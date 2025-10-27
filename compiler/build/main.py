@@ -2,6 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.parser import parse_program
+from compiler.build.ast import Program
 from compiler.build.emitter_sailfin import emit_program
 from compiler.build.emit_native import emit_native, EmitNativeResult, NativeModule
 from compiler.build.native_lowering import lower_to_python, LoweredPythonResult

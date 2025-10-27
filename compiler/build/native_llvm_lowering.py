@@ -6105,7 +6105,34 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_result.operand == None:
         return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
-    harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines)
+    alignment_lines = right_result.lines
+    alignment_temp = right_result.temp_index
+    left_operand = left_result.operand
+    right_operand = right_result.operand
+    is_equality = match.symbol == "=="  or  match.symbol == "!="
+    if is_equality  and  left_operand != None  and  right_operand != None:
+        left_is_char = left_operand.llvm_type == "i8"
+        right_is_char = right_operand.llvm_type == "i8"
+        left_is_pointer = ends_with_pointer_suffix(left_operand.llvm_type)
+        right_is_pointer = ends_with_pointer_suffix(right_operand.llvm_type)
+        if left_is_char  and  right_is_pointer:
+            coercion = coerce_operand_to_type(right_operand, "i8", alignment_temp, alignment_lines)
+            diagnostics = (diagnostics) + (coercion.diagnostics)
+            if coercion.operand == None:
+                return ExpressionResult(lines=coercion.lines, temp_index=coercion.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+            right_operand = coercion.operand
+            alignment_lines = coercion.lines
+            alignment_temp = coercion.temp_index
+        else:
+            if right_is_char  and  left_is_pointer:
+                coercion = coerce_operand_to_type(left_operand, "i8", alignment_temp, alignment_lines)
+                diagnostics = (diagnostics) + (coercion.diagnostics)
+                if coercion.operand == None:
+                    return ExpressionResult(lines=coercion.lines, temp_index=coercion.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+                left_operand = coercion.operand
+                alignment_lines = coercion.lines
+                alignment_temp = coercion.temp_index
+    harmonised = harmonise_operands(left_operand, right_operand, alignment_temp, alignment_lines)
     diagnostics = (diagnostics) + (harmonised.diagnostics)
     if harmonised.left == None  or  harmonised.right == None:
         return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
@@ -7006,11 +7033,23 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
     length_value = len(operands)
     length_text = number_to_string(length_value)
     array_type = "[" + length_text + " x " + element_type + "]"
-    array_alloca = format_temp_name(current_temp)
-    current_lines = append_string(current_lines, "  " + array_alloca + " = alloca " + array_type)
+    array_size_ptr = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + array_size_ptr + " = getelementptr " + array_type + ", " + array_type + "* null, i32 1")
+    current_temp += 1
+    array_bytes = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + array_bytes + " = ptrtoint " + array_type + "* " + array_size_ptr + " to i64")
+    current_temp += 1
+    array_bytes_is_zero = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + array_bytes_is_zero + " = icmp eq i64 " + array_bytes + ", 0")
+    current_temp += 1
+    adjusted_array_bytes = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + adjusted_array_bytes + " = select i1 " + array_bytes_is_zero + ", i64 1, i64 " + array_bytes)
+    current_temp += 1
+    raw_array_ptr = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + raw_array_ptr + " = call i8* @malloc(i64 " + adjusted_array_bytes + ")")
     current_temp += 1
     data_pointer = format_temp_name(current_temp)
-    current_lines = append_string(current_lines, "  " + data_pointer + " = getelementptr " + array_type + ", " + array_type + "* " + array_alloca + ", i32 0, i32 0")
+    current_lines = append_string(current_lines, "  " + data_pointer + " = bitcast i8* " + raw_array_ptr + " to " + element_type + "*")
     current_temp += 1
     index = 0
     while True:
@@ -7024,20 +7063,29 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
     struct_type = array_struct_type_for_element(element_type)
     if len(operands) == 0  and  len(expected_struct_type) > 0:
         struct_type = expected_struct_type
-    struct_alloca = format_temp_name(current_temp)
-    current_lines = append_string(current_lines, "  " + struct_alloca + " = alloca " + struct_type)
+    struct_size_ptr = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + struct_size_ptr + " = getelementptr " + struct_type + ", " + struct_type + "* null, i32 1")
+    current_temp += 1
+    struct_bytes = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + struct_bytes + " = ptrtoint " + struct_type + "* " + struct_size_ptr + " to i64")
+    current_temp += 1
+    raw_struct_ptr = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + raw_struct_ptr + " = call i8* @malloc(i64 " + struct_bytes + ")")
+    current_temp += 1
+    struct_pointer = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + struct_pointer + " = bitcast i8* " + raw_struct_ptr + " to " + struct_type + "*")
     current_temp += 1
     data_field_pointer = format_temp_name(current_temp)
-    current_lines = append_string(current_lines, "  " + data_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_alloca + ", i32 0, i32 0")
+    current_lines = append_string(current_lines, "  " + data_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_pointer + ", i32 0, i32 0")
     current_temp += 1
     data_pointer_type = element_type + "*"
     data_pointer_pointer_type = data_pointer_type + "*"
     current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + data_pointer + ", " + data_pointer_pointer_type + " " + data_field_pointer)
     length_field_pointer = format_temp_name(current_temp)
-    current_lines = append_string(current_lines, "  " + length_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_alloca + ", i32 0, i32 1")
+    current_lines = append_string(current_lines, "  " + length_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_pointer + ", i32 0, i32 1")
     current_temp += 1
     current_lines = append_string(current_lines, "  store i64 " + length_text + ", i64* " + length_field_pointer)
-    operand = LLVMOperand(llvm_type=struct_type + "*", value=struct_alloca)
+    operand = LLVMOperand(llvm_type=struct_type + "*", value=struct_pointer)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
 
 def find_matching_closing_brace(text, open_index):
@@ -7919,8 +7967,14 @@ def dominant_type(first, second):
         return first
     if first == second:
         return first
-    if first == "i8"  and  second == "i8*"  or  first == "i8*"  and  second == "i8":
-        return "i8"
+    first_is_pointer = ends_with_pointer_suffix(first)
+    second_is_pointer = ends_with_pointer_suffix(second)
+    if first_is_pointer  and  not second_is_pointer:
+        return first
+    if second_is_pointer  and  not first_is_pointer:
+        return second
+    if first_is_pointer  and  second_is_pointer:
+        return first
     if first == "double"  or  second == "double":
         return "double"
     if first == "i64"  or  second == "i64":

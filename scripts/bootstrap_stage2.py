@@ -654,6 +654,7 @@ def _merge_missing_string_constants(primary, fallback) -> None:
 
 _STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\])*"')
 _STRING_REF_RE = re.compile(r'@\.str[0-9A-Za-z_.]*')
+_ENUM_REF_RE = re.compile(r'@\.enum(?:\.[A-Za-z0-9_]+)+')
 _LITERAL_CACHE: Dict[pathlib.Path, Dict[str, Any]] = {}
 _HELPER_DECLARATIONS: Dict[str, str] = {
     descriptor.symbol: f"declare {descriptor.return_type} @{descriptor.symbol}({', '.join(descriptor.parameter_types)})"
@@ -685,26 +686,86 @@ def _ensure_module_string_constants(source_path: pathlib.Path, source_text: str,
     ir_text = getattr(lowered, "ir", "")
     if not ir_text:
         return
-    referenced = set(_STRING_REF_RE.findall(ir_text))
+    referenced: Set[str] = set(_STRING_REF_RE.findall(ir_text))
+    referenced.update(match.group(0) for match in _ENUM_REF_RE.finditer(ir_text))
     if not referenced:
         return
-    existing = {getattr(constant, "name", "") for constant in getattr(lowered, "string_constants", []) or []}
-    missing = [name for name in referenced if name and name not in existing]
-    if not missing:
-        return
-
     literal_map = _string_constants_from_source(source_path, source_text)
-    updated_constants = list(getattr(lowered, "string_constants", []) or [])
+    existing_constants = list(getattr(lowered, "string_constants", []) or [])
+    constant_map = {
+        getattr(constant, "name", ""): constant for constant in existing_constants if getattr(constant, "name", "")
+    }
+    defined_globals = _extract_defined_globals(ir_text)
+    updated_constants = list(existing_constants)
     appended = False
-    for name in missing:
-        constant = literal_map.get(name)
+    appended_definitions: list[str] = []
+    for name in referenced:
+        if not name:
+            continue
+        constant = constant_map.get(name)
+        if constant is None:
+            constant = literal_map.get(name)
+        if constant is None and name.startswith("@.enum."):
+            constant = _synthesise_enum_string_constant(name)
         if constant is None:
             continue
-        updated_constants.append(constant)
-        appended = True
+        if getattr(constant, "name", "") not in constant_map:
+            updated_constants.append(constant)
+            constant_map[getattr(constant, "name", "")] = constant
+            appended = True
+        definition = _render_string_constant_definition(constant)
+        if name not in defined_globals and definition:
+            appended_definitions.append(definition)
+            defined_globals.add(name)
 
     if appended:
         setattr(lowered, "string_constants", updated_constants)
+    if appended_definitions:
+        ir_body = ir_text.rstrip() + "\n" + "\n".join(appended_definitions) + "\n"
+        setattr(lowered, "ir", ir_body)
+
+
+def _synthesise_enum_string_constant(name: str):
+    raw = name[1:] if name.startswith("@") else name
+    parts = [part for part in raw.split(".") if part]
+    if len(parts) < 3 or parts[0] != "enum":
+        return None
+    if parts[-1] == "default":
+        content = ""
+    elif parts[-1] == "variant" and len(parts) >= 4:
+        content = parts[-2]
+    else:
+        return None
+    byte_count = len(content.encode("utf-8"))
+    return stage1_lowering.StringConstant(
+        name=name,
+        content=content,
+        byte_count=byte_count,
+    )
+
+
+def _render_string_constant_definition(constant) -> str | None:
+    name = getattr(constant, "name", "")
+    content = getattr(constant, "content", "")
+    if not name:
+        return None
+    if not name.startswith("@"):
+        name = "@" + name
+    escaped = stage1_lowering.escape_string_for_llvm(content)
+    byte_count = getattr(constant, "byte_count", len(content.encode("utf-8")))
+    length = byte_count + 1
+    return f"{name} = private unnamed_addr constant [{length} x i8] c\"{escaped}\\00\""
+
+
+def _extract_defined_globals(ir_text: str) -> Set[str]:
+    defined: Set[str] = set()
+    for line in ir_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("@") or " = " not in stripped:
+            continue
+        name = stripped.split("=", 1)[0].strip()
+        defined.add(name)
+    return defined
 
 
 def _ensure_runtime_helper_declarations(lowered) -> None:

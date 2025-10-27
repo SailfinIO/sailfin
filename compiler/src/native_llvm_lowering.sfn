@@ -8990,7 +8990,38 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
         return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
 
-    let harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines);
+    let mut alignment_lines -> string[] = right_result.lines;
+    let mut alignment_temp -> number = right_result.temp_index;
+    let mut left_operand = left_result.operand;
+    let mut right_operand = right_result.operand;
+    let is_equality = match.symbol == "==" || match.symbol == "!=";
+    if is_equality && left_operand != null && right_operand != null {
+        let left_is_char = left_operand.llvm_type == "i8";
+        let right_is_char = right_operand.llvm_type == "i8";
+        let left_is_pointer = ends_with_pointer_suffix(left_operand.llvm_type);
+        let right_is_pointer = ends_with_pointer_suffix(right_operand.llvm_type);
+        if left_is_char && right_is_pointer {
+            let coercion = coerce_operand_to_type(right_operand, "i8", alignment_temp, alignment_lines);
+            diagnostics = diagnostics.concat(coercion.diagnostics);
+            if coercion.operand == null {
+                return ExpressionResult { lines: coercion.lines, temp_index: coercion.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+            }
+            right_operand = coercion.operand;
+            alignment_lines = coercion.lines;
+            alignment_temp = coercion.temp_index;
+        } else if right_is_char && left_is_pointer {
+            let coercion = coerce_operand_to_type(left_operand, "i8", alignment_temp, alignment_lines);
+            diagnostics = diagnostics.concat(coercion.diagnostics);
+            if coercion.operand == null {
+                return ExpressionResult { lines: coercion.lines, temp_index: coercion.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+            }
+            left_operand = coercion.operand;
+            alignment_lines = coercion.lines;
+            alignment_temp = coercion.temp_index;
+        }
+    }
+
+    let harmonised = harmonise_operands(left_operand, right_operand, alignment_temp, alignment_lines);
     diagnostics = diagnostics.concat(harmonised.diagnostics);
     if harmonised.left == null || harmonised.right == null {
         return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
@@ -10283,12 +10314,28 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     let length_text = number_to_string(length_value);
     let array_type = "[" + length_text + " x " + element_type + "]";
 
-    let array_alloca = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + array_alloca + " = alloca " + array_type);
+    let array_size_ptr = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + array_size_ptr + " = getelementptr " + array_type + ", " + array_type + "* null, i32 1");
+    current_temp += 1;
+
+    let array_bytes = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + array_bytes + " = ptrtoint " + array_type + "* " + array_size_ptr + " to i64");
+    current_temp += 1;
+
+    let array_bytes_is_zero = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + array_bytes_is_zero + " = icmp eq i64 " + array_bytes + ", 0");
+    current_temp += 1;
+
+    let adjusted_array_bytes = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + adjusted_array_bytes + " = select i1 " + array_bytes_is_zero + ", i64 1, i64 " + array_bytes);
+    current_temp += 1;
+
+    let raw_array_ptr = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + raw_array_ptr + " = call i8* @malloc(i64 " + adjusted_array_bytes + ")");
     current_temp += 1;
 
     let data_pointer = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + data_pointer + " = getelementptr " + array_type + ", " + array_type + "* " + array_alloca + ", i32 0, i32 0");
+    current_lines = append_string(current_lines, "  " + data_pointer + " = bitcast i8* " + raw_array_ptr + " to " + element_type + "*");
     current_temp += 1;
 
     index = 0;
@@ -10307,23 +10354,35 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     if operands.length == 0 && expected_struct_type.length > 0 {
         struct_type = expected_struct_type;
     }
-    let struct_alloca = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + struct_alloca + " = alloca " + struct_type);
+    let struct_size_ptr = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + struct_size_ptr + " = getelementptr " + struct_type + ", " + struct_type + "* null, i32 1");
+    current_temp += 1;
+
+    let struct_bytes = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + struct_bytes + " = ptrtoint " + struct_type + "* " + struct_size_ptr + " to i64");
+    current_temp += 1;
+
+    let raw_struct_ptr = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + raw_struct_ptr + " = call i8* @malloc(i64 " + struct_bytes + ")");
+    current_temp += 1;
+
+    let struct_pointer = format_temp_name(current_temp);
+    current_lines = append_string(current_lines, "  " + struct_pointer + " = bitcast i8* " + raw_struct_ptr + " to " + struct_type + "*");
     current_temp += 1;
 
     let data_field_pointer = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + data_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_alloca + ", i32 0, i32 0");
+    current_lines = append_string(current_lines, "  " + data_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_pointer + ", i32 0, i32 0");
     current_temp += 1;
     let data_pointer_type = element_type + "*";
     let data_pointer_pointer_type = data_pointer_type + "*";
     current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + data_pointer + ", " + data_pointer_pointer_type + " " + data_field_pointer);
 
     let length_field_pointer = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + length_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_alloca + ", i32 0, i32 1");
+    current_lines = append_string(current_lines, "  " + length_field_pointer + " = getelementptr " + struct_type + ", " + struct_type + "* " + struct_pointer + ", i32 0, i32 1");
     current_temp += 1;
     current_lines = append_string(current_lines, "  store i64 " + length_text + ", i64* " + length_field_pointer);
 
-    let operand = LLVMOperand { llvm_type: struct_type + "*", value: struct_alloca };
+    let operand = LLVMOperand { llvm_type: struct_type + "*", value: struct_pointer };
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
@@ -11503,10 +11562,16 @@ fn dominant_type(first -> string, second -> string) -> string {
     if first == second {
         return first;
     }
-    // Special case: comparing i8 character with i8* string should use i8 for comparison
-    // This handles cases like: text[0] == "a" where text[0] is i8 and "a" is now i8
-    if (first == "i8" && second == "i8*") || (first == "i8*" && second == "i8") {
-        return "i8";
+    let first_is_pointer = ends_with_pointer_suffix(first);
+    let second_is_pointer = ends_with_pointer_suffix(second);
+    if first_is_pointer && !second_is_pointer {
+        return first;
+    }
+    if second_is_pointer && !first_is_pointer {
+        return second;
+    }
+    if first_is_pointer && second_is_pointer {
+        return first;
     }
     if first == "double" || second == "double" {
         return "double";
