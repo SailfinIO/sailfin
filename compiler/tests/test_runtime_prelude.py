@@ -212,7 +212,7 @@ def test_runtime_bounds_check_rejects_invalid_indices() -> None:
         runtime_support.bounds_check(2, 2)
     with pytest.raises(IndexError, match="out of bounds"):
         runtime_support.bounds_check(-1, 4)
-    assert format_interpolated(["a", "b", "c"], [1, 2]) == "a1b2c"
+    assert runtime_support.format_interpolated(["a", "b", "c"], [1, 2]) == "a1b2c"
 
 
 @pytest.mark.usefixtures("stage1_environment")

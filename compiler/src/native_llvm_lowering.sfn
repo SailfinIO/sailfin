@@ -3541,10 +3541,11 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     if signature.length == 0 {
         signature = "";
     }
+    let entry_label -> string = "block.entry";
     lines = append_string(lines, "define " + llvm_return + " @" + sanitized + "(" + signature + ") {");
-    lines = append_string(lines, "entry:");
+    lines = append_string(lines, entry_label + ":");
 
-    let body = emit_body(function, llvm_return, preparation.bindings, functions, context);
+    let body = emit_body(function, llvm_return, preparation.bindings, functions, context, entry_label);
     lines = lines.concat(body.lines);
     diagnostics = diagnostics.concat(body.diagnostics);
     let lifetime_diagnostics = validate_borrow_lifetimes(function, body.lifetime_regions);
@@ -3554,7 +3555,7 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: body.lifetime_regions, string_constants: body.string_constants };
 }
 
-fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> ParameterBinding[], functions -> NativeFunction[], context -> TypeContext) -> BodyResult {
+fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> ParameterBinding[], functions -> NativeFunction[], context -> TypeContext, entry_label -> string) -> BodyResult {
     let lowered = lower_instruction_range(
         function,
         0,
@@ -3573,7 +3574,7 @@ fn emit_body(function -> NativeFunction, llvm_return -> string, bindings -> Para
         context,
         format_root_scope_id(function.name),
         0,
-        "entry"
+        entry_label
     );
     let mut diagnostics -> string[] = lowered.diagnostics;
     let mut lines -> string[] = [];
@@ -6999,7 +7000,29 @@ fn lower_expression_statement(
                     diagnostics = append_string(diagnostics, "llvm lowering: member access assignment base `" + member_parse.base + "` produced no value");
                 } else {
                     // Get pointer to the field using getelementptr
-                    let struct_info = find_struct_info_by_llvm_type(context, base_result.operand.llvm_type);
+                    let base_operand = base_result.operand;
+                    let mut base_pointer_type -> string = base_operand.llvm_type;
+                    let mut base_pointer_value -> string = base_operand.value;
+                    let base_name = trim_text(member_parse.base);
+                    if !ends_with_pointer_suffix(base_pointer_type) && is_simple_identifier(base_name) {
+                        let local_pointer = find_local_binding(current_locals, base_name);
+                        if local_pointer != null {
+                            base_pointer_type = local_pointer.llvm_type + "*";
+                            base_pointer_value = local_pointer.pointer;
+                        } else {
+                            let parameter_pointer = find_parameter_binding(current_bindings, base_name);
+                            if parameter_pointer != null && ends_with_pointer_suffix(parameter_pointer.llvm_type) {
+                                base_pointer_type = parameter_pointer.llvm_type;
+                                base_pointer_value = parameter_pointer.llvm_name;
+                            }
+                        }
+                    }
+                    if !ends_with_pointer_suffix(base_pointer_type) {
+                        diagnostics = append_string(diagnostics, "llvm lowering: member access assignment base `" + member_parse.base + "` is not addressable");
+                        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
+                    }
+                    let struct_llvm_name = strip_pointer_suffix(base_pointer_type);
+                    let struct_info = find_struct_info_by_llvm_type(context, struct_llvm_name);
                     if struct_info == null {
                         diagnostics = append_string(diagnostics, "llvm lowering: member access assignment on non-struct type `" + base_result.operand.llvm_type + "`");
                     } else {
@@ -7018,7 +7041,7 @@ fn lower_expression_statement(
                                 // Emit getelementptr to get field pointer, then store
                                 let field_ptr_temp = format_temp_name(current_temp);
                                 current_temp += 1;
-                                current_lines = append_string(current_lines, "  " + field_ptr_temp + " = getelementptr " + struct_info.llvm_name + ", " + base_result.operand.llvm_type + " " + base_result.operand.value + ", i32 0, i32 " + number_to_string(field_index));
+                                current_lines = append_string(current_lines, "  " + field_ptr_temp + " = getelementptr " + struct_info.llvm_name + ", " + base_pointer_type + " " + base_pointer_value + ", i32 0, i32 " + number_to_string(field_index));
                                 current_lines = append_string(current_lines, "  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + field_ptr_temp);
                             }
                         }

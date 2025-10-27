@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextvars
 import ctypes
 import os
+import re
 from dataclasses import dataclass
 from collections import OrderedDict
 from collections.abc import Iterable as ABCIterable
@@ -217,8 +218,9 @@ class Stage2Runner:
         return ()
 
     @staticmethod
-    def _collect_global_constant_definitions(lowered_modules: Iterable) -> Dict[str, str]:
-        definitions: Dict[str, str] = {}
+    def _collect_global_constant_definitions(lowered_modules: Iterable) -> Dict[str, tuple[str, int]]:
+        definitions: Dict[str, tuple[str, int]] = {}
+        referenced_enum_constants: set[str] = set()
         for lowered in lowered_modules:
             module_ir = getattr(lowered, "ir", "")
             if module_ir:
@@ -231,7 +233,12 @@ class Stage2Runner:
                     if " external " in stripped:
                         continue
                     name = stripped.split("=", 1)[0].strip()[1:]
-                    definitions.setdefault(name, line)
+                    length = Stage2Runner._parse_constant_length(stripped)
+                    if length is None:
+                        continue
+                    definitions.setdefault(name, (line, length))
+                for match in re.finditer(r"@\.enum\.[A-Za-z0-9_\.]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+", module_ir):
+                    referenced_enum_constants.add(match.group(0)[1:])
 
             for constant in Stage2Runner._iterate_string_constants(getattr(lowered, "string_constants", None)):
                 rendered = Stage2Runner._render_string_constant(constant)
@@ -242,8 +249,70 @@ class Stage2Runner:
                     const_name = const_name[1:]
                 if not const_name:
                     continue
-                definitions.setdefault(const_name, rendered)
+                length = Stage2Runner._parse_constant_length(rendered)
+                if length is None:
+                    continue
+                definitions.setdefault(const_name, (rendered, length))
+        for name in referenced_enum_constants:
+            definition, length = Stage2Runner._synthesize_enum_variant_constant(name)
+            definitions.setdefault(name, (definition, length))
         return definitions
+
+    @staticmethod
+    def _collect_function_signatures(lowered_modules: Iterable) -> "OrderedDict[str, str]":
+        signatures: "OrderedDict[str, str]" = OrderedDict()
+        for lowered in lowered_modules:
+            module_ir = getattr(lowered, "ir", "")
+            if not module_ir:
+                continue
+            for line in module_ir.splitlines():
+                stripped = line.lstrip()
+                if stripped.startswith("define "):
+                    symbol, signature = Stage2Runner._extract_function_symbol_and_signature(
+                        line)
+                    if symbol and signature and symbol not in signatures:
+                        signatures[symbol] = signature
+                elif stripped.startswith("declare "):
+                    symbol = Stage2Runner._extract_function_symbol_from_declaration(
+                        line)
+                    if symbol and symbol not in signatures:
+                        signatures[symbol] = stripped[len("declare "):]
+        return signatures
+
+    @staticmethod
+    def _collect_type_definitions(lowered_modules: Iterable) -> "OrderedDict[str, str]":
+        definitions: "OrderedDict[str, str]" = OrderedDict()
+        for lowered in lowered_modules:
+            module_ir = getattr(lowered, "ir", "")
+            if not module_ir:
+                continue
+            for line in module_ir.splitlines():
+                stripped = line.strip()
+                if not stripped.startswith("%") or " = type" not in stripped:
+                    continue
+                name = stripped.split("=", 1)[0].strip()[1:]
+                if not name:
+                    continue
+                definitions.setdefault(name, stripped)
+        return definitions
+
+    @staticmethod
+    def _deduplicate_type_definitions(ir_text: str) -> str:
+        lines = ir_text.splitlines()
+        seen: set[str] = set()
+        result_lines: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("%") and " = type" in stripped:
+                name = stripped.split("=", 1)[0].strip()[1:]
+                if name:
+                    if name in seen:
+                        continue
+                    seen.add(name)
+            result_lines.append(line)
+        if len(result_lines) == len(lines):
+            return ir_text
+        return "\n".join(result_lines)
 
     @staticmethod
     def _extract_function_symbol_and_signature(line: str) -> tuple[str | None, str | None]:
@@ -445,6 +514,22 @@ class Stage2Runner:
         return suffix or "module"
 
     @staticmethod
+    def _synthesize_enum_variant_constant(name: str) -> tuple[str, int]:
+        parts = [part for part in name.split(".") if part]
+        variant = parts[-2] if len(parts) >= 2 else name
+        content = variant
+        escaped = Stage2Runner._escape_string_for_llvm(content)
+        length = len(content.encode("utf-8")) + 1
+        return f"@{name} = private unnamed_addr constant [{length} x i8] c\"{escaped}\\00\"", length
+
+    @staticmethod
+    def _parse_constant_length(definition: str) -> int | None:
+        match = re.search(r"\[(\d+) x i8\]", definition)
+        if not match:
+            return None
+        return int(match.group(1))
+
+    @staticmethod
     def _extract_defined_globals(module_ir: str) -> set[str]:
         defined: set[str] = set()
         for line in module_ir.splitlines():
@@ -456,20 +541,28 @@ class Stage2Runner:
         return defined
 
     @staticmethod
-    def _inject_missing_constant_definitions(module_ir: str, *, definitions: Mapping[str, str]) -> str:
+    def _inject_missing_constant_definitions(module_ir: str, *, definitions: Mapping[str, tuple[str, int]], already_defined: set[str] | None = None) -> tuple[str, set[str]]:
         if not definitions:
-            return module_ir
+            return module_ir, set()
         defined = Stage2Runner._extract_defined_globals(module_ir)
         missing_lines: list[str] = []
-        for name, definition in definitions.items():
+        injected: set[str] = set()
+        for name, (definition, length) in definitions.items():
             if name in defined:
+                continue
+            if already_defined is not None and name in already_defined:
+                if f"@{name}" not in module_ir:
+                    missing_lines.append(f"@{name} = external constant [{length} x i8]")
+                    injected.add(name)
                 continue
             if f"@{name}" not in module_ir:
                 continue
             missing_lines.append(definition)
+            injected.add(name)
         if not missing_lines:
-            return module_ir
-        return module_ir.rstrip() + "\n" + "\n".join(missing_lines) + "\n"
+            return module_ir, set()
+        patched = module_ir.rstrip() + "\n" + "\n".join(missing_lines) + "\n"
+        return patched, injected
 
     @staticmethod
     def _build_manifest_index(lowered_modules: Iterable) -> Dict[str, Sequence[str]]:
@@ -920,20 +1013,28 @@ class Stage2Runner:
     def _compile_ir(self) -> None:
         constant_definitions = self._collect_global_constant_definitions(
             self._lowered_modules)
+        function_signatures: "OrderedDict[str, str]" = self._collect_function_signatures(
+            self._lowered_modules)
+        type_definitions: "OrderedDict[str, str]" = self._collect_type_definitions(
+            self._lowered_modules)
+
         self._debug_log(
             f"[stage2] lowered modules: {len(self._lowered_modules)}")
 
         candidates: list[tuple[str, str]] = []
         defined_symbols: set[str] = set()
-        function_signatures: "OrderedDict[str, str]" = OrderedDict()
-        type_definitions: "OrderedDict[str, str]" = OrderedDict()
         duplicate_registry: Dict[str, list[str]] = {}
+        defined_globals: set[str] = set()
         for index, lowered in enumerate(self._lowered_modules):
             module_ir = getattr(lowered, "ir", "")
             if not module_ir:
                 continue
-            patched_ir = self._inject_missing_constant_definitions(
-                module_ir, definitions=constant_definitions)
+            module_defined = self._extract_defined_globals(module_ir)
+            defined_globals.update(module_defined)
+            module_ir = self._deduplicate_type_definitions(module_ir)
+            patched_ir, injected = self._inject_missing_constant_definitions(
+                module_ir, definitions=constant_definitions, already_defined=defined_globals)
+            defined_globals.update(injected)
             rewritten_ir, duplicates = self._rewrite_function_linkage(
                 patched_ir, defined_symbols, function_signatures)
             rewritten_ir = self._inject_missing_type_definitions(
