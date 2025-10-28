@@ -55,6 +55,7 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
     "sailfin_adapter_fs_list_directory": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_adapter_fs_delete_file": ("io", (ctypes.c_void_p,), ctypes.c_bool),
     "sailfin_adapter_fs_create_directory": ("io", (ctypes.c_void_p, ctypes.c_bool), ctypes.c_bool),
+    "sailfin_intrinsic_fs_exists": ("io", (ctypes.c_void_p,), ctypes.c_bool),
     # Capability helpers
     "sailfin_runtime_create_capability_grant": (None, (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_runtime_create_filesystem_bridge": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
@@ -117,6 +118,10 @@ _LAST_RUNTIME_ERROR: contextvars.ContextVar[Exception | None] = contextvars.Cont
 )
 
 _LLVM_INITIALISED = False
+_LIBC_HANDLE: ctypes.CDLL | None = None
+_LIBC_FUNCTIONS: dict[str, ctypes._CFuncPtr] = {}
+_LIBC_SYMBOL_ADDRESSES: dict[str, int] = {}
+_LIBC_ALLOCATIONS: dict[int, tuple[ctypes.Array, int]] = {}
 
 
 def current_capability_grant() -> runtime.CapabilityGrant | None:
@@ -132,6 +137,95 @@ def _ensure_llvm_initialised() -> None:
     llvm.initialize_native_target()
     llvm.initialize_native_asmprinter()
     _LLVM_INITIALISED = True
+
+
+def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, ctypes._CFuncPtr]:
+    global _LIBC_HANDLE, _LIBC_FUNCTIONS, _LIBC_SYMBOL_ADDRESSES
+    if _LIBC_FUNCTIONS:
+        for name, address in _LIBC_SYMBOL_ADDRESSES.items():
+            llvm.add_symbol(name, address)
+        return _LIBC_FUNCTIONS
+
+    try:
+        logger = debug_log
+
+        def _malloc_wrapper(size: int) -> int:
+            try:
+                request = int(size)
+            except Exception:
+                request = 0
+            if request <= 0:
+                request = 1
+            try:
+                buffer = ctypes.create_string_buffer(request)
+            except Exception as exc:
+                if logger:
+                    logger(f"[stage2] malloc({request}) allocation failed: {exc}")
+                if _LAST_RUNTIME_ERROR.get() is None:
+                    _LAST_RUNTIME_ERROR.set(exc)
+                return 0
+            address_obj = ctypes.cast(buffer, ctypes.c_void_p)
+            address_value = address_obj.value
+            pointer = 0 if address_value is None else int(address_value)
+            if pointer != 0:
+                _LIBC_ALLOCATIONS[pointer] = (buffer, request)
+                if logger:
+                    logger(
+                        f"[stage2] malloc request size={request} result=0x{pointer:x}"
+                    )
+            else:
+                if logger:
+                    logger(f"[stage2] malloc request size={request} result=null")
+            return pointer
+
+        def _free_wrapper(ptr: ctypes.c_void_p | int) -> None:
+            try:
+                if isinstance(ptr, ctypes.c_void_p):
+                    address = int(ptr.value or 0)
+                else:
+                    address = int(ptr or 0)
+            except Exception:
+                address = 0
+            if address == 0:
+                if logger:
+                    logger("[stage2] free ptr=null (ignored)")
+                return
+            allocation = _LIBC_ALLOCATIONS.pop(address, None)
+            if allocation is None:
+                if logger:
+                    logger(f"[stage2] free unknown ptr=0x{address:x} (skipped)")
+                if _LAST_RUNTIME_ERROR.get() is None:
+                    _LAST_RUNTIME_ERROR.set(
+                        RuntimeError(
+                            f"free invoked on unknown pointer 0x{address:x}"
+                        )
+                    )
+                return
+            if logger:
+                size = allocation[1]
+                logger(f"[stage2] free ptr=0x{address:x} size={size}")
+            # letting the buffer go out of scope releases the memory
+
+        malloc_cfunc = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_size_t)(_malloc_wrapper)
+        free_cfunc = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(_free_wrapper)
+        malloc_addr = int(ctypes.cast(malloc_cfunc, ctypes.c_void_p).value or 0)
+        free_addr = int(ctypes.cast(free_cfunc, ctypes.c_void_p).value or 0)
+
+        llvm.add_symbol("malloc", malloc_addr)
+        llvm.add_symbol("free", free_addr)
+
+        _LIBC_HANDLE = None
+        _LIBC_FUNCTIONS = {"malloc": malloc_cfunc, "free": free_cfunc}
+        _LIBC_SYMBOL_ADDRESSES = {"malloc": malloc_addr, "free": free_addr}
+
+        if debug_log:
+            debug_log(f"[stage2] registered managed malloc wrapper: addr=0x{malloc_addr:x}")
+            debug_log(f"[stage2] registered managed free wrapper: addr=0x{free_addr:x}")
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        if debug_log:
+            debug_log(f"[stage2] failed to register libc malloc/free wrappers: {exc}")
+
+    return _LIBC_FUNCTIONS
 
 
 def _normalise_hooks(hooks: Stage2RuntimeHooks | Mapping[str, Callable[..., None]] | None) -> Dict[str, Callable[..., None] | None]:
@@ -872,45 +966,26 @@ class Stage2Runner:
             self._registered_helpers.append(cfunc)
             self._adapter_functions[symbol] = cfunc
 
-        # Register libc malloc/free wrappers for diagnostics
-        try:
-            libc = ctypes.CDLL(None)
-            libc_malloc = libc.malloc
-            libc_malloc.restype = ctypes.c_void_p
-            libc_malloc.argtypes = (ctypes.c_size_t,)
-            libc_free = libc.free
-            libc_free.restype = None
-            libc_free.argtypes = (ctypes.c_void_p,)
+        libc_funcs = _ensure_libc_symbols(self._debug_log)
+        malloc_func = libc_funcs.get("malloc")
+        if malloc_func is not None:
+            malloc_addr = _LIBC_SYMBOL_ADDRESSES.get("malloc", 0)
+            self._debug_log(
+                f"[stage2] register adapter malloc: addr=0x{int(malloc_addr):x}"
+            )
+            self._adapter_functions["malloc"] = malloc_func
+        else:  # pragma: no cover - diagnostics only
+            self._debug_log("[stage2] libc malloc unavailable")
 
-            def _malloc_wrapper(size: int) -> int:
-                self._debug_log(f"[stage2] malloc request size={size}")
-                result = libc_malloc(size)
-                addr = 0 if result is None else int(result)
-                self._debug_log(f"[stage2] malloc result=0x{addr:x}")
-                return addr
-
-            def _free_wrapper(ptr: ctypes.c_void_p | int) -> None:
-                address = 0
-                if isinstance(ptr, ctypes.c_void_p):
-                    address = int(ptr.value or 0)
-                else:
-                    address = int(ptr or 0)
-                self._debug_log(f"[stage2] free ptr=0x{address:x}")
-                libc_free(ptr)
-
-            malloc_cfunc = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_size_t)(_malloc_wrapper)
-            free_cfunc = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(_free_wrapper)
-            malloc_addr = ctypes.cast(malloc_cfunc, ctypes.c_void_p).value or 0
-            free_addr = ctypes.cast(free_cfunc, ctypes.c_void_p).value or 0
-            self._debug_log(f"[stage2] register adapter malloc: addr=0x{int(malloc_addr):x}")
-            self._debug_log(f"[stage2] register adapter free: addr=0x{int(free_addr):x}")
-            llvm.add_symbol("malloc", malloc_addr)
-            llvm.add_symbol("free", free_addr)
-            self._registered_helpers.extend([malloc_cfunc, free_cfunc])
-            self._adapter_functions["malloc"] = malloc_cfunc
-            self._adapter_functions["free"] = free_cfunc
-        except Exception as exc:  # pragma: no cover - diagnostics only
-            self._debug_log(f"[stage2] failed to register malloc/free wrappers: {exc}")
+        free_func = libc_funcs.get("free")
+        if free_func is not None:
+            free_addr = _LIBC_SYMBOL_ADDRESSES.get("free", 0)
+            self._debug_log(
+                f"[stage2] register adapter free: addr=0x{int(free_addr):x}"
+            )
+            self._adapter_functions["free"] = free_func
+        else:  # pragma: no cover - diagnostics only
+            self._debug_log("[stage2] libc free unavailable")
 
     def _make_helper(
         self,
@@ -1327,6 +1402,21 @@ class Stage2Runner:
                     return False
 
             return cfunc_type(_fs_create_directory)
+
+        elif symbol == "sailfin_intrinsic_fs_exists":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p)
+
+            def _fs_exists(path_ptr: ctypes.c_void_p) -> bool:
+                try:
+                    _require_effects()
+                    path = _ptr_to_str(path_ptr)
+                    return bool(runtime.fs.exists(path))
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return False
+
+            return cfunc_type(_fs_exists)
 
         elif symbol == "sailfin_runtime_string_length":
             cfunc_type = ctypes.CFUNCTYPE(ctypes.c_longlong, ctypes.c_void_p)
