@@ -652,20 +652,19 @@ class Stage2Runner:
         self._function_info_cache[symbol] = None
         return None
 
-    def _allocate_sret_buffer(self, module, return_type: str) -> tuple[int, ctypes.Array, int]:
-        pointer_size = ctypes.sizeof(ctypes.c_void_p)
-        struct_size = pointer_size
-        alignment = pointer_size
-        target_data = getattr(self._engine, "target_data", None)
-
-        type_ref = None
+    def _resolve_struct_type(self, module, return_type: str):
+        if not return_type:
+            return None
         type_name = return_type.strip()
+        if not type_name:
+            return None
+        type_ref = None
         if type_name.startswith("%"):
             lookup = type_name[1:].strip()
             candidates = [lookup]
             if lookup.startswith("struct."):
                 candidates.append(lookup.split("struct.", 1)[1])
-            module_candidates = []
+            module_candidates: list = []
             if module is not None:
                 module_candidates.append(module)
             for mod in self._modules or ():
@@ -689,24 +688,40 @@ class Stage2Runner:
                 type_ref = tmp_module.get_struct_type("__sret_tmp")
             except Exception:
                 type_ref = None
+        return type_ref
 
+    def _compute_type_layout(self, type_ref) -> tuple[int, int]:
+        pointer_size = ctypes.sizeof(ctypes.c_void_p)
+        abi_size = 0
+        abi_alignment = pointer_size
+        target_data = getattr(self._engine, "target_data", None)
         if target_data is not None and type_ref is not None:
             try:
-                computed_size = int(target_data.get_abi_size(type_ref))
-                if computed_size:
-                    struct_size = max(struct_size, computed_size)
-                computed_alignment = int(
-                    target_data.get_abi_alignment(type_ref))
-                if computed_alignment:
-                    alignment = max(alignment, computed_alignment)
+                abi_size = int(target_data.get_abi_size(type_ref))
             except Exception:
-                pass
+                abi_size = 0
+            try:
+                abi_alignment = int(target_data.get_abi_alignment(type_ref))
+            except Exception:
+                abi_alignment = pointer_size
+        if abi_alignment <= 0:
+            abi_alignment = pointer_size
+        return abi_size, abi_alignment
 
+    def _allocate_sret_buffer(self, module, return_type: str) -> tuple[int, ctypes.Array, int]:
+        pointer_size = ctypes.sizeof(ctypes.c_void_p)
+        type_ref = self._resolve_struct_type(module, return_type)
+        abi_size, abi_alignment = self._compute_type_layout(type_ref)
+        struct_size = pointer_size
+        alignment = pointer_size
+        if abi_size:
+            struct_size = max(struct_size, abi_size)
+        if abi_alignment:
+            alignment = max(alignment, abi_alignment)
         if struct_size <= 0:
             struct_size = pointer_size
         if alignment <= 0:
             alignment = pointer_size
-
         raw_buffer = ctypes.create_string_buffer(struct_size + alignment)
         raw_address = ctypes.addressof(raw_buffer)
         aligned_address = (raw_address + (alignment - 1)) & ~(alignment - 1)
@@ -745,13 +760,21 @@ class Stage2Runner:
         for symbol, (effect, arg_types) in _HELPER_SIGNATURES.items():
             delegate = self._hooks.get(symbol)
             cfunc = self._make_helper(symbol, effect, arg_types, delegate)
-            llvm.add_symbol(symbol, ctypes.cast(cfunc, ctypes.c_void_p).value)
+            address = ctypes.cast(cfunc, ctypes.c_void_p).value or 0
+            self._debug_log(
+                f"[stage2] register helper {symbol}: addr=0x{int(address):x}"
+            )
+            llvm.add_symbol(symbol, address)
             self._registered_helpers.append(cfunc)
 
         # Register capability adapters
         for symbol, (effect, arg_types, return_type) in _ADAPTER_SIGNATURES.items():
             cfunc = self._make_adapter(symbol, effect, arg_types, return_type)
-            llvm.add_symbol(symbol, ctypes.cast(cfunc, ctypes.c_void_p).value)
+            address = ctypes.cast(cfunc, ctypes.c_void_p).value or 0
+            self._debug_log(
+                f"[stage2] register adapter {symbol}: addr=0x{int(address):x}"
+            )
+            llvm.add_symbol(symbol, address)
             self._registered_helpers.append(cfunc)
 
     def _make_helper(
@@ -846,21 +869,69 @@ class Stage2Runner:
                 return None
             return self._adapter_object_handles.get(address)
 
+        class _Stage2String(ctypes.Structure):
+            _fields_ = [
+                ("data", ctypes.c_void_p),
+                ("length", ctypes.c_longlong),
+            ]
+
+        # Helper to normalise void* arguments into plain integers
+        def _normalise_ptr(value: ctypes.c_void_p | int | None) -> int:
+            if isinstance(value, ctypes.c_void_p):
+                raw = value.value
+            else:
+                raw = value
+            return 0 if raw is None else int(raw)
+
         # Helper to convert c_void_p to Python string
-        def _ptr_to_str(ptr: ctypes.c_void_p) -> str:
-            if not ptr:
+        def _ptr_to_str(ptr: ctypes.c_void_p | int | None) -> str:
+            address = _normalise_ptr(ptr)
+            if address == 0:
                 return ""
-            value = ctypes.cast(ptr, ctypes.c_char_p).value
-            return value.decode('utf-8') if value is not None else ""
+
+            struct_value: _Stage2String | None = None
+            try:
+                struct_ptr = ctypes.cast(ctypes.c_void_p(
+                    address), ctypes.POINTER(_Stage2String))
+                struct_value = struct_ptr.contents
+            except (ValueError, OSError, ctypes.ArgumentError):
+                struct_value = None
+
+            if struct_value is not None:
+                data_address = _normalise_ptr(struct_value.data)
+                length = int(struct_value.length)
+                if 0 <= length <= 1 << 30 and data_address != 0:
+                    try:
+                        raw_bytes = ctypes.string_at(data_address, length)
+                        return raw_bytes.decode("utf-8")
+                    except (ValueError, OSError):
+                        pass
+
+            # Fallback for legacy raw C strings (pre-struct representation)
+            c_string = ctypes.cast(ctypes.c_void_p(
+                address), ctypes.c_char_p).value
+            return c_string.decode("utf-8") if c_string is not None else ""
 
         # Storage for string buffers to keep them alive (stored on runner instance)
         # Helper to convert Python string to pointer integer
         def _str_to_ptr(s: str) -> int:
-            encoded = s.encode('utf-8')
-            buf = ctypes.create_string_buffer(encoded + b'\0')
+            encoded = s.encode("utf-8")
+            buf = ctypes.create_string_buffer(encoded + b"\0")
             self._adapter_string_buffers.append(buf)  # Keep buffer alive
-            value = ctypes.cast(buf, ctypes.c_void_p).value
-            return 0 if value is None else value
+
+            data_address = ctypes.cast(buf, ctypes.c_void_p).value
+            stage2_string = _Stage2String()
+            stage2_string.data = 0 if data_address is None else data_address
+            stage2_string.length = len(encoded)
+
+            stage2_string_ptr = ctypes.pointer(stage2_string)
+            # Keep both the structure and the pointer alive for the duration of the runner
+            self._adapter_string_buffers.append(stage2_string)
+            self._adapter_string_buffers.append(stage2_string_ptr)
+
+            struct_address = ctypes.cast(
+                stage2_string_ptr, ctypes.c_void_p).value
+            return 0 if struct_address is None else int(struct_address)
 
         class _StringArray(ctypes.Structure):
             _fields_ = [
@@ -869,10 +940,11 @@ class Stage2Runner:
             ]
 
         def _array_to_list(array_ptr: ctypes.c_void_p) -> list[str]:
-            if not array_ptr:
+            address = _normalise_ptr(array_ptr)
+            if address == 0:
                 return []
             array = ctypes.cast(
-                array_ptr, ctypes.POINTER(_StringArray)
+                ctypes.c_void_p(address), ctypes.POINTER(_StringArray)
             ).contents
             length = int(array.length)
             if length <= 0 or not array.data:
@@ -880,10 +952,11 @@ class Stage2Runner:
             return [_ptr_to_str(array.data[i]) for i in range(length)]
 
         def _array_to_handles(array_ptr: ctypes.c_void_p) -> list[int]:
-            if not array_ptr:
+            address = _normalise_ptr(array_ptr)
+            if address == 0:
                 return []
             array = ctypes.cast(
-                array_ptr, ctypes.POINTER(_StringArray)
+                ctypes.c_void_p(address), ctypes.POINTER(_StringArray)
             ).contents
             length = int(array.length)
             if length <= 0 or not array.data:
@@ -1111,8 +1184,10 @@ class Stage2Runner:
 
             def _string_length(value_ptr: ctypes.c_void_p) -> int:
                 try:
-                    address = int(value_ptr.value or 0) if isinstance(value_ptr, ctypes.c_void_p) else int(value_ptr or 0)
-                    self._debug_log(f"[stage2] runtime string_length ptr=0x{address:x}")
+                    address = int(value_ptr.value or 0) if isinstance(
+                        value_ptr, ctypes.c_void_p) else int(value_ptr or 0)
+                    self._debug_log(
+                        f"[stage2] runtime string_length ptr=0x{address:x}")
                     _require_effects()
                     text = _ptr_to_str(value_ptr)
                     return len(text)
@@ -1166,8 +1241,10 @@ class Stage2Runner:
                 try:
                     left = _array_to_handles(first_ptr)
                     right = _array_to_handles(second_ptr)
-                    first_addr = int(first_ptr.value or 0) if isinstance(first_ptr, ctypes.c_void_p) else int(first_ptr or 0)
-                    second_addr = int(second_ptr.value or 0) if isinstance(second_ptr, ctypes.c_void_p) else int(second_ptr or 0)
+                    first_addr = int(first_ptr.value or 0) if isinstance(
+                        first_ptr, ctypes.c_void_p) else int(first_ptr or 0)
+                    second_addr = int(second_ptr.value or 0) if isinstance(
+                        second_ptr, ctypes.c_void_p) else int(second_ptr or 0)
                     self._debug_log(
                         f"[stage2] runtime concat first=0x{first_addr:x} ({len(left)} handles) second=0x{second_addr:x} ({len(right)} handles)"
                     )
@@ -1472,8 +1549,10 @@ class Stage2Runner:
 
             def _char_code(value_ptr: ctypes.c_void_p) -> float:
                 try:
-                    address = int(value_ptr.value or 0) if isinstance(value_ptr, ctypes.c_void_p) else int(value_ptr or 0)
-                    self._debug_log(f"[stage2] runtime char_code ptr=0x{address:x}")
+                    address = int(value_ptr.value or 0) if isinstance(
+                        value_ptr, ctypes.c_void_p) else int(value_ptr or 0)
+                    self._debug_log(
+                        f"[stage2] runtime char_code ptr=0x{address:x}")
                     _require_effects()
                     text = _ptr_to_str(value_ptr)
                     ch = text[0] if text else "\0"
@@ -1694,6 +1773,10 @@ class Stage2Runner:
                 raise ValueError(
                     "argtypes must be specified when invoking with positional arguments")
             argtypes = ()
+        argtypes = tuple(argtypes)
+        invoke_args: tuple = args
+        call_argtypes = argtypes
+        function = None
         function_info = self._lookup_function_return(entry_point)
         aggregate_module = None
         aggregate_return_type = None
@@ -1704,33 +1787,57 @@ class Stage2Runner:
         if function_info is not None:
             aggregate_module, aggregate_return_type = function_info
             if self._is_aggregate_return_type(aggregate_return_type):
-                aggregate_address, aggregate_buffer, aggregate_size = self._allocate_sret_buffer(
+                type_ref = self._resolve_struct_type(
                     aggregate_module, aggregate_return_type)
-                aggregate_size = max(1, aggregate_size)
-                aggregate_restype = ctypes.c_ubyte * aggregate_size
-                cfunc_type = ctypes.CFUNCTYPE(aggregate_restype, *argtypes)
-                function = cfunc_type(address)
-                self._debug_log(
-                    f"[stage2] aggregate entry {entry_point}: declared={aggregate_return_type} size={aggregate_size}"
-                )
-                use_aggregate = True
+                abi_size, _ = self._compute_type_layout(type_ref)
+                pointer_size = ctypes.sizeof(ctypes.c_void_p)
+                if abi_size and abi_size <= pointer_size:
+                    self._debug_log(
+                        f"[stage2] aggregate skip {entry_point}: abi_size={abi_size} pointer_size={pointer_size}"
+                    )
+                else:
+                    aggregate_address, aggregate_buffer, aggregate_size = self._allocate_sret_buffer(
+                        aggregate_module, aggregate_return_type)
+                    aggregate_size = max(1, aggregate_size)
+                    aggregate_pointer_type = ctypes.c_void_p
+                    call_argtypes = (aggregate_pointer_type, *argtypes)
+                    cfunc_type = ctypes.CFUNCTYPE(None, *call_argtypes)
+                    function = cfunc_type(address)
+                    invoke_args = (ctypes.c_void_p(aggregate_address), *args)
+                    self._debug_log(
+                        f"[stage2] aggregate entry {entry_point}: declared={aggregate_return_type} size={aggregate_size} "
+                        f"address=0x{address:x} sret=0x{aggregate_address:x}"
+                    )
+                    use_aggregate = True
         if not use_aggregate:
             cfunc_type = ctypes.CFUNCTYPE(
                 restype, *argtypes) if restype is not None else ctypes.CFUNCTYPE(None, *argtypes)
             function = cfunc_type(address)
+        if function is None:
+            raise RuntimeError(
+                f"could not materialise callable for {entry_point}")
+        self._debug_log(
+            f"[stage2] prepare call {entry_point}: func=0x{address:x} aggregate={use_aggregate} args={args} invoke_args={invoke_args}"
+        )
         effects = self._manifest.get(entry_point, ())
         grant = runtime.create_capability_grant(effects)
         token = _ACTIVE_GRANT.set(grant)
         error_token = _LAST_RUNTIME_ERROR.set(None)
-        aggregate_result = None
+        result = None
         try:
             self._debug_log(
                 f"[stage2] invoke {entry_point}: aggregate={use_aggregate}"
             )
             if use_aggregate:
-                aggregate_result = function(*args)
+                function(*invoke_args)
+                self._debug_log(
+                    f"[stage2] aggregate write {entry_point}: buffer=0x{aggregate_address:x} size={aggregate_size}"
+                )
             else:
-                result = function(*args)
+                result = function(*invoke_args)
+                self._debug_log(
+                    f"[stage2] return {entry_point}: result={result}"
+                )
         finally:
             _ACTIVE_GRANT.reset(token)
             runtime_error = _LAST_RUNTIME_ERROR.get()
@@ -1738,21 +1845,10 @@ class Stage2Runner:
         if runtime_error is not None:
             raise runtime_error
         if use_aggregate:
-            if aggregate_result is None:
-                return None
-            source_address = ctypes.addressof(aggregate_result)
-            if aggregate_address == 0 or source_address == 0:
+            if aggregate_address == 0:
                 raise RuntimeError(
-                    f"aggregate invocation for {entry_point} produced null buffer (dest={aggregate_address}, src={source_address})"
+                    f"aggregate invocation for {entry_point} produced null buffer (dest={aggregate_address})"
                 )
-            self._debug_log(
-                f"[stage2] aggregate copy {entry_point}: size={aggregate_size} dest=0x{aggregate_address:x} src=0x{source_address:x}"
-            )
-            ctypes.memmove(
-                aggregate_address,
-                source_address,
-                aggregate_size,
-            )
             if restype is None:
                 return aggregate_address
             return self._extract_sret_result(aggregate_address, aggregate_size, restype)
