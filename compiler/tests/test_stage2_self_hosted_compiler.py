@@ -173,10 +173,10 @@ def stage2_bootstrap(tmp_path_factory):
 def test_stage2_compile_to_sailfin_roundtrip(stage2_bootstrap) -> None:
     runner: Stage2Runner = stage2_bootstrap["runner"]
     source_text = _read_example("basics/hello-world.sfn")
-    buffer = ctypes.create_string_buffer(source_text.encode("utf-8"))
+    buffer = runner.encode_host_string(source_text)
     result_ptr = runner.invoke(
         "compile_to_sailfin",
-        ctypes.cast(buffer, ctypes.c_void_p),
+        buffer,
         restype=ctypes.c_void_p,
         argtypes=(ctypes.c_void_p,),
     )
@@ -195,10 +195,10 @@ def test_stage2_compile_to_sailfin_roundtrip(stage2_bootstrap) -> None:
 def test_stage2_emits_native_artifacts(stage2_bootstrap) -> None:
     runner: Stage2Runner = stage2_bootstrap["runner"]
     source = "fn greet() -> string { return \"hi\"; }\n"
-    buffer = ctypes.create_string_buffer(source.encode("utf-8"))
+    buffer = runner.encode_host_string(source)
     result = runner.invoke(
         "compile_to_native",
-        ctypes.cast(buffer, ctypes.c_void_p),
+        buffer,
         restype=_EmitNativeResult,
         argtypes=(ctypes.c_void_p,),
     )
@@ -216,10 +216,10 @@ def test_stage2_emits_native_artifacts(stage2_bootstrap) -> None:
 def test_stage2_generates_valid_llvm(stage2_bootstrap) -> None:
     runner: Stage2Runner = stage2_bootstrap["runner"]
     source = "fn number_source() -> number { return 123.0; }\n"
-    buffer = ctypes.create_string_buffer(source.encode("utf-8"))
+    buffer = runner.encode_host_string(source)
     result = runner.invoke(
         "compile_to_native_llvm",
-        ctypes.cast(buffer, ctypes.c_void_p),
+        buffer,
         restype=_LoweredLLVMResult,
         argtypes=(ctypes.c_void_p,),
     )
@@ -235,10 +235,10 @@ def test_stage2_generates_valid_llvm(stage2_bootstrap) -> None:
 def test_stage2_executes_compiled_program(stage2_bootstrap) -> None:
     runner: Stage2Runner = stage2_bootstrap["runner"]
     source = "fn compute() -> number { return 21.0 + 21.0; }\n"
-    buffer = ctypes.create_string_buffer(source.encode("utf-8"))
+    buffer = runner.encode_host_string(source)
     stage2_result = runner.invoke(
         "compile_to_native_llvm",
-        ctypes.cast(buffer, ctypes.c_void_p),
+        buffer,
         restype=_LoweredLLVMResult,
         argtypes=(ctypes.c_void_p,),
     )

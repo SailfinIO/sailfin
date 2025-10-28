@@ -1,135 +1,88 @@
-# Stage2 Debugging Status (Jan 2025)
+# Stage2 Debugging Status (Feb 2025)
 
-## Overview
+## Current Outlook
 
-The stage2 self-hosting pipeline still segfaults when invoked via `Stage2Runner`. The crash happens the moment we call `compile_to_sailfin` inside the native JIT. Most of the up-front IR hygiene issues have been fixed, so the remaining work is to drop into the generated LLVM and catch the exact bad write/read.
+Stage2 bootstrapping continues to abort the moment we invoke `compile_to_sailfin` through the native JIT. We no longer see raw segfaults—the crash now happens because the runtime stub calls `abort()`. Instrumentation shows that Stage2 is passing valid pointers into the runtime helpers, but the stub returns the wrong string representation, so the lexer mis-classifies tokens and the pipeline dies.
 
-This note captures what has been completed so far and the concrete next steps needed to resume the investigation.
+This note records the fixes that have landed, what we can reliably reproduce today, and the remaining work required to get Stage2 through the self-hosted compiler tests.
 
-## Completed Fixes
+## What’s Fixed
 
-- **`Program` value handling** – `compiler/src/main.sfn` now stores and reuses the parsed `Program` struct instead of mishandling it as an `i8*`. Regenerated `compiler/build/main.py` mirrors the change.
-- **Enum variant globals** – `scripts/bootstrap_stage2.py` synthesises `@.enum.*` string constants for every referencing module, appends them to both the `string_constants` table and the emitted IR, and pushes the definitions through Stage2Runner. `bootstrap_stage2` now finishes cleanly and each `.ll` file defines its own `@.enum.…variant`.
-- **Array literal lowering** – `lower_array_literal` allocates heap storage (no more stack pointers escaping the function) and guards zero-length allocations.
-- **Stage2 harness improvements** – `scratch/verify_stage2_runner.py` can build the compiler, create a `Stage2Runner`, and (with `WAIT_FOR_DEBUGGER=1`) pause at start-up until a `scratch/continue_stage2_debug` sentinel file appears. This lets us attach before invoking the native entry points.
-- **Runtime stubs (partial)** – A placeholder C runtime (`runtime/stage2_runtime_stub.c`) implements the frequently referenced `sailfin_runtime_*` helpers so that a stand-alone `lli` session can be set up after we export the post-Stage2Runner modules.
+- **Runner instrumentation**
+  - `Stage2Runner` now logs every `malloc`/`free`, tracks tracked allocations, and records whether string pointers are “tracked”, “alloc”, or “unknown”.
+  - `_ptr_to_str` can recover strings from both tracked buffers and arbitrary heap pointers, logging the path it takes (`reuse`, `struct decode`, or `cstring decode/fallback`).
+  - New helper `Stage2Runner.encode_host_string(text)` registers host strings so the runtime can recognise them during string-length calls.
 
-## Outstanding Issues
+- **Test harness updates**
+  - All Stage2 self-host tests call `runner.encode_host_string(...)` instead of constructing raw `ctypes.create_string_buffer` objects.
+  - `scratch/stage2_repro.py` builds the Stage2 compiler, instantiates a `Stage2Runner`, and directly calls `compile_to_sailfin`. This reproduces the abort without pytest overhead.
+  - `scratch/inspect_recursive_enum.py` and `scratch/analyze_stage2_runner.py` remain available for inspecting targeted IR and execution-engine state.
 
-1. **No native debugger access**  
-   The host denies debugserver/PTY requests, so attaching a native debugger is not an option. We must rely on harness logging and `lli` reproductions for visibility.
+- **Stage2 string diagnostics**
+  - The debug log (`SAILFIN_STAGE2_DEBUG_LOG`) captures every `runtime string_length` call, along with the pointer status and the decoded length.
+  - Unknown pointers no longer segfault; they return `""` after logging a warning, ensuring we see the upstream fallout instead of crashing immediately.
 
-2. **`lli` linking still hits duplicate globals**  
-   When we link the raw `.ll` files plus the stub runtime we get `symbol multiply defined` errors (e.g. `_add`). Stage2Runner rewrites the modules in-memory to avoid these conflicts, so the files on disk are not sufficient for `llvm-link`/`lli`.
+## What We Observe Now
 
-3. **Segfault cause still unknown**  
-   With no debugger and no `lli` reproduction we haven’t seen the exact function or instruction that corrupts memory.
+1. **String ABI is `cstring`**  
+   Stage2 chooses the legacy C-string ABI when it loads the compiled modules. All helper decoding paths confirm we are dealing with `char* + nul` buffers, not the struct-based layout.
 
-### 2025-02-14 update – native reproduction and findings
+2. **Host strings are tracked correctly**  
+   Pointers originating from `encode_host_string` are logged as `status=tracked` with the expected length, so the pipeline receives the correct source text initially.
 
-Using the rewritten Stage2 modules (`scratch/stage2_patched/…`) plus the driver/runtime stub, we can now reproduce the crash entirely inside `lli`:
+3. **Runtime stub returns inconsistent data**  
+   When Stage2 calls helpers such as `sailfin_runtime_substring`, `sailfin_runtime_concat`, or `sailfin_runtime_char_code`, the stub still allocates raw `malloc` buffers and sometimes returns handles instead of strings. The subsequent `string_length` calls see unexpected values (often empty strings), causing the lexer to emit incorrect tokens. The parser then loops until the sandbox kills the process.
 
-```bash
-/opt/homebrew/opt/llvm/bin/llvm-link \
-  scratch/stage2_patched/0{0..9}__string_.bc \
-  scratch/stage2_patched/1{0..5}__string_.bc \
-  scratch/stage2_runtime_stub.bc \
-  scratch/stage2_driver_parse.bc \
-  -o scratch/stage2_combined_parse.bc
+4. **Abort comes from the stub**  
+   The crash is now an explicit `abort()` inside `runtime/stage2_runtime_stub.c` (e.g. `sailfin_runtime_raise_value_error`). No `[stage2-runtime] value error` messages appear because the stub doesn’t print context before aborting.
 
-/opt/homebrew/opt/llvm/bin/lli --entry-function=stage2_parse_entry scratch/stage2_combined_parse.bc
-```
+5. **`debug_marker` probes reach 1001 repeatedly**  
+   Our IR instrumentation inserts `stage2_debug_marker` calls throughout the `lex` function. The log shows code `1001` firing in a tight loop, matching the observation that the lexer is spinning on bad tokens.
 
-Instrumenting `lex`, `parse_tokens`, `append_token`, and the runtime helpers shows:
+## Next Steps
 
-- The very first call to `char_code` should see `'f'` from the source (`"fn greet"`), but the value passed into the C stub is an empty string. Our logging prints `[stage2-debug] [lex] buffer byte=102` for the stack copy **and** `char_code ptr=… char=0x00` for the pointer handed to Stage2 – it’s the wrong representation.
-- Because `is_letter`/`is_identifier_start` fail, the lexer immediately falls into the “unknown token” path and appends an `EndOfFile` token (kind `7`). The parser then spins forever on duplicate EOF tokens and eventually hits the sandbox kill.
-- The LLVM IR shows string helpers such as `slice` and `char_at` returning values via `sailfin_runtime_substring`. Stage2 expects those helpers to return a struct-like blob, not a raw `char *`.
+1. **Fix the runtime stub’s string model**
+   - Mirror the ABI that Stage2 expects. Based on the LLVM IR, each helper should return either:
+     - A raw `i8*` buffer with the lexeme contents (nul-terminated), or
+     - A struct containing `{ i8*, i64 }`.  
+     Confirm which one the IR uses by inspecting `%StringConstant`, `struct` definitions, and function signatures. Stage2 currently assumes `cstring`, so returning a bare `char*` for every helper is acceptable *only if the pointer stays valid and nul-terminated*.
+   - Update helpers like `sailfin_runtime_substring`, `sailfin_runtime_concat`, `sailfin_runtime_append_string`, `sailfin_runtime_to_debug_string`, and `sailfin_runtime_string_length` so they:
+     1. Allocate buffers of the correct length (`len + 1` for the terminator).
+     2. Store the pointer in a map if the stub needs to hand it back later.
+     3. Return pointers that outlive the helper call (do not return the address of stack locals).
 
-**Root cause:** the C runtime stub (`runtime/stage2_runtime_stub.c`) still treats Stage2 strings as bare `char *`. Stage2 code is actually passing around richer values (pointer + length). When our stub returns a plain heap buffer the subsequent runtime helpers (`string_length`, `char_code`, etc.) read zero and the lexer collapses.
+2. **Add diagnostics before `abort()`**
+   - Print the message and pointer involved before calling `abort()` in `sailfin_runtime_raise_value_error` and other failure paths. This will tell us exactly which code path triggers the fatal error.
 
-### Action items
+3. **Rebuild the stub and rerun the native repro**
+   ```bash
+   clang -O0 -g -emit-llvm -c runtime/stage2_runtime_stub.c -o scratch/stage2_runtime_stub.bc
+   SAILFIN_STAGE2_DEBUG_LOG=scratch/stage2_debug.log \
+     conda run -n sailfin python scratch/stage2_repro.py
+   ```
+   The expected outcome is that `compile_to_sailfin` completes without aborting, and the log shows token kinds progressing past the initial `debug_marker 1001` loop.
 
-1. Update the C stub to mirror Stage2’s string layout:
+4. **Re-run the Stage2 pytest subset**
+   Once the stub returns correct strings, run:
+   ```bash
+   SAILFIN_STAGE2_DEBUG_LOG=scratch/stage2_debug.log \
+   make test PYTEST_ARGS='compiler/tests/test_stage2_self_hosted_compiler.py::test_stage2_compile_to_sailfin_roundtrip -vv -s'
+   ```
+   Follow up with the full Stage2 suite if the roundtrip passes.
 
-   - Define a `struct Stage2String { char *data; int64_t length; }` (or whatever layout we infer from the IR; the `%StringConstant` struct is a good starting point).
-   - Make `sailfin_runtime_substring`, `sailfin_runtime_concat`, `sailfin_runtime_append_string`, `sailfin_runtime_string_length`, and `sailfin_runtime_char_code` allocate/populate that struct rather than returning a raw C string.
-   - Continue to accept raw `char *` only at the external API boundary (`parse_program`). Once Stage2 calls into the runtime, we must hand back `Stage2String` values.
+5. **Document the verified ABI**
+   After confirming the working layout, record it in the spec (e.g. `docs/spec.md` or a dedicated runtime ABI reference) so future changes don’t regress the helpers.
 
-2. Rebuild the stub (`clang -emit-llvm -c runtime/stage2_runtime_stub.c -o scratch/stage2_runtime_stub.bc`) and rerun the `lli` harness. The expected successful log should show `[parse_tokens] kind=0` for the first token and only a single EOF appended at the end.
+## Quick Reference
 
-3. With the lexer working, rerun the updated harness to confirm there’s no remaining native fault, then re-enable `runtime/stage2_runner.py` to verify the full Python harness completes.
+- **Key scripts**
+  - `scratch/stage2_repro.py` – minimal reproduction of the Stage2 abort.
+  - `scratch/analyze_stage2_runner.py` – inspects the LLVM modules loaded into the runner and lists unresolved symbols.
+  - `scratch/inspect_recursive_enum.py` – compiles small snippets and executes their `main` via MCJIT for isolated testing.
 
-### 2025-10-27 update – string runtime alignment
+- **Crucial files**
+  - `runtime/stage2_runner.py` – instrumentation and host-string registration.
+  - `runtime/stage2_runtime_stub.c` – runtime helpers (needs ABI fixes).
+  - `compiler/tests/test_stage2_self_hosted_compiler.py` – Stage2 pytest coverage using the new helper API.
 
-- `runtime/stage2_runner.py` now marshals strings as `{ data, length }` structs when bridging native helpers. The adapter keeps the backing UTF-8 buffer, the struct, and its pointer alive for the duration of the runner so native code sees stable addresses.
-- `runtime/stage2_runtime_stub.c` implements `SailfinString`/`SailfinStringArray` helpers, with every string-producing runtime helper returning a heap-allocated struct (and helpers such as `string_length`, `substring`, `char_code`, and `append_string` rewritten to respect the new layout).
-- To refresh the lli harness, rebuild the stub bitcode: `clang -O0 -g -emit-llvm -c runtime/stage2_runtime_stub.c -o scratch/stage2_runtime_stub.bc`.
-- Next step: rerun the linked Stage2 bundle under `lli` (or `scratch/verify_stage2_runner.py`) and capture the lexer logs; the first `char_code` call should now report `'f'` instead of `0x00`.
-
-### 2025-10-28 update – harness state and debugger setup
-
-- `scratch/verify_stage2_runner.py` now feeds the Stage2 runner with a raw UTF-8 buffer (null terminated) because `ctypes` cannot currently express the `%Program` struct return type; we still pass the resulting pointer back into `typecheck_program` and `emit_program` as `ctypes.c_void_p`.
-- Running the harness with `SAILFIN_STAGE2_DEBUG_LOG=scratch/stage2_runner_debug.log conda run python scratch/verify_stage2_runner.py` shows the runner laying out all 16 modules, skipping the aggregate return path for `parse_program`, and then segfaulting inside `Stage2Runner.invoke` as soon as the call is issued. No runtime helper logging appears before the crash, so the fault happens before helpers such as `sailfin_runtime_string_length` run.
-- The host environment prevents debugger attachment, so rely on `WAIT_FOR_DEBUGGER=1` only as a synchronisation aid. Log output still streams to `SAILFIN_STAGE2_DEBUG_LOG`, and `touch scratch/continue_stage2_debug` resumes execution once instrumentation is configured.
-- `scratch/verify_stage2_runner.py` lazy-loads Stage2 modules via `importlib` after it has appended the repo root to `sys.path`. This avoids `ModuleNotFoundError` when the script is launched from tools that skip our virtualenv activation. Double-check that you’re running the up-to-date harness if modules still fail to resolve.
-- Immediate next step: capture detailed logging from this segfaulting call so we know which native frame fails before any runtime helper interaction. If the harness still exits too quickly, run the generated bundle under `lli` with additional instrumentation to trace the failing call.
-
-## How to Reproduce the Current Crash
-
-```bash
-# Rebuild stage2 output
-conda run -n sailfin python scripts/bootstrap_stage2.py \
-  --out scratch/stage2_artifacts --quiet --no-validate
-
-# Run the stage2 harness (crashes inside runner.invoke)
-conda run -n sailfin python scratch/verify_stage2_runner.py
-```
-
-With `WAIT_FOR_DEBUGGER=1` the script pauses before invoking `parse_program`. Touch `scratch/continue_stage2_debug` to resume.
-
-## Suggested Next Steps
-
-### 1. Capture Detailed Instrumentation
-
-- Enable verbose logging with `SAILFIN_STAGE2_DEBUG_LOG=...` and use `WAIT_FOR_DEBUGGER=1` solely to pause execution while probes are configured.
-- Add targeted prints or `printf` instrumentation inside the runtime stubs and regenerated LLVM to narrow the failing call prior to the segfault.
-
-### 2. Re-create Stage2Runner’s Linked Module for `lli`
-
-- Dump the _rewritten_ modules from `Stage2Runner._modules` (after `_compile_ir` runs). You can adapt the earlier `scratch/dump_stage2_modules.py` to call `module.as_bitcode()` and `module.__str__()` for each in-memory module.
-- Link those `.bc` files with `stage2_driver.ll` and `stage2_runtime_stub.bc`, then run under `/opt/homebrew/opt/llvm/bin/lli`. Because the rewritten modules have unique globals, the linker should succeed and `lli` can execute `compile_to_sailfin`.
-- Once that works, iterate with `lli` and additional logging to single-step conceptually through the native function without the Python boundary.
-
-### 3. Expand Runtime Stubs As Needed
-
-If unresolved symbols remain after linking the rewritten modules, add the missing helper signatures to `runtime/stage2_runtime_stub.c`. The current stub covers:
-
-```
-sailfin_runtime_bounds_check
-sailfin_runtime_string_length
-sailfin_runtime_string_concat
-sailfin_runtime_substring
-char_code / sailfin_runtime_char_code
-sailfin_runtime_grapheme_count / grapheme_at
-… (basic type checks, logging, concat helpers, capability stubs)
-```
-
-Fill in any additional helpers that `lli` complains about.
-
-### 4. Diagnose the Actual Fault
-
-Once a debugger or `lli` is running:
-
-- Compare registers/pointers right before the fault to Stage1 output.
-- Inspect arrays/structs returned by the failing function; pay attention to heap allocations introduced in stage2 (array literals, enum payloads, etc.).
-- Capture the problematic module/IR snippet and add it to the doc or a tracked issue.
-
-## Useful Paths & Scripts
-
-- `scratch/verify_stage2_runner.py` – stage2 harness (supports debugger wait).
-- `runtime/stage2_runtime_stub.c` – runtime helper stubs; compile to bitcode (`clang -c -O0 -emit-llvm`).
-- `scripts/bootstrap_stage2.py` – now responsible for materialising enum variant constants.
-- `scratch/stage2_driver.c` → `stage2_driver.ll` – simple driver that calls `compile_to_sailfin` from native code.
-
-Keep this document updated as new findings come in so the next person can jump straight into the remaining work. Good luck!
+Keep this document updated as new findings land so the next person can continue from the latest state rather than rediscovering the same issues. Good luck!

@@ -121,7 +121,7 @@ _LLVM_INITIALISED = False
 _LIBC_HANDLE: ctypes.CDLL | None = None
 _LIBC_FUNCTIONS: dict[str, ctypes._CFuncPtr] = {}
 _LIBC_SYMBOL_ADDRESSES: dict[str, int] = {}
-_LIBC_ALLOCATIONS: dict[int, tuple[ctypes.Array, int]] = {}
+_LIBC_ALLOCATIONS: dict[int, int] = {}
 
 
 def current_capability_grant() -> runtime.CapabilityGrant | None:
@@ -147,6 +147,15 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
         return _LIBC_FUNCTIONS
 
     try:
+        libc = ctypes.CDLL(None)
+        libc_malloc = libc.malloc
+        libc_malloc.restype = ctypes.c_void_p
+        libc_malloc.argtypes = (ctypes.c_size_t,)
+
+        libc_free = libc.free
+        libc_free.restype = None
+        libc_free.argtypes = (ctypes.c_void_p,)
+
         logger = debug_log
 
         def _malloc_wrapper(size: int) -> int:
@@ -156,19 +165,10 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
                 request = 0
             if request <= 0:
                 request = 1
-            try:
-                buffer = ctypes.create_string_buffer(request)
-            except Exception as exc:
-                if logger:
-                    logger(f"[stage2] malloc({request}) allocation failed: {exc}")
-                if _LAST_RUNTIME_ERROR.get() is None:
-                    _LAST_RUNTIME_ERROR.set(exc)
-                return 0
-            address_obj = ctypes.cast(buffer, ctypes.c_void_p)
-            address_value = address_obj.value
-            pointer = 0 if address_value is None else int(address_value)
+            result = libc_malloc(request)
+            pointer = 0 if result is None else int(result)
             if pointer != 0:
-                _LIBC_ALLOCATIONS[pointer] = (buffer, request)
+                _LIBC_ALLOCATIONS[pointer] = request
                 if logger:
                     logger(
                         f"[stage2] malloc request size={request} result=0x{pointer:x}"
@@ -180,10 +180,7 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
 
         def _free_wrapper(ptr: ctypes.c_void_p | int) -> None:
             try:
-                if isinstance(ptr, ctypes.c_void_p):
-                    address = int(ptr.value or 0)
-                else:
-                    address = int(ptr or 0)
+                address = int(ptr) if not isinstance(ptr, ctypes.c_void_p) else int(ptr.value or 0)
             except Exception:
                 address = 0
             if address == 0:
@@ -202,9 +199,8 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
                     )
                 return
             if logger:
-                size = allocation[1]
-                logger(f"[stage2] free ptr=0x{address:x} size={size}")
-            # letting the buffer go out of scope releases the memory
+                logger(f"[stage2] free ptr=0x{address:x} size={allocation}")
+            libc_free(ctypes.c_void_p(address))
 
         malloc_cfunc = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_size_t)(_malloc_wrapper)
         free_cfunc = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(_free_wrapper)
@@ -214,13 +210,13 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
         llvm.add_symbol("malloc", malloc_addr)
         llvm.add_symbol("free", free_addr)
 
-        _LIBC_HANDLE = None
+        _LIBC_HANDLE = libc
         _LIBC_FUNCTIONS = {"malloc": malloc_cfunc, "free": free_cfunc}
         _LIBC_SYMBOL_ADDRESSES = {"malloc": malloc_addr, "free": free_addr}
 
         if debug_log:
-            debug_log(f"[stage2] registered managed malloc wrapper: addr=0x{malloc_addr:x}")
-            debug_log(f"[stage2] registered managed free wrapper: addr=0x{free_addr:x}")
+            debug_log(f"[stage2] registered libc malloc wrapper: addr=0x{malloc_addr:x}")
+            debug_log(f"[stage2] registered libc free wrapper: addr=0x{free_addr:x}")
     except Exception as exc:  # pragma: no cover - diagnostics only
         if debug_log:
             debug_log(f"[stage2] failed to register libc malloc/free wrappers: {exc}")
@@ -283,6 +279,7 @@ class Stage2Runner:
         self._registered_helpers = []
         self._hooks = _normalise_hooks(runtime_hooks)
         self._adapter_string_buffers = []
+        self._tracked_string_addresses: dict[int, tuple[str, str, int]] = {}
         self._adapter_object_handles: dict[int, object] = {}
         self._function_info_cache = {}
         self._adapter_functions: dict[str, ctypes._CFuncPtr] = {}
@@ -294,6 +291,18 @@ class Stage2Runner:
         if isinstance(lowered, Sequence) and not isinstance(lowered, (bytes, str)):
             return list(lowered)
         return [lowered]
+
+    def encode_host_string(self, text: str) -> ctypes.c_void_p:
+        """Register a host string so Stage2 helpers can safely read it."""
+
+        encoded = text.encode("utf-8")
+        buffer = ctypes.create_string_buffer(encoded + b"\0")
+        self._adapter_string_buffers.append(buffer)
+        pointer = ctypes.cast(buffer, ctypes.c_void_p)
+        address = pointer.value
+        if address:
+            self._tracked_string_addresses[int(address)] = ("cstring", text, len(encoded))
+        return pointer
 
     @staticmethod
     def _detect_string_abi(lowered_modules: Sequence) -> str:
@@ -1104,6 +1113,26 @@ class Stage2Runner:
             if address == 0:
                 return ""
 
+            meta = self._tracked_string_addresses.get(address)
+            if meta is not None:
+                self._debug_log(
+                    f"[stage2] ptr_to_str reuse 0x{address:x} kind={meta[0]} len={meta[2]}"
+                )
+                return meta[1]
+
+            def _bytes_from_allocation(ptr_address: int, limit: int | None = None) -> bytes | None:
+                entry = _LIBC_ALLOCATIONS.get(ptr_address)
+                if entry is None:
+                    return None
+                size = entry
+                read_size = size if limit is None else min(size, max(limit, 0))
+                if read_size <= 0:
+                    read_size = size
+                try:
+                    return ctypes.string_at(ptr_address, read_size)
+                except (ValueError, OSError):
+                    return None
+
             if Stage2StringType is not None:
                 try:
                     struct_ptr = ctypes.cast(
@@ -1116,17 +1145,61 @@ class Stage2Runner:
                 if struct_value is not None:
                     data_address = _normalise_ptr(struct_value.data)
                     length = int(struct_value.length)
-                    if 0 <= length <= 1 << 30 and data_address != 0:
-                        try:
-                            raw_bytes = ctypes.string_at(data_address, length)
-                            return raw_bytes.decode("utf-8")
-                        except (ValueError, OSError):
-                            pass
+                    self._debug_log(
+                        f"[stage2] ptr_to_str struct candidate 0x{address:x} data=0x{data_address:x} len={length}"
+                    )
+                    if data_address in self._tracked_string_addresses:
+                        text = self._tracked_string_addresses[data_address][1]
+                        self._tracked_string_addresses[address] = ("struct", text, length)
+                        self._debug_log(
+                            f"[stage2] ptr_to_str struct cached 0x{address:x} -> data 0x{data_address:x} len={length}"
+                        )
+                        return text
+                    if data_address != 0 and 0 <= length <= 1 << 30:
+                        raw_bytes = _bytes_from_allocation(data_address, length)
+                        if raw_bytes is None:
+                            try:
+                                raw_bytes = ctypes.string_at(data_address, length)
+                            except (ValueError, OSError):
+                                raw_bytes = None
+                        if raw_bytes is not None:
+                            slice_length = min(length, len(raw_bytes))
+                            raw = raw_bytes[:slice_length]
+                            text = raw.decode("utf-8", errors="ignore")
+                            self._tracked_string_addresses[address] = ("struct", text, slice_length)
+                            self._debug_log(
+                                f"[stage2] ptr_to_str struct decode 0x{address:x} -> data 0x{data_address:x} len={slice_length}"
+                            )
+                            return text
 
-            # Fallback for legacy raw C strings (pre-struct representation)
-            c_string = ctypes.cast(ctypes.c_void_p(
-                address), ctypes.c_char_p).value
-            return c_string.decode("utf-8") if c_string is not None else ""
+            allocation_bytes = _bytes_from_allocation(address)
+            if allocation_bytes is not None:
+                raw, _, _ = allocation_bytes.partition(b"\0")
+                text = raw.decode("utf-8", errors="ignore")
+                self._tracked_string_addresses[address] = ("cstring", text, len(raw))
+                self._debug_log(
+                    f"[stage2] ptr_to_str cstring decode 0x{address:x} size={len(raw)}"
+                )
+                return text
+            try:
+                raw_cstring = ctypes.string_at(address)
+            except (ValueError, OSError):
+                raw_cstring = None
+            if raw_cstring is not None:
+                raw, _, _ = raw_cstring.partition(b"\0")
+                text = raw.decode("utf-8", errors="ignore")
+                self._tracked_string_addresses[address] = ("cstring", text, len(raw))
+                self._debug_log(
+                    f"[stage2] ptr_to_str cstring fallback 0x{address:x} size={len(raw)}"
+                )
+                return text
+
+            message = f"runtime string pointer 0x{address:x} not tracked"
+            self._debug_log(f"[stage2] {message}")
+            error = RuntimeError(message)
+            if _LAST_RUNTIME_ERROR.get() is None:
+                _LAST_RUNTIME_ERROR.set(error)
+            return ""
 
         # Storage for string buffers to keep them alive (stored on runner instance)
         # Helper to convert Python string to pointer integer
@@ -1137,6 +1210,8 @@ class Stage2Runner:
 
             data_address = ctypes.cast(buf, ctypes.c_void_p).value
             data_int = 0 if data_address is None else int(data_address)
+            if data_int != 0:
+                self._tracked_string_addresses[data_int] = ("cstring", s, len(encoded))
             if Stage2StringType is None:
                 return data_int
 
@@ -1151,7 +1226,10 @@ class Stage2Runner:
 
             struct_address = ctypes.cast(
                 stage2_string_ptr, ctypes.c_void_p).value
-            return 0 if struct_address is None else int(struct_address)
+            struct_int = 0 if struct_address is None else int(struct_address)
+            if struct_int != 0:
+                self._tracked_string_addresses[struct_int] = ("struct", s, len(encoded))
+            return struct_int
 
         class _StringArray(ctypes.Structure):
             _fields_ = [
@@ -1425,8 +1503,11 @@ class Stage2Runner:
                 try:
                     address = int(value_ptr.value or 0) if isinstance(
                         value_ptr, ctypes.c_void_p) else int(value_ptr or 0)
+                    status = "tracked" if address in self._tracked_string_addresses else (
+                        "alloc" if address in _LIBC_ALLOCATIONS else "unknown"
+                    )
                     self._debug_log(
-                        f"[stage2] runtime string_length ptr=0x{address:x}")
+                        f"[stage2] runtime string_length ptr=0x{address:x} status={status}")
                     _require_effects()
                     text = _ptr_to_str(value_ptr)
                     return len(text)
