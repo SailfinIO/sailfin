@@ -17,6 +17,46 @@ typedef struct
     int64_t length;
 } SailfinStringArray;
 
+static SailfinString **g_string_registry = NULL;
+static size_t g_string_registry_count = 0;
+static size_t g_string_registry_capacity = 0;
+
+static void register_string_struct(SailfinString *value)
+{
+    if (!value)
+    {
+        return;
+    }
+    if (g_string_registry_count == g_string_registry_capacity)
+    {
+        size_t new_capacity = g_string_registry_capacity == 0 ? 64 : g_string_registry_capacity * 2;
+        SailfinString **new_items = realloc(g_string_registry, new_capacity * sizeof(SailfinString *));
+        if (!new_items)
+        {
+            return;
+        }
+        g_string_registry = new_items;
+        g_string_registry_capacity = new_capacity;
+    }
+    g_string_registry[g_string_registry_count++] = value;
+}
+
+static int is_registered_string(const void *value)
+{
+    if (!value)
+    {
+        return 0;
+    }
+    for (size_t index = 0; index < g_string_registry_count; ++index)
+    {
+        if (g_string_registry[index] == value)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static SailfinString *alloc_string(int64_t length)
 {
     if (length < 0)
@@ -36,6 +76,7 @@ static SailfinString *alloc_string(int64_t length)
     }
     value->length = length;
     value->data[length] = '\0';
+    register_string_struct(value);
     return value;
 }
 
@@ -62,31 +103,56 @@ static SailfinString *string_from_cstr(const char *value)
     return string_from_span(value, (int64_t)strlen(value));
 }
 
-static SailfinString *string_clone(const SailfinString *value)
+static SailfinString *string_clone(void *value_ptr)
 {
-    if (!value)
+    if (!value_ptr)
     {
         return alloc_string(0);
     }
-    return string_from_span(value->data, value->length);
+    if (is_registered_string(value_ptr))
+    {
+        const SailfinString *value = (const SailfinString *)value_ptr;
+        return string_from_span(value->data, value->length);
+    }
+    const char *raw = (const char *)value_ptr;
+    return string_from_span(raw, (int64_t)strlen(raw));
 }
 
-static const char *string_data(const SailfinString *value)
+static const char *string_data(void *value_ptr)
 {
-    if (!value || !value->data)
+    if (!value_ptr)
     {
         return "";
     }
-    return value->data;
+    if (is_registered_string(value_ptr))
+    {
+        const SailfinString *value = (const SailfinString *)value_ptr;
+        if (!value->data)
+        {
+            return "";
+        }
+        return value->data;
+    }
+    return (const char *)value_ptr;
 }
 
-static int64_t string_length(const SailfinString *value)
+static int64_t string_length(void *value_ptr)
 {
-    if (!value)
+    if (!value_ptr)
     {
         return 0;
     }
-    return value->length;
+    if (is_registered_string(value_ptr))
+    {
+        const SailfinString *value = (const SailfinString *)value_ptr;
+        return value->length;
+    }
+    const char *raw = (const char *)value_ptr;
+    if (!raw)
+    {
+        return 0;
+    }
+    return (int64_t)strlen(raw);
 }
 
 static SailfinStringArray *alloc_array(int64_t length)

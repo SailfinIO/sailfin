@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextvars
 import ctypes
 import os
+import pathlib
 import re
 from dataclasses import dataclass
 from collections import OrderedDict
@@ -105,6 +106,7 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
     "sailfin_adapter_channel_create": ("channel", (ctypes.c_longlong,), ctypes.c_void_p),
     "sailfin_adapter_channel_send": ("channel", (ctypes.c_void_p, ctypes.c_void_p), None),
     "sailfin_adapter_channel_receive": ("channel", (ctypes.c_void_p,), ctypes.c_void_p),
+    "stage2_debug_marker": (None, (ctypes.c_longlong,), None),
 }
 
 _ACTIVE_GRANT: contextvars.ContextVar[runtime.CapabilityGrant | None] = contextvars.ContextVar(
@@ -178,6 +180,9 @@ class Stage2Runner:
             except OSError:
                 self._debug_log_path = None
         self._lowered_modules = self._normalise_lowered(lowered)
+        self._string_abi = self._detect_string_abi(self._lowered_modules)
+        self._use_struct_strings = self._string_abi != "cstring"
+        self._debug_log(f"[stage2] string ABI: {self._string_abi}")
         self._manifest = self._build_manifest_index(self._lowered_modules)
         self._engine = None
         self._modules = None
@@ -186,6 +191,7 @@ class Stage2Runner:
         self._adapter_string_buffers = []
         self._adapter_object_handles: dict[int, object] = {}
         self._function_info_cache = {}
+        self._adapter_functions: dict[str, ctypes._CFuncPtr] = {}
         self._initialise_runtime_helpers()
         self._compile_ir()
 
@@ -194,6 +200,36 @@ class Stage2Runner:
         if isinstance(lowered, Sequence) and not isinstance(lowered, (bytes, str)):
             return list(lowered)
         return [lowered]
+
+    @staticmethod
+    def _detect_string_abi(lowered_modules: Sequence) -> str:
+        """Infer whether the lowered modules expect C strings or structured strings."""
+
+        cstring_pattern = re.compile(
+            r"(?:getelementptr\s+(?:inbounds\s+)?i8,\s+ptr\s+%|load\s+i8,\s+ptr\s+%)",
+            re.IGNORECASE,
+        )
+        for lowered in lowered_modules:
+            module_ir = getattr(lowered, "ir", "") or ""
+            if not module_ir:
+                continue
+            if cstring_pattern.search(module_ir):
+                return "cstring"
+
+        struct_pattern = re.compile(
+            r"%(?:Stage2|Sailfin|Runtime)String(?:Ref)?\s*=\s*type\s*\{\s*ptr\s*,\s*i64",
+            re.IGNORECASE,
+        )
+        for lowered in lowered_modules:
+            module_ir = getattr(lowered, "ir", "") or ""
+            if not module_ir:
+                continue
+            if struct_pattern.search(module_ir):
+                return "struct"
+
+        # Default to the legacy C string representation unless we see explicit
+        # evidence of the structured ABI.
+        return "cstring"
 
     def _debug_log(self, message: str) -> None:
         path = self._debug_log_path
@@ -349,6 +385,63 @@ class Stage2Runner:
         if len(result_lines) == len(lines):
             return ir_text
         return "\n".join(result_lines)
+
+    @staticmethod
+    def _instrument_lex_ir(ir_text: str) -> str:
+        candidates = [
+            "define ptr @lex(",
+            "define { %Token*, i64 }* @lex(",
+        ]
+        if not any(candidate in ir_text for candidate in candidates):
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + declaration + ir_text[declare_index:]
+
+        lex_start = -1
+        lex_marker = ""
+        for candidate in candidates:
+            index = ir_text.find(candidate)
+            if index != -1:
+                lex_start = index
+                lex_marker = candidate
+                break
+        if lex_start == -1:
+            return ir_text
+        lex_end = ir_text.find("\n}\n", lex_start)
+        if lex_end == -1:
+            return ir_text
+        lex_end += 3
+        lex_body = ir_text[lex_start:lex_end]
+        markers: list[tuple[str, str, int]] = [
+            ("block.entry", "  %l0 = alloca %LexerState", 1000),
+            ("merge5", "  %t30 = load %LexerState", 1001),
+            ("then6", "  %t46 = load %LexerState", 1002),
+            ("loop.body9", "  %t58 = load %LexerState", 1003),
+            ("merge15", "  %t90 = load %LexerState", 1004),
+            ("then19", "  %t152 = load %LexerState", 1005),
+            ("then21", "  %t161 = load %LexerState", 1006),
+            ("loop.header23", "  %t235 = load double", 1007),
+            ("merge28", "  %t209 = load %LexerState", 1008),
+            ("then31", "  %t276 = load %LexerState", 1009),
+            ("loop.body34", "  %t301 = load %LexerState", 1010),
+        ]
+        for label, first_instr, code in markers:
+            pattern = f"{label}:\n{first_instr}"
+            replacement = f"{label}:\n  call void @stage2_debug_marker(i64 {code})\n{first_instr}"
+            lex_body = lex_body.replace(pattern, replacement, 1)
+
+        try:
+            instrumentation_path = pathlib.Path("scratch/instrumented_lex.ll")
+            instrumentation_path.write_text(lex_body, encoding="utf-8")
+        except Exception:
+            pass
+
+        return ir_text[:lex_start] + lex_body + ir_text[lex_end:]
 
     @staticmethod
     def _extract_function_symbol_and_signature(line: str) -> tuple[str | None, str | None]:
@@ -766,6 +859,7 @@ class Stage2Runner:
             )
             llvm.add_symbol(symbol, address)
             self._registered_helpers.append(cfunc)
+            self._adapter_functions[symbol] = cfunc
 
         # Register capability adapters
         for symbol, (effect, arg_types, return_type) in _ADAPTER_SIGNATURES.items():
@@ -776,6 +870,47 @@ class Stage2Runner:
             )
             llvm.add_symbol(symbol, address)
             self._registered_helpers.append(cfunc)
+            self._adapter_functions[symbol] = cfunc
+
+        # Register libc malloc/free wrappers for diagnostics
+        try:
+            libc = ctypes.CDLL(None)
+            libc_malloc = libc.malloc
+            libc_malloc.restype = ctypes.c_void_p
+            libc_malloc.argtypes = (ctypes.c_size_t,)
+            libc_free = libc.free
+            libc_free.restype = None
+            libc_free.argtypes = (ctypes.c_void_p,)
+
+            def _malloc_wrapper(size: int) -> int:
+                self._debug_log(f"[stage2] malloc request size={size}")
+                result = libc_malloc(size)
+                addr = 0 if result is None else int(result)
+                self._debug_log(f"[stage2] malloc result=0x{addr:x}")
+                return addr
+
+            def _free_wrapper(ptr: ctypes.c_void_p | int) -> None:
+                address = 0
+                if isinstance(ptr, ctypes.c_void_p):
+                    address = int(ptr.value or 0)
+                else:
+                    address = int(ptr or 0)
+                self._debug_log(f"[stage2] free ptr=0x{address:x}")
+                libc_free(ptr)
+
+            malloc_cfunc = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_size_t)(_malloc_wrapper)
+            free_cfunc = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(_free_wrapper)
+            malloc_addr = ctypes.cast(malloc_cfunc, ctypes.c_void_p).value or 0
+            free_addr = ctypes.cast(free_cfunc, ctypes.c_void_p).value or 0
+            self._debug_log(f"[stage2] register adapter malloc: addr=0x{int(malloc_addr):x}")
+            self._debug_log(f"[stage2] register adapter free: addr=0x{int(free_addr):x}")
+            llvm.add_symbol("malloc", malloc_addr)
+            llvm.add_symbol("free", free_addr)
+            self._registered_helpers.extend([malloc_cfunc, free_cfunc])
+            self._adapter_functions["malloc"] = malloc_cfunc
+            self._adapter_functions["free"] = free_cfunc
+        except Exception as exc:  # pragma: no cover - diagnostics only
+            self._debug_log(f"[stage2] failed to register malloc/free wrappers: {exc}")
 
     def _make_helper(
         self,
@@ -869,11 +1004,16 @@ class Stage2Runner:
                 return None
             return self._adapter_object_handles.get(address)
 
-        class _Stage2String(ctypes.Structure):
-            _fields_ = [
-                ("data", ctypes.c_void_p),
-                ("length", ctypes.c_longlong),
-            ]
+        use_struct_strings = getattr(self, "_use_struct_strings", True)
+        Stage2StringType: type[ctypes.Structure] | None = None
+        if use_struct_strings:
+            class _Stage2String(ctypes.Structure):
+                _fields_ = [
+                    ("data", ctypes.c_void_p),
+                    ("length", ctypes.c_longlong),
+                ]
+
+            Stage2StringType = _Stage2String
 
         # Helper to normalise void* arguments into plain integers
         def _normalise_ptr(value: ctypes.c_void_p | int | None) -> int:
@@ -889,23 +1029,24 @@ class Stage2Runner:
             if address == 0:
                 return ""
 
-            struct_value: _Stage2String | None = None
-            try:
-                struct_ptr = ctypes.cast(ctypes.c_void_p(
-                    address), ctypes.POINTER(_Stage2String))
-                struct_value = struct_ptr.contents
-            except (ValueError, OSError, ctypes.ArgumentError):
-                struct_value = None
+            if Stage2StringType is not None:
+                try:
+                    struct_ptr = ctypes.cast(
+                        ctypes.c_void_p(address), ctypes.POINTER(Stage2StringType)
+                    )
+                    struct_value = struct_ptr.contents
+                except (ValueError, OSError, ctypes.ArgumentError):
+                    struct_value = None
 
-            if struct_value is not None:
-                data_address = _normalise_ptr(struct_value.data)
-                length = int(struct_value.length)
-                if 0 <= length <= 1 << 30 and data_address != 0:
-                    try:
-                        raw_bytes = ctypes.string_at(data_address, length)
-                        return raw_bytes.decode("utf-8")
-                    except (ValueError, OSError):
-                        pass
+                if struct_value is not None:
+                    data_address = _normalise_ptr(struct_value.data)
+                    length = int(struct_value.length)
+                    if 0 <= length <= 1 << 30 and data_address != 0:
+                        try:
+                            raw_bytes = ctypes.string_at(data_address, length)
+                            return raw_bytes.decode("utf-8")
+                        except (ValueError, OSError):
+                            pass
 
             # Fallback for legacy raw C strings (pre-struct representation)
             c_string = ctypes.cast(ctypes.c_void_p(
@@ -920,8 +1061,12 @@ class Stage2Runner:
             self._adapter_string_buffers.append(buf)  # Keep buffer alive
 
             data_address = ctypes.cast(buf, ctypes.c_void_p).value
-            stage2_string = _Stage2String()
-            stage2_string.data = 0 if data_address is None else data_address
+            data_int = 0 if data_address is None else int(data_address)
+            if Stage2StringType is None:
+                return data_int
+
+            stage2_string = Stage2StringType()
+            stage2_string.data = ctypes.c_void_p(data_int)
             stage2_string.length = len(encoded)
 
             stage2_string_ptr = ctypes.pointer(stage2_string)
@@ -975,7 +1120,9 @@ class Stage2Runner:
             array_struct.length = length
             self._adapter_string_buffers.append(data)
             self._adapter_string_buffers.append(array_struct)
-            return ctypes.cast(ctypes.pointer(array_struct), ctypes.c_void_p).value or 0
+            array_ptr = ctypes.cast(
+                ctypes.pointer(array_struct), ctypes.c_void_p).value
+            return 0 if array_ptr is None else int(array_ptr)
 
         def _handles_to_array(handles: Sequence[int]) -> int:
             length = len(handles)
@@ -989,7 +1136,9 @@ class Stage2Runner:
             array_struct.length = length
             self._adapter_string_buffers.append(data)
             self._adapter_string_buffers.append(array_struct)
-            return ctypes.cast(ctypes.pointer(array_struct), ctypes.c_void_p).value or 0
+            array_ptr = ctypes.cast(
+                ctypes.pointer(array_struct), ctypes.c_void_p).value
+            return 0 if array_ptr is None else int(array_ptr)
 
         def _build_fallback():
             cfunc_type = (
@@ -1564,6 +1713,14 @@ class Stage2Runner:
 
             return cfunc_type(_char_code)
 
+        elif symbol == "stage2_debug_marker":
+            cfunc_type = ctypes.CFUNCTYPE(None, ctypes.c_longlong)
+
+            def _debug_marker(code: ctypes.c_longlong) -> None:
+                self._debug_log(f"[stage2] debug_marker code={int(code)}")
+
+            return cfunc_type(_debug_marker)
+
         return _build_fallback()
 
     def _compile_ir(self) -> None:
@@ -1597,6 +1754,7 @@ class Stage2Runner:
                 rewritten_ir, type_definitions)
             rewritten_ir = self._inject_missing_function_declarations(
                 rewritten_ir, function_signatures)
+            rewritten_ir = self._instrument_lex_ir(rewritten_ir)
             self._register_type_definitions(rewritten_ir, type_definitions)
             if duplicates:
                 duplicate_registry[str(
