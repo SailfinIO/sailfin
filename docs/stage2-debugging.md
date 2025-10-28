@@ -25,6 +25,40 @@ This note captures what has been completed so far and the concrete next steps ne
 3. **Segfault cause still unknown**  
    With no debugger and no `lli` reproduction we haven’t seen the exact function or instruction that corrupts memory.
 
+### 2025-02-14 update – native reproduction and findings
+
+Using the rewritten Stage2 modules (`scratch/stage2_patched/…`) plus the driver/runtime stub, we can now reproduce the crash entirely inside `lli`:
+
+```bash
+/opt/homebrew/opt/llvm/bin/llvm-link \
+  scratch/stage2_patched/0{0..9}__string_.bc \
+  scratch/stage2_patched/1{0..5}__string_.bc \
+  scratch/stage2_runtime_stub.bc \
+  scratch/stage2_driver_parse.bc \
+  -o scratch/stage2_combined_parse.bc
+
+/opt/homebrew/opt/llvm/bin/lli --entry-function=stage2_parse_entry scratch/stage2_combined_parse.bc
+```
+
+Instrumenting `lex`, `parse_tokens`, `append_token`, and the runtime helpers shows:
+
+- The very first call to `char_code` should see `'f'` from the source (`"fn greet"`), but the value passed into the C stub is an empty string. Our logging prints `[stage2-debug] [lex] buffer byte=102` for the stack copy **and** `char_code ptr=… char=0x00` for the pointer handed to Stage2 – it’s the wrong representation.
+- Because `is_letter`/`is_identifier_start` fail, the lexer immediately falls into the “unknown token” path and appends an `EndOfFile` token (kind `7`). The parser then spins forever on duplicate EOF tokens and eventually hits the sandbox kill.
+- The LLVM IR shows string helpers such as `slice` and `char_at` returning values via `sailfin_runtime_substring`. Stage2 expects those helpers to return a struct-like blob, not a raw `char *`.
+
+**Root cause:** the C runtime stub (`scratch/stage2_runtime_stub.c`) still treats Stage2 strings as bare `char *`. Stage2 code is actually passing around richer values (pointer + length). When our stub returns a plain heap buffer the subsequent runtime helpers (`string_length`, `char_code`, etc.) read zero and the lexer collapses.
+
+### Action items
+
+1. Update the C stub to mirror Stage2’s string layout:
+   - Define a `struct Stage2String { char *data; int64_t length; }` (or whatever layout we infer from the IR; the `%StringConstant` struct is a good starting point).
+   - Make `sailfin_runtime_substring`, `sailfin_runtime_concat`, `sailfin_runtime_append_string`, `sailfin_runtime_string_length`, and `sailfin_runtime_char_code` allocate/populate that struct rather than returning a raw C string.
+   - Continue to accept raw `char *` only at the external API boundary (`parse_program`). Once Stage2 calls into the runtime, we must hand back `Stage2String` values.
+
+2. Rebuild the stub (`clang -emit-llvm -c scratch/stage2_runtime_stub.c -o scratch/stage2_runtime_stub.bc`) and rerun the `lli` harness. The expected successful log should show `[parse_tokens] kind=0` for the first token and only a single EOF appended at the end.
+
+3. With the lexer working, rerun under `lldb` to confirm there’s no remaining native fault, then re-enable `runtime/stage2_runner.py` to verify the full Python harness completes.
+
 ## How to Reproduce the Current Crash
 
 ```bash

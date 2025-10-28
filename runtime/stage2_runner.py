@@ -1111,6 +1111,8 @@ class Stage2Runner:
 
             def _string_length(value_ptr: ctypes.c_void_p) -> int:
                 try:
+                    address = int(value_ptr.value or 0) if isinstance(value_ptr, ctypes.c_void_p) else int(value_ptr or 0)
+                    self._debug_log(f"[stage2] runtime string_length ptr=0x{address:x}")
                     _require_effects()
                     text = _ptr_to_str(value_ptr)
                     return len(text)
@@ -1162,10 +1164,29 @@ class Stage2Runner:
 
             def _concat(first_ptr: ctypes.c_void_p, second_ptr: ctypes.c_void_p) -> int:
                 try:
-                    first = _array_to_list(first_ptr)
-                    second = _array_to_list(second_ptr)
-                    combined = (first or []) + (second or [])
-                    return _list_to_array(combined)
+                    left = _array_to_handles(first_ptr)
+                    right = _array_to_handles(second_ptr)
+                    first_addr = int(first_ptr.value or 0) if isinstance(first_ptr, ctypes.c_void_p) else int(first_ptr or 0)
+                    second_addr = int(second_ptr.value or 0) if isinstance(second_ptr, ctypes.c_void_p) else int(second_ptr or 0)
+                    self._debug_log(
+                        f"[stage2] runtime concat first=0x{first_addr:x} ({len(left)} handles) second=0x{second_addr:x} ({len(right)} handles)"
+                    )
+                    if not left and not right:
+                        result = _handles_to_array(())
+                        self._debug_log(
+                            f"[stage2] runtime concat result=0x{result:x} length=0 (empty inputs)"
+                        )
+                        return result
+                    merged: list[int] = []
+                    if left:
+                        merged.extend(left)
+                    if right:
+                        merged.extend(right)
+                    result = _handles_to_array(merged)
+                    self._debug_log(
+                        f"[stage2] runtime concat result=0x{result:x} length={len(merged)}"
+                    )
+                    return result
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:
                         _LAST_RUNTIME_ERROR.set(exc)
@@ -1451,6 +1472,8 @@ class Stage2Runner:
 
             def _char_code(value_ptr: ctypes.c_void_p) -> float:
                 try:
+                    address = int(value_ptr.value or 0) if isinstance(value_ptr, ctypes.c_void_p) else int(value_ptr or 0)
+                    self._debug_log(f"[stage2] runtime char_code ptr=0x{address:x}")
                     _require_effects()
                     text = _ptr_to_str(value_ptr)
                     ch = text[0] if text else "\0"
