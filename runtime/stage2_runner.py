@@ -1506,10 +1506,12 @@ class Stage2Runner:
                     status = "tracked" if address in self._tracked_string_addresses else (
                         "alloc" if address in _LIBC_ALLOCATIONS else "unknown"
                     )
-                    self._debug_log(
-                        f"[stage2] runtime string_length ptr=0x{address:x} status={status}")
                     _require_effects()
                     text = _ptr_to_str(value_ptr)
+                    preview = text[:40] if isinstance(text, str) else ""
+                    self._debug_log(
+                        f"[stage2] runtime string_length ptr=0x{address:x} status={status} len={len(text)} preview={preview!r}"
+                    )
                     return len(text)
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:

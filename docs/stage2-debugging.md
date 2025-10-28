@@ -10,7 +10,7 @@ This note records the fixes that have landed, what we can reliably reproduce tod
 
 - **Runner instrumentation**
   - `Stage2Runner` now logs every `malloc`/`free`, tracks tracked allocations, and records whether string pointers are “tracked”, “alloc”, or “unknown”.
-  - `_ptr_to_str` can recover strings from both tracked buffers and arbitrary heap pointers, logging the path it takes (`reuse`, `struct decode`, or `cstring decode/fallback`).
+  - `_ptr_to_str` can recover strings from both tracked buffers and arbitrary heap pointers, logging the path it takes (`reuse`, `struct decode`, or `cstring decode/fallback`). `sailfin_runtime_string_length` now records pointer status, length, and a 40-character preview to make lex traces easier to read.
   - New helper `Stage2Runner.encode_host_string(text)` registers host strings so the runtime can recognise them during string-length calls.
 
 - **Test harness updates**
@@ -34,8 +34,8 @@ This note records the fixes that have landed, what we can reliably reproduce tod
 2. **Host strings are tracked correctly**  
    Pointers originating from `encode_host_string` are logged as `status=tracked` with the expected length, so the pipeline receives the correct source text initially.
 
-3. **Runtime stub returns inconsistent data**  
-   When Stage2 calls helpers such as `sailfin_runtime_substring`, `sailfin_runtime_concat`, or `sailfin_runtime_char_code`, the stub still allocates raw `malloc` buffers and sometimes returns handles instead of strings. The subsequent `string_length` calls see unexpected values (often empty strings), causing the lexer to emit incorrect tokens. The parser then loops until the sandbox kills the process.
+3. **Runtime stub now mirrors the c-string ABI**  
+   The rebuilt stub returns proper nul-terminated buffers for every helper. `Stage2Runner` logs confirm we see the full hello-world source as well as the lexeme tables (`0123456789`, `abcdefghijklmnopqrstuvwxyz`, …). Despite this, the lexer still gets stuck in the `debug_marker` 1001 loop, so the root cause is higher up the stack (likely a logic bug rather than an ABI mismatch).
 
 4. **Abort comes from the stub**  
    The crash is now an explicit `abort()` inside `runtime/stage2_runtime_stub.c` (e.g. `sailfin_runtime_raise_value_error`). No `[stage2-runtime] value error` messages appear because the stub doesn’t print context before aborting.
@@ -48,7 +48,7 @@ This note records the fixes that have landed, what we can reliably reproduce tod
 1. **Add diagnostics before `abort()`**
    - Print the message and pointer involved before calling `abort()` in `sailfin_runtime_raise_value_error` and other failure paths. This will tell us exactly which code path triggers the fatal error.
 2. **Instrument the failure path**
-   - With the string ABI aligned, the remaining abort is likely triggered by a runtime value error. Add logging inside the C stub (and/or the Python bridge) to record the offending token kind, lexeme, and stack location before `abort()` so we know which parsing branch misbehaves.
+   - With the ABI confirmed, the remaining abort is likely triggered by a runtime panic inside the lexer/parser. Add logging inside the C stub (and/or the Python bridge) to capture the offending token kind, lexeme, and source position before `abort()` so we know which branch misbehaves. Consider augmenting the `stage2_debug_marker` instrumentation with additional identifiers so we can map the infinite loop to a specific case in `lexer.sfn`.
 
 3. **Rebuild the stub and rerun the native repro**
    ```bash
@@ -59,7 +59,7 @@ This note records the fixes that have landed, what we can reliably reproduce tod
    SAILFIN_STAGE2_DEBUG_LOG=scratch/stage2_debug.log \
      conda run -n sailfin python scratch/stage2_repro.py
    ```
-   The goal is to see `compile_to_sailfin` complete without aborting and the lexer markers (`stage2_debug_marker`) advance beyond code `1001`.
+   The goal is to capture richer logging (ideally the failing token/lexeme) and, ultimately, to see `compile_to_sailfin` complete without aborting. Watch for the `stage2_debug_marker` codes advancing past the 1000/1001 loop.
 
 4. **Re-run the Stage2 pytest subset**
    Once the stub returns correct strings, run:

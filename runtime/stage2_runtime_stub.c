@@ -111,7 +111,22 @@ int64_t sailfin_runtime_string_length(SailfinString value)
     static int debug_length_count = 0;
     if (debug_length_count < 200)
     {
-        fprintf(stderr, "[stage2-debug] string_length ptr=%p len=%lld\n", (void *)value, (long long)length);
+        const char *text = string_data(value);
+        int preview = 0;
+        if (text)
+        {
+            preview = (int)length;
+            if (preview > 40)
+            {
+                preview = 40;
+            }
+        }
+        fprintf(stderr,
+                "[stage2-debug] string_length ptr=%p len=%lld preview=\"%.*s\"\n",
+                (void *)value,
+                (long long)length,
+                preview,
+                text ? text : "");
     }
     debug_length_count++;
     return length;
