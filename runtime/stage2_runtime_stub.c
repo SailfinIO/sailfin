@@ -5,96 +5,48 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct
-{
-    char *data;
-    int64_t length;
-} SailfinString;
+typedef char *SailfinString;
 
 typedef struct
 {
-    SailfinString **data;
+    SailfinString *data;
     int64_t length;
 } SailfinStringArray;
 
-static SailfinString **g_string_registry = NULL;
-static size_t g_string_registry_count = 0;
-static size_t g_string_registry_capacity = 0;
-
-static void register_string_struct(SailfinString *value)
-{
-    if (!value)
-    {
-        return;
-    }
-    if (g_string_registry_count == g_string_registry_capacity)
-    {
-        size_t new_capacity = g_string_registry_capacity == 0 ? 64 : g_string_registry_capacity * 2;
-        SailfinString **new_items = realloc(g_string_registry, new_capacity * sizeof(SailfinString *));
-        if (!new_items)
-        {
-            return;
-        }
-        g_string_registry = new_items;
-        g_string_registry_capacity = new_capacity;
-    }
-    g_string_registry[g_string_registry_count++] = value;
-}
-
-static int is_registered_string(const void *value)
-{
-    if (!value)
-    {
-        return 0;
-    }
-    for (size_t index = 0; index < g_string_registry_count; ++index)
-    {
-        if (g_string_registry[index] == value)
-        {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static SailfinString *alloc_string(int64_t length)
+static SailfinString alloc_string(int64_t length)
 {
     if (length < 0)
     {
         length = 0;
     }
-    SailfinString *value = malloc(sizeof(SailfinString));
-    if (!value)
+    char *buffer = malloc((size_t)length + 1);
+    if (!buffer)
     {
         return NULL;
     }
-    value->data = calloc((size_t)length + 1, sizeof(char));
-    if (!value->data)
+    if (length > 0)
     {
-        free(value);
-        return NULL;
+        memset(buffer, 0, (size_t)length + 1);
     }
-    value->length = length;
-    value->data[length] = '\0';
-    register_string_struct(value);
-    return value;
+    buffer[length] = '\0';
+    return buffer;
 }
 
-static SailfinString *string_from_span(const char *data, int64_t length)
+static SailfinString string_from_span(const char *data, int64_t length)
 {
-    SailfinString *value = alloc_string(length);
+    SailfinString value = alloc_string(length);
     if (!value)
     {
         return NULL;
     }
     if (data && length > 0)
     {
-        memcpy(value->data, data, (size_t)length);
+        memcpy(value, data, (size_t)length);
     }
     return value;
 }
 
-static SailfinString *string_from_cstr(const char *value)
+static SailfinString string_from_cstr(const char *value)
 {
     if (!value)
     {
@@ -103,16 +55,11 @@ static SailfinString *string_from_cstr(const char *value)
     return string_from_span(value, (int64_t)strlen(value));
 }
 
-static SailfinString *string_clone(void *value_ptr)
+static SailfinString string_clone(void *value_ptr)
 {
     if (!value_ptr)
     {
         return alloc_string(0);
-    }
-    if (is_registered_string(value_ptr))
-    {
-        const SailfinString *value = (const SailfinString *)value_ptr;
-        return string_from_span(value->data, value->length);
     }
     const char *raw = (const char *)value_ptr;
     return string_from_span(raw, (int64_t)strlen(raw));
@@ -124,15 +71,6 @@ static const char *string_data(void *value_ptr)
     {
         return "";
     }
-    if (is_registered_string(value_ptr))
-    {
-        const SailfinString *value = (const SailfinString *)value_ptr;
-        if (!value->data)
-        {
-            return "";
-        }
-        return value->data;
-    }
     return (const char *)value_ptr;
 }
 
@@ -142,17 +80,7 @@ static int64_t string_length(void *value_ptr)
     {
         return 0;
     }
-    if (is_registered_string(value_ptr))
-    {
-        const SailfinString *value = (const SailfinString *)value_ptr;
-        return value->length;
-    }
-    const char *raw = (const char *)value_ptr;
-    if (!raw)
-    {
-        return 0;
-    }
-    return (int64_t)strlen(raw);
+    return (int64_t)strlen((const char *)value_ptr);
 }
 
 static SailfinStringArray *alloc_array(int64_t length)
@@ -163,7 +91,7 @@ static SailfinStringArray *alloc_array(int64_t length)
         return NULL;
     }
     array->length = length;
-    array->data = length > 0 ? calloc((size_t)length, sizeof(SailfinString *)) : NULL;
+    array->data = length > 0 ? calloc((size_t)length, sizeof(SailfinString)) : NULL;
     return array;
 }
 
@@ -177,7 +105,7 @@ void sailfin_runtime_bounds_check(int64_t index, int64_t length)
     }
 }
 
-int64_t sailfin_runtime_string_length(SailfinString *value)
+int64_t sailfin_runtime_string_length(SailfinString value)
 {
     int64_t length = string_length(value);
     static int debug_length_count = 0;
@@ -189,28 +117,28 @@ int64_t sailfin_runtime_string_length(SailfinString *value)
     return length;
 }
 
-void *sailfin_runtime_string_concat(SailfinString *a, SailfinString *b)
+void *sailfin_runtime_string_concat(SailfinString a, SailfinString b)
 {
     int64_t len_a = string_length(a);
     int64_t len_b = string_length(b);
-    SailfinString *result = alloc_string(len_a + len_b);
+    SailfinString result = alloc_string(len_a + len_b);
     if (!result)
     {
         return NULL;
     }
     if (len_a > 0)
     {
-        memcpy(result->data, string_data(a), (size_t)len_a);
+        memcpy(result, string_data(a), (size_t)len_a);
     }
     if (len_b > 0)
     {
-        memcpy(result->data + len_a, string_data(b), (size_t)len_b);
+        memcpy(result + len_a, string_data(b), (size_t)len_b);
     }
-    result->data[len_a + len_b] = '\0';
+    result[len_a + len_b] = '\0';
     return result;
 }
 
-void *sailfin_runtime_substring(SailfinString *value, int64_t start, int64_t end)
+void *sailfin_runtime_substring(SailfinString value, int64_t start, int64_t end)
 {
     int64_t length = string_length(value);
     if (start < 0)
@@ -230,12 +158,12 @@ void *sailfin_runtime_substring(SailfinString *value, int64_t start, int64_t end
     return string_from_span(data ? data + start : NULL, span);
 }
 
-double sailfin_runtime_grapheme_count(SailfinString *value)
+double sailfin_runtime_grapheme_count(SailfinString value)
 {
     return (double)string_length(value);
 }
 
-void *sailfin_runtime_grapheme_at(SailfinString *value, double index)
+void *sailfin_runtime_grapheme_at(SailfinString value, double index)
 {
     int64_t idx = (int64_t)index;
     const char *data = string_data(value);
@@ -259,7 +187,7 @@ bool sailfin_runtime_is_whitespace_char(int8_t ch)
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
 }
 
-bool sailfin_runtime_is_number(SailfinString *value)
+bool sailfin_runtime_is_number(SailfinString value)
 {
     const char *text = string_data(value);
     if (!text || *text == '\0')
@@ -271,13 +199,13 @@ bool sailfin_runtime_is_number(SailfinString *value)
     return end && *end == '\0';
 }
 
-bool sailfin_runtime_is_string(SailfinString *value)
+bool sailfin_runtime_is_string(SailfinString value)
 {
     (void)value;
     return true;
 }
 
-bool sailfin_runtime_is_boolean(SailfinString *value)
+bool sailfin_runtime_is_boolean(SailfinString value)
 {
     const char *text = string_data(value);
     if (!text)
@@ -311,7 +239,7 @@ bool sailfin_runtime_instance_of(void *value, void *type_name)
     return false;
 }
 
-SailfinStringArray *sailfin_runtime_append_string(SailfinStringArray *array, SailfinString *value)
+SailfinStringArray *sailfin_runtime_append_string(SailfinStringArray *array, SailfinString value)
 {
     if (!array)
     {
@@ -327,7 +255,8 @@ SailfinStringArray *sailfin_runtime_append_string(SailfinStringArray *array, Sai
                 (long long)array->length,
                 (void *)value,
                 (long long)string_length(value));
-        if (value && value->data)
+        const char *text = string_data(value);
+        if (text)
         {
             int64_t printable = string_length(value);
             if (printable > 64)
@@ -337,13 +266,13 @@ SailfinStringArray *sailfin_runtime_append_string(SailfinStringArray *array, Sai
             fprintf(stderr,
                     "[stage2-debug] append_string value_prefix=\"%.*s\"\n",
                     (int)printable,
-                    value->data);
+                    text);
         }
         fflush(stderr);
     }
     debug_append_count++;
     int64_t new_length = array->length + 1;
-    SailfinString **new_data = realloc(array->data, (size_t)new_length * sizeof(SailfinString *));
+    SailfinString *new_data = realloc(array->data, (size_t)new_length * sizeof(SailfinString));
     if (!new_data)
     {
         return array;
@@ -389,14 +318,14 @@ SailfinStringArray *sailfin_runtime_array_filter(SailfinStringArray *array, void
     return alloc_array(0);
 }
 
-void *sailfin_runtime_array_reduce(SailfinStringArray *array, SailfinString *initial, void *callback)
+void *sailfin_runtime_array_reduce(SailfinStringArray *array, SailfinString initial, void *callback)
 {
     (void)array;
     (void)callback;
     return string_clone(initial);
 }
 
-void *sailfin_runtime_get_field(void *base, SailfinString *field)
+void *sailfin_runtime_get_field(void *base, SailfinString field)
 {
     (void)base;
     (void)field;
@@ -437,7 +366,7 @@ static int debug_should_log(void)
     return 0;
 }
 
-void sailfin_runtime_print_info(SailfinString *value)
+void sailfin_runtime_print_info(SailfinString value)
 {
     if (debug_should_log())
     {
@@ -453,7 +382,7 @@ void sailfin_runtime_debug_i64(int64_t value)
     }
 }
 
-void sailfin_runtime_debug_label_i64(SailfinString *label, int64_t value)
+void sailfin_runtime_debug_label_i64(SailfinString label, int64_t value)
 {
     if (debug_should_log())
     {
@@ -461,7 +390,7 @@ void sailfin_runtime_debug_label_i64(SailfinString *label, int64_t value)
     }
 }
 
-void sailfin_runtime_debug_ptr(SailfinString *label, void *value)
+void sailfin_runtime_debug_ptr(SailfinString label, void *value)
 {
     if (debug_should_log())
     {
@@ -469,7 +398,7 @@ void sailfin_runtime_debug_ptr(SailfinString *label, void *value)
     }
 }
 
-void sailfin_runtime_debug_text(SailfinString *label, SailfinString *value)
+void sailfin_runtime_debug_text(SailfinString label, SailfinString value)
 {
     if (debug_should_log())
     {
@@ -477,33 +406,33 @@ void sailfin_runtime_debug_text(SailfinString *label, SailfinString *value)
     }
 }
 
-void sailfin_runtime_print_warn(SailfinString *value)
+void sailfin_runtime_print_warn(SailfinString value)
 {
     fprintf(stderr, "[stage2-warn] %s\n", string_data(value));
 }
 
-void sailfin_runtime_print_error(SailfinString *value)
+void sailfin_runtime_print_error(SailfinString value)
 {
     fprintf(stderr, "[stage2-error] %s\n", string_data(value));
 }
 
-void sailfin_runtime_raise_value_error(SailfinString *message)
+void sailfin_runtime_raise_value_error(SailfinString message)
 {
     fprintf(stderr, "[stage2-runtime] value error: %s\n", string_data(message));
     abort();
 }
 
-void *sailfin_runtime_log_execution(SailfinString *value)
+void *sailfin_runtime_log_execution(SailfinString value)
 {
     return string_clone(value);
 }
 
-void *sailfin_runtime_to_debug_string(SailfinString *value)
+void *sailfin_runtime_to_debug_string(SailfinString value)
 {
     return string_clone(value);
 }
 
-void *sailfin_runtime_resolve_type(SailfinString *value)
+void *sailfin_runtime_resolve_type(SailfinString value)
 {
     return string_clone(value);
 }
@@ -544,7 +473,7 @@ void sailfin_runtime_serve(void *handler, void *config)
     (void)config;
 }
 
-void *char_code_wrapper(SailfinString *value)
+void *char_code_wrapper(SailfinString value)
 {
     return string_clone(value);
 }
@@ -556,7 +485,7 @@ void *sailfin_runtime_instance_of_wrapper(void *value, void *type_name)
     return NULL;
 }
 
-double sailfin_runtime_char_code(SailfinString *value)
+double sailfin_runtime_char_code(SailfinString value)
 {
     static int debug_char_code_count = 0;
     const char *raw = string_data(value);
@@ -574,13 +503,13 @@ double sailfin_runtime_char_code(SailfinString *value)
     return (double)ch;
 }
 
-int sailfin_intrinsic_fs_exists(SailfinString *path)
+int sailfin_intrinsic_fs_exists(SailfinString path)
 {
     (void)path;
     return 0;
 }
 
-void *sailfin_adapter_fs_read_file(SailfinString *path)
+void *sailfin_adapter_fs_read_file(SailfinString path)
 {
     (void)path;
     return string_from_cstr("");
