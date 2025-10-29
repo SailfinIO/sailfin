@@ -2,7 +2,7 @@
 
 ## Current Outlook
 
-Stage2 bootstrapping continues to abort the moment we invoke `compile_to_sailfin` through the native JIT. We no longer see raw segfaults—the crash now happens because the runtime stub calls `abort()`. Instrumentation shows that Stage2 is passing valid pointers into the runtime helpers, and the stub now mirrors the expected C-string ABI, yet the lexer still mis-classifies tokens, so the pipeline dies.
+Stage2 bootstrapping continues to abort the moment we invoke `compile_to_sailfin` through the native JIT. We no longer see raw segfaults—the crash now happens because the runtime stub calls `abort()`. Instrumentation shows that Stage2 is passing valid pointers into the runtime helpers, the stub mirrors the expected C-string ABI, and the lexer produces the correct tokens; however, the parser immediately falls back to `parse_unknown`, classifying the entire source file as an `Unknown` statement. The pipeline therefore aborts before `typecheck_program` ever runs.
 
 This note records the fixes that have landed, what we can reliably reproduce today, and the remaining work required to get Stage2 through the self-hosted compiler tests.
 
@@ -12,6 +12,7 @@ This note records the fixes that have landed, what we can reliably reproduce tod
   - `Stage2Runner` now logs every `malloc`/`free`, tracks tracked allocations, and records whether string pointers are “tracked”, “alloc”, or “unknown”.
   - `_ptr_to_str` can recover strings from both tracked buffers and arbitrary heap pointers, logging the path it takes (`reuse`, `struct decode`, or `cstring decode/fallback`). `sailfin_runtime_string_length` now records pointer status, length, and a 40-character preview to make lex traces easier to read.
   - New helper `Stage2Runner.encode_host_string(text)` registers host strings so the runtime can recognise them during string-length calls.
+  - Additional IR instrumentation now drops debug markers throughout `compile_to_sailfin`, `parse_tokens`, `parse_block`, and `parse_unknown`, making it easy to correlate log output with parser progress (`2000+`, `6000+`, `8000+`, `10000+`/`11000+`/`13000+` ranges).
 
 - **Test harness updates**
   - All Stage2 self-host tests call `runner.encode_host_string(...)` instead of constructing raw `ctypes.create_string_buffer` objects.
@@ -34,43 +35,37 @@ This note records the fixes that have landed, what we can reliably reproduce tod
 2. **Host strings are tracked correctly**  
    Pointers originating from `encode_host_string` are logged as `status=tracked` with the expected length, so the pipeline receives the correct source text initially.
 
-3. **Runtime stub now mirrors the c-string ABI**  
-   The rebuilt stub returns proper nul-terminated buffers for every helper. `Stage2Runner` logs confirm we see the full hello-world source as well as the lexeme tables (`0123456789`, `abcdefghijklmnopqrstuvwxyz`, …). Despite this, the lexer still gets stuck in the `debug_marker` 1001 loop, so the root cause is higher up the stack (likely a logic bug rather than an ABI mismatch).
+3. **Pipeline halts inside `parse_unknown`**  
+   Additional IR instrumentation (markers 2000+, 6000+, 10000+) shows `compile_to_sailfin` calling `parse_program`, but never `typecheck_program`. `parse_tokens` emits a single iteration (marker `6000`), then hands control to `parse_statement`, which immediately calls `parse_unknown`. Markers `10000+idx` confirm the entire `fn main … { … }` block is consumed as an unknown statement.
 
-4. **Abort comes from the stub**  
-   The crash is now an explicit `abort()` inside `runtime/stage2_runtime_stub.c` (e.g. `sailfin_runtime_raise_value_error`). No `[stage2-runtime] value error` messages appear because the stub doesn’t print context before aborting.
+4. **Token stream is correct, but statement dispatch fails**  
+   While `parse_unknown` runs, the token-kind markers (`11000+variant`) report the expected sequence: comment → whitespace → `NumberLiteral` (the `fn` token) → identifiers/symbols for the function signature. Depth markers (`13000+depth`) stay at zero, so `parse_unknown` exits only at EOF. This indicates `parse_statement` never recognises the leading `fn` identifier, despite the lexer providing it.
 
-5. **`debug_marker` probes reach 1001 repeatedly**  
-   Our IR instrumentation inserts `stage2_debug_marker` calls throughout the `lex` function. The log shows code `1001` firing in a tight loop, matching the observation that the lexer is spinning on bad tokens.
+5. **Abort still originates in the stub**  
+   The crash is still the explicit `abort()` inside `runtime/stage2_runtime_stub.c` (`sailfin_runtime_raise_value_error`). Thanks to the new abort adapter we now log the call path, but the root cause remains the parser producing an empty/invalid AST.
 
 ## Next Steps
 
-1. **Add diagnostics before `abort()`**
-   - Print the message and pointer involved before calling `abort()` in `sailfin_runtime_raise_value_error` and other failure paths. This will tell us exactly which code path triggers the fatal error.
-2. **Instrument the failure path**
-   - With the ABI confirmed, the remaining abort is likely triggered by a runtime panic inside the lexer/parser. Add logging inside the C stub (and/or the Python bridge) to capture the offending token kind, lexeme, and source position before `abort()` so we know which branch misbehaves. Consider augmenting the `stage2_debug_marker` instrumentation with additional identifiers so we can map the infinite loop to a specific case in `lexer.sfn`.
+1. **Log `parse_statement` dispatch**  
+   - Extend the instrumentation (either via Sailfin or IR patch) to emit the token variant/value seen after `skip_trivia` inside `parse_statement`. We need to confirm whether the token arriving at the dispatcher is still a comment/whitespace, or an identifier with an empty `value` field.
 
-3. **Rebuild the stub and rerun the native repro**
-   ```bash
-   mkdir -p runtime/build
-   clang -O0 -g -emit-llvm -c runtime/stage2_runtime_stub.c -o runtime/build/stage2_runtime_stub.bc
-   clang -S  -O0 -emit-llvm runtime/stage2_runtime_stub.c -o runtime/build/stage2_runtime_stub.ll
+2. **Verify `skip_trivia` and token payloads**  
+   - If `parse_statement` still sees trivia, inspect `skip_trivia` and `is_trivia_token` to ensure comment and whitespace tokens are being advanced.  
+   - If the token is an identifier but the `value` field is empty, inspect the Stage2 `TokenKind.Identifier` payload and the stage1-generated lexer to ensure we populate the identifier text.
 
-   SAILFIN_STAGE2_DEBUG_LOG=scratch/stage2_debug.log \
-     conda run -n sailfin python scratch/stage2_repro.py
-   ```
-   The goal is to capture richer logging (ideally the failing token/lexeme) and, ultimately, to see `compile_to_sailfin` complete without aborting. Watch for the `stage2_debug_marker` codes advancing past the 1000/1001 loop.
+3. **Patch `parse_statement` to recognise `fn`**  
+   - Once we understand the token mismatch, adjust `identifier_matches`/`parse_statement` so the leading `fn` is recognised and routed to `parse_function`. That should unblock `parse_tokens` and allow `typecheck_program` to run.
 
-4. **Re-run the Stage2 pytest subset**
-   Once the stub returns correct strings, run:
-   ```bash
-   SAILFIN_STAGE2_DEBUG_LOG=scratch/stage2_debug.log \
-   make test PYTEST_ARGS='compiler/tests/test_stage2_self_hosted_compiler.py::test_stage2_compile_to_sailfin_roundtrip -vv -s'
-   ```
-   Follow up with the full Stage2 suite if the roundtrip passes.
+4. **Re-run the native repro with logging**  
+   - After the parser change, rerun:
+     ```bash
+     SAILFIN_STAGE2_DEBUG_LOG=scratch/stage2_debug.log \
+       conda run -n sailfin python scratch/stage2_repro.py
+     ```
+     Confirm markers progress through 2000 → 2001 and beyond, and that `parse_unknown` markers disappear.
 
-5. **Document the verified ABI**
-   After confirming the working layout, record it in the spec (e.g. `docs/spec.md` or a dedicated runtime ABI reference) so future changes don’t regress the helpers.
+5. **Escalate to Stage2 tests**  
+   - When the parser emits proper ASTs, run the focused stage2 pytest (`test_stage2_compile_to_sailfin_roundtrip`) followed by the wider suite.
 
 ## Quick Reference
 

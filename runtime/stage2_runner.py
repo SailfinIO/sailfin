@@ -7,6 +7,7 @@ import ctypes
 import os
 import pathlib
 import re
+import traceback
 from dataclasses import dataclass
 from collections import OrderedDict
 from collections.abc import Iterable as ABCIterable
@@ -74,6 +75,7 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
     "sailfin_runtime_is_whitespace_char": (None, (ctypes.c_byte,), ctypes.c_bool),
     "char_code": (None, (ctypes.c_void_p,), ctypes.c_double),
     "sailfin_runtime_bounds_check": (None, (ctypes.c_longlong, ctypes.c_longlong), None),
+    "abort": (None, (), None),
     # Generic runtime helpers
     "sailfin_runtime_channel": ("io", (ctypes.c_double,), ctypes.c_void_p),
     "sailfin_runtime_parallel": ("io", (ctypes.c_void_p,), ctypes.c_void_p),
@@ -538,6 +540,30 @@ class Stage2Runner:
             replacement = f"{label}:\n  call void @stage2_debug_marker(i64 {code})\n{first_instr}"
             lex_body = lex_body.replace(pattern, replacement, 1)
 
+        char_probe = "  %t36 = load i8, i8* %t35\n"
+        if char_probe in lex_body:
+            injection = (
+                "  %t36 = load i8, i8* %t35\n"
+                "  %stage2_debug_index_code = add i64 %t34, 4000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_debug_index_code)\n"
+                "  %stage2_debug_char = zext i8 %t36 to i64\n"
+                "  %stage2_debug_char_code = add i64 %stage2_debug_char, 3000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_debug_char_code)\n"
+            )
+            lex_body = lex_body.replace(char_probe, injection, 1)
+
+        identifier_probe = "  %t898 = load i8, i8* %t897\n"
+        if identifier_probe in lex_body:
+            id_injection = (
+                "  %t898 = load i8, i8* %t897\n"
+                "  %stage2_ident_index_code = add i64 %t896, 5000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_ident_index_code)\n"
+                "  %stage2_ident_char = zext i8 %t898 to i64\n"
+                "  %stage2_ident_char_code = add i64 %stage2_ident_char, 3000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_ident_char_code)\n"
+            )
+            lex_body = lex_body.replace(identifier_probe, id_injection, 1)
+
         try:
             instrumentation_path = pathlib.Path("scratch/instrumented_lex.ll")
             instrumentation_path.write_text(lex_body, encoding="utf-8")
@@ -545,6 +571,246 @@ class Stage2Runner:
             pass
 
         return ir_text[:lex_start] + lex_body + ir_text[lex_end:]
+
+    @staticmethod
+    def _instrument_compile_pipeline_ir(ir_text: str) -> str:
+        if "define i8* @compile_to_sailfin(" not in ir_text:
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
+
+        start = ir_text.find("define i8* @compile_to_sailfin(")
+        if start == -1:
+            return ir_text
+        end = ir_text.find("\n}\n", start)
+        if end == -1:
+            return ir_text
+        end += 3
+        body = ir_text[start:end]
+
+        parse_call = "  %t0 = call %Program @parse_program(i8* %source)\n"
+        if parse_call in body:
+            body = body.replace(
+                parse_call,
+                parse_call + "  call void @stage2_debug_marker(i64 2000)\n",
+                1,
+            )
+
+        typecheck_call = "  %t2 = call %TypecheckResult @typecheck_program(%Program %t1)\n"
+        if typecheck_call in body:
+            body = body.replace(
+                typecheck_call,
+                typecheck_call + "  call void @stage2_debug_marker(i64 2001)\n",
+                1,
+            )
+
+        then_label = "then0:\n"
+        if then_label in body:
+            body = body.replace(
+                then_label,
+                "then0:\n  call void @stage2_debug_marker(i64 2002)\n",
+                1,
+            )
+
+        merge_label = "merge1:\n"
+        if merge_label in body:
+            body = body.replace(
+                merge_label,
+                "merge1:\n  call void @stage2_debug_marker(i64 2003)\n",
+                1,
+            )
+
+        emit_call = "  %t15 = call i8* @emit_program(%Program %t14)\n"
+        if emit_call in body:
+            body = body.replace(
+                emit_call,
+                "  %t15 = call i8* @emit_program(%Program %t14)\n  call void @stage2_debug_marker(i64 2004)\n",
+                1,
+            )
+
+        try:
+            pathlib.Path("scratch/instrumented_compile.ll").write_text(
+                body, encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+        return ir_text[:start] + body + ir_text[end:]
+
+    @staticmethod
+    def _instrument_parse_tokens_ir(ir_text: str) -> str:
+        if "define %Program @parse_tokens(" not in ir_text:
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
+
+        start = ir_text.find("define %Program @parse_tokens(")
+        if start == -1:
+            return ir_text
+        end = ir_text.find("\n}\n", start)
+        if end == -1:
+            return ir_text
+        end += 3
+        body = ir_text[start:end]
+
+        loop_pattern = "loop.body1:\n  %t20 = load %Parser, %Parser* %l0\n"
+        if loop_pattern in body:
+            loop_replacement = (
+                "loop.body1:\n"
+                "  %t20 = load %Parser, %Parser* %l0\n"
+                "  %stage2_parse_index = extractvalue %Parser %t20, 1\n"
+                "  %stage2_parse_index_i64 = fptosi double %stage2_parse_index to i64\n"
+                "  %stage2_parse_marker = add i64 %stage2_parse_index_i64, 6000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_parse_marker)\n"
+            )
+            body = body.replace(loop_pattern, loop_replacement, 1)
+
+        token_pattern = "  %t22 = load %Token, %Token* %l2\n"
+        if token_pattern in body:
+            token_replacement = (
+                "  %t22 = load %Token, %Token* %l2\n"
+                "  %stage2_token_kind = extractvalue %Token %t22, 0\n"
+                "  %stage2_token_variant = extractvalue %TokenKind %stage2_token_kind, 0\n"
+                "  %stage2_token_variant_i64 = sext i32 %stage2_token_variant to i64\n"
+                "  %stage2_token_marker = add i64 %stage2_token_variant_i64, 7000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_token_marker)\n"
+            )
+            body = body.replace(token_pattern, token_replacement, 1)
+
+        try:
+            pathlib.Path("scratch/instrumented_parse_tokens.ll").write_text(
+                body, encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+        return ir_text[:start] + body + ir_text[end:]
+
+    @staticmethod
+    def _instrument_parse_block_ir(ir_text: str) -> str:
+        if "define %BlockParseResult @parse_block(" not in ir_text:
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
+
+        start = ir_text.find("define %BlockParseResult @parse_block(")
+        if start == -1:
+            return ir_text
+        end = ir_text.find("\n}\n", start)
+        if end == -1:
+            return ir_text
+        end += 3
+        body = ir_text[start:end]
+
+        loop_pattern = "loop.body3:\n  %t128 = load %Parser, %Parser* %l3\n"
+        if loop_pattern in body:
+            loop_replacement = (
+                "loop.body3:\n"
+                "  %t128 = load %Parser, %Parser* %l3\n"
+                "  %stage2_block_index = extractvalue %Parser %t128, 1\n"
+                "  %stage2_block_index_i64 = fptosi double %stage2_block_index to i64\n"
+                "  %stage2_block_marker = add i64 %stage2_block_index_i64, 8000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_block_marker)\n"
+            )
+            body = body.replace(loop_pattern, loop_replacement, 1)
+
+        token_pattern = "  %t133 = load %Token, %Token* %l6\n"
+        if token_pattern in body:
+            token_replacement = (
+                "  %t133 = load %Token, %Token* %l6\n"
+                "  %stage2_block_token_kind = extractvalue %Token %t133, 0\n"
+                "  %stage2_block_token_variant = extractvalue %TokenKind %stage2_block_token_kind, 0\n"
+                "  %stage2_block_token_variant_i64 = sext i32 %stage2_block_token_variant to i64\n"
+                "  %stage2_block_token_marker = add i64 %stage2_block_token_variant_i64, 9000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_block_token_marker)\n"
+            )
+            body = body.replace(token_pattern, token_replacement, 1)
+
+        try:
+            pathlib.Path("scratch/instrumented_parse_block.ll").write_text(
+                body, encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+        return ir_text[:start] + body + ir_text[end:]
+
+    @staticmethod
+    def _instrument_parse_unknown_ir(ir_text: str) -> str:
+        if "define %StatementParseResult @parse_unknown(" not in ir_text:
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
+
+        start = ir_text.find("define %StatementParseResult @parse_unknown(")
+        if start == -1:
+            return ir_text
+        end = ir_text.find("\n}\n", start)
+        if end == -1:
+            return ir_text
+        end += 3
+        body = ir_text[start:end]
+
+        loop_pattern = "loop.body1:\n  %t20 = load %Parser, %Parser* %l2\n"
+        if loop_pattern in body:
+            loop_replacement = (
+                "loop.body1:\n"
+                "  %t20 = load %Parser, %Parser* %l2\n"
+                "  %stage2_unknown_index = extractvalue %Parser %t20, 1\n"
+                "  %stage2_unknown_index_i64 = fptosi double %stage2_unknown_index to i64\n"
+                "  %stage2_unknown_marker = add i64 %stage2_unknown_index_i64, 10000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_unknown_marker)\n"
+            )
+            body = body.replace(loop_pattern, loop_replacement, 1)
+
+        token_pattern = "  %t25 = load %Token, %Token* %l4\n"
+        if token_pattern in body:
+            token_replacement = (
+                "  %t25 = load %Token, %Token* %l4\n"
+                "  %stage2_unknown_token_kind = extractvalue %Token %t25, 0\n"
+                "  %stage2_unknown_token_variant = extractvalue %TokenKind %stage2_unknown_token_kind, 0\n"
+                "  %stage2_unknown_token_variant_i64 = sext i32 %stage2_unknown_token_variant to i64\n"
+                "  %stage2_unknown_token_marker = add i64 %stage2_unknown_token_variant_i64, 11000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_unknown_token_marker)\n"
+                "  %stage2_unknown_depth_value = load double, double* %l3\n"
+                "  %stage2_unknown_depth_i64 = fptosi double %stage2_unknown_depth_value to i64\n"
+                "  %stage2_unknown_depth_marker = add i64 %stage2_unknown_depth_i64, 13000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_unknown_depth_marker)\n"
+            )
+            body = body.replace(token_pattern, token_replacement, 1)
+
+        try:
+            pathlib.Path("scratch/instrumented_parse_unknown.ll").write_text(
+                body, encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+        return ir_text[:start] + body + ir_text[end:]
 
     @staticmethod
     def _extract_function_symbol_and_signature(line: str) -> tuple[str | None, str | None]:
@@ -1653,6 +1919,31 @@ class Stage2Runner:
 
             return cfunc_type(_raise_value_error)
 
+        elif symbol == "abort":
+            cfunc_type = ctypes.CFUNCTYPE(None)
+
+            def _abort() -> None:
+                try:
+                    message = "[stage2-runtime] abort() invoked"
+                    self._debug_log(message)
+                    try:
+                        runtime.console.error(message)
+                    except Exception:
+                        pass
+                    stack = "".join(traceback.format_stack(limit=12))
+                    if stack:
+                        self._debug_log(stack.rstrip())
+                    error = RuntimeError("Stage2 invoked abort()")
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(error)
+                    raise RuntimeError("Stage2 invoked abort()")
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    raise
+
+            return cfunc_type(_abort)
+
         elif symbol == "sailfin_runtime_bounds_check":
             cfunc_type = ctypes.CFUNCTYPE(
                 None, ctypes.c_longlong, ctypes.c_longlong)
@@ -1993,6 +2284,10 @@ class Stage2Runner:
             rewritten_ir = self._inject_missing_function_declarations(
                 rewritten_ir, function_signatures)
             rewritten_ir = self._instrument_lex_ir(rewritten_ir)
+            rewritten_ir = self._instrument_compile_pipeline_ir(rewritten_ir)
+            rewritten_ir = self._instrument_parse_tokens_ir(rewritten_ir)
+            rewritten_ir = self._instrument_parse_block_ir(rewritten_ir)
+            rewritten_ir = self._instrument_parse_unknown_ir(rewritten_ir)
             self._register_type_definitions(rewritten_ir, type_definitions)
             if duplicates:
                 duplicate_registry[str(
