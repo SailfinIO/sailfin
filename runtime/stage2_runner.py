@@ -1594,14 +1594,24 @@ class Stage2Runner:
             return cfunc_type(_concat)
 
         elif symbol == "sailfin_runtime_append_string":
+            append_debug_count = 0
+            append_debug_limit = 200
             cfunc_type = ctypes.CFUNCTYPE(
                 ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
 
             def _append_string(array_ptr: ctypes.c_void_p, value_ptr: ctypes.c_void_p) -> int:
+                nonlocal append_debug_count
                 try:
                     existing = _array_to_list(array_ptr)
                     appended = list(existing or [])
-                    appended.append(_ptr_to_str(value_ptr))
+                    token_text = _ptr_to_str(value_ptr)
+                    appended.append(token_text)
+                    if append_debug_count < append_debug_limit:
+                        preview = token_text[:64] if isinstance(token_text, str) else ""
+                        self._debug_log(
+                            f"[stage2] runtime append_string array_len={len(existing or [])} -> {len(appended)} value={preview!r}"
+                        )
+                    append_debug_count += 1
                     return _list_to_array(appended)
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:
@@ -1609,6 +1619,39 @@ class Stage2Runner:
                     return 0
 
             return cfunc_type(_append_string)
+
+        elif symbol == "sailfin_runtime_raise_value_error":
+            cfunc_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+
+            def _raise_value_error(message_ptr: ctypes.c_void_p) -> None:
+                try:
+                    _require_effects()
+                    address = _normalise_ptr(message_ptr)
+                    status = "tracked" if address in self._tracked_string_addresses else (
+                        "alloc" if address in _LIBC_ALLOCATIONS else "unknown"
+                    )
+                    text = _ptr_to_str(message_ptr)
+                    preview = text[:160] if isinstance(text, str) else ""
+                    self._debug_log(
+                        f"[stage2] runtime raise_value_error ptr=0x{address:x} status={status} message={preview!r}"
+                    )
+                    detail = text if text else f"(ptr=0x{address:x} status={status})"
+                    try:
+                        runtime.console.error(
+                            f"[stage2-runtime] raise_value_error ptr=0x{address:x} status={status}: {detail}"
+                        )
+                    except Exception:
+                        pass
+                    error = ValueError(
+                        f"Stage2 runtime value error ptr=0x{address:x} status={status}: {text}"
+                    )
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(error)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+
+            return cfunc_type(_raise_value_error)
 
         elif symbol == "sailfin_runtime_bounds_check":
             cfunc_type = ctypes.CFUNCTYPE(
@@ -1640,13 +1683,23 @@ class Stage2Runner:
             return cfunc_type(_runtime_char_code)
 
         elif symbol == "sailfin_runtime_is_decimal_digit":
+            digit_debug_count = 0
+            digit_debug_limit = 200
             cfunc_type = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_byte)
 
             def _is_decimal_digit(value: ctypes.c_byte) -> bool:
+                nonlocal digit_debug_count
                 try:
                     code = int(value) & 0xFF
                     ch = chr(code)
-                    return '0' <= ch <= '9'
+                    result = '0' <= ch <= '9'
+                    if digit_debug_count < digit_debug_limit:
+                        display = repr(ch) if 32 <= code < 127 else f"\\x{code:02x}"
+                        self._debug_log(
+                            f"[stage2] runtime is_decimal_digit ch=0x{code:02x} ({display}) -> {result}"
+                        )
+                    digit_debug_count += 1
+                    return result
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:
                         _LAST_RUNTIME_ERROR.set(exc)
@@ -1688,14 +1741,26 @@ class Stage2Runner:
             return cfunc_type(_grapheme_at)
 
         elif symbol == "sailfin_runtime_is_whitespace_char":
+            whitespace_debug_count = 0
+            whitespace_debug_limit = 200
             cfunc_type = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_byte)
 
             def _is_whitespace_char(value: ctypes.c_byte) -> bool:
+                nonlocal whitespace_debug_count
                 try:
                     code = int(value) & 0xFF
                     ch = chr(code)
                     # Match ASCII whitespace plus newline and carriage return.
-                    return ch.isspace()
+                    result = ch.isspace()
+                    if whitespace_debug_count < whitespace_debug_limit:
+                        display = repr(ch) if 32 <= code < 127 else (
+                            "\\n" if ch == "\n" else "\\r" if ch == "\r" else f"\\x{code:02x}"
+                        )
+                        self._debug_log(
+                            f"[stage2] runtime is_whitespace_char ch=0x{code:02x} ({display}) -> {result}"
+                        )
+                    whitespace_debug_count += 1
+                    return result
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:
                         _LAST_RUNTIME_ERROR.set(exc)

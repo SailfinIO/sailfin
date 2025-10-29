@@ -433,7 +433,30 @@ void sailfin_runtime_print_error(SailfinString value)
 
 void sailfin_runtime_raise_value_error(SailfinString message)
 {
-    fprintf(stderr, "[stage2-runtime] value error: %s\n", string_data(message));
+    const char *text = string_data(message);
+    int64_t length = string_length(message);
+    int preview = 0;
+    if (length > 0)
+    {
+        preview = (int)length;
+        if (preview > 120)
+        {
+            preview = 120;
+        }
+    }
+    fprintf(stderr,
+            "[stage2-runtime] raise_value_error ptr=%p len=%lld preview=\"%.*s\"\n",
+            (void *)message,
+            (long long)length,
+            preview,
+            text ? text : "");
+    if (length > preview)
+    {
+        fprintf(stderr,
+                "[stage2-runtime] raise_value_error truncated actual_len=%lld\n",
+                (long long)length);
+    }
+    fflush(stderr);
     abort();
 }
 
