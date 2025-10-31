@@ -6,12 +6,13 @@
 #include <string.h>
 
 typedef char *SailfinString;
+typedef void *SailfinValue;
 
 typedef struct
 {
-    SailfinString *data;
+    SailfinValue *data;
     int64_t length;
-} SailfinStringArray;
+} SailfinArray;
 
 static SailfinString alloc_string(int64_t length)
 {
@@ -83,15 +84,19 @@ static int64_t string_length(void *value_ptr)
     return (int64_t)strlen((const char *)value_ptr);
 }
 
-static SailfinStringArray *alloc_array(int64_t length)
+static SailfinArray *alloc_array(int64_t length)
 {
-    SailfinStringArray *array = malloc(sizeof(SailfinStringArray));
+    if (length < 0)
+    {
+        length = 0;
+    }
+    SailfinArray *array = malloc(sizeof(SailfinArray));
     if (!array)
     {
         return NULL;
     }
     array->length = length;
-    array->data = length > 0 ? calloc((size_t)length, sizeof(SailfinString)) : NULL;
+    array->data = length > 0 ? calloc((size_t)length, sizeof(SailfinValue)) : NULL;
     return array;
 }
 
@@ -254,7 +259,7 @@ bool sailfin_runtime_instance_of(void *value, void *type_name)
     return false;
 }
 
-SailfinStringArray *sailfin_runtime_append_string(SailfinStringArray *array, SailfinString value)
+SailfinArray *sailfin_runtime_append_string(SailfinArray *array, SailfinString value)
 {
     if (!array)
     {
@@ -287,7 +292,7 @@ SailfinStringArray *sailfin_runtime_append_string(SailfinStringArray *array, Sai
     }
     debug_append_count++;
     int64_t new_length = array->length + 1;
-    SailfinString *new_data = realloc(array->data, (size_t)new_length * sizeof(SailfinString));
+    SailfinValue *new_data = realloc(array->data, (size_t)new_length * sizeof(SailfinValue));
     if (!new_data)
     {
         return array;
@@ -298,42 +303,53 @@ SailfinStringArray *sailfin_runtime_append_string(SailfinStringArray *array, Sai
     return array;
 }
 
-SailfinStringArray *sailfin_runtime_concat(SailfinStringArray *lhs, SailfinStringArray *rhs)
+SailfinArray *sailfin_runtime_concat(SailfinArray *lhs, SailfinArray *rhs)
 {
     int64_t lhs_len = lhs ? lhs->length : 0;
     int64_t rhs_len = rhs ? rhs->length : 0;
-    SailfinStringArray *result = alloc_array(lhs_len + rhs_len);
+    SailfinArray *result = alloc_array(lhs_len + rhs_len);
     if (!result)
     {
         return NULL;
     }
     int64_t index = 0;
+    /* copy pointer payloads verbatim; value owners manage lifetimes */
     for (int64_t i = 0; i < lhs_len; ++i)
     {
-        result->data[index++] = lhs && lhs->data ? string_clone(lhs->data[i]) : NULL;
+        SailfinValue value = NULL;
+        if (lhs && lhs->data)
+        {
+            value = lhs->data[i];
+        }
+        result->data[index++] = value;
     }
     for (int64_t i = 0; i < rhs_len; ++i)
     {
-        result->data[index++] = rhs && rhs->data ? string_clone(rhs->data[i]) : NULL;
+        SailfinValue value = NULL;
+        if (rhs && rhs->data)
+        {
+            value = rhs->data[i];
+        }
+        result->data[index++] = value;
     }
     return result;
 }
 
-SailfinStringArray *sailfin_runtime_array_map(SailfinStringArray *array, void *callback)
+SailfinArray *sailfin_runtime_array_map(SailfinArray *array, void *callback)
 {
     (void)array;
     (void)callback;
     return alloc_array(0);
 }
 
-SailfinStringArray *sailfin_runtime_array_filter(SailfinStringArray *array, void *callback)
+SailfinArray *sailfin_runtime_array_filter(SailfinArray *array, void *callback)
 {
     (void)array;
     (void)callback;
     return alloc_array(0);
 }
 
-void *sailfin_runtime_array_reduce(SailfinStringArray *array, SailfinString initial, void *callback)
+void *sailfin_runtime_array_reduce(SailfinArray *array, SailfinString initial, void *callback)
 {
     (void)array;
     (void)callback;
