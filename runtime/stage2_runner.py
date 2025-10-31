@@ -9,7 +9,7 @@ import pathlib
 import re
 import traceback
 from dataclasses import dataclass
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Iterable as ABCIterable
 from typing import Callable, Dict, Iterable, Mapping, Sequence, cast
 
@@ -73,6 +73,7 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
     "sailfin_runtime_grapheme_count": (None, (ctypes.c_void_p,), ctypes.c_double),
     "sailfin_runtime_grapheme_at": (None, (ctypes.c_void_p, ctypes.c_double), ctypes.c_void_p),
     "sailfin_runtime_is_whitespace_char": (None, (ctypes.c_byte,), ctypes.c_bool),
+    "strings_equal": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_bool),
     "char_code": (None, (ctypes.c_void_p,), ctypes.c_double),
     "sailfin_runtime_bounds_check": (None, (ctypes.c_longlong, ctypes.c_longlong), None),
     "abort": (None, (), None),
@@ -177,12 +178,14 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
                     )
             else:
                 if logger:
-                    logger(f"[stage2] malloc request size={request} result=null")
+                    logger(
+                        f"[stage2] malloc request size={request} result=null")
             return pointer
 
         def _free_wrapper(ptr: ctypes.c_void_p | int) -> None:
             try:
-                address = int(ptr) if not isinstance(ptr, ctypes.c_void_p) else int(ptr.value or 0)
+                address = int(ptr) if not isinstance(
+                    ptr, ctypes.c_void_p) else int(ptr.value or 0)
             except Exception:
                 address = 0
             if address == 0:
@@ -192,7 +195,8 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
             allocation = _LIBC_ALLOCATIONS.pop(address, None)
             if allocation is None:
                 if logger:
-                    logger(f"[stage2] free unknown ptr=0x{address:x} (skipped)")
+                    logger(
+                        f"[stage2] free unknown ptr=0x{address:x} (skipped)")
                 if _LAST_RUNTIME_ERROR.get() is None:
                     _LAST_RUNTIME_ERROR.set(
                         RuntimeError(
@@ -204,9 +208,11 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
                 logger(f"[stage2] free ptr=0x{address:x} size={allocation}")
             libc_free(ctypes.c_void_p(address))
 
-        malloc_cfunc = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_size_t)(_malloc_wrapper)
+        malloc_cfunc = ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_size_t)(_malloc_wrapper)
         free_cfunc = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(_free_wrapper)
-        malloc_addr = int(ctypes.cast(malloc_cfunc, ctypes.c_void_p).value or 0)
+        malloc_addr = int(ctypes.cast(
+            malloc_cfunc, ctypes.c_void_p).value or 0)
         free_addr = int(ctypes.cast(free_cfunc, ctypes.c_void_p).value or 0)
 
         llvm.add_symbol("malloc", malloc_addr)
@@ -217,11 +223,14 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
         _LIBC_SYMBOL_ADDRESSES = {"malloc": malloc_addr, "free": free_addr}
 
         if debug_log:
-            debug_log(f"[stage2] registered libc malloc wrapper: addr=0x{malloc_addr:x}")
-            debug_log(f"[stage2] registered libc free wrapper: addr=0x{free_addr:x}")
+            debug_log(
+                f"[stage2] registered libc malloc wrapper: addr=0x{malloc_addr:x}")
+            debug_log(
+                f"[stage2] registered libc free wrapper: addr=0x{free_addr:x}")
     except Exception as exc:  # pragma: no cover - diagnostics only
         if debug_log:
-            debug_log(f"[stage2] failed to register libc malloc/free wrappers: {exc}")
+            debug_log(
+                f"[stage2] failed to register libc malloc/free wrappers: {exc}")
 
     return _LIBC_FUNCTIONS
 
@@ -303,7 +312,8 @@ class Stage2Runner:
         pointer = ctypes.cast(buffer, ctypes.c_void_p)
         address = pointer.value
         if address:
-            self._tracked_string_addresses[int(address)] = ("cstring", text, len(encoded))
+            self._tracked_string_addresses[int(address)] = (
+                "cstring", text, len(encoded))
         return pointer
 
     @staticmethod
@@ -505,7 +515,8 @@ class Stage2Runner:
             if declare_index == -1:
                 ir_text = ir_text + "\n" + declaration
             else:
-                ir_text = ir_text[:declare_index] + declaration + ir_text[declare_index:]
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
 
         lex_start = -1
         lex_marker = ""
@@ -606,7 +617,8 @@ class Stage2Runner:
         if typecheck_call in body:
             body = body.replace(
                 typecheck_call,
-                typecheck_call + "  call void @stage2_debug_marker(i64 2001)\n",
+                typecheck_call +
+                "  call void @stage2_debug_marker(i64 2001)\n",
                 1,
             )
 
@@ -1402,7 +1414,8 @@ class Stage2Runner:
             if Stage2StringType is not None:
                 try:
                     struct_ptr = ctypes.cast(
-                        ctypes.c_void_p(address), ctypes.POINTER(Stage2StringType)
+                        ctypes.c_void_p(address), ctypes.POINTER(
+                            Stage2StringType)
                     )
                     struct_value = struct_ptr.contents
                 except (ValueError, OSError, ctypes.ArgumentError):
@@ -1416,23 +1429,27 @@ class Stage2Runner:
                     )
                     if data_address in self._tracked_string_addresses:
                         text = self._tracked_string_addresses[data_address][1]
-                        self._tracked_string_addresses[address] = ("struct", text, length)
+                        self._tracked_string_addresses[address] = (
+                            "struct", text, length)
                         self._debug_log(
                             f"[stage2] ptr_to_str struct cached 0x{address:x} -> data 0x{data_address:x} len={length}"
                         )
                         return text
                     if data_address != 0 and 0 <= length <= 1 << 30:
-                        raw_bytes = _bytes_from_allocation(data_address, length)
+                        raw_bytes = _bytes_from_allocation(
+                            data_address, length)
                         if raw_bytes is None:
                             try:
-                                raw_bytes = ctypes.string_at(data_address, length)
+                                raw_bytes = ctypes.string_at(
+                                    data_address, length)
                             except (ValueError, OSError):
                                 raw_bytes = None
                         if raw_bytes is not None:
                             slice_length = min(length, len(raw_bytes))
                             raw = raw_bytes[:slice_length]
                             text = raw.decode("utf-8", errors="ignore")
-                            self._tracked_string_addresses[address] = ("struct", text, slice_length)
+                            self._tracked_string_addresses[address] = (
+                                "struct", text, slice_length)
                             self._debug_log(
                                 f"[stage2] ptr_to_str struct decode 0x{address:x} -> data 0x{data_address:x} len={slice_length}"
                             )
@@ -1442,7 +1459,8 @@ class Stage2Runner:
             if allocation_bytes is not None:
                 raw, _, _ = allocation_bytes.partition(b"\0")
                 text = raw.decode("utf-8", errors="ignore")
-                self._tracked_string_addresses[address] = ("cstring", text, len(raw))
+                self._tracked_string_addresses[address] = (
+                    "cstring", text, len(raw))
                 self._debug_log(
                     f"[stage2] ptr_to_str cstring decode 0x{address:x} size={len(raw)}"
                 )
@@ -1454,7 +1472,8 @@ class Stage2Runner:
             if raw_cstring is not None:
                 raw, _, _ = raw_cstring.partition(b"\0")
                 text = raw.decode("utf-8", errors="ignore")
-                self._tracked_string_addresses[address] = ("cstring", text, len(raw))
+                self._tracked_string_addresses[address] = (
+                    "cstring", text, len(raw))
                 self._debug_log(
                     f"[stage2] ptr_to_str cstring fallback 0x{address:x} size={len(raw)}"
                 )
@@ -1477,7 +1496,8 @@ class Stage2Runner:
             data_address = ctypes.cast(buf, ctypes.c_void_p).value
             data_int = 0 if data_address is None else int(data_address)
             if data_int != 0:
-                self._tracked_string_addresses[data_int] = ("cstring", s, len(encoded))
+                self._tracked_string_addresses[data_int] = (
+                    "cstring", s, len(encoded))
             if Stage2StringType is None:
                 return data_int
 
@@ -1494,7 +1514,8 @@ class Stage2Runner:
                 stage2_string_ptr, ctypes.c_void_p).value
             struct_int = 0 if struct_address is None else int(struct_address)
             if struct_int != 0:
-                self._tracked_string_addresses[struct_int] = ("struct", s, len(encoded))
+                self._tracked_string_addresses[struct_int] = (
+                    "struct", s, len(encoded))
             return struct_int
 
         class _StringArray(ctypes.Structure):
@@ -1873,7 +1894,8 @@ class Stage2Runner:
                     token_text = _ptr_to_str(value_ptr)
                     appended.append(token_text)
                     if append_debug_count < append_debug_limit:
-                        preview = token_text[:64] if isinstance(token_text, str) else ""
+                        preview = token_text[:64] if isinstance(
+                            token_text, str) else ""
                         self._debug_log(
                             f"[stage2] runtime append_string array_len={len(existing or [])} -> {len(appended)} value={preview!r}"
                         )
@@ -1985,7 +2007,8 @@ class Stage2Runner:
                     ch = chr(code)
                     result = '0' <= ch <= '9'
                     if digit_debug_count < digit_debug_limit:
-                        display = repr(ch) if 32 <= code < 127 else f"\\x{code:02x}"
+                        display = repr(
+                            ch) if 32 <= code < 127 else f"\\x{code:02x}"
                         self._debug_log(
                             f"[stage2] runtime is_decimal_digit ch=0x{code:02x} ({display}) -> {result}"
                         )
@@ -2058,6 +2081,22 @@ class Stage2Runner:
                     return False
 
             return cfunc_type(_is_whitespace_char)
+
+        elif symbol == "strings_equal":
+            cfunc_type = ctypes.CFUNCTYPE(
+                ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+            def _strings_equal(left_ptr: ctypes.c_void_p, right_ptr: ctypes.c_void_p) -> bool:
+                try:
+                    left = _ptr_to_str(left_ptr)
+                    right = _ptr_to_str(right_ptr)
+                    return left == right
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+                    return False
+
+            return cfunc_type(_strings_equal)
 
         # HTTP adapters
         elif symbol == "sailfin_adapter_http_get":
@@ -2424,6 +2463,34 @@ class Stage2Runner:
                 f"{name} ({reason})" for name, reason in skipped[:5])
             runtime.console.warn(
                 f"[stage2] skipped {len(skipped)} module(s): {preview}")
+
+        if duplicate_registry:
+            for module_label, duplicates in sorted(duplicate_registry.items()):
+                if not duplicates:
+                    continue
+                preview = ", ".join(duplicates[:5])
+                self._debug_log(
+                    f"[stage2] linkage duplicates {module_label}: {len(duplicates)} symbol(s), e.g. {preview}"
+                )
+
+        if final_duplicates:
+            renamed_preview = ", ".join(final_duplicates[:10])
+            self._debug_log(
+                f"[stage2] applied {len(final_duplicates)} post-link rename(s): {renamed_preview}"
+            )
+            histogram = Counter()
+            for entry in final_duplicates:
+                original, _, renamed = entry.partition("->")
+                if not original:
+                    continue
+                histogram[original] += 1
+            if histogram:
+                top = ", ".join(
+                    f"{name}×{count}" for name, count in histogram.most_common(10)
+                )
+                self._debug_log(
+                    f"[stage2] duplicate frequency: {top}"
+                )
 
         if duplicate_registry or final_duplicates:
             total_duplicates = sum(len(entries)

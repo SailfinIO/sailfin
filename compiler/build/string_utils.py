@@ -70,4 +70,18 @@ def sanitize_symbol(name):
         result = "_" + result
     return result
 
-__all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "char_at", "sanitize_symbol"]
+def strings_equal(left, right):
+    if len(left) != len(right):
+        return False
+    index = 0
+    while True:
+        if index >= len(left):
+            break
+        left_char = char_at(left, index)
+        right_char = char_at(right, index)
+        if char_code(left_char) != char_code(right_char):
+            return False
+        index += 1
+    return True
+
+__all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "char_at", "sanitize_symbol", "strings_equal"]

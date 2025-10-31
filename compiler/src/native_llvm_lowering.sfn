@@ -3120,6 +3120,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "strings_equal",
+        symbol: "strings_equal",
+        return_type: "i1",
+        parameter_types: ["i8*", "i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "char_code",
         symbol: "char_code",
         return_type: "double",

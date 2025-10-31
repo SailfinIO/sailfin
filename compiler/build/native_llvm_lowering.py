@@ -2358,6 +2358,7 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="substring", symbol="sailfin_runtime_substring", return_type="i8*", parameter_types=["i8*", "i64", "i64"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="len(string)", symbol="sailfin_runtime_string_length", return_type="i64", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="string.concat", symbol="sailfin_runtime_string_concat", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="strings_equal", symbol="strings_equal", return_type="i1", parameter_types=["i8*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="char_code", symbol="char_code", return_type="double", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_grapheme_count_fn", symbol="sailfin_runtime_grapheme_count", return_type="double", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_grapheme_at_fn", symbol="sailfin_runtime_grapheme_at", return_type="i8*", parameter_types=["i8*", "double"], effects=[]))

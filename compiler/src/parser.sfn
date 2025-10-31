@@ -36,7 +36,7 @@ import {
     SourceSpan,
 } from "./ast";
 import { evaluate_decorators, infer_effects } from "./decorator_semantics";
-import { substring, char_code, char_at } from "./string_utils";
+import { substring, char_code, char_at, strings_equal } from "./string_utils";
 
 struct Parser {
     tokens -> Token[];
@@ -343,7 +343,8 @@ fn parse_import(initial_parser -> Parser) -> StatementParseResult {
     source = strip_surrounding_quotes(source);
 
     parser = skip_trivia(parser);
-    if parser_peek_raw(parser).kind.variant == "Symbol" && parser_peek_raw(parser).kind.value == ";" {
+    let import_terminator = parser_peek_raw(parser);
+    if symbol_matches(import_terminator, ";") {
         parser = parser_advance_raw(parser);
     }
 
@@ -372,7 +373,8 @@ fn parse_export(initial_parser -> Parser) -> StatementParseResult {
     source = strip_surrounding_quotes(source);
 
     parser = skip_trivia(parser);
-    if parser_peek_raw(parser).kind.variant == "Symbol" && parser_peek_raw(parser).kind.value == ";" {
+    let export_terminator = parser_peek_raw(parser);
+    if symbol_matches(export_terminator, ";") {
         parser = parser_advance_raw(parser);
     }
 
@@ -409,7 +411,7 @@ fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
     let mut type_annotation -> TypeAnnotation? = null;
     parser = skip_trivia(parser);
     let separator = parser_peek_raw(parser);
-        if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
         statement_tokens = append_token(statement_tokens, separator);
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), ["=", ";"]);
@@ -432,7 +434,7 @@ fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
     let mut initializer_span -> SourceSpan? = null;
     parser = skip_trivia(parser);
     let assign = parser_peek_raw(parser);
-    if assign.kind.variant == "Symbol" && assign.kind.value == "=" {
+    if symbol_matches(assign, "=") {
         statement_tokens = append_token(statement_tokens, assign);
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), [";"]);
@@ -453,7 +455,7 @@ fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
 
     parser = skip_trivia(parser);
     let terminator = parser_peek_raw(parser);
-    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
         statement_tokens = append_token(statement_tokens, terminator);
         parser = parser_advance_raw(parser);
     }
@@ -480,16 +482,18 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
     parser = skip_trivia(parser);
     loop {
         let current = parser_peek_raw(parser);
-        if current.kind.variant == "Symbol" && current.kind.value == "}" {
+        if symbol_matches(current, "}") {
             parser = parser_advance_raw(parser);
             break;
         }
         if current.kind.variant != "Identifier" {
             break;
         }
+
         let name = identifier_text(current);
         parser = parser_advance_raw(parser);
         parser = skip_trivia(parser);
+
         let mut alias -> string? = null;
         let potential_alias = parser_peek_raw(parser);
         if identifier_matches(potential_alias, "as") {
@@ -502,9 +506,11 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
                 parser = skip_trivia(parser);
             }
         }
+
         specifiers = specifiers.concat([NamedSpecifier { name: name, alias: alias }]);
+
         let separator = parser_peek_raw(parser);
-        if separator.kind.variant == "Symbol" && separator.kind.value == "," {
+        if symbol_matches(separator, ",") {
             parser = parser_advance_raw(parser);
             parser = skip_trivia(parser);
             continue;
@@ -512,7 +518,7 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
     }
 
     parser = skip_trivia(parser);
-    if parser_peek_raw(parser).kind.variant == "Symbol" && parser_peek_raw(parser).kind.value == "}" {
+    if symbol_matches(parser_peek_raw(parser), "}") {
         parser = parser_advance_raw(parser);
     }
 
@@ -583,7 +589,7 @@ fn parse_struct(initial_parser -> Parser, decorators -> Decorator[]) -> Statemen
 
         parser = skip_trivia(parser);
         let token = parser_peek_raw(parser);
-        if token.kind.variant == "Symbol" && token.kind.value == "}" {
+        if symbol_matches(token, "}") {
             parser = parser_advance_raw(parser);
             break;
         }
@@ -645,7 +651,7 @@ fn parse_type_alias(initial_parser -> Parser, decorators -> Decorator[]) -> Stat
 
     parser = skip_trivia(parser);
     let equals = parser_peek_raw(parser);
-    if equals.kind.variant != "Symbol" || equals.kind.value != "=" {
+    if !symbol_matches(equals, "=") {
         return parse_unknown(original);
     }
     parser = parser_advance_raw(parser);
@@ -659,7 +665,8 @@ fn parse_type_alias(initial_parser -> Parser, decorators -> Decorator[]) -> Stat
     let aliased_type = TypeAnnotation { text: aliased_text };
 
     parser = skip_trivia(parser);
-    if parser_peek_raw(parser).kind.variant == "Symbol" && parser_peek_raw(parser).kind.value == ";" {
+    let alias_terminator = parser_peek_raw(parser);
+    if symbol_matches(alias_terminator, ";") {
         parser = parser_advance_raw(parser);
     }
 
@@ -700,7 +707,7 @@ fn parse_interface(initial_parser -> Parser, decorators -> Decorator[]) -> State
     loop {
         parser = skip_trivia(parser);
         let token = parser_peek_raw(parser);
-        if token.kind.variant == "Symbol" && token.kind.value == "}" {
+        if symbol_matches(token, "}") {
             parser = parser_advance_raw(parser);
             break;
         }
@@ -763,7 +770,7 @@ fn parse_enum(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
     loop {
         parser = skip_trivia(parser);
         let token = parser_peek_raw(parser);
-        if token.kind.variant == "Symbol" && token.kind.value == "}" {
+        if symbol_matches(token, "}") {
             parser = parser_advance_raw(parser);
             break;
         }
@@ -836,7 +843,7 @@ fn parse_interface_member(parser -> Parser, decorators -> Decorator[]) -> Interf
     current = skip_trivia(current);
     let mut return_type -> TypeAnnotation? = null;
     let separator = parser_peek_raw(current);
-    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
         current = parser_advance_raw(current);
         let capture = collect_until(skip_trivia(current), ["!", ";", "{" ]);
         current = capture.parser;
@@ -855,7 +862,7 @@ fn parse_interface_member(parser -> Parser, decorators -> Decorator[]) -> Interf
     current = skip_trivia(current);
     if current.index < current.tokens.length {
         let terminator = parser_peek_raw(current);
-        if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+        if symbol_matches(terminator, ";") {
             current = parser_advance_raw(current);
         }
     }
@@ -891,12 +898,12 @@ fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
     let mut fields -> FieldDeclaration[] = [];
     current = skip_trivia(current);
     let next = parser_peek_raw(current);
-    if next.kind.variant == "Symbol" && next.kind.value == "{" {
+    if symbol_matches(next, "{") {
         current = parser_advance_raw(current);
         loop {
             current = skip_trivia(current);
             let token = parser_peek_raw(current);
-            if token.kind.variant == "Symbol" && token.kind.value == "}" {
+            if symbol_matches(token, "}") {
                 current = parser_advance_raw(current);
                 break;
             }
@@ -919,7 +926,7 @@ fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
 
     current = skip_trivia(current);
     let mut terminator = parser_peek_raw(current);
-    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
         current = parser_advance_raw(current);
         current = skip_trivia(current);
         terminator = parser_peek_raw(current);
@@ -962,11 +969,8 @@ fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
     current = skip_trivia(current);
     let separator = parser_peek_raw(current);
     let mut is_type_sep = false;
-    if separator.kind.variant == "Symbol" {
-        let separator_value = separator.kind.value;
-        if separator_value == ":" || separator_value == "->" {
-            is_type_sep = true;
-        }
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
+        is_type_sep = true;
     }
     if !is_type_sep {
         return StructFieldParseResult { parser: parser, field: null, success: false };
@@ -993,16 +997,14 @@ fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if terminator.kind.variant == "Symbol" {
-        if terminator.kind.value == "," {
+    if symbol_matches(terminator, ",") {
+        current = parser_advance_raw(current);
+    } else if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+        let maybe_comma = parser_peek_raw(current);
+        if symbol_matches(maybe_comma, ",") {
             current = parser_advance_raw(current);
-        } else if terminator.kind.value == ";" {
-            current = parser_advance_raw(current);
-            current = skip_trivia(current);
-            let maybe_comma = parser_peek_raw(current);
-            if maybe_comma.kind.variant == "Symbol" && maybe_comma.kind.value == "," {
-                current = parser_advance_raw(current);
-            }
         }
     }
 
@@ -1023,7 +1025,7 @@ fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
 fn skip_trailing_comma(parser -> Parser) -> Parser {
     let mut current = skip_trivia(parser);
     let token = parser_peek_raw(current);
-    if token.kind.variant == "Symbol" && token.kind.value == "," {
+    if symbol_matches(token, ",") {
         current = parser_advance_raw(current);
     }
     return current;
@@ -1065,7 +1067,7 @@ fn parse_model(initial_parser -> Parser, decorators -> Decorator[]) -> Statement
     loop {
         parser = skip_trivia(parser);
         let token = parser_peek_raw(parser);
-        if token.kind.variant == "Symbol" && token.kind.value == "}" {
+        if symbol_matches(token, "}") {
             parser = parser_advance_raw(parser);
             break;
         }
@@ -1084,7 +1086,7 @@ fn parse_model(initial_parser -> Parser, decorators -> Decorator[]) -> Statement
         parser = skip_struct_member(entry_start);
         parser = skip_trivia(parser);
         let maybe_close = parser_peek_raw(parser);
-        if maybe_close.kind.variant == "Symbol" && maybe_close.kind.value == "}" {
+        if symbol_matches(maybe_close, "}") {
             parser = parser_advance_raw(parser);
             break;
         }
@@ -1128,7 +1130,7 @@ fn parse_pipeline(initial_parser -> Parser, decorators -> Decorator[]) -> Statem
     parser = skip_trivia(parser);
     let mut return_type -> TypeAnnotation? = null;
     let separator = parser_peek_raw(parser);
-    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), ["!", "{"]);
         parser = capture.parser;
@@ -1186,7 +1188,7 @@ fn parse_tool(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
     parser = skip_trivia(parser);
     let mut return_type -> TypeAnnotation? = null;
     let separator = parser_peek_raw(parser);
-    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), ["!", "{"]);
         parser = capture.parser;
@@ -1302,7 +1304,7 @@ fn parse_function(initial_parser -> Parser, starts_with_async -> boolean, decora
     parser = skip_trivia(parser);
     let mut return_type -> TypeAnnotation? = null;
     let separator = parser_peek_raw(parser);
-    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), ["!", "{"]);
         parser = capture.parser;
@@ -1346,7 +1348,7 @@ fn parse_parameter_list(initial_parser -> Parser) -> ParameterListParseResult {
     let mut parameters -> Parameter[] = [];
 
     let token = parser_peek_raw(parser);
-    if token.kind.variant == "Symbol" && token.kind.value == ")" {
+    if symbol_matches(token, ")") {
         parser = parser_advance_raw(parser);
         return ParameterListParseResult { parser: parser, parameters: parameters };
     }
@@ -1357,12 +1359,12 @@ fn parse_parameter_list(initial_parser -> Parser) -> ParameterListParseResult {
         parameters = append_parameter(parameters, param_result.parameter);
         parser = skip_trivia(parser);
         let separator = parser_peek_raw(parser);
-        if separator.kind.variant == "Symbol" && separator.kind.value == "," {
+        if symbol_matches(separator, ",") {
             parser = parser_advance_raw(parser);
             parser = skip_trivia(parser);
             continue;
         }
-        if separator.kind.variant == "Symbol" && separator.kind.value == ")" {
+        if symbol_matches(separator, ")") {
             parser = parser_advance_raw(parser);
             break;
         }
@@ -1397,13 +1399,9 @@ fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
 
     current = skip_trivia(current);
     let separator = parser_peek_raw(current);
-    let is_symbol = separator.kind.variant == "Symbol";
     let mut is_type_sep = false;
-    if is_symbol {
-        let symbol_value = separator.kind.value;
-        if symbol_value == ":" || symbol_value == "->" {
-            is_type_sep = true;
-        }
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
+        is_type_sep = true;
     }
     if !is_type_sep {
         return StructFieldParseResult { parser: parser, field: null, success: false };
@@ -1419,7 +1417,7 @@ fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if terminator.kind.variant != "Symbol" || terminator.kind.value != ";" {
+    if !symbol_matches(terminator, ";") {
         return StructFieldParseResult { parser: parser, field: null, success: false };
     }
     current = parser_advance_raw(current);
@@ -1449,7 +1447,7 @@ fn parse_model_property(parser -> Parser) -> ModelPropertyParseResult {
 
     current = skip_trivia(current);
     let equals = parser_peek_raw(current);
-    if equals.kind.variant != "Symbol" || equals.kind.value != "=" {
+    if !symbol_matches(equals, "=") {
         return ModelPropertyParseResult { parser: parser, property: null, success: false };
     }
     current = parser_advance_raw(current);
@@ -1460,7 +1458,7 @@ fn parse_model_property(parser -> Parser) -> ModelPropertyParseResult {
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if terminator.kind.variant != "Symbol" || terminator.kind.value != ";" {
+    if !symbol_matches(terminator, ";") {
         return ModelPropertyParseResult { parser: parser, property: null, success: false };
     }
     current = parser_advance_raw(current);
@@ -1515,7 +1513,7 @@ fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodPar
     current = skip_trivia(current);
     let mut return_type -> TypeAnnotation? = null;
     let separator = parser_peek_raw(current);
-    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
         current = parser_advance_raw(current);
         let capture = collect_until(skip_trivia(current), ["!", "{"]);
         current = capture.parser;
@@ -1565,7 +1563,7 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
     loop {
         current = skip_trivia(current);
         let token = parser_peek_raw(current);
-    if token.kind.variant != "Symbol" || token.kind.value != "@" {
+        if !symbol_matches(token, "@") {
             break;
         }
 
@@ -1585,7 +1583,7 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
 
         let mut decorator_arguments -> DecoratorArgument[] = [];
         let after = parser_peek_raw(current);
-        if after.kind.variant == "Symbol" && after.kind.value == "(" {
+        if symbol_matches(after, "(") {
             let paren_result = collect_parenthesized(current);
             if paren_result.success {
                 let mut segment_tokens -> Token[] = [];
@@ -1602,26 +1600,26 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
                     let tok = paren_result.tokens[index];
                     if tok.kind.variant == "Symbol" {
                         let sym = tok.kind.value;
-                        if sym == "<" {
+                        if strings_equal(sym, "<") {
                             angle += 1;
-                        } else if sym == ">" && angle > 0 {
+                        } else if strings_equal(sym, ">") && angle > 0 {
                             angle -= 1;
-                        } else if sym == "(" {
+                        } else if strings_equal(sym, "(") {
                             paren += 1;
-                        } else if sym == ")" && paren > 0 {
+                        } else if strings_equal(sym, ")") && paren > 0 {
                             paren -= 1;
-                        } else if sym == "{" {
+                        } else if strings_equal(sym, "{") {
                             brace += 1;
-                        } else if sym == "}" && brace > 0 {
+                        } else if strings_equal(sym, "}") && brace > 0 {
                             brace -= 1;
-                        } else if sym == "[" {
+                        } else if strings_equal(sym, "[") {
                             bracket += 1;
-                        } else if sym == "]" && bracket > 0 {
+                        } else if strings_equal(sym, "]") && bracket > 0 {
                             bracket -= 1;
                         }
 
                         let at_top_level = angle == 0 && paren == 0 && brace == 0 && bracket == 0;
-                        if sym == "," && at_top_level {
+                        if strings_equal(sym, ",") && at_top_level {
                             let trimmed_tokens = trim_token_edges(segment_tokens);
                             let argument = parse_decorator_argument(trimmed_tokens);
                             if argument != null {
@@ -1657,7 +1655,7 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
 fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
     let mut current = skip_trivia(parser);
     let token = parser_peek_raw(current);
-    if token.kind.variant != "Symbol" || token.kind.value != "<" {
+    if !symbol_matches(token, "<") {
         return TypeParameterParseResult { parser: parser, parameters: [] };
     }
 
@@ -1672,9 +1670,9 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
         }
         if tok.kind.variant == "Symbol" {
             let sym = tok.kind.value;
-            if sym == "<" {
+            if strings_equal(sym, "<") {
                 depth += 1;
-            } else if sym == ">" {
+            } else if strings_equal(sym, ">") {
                 depth -= 1;
                 if depth == 0 {
                     current = parser_advance_raw(current);
@@ -1775,7 +1773,7 @@ fn parse_single_parameter(initial_parser -> Parser) -> ParameterParseResult {
     let mut type_annotation -> TypeAnnotation? = null;
     parser = skip_trivia(parser);
     let separator = parser_peek_raw(parser);
-    if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), ["=", ",", ")"]);
         parser = capture.parser;
@@ -1788,7 +1786,7 @@ fn parse_single_parameter(initial_parser -> Parser) -> ParameterParseResult {
     let mut default_value -> Expression? = null;
     parser = skip_trivia(parser);
     let assign = parser_peek_raw(parser);
-    if assign.kind.variant == "Symbol" && assign.kind.value == "=" {
+    if symbol_matches(assign, "=") {
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), [",", ")"]);
         parser = capture.parser;
@@ -1813,7 +1811,7 @@ fn parse_effect_list(initial_parser -> Parser) -> EffectParseResult {
     let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
-    if token.kind.variant != "Symbol" || token.kind.value != "!" {
+    if !symbol_matches(token, "!") {
         return EffectParseResult { parser: parser, effects: [] };
     }
 
@@ -1825,7 +1823,7 @@ fn parse_effect_list(initial_parser -> Parser) -> EffectParseResult {
     parser = skip_trivia(parser);
     loop {
         let current = parser_peek_raw(parser);
-        if current.kind.variant == "Symbol" && current.kind.value == "]" {
+        if symbol_matches(current, "]") {
             parser = parser_advance_raw(parser);
             break;
         }
@@ -1835,7 +1833,7 @@ fn parse_effect_list(initial_parser -> Parser) -> EffectParseResult {
             parser = parser_advance_raw(parser);
             parser = skip_trivia(parser);
             let separator = parser_peek_raw(parser);
-            if separator.kind.variant == "Symbol" && separator.kind.value == "," {
+            if symbol_matches(separator, ",") {
                 parser = parser_advance_raw(parser);
                 parser = skip_trivia(parser);
                 continue;
@@ -1853,7 +1851,7 @@ fn parse_block(initial_parser -> Parser) -> BlockParseResult {
     let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
-    if token.kind.variant != "Symbol" || token.kind.value != "{" {
+    if !symbol_matches(token, "{") {
         return BlockParseResult {
             parser: parser,
             block: Block { tokens: [], text: "", statements: [] },
@@ -1868,7 +1866,7 @@ fn parse_block(initial_parser -> Parser) -> BlockParseResult {
     loop {
         current = skip_trivia(current);
         let tok = parser_peek_raw(current);
-        if tok.kind.variant == "Symbol" && tok.kind.value == "}" {
+        if symbol_matches(tok, "}") {
             block_end_index = current.index + 1;
             current = parser_advance_raw(current);
             break;
@@ -2005,7 +2003,7 @@ fn parse_for_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStat
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
         current = parser_advance_raw(current);
     }
 
@@ -2038,7 +2036,7 @@ fn parse_loop_statement(parser -> Parser, decorators -> Decorator[]) -> BlockSta
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
         current = parser_advance_raw(current);
     }
 
@@ -2064,7 +2062,7 @@ fn parse_break_statement(parser -> Parser) -> BlockStatementParseResult {
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
         current = parser_advance_raw(current);
     }
 
@@ -2085,7 +2083,7 @@ fn parse_continue_statement(parser -> Parser) -> BlockStatementParseResult {
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
         current = parser_advance_raw(current);
     }
 
@@ -2146,7 +2144,7 @@ fn parse_if_statement(parser -> Parser, decorators -> Decorator[]) -> BlockState
 
         current = skip_trivia(current);
         let terminator = parser_peek_raw(current);
-        if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
             current = parser_advance_raw(current);
         }
     }
@@ -2190,7 +2188,7 @@ fn parse_match_statement(parser -> Parser, decorators -> Decorator[]) -> BlockSt
     current = skip_trivia(current);
     if current.index < current.tokens.length {
         let terminator = parser_peek_raw(current);
-        if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+        if symbol_matches(terminator, ";") {
             current = parser_advance_raw(current);
         }
     }
@@ -2212,7 +2210,7 @@ fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
     let mut current = skip_trivia(parser);
     current = advance_to_symbol(current, "{");
     let peek = parser_peek_raw(current);
-    if peek.kind.variant != "Symbol" || peek.kind.value != "{" {
+    if !symbol_matches(peek, "{") {
         return MatchCasesParseResult { parser: parser, cases: [], success: false };
     }
     current = parser_advance_raw(current);
@@ -2222,7 +2220,7 @@ fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
     loop {
         current = skip_trivia(current);
         let token = parser_peek_raw(current);
-        if token.kind.variant == "Symbol" && token.kind.value == "}" {
+        if symbol_matches(token, "}") {
             current = parser_advance_raw(current);
             break;
         }
@@ -2239,7 +2237,7 @@ fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
 
         current = skip_trivia(current);
         let separator = parser_peek_raw(current);
-        if separator.kind.variant == "Symbol" && separator.kind.value == "," {
+        if symbol_matches(separator, ",") {
             current = parser_advance_raw(current);
         }
     }
@@ -2281,7 +2279,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
 
     let mut body -> Block? = null;
 
-    if next.kind.variant == "Symbol" && next.kind.value == "{" {
+    if symbol_matches(next, "{") {
         let body_result = parse_block(current);
         if body_result.block.tokens.length == 0 {
             return MatchCaseParseResult { parser: original, case: null, success: false };
@@ -2312,7 +2310,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
 
         current = skip_trivia(capture.parser);
         let terminator = parser_peek_raw(current);
-        if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
             block_tokens = append_token(block_tokens, terminator);
             current = parser_advance_raw(current);
         }
@@ -2346,7 +2344,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
 
         current = skip_trivia(capture.parser);
         let terminator = parser_peek_raw(current);
-        if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
             block_tokens = append_token(block_tokens, terminator);
             current = parser_advance_raw(current);
         }
@@ -2404,7 +2402,7 @@ fn parse_prompt_statement(parser -> Parser, decorators -> Decorator[]) -> BlockS
     let body = block_result.block;
 
     current = skip_trivia(current);
-    if parser_peek_raw(current).kind.variant == "Symbol" && parser_peek_raw(current).kind.value == ";" {
+    if symbol_matches(parser_peek_raw(current), ";") {
         current = parser_advance_raw(current);
     }
 
@@ -2455,7 +2453,7 @@ fn parse_with_statement(parser -> Parser, decorators -> Decorator[]) -> BlockSta
     let body = block_result.block;
 
     current = skip_trivia(current);
-    if parser_peek_raw(current).kind.variant == "Symbol" && parser_peek_raw(current).kind.value == ";" {
+    if symbol_matches(parser_peek_raw(current), ";") {
         current = parser_advance_raw(current);
     }
 
@@ -2502,7 +2500,7 @@ fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult {
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if terminator.kind.variant == "Symbol" && terminator.kind.value == ";" {
+    if symbol_matches(terminator, ";") {
         statement_tokens = append_token(statement_tokens, terminator);
         current = parser_advance_raw(current);
     }
@@ -2529,7 +2527,7 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
     }
     if start.kind.variant == "Symbol" {
         let sym = start.kind.value;
-        if sym == "}" || sym == "{" {
+        if strings_equal(sym, "}") || strings_equal(sym, "{") {
             return BlockStatementParseResult { parser: parser, statement: null, success: false };
         }
     }
@@ -2557,7 +2555,7 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
     current = capture.parser;
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if terminator.kind.variant != "Symbol" || terminator.kind.value != ";" {
+    if !symbol_matches(terminator, ";") {
         return BlockStatementParseResult { parser: parser, statement: null, success: false };
     }
     statement_tokens = append_token(statement_tokens, terminator);
@@ -2586,17 +2584,17 @@ fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
 
         if tok.kind.variant == "Symbol" {
             let sym = tok.kind.value;
-            if sym == "{" {
+            if strings_equal(sym, "{") {
                 depth += 1;
-            } else if sym == "}" {
+            } else if strings_equal(sym, "}") {
                 if depth > 0 {
                     depth -= 1;
                 }
-                if depth == 0 && sym == "}" {
+                if depth == 0 {
                     current = parser_advance_raw(current);
                     break;
                 }
-            } else if sym == ";" && depth == 0 {
+            } else if strings_equal(sym, ";") && depth == 0 {
                 current = parser_advance_raw(current);
                 break;
             }
@@ -2620,10 +2618,26 @@ fn identifier_matches(token -> Token, expected -> string) -> boolean {
     if token.kind.variant != "Identifier" {
         return false;
     }
-    if token.kind.value == expected {
-        return true;
+    let value = token.kind.value;
+    if value.length > 0 {
+        if strings_equal(value, expected) {
+            return true;
+        }
     }
-    return token.lexeme == expected;
+    return strings_equal(token.lexeme, expected);
+}
+
+fn symbol_matches(token -> Token, expected -> string) -> boolean {
+    if token.kind.variant != "Symbol" {
+        return false;
+    }
+    let value = token.kind.value;
+    if value.length > 0 {
+        if strings_equal(value, expected) {
+            return true;
+        }
+    }
+    return strings_equal(token.lexeme, expected);
 }
 
 fn identifier_text(token -> Token) -> string {
@@ -2694,7 +2708,7 @@ fn consume_symbol(initial_parser -> Parser, symbol -> string) -> Parser {
     let mut parser -> Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
-    if token.kind.variant == "Symbol" && token.kind.value == symbol {
+    if symbol_matches(token, symbol) {
         return parser_advance_raw(parser);
     }
     return parser;
@@ -2727,17 +2741,17 @@ fn collect_until(parser -> Parser, terminators -> string[]) -> CaptureResult {
 
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "(" {
+            if strings_equal(sym, "(") {
                 paren_depth += 1;
-            } else if sym == ")" && paren_depth > 0 {
+            } else if strings_equal(sym, ")") && paren_depth > 0 {
                 paren_depth -= 1;
-            } else if sym == "{" {
+            } else if strings_equal(sym, "{") {
                 brace_depth += 1;
-            } else if sym == "}" && brace_depth > 0 {
+            } else if strings_equal(sym, "}") && brace_depth > 0 {
                 brace_depth -= 1;
-            } else if sym == "[" {
+            } else if strings_equal(sym, "[") {
                 bracket_depth += 1;
-            } else if sym == "]" && bracket_depth > 0 {
+            } else if strings_equal(sym, "]") && bracket_depth > 0 {
                 bracket_depth -= 1;
             }
         }
@@ -2755,7 +2769,7 @@ fn collect_until(parser -> Parser, terminators -> string[]) -> CaptureResult {
 fn collect_parenthesized(parser -> Parser) -> ParenthesizedParseResult {
     let mut current = skip_trivia(parser);
     let start = parser_peek_raw(current);
-    if start.kind.variant != "Symbol" || start.kind.value != "(" {
+    if !symbol_matches(start, "(") {
         return ParenthesizedParseResult { parser: parser, tokens: [], success: false };
     }
 
@@ -2771,9 +2785,9 @@ fn collect_parenthesized(parser -> Parser) -> ParenthesizedParseResult {
 
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "(" {
+            if strings_equal(sym, "(") {
                 depth += 1;
-            } else if sym == ")" {
+            } else if strings_equal(sym, ")") {
                 depth -= 1;
                 if depth == 0 {
                     current = parser_advance_raw(current);
@@ -2806,7 +2820,7 @@ fn collect_pattern_until_arrow(parser -> Parser) -> PatternCaptureResult {
         }
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "=>" || sym == "->" {
+            if strings_equal(sym, "=>") || strings_equal(sym, "->") {
                 current = parser_advance_raw(current);
                 break;
             }
@@ -3064,9 +3078,9 @@ fn trim_block_tokens(tokens -> Token[]) -> Token[] {
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "{" {
+            if strings_equal(sym, "{") {
                 depth += 1;
-            } else if sym == "}" {
+            } else if strings_equal(sym, "}") {
                 if depth > 0 {
                     depth -= 1;
                 }
@@ -3095,23 +3109,23 @@ fn find_top_level_colon(tokens -> Token[]) -> number {
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "<" {
+            if strings_equal(sym, "<") {
                 angle += 1;
-            } else if sym == ">" && angle > 0 {
+            } else if strings_equal(sym, ">") && angle > 0 {
                 angle -= 1;
-            } else if sym == "(" {
+            } else if strings_equal(sym, "(") {
                 paren += 1;
-            } else if sym == ")" && paren > 0 {
+            } else if strings_equal(sym, ")") && paren > 0 {
                 paren -= 1;
-            } else if sym == "{" {
+            } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else if sym == "}" && brace > 0 {
+            } else if strings_equal(sym, "}") && brace > 0 {
                 brace -= 1;
-            } else if sym == "[" {
+            } else if strings_equal(sym, "[") {
                 bracket += 1;
-            } else if sym == "]" && bracket > 0 {
+            } else if strings_equal(sym, "]") && bracket > 0 {
                 bracket -= 1;
-            } else if sym == ":" {
+            } else if strings_equal(sym, ":") {
                 let at_top = angle == 0 && paren == 0 && brace == 0 && bracket == 0;
                 if at_top {
                     return index;
@@ -3161,13 +3175,13 @@ fn expression_from_single_token(token -> Token) -> Expression? {
     }
     if token.kind.variant == "Identifier" {
         let value = identifier_text(token);
-        if value == "true" {
+        if strings_equal(value, "true") {
             return Expression.BooleanLiteral { value: "true" };
         }
-        if value == "false" {
+        if strings_equal(value, "false") {
             return Expression.BooleanLiteral { value: "false" };
         }
-        if value == "null" {
+        if strings_equal(value, "null") {
             return Expression.NullLiteral();
         }
         return Expression.Identifier { name: value };
@@ -3194,27 +3208,27 @@ fn expression_tokens_collect_until(state -> ExpressionTokens, terminators -> str
         }
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "<" {
+            if strings_equal(sym, "<") {
                 angle += 1;
-            } else if sym == ">" {
+            } else if strings_equal(sym, ">") {
                 if angle > 0 {
                     angle -= 1;
                 }
-            } else if sym == "(" {
+            } else if strings_equal(sym, "(") {
                 paren += 1;
-            } else if sym == ")" {
+            } else if strings_equal(sym, ")") {
                 if paren > 0 {
                     paren -= 1;
                 }
-            } else if sym == "{" {
+            } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else if sym == "}" {
+            } else if strings_equal(sym, "}") {
                 if brace > 0 {
                     brace -= 1;
                 }
-            } else if sym == "[" {
+            } else if strings_equal(sym, "[") {
                 bracket += 1;
-            } else if sym == "]" {
+            } else if strings_equal(sym, "]") {
                 if bracket > 0 {
                     bracket -= 1;
                 }
@@ -3233,7 +3247,7 @@ fn collect_expression_block(state -> ExpressionTokens) -> ExpressionBlockParseRe
         return ExpressionBlockParseResult { state: current, tokens: [], success: false };
     }
     let first = expression_tokens_peek(current);
-    if first.kind.variant != "Symbol" || first.kind.value != "{" {
+    if !symbol_matches(first, "{") {
         return ExpressionBlockParseResult { state: current, tokens: [], success: false };
     }
 
@@ -3248,9 +3262,9 @@ fn collect_expression_block(state -> ExpressionTokens) -> ExpressionBlockParseRe
         tokens = append_token(tokens, token);
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "{" {
+            if strings_equal(sym, "{") {
                 depth += 1;
-            } else if sym == "}" {
+            } else if strings_equal(sym, "}") {
                 depth -= 1;
                 if depth == 0 {
                     current = expression_tokens_advance(current);
@@ -3291,7 +3305,7 @@ fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResu
     let mut type_annotation -> TypeAnnotation? = null;
     if !expression_tokens_is_at_end(current) {
         let separator = expression_tokens_peek(current);
-        if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
             current = expression_tokens_advance(current);
             let capture = expression_tokens_collect_until(current, ["=", ",", ")"]);
             if !capture.success {
@@ -3308,7 +3322,7 @@ fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResu
     let mut default_value -> Expression? = null;
     if !expression_tokens_is_at_end(current) {
         let assign = expression_tokens_peek(current);
-        if assign.kind.variant == "Symbol" && assign.kind.value == "=" {
+        if symbol_matches(assign, "=") {
             current = expression_tokens_advance(current);
             let capture = expression_tokens_collect_until(current, [",", ")"]);
             if !capture.success {
@@ -3342,7 +3356,7 @@ fn parse_lambda_parameter_list(state -> ExpressionTokens) -> LambdaParameterList
     }
 
     let closing = expression_tokens_peek(current);
-    if closing.kind.variant == "Symbol" && closing.kind.value == ")" {
+    if symbol_matches(closing, ")") {
         current = expression_tokens_advance(current);
         return LambdaParameterListParseResult { state: current, parameters: parameters, success: true };
     }
@@ -3359,11 +3373,11 @@ fn parse_lambda_parameter_list(state -> ExpressionTokens) -> LambdaParameterList
         }
         let separator = expression_tokens_peek(current);
         if separator.kind.variant == "Symbol" {
-            if separator.kind.value == "," {
+            if symbol_matches(separator, ",") {
                 current = expression_tokens_advance(current);
                 continue;
             }
-            if separator.kind.value == ")" {
+            if symbol_matches(separator, ")") {
                 current = expression_tokens_advance(current);
                 break;
             }
@@ -3389,7 +3403,7 @@ fn parse_lambda_expression(state -> ExpressionTokens) -> ExpressionParseResult {
         return expression_parse_failure(state);
     }
     let open_paren = expression_tokens_peek(current);
-    if open_paren.kind.variant != "Symbol" || open_paren.kind.value != "(" {
+    if !symbol_matches(open_paren, "(") {
         return expression_parse_failure(state);
     }
 
@@ -3404,7 +3418,7 @@ fn parse_lambda_expression(state -> ExpressionTokens) -> ExpressionParseResult {
     let mut return_type -> TypeAnnotation? = null;
     if !expression_tokens_is_at_end(current) {
         let separator = expression_tokens_peek(current);
-        if separator.kind.variant == "Symbol" && (separator.kind.value == ":" || separator.kind.value == "->") {
+    if symbol_matches(separator, ":") || symbol_matches(separator, "->") {
             current = expression_tokens_advance(current);
             let capture = expression_tokens_collect_until(current, ["{"]);
             if !capture.success {
@@ -3512,7 +3526,7 @@ fn parse_prefix_expression(state -> ExpressionTokens) -> ExpressionParseResult {
     let token = expression_tokens_peek(state);
     if token.kind.variant == "Symbol" {
         let sym = token.kind.value;
-        if sym == "-" || sym == "!" {
+    if strings_equal(sym, "-") || strings_equal(sym, "!") {
             let advanced = expression_tokens_advance(state);
             let operand_result = parse_expression_bp(advanced, unary_precedence());
             if !operand_result.success {
@@ -3572,21 +3586,21 @@ fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult 
     }
     if token.kind.variant == "Identifier" {
         let name = identifier_text(token);
-        if name == "true" {
+        if strings_equal(name, "true") {
             return ExpressionParseResult {
                 state: expression_tokens_advance(state),
                 expression: Expression.BooleanLiteral { value: "true" },
                 success: true,
             };
         }
-        if name == "false" {
+        if strings_equal(name, "false") {
             return ExpressionParseResult {
                 state: expression_tokens_advance(state),
                 expression: Expression.BooleanLiteral { value: "false" },
                 success: true,
             };
         }
-        if name == "null" {
+        if strings_equal(name, "null") {
             return ExpressionParseResult {
                 state: expression_tokens_advance(state),
                 expression: Expression.NullLiteral(),
@@ -3599,7 +3613,7 @@ fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult 
             success: true,
         };
     }
-    if token.kind.variant == "Symbol" && token.kind.value == "(" {
+    if symbol_matches(token, "(") {
         let inner_state = expression_tokens_advance(state);
         let inner_result = parse_expression_bp(inner_state, 0);
         if !inner_result.success {
@@ -3610,7 +3624,7 @@ fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult 
             return expression_parse_failure(state);
         }
         let closing = expression_tokens_peek(after_inner);
-        if closing.kind.variant != "Symbol" || closing.kind.value != ")" {
+        if !symbol_matches(closing, ")") {
             return expression_parse_failure(state);
         }
         return ExpressionParseResult {
@@ -3620,7 +3634,7 @@ fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult 
         };
     }
 
-    if token.kind.variant == "Symbol" && token.kind.value == "[" {
+    if symbol_matches(token, "[") {
         let array_result = parse_array_literal(expression_tokens_advance(state));
         if !array_result.success {
             return expression_parse_failure(state);
@@ -3632,7 +3646,7 @@ fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult 
         };
     }
 
-    if token.kind.variant == "Symbol" && token.kind.value == "{" {
+    if symbol_matches(token, "{") {
         let object_result = parse_object_literal(expression_tokens_advance(state));
         if !object_result.success {
             return expression_parse_failure(state);
@@ -3661,7 +3675,7 @@ fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> E
         }
 
         let sym = token.kind.value;
-        if sym == "." {
+    if strings_equal(sym, ".") {
             let after_dot = expression_tokens_advance(current_state);
             if expression_tokens_is_at_end(after_dot) {
                 return expression_parse_failure(state);
@@ -3677,7 +3691,7 @@ fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> E
             };
             continue;
         }
-        if sym == "(" {
+        if strings_equal(sym, "(") {
             let call_result = parse_call_arguments(current_state);
             if !call_result.success {
                 return expression_parse_failure(state);
@@ -3689,7 +3703,7 @@ fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> E
             };
             continue;
         }
-        if sym == "[" {
+        if strings_equal(sym, "[") {
             let index_state = expression_tokens_advance(current_state);
             let index_result = parse_expression_bp(index_state, 0);
             if !index_result.success {
@@ -3700,7 +3714,7 @@ fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> E
                 return expression_parse_failure(state);
             }
             let closing = expression_tokens_peek(after_index);
-            if closing.kind.variant != "Symbol" || closing.kind.value != "]" {
+            if !symbol_matches(closing, "]") {
                 return expression_parse_failure(state);
             }
             current_state = expression_tokens_advance(after_index);
@@ -3710,7 +3724,7 @@ fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> E
             };
             continue;
         }
-        if sym == "{" {
+        if strings_equal(sym, "{") {
             if !expression_is_struct_target(current_expression) {
                 break;
             }
@@ -3740,8 +3754,9 @@ fn parse_call_arguments(state -> ExpressionTokens) -> CallArgumentsParseResult {
         return CallArgumentsParseResult { state: state, arguments: [], success: false };
     }
 
-    if expression_tokens_peek(current).kind.variant == "Symbol"
-        && expression_tokens_peek(current).kind.value == ")" {
+    let closing_token = expression_tokens_peek(current);
+    if closing_token.kind.variant == "Symbol"
+        && symbol_matches(closing_token, ")") {
         current = expression_tokens_advance(current);
         return CallArgumentsParseResult { state: current, arguments: arguments, success: true };
     }
@@ -3757,11 +3772,11 @@ fn parse_call_arguments(state -> ExpressionTokens) -> CallArgumentsParseResult {
             return CallArgumentsParseResult { state: state, arguments: [], success: false };
         }
         let separator = expression_tokens_peek(current);
-        if separator.kind.variant == "Symbol" && separator.kind.value == "," {
+        if symbol_matches(separator, ",") {
             current = expression_tokens_advance(current);
             continue;
         }
-        if separator.kind.variant == "Symbol" && separator.kind.value == ")" {
+        if symbol_matches(separator, ")") {
             current = expression_tokens_advance(current);
             break;
         }
@@ -3779,8 +3794,9 @@ fn parse_array_literal(state -> ExpressionTokens) -> ArrayLiteralParseResult {
         return ArrayLiteralParseResult { state: state, elements: [], success: false };
     }
 
-    if expression_tokens_peek(current).kind.variant == "Symbol"
-        && expression_tokens_peek(current).kind.value == "]" {
+    let closing_bracket = expression_tokens_peek(current);
+    if closing_bracket.kind.variant == "Symbol"
+        && symbol_matches(closing_bracket, "]") {
         current = expression_tokens_advance(current);
         return ArrayLiteralParseResult { state: current, elements: elements, success: true };
     }
@@ -3798,19 +3814,19 @@ fn parse_array_literal(state -> ExpressionTokens) -> ArrayLiteralParseResult {
         }
 
         let separator = expression_tokens_peek(current);
-        if separator.kind.variant == "Symbol" && separator.kind.value == "," {
+        if symbol_matches(separator, ",") {
             current = expression_tokens_advance(current);
             if expression_tokens_is_at_end(current) {
                 return ArrayLiteralParseResult { state: state, elements: [], success: false };
             }
             let maybe_end = expression_tokens_peek(current);
-            if maybe_end.kind.variant == "Symbol" && maybe_end.kind.value == "]" {
+            if symbol_matches(maybe_end, "]") {
                 current = expression_tokens_advance(current);
                 break;
             }
             continue;
         }
-        if separator.kind.variant == "Symbol" && separator.kind.value == "]" {
+        if symbol_matches(separator, "]") {
             current = expression_tokens_advance(current);
             break;
         }
@@ -3828,8 +3844,9 @@ fn parse_object_literal(state -> ExpressionTokens) -> ObjectLiteralParseResult {
         return ObjectLiteralParseResult { state: state, fields: [], success: false };
     }
 
-    if expression_tokens_peek(current).kind.variant == "Symbol"
-        && expression_tokens_peek(current).kind.value == "}" {
+    let closing_brace = expression_tokens_peek(current);
+    if closing_brace.kind.variant == "Symbol"
+        && symbol_matches(closing_brace, "}") {
         current = expression_tokens_advance(current);
         return ObjectLiteralParseResult { state: current, fields: fields, success: true };
     }
@@ -3849,7 +3866,7 @@ fn parse_object_literal(state -> ExpressionTokens) -> ObjectLiteralParseResult {
             return ObjectLiteralParseResult { state: state, fields: [], success: false };
         }
         let colon = expression_tokens_peek(current);
-        if colon.kind.variant != "Symbol" || colon.kind.value != ":" {
+        if !symbol_matches(colon, ":") {
             return ObjectLiteralParseResult { state: state, fields: [], success: false };
         }
         current = expression_tokens_advance(current);
@@ -3865,19 +3882,19 @@ fn parse_object_literal(state -> ExpressionTokens) -> ObjectLiteralParseResult {
             return ObjectLiteralParseResult { state: state, fields: [], success: false };
         }
         let separator = expression_tokens_peek(current);
-        if separator.kind.variant == "Symbol" && separator.kind.value == "," {
+        if symbol_matches(separator, ",") {
             current = expression_tokens_advance(current);
             if expression_tokens_is_at_end(current) {
                 return ObjectLiteralParseResult { state: state, fields: [], success: false };
             }
             let maybe_end = expression_tokens_peek(current);
-            if maybe_end.kind.variant == "Symbol" && maybe_end.kind.value == "}" {
+            if symbol_matches(maybe_end, "}") {
                 current = expression_tokens_advance(current);
                 break;
             }
             continue;
         }
-        if separator.kind.variant == "Symbol" && separator.kind.value == "}" {
+        if symbol_matches(separator, "}") {
             current = expression_tokens_advance(current);
             break;
         }
@@ -4065,7 +4082,7 @@ fn string_array_contains(values -> string[], target -> string) -> boolean {
         if index >= values.length {
             break;
         }
-        if values[index] == target {
+        if strings_equal(values[index], target) {
             return true;
         }
         index += 1;
@@ -4108,7 +4125,7 @@ fn advance_to_symbol(parser -> Parser, symbol -> string) -> Parser {
     loop {
         current = skip_trivia(current);
         let token = parser_peek_raw(current);
-        if token.kind.variant == "Symbol" && token.kind.value == symbol {
+        if symbol_matches(token, symbol) {
             return current;
         }
         if token.kind.variant == "EndOfFile" {
@@ -4137,11 +4154,11 @@ fn skip_struct_member(parser -> Parser) -> Parser {
         }
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == ";" {
+            if strings_equal(sym, ";") {
                 current = parser_advance_raw(current);
                 return current;
             }
-            if sym == "}" {
+            if strings_equal(sym, "}") {
                 return current;
             }
         }
@@ -4163,11 +4180,11 @@ fn skip_enum_variant_entry(parser -> Parser) -> Parser {
         }
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "," {
+            if strings_equal(sym, ",") {
                 current = parser_advance_raw(current);
                 return current;
             }
-            if sym == "}" {
+            if strings_equal(sym, "}") {
                 return current;
             }
         }
@@ -4215,25 +4232,25 @@ fn split_tokens_by_comma(tokens -> Token[]) -> string[] {
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "<" {
+            if strings_equal(sym, "<") {
                 angle += 1;
-            } else if sym == ">" && angle > 0 {
+            } else if strings_equal(sym, ">") && angle > 0 {
                 angle -= 1;
-            } else if sym == "(" {
+            } else if strings_equal(sym, "(") {
                 paren += 1;
-            } else if sym == ")" && paren > 0 {
+            } else if strings_equal(sym, ")") && paren > 0 {
                 paren -= 1;
-            } else if sym == "{" {
+            } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else if sym == "}" && brace > 0 {
+            } else if strings_equal(sym, "}") && brace > 0 {
                 brace -= 1;
-            } else if sym == "[" {
+            } else if strings_equal(sym, "[") {
                 bracket += 1;
-            } else if sym == "]" && bracket > 0 {
+            } else if strings_equal(sym, "]") && bracket > 0 {
                 bracket -= 1;
             }
 
-            if sym == "," && angle == 0 && paren == 0 && brace == 0 && bracket == 0 {
+            if strings_equal(sym, ",") && angle == 0 && paren == 0 && brace == 0 && bracket == 0 {
                 let text = trim_text(segment);
                 if text.length > 0 {
                     parts = append_string(parts, text);
@@ -4270,25 +4287,25 @@ fn split_token_slices_by_comma(tokens -> Token[]) -> Token[][] {
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "<" {
+            if strings_equal(sym, "<") {
                 angle += 1;
-            } else if sym == ">" && angle > 0 {
+            } else if strings_equal(sym, ">") && angle > 0 {
                 angle -= 1;
-            } else if sym == "(" {
+            } else if strings_equal(sym, "(") {
                 paren += 1;
-            } else if sym == ")" && paren > 0 {
+            } else if strings_equal(sym, ")") && paren > 0 {
                 paren -= 1;
-            } else if sym == "{" {
+            } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else if sym == "}" && brace > 0 {
+            } else if strings_equal(sym, "}") && brace > 0 {
                 brace -= 1;
-            } else if sym == "[" {
+            } else if strings_equal(sym, "[") {
                 bracket += 1;
-            } else if sym == "]" && bracket > 0 {
+            } else if strings_equal(sym, "]") && bracket > 0 {
                 bracket -= 1;
             }
 
-            if sym == "," && angle == 0 && paren == 0 && brace == 0 && bracket == 0 {
+            if strings_equal(sym, ",") && angle == 0 && paren == 0 && brace == 0 && bracket == 0 {
                 parts = append_token_array(parts, segment);
                 segment = [];
                 index += 1;
@@ -4319,25 +4336,25 @@ fn find_top_level_symbol(tokens -> Token[], symbol -> string) -> number {
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "<" {
+            if strings_equal(sym, "<") {
                 angle += 1;
-            } else if sym == ">" && angle > 0 {
+            } else if strings_equal(sym, ">") && angle > 0 {
                 angle -= 1;
-            } else if sym == "(" {
+            } else if strings_equal(sym, "(") {
                 paren += 1;
-            } else if sym == ")" && paren > 0 {
+            } else if strings_equal(sym, ")") && paren > 0 {
                 paren -= 1;
-            } else if sym == "{" {
+            } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else if sym == "}" && brace > 0 {
+            } else if strings_equal(sym, "}") && brace > 0 {
                 brace -= 1;
-            } else if sym == "[" {
+            } else if strings_equal(sym, "[") {
                 bracket += 1;
-            } else if sym == "]" && bracket > 0 {
+            } else if strings_equal(sym, "]") && bracket > 0 {
                 bracket -= 1;
             }
 
-            if sym == symbol && angle == 0 && paren == 0 && brace == 0 && bracket == 0 {
+            if strings_equal(sym, symbol) && angle == 0 && paren == 0 && brace == 0 && bracket == 0 {
                 return index;
             }
         }
@@ -4360,21 +4377,21 @@ fn find_top_level_identifier(tokens -> Token[], keyword -> string) -> number {
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.kind.value;
-            if sym == "<" {
+            if strings_equal(sym, "<") {
                 angle += 1;
-            } else if sym == ">" && angle > 0 {
+            } else if strings_equal(sym, ">") && angle > 0 {
                 angle -= 1;
-            } else if sym == "(" {
+            } else if strings_equal(sym, "(") {
                 paren += 1;
-            } else if sym == ")" && paren > 0 {
+            } else if strings_equal(sym, ")") && paren > 0 {
                 paren -= 1;
-            } else if sym == "{" {
+            } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else if sym == "}" && brace > 0 {
+            } else if strings_equal(sym, "}") && brace > 0 {
                 brace -= 1;
-            } else if sym == "[" {
+            } else if strings_equal(sym, "[") {
                 bracket += 1;
-            } else if sym == "]" && bracket > 0 {
+            } else if strings_equal(sym, "]") && bracket > 0 {
                 bracket -= 1;
             }
         }

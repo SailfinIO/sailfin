@@ -16,7 +16,7 @@ declare noalias i8* @malloc(i64)
 @.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
 
 define %Token @eof_token(double %line, double %column) {
-entry:
+block.entry:
   %t0 = insertvalue %TokenKind undef, i32 7, 0
   %t1 = insertvalue %Token undef, %TokenKind %t0, 0
   %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0

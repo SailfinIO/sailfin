@@ -55,7 +55,6 @@ declare noalias i8* @malloc(i64)
 @runtime = external global i8**
 
 @.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.len9.h1770336441 = private unnamed_addr constant [10 x i8] c"primitive\00"
 @.str.len5.h550282393 = private unnamed_addr constant [6 x i8] c"union\00"
 @.str.len12.h22148892 = private unnamed_addr constant [13 x i8] c"intersection\00"
@@ -63,60 +62,53 @@ declare noalias i8* @malloc(i64)
 @.str.len8.h1603982015 = private unnamed_addr constant [9 x i8] c"function\00"
 @.str.len5.h261050197 = private unnamed_addr constant [6 x i8] c"named\00"
 @.str.len7.h186837049 = private unnamed_addr constant [8 x i8] c"unknown\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
-@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
-@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
-@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
-@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
 @.str.len42.h1658844115 = private unnamed_addr constant [43 x i8] c"Non-exhaustive match for value {{ value }}\00"
 @.str.len10.h626550212 = private unnamed_addr constant [11 x i8] c"0123456789\00"
 @.str.len26.h287370135 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
 @.str.len26.h645889856 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
 
 define i8* @capability_grant({ i8**, i64 }* %effects) {
-entry:
+block.entry:
   %t0 = bitcast { i8**, i64 }* %effects to i8*
   %t1 = call i8* @sailfin_runtime_create_capability_grant(i8* %t0)
   ret i8* %t1
 }
 
 define i8* @fs_bridge(i8* %grant) {
-entry:
+block.entry:
   %t0 = call i8* @sailfin_runtime_create_filesystem_bridge(i8* %grant)
   ret i8* %t0
 }
 
 define i8* @http_bridge(i8* %grant) {
-entry:
+block.entry:
   %t0 = call i8* @sailfin_runtime_create_http_bridge(i8* %grant)
   ret i8* %t0
 }
 
 define i8* @model_bridge(i8* %grant) {
-entry:
+block.entry:
   %t0 = call i8* @sailfin_runtime_create_model_bridge(i8* %grant)
   ret i8* %t0
 }
 
 ; fn sleep effects: ![clock]
 define void @sleep(double %milliseconds) {
-entry:
+block.entry:
   call void @sailfin_runtime_sleep(double %milliseconds)
   ret void
 }
 
 ; fn channel effects: ![io]
 define i8* @channel(double %capacity) {
-entry:
+block.entry:
   %t0 = call i8* @sailfin_runtime_channel(double %capacity)
   ret i8* %t0
 }
 
 ; fn parallel effects: ![io]
 define { i8**, i64 }* @parallel({ i8**, i64 }* %tasks) {
-entry:
+block.entry:
   %t0 = bitcast { i8**, i64 }* %tasks to i8*
   %t1 = call i8* @sailfin_runtime_parallel(i8* %t0)
   %t2 = bitcast i8* %t1 to { i8**, i64 }*
@@ -125,19 +117,19 @@ entry:
 
 ; fn spawn effects: ![io]
 define void @spawn(i8* %task, i8* %name) {
-entry:
+block.entry:
   call void @sailfin_runtime_spawn(i8* %task, i8* %name)
   ret void
 }
 
 define i8* @logExecution(i8* %callable) {
-entry:
+block.entry:
   %t0 = call i8* @sailfin_runtime_log_execution(i8* %callable)
   ret i8* %t0
 }
 
 define { i8**, i64 }* @array_map({ i8**, i64 }* %items, i8* %mapper) {
-entry:
+block.entry:
   %t0 = bitcast { i8**, i64 }* %items to i8*
   %t1 = call i8* @sailfin_runtime_array_map(i8* %t0, i8* %mapper)
   %t2 = bitcast i8* %t1 to { i8**, i64 }*
@@ -145,7 +137,7 @@ entry:
 }
 
 define { i8**, i64 }* @array_filter({ i8**, i64 }* %items, i8* %predicate) {
-entry:
+block.entry:
   %t0 = bitcast { i8**, i64 }* %items to i8*
   %t1 = call i8* @sailfin_runtime_array_filter(i8* %t0, i8* %predicate)
   %t2 = bitcast i8* %t1 to { i8**, i64 }*
@@ -153,14 +145,14 @@ entry:
 }
 
 define i8* @array_reduce({ i8**, i64 }* %items, i8* %initial, i8* %reducer) {
-entry:
+block.entry:
   %t0 = bitcast { i8**, i64 }* %items to i8*
   %t1 = call i8* @sailfin_runtime_array_reduce(i8* %t0, i8* %initial, i8* %reducer)
   ret i8* %t1
 }
 
 define i8* @char_at(i8* %value, double %index) {
-entry:
+block.entry:
   %t0 = call i64 @sailfin_runtime_string_length(i8* %value)
   %t1 = icmp eq i64 %t0, 0
   br i1 %t1, label %then0, label %merge1
@@ -196,28 +188,35 @@ merge5:
 }
 
 define %EnumType @enum_type(i8* %name) {
-entry:
+block.entry:
   %t0 = insertvalue %EnumType undef, i8* %name, 0
-  %t1 = alloca [0 x %EnumVariantDefinition*]
-  %t2 = getelementptr [0 x %EnumVariantDefinition*], [0 x %EnumVariantDefinition*]* %t1, i32 0, i32 0
-  %t3 = alloca { %EnumVariantDefinition**, i64 }
-  %t4 = getelementptr { %EnumVariantDefinition**, i64 }, { %EnumVariantDefinition**, i64 }* %t3, i32 0, i32 0
-  store %EnumVariantDefinition** %t2, %EnumVariantDefinition*** %t4
-  %t5 = getelementptr { %EnumVariantDefinition**, i64 }, { %EnumVariantDefinition**, i64 }* %t3, i32 0, i32 1
-  store i64 0, i64* %t5
-  %t6 = insertvalue %EnumType %t0, { %EnumVariantDefinition**, i64 }* %t3, 1
-  ret %EnumType %t6
+  %t1 = getelementptr [0 x %EnumVariantDefinition*], [0 x %EnumVariantDefinition*]* null, i32 1
+  %t2 = ptrtoint [0 x %EnumVariantDefinition*]* %t1 to i64
+  %t3 = icmp eq i64 %t2, 0
+  %t4 = select i1 %t3, i64 1, i64 %t2
+  %t5 = call i8* @malloc(i64 %t4)
+  %t6 = bitcast i8* %t5 to %EnumVariantDefinition**
+  %t7 = getelementptr { %EnumVariantDefinition**, i64 }, { %EnumVariantDefinition**, i64 }* null, i32 1
+  %t8 = ptrtoint { %EnumVariantDefinition**, i64 }* %t7 to i64
+  %t9 = call i8* @malloc(i64 %t8)
+  %t10 = bitcast i8* %t9 to { %EnumVariantDefinition**, i64 }*
+  %t11 = getelementptr { %EnumVariantDefinition**, i64 }, { %EnumVariantDefinition**, i64 }* %t10, i32 0, i32 0
+  store %EnumVariantDefinition** %t6, %EnumVariantDefinition*** %t11
+  %t12 = getelementptr { %EnumVariantDefinition**, i64 }, { %EnumVariantDefinition**, i64 }* %t10, i32 0, i32 1
+  store i64 0, i64* %t12
+  %t13 = insertvalue %EnumType %t0, { %EnumVariantDefinition**, i64 }* %t10, 1
+  ret %EnumType %t13
 }
 
 define %EnumField @enum_field(i8* %name, i8* %value) {
-entry:
+block.entry:
   %t0 = insertvalue %EnumField undef, i8* %name, 0
   %t1 = insertvalue %EnumField %t0, i8* %value, 1
   ret %EnumField %t1
 }
 
 define %EnumType @enum_define_variant(%EnumType %enum_type, i8* %variant_name, { i8**, i64 }* %field_names) {
-entry:
+block.entry:
   %l0 = alloca %EnumVariantDefinition
   %l1 = alloca { i8**, i64 }*
   %t0 = insertvalue %EnumVariantDefinition undef, i8* %variant_name, 0
@@ -228,35 +227,42 @@ entry:
   %t4 = call noalias i8* @malloc(i64 16)
   %t5 = bitcast i8* %t4 to %EnumVariantDefinition*
   store %EnumVariantDefinition %t3, %EnumVariantDefinition* %t5
-  %t6 = alloca [1 x i8*]
-  %t7 = getelementptr [1 x i8*], [1 x i8*]* %t6, i32 0, i32 0
-  %t8 = getelementptr i8*, i8** %t7, i64 0
-  store i8* %t4, i8** %t8
-  %t9 = alloca { i8**, i64 }
-  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %t9, i32 0, i32 0
-  store i8** %t7, i8*** %t10
-  %t11 = getelementptr { i8**, i64 }, { i8**, i64 }* %t9, i32 0, i32 1
-  store i64 1, i64* %t11
-  %t12 = bitcast { %EnumVariantDefinition**, i64 }* %t2 to { i8**, i64 }*
-  %t13 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t12, { i8**, i64 }* %t9)
-  store { i8**, i64 }* %t13, { i8**, i64 }** %l1
-  %t14 = extractvalue %EnumType %enum_type, 0
-  %t15 = insertvalue %EnumType undef, i8* %t14, 0
-  %t16 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t17 = bitcast { i8**, i64 }* %t16 to { %EnumVariantDefinition**, i64 }*
-  %t18 = insertvalue %EnumType %t15, { %EnumVariantDefinition**, i64 }* %t17, 1
-  ret %EnumType %t18
+  %t6 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t7 = ptrtoint [1 x i8*]* %t6 to i64
+  %t8 = icmp eq i64 %t7, 0
+  %t9 = select i1 %t8, i64 1, i64 %t7
+  %t10 = call i8* @malloc(i64 %t9)
+  %t11 = bitcast i8* %t10 to i8**
+  %t12 = getelementptr i8*, i8** %t11, i64 0
+  store i8* %t4, i8** %t12
+  %t13 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t14 = ptrtoint { i8**, i64 }* %t13 to i64
+  %t15 = call i8* @malloc(i64 %t14)
+  %t16 = bitcast i8* %t15 to { i8**, i64 }*
+  %t17 = getelementptr { i8**, i64 }, { i8**, i64 }* %t16, i32 0, i32 0
+  store i8** %t11, i8*** %t17
+  %t18 = getelementptr { i8**, i64 }, { i8**, i64 }* %t16, i32 0, i32 1
+  store i64 1, i64* %t18
+  %t19 = bitcast { %EnumVariantDefinition**, i64 }* %t2 to { i8**, i64 }*
+  %t20 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t19, { i8**, i64 }* %t16)
+  store { i8**, i64 }* %t20, { i8**, i64 }** %l1
+  %t21 = extractvalue %EnumType %enum_type, 0
+  %t22 = insertvalue %EnumType undef, i8* %t21, 0
+  %t23 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t24 = bitcast { i8**, i64 }* %t23 to { %EnumVariantDefinition**, i64 }*
+  %t25 = insertvalue %EnumType %t22, { %EnumVariantDefinition**, i64 }* %t24, 1
+  ret %EnumType %t25
 }
 
 define %EnumField* @enum_lookup_field({ %EnumField*, i64 }* %fields, i8* %name) {
-entry:
+block.entry:
   %l0 = alloca i64
   %l1 = alloca %EnumField
   store i64 0, i64* %l0
   %t0 = load i64, i64* %l0
   br label %loop.header0
 loop.header0:
-  %t23 = phi i64 [ %t0, %entry ], [ %t22, %loop.latch2 ]
+  %t23 = phi i64 [ %t0, %block.entry ], [ %t22, %loop.latch2 ]
   store i64 %t23, i64* %l0
   br label %loop.body1
 loop.body1:
@@ -305,14 +311,14 @@ afterloop3:
 }
 
 define %EnumVariantDefinition* @enum_find_variant(%EnumType %enum_type, i8* %variant_name) {
-entry:
+block.entry:
   %l0 = alloca i64
   %l1 = alloca %EnumVariantDefinition*
   store i64 0, i64* %l0
   %t0 = load i64, i64* %l0
   br label %loop.header0
 loop.header0:
-  %t25 = phi i64 [ %t0, %entry ], [ %t24, %loop.latch2 ]
+  %t25 = phi i64 [ %t0, %block.entry ], [ %t24, %loop.latch2 ]
   store i64 %t25, i64* %l0
   br label %loop.body1
 loop.body1:
@@ -362,7 +368,7 @@ afterloop3:
 }
 
 define { %EnumField*, i64 }* @enum_normalize_fields(%EnumVariantDefinition* %definition, { %EnumField*, i64 }* %provided) {
-entry:
+block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca { %EnumField*, i64 }*
   %l2 = alloca i64
@@ -384,119 +390,140 @@ merge1:
   %t7 = load { i8**, i64 }*, { i8**, i64 }** %l0
   br i1 %t6, label %then2, label %merge3
 then2:
-  %t8 = alloca [0 x %EnumField]
-  %t9 = getelementptr [0 x %EnumField], [0 x %EnumField]* %t8, i32 0, i32 0
-  %t10 = alloca { %EnumField*, i64 }
-  %t11 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t10, i32 0, i32 0
-  store %EnumField* %t9, %EnumField** %t11
-  %t12 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t10, i32 0, i32 1
-  store i64 0, i64* %t12
-  ret { %EnumField*, i64 }* %t10
+  %t8 = getelementptr [0 x %EnumField], [0 x %EnumField]* null, i32 1
+  %t9 = ptrtoint [0 x %EnumField]* %t8 to i64
+  %t10 = icmp eq i64 %t9, 0
+  %t11 = select i1 %t10, i64 1, i64 %t9
+  %t12 = call i8* @malloc(i64 %t11)
+  %t13 = bitcast i8* %t12 to %EnumField*
+  %t14 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* null, i32 1
+  %t15 = ptrtoint { %EnumField*, i64 }* %t14 to i64
+  %t16 = call i8* @malloc(i64 %t15)
+  %t17 = bitcast i8* %t16 to { %EnumField*, i64 }*
+  %t18 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t17, i32 0, i32 0
+  store %EnumField* %t13, %EnumField** %t18
+  %t19 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t17, i32 0, i32 1
+  store i64 0, i64* %t19
+  ret { %EnumField*, i64 }* %t17
 merge3:
-  %t13 = alloca [0 x %EnumField]
-  %t14 = getelementptr [0 x %EnumField], [0 x %EnumField]* %t13, i32 0, i32 0
-  %t15 = alloca { %EnumField*, i64 }
-  %t16 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t15, i32 0, i32 0
-  store %EnumField* %t14, %EnumField** %t16
-  %t17 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t15, i32 0, i32 1
-  store i64 0, i64* %t17
-  store { %EnumField*, i64 }* %t15, { %EnumField*, i64 }** %l1
+  %t20 = getelementptr [0 x %EnumField], [0 x %EnumField]* null, i32 1
+  %t21 = ptrtoint [0 x %EnumField]* %t20 to i64
+  %t22 = icmp eq i64 %t21, 0
+  %t23 = select i1 %t22, i64 1, i64 %t21
+  %t24 = call i8* @malloc(i64 %t23)
+  %t25 = bitcast i8* %t24 to %EnumField*
+  %t26 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* null, i32 1
+  %t27 = ptrtoint { %EnumField*, i64 }* %t26 to i64
+  %t28 = call i8* @malloc(i64 %t27)
+  %t29 = bitcast i8* %t28 to { %EnumField*, i64 }*
+  %t30 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t29, i32 0, i32 0
+  store %EnumField* %t25, %EnumField** %t30
+  %t31 = getelementptr { %EnumField*, i64 }, { %EnumField*, i64 }* %t29, i32 0, i32 1
+  store i64 0, i64* %t31
+  store { %EnumField*, i64 }* %t29, { %EnumField*, i64 }** %l1
   store i64 0, i64* %l2
-  %t18 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t19 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t20 = load i64, i64* %l2
+  %t32 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t33 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t34 = load i64, i64* %l2
   br label %loop.header4
 loop.header4:
-  %t72 = phi { %EnumField*, i64 }* [ %t19, %merge3 ], [ %t70, %loop.latch6 ]
-  %t73 = phi i64 [ %t20, %merge3 ], [ %t71, %loop.latch6 ]
-  store { %EnumField*, i64 }* %t72, { %EnumField*, i64 }** %l1
-  store i64 %t73, i64* %l2
+  %t93 = phi { %EnumField*, i64 }* [ %t33, %merge3 ], [ %t91, %loop.latch6 ]
+  %t94 = phi i64 [ %t34, %merge3 ], [ %t92, %loop.latch6 ]
+  store { %EnumField*, i64 }* %t93, { %EnumField*, i64 }** %l1
+  store i64 %t94, i64* %l2
   br label %loop.body5
 loop.body5:
-  %t21 = load i64, i64* %l2
-  %t22 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t23 = load { i8**, i64 }, { i8**, i64 }* %t22
-  %t24 = extractvalue { i8**, i64 } %t23, 1
-  %t25 = icmp sge i64 %t21, %t24
-  %t26 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t27 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t28 = load i64, i64* %l2
-  br i1 %t25, label %then8, label %merge9
+  %t35 = load i64, i64* %l2
+  %t36 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t37 = load { i8**, i64 }, { i8**, i64 }* %t36
+  %t38 = extractvalue { i8**, i64 } %t37, 1
+  %t39 = icmp sge i64 %t35, %t38
+  %t40 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t41 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t42 = load i64, i64* %l2
+  br i1 %t39, label %then8, label %merge9
 then8:
   br label %afterloop7
 merge9:
-  %t29 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t30 = load i64, i64* %l2
-  %t31 = load { i8**, i64 }, { i8**, i64 }* %t29
-  %t32 = extractvalue { i8**, i64 } %t31, 0
-  %t33 = extractvalue { i8**, i64 } %t31, 1
-  %t34 = icmp uge i64 %t30, %t33
-  ; bounds check: %t34 (if true, out of bounds)
-  call void @sailfin_runtime_bounds_check(i64 %t30, i64 %t33)
-  %t35 = getelementptr i8*, i8** %t32, i64 %t30
-  %t36 = load i8*, i8** %t35
-  store i8* %t36, i8** %l3
-  %t37 = load i8*, i8** %l3
-  %t38 = call %EnumField* @enum_lookup_field({ %EnumField*, i64 }* %provided, i8* %t37)
-  store %EnumField* %t38, %EnumField** %l4
+  %t43 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t44 = load i64, i64* %l2
+  %t45 = load { i8**, i64 }, { i8**, i64 }* %t43
+  %t46 = extractvalue { i8**, i64 } %t45, 0
+  %t47 = extractvalue { i8**, i64 } %t45, 1
+  %t48 = icmp uge i64 %t44, %t47
+  ; bounds check: %t48 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t44, i64 %t47)
+  %t49 = getelementptr i8*, i8** %t46, i64 %t44
+  %t50 = load i8*, i8** %t49
+  store i8* %t50, i8** %l3
+  %t51 = load i8*, i8** %l3
+  %t52 = call %EnumField* @enum_lookup_field({ %EnumField*, i64 }* %provided, i8* %t51)
+  store %EnumField* %t52, %EnumField** %l4
   store i8* null, i8** %l5
-  %t39 = load %EnumField*, %EnumField** %l4
-  %t40 = icmp ne %EnumField* %t39, null
-  %t41 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t42 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t43 = load i64, i64* %l2
-  %t44 = load i8*, i8** %l3
-  %t45 = load %EnumField*, %EnumField** %l4
-  %t46 = load i8*, i8** %l5
-  br i1 %t40, label %then10, label %merge11
+  %t53 = load %EnumField*, %EnumField** %l4
+  %t54 = icmp ne %EnumField* %t53, null
+  %t55 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t56 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t57 = load i64, i64* %l2
+  %t58 = load i8*, i8** %l3
+  %t59 = load %EnumField*, %EnumField** %l4
+  %t60 = load i8*, i8** %l5
+  br i1 %t54, label %then10, label %merge11
 then10:
-  %t47 = load %EnumField*, %EnumField** %l4
-  %t48 = getelementptr %EnumField, %EnumField* %t47, i32 0, i32 1
-  %t49 = load i8*, i8** %t48
-  store i8* %t49, i8** %l5
-  %t50 = load i8*, i8** %l5
+  %t61 = load %EnumField*, %EnumField** %l4
+  %t62 = getelementptr %EnumField, %EnumField* %t61, i32 0, i32 1
+  %t63 = load i8*, i8** %t62
+  store i8* %t63, i8** %l5
+  %t64 = load i8*, i8** %l5
   br label %merge11
 merge11:
-  %t51 = phi i8* [ %t50, %then10 ], [ %t46, %merge9 ]
-  store i8* %t51, i8** %l5
-  %t52 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t53 = load i8*, i8** %l3
-  %t54 = insertvalue %EnumField undef, i8* %t53, 0
-  %t55 = load i8*, i8** %l5
-  %t56 = insertvalue %EnumField %t54, i8* %t55, 1
-  %t57 = call noalias i8* @malloc(i64 16)
-  %t58 = bitcast i8* %t57 to %EnumField*
-  store %EnumField %t56, %EnumField* %t58
-  %t59 = alloca [1 x i8*]
-  %t60 = getelementptr [1 x i8*], [1 x i8*]* %t59, i32 0, i32 0
-  %t61 = getelementptr i8*, i8** %t60, i64 0
-  store i8* %t57, i8** %t61
-  %t62 = alloca { i8**, i64 }
-  %t63 = getelementptr { i8**, i64 }, { i8**, i64 }* %t62, i32 0, i32 0
-  store i8** %t60, i8*** %t63
-  %t64 = getelementptr { i8**, i64 }, { i8**, i64 }* %t62, i32 0, i32 1
-  store i64 1, i64* %t64
-  %t65 = bitcast { %EnumField*, i64 }* %t52 to { i8**, i64 }*
-  %t66 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t65, { i8**, i64 }* %t62)
-  %t67 = bitcast { i8**, i64 }* %t66 to { %EnumField*, i64 }*
-  store { %EnumField*, i64 }* %t67, { %EnumField*, i64 }** %l1
-  %t68 = load i64, i64* %l2
-  %t69 = add i64 %t68, 1
-  store i64 %t69, i64* %l2
+  %t65 = phi i8* [ %t64, %then10 ], [ %t60, %merge9 ]
+  store i8* %t65, i8** %l5
+  %t66 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t67 = load i8*, i8** %l3
+  %t68 = insertvalue %EnumField undef, i8* %t67, 0
+  %t69 = load i8*, i8** %l5
+  %t70 = insertvalue %EnumField %t68, i8* %t69, 1
+  %t71 = call noalias i8* @malloc(i64 16)
+  %t72 = bitcast i8* %t71 to %EnumField*
+  store %EnumField %t70, %EnumField* %t72
+  %t73 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t74 = ptrtoint [1 x i8*]* %t73 to i64
+  %t75 = icmp eq i64 %t74, 0
+  %t76 = select i1 %t75, i64 1, i64 %t74
+  %t77 = call i8* @malloc(i64 %t76)
+  %t78 = bitcast i8* %t77 to i8**
+  %t79 = getelementptr i8*, i8** %t78, i64 0
+  store i8* %t71, i8** %t79
+  %t80 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t81 = ptrtoint { i8**, i64 }* %t80 to i64
+  %t82 = call i8* @malloc(i64 %t81)
+  %t83 = bitcast i8* %t82 to { i8**, i64 }*
+  %t84 = getelementptr { i8**, i64 }, { i8**, i64 }* %t83, i32 0, i32 0
+  store i8** %t78, i8*** %t84
+  %t85 = getelementptr { i8**, i64 }, { i8**, i64 }* %t83, i32 0, i32 1
+  store i64 1, i64* %t85
+  %t86 = bitcast { %EnumField*, i64 }* %t66 to { i8**, i64 }*
+  %t87 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t86, { i8**, i64 }* %t83)
+  %t88 = bitcast { i8**, i64 }* %t87 to { %EnumField*, i64 }*
+  store { %EnumField*, i64 }* %t88, { %EnumField*, i64 }** %l1
+  %t89 = load i64, i64* %l2
+  %t90 = add i64 %t89, 1
+  store i64 %t90, i64* %l2
   br label %loop.latch6
 loop.latch6:
-  %t70 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t71 = load i64, i64* %l2
+  %t91 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t92 = load i64, i64* %l2
   br label %loop.header4
 afterloop7:
-  %t74 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  %t75 = load i64, i64* %l2
-  %t76 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
-  ret { %EnumField*, i64 }* %t76
+  %t95 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  %t96 = load i64, i64* %l2
+  %t97 = load { %EnumField*, i64 }*, { %EnumField*, i64 }** %l1
+  ret { %EnumField*, i64 }* %t97
 }
 
 define %EnumInstance @enum_instantiate(%EnumType %enum_type, i8* %variant_name, { %EnumField*, i64 }* %provided) {
-entry:
+block.entry:
   %l0 = alloca %EnumVariantDefinition*
   %l1 = alloca { %EnumField*, i64 }*
   %t0 = call %EnumVariantDefinition* @enum_find_variant(%EnumType %enum_type, i8* %variant_name)
@@ -513,14 +540,14 @@ entry:
 }
 
 define i8* @enum_get_field(%EnumInstance %instance, i8* %name) {
-entry:
+block.entry:
   %l0 = alloca i64
   %l1 = alloca %EnumField*
   store i64 0, i64* %l0
   %t0 = load i64, i64* %l0
   br label %loop.header0
 loop.header0:
-  %t27 = phi i64 [ %t0, %entry ], [ %t26, %loop.latch2 ]
+  %t27 = phi i64 [ %t0, %block.entry ], [ %t26, %loop.latch2 ]
   store i64 %t27, i64* %l0
   br label %loop.body1
 loop.body1:
@@ -571,114 +598,122 @@ afterloop3:
 }
 
 define %StructField @struct_field(i8* %name, i8* %value) {
-entry:
+block.entry:
   %t0 = insertvalue %StructField undef, i8* %name, 0
   %t1 = insertvalue %StructField %t0, i8* %value, 1
   ret %StructField %t1
 }
 
 define i8* @struct_repr(i8* %name, { %StructField*, i64 }* %fields) {
-entry:
-  %l0 = alloca i8
+block.entry:
+  %l0 = alloca i8*
   %l1 = alloca i64
   %l2 = alloca %StructField
   %l3 = alloca i8*
-  %t0 = load i8, i8* %name
-  %t1 = add i8 %t0, 40
-  store i8 %t1, i8* %l0
+  %t0 = alloca [2 x i8], align 1
+  %t1 = getelementptr [2 x i8], [2 x i8]* %t0, i32 0, i32 0
+  store i8 40, i8* %t1
+  %t2 = getelementptr [2 x i8], [2 x i8]* %t0, i32 0, i32 1
+  store i8 0, i8* %t2
+  %t3 = getelementptr [2 x i8], [2 x i8]* %t0, i32 0, i32 0
+  %t4 = call i8* @sailfin_runtime_string_concat(i8* %name, i8* %t3)
+  store i8* %t4, i8** %l0
   store i64 0, i64* %l1
-  %t2 = load i8, i8* %l0
-  %t3 = load i64, i64* %l1
+  %t5 = load i8*, i8** %l0
+  %t6 = load i64, i64* %l1
   br label %loop.header0
 loop.header0:
-  %t43 = phi i8 [ %t2, %entry ], [ %t41, %loop.latch2 ]
-  %t44 = phi i64 [ %t3, %entry ], [ %t42, %loop.latch2 ]
-  store i8 %t43, i8* %l0
-  store i64 %t44, i64* %l1
+  %t47 = phi i8* [ %t5, %block.entry ], [ %t45, %loop.latch2 ]
+  %t48 = phi i64 [ %t6, %block.entry ], [ %t46, %loop.latch2 ]
+  store i8* %t47, i8** %l0
+  store i64 %t48, i64* %l1
   br label %loop.body1
 loop.body1:
-  %t4 = load i64, i64* %l1
-  %t5 = load { %StructField*, i64 }, { %StructField*, i64 }* %fields
-  %t6 = extractvalue { %StructField*, i64 } %t5, 1
-  %t7 = icmp sge i64 %t4, %t6
-  %t8 = load i8, i8* %l0
-  %t9 = load i64, i64* %l1
-  br i1 %t7, label %then4, label %merge5
+  %t7 = load i64, i64* %l1
+  %t8 = load { %StructField*, i64 }, { %StructField*, i64 }* %fields
+  %t9 = extractvalue { %StructField*, i64 } %t8, 1
+  %t10 = icmp sge i64 %t7, %t9
+  %t11 = load i8*, i8** %l0
+  %t12 = load i64, i64* %l1
+  br i1 %t10, label %then4, label %merge5
 then4:
   br label %afterloop3
 merge5:
-  %t10 = load i64, i64* %l1
-  %t11 = icmp sgt i64 %t10, 0
-  %t12 = load i8, i8* %l0
   %t13 = load i64, i64* %l1
-  br i1 %t11, label %then6, label %merge7
+  %t14 = icmp sgt i64 %t13, 0
+  %t15 = load i8*, i8** %l0
+  %t16 = load i64, i64* %l1
+  br i1 %t14, label %then6, label %merge7
 then6:
-  %t14 = load i8, i8* %l0
-  %s15 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
-  %t16 = load i8, i8* %s15
-  %t17 = add i8 %t14, %t16
-  store i8 %t17, i8* %l0
-  %t18 = load i8, i8* %l0
+  %t17 = load i8*, i8** %l0
+  %s18 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
+  %t19 = call i8* @sailfin_runtime_string_concat(i8* %t17, i8* %s18)
+  store i8* %t19, i8** %l0
+  %t20 = load i8*, i8** %l0
   br label %merge7
 merge7:
-  %t19 = phi i8 [ %t18, %then6 ], [ %t12, %merge5 ]
-  store i8 %t19, i8* %l0
-  %t20 = load i64, i64* %l1
-  %t21 = load { %StructField*, i64 }, { %StructField*, i64 }* %fields
-  %t22 = extractvalue { %StructField*, i64 } %t21, 0
-  %t23 = extractvalue { %StructField*, i64 } %t21, 1
-  %t24 = icmp uge i64 %t20, %t23
-  ; bounds check: %t24 (if true, out of bounds)
-  call void @sailfin_runtime_bounds_check(i64 %t20, i64 %t23)
-  %t25 = getelementptr %StructField, %StructField* %t22, i64 %t20
-  %t26 = load %StructField, %StructField* %t25
-  store %StructField %t26, %StructField* %l2
-  %t27 = load %StructField, %StructField* %l2
-  %t28 = extractvalue %StructField %t27, 1
-  %t29 = call i8* @to_debug_string(i8* %t28)
-  store i8* %t29, i8** %l3
-  %t30 = load i8, i8* %l0
-  %t31 = load %StructField, %StructField* %l2
-  %t32 = extractvalue %StructField %t31, 0
-  %t33 = load i8, i8* %t32
-  %t34 = add i8 %t30, %t33
-  %t35 = add i8 %t34, 61
-  %t36 = load i8*, i8** %l3
-  %t37 = load i8, i8* %t36
-  %t38 = add i8 %t35, %t37
-  store i8 %t38, i8* %l0
-  %t39 = load i64, i64* %l1
-  %t40 = add i64 %t39, 1
-  store i64 %t40, i64* %l1
+  %t21 = phi i8* [ %t20, %then6 ], [ %t15, %merge5 ]
+  store i8* %t21, i8** %l0
+  %t22 = load i64, i64* %l1
+  %t23 = load { %StructField*, i64 }, { %StructField*, i64 }* %fields
+  %t24 = extractvalue { %StructField*, i64 } %t23, 0
+  %t25 = extractvalue { %StructField*, i64 } %t23, 1
+  %t26 = icmp uge i64 %t22, %t25
+  ; bounds check: %t26 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t22, i64 %t25)
+  %t27 = getelementptr %StructField, %StructField* %t24, i64 %t22
+  %t28 = load %StructField, %StructField* %t27
+  store %StructField %t28, %StructField* %l2
+  %t29 = load %StructField, %StructField* %l2
+  %t30 = extractvalue %StructField %t29, 1
+  %t31 = call i8* @to_debug_string(i8* %t30)
+  store i8* %t31, i8** %l3
+  %t32 = load i8*, i8** %l0
+  %t33 = load %StructField, %StructField* %l2
+  %t34 = extractvalue %StructField %t33, 0
+  %t35 = call i8* @sailfin_runtime_string_concat(i8* %t32, i8* %t34)
+  %t36 = alloca [2 x i8], align 1
+  %t37 = getelementptr [2 x i8], [2 x i8]* %t36, i32 0, i32 0
+  store i8 61, i8* %t37
+  %t38 = getelementptr [2 x i8], [2 x i8]* %t36, i32 0, i32 1
+  store i8 0, i8* %t38
+  %t39 = getelementptr [2 x i8], [2 x i8]* %t36, i32 0, i32 0
+  %t40 = call i8* @sailfin_runtime_string_concat(i8* %t35, i8* %t39)
+  %t41 = load i8*, i8** %l3
+  %t42 = call i8* @sailfin_runtime_string_concat(i8* %t40, i8* %t41)
+  store i8* %t42, i8** %l0
+  %t43 = load i64, i64* %l1
+  %t44 = add i64 %t43, 1
+  store i64 %t44, i64* %l1
   br label %loop.latch2
 loop.latch2:
-  %t41 = load i8, i8* %l0
-  %t42 = load i64, i64* %l1
+  %t45 = load i8*, i8** %l0
+  %t46 = load i64, i64* %l1
   br label %loop.header0
 afterloop3:
-  %t45 = load i8, i8* %l0
-  %t46 = load i64, i64* %l1
-  %t47 = load i8, i8* %l0
-  %t48 = add i8 %t47, 41
-  store i8 %t48, i8* %l0
-  %t49 = load i8, i8* %l0
-  %t50 = alloca [2 x i8], align 1
-  %t51 = getelementptr [2 x i8], [2 x i8]* %t50, i32 0, i32 0
-  store i8 %t49, i8* %t51
-  %t52 = getelementptr [2 x i8], [2 x i8]* %t50, i32 0, i32 1
-  store i8 0, i8* %t52
-  %t53 = getelementptr [2 x i8], [2 x i8]* %t50, i32 0, i32 0
-  ret i8* %t53
+  %t49 = load i8*, i8** %l0
+  %t50 = load i64, i64* %l1
+  %t51 = load i8*, i8** %l0
+  %t52 = alloca [2 x i8], align 1
+  %t53 = getelementptr [2 x i8], [2 x i8]* %t52, i32 0, i32 0
+  store i8 41, i8* %t53
+  %t54 = getelementptr [2 x i8], [2 x i8]* %t52, i32 0, i32 1
+  store i8 0, i8* %t54
+  %t55 = getelementptr [2 x i8], [2 x i8]* %t52, i32 0, i32 0
+  %t56 = call i8* @sailfin_runtime_string_concat(i8* %t51, i8* %t55)
+  store i8* %t56, i8** %l0
+  %t57 = load i8*, i8** %l0
+  ret i8* %t57
 }
 
 define i8* @to_debug_string(i8* %value) {
-entry:
+block.entry:
   %t0 = call i8* @sailfin_runtime_to_debug_string(i8* %value)
   ret i8* %t0
 }
 
 define i8* @format_interpolated({ i8**, i64 }* %parts, { i8**, i64 }* %values) {
-entry:
+block.entry:
   %l0 = alloca i8*
   %l1 = alloca i64
   %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
@@ -688,8 +723,8 @@ entry:
   %t2 = load i64, i64* %l1
   br label %loop.header0
 loop.header0:
-  %t40 = phi i8* [ %t1, %entry ], [ %t38, %loop.latch2 ]
-  %t41 = phi i64 [ %t2, %entry ], [ %t39, %loop.latch2 ]
+  %t40 = phi i8* [ %t1, %block.entry ], [ %t38, %loop.latch2 ]
+  %t41 = phi i64 [ %t2, %block.entry ], [ %t39, %loop.latch2 ]
   store i8* %t40, i8** %l0
   store i64 %t41, i64* %l1
   br label %loop.body1
@@ -758,7 +793,7 @@ afterloop3:
 }
 
 define %TypeDescriptor @type_descriptor(i8* %kind, i8* %name, { %TypeDescriptor*, i64 }* %items) {
-entry:
+block.entry:
   %t0 = insertvalue %TypeDescriptor undef, i8* %kind, 0
   %t1 = insertvalue %TypeDescriptor %t0, i8* %name, 1
   %t2 = bitcast { %TypeDescriptor*, i64 }* %items to { %TypeDescriptor**, i64 }*
@@ -767,93 +802,128 @@ entry:
 }
 
 define %TypeDescriptor @type_descriptor_primitive(i8* %name) {
-entry:
+block.entry:
   %s0 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1770336441, i32 0, i32 0
-  %t1 = alloca [0 x %TypeDescriptor]
-  %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
-  %t3 = alloca { %TypeDescriptor*, i64 }
-  %t4 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 0
-  store %TypeDescriptor* %t2, %TypeDescriptor** %t4
-  %t5 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 1
-  store i64 0, i64* %t5
-  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* %t3)
-  ret %TypeDescriptor %t6
+  %t1 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* null, i32 1
+  %t2 = ptrtoint [0 x %TypeDescriptor]* %t1 to i64
+  %t3 = icmp eq i64 %t2, 0
+  %t4 = select i1 %t3, i64 1, i64 %t2
+  %t5 = call i8* @malloc(i64 %t4)
+  %t6 = bitcast i8* %t5 to %TypeDescriptor*
+  %t7 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* null, i32 1
+  %t8 = ptrtoint { %TypeDescriptor*, i64 }* %t7 to i64
+  %t9 = call i8* @malloc(i64 %t8)
+  %t10 = bitcast i8* %t9 to { %TypeDescriptor*, i64 }*
+  %t11 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t10, i32 0, i32 0
+  store %TypeDescriptor* %t6, %TypeDescriptor** %t11
+  %t12 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t10, i32 0, i32 1
+  store i64 0, i64* %t12
+  %t13 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* %t10)
+  ret %TypeDescriptor %t13
 }
 
 define %TypeDescriptor @type_descriptor_union({ %TypeDescriptor*, i64 }* %descriptors) {
-entry:
+block.entry:
   %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h550282393, i32 0, i32 0
   %t1 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %descriptors)
   ret %TypeDescriptor %t1
 }
 
 define %TypeDescriptor @type_descriptor_intersection({ %TypeDescriptor*, i64 }* %descriptors) {
-entry:
+block.entry:
   %s0 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h22148892, i32 0, i32 0
   %t1 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %descriptors)
   ret %TypeDescriptor %t1
 }
 
 define %TypeDescriptor @type_descriptor_array(%TypeDescriptor %inner) {
-entry:
+block.entry:
   %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1920110414, i32 0, i32 0
-  %t1 = alloca [1 x %TypeDescriptor]
-  %t2 = getelementptr [1 x %TypeDescriptor], [1 x %TypeDescriptor]* %t1, i32 0, i32 0
-  %t3 = getelementptr %TypeDescriptor, %TypeDescriptor* %t2, i64 0
-  store %TypeDescriptor %inner, %TypeDescriptor* %t3
-  %t4 = alloca { %TypeDescriptor*, i64 }
-  %t5 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t4, i32 0, i32 0
-  store %TypeDescriptor* %t2, %TypeDescriptor** %t5
-  %t6 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t4, i32 0, i32 1
-  store i64 1, i64* %t6
-  %t7 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t4)
-  ret %TypeDescriptor %t7
+  %t1 = getelementptr [1 x %TypeDescriptor], [1 x %TypeDescriptor]* null, i32 1
+  %t2 = ptrtoint [1 x %TypeDescriptor]* %t1 to i64
+  %t3 = icmp eq i64 %t2, 0
+  %t4 = select i1 %t3, i64 1, i64 %t2
+  %t5 = call i8* @malloc(i64 %t4)
+  %t6 = bitcast i8* %t5 to %TypeDescriptor*
+  %t7 = getelementptr %TypeDescriptor, %TypeDescriptor* %t6, i64 0
+  store %TypeDescriptor %inner, %TypeDescriptor* %t7
+  %t8 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* null, i32 1
+  %t9 = ptrtoint { %TypeDescriptor*, i64 }* %t8 to i64
+  %t10 = call i8* @malloc(i64 %t9)
+  %t11 = bitcast i8* %t10 to { %TypeDescriptor*, i64 }*
+  %t12 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t11, i32 0, i32 0
+  store %TypeDescriptor* %t6, %TypeDescriptor** %t12
+  %t13 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t11, i32 0, i32 1
+  store i64 1, i64* %t13
+  %t14 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t11)
+  ret %TypeDescriptor %t14
 }
 
 define %TypeDescriptor @type_descriptor_function() {
-entry:
+block.entry:
   %s0 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1603982015, i32 0, i32 0
-  %t1 = alloca [0 x %TypeDescriptor]
-  %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
-  %t3 = alloca { %TypeDescriptor*, i64 }
-  %t4 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 0
-  store %TypeDescriptor* %t2, %TypeDescriptor** %t4
-  %t5 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 1
-  store i64 0, i64* %t5
-  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t3)
-  ret %TypeDescriptor %t6
+  %t1 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* null, i32 1
+  %t2 = ptrtoint [0 x %TypeDescriptor]* %t1 to i64
+  %t3 = icmp eq i64 %t2, 0
+  %t4 = select i1 %t3, i64 1, i64 %t2
+  %t5 = call i8* @malloc(i64 %t4)
+  %t6 = bitcast i8* %t5 to %TypeDescriptor*
+  %t7 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* null, i32 1
+  %t8 = ptrtoint { %TypeDescriptor*, i64 }* %t7 to i64
+  %t9 = call i8* @malloc(i64 %t8)
+  %t10 = bitcast i8* %t9 to { %TypeDescriptor*, i64 }*
+  %t11 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t10, i32 0, i32 0
+  store %TypeDescriptor* %t6, %TypeDescriptor** %t11
+  %t12 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t10, i32 0, i32 1
+  store i64 0, i64* %t12
+  %t13 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t10)
+  ret %TypeDescriptor %t13
 }
 
 define %TypeDescriptor @type_descriptor_named(i8* %name) {
-entry:
+block.entry:
   %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h261050197, i32 0, i32 0
-  %t1 = alloca [0 x %TypeDescriptor]
-  %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
-  %t3 = alloca { %TypeDescriptor*, i64 }
-  %t4 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 0
-  store %TypeDescriptor* %t2, %TypeDescriptor** %t4
-  %t5 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 1
-  store i64 0, i64* %t5
-  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* %t3)
-  ret %TypeDescriptor %t6
+  %t1 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* null, i32 1
+  %t2 = ptrtoint [0 x %TypeDescriptor]* %t1 to i64
+  %t3 = icmp eq i64 %t2, 0
+  %t4 = select i1 %t3, i64 1, i64 %t2
+  %t5 = call i8* @malloc(i64 %t4)
+  %t6 = bitcast i8* %t5 to %TypeDescriptor*
+  %t7 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* null, i32 1
+  %t8 = ptrtoint { %TypeDescriptor*, i64 }* %t7 to i64
+  %t9 = call i8* @malloc(i64 %t8)
+  %t10 = bitcast i8* %t9 to { %TypeDescriptor*, i64 }*
+  %t11 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t10, i32 0, i32 0
+  store %TypeDescriptor* %t6, %TypeDescriptor** %t11
+  %t12 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t10, i32 0, i32 1
+  store i64 0, i64* %t12
+  %t13 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* %name, { %TypeDescriptor*, i64 }* %t10)
+  ret %TypeDescriptor %t13
 }
 
 define %TypeDescriptor @type_descriptor_unknown() {
-entry:
+block.entry:
   %s0 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h186837049, i32 0, i32 0
-  %t1 = alloca [0 x %TypeDescriptor]
-  %t2 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t1, i32 0, i32 0
-  %t3 = alloca { %TypeDescriptor*, i64 }
-  %t4 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 0
-  store %TypeDescriptor* %t2, %TypeDescriptor** %t4
-  %t5 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t3, i32 0, i32 1
-  store i64 0, i64* %t5
-  %t6 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t3)
-  ret %TypeDescriptor %t6
+  %t1 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* null, i32 1
+  %t2 = ptrtoint [0 x %TypeDescriptor]* %t1 to i64
+  %t3 = icmp eq i64 %t2, 0
+  %t4 = select i1 %t3, i64 1, i64 %t2
+  %t5 = call i8* @malloc(i64 %t4)
+  %t6 = bitcast i8* %t5 to %TypeDescriptor*
+  %t7 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* null, i32 1
+  %t8 = ptrtoint { %TypeDescriptor*, i64 }* %t7 to i64
+  %t9 = call i8* @malloc(i64 %t8)
+  %t10 = bitcast i8* %t9 to { %TypeDescriptor*, i64 }*
+  %t11 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t10, i32 0, i32 0
+  store %TypeDescriptor* %t6, %TypeDescriptor** %t11
+  %t12 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t10, i32 0, i32 1
+  store i64 0, i64* %t12
+  %t13 = call %TypeDescriptor @type_descriptor(i8* %s0, i8* null, { %TypeDescriptor*, i64 }* %t10)
+  ret %TypeDescriptor %t13
 }
 
 define i8* @descriptor_trim(i8* %value) {
-entry:
+block.entry:
   %l0 = alloca i64
   %l1 = alloca i64
   %l2 = alloca i8*
@@ -865,7 +935,7 @@ entry:
   %t2 = load i64, i64* %l1
   br label %loop.header0
 loop.header0:
-  %t35 = phi i64 [ %t1, %entry ], [ %t34, %loop.latch2 ]
+  %t35 = phi i64 [ %t1, %block.entry ], [ %t34, %loop.latch2 ]
   store i64 %t35, i64* %l0
   br label %loop.body1
 loop.body1:
@@ -1047,7 +1117,7 @@ afterloop11:
 }
 
 define i1 @string_starts_with(i8* %value, i8* %prefix) {
-entry:
+block.entry:
   %l0 = alloca i64
   %l1 = alloca i8*
   %l2 = alloca i8*
@@ -1105,7 +1175,7 @@ afterloop5:
 }
 
 define i1 @string_ends_with(i8* %value, i8* %suffix) {
-entry:
+block.entry:
   %l0 = alloca i64
   %l1 = alloca i64
   %l2 = alloca i8*
@@ -1173,7 +1243,7 @@ afterloop5:
 }
 
 define double @descriptor_find_top_level(i8* %value, i8* %needle) {
-entry:
+block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
   %l2 = alloca i64
@@ -1521,7 +1591,7 @@ afterloop5:
 }
 
 define i8* @descriptor_strip_outer_parens(i8* %value) {
-entry:
+block.entry:
   %l0 = alloca i8*
   %l1 = alloca i64
   %l2 = alloca i64
@@ -1532,7 +1602,7 @@ entry:
   %t1 = load i8*, i8** %l0
   br label %loop.header0
 loop.header0:
-  %t124 = phi i8* [ %t1, %entry ], [ %t123, %loop.latch2 ]
+  %t124 = phi i8* [ %t1, %block.entry ], [ %t123, %loop.latch2 ]
   store i8* %t124, i8** %l0
   br label %loop.body1
 loop.body1:
@@ -1754,7 +1824,7 @@ afterloop3:
 }
 
 define { i8**, i64 }* @split_descriptor(i8* %value, i8* %separator) {
-entry:
+block.entry:
   %l0 = alloca i8*
   %l1 = alloca { i8**, i64 }*
   %l2 = alloca i64
@@ -1775,569 +1845,611 @@ entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %t4 = load i8*, i8** %l0
-  %t5 = alloca [1 x i8*]
-  %t6 = getelementptr [1 x i8*], [1 x i8*]* %t5, i32 0, i32 0
-  %t7 = getelementptr i8*, i8** %t6, i64 0
-  store i8* %t4, i8** %t7
-  %t8 = alloca { i8**, i64 }
-  %t9 = getelementptr { i8**, i64 }, { i8**, i64 }* %t8, i32 0, i32 0
-  store i8** %t6, i8*** %t9
-  %t10 = getelementptr { i8**, i64 }, { i8**, i64 }* %t8, i32 0, i32 1
-  store i64 1, i64* %t10
-  ret { i8**, i64 }* %t8
+  %t5 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t6 = ptrtoint [1 x i8*]* %t5 to i64
+  %t7 = icmp eq i64 %t6, 0
+  %t8 = select i1 %t7, i64 1, i64 %t6
+  %t9 = call i8* @malloc(i64 %t8)
+  %t10 = bitcast i8* %t9 to i8**
+  %t11 = getelementptr i8*, i8** %t10, i64 0
+  store i8* %t4, i8** %t11
+  %t12 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t13 = ptrtoint { i8**, i64 }* %t12 to i64
+  %t14 = call i8* @malloc(i64 %t13)
+  %t15 = bitcast i8* %t14 to { i8**, i64 }*
+  %t16 = getelementptr { i8**, i64 }, { i8**, i64 }* %t15, i32 0, i32 0
+  store i8** %t10, i8*** %t16
+  %t17 = getelementptr { i8**, i64 }, { i8**, i64 }* %t15, i32 0, i32 1
+  store i64 1, i64* %t17
+  ret { i8**, i64 }* %t15
 merge1:
-  %t11 = alloca [0 x i8*]
-  %t12 = getelementptr [0 x i8*], [0 x i8*]* %t11, i32 0, i32 0
-  %t13 = alloca { i8**, i64 }
-  %t14 = getelementptr { i8**, i64 }, { i8**, i64 }* %t13, i32 0, i32 0
-  store i8** %t12, i8*** %t14
-  %t15 = getelementptr { i8**, i64 }, { i8**, i64 }* %t13, i32 0, i32 1
-  store i64 0, i64* %t15
-  store { i8**, i64 }* %t13, { i8**, i64 }** %l1
+  %t18 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
+  %t19 = ptrtoint [0 x i8*]* %t18 to i64
+  %t20 = icmp eq i64 %t19, 0
+  %t21 = select i1 %t20, i64 1, i64 %t19
+  %t22 = call i8* @malloc(i64 %t21)
+  %t23 = bitcast i8* %t22 to i8**
+  %t24 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t25 = ptrtoint { i8**, i64 }* %t24 to i64
+  %t26 = call i8* @malloc(i64 %t25)
+  %t27 = bitcast i8* %t26 to { i8**, i64 }*
+  %t28 = getelementptr { i8**, i64 }, { i8**, i64 }* %t27, i32 0, i32 0
+  store i8** %t23, i8*** %t28
+  %t29 = getelementptr { i8**, i64 }, { i8**, i64 }* %t27, i32 0, i32 1
+  store i64 0, i64* %t29
+  store { i8**, i64 }* %t27, { i8**, i64 }** %l1
   store i64 0, i64* %l2
   store i64 0, i64* %l3
   store i64 0, i64* %l4
   store i64 0, i64* %l5
   store i64 0, i64* %l6
-  %t16 = sitofp i64 0 to double
-  %t17 = call i8* @char_at(i8* %separator, double %t16)
-  store i8* %t17, i8** %l7
-  %t18 = load i8*, i8** %l0
-  %t19 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t20 = load i64, i64* %l2
-  %t21 = load i64, i64* %l3
-  %t22 = load i64, i64* %l4
-  %t23 = load i64, i64* %l5
-  %t24 = load i64, i64* %l6
-  %t25 = load i8*, i8** %l7
+  %t30 = sitofp i64 0 to double
+  %t31 = call i8* @char_at(i8* %separator, double %t30)
+  store i8* %t31, i8** %l7
+  %t32 = load i8*, i8** %l0
+  %t33 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t34 = load i64, i64* %l2
+  %t35 = load i64, i64* %l3
+  %t36 = load i64, i64* %l4
+  %t37 = load i64, i64* %l5
+  %t38 = load i64, i64* %l6
+  %t39 = load i8*, i8** %l7
   br label %loop.header2
 loop.header2:
-  %t252 = phi i64 [ %t22, %merge1 ], [ %t246, %loop.latch4 ]
-  %t253 = phi i64 [ %t23, %merge1 ], [ %t247, %loop.latch4 ]
-  %t254 = phi i64 [ %t24, %merge1 ], [ %t248, %loop.latch4 ]
-  %t255 = phi { i8**, i64 }* [ %t19, %merge1 ], [ %t249, %loop.latch4 ]
-  %t256 = phi i64 [ %t20, %merge1 ], [ %t250, %loop.latch4 ]
-  %t257 = phi i64 [ %t21, %merge1 ], [ %t251, %loop.latch4 ]
-  store i64 %t252, i64* %l4
-  store i64 %t253, i64* %l5
-  store i64 %t254, i64* %l6
-  store { i8**, i64 }* %t255, { i8**, i64 }** %l1
-  store i64 %t256, i64* %l2
-  store i64 %t257, i64* %l3
+  %t273 = phi i64 [ %t36, %merge1 ], [ %t267, %loop.latch4 ]
+  %t274 = phi i64 [ %t37, %merge1 ], [ %t268, %loop.latch4 ]
+  %t275 = phi i64 [ %t38, %merge1 ], [ %t269, %loop.latch4 ]
+  %t276 = phi { i8**, i64 }* [ %t33, %merge1 ], [ %t270, %loop.latch4 ]
+  %t277 = phi i64 [ %t34, %merge1 ], [ %t271, %loop.latch4 ]
+  %t278 = phi i64 [ %t35, %merge1 ], [ %t272, %loop.latch4 ]
+  store i64 %t273, i64* %l4
+  store i64 %t274, i64* %l5
+  store i64 %t275, i64* %l6
+  store { i8**, i64 }* %t276, { i8**, i64 }** %l1
+  store i64 %t277, i64* %l2
+  store i64 %t278, i64* %l3
   br label %loop.body3
 loop.body3:
-  %t26 = load i64, i64* %l3
-  %t27 = load i8*, i8** %l0
-  %t28 = call i64 @sailfin_runtime_string_length(i8* %t27)
-  %t29 = icmp sge i64 %t26, %t28
-  %t30 = load i8*, i8** %l0
-  %t31 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t32 = load i64, i64* %l2
-  %t33 = load i64, i64* %l3
-  %t34 = load i64, i64* %l4
-  %t35 = load i64, i64* %l5
-  %t36 = load i64, i64* %l6
-  %t37 = load i8*, i8** %l7
-  br i1 %t29, label %then6, label %merge7
+  %t40 = load i64, i64* %l3
+  %t41 = load i8*, i8** %l0
+  %t42 = call i64 @sailfin_runtime_string_length(i8* %t41)
+  %t43 = icmp sge i64 %t40, %t42
+  %t44 = load i8*, i8** %l0
+  %t45 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t46 = load i64, i64* %l2
+  %t47 = load i64, i64* %l3
+  %t48 = load i64, i64* %l4
+  %t49 = load i64, i64* %l5
+  %t50 = load i64, i64* %l6
+  %t51 = load i8*, i8** %l7
+  br i1 %t43, label %then6, label %merge7
 then6:
   br label %afterloop5
 merge7:
-  %t38 = load i8*, i8** %l0
-  %t39 = load i64, i64* %l3
-  %t40 = sitofp i64 %t39 to double
-  %t41 = call i8* @char_at(i8* %t38, double %t40)
-  store i8* %t41, i8** %l8
-  %t42 = load i8*, i8** %l8
-  %t43 = load i8, i8* %t42
-  %t44 = icmp eq i8 %t43, 40
-  %t45 = load i8*, i8** %l0
-  %t46 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t47 = load i64, i64* %l2
-  %t48 = load i64, i64* %l3
-  %t49 = load i64, i64* %l4
-  %t50 = load i64, i64* %l5
-  %t51 = load i64, i64* %l6
-  %t52 = load i8*, i8** %l7
-  %t53 = load i8*, i8** %l8
-  br i1 %t44, label %then8, label %else9
+  %t52 = load i8*, i8** %l0
+  %t53 = load i64, i64* %l3
+  %t54 = sitofp i64 %t53 to double
+  %t55 = call i8* @char_at(i8* %t52, double %t54)
+  store i8* %t55, i8** %l8
+  %t56 = load i8*, i8** %l8
+  %t57 = load i8, i8* %t56
+  %t58 = icmp eq i8 %t57, 40
+  %t59 = load i8*, i8** %l0
+  %t60 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t61 = load i64, i64* %l2
+  %t62 = load i64, i64* %l3
+  %t63 = load i64, i64* %l4
+  %t64 = load i64, i64* %l5
+  %t65 = load i64, i64* %l6
+  %t66 = load i8*, i8** %l7
+  %t67 = load i8*, i8** %l8
+  br i1 %t58, label %then8, label %else9
 then8:
-  %t54 = load i64, i64* %l4
-  %t55 = add i64 %t54, 1
-  store i64 %t55, i64* %l4
-  %t56 = load i64, i64* %l4
+  %t68 = load i64, i64* %l4
+  %t69 = add i64 %t68, 1
+  store i64 %t69, i64* %l4
+  %t70 = load i64, i64* %l4
   br label %merge10
 else9:
-  %t57 = load i8*, i8** %l8
-  %t58 = load i8, i8* %t57
-  %t59 = icmp eq i8 %t58, 41
-  %t60 = load i8*, i8** %l0
-  %t61 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t62 = load i64, i64* %l2
-  %t63 = load i64, i64* %l3
-  %t64 = load i64, i64* %l4
-  %t65 = load i64, i64* %l5
-  %t66 = load i64, i64* %l6
-  %t67 = load i8*, i8** %l7
-  %t68 = load i8*, i8** %l8
-  br i1 %t59, label %then11, label %else12
+  %t71 = load i8*, i8** %l8
+  %t72 = load i8, i8* %t71
+  %t73 = icmp eq i8 %t72, 41
+  %t74 = load i8*, i8** %l0
+  %t75 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t76 = load i64, i64* %l2
+  %t77 = load i64, i64* %l3
+  %t78 = load i64, i64* %l4
+  %t79 = load i64, i64* %l5
+  %t80 = load i64, i64* %l6
+  %t81 = load i8*, i8** %l7
+  %t82 = load i8*, i8** %l8
+  br i1 %t73, label %then11, label %else12
 then11:
-  %t69 = load i64, i64* %l4
-  %t70 = icmp sgt i64 %t69, 0
-  %t71 = load i8*, i8** %l0
-  %t72 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t73 = load i64, i64* %l2
-  %t74 = load i64, i64* %l3
-  %t75 = load i64, i64* %l4
-  %t76 = load i64, i64* %l5
-  %t77 = load i64, i64* %l6
-  %t78 = load i8*, i8** %l7
-  %t79 = load i8*, i8** %l8
-  br i1 %t70, label %then14, label %merge15
+  %t83 = load i64, i64* %l4
+  %t84 = icmp sgt i64 %t83, 0
+  %t85 = load i8*, i8** %l0
+  %t86 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t87 = load i64, i64* %l2
+  %t88 = load i64, i64* %l3
+  %t89 = load i64, i64* %l4
+  %t90 = load i64, i64* %l5
+  %t91 = load i64, i64* %l6
+  %t92 = load i8*, i8** %l7
+  %t93 = load i8*, i8** %l8
+  br i1 %t84, label %then14, label %merge15
 then14:
-  %t80 = load i64, i64* %l4
-  %t81 = sub i64 %t80, 1
-  store i64 %t81, i64* %l4
-  %t82 = load i64, i64* %l4
+  %t94 = load i64, i64* %l4
+  %t95 = sub i64 %t94, 1
+  store i64 %t95, i64* %l4
+  %t96 = load i64, i64* %l4
   br label %merge15
 merge15:
-  %t83 = phi i64 [ %t82, %then14 ], [ %t75, %then11 ]
-  store i64 %t83, i64* %l4
-  %t84 = load i64, i64* %l4
+  %t97 = phi i64 [ %t96, %then14 ], [ %t89, %then11 ]
+  store i64 %t97, i64* %l4
+  %t98 = load i64, i64* %l4
   br label %merge13
 else12:
-  %t85 = load i8*, i8** %l8
-  %t86 = load i8, i8* %t85
-  %t87 = icmp eq i8 %t86, 60
-  %t88 = load i8*, i8** %l0
-  %t89 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t90 = load i64, i64* %l2
-  %t91 = load i64, i64* %l3
-  %t92 = load i64, i64* %l4
-  %t93 = load i64, i64* %l5
-  %t94 = load i64, i64* %l6
-  %t95 = load i8*, i8** %l7
-  %t96 = load i8*, i8** %l8
-  br i1 %t87, label %then16, label %else17
+  %t99 = load i8*, i8** %l8
+  %t100 = load i8, i8* %t99
+  %t101 = icmp eq i8 %t100, 60
+  %t102 = load i8*, i8** %l0
+  %t103 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t104 = load i64, i64* %l2
+  %t105 = load i64, i64* %l3
+  %t106 = load i64, i64* %l4
+  %t107 = load i64, i64* %l5
+  %t108 = load i64, i64* %l6
+  %t109 = load i8*, i8** %l7
+  %t110 = load i8*, i8** %l8
+  br i1 %t101, label %then16, label %else17
 then16:
-  %t97 = load i64, i64* %l5
-  %t98 = add i64 %t97, 1
-  store i64 %t98, i64* %l5
-  %t99 = load i64, i64* %l5
+  %t111 = load i64, i64* %l5
+  %t112 = add i64 %t111, 1
+  store i64 %t112, i64* %l5
+  %t113 = load i64, i64* %l5
   br label %merge18
 else17:
-  %t100 = load i8*, i8** %l8
-  %t101 = load i8, i8* %t100
-  %t102 = icmp eq i8 %t101, 62
-  %t103 = load i8*, i8** %l0
-  %t104 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t105 = load i64, i64* %l2
-  %t106 = load i64, i64* %l3
-  %t107 = load i64, i64* %l4
-  %t108 = load i64, i64* %l5
-  %t109 = load i64, i64* %l6
-  %t110 = load i8*, i8** %l7
-  %t111 = load i8*, i8** %l8
-  br i1 %t102, label %then19, label %else20
+  %t114 = load i8*, i8** %l8
+  %t115 = load i8, i8* %t114
+  %t116 = icmp eq i8 %t115, 62
+  %t117 = load i8*, i8** %l0
+  %t118 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t119 = load i64, i64* %l2
+  %t120 = load i64, i64* %l3
+  %t121 = load i64, i64* %l4
+  %t122 = load i64, i64* %l5
+  %t123 = load i64, i64* %l6
+  %t124 = load i8*, i8** %l7
+  %t125 = load i8*, i8** %l8
+  br i1 %t116, label %then19, label %else20
 then19:
-  %t112 = load i64, i64* %l5
-  %t113 = icmp sgt i64 %t112, 0
-  %t114 = load i8*, i8** %l0
-  %t115 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t116 = load i64, i64* %l2
-  %t117 = load i64, i64* %l3
-  %t118 = load i64, i64* %l4
-  %t119 = load i64, i64* %l5
-  %t120 = load i64, i64* %l6
-  %t121 = load i8*, i8** %l7
-  %t122 = load i8*, i8** %l8
-  br i1 %t113, label %then22, label %merge23
+  %t126 = load i64, i64* %l5
+  %t127 = icmp sgt i64 %t126, 0
+  %t128 = load i8*, i8** %l0
+  %t129 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t130 = load i64, i64* %l2
+  %t131 = load i64, i64* %l3
+  %t132 = load i64, i64* %l4
+  %t133 = load i64, i64* %l5
+  %t134 = load i64, i64* %l6
+  %t135 = load i8*, i8** %l7
+  %t136 = load i8*, i8** %l8
+  br i1 %t127, label %then22, label %merge23
 then22:
-  %t123 = load i64, i64* %l5
-  %t124 = sub i64 %t123, 1
-  store i64 %t124, i64* %l5
-  %t125 = load i64, i64* %l5
+  %t137 = load i64, i64* %l5
+  %t138 = sub i64 %t137, 1
+  store i64 %t138, i64* %l5
+  %t139 = load i64, i64* %l5
   br label %merge23
 merge23:
-  %t126 = phi i64 [ %t125, %then22 ], [ %t119, %then19 ]
-  store i64 %t126, i64* %l5
-  %t127 = load i64, i64* %l5
+  %t140 = phi i64 [ %t139, %then22 ], [ %t133, %then19 ]
+  store i64 %t140, i64* %l5
+  %t141 = load i64, i64* %l5
   br label %merge21
 else20:
-  %t128 = load i8*, i8** %l8
-  %t129 = load i8, i8* %t128
-  %t130 = icmp eq i8 %t129, 91
-  %t131 = load i8*, i8** %l0
-  %t132 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t133 = load i64, i64* %l2
-  %t134 = load i64, i64* %l3
-  %t135 = load i64, i64* %l4
-  %t136 = load i64, i64* %l5
-  %t137 = load i64, i64* %l6
-  %t138 = load i8*, i8** %l7
-  %t139 = load i8*, i8** %l8
-  br i1 %t130, label %then24, label %else25
+  %t142 = load i8*, i8** %l8
+  %t143 = load i8, i8* %t142
+  %t144 = icmp eq i8 %t143, 91
+  %t145 = load i8*, i8** %l0
+  %t146 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t147 = load i64, i64* %l2
+  %t148 = load i64, i64* %l3
+  %t149 = load i64, i64* %l4
+  %t150 = load i64, i64* %l5
+  %t151 = load i64, i64* %l6
+  %t152 = load i8*, i8** %l7
+  %t153 = load i8*, i8** %l8
+  br i1 %t144, label %then24, label %else25
 then24:
-  %t140 = load i64, i64* %l6
-  %t141 = add i64 %t140, 1
-  store i64 %t141, i64* %l6
-  %t142 = load i64, i64* %l6
+  %t154 = load i64, i64* %l6
+  %t155 = add i64 %t154, 1
+  store i64 %t155, i64* %l6
+  %t156 = load i64, i64* %l6
   br label %merge26
 else25:
-  %t143 = load i8*, i8** %l8
-  %t144 = load i8, i8* %t143
-  %t145 = icmp eq i8 %t144, 93
-  %t146 = load i8*, i8** %l0
-  %t147 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t148 = load i64, i64* %l2
-  %t149 = load i64, i64* %l3
-  %t150 = load i64, i64* %l4
-  %t151 = load i64, i64* %l5
-  %t152 = load i64, i64* %l6
-  %t153 = load i8*, i8** %l7
-  %t154 = load i8*, i8** %l8
-  br i1 %t145, label %then27, label %merge28
-then27:
-  %t155 = load i64, i64* %l6
-  %t156 = icmp sgt i64 %t155, 0
-  %t157 = load i8*, i8** %l0
-  %t158 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t159 = load i64, i64* %l2
-  %t160 = load i64, i64* %l3
-  %t161 = load i64, i64* %l4
-  %t162 = load i64, i64* %l5
-  %t163 = load i64, i64* %l6
-  %t164 = load i8*, i8** %l7
-  %t165 = load i8*, i8** %l8
-  br i1 %t156, label %then29, label %merge30
-then29:
+  %t157 = load i8*, i8** %l8
+  %t158 = load i8, i8* %t157
+  %t159 = icmp eq i8 %t158, 93
+  %t160 = load i8*, i8** %l0
+  %t161 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t162 = load i64, i64* %l2
+  %t163 = load i64, i64* %l3
+  %t164 = load i64, i64* %l4
+  %t165 = load i64, i64* %l5
   %t166 = load i64, i64* %l6
-  %t167 = sub i64 %t166, 1
-  store i64 %t167, i64* %l6
-  %t168 = load i64, i64* %l6
+  %t167 = load i8*, i8** %l7
+  %t168 = load i8*, i8** %l8
+  br i1 %t159, label %then27, label %merge28
+then27:
+  %t169 = load i64, i64* %l6
+  %t170 = icmp sgt i64 %t169, 0
+  %t171 = load i8*, i8** %l0
+  %t172 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t173 = load i64, i64* %l2
+  %t174 = load i64, i64* %l3
+  %t175 = load i64, i64* %l4
+  %t176 = load i64, i64* %l5
+  %t177 = load i64, i64* %l6
+  %t178 = load i8*, i8** %l7
+  %t179 = load i8*, i8** %l8
+  br i1 %t170, label %then29, label %merge30
+then29:
+  %t180 = load i64, i64* %l6
+  %t181 = sub i64 %t180, 1
+  store i64 %t181, i64* %l6
+  %t182 = load i64, i64* %l6
   br label %merge30
 merge30:
-  %t169 = phi i64 [ %t168, %then29 ], [ %t163, %then27 ]
-  store i64 %t169, i64* %l6
-  %t170 = load i64, i64* %l6
+  %t183 = phi i64 [ %t182, %then29 ], [ %t177, %then27 ]
+  store i64 %t183, i64* %l6
+  %t184 = load i64, i64* %l6
   br label %merge28
 merge28:
-  %t171 = phi i64 [ %t170, %merge30 ], [ %t152, %else25 ]
-  store i64 %t171, i64* %l6
-  %t172 = load i64, i64* %l6
+  %t185 = phi i64 [ %t184, %merge30 ], [ %t166, %else25 ]
+  store i64 %t185, i64* %l6
+  %t186 = load i64, i64* %l6
   br label %merge26
 merge26:
-  %t173 = phi i64 [ %t142, %then24 ], [ %t172, %merge28 ]
-  store i64 %t173, i64* %l6
-  %t174 = load i64, i64* %l6
-  %t175 = load i64, i64* %l6
+  %t187 = phi i64 [ %t156, %then24 ], [ %t186, %merge28 ]
+  store i64 %t187, i64* %l6
+  %t188 = load i64, i64* %l6
+  %t189 = load i64, i64* %l6
   br label %merge21
 merge21:
-  %t176 = phi i64 [ %t127, %merge23 ], [ %t108, %merge26 ]
-  %t177 = phi i64 [ %t109, %merge23 ], [ %t174, %merge26 ]
-  store i64 %t176, i64* %l5
-  store i64 %t177, i64* %l6
-  %t178 = load i64, i64* %l5
-  %t179 = load i64, i64* %l6
-  %t180 = load i64, i64* %l6
-  br label %merge18
-merge18:
-  %t181 = phi i64 [ %t99, %then16 ], [ %t178, %merge21 ]
-  %t182 = phi i64 [ %t94, %then16 ], [ %t179, %merge21 ]
-  store i64 %t181, i64* %l5
-  store i64 %t182, i64* %l6
-  %t183 = load i64, i64* %l5
-  %t184 = load i64, i64* %l5
-  %t185 = load i64, i64* %l6
-  %t186 = load i64, i64* %l6
-  br label %merge13
-merge13:
-  %t187 = phi i64 [ %t84, %merge15 ], [ %t64, %merge18 ]
-  %t188 = phi i64 [ %t65, %merge15 ], [ %t183, %merge18 ]
-  %t189 = phi i64 [ %t66, %merge15 ], [ %t185, %merge18 ]
-  store i64 %t187, i64* %l4
-  store i64 %t188, i64* %l5
-  store i64 %t189, i64* %l6
-  %t190 = load i64, i64* %l4
-  %t191 = load i64, i64* %l5
+  %t190 = phi i64 [ %t141, %merge23 ], [ %t122, %merge26 ]
+  %t191 = phi i64 [ %t123, %merge23 ], [ %t188, %merge26 ]
+  store i64 %t190, i64* %l5
+  store i64 %t191, i64* %l6
   %t192 = load i64, i64* %l5
   %t193 = load i64, i64* %l6
   %t194 = load i64, i64* %l6
+  br label %merge18
+merge18:
+  %t195 = phi i64 [ %t113, %then16 ], [ %t192, %merge21 ]
+  %t196 = phi i64 [ %t108, %then16 ], [ %t193, %merge21 ]
+  store i64 %t195, i64* %l5
+  store i64 %t196, i64* %l6
+  %t197 = load i64, i64* %l5
+  %t198 = load i64, i64* %l5
+  %t199 = load i64, i64* %l6
+  %t200 = load i64, i64* %l6
+  br label %merge13
+merge13:
+  %t201 = phi i64 [ %t98, %merge15 ], [ %t78, %merge18 ]
+  %t202 = phi i64 [ %t79, %merge15 ], [ %t197, %merge18 ]
+  %t203 = phi i64 [ %t80, %merge15 ], [ %t199, %merge18 ]
+  store i64 %t201, i64* %l4
+  store i64 %t202, i64* %l5
+  store i64 %t203, i64* %l6
+  %t204 = load i64, i64* %l4
+  %t205 = load i64, i64* %l5
+  %t206 = load i64, i64* %l5
+  %t207 = load i64, i64* %l6
+  %t208 = load i64, i64* %l6
   br label %merge10
 merge10:
-  %t195 = phi i64 [ %t56, %then8 ], [ %t190, %merge13 ]
-  %t196 = phi i64 [ %t50, %then8 ], [ %t191, %merge13 ]
-  %t197 = phi i64 [ %t51, %then8 ], [ %t193, %merge13 ]
-  store i64 %t195, i64* %l4
-  store i64 %t196, i64* %l5
-  store i64 %t197, i64* %l6
-  %t199 = load i8*, i8** %l8
-  %t200 = load i8*, i8** %l7
-  %t201 = icmp eq i8* %t199, %t200
-  br label %logical_and_entry_198
+  %t209 = phi i64 [ %t70, %then8 ], [ %t204, %merge13 ]
+  %t210 = phi i64 [ %t64, %then8 ], [ %t205, %merge13 ]
+  %t211 = phi i64 [ %t65, %then8 ], [ %t207, %merge13 ]
+  store i64 %t209, i64* %l4
+  store i64 %t210, i64* %l5
+  store i64 %t211, i64* %l6
+  %t213 = load i8*, i8** %l8
+  %t214 = load i8*, i8** %l7
+  %t215 = icmp eq i8* %t213, %t214
+  br label %logical_and_entry_212
 
-logical_and_entry_198:
-  br i1 %t201, label %logical_and_right_198, label %logical_and_merge_198
+logical_and_entry_212:
+  br i1 %t215, label %logical_and_right_212, label %logical_and_merge_212
 
-logical_and_right_198:
-  %t203 = load i64, i64* %l4
-  %t204 = icmp eq i64 %t203, 0
-  br label %logical_and_entry_202
-
-logical_and_entry_202:
-  br i1 %t204, label %logical_and_right_202, label %logical_and_merge_202
-
-logical_and_right_202:
-  %t206 = load i64, i64* %l5
-  %t207 = icmp eq i64 %t206, 0
-  br label %logical_and_entry_205
-
-logical_and_entry_205:
-  br i1 %t207, label %logical_and_right_205, label %logical_and_merge_205
-
-logical_and_right_205:
-  %t208 = load i64, i64* %l6
-  %t209 = icmp eq i64 %t208, 0
-  br label %logical_and_right_end_205
-
-logical_and_right_end_205:
-  br label %logical_and_merge_205
-
-logical_and_merge_205:
-  %t210 = phi i1 [ false, %logical_and_entry_205 ], [ %t209, %logical_and_right_end_205 ]
-  br label %logical_and_right_end_202
-
-logical_and_right_end_202:
-  br label %logical_and_merge_202
-
-logical_and_merge_202:
-  %t211 = phi i1 [ false, %logical_and_entry_202 ], [ %t210, %logical_and_right_end_202 ]
-  br label %logical_and_right_end_198
-
-logical_and_right_end_198:
-  br label %logical_and_merge_198
-
-logical_and_merge_198:
-  %t212 = phi i1 [ false, %logical_and_entry_198 ], [ %t211, %logical_and_right_end_198 ]
-  %t213 = load i8*, i8** %l0
-  %t214 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t215 = load i64, i64* %l2
-  %t216 = load i64, i64* %l3
+logical_and_right_212:
   %t217 = load i64, i64* %l4
-  %t218 = load i64, i64* %l5
-  %t219 = load i64, i64* %l6
-  %t220 = load i8*, i8** %l7
-  %t221 = load i8*, i8** %l8
-  br i1 %t212, label %then31, label %merge32
-then31:
-  %t222 = load i8*, i8** %l0
-  %t223 = load i64, i64* %l2
-  %t224 = load i64, i64* %l3
-  %t225 = sitofp i64 %t223 to double
-  %t226 = sitofp i64 %t224 to double
-  %t227 = call i8* @sailfin_runtime_substring(i8* %t222, double %t225, double %t226)
-  store i8* %t227, i8** %l9
+  %t218 = icmp eq i64 %t217, 0
+  br label %logical_and_entry_216
+
+logical_and_entry_216:
+  br i1 %t218, label %logical_and_right_216, label %logical_and_merge_216
+
+logical_and_right_216:
+  %t220 = load i64, i64* %l5
+  %t221 = icmp eq i64 %t220, 0
+  br label %logical_and_entry_219
+
+logical_and_entry_219:
+  br i1 %t221, label %logical_and_right_219, label %logical_and_merge_219
+
+logical_and_right_219:
+  %t222 = load i64, i64* %l6
+  %t223 = icmp eq i64 %t222, 0
+  br label %logical_and_right_end_219
+
+logical_and_right_end_219:
+  br label %logical_and_merge_219
+
+logical_and_merge_219:
+  %t224 = phi i1 [ false, %logical_and_entry_219 ], [ %t223, %logical_and_right_end_219 ]
+  br label %logical_and_right_end_216
+
+logical_and_right_end_216:
+  br label %logical_and_merge_216
+
+logical_and_merge_216:
+  %t225 = phi i1 [ false, %logical_and_entry_216 ], [ %t224, %logical_and_right_end_216 ]
+  br label %logical_and_right_end_212
+
+logical_and_right_end_212:
+  br label %logical_and_merge_212
+
+logical_and_merge_212:
+  %t226 = phi i1 [ false, %logical_and_entry_212 ], [ %t225, %logical_and_right_end_212 ]
+  %t227 = load i8*, i8** %l0
   %t228 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t229 = load i8*, i8** %l9
-  %t230 = call i8* @descriptor_trim(i8* %t229)
-  %t231 = alloca [1 x i8*]
-  %t232 = getelementptr [1 x i8*], [1 x i8*]* %t231, i32 0, i32 0
-  %t233 = getelementptr i8*, i8** %t232, i64 0
-  store i8* %t230, i8** %t233
-  %t234 = alloca { i8**, i64 }
-  %t235 = getelementptr { i8**, i64 }, { i8**, i64 }* %t234, i32 0, i32 0
-  store i8** %t232, i8*** %t235
-  %t236 = getelementptr { i8**, i64 }, { i8**, i64 }* %t234, i32 0, i32 1
-  store i64 1, i64* %t236
-  %t237 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t228, { i8**, i64 }* %t234)
-  store { i8**, i64 }* %t237, { i8**, i64 }** %l1
+  %t229 = load i64, i64* %l2
+  %t230 = load i64, i64* %l3
+  %t231 = load i64, i64* %l4
+  %t232 = load i64, i64* %l5
+  %t233 = load i64, i64* %l6
+  %t234 = load i8*, i8** %l7
+  %t235 = load i8*, i8** %l8
+  br i1 %t226, label %then31, label %merge32
+then31:
+  %t236 = load i8*, i8** %l0
+  %t237 = load i64, i64* %l2
   %t238 = load i64, i64* %l3
-  %t239 = add i64 %t238, 1
-  store i64 %t239, i64* %l2
-  %t240 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t241 = load i64, i64* %l2
-  br label %merge32
-merge32:
-  %t242 = phi { i8**, i64 }* [ %t240, %then31 ], [ %t214, %logical_and_merge_198 ]
-  %t243 = phi i64 [ %t241, %then31 ], [ %t215, %logical_and_merge_198 ]
-  store { i8**, i64 }* %t242, { i8**, i64 }** %l1
-  store i64 %t243, i64* %l2
-  %t244 = load i64, i64* %l3
-  %t245 = add i64 %t244, 1
-  store i64 %t245, i64* %l3
-  br label %loop.latch4
-loop.latch4:
-  %t246 = load i64, i64* %l4
-  %t247 = load i64, i64* %l5
-  %t248 = load i64, i64* %l6
-  %t249 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t250 = load i64, i64* %l2
-  %t251 = load i64, i64* %l3
-  br label %loop.header2
-afterloop5:
-  %t258 = load i64, i64* %l4
-  %t259 = load i64, i64* %l5
-  %t260 = load i64, i64* %l6
+  %t239 = sitofp i64 %t237 to double
+  %t240 = sitofp i64 %t238 to double
+  %t241 = call i8* @sailfin_runtime_substring(i8* %t236, double %t239, double %t240)
+  store i8* %t241, i8** %l9
+  %t242 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t243 = load i8*, i8** %l9
+  %t244 = call i8* @descriptor_trim(i8* %t243)
+  %t245 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t246 = ptrtoint [1 x i8*]* %t245 to i64
+  %t247 = icmp eq i64 %t246, 0
+  %t248 = select i1 %t247, i64 1, i64 %t246
+  %t249 = call i8* @malloc(i64 %t248)
+  %t250 = bitcast i8* %t249 to i8**
+  %t251 = getelementptr i8*, i8** %t250, i64 0
+  store i8* %t244, i8** %t251
+  %t252 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t253 = ptrtoint { i8**, i64 }* %t252 to i64
+  %t254 = call i8* @malloc(i64 %t253)
+  %t255 = bitcast i8* %t254 to { i8**, i64 }*
+  %t256 = getelementptr { i8**, i64 }, { i8**, i64 }* %t255, i32 0, i32 0
+  store i8** %t250, i8*** %t256
+  %t257 = getelementptr { i8**, i64 }, { i8**, i64 }* %t255, i32 0, i32 1
+  store i64 1, i64* %t257
+  %t258 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t242, { i8**, i64 }* %t255)
+  store { i8**, i64 }* %t258, { i8**, i64 }** %l1
+  %t259 = load i64, i64* %l3
+  %t260 = add i64 %t259, 1
+  store i64 %t260, i64* %l2
   %t261 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t262 = load i64, i64* %l2
-  %t263 = load i64, i64* %l3
-  %t264 = load i8*, i8** %l0
-  %t265 = load i64, i64* %l2
-  %t266 = load i8*, i8** %l0
-  %t267 = call i64 @sailfin_runtime_string_length(i8* %t266)
-  %t268 = sitofp i64 %t265 to double
-  %t269 = sitofp i64 %t267 to double
-  %t270 = call i8* @sailfin_runtime_substring(i8* %t264, double %t268, double %t269)
-  store i8* %t270, i8** %l10
-  %t271 = load i8*, i8** %l10
-  %t272 = call i8* @descriptor_trim(i8* %t271)
-  store i8* %t272, i8** %l11
-  %t274 = load i8*, i8** %l11
-  %t275 = call i64 @sailfin_runtime_string_length(i8* %t274)
-  %t276 = icmp sgt i64 %t275, 0
-  br label %logical_or_entry_273
+  br label %merge32
+merge32:
+  %t263 = phi { i8**, i64 }* [ %t261, %then31 ], [ %t228, %logical_and_merge_212 ]
+  %t264 = phi i64 [ %t262, %then31 ], [ %t229, %logical_and_merge_212 ]
+  store { i8**, i64 }* %t263, { i8**, i64 }** %l1
+  store i64 %t264, i64* %l2
+  %t265 = load i64, i64* %l3
+  %t266 = add i64 %t265, 1
+  store i64 %t266, i64* %l3
+  br label %loop.latch4
+loop.latch4:
+  %t267 = load i64, i64* %l4
+  %t268 = load i64, i64* %l5
+  %t269 = load i64, i64* %l6
+  %t270 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t271 = load i64, i64* %l2
+  %t272 = load i64, i64* %l3
+  br label %loop.header2
+afterloop5:
+  %t279 = load i64, i64* %l4
+  %t280 = load i64, i64* %l5
+  %t281 = load i64, i64* %l6
+  %t282 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t283 = load i64, i64* %l2
+  %t284 = load i64, i64* %l3
+  %t285 = load i8*, i8** %l0
+  %t286 = load i64, i64* %l2
+  %t287 = load i8*, i8** %l0
+  %t288 = call i64 @sailfin_runtime_string_length(i8* %t287)
+  %t289 = sitofp i64 %t286 to double
+  %t290 = sitofp i64 %t288 to double
+  %t291 = call i8* @sailfin_runtime_substring(i8* %t285, double %t289, double %t290)
+  store i8* %t291, i8** %l10
+  %t292 = load i8*, i8** %l10
+  %t293 = call i8* @descriptor_trim(i8* %t292)
+  store i8* %t293, i8** %l11
+  %t295 = load i8*, i8** %l11
+  %t296 = call i64 @sailfin_runtime_string_length(i8* %t295)
+  %t297 = icmp sgt i64 %t296, 0
+  br label %logical_or_entry_294
 
-logical_or_entry_273:
-  br i1 %t276, label %logical_or_merge_273, label %logical_or_right_273
+logical_or_entry_294:
+  br i1 %t297, label %logical_or_merge_294, label %logical_or_right_294
 
-logical_or_right_273:
-  %t277 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t278 = load { i8**, i64 }, { i8**, i64 }* %t277
-  %t279 = extractvalue { i8**, i64 } %t278, 1
-  %t280 = icmp eq i64 %t279, 0
-  br label %logical_or_right_end_273
+logical_or_right_294:
+  %t298 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t299 = load { i8**, i64 }, { i8**, i64 }* %t298
+  %t300 = extractvalue { i8**, i64 } %t299, 1
+  %t301 = icmp eq i64 %t300, 0
+  br label %logical_or_right_end_294
 
-logical_or_right_end_273:
-  br label %logical_or_merge_273
+logical_or_right_end_294:
+  br label %logical_or_merge_294
 
-logical_or_merge_273:
-  %t281 = phi i1 [ true, %logical_or_entry_273 ], [ %t280, %logical_or_right_end_273 ]
-  %t282 = load i8*, i8** %l0
-  %t283 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t284 = load i64, i64* %l2
-  %t285 = load i64, i64* %l3
-  %t286 = load i64, i64* %l4
-  %t287 = load i64, i64* %l5
-  %t288 = load i64, i64* %l6
-  %t289 = load i8*, i8** %l7
-  %t290 = load i8*, i8** %l10
-  %t291 = load i8*, i8** %l11
-  br i1 %t281, label %then33, label %merge34
+logical_or_merge_294:
+  %t302 = phi i1 [ true, %logical_or_entry_294 ], [ %t301, %logical_or_right_end_294 ]
+  %t303 = load i8*, i8** %l0
+  %t304 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t305 = load i64, i64* %l2
+  %t306 = load i64, i64* %l3
+  %t307 = load i64, i64* %l4
+  %t308 = load i64, i64* %l5
+  %t309 = load i64, i64* %l6
+  %t310 = load i8*, i8** %l7
+  %t311 = load i8*, i8** %l10
+  %t312 = load i8*, i8** %l11
+  br i1 %t302, label %then33, label %merge34
 then33:
-  %t292 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t293 = load i8*, i8** %l11
-  %t294 = alloca [1 x i8*]
-  %t295 = getelementptr [1 x i8*], [1 x i8*]* %t294, i32 0, i32 0
-  %t296 = getelementptr i8*, i8** %t295, i64 0
-  store i8* %t293, i8** %t296
-  %t297 = alloca { i8**, i64 }
-  %t298 = getelementptr { i8**, i64 }, { i8**, i64 }* %t297, i32 0, i32 0
-  store i8** %t295, i8*** %t298
-  %t299 = getelementptr { i8**, i64 }, { i8**, i64 }* %t297, i32 0, i32 1
-  store i64 1, i64* %t299
-  %t300 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t292, { i8**, i64 }* %t297)
-  store { i8**, i64 }* %t300, { i8**, i64 }** %l1
-  %t301 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t313 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t314 = load i8*, i8** %l11
+  %t315 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t316 = ptrtoint [1 x i8*]* %t315 to i64
+  %t317 = icmp eq i64 %t316, 0
+  %t318 = select i1 %t317, i64 1, i64 %t316
+  %t319 = call i8* @malloc(i64 %t318)
+  %t320 = bitcast i8* %t319 to i8**
+  %t321 = getelementptr i8*, i8** %t320, i64 0
+  store i8* %t314, i8** %t321
+  %t322 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t323 = ptrtoint { i8**, i64 }* %t322 to i64
+  %t324 = call i8* @malloc(i64 %t323)
+  %t325 = bitcast i8* %t324 to { i8**, i64 }*
+  %t326 = getelementptr { i8**, i64 }, { i8**, i64 }* %t325, i32 0, i32 0
+  store i8** %t320, i8*** %t326
+  %t327 = getelementptr { i8**, i64 }, { i8**, i64 }* %t325, i32 0, i32 1
+  store i64 1, i64* %t327
+  %t328 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t313, { i8**, i64 }* %t325)
+  store { i8**, i64 }* %t328, { i8**, i64 }** %l1
+  %t329 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br label %merge34
 merge34:
-  %t302 = phi { i8**, i64 }* [ %t301, %then33 ], [ %t283, %logical_or_merge_273 ]
-  store { i8**, i64 }* %t302, { i8**, i64 }** %l1
-  %t303 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  ret { i8**, i64 }* %t303
+  %t330 = phi { i8**, i64 }* [ %t329, %then33 ], [ %t304, %logical_or_merge_294 ]
+  store { i8**, i64 }* %t330, { i8**, i64 }** %l1
+  %t331 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  ret { i8**, i64 }* %t331
 }
 
 define { %TypeDescriptor*, i64 }* @parse_descriptor_list({ i8**, i64 }* %parts) {
-entry:
+block.entry:
   %l0 = alloca { %TypeDescriptor*, i64 }*
   %l1 = alloca i64
   %l2 = alloca i8*
-  %t0 = alloca [0 x %TypeDescriptor]
-  %t1 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* %t0, i32 0, i32 0
-  %t2 = alloca { %TypeDescriptor*, i64 }
-  %t3 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t2, i32 0, i32 0
-  store %TypeDescriptor* %t1, %TypeDescriptor** %t3
-  %t4 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t2, i32 0, i32 1
-  store i64 0, i64* %t4
-  store { %TypeDescriptor*, i64 }* %t2, { %TypeDescriptor*, i64 }** %l0
+  %t0 = getelementptr [0 x %TypeDescriptor], [0 x %TypeDescriptor]* null, i32 1
+  %t1 = ptrtoint [0 x %TypeDescriptor]* %t0 to i64
+  %t2 = icmp eq i64 %t1, 0
+  %t3 = select i1 %t2, i64 1, i64 %t1
+  %t4 = call i8* @malloc(i64 %t3)
+  %t5 = bitcast i8* %t4 to %TypeDescriptor*
+  %t6 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* null, i32 1
+  %t7 = ptrtoint { %TypeDescriptor*, i64 }* %t6 to i64
+  %t8 = call i8* @malloc(i64 %t7)
+  %t9 = bitcast i8* %t8 to { %TypeDescriptor*, i64 }*
+  %t10 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t9, i32 0, i32 0
+  store %TypeDescriptor* %t5, %TypeDescriptor** %t10
+  %t11 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t9, i32 0, i32 1
+  store i64 0, i64* %t11
+  store { %TypeDescriptor*, i64 }* %t9, { %TypeDescriptor*, i64 }** %l0
   store i64 0, i64* %l1
-  %t5 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
-  %t6 = load i64, i64* %l1
+  %t12 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  %t13 = load i64, i64* %l1
   br label %loop.header0
 loop.header0:
-  %t46 = phi { %TypeDescriptor*, i64 }* [ %t5, %entry ], [ %t44, %loop.latch2 ]
-  %t47 = phi i64 [ %t6, %entry ], [ %t45, %loop.latch2 ]
-  store { %TypeDescriptor*, i64 }* %t46, { %TypeDescriptor*, i64 }** %l0
-  store i64 %t47, i64* %l1
+  %t60 = phi { %TypeDescriptor*, i64 }* [ %t12, %block.entry ], [ %t58, %loop.latch2 ]
+  %t61 = phi i64 [ %t13, %block.entry ], [ %t59, %loop.latch2 ]
+  store { %TypeDescriptor*, i64 }* %t60, { %TypeDescriptor*, i64 }** %l0
+  store i64 %t61, i64* %l1
   br label %loop.body1
 loop.body1:
-  %t7 = load i64, i64* %l1
-  %t8 = load { i8**, i64 }, { i8**, i64 }* %parts
-  %t9 = extractvalue { i8**, i64 } %t8, 1
-  %t10 = icmp sge i64 %t7, %t9
-  %t11 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
-  %t12 = load i64, i64* %l1
-  br i1 %t10, label %then4, label %merge5
+  %t14 = load i64, i64* %l1
+  %t15 = load { i8**, i64 }, { i8**, i64 }* %parts
+  %t16 = extractvalue { i8**, i64 } %t15, 1
+  %t17 = icmp sge i64 %t14, %t16
+  %t18 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  %t19 = load i64, i64* %l1
+  br i1 %t17, label %then4, label %merge5
 then4:
   br label %afterloop3
 merge5:
-  %t13 = load i64, i64* %l1
-  %t14 = load { i8**, i64 }, { i8**, i64 }* %parts
-  %t15 = extractvalue { i8**, i64 } %t14, 0
-  %t16 = extractvalue { i8**, i64 } %t14, 1
-  %t17 = icmp uge i64 %t13, %t16
-  ; bounds check: %t17 (if true, out of bounds)
-  call void @sailfin_runtime_bounds_check(i64 %t13, i64 %t16)
-  %t18 = getelementptr i8*, i8** %t15, i64 %t13
-  %t19 = load i8*, i8** %t18
-  store i8* %t19, i8** %l2
-  %t20 = load i8*, i8** %l2
-  %t21 = call i64 @sailfin_runtime_string_length(i8* %t20)
-  %t22 = icmp sgt i64 %t21, 0
-  %t23 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
-  %t24 = load i64, i64* %l1
-  %t25 = load i8*, i8** %l2
-  br i1 %t22, label %then6, label %merge7
-then6:
-  %t26 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  %t20 = load i64, i64* %l1
+  %t21 = load { i8**, i64 }, { i8**, i64 }* %parts
+  %t22 = extractvalue { i8**, i64 } %t21, 0
+  %t23 = extractvalue { i8**, i64 } %t21, 1
+  %t24 = icmp uge i64 %t20, %t23
+  ; bounds check: %t24 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t20, i64 %t23)
+  %t25 = getelementptr i8*, i8** %t22, i64 %t20
+  %t26 = load i8*, i8** %t25
+  store i8* %t26, i8** %l2
   %t27 = load i8*, i8** %l2
-  %t28 = call %TypeDescriptor @parse_type_descriptor(i8* %t27)
-  %t29 = call noalias i8* @malloc(i64 24)
-  %t30 = bitcast i8* %t29 to %TypeDescriptor*
-  store %TypeDescriptor %t28, %TypeDescriptor* %t30
-  %t31 = alloca [1 x i8*]
-  %t32 = getelementptr [1 x i8*], [1 x i8*]* %t31, i32 0, i32 0
-  %t33 = getelementptr i8*, i8** %t32, i64 0
-  store i8* %t29, i8** %t33
-  %t34 = alloca { i8**, i64 }
-  %t35 = getelementptr { i8**, i64 }, { i8**, i64 }* %t34, i32 0, i32 0
-  store i8** %t32, i8*** %t35
-  %t36 = getelementptr { i8**, i64 }, { i8**, i64 }* %t34, i32 0, i32 1
-  store i64 1, i64* %t36
-  %t37 = bitcast { %TypeDescriptor*, i64 }* %t26 to { i8**, i64 }*
-  %t38 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t37, { i8**, i64 }* %t34)
-  %t39 = bitcast { i8**, i64 }* %t38 to { %TypeDescriptor*, i64 }*
-  store { %TypeDescriptor*, i64 }* %t39, { %TypeDescriptor*, i64 }** %l0
-  %t40 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  %t28 = call i64 @sailfin_runtime_string_length(i8* %t27)
+  %t29 = icmp sgt i64 %t28, 0
+  %t30 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  %t31 = load i64, i64* %l1
+  %t32 = load i8*, i8** %l2
+  br i1 %t29, label %then6, label %merge7
+then6:
+  %t33 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  %t34 = load i8*, i8** %l2
+  %t35 = call %TypeDescriptor @parse_type_descriptor(i8* %t34)
+  %t36 = call noalias i8* @malloc(i64 24)
+  %t37 = bitcast i8* %t36 to %TypeDescriptor*
+  store %TypeDescriptor %t35, %TypeDescriptor* %t37
+  %t38 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t39 = ptrtoint [1 x i8*]* %t38 to i64
+  %t40 = icmp eq i64 %t39, 0
+  %t41 = select i1 %t40, i64 1, i64 %t39
+  %t42 = call i8* @malloc(i64 %t41)
+  %t43 = bitcast i8* %t42 to i8**
+  %t44 = getelementptr i8*, i8** %t43, i64 0
+  store i8* %t36, i8** %t44
+  %t45 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t46 = ptrtoint { i8**, i64 }* %t45 to i64
+  %t47 = call i8* @malloc(i64 %t46)
+  %t48 = bitcast i8* %t47 to { i8**, i64 }*
+  %t49 = getelementptr { i8**, i64 }, { i8**, i64 }* %t48, i32 0, i32 0
+  store i8** %t43, i8*** %t49
+  %t50 = getelementptr { i8**, i64 }, { i8**, i64 }* %t48, i32 0, i32 1
+  store i64 1, i64* %t50
+  %t51 = bitcast { %TypeDescriptor*, i64 }* %t33 to { i8**, i64 }*
+  %t52 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t51, { i8**, i64 }* %t48)
+  %t53 = bitcast { i8**, i64 }* %t52 to { %TypeDescriptor*, i64 }*
+  store { %TypeDescriptor*, i64 }* %t53, { %TypeDescriptor*, i64 }** %l0
+  %t54 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
   br label %merge7
 merge7:
-  %t41 = phi { %TypeDescriptor*, i64 }* [ %t40, %then6 ], [ %t23, %merge5 ]
-  store { %TypeDescriptor*, i64 }* %t41, { %TypeDescriptor*, i64 }** %l0
-  %t42 = load i64, i64* %l1
-  %t43 = add i64 %t42, 1
-  store i64 %t43, i64* %l1
+  %t55 = phi { %TypeDescriptor*, i64 }* [ %t54, %then6 ], [ %t30, %merge5 ]
+  store { %TypeDescriptor*, i64 }* %t55, { %TypeDescriptor*, i64 }** %l0
+  %t56 = load i64, i64* %l1
+  %t57 = add i64 %t56, 1
+  store i64 %t57, i64* %l1
   br label %loop.latch2
 loop.latch2:
-  %t44 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
-  %t45 = load i64, i64* %l1
+  %t58 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  %t59 = load i64, i64* %l1
   br label %loop.header0
 afterloop3:
-  %t48 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
-  %t49 = load i64, i64* %l1
-  %t50 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
-  ret { %TypeDescriptor*, i64 }* %t50
+  %t62 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  %t63 = load i64, i64* %l1
+  %t64 = load { %TypeDescriptor*, i64 }*, { %TypeDescriptor*, i64 }** %l0
+  ret { %TypeDescriptor*, i64 }* %t64
 }
 
 define %TypeDescriptor @parse_type_descriptor(i8* %text) {
-entry:
+block.entry:
   %l0 = alloca i8*
   %l1 = alloca { i8**, i64 }*
   %l2 = alloca { i8**, i64 }*
@@ -2464,144 +2576,151 @@ then10:
   store %TypeDescriptor %t81, %TypeDescriptor* %l6
   %t82 = load %TypeDescriptor, %TypeDescriptor* %l5
   %t83 = load %TypeDescriptor, %TypeDescriptor* %l6
-  %t84 = alloca [2 x %TypeDescriptor]
-  %t85 = getelementptr [2 x %TypeDescriptor], [2 x %TypeDescriptor]* %t84, i32 0, i32 0
-  %t86 = getelementptr %TypeDescriptor, %TypeDescriptor* %t85, i64 0
-  store %TypeDescriptor %t82, %TypeDescriptor* %t86
-  %t87 = getelementptr %TypeDescriptor, %TypeDescriptor* %t85, i64 1
-  store %TypeDescriptor %t83, %TypeDescriptor* %t87
-  %t88 = alloca { %TypeDescriptor*, i64 }
-  %t89 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t88, i32 0, i32 0
-  store %TypeDescriptor* %t85, %TypeDescriptor** %t89
-  %t90 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t88, i32 0, i32 1
-  store i64 2, i64* %t90
-  %t91 = call %TypeDescriptor @type_descriptor_union({ %TypeDescriptor*, i64 }* %t88)
-  ret %TypeDescriptor %t91
+  %t84 = getelementptr [2 x %TypeDescriptor], [2 x %TypeDescriptor]* null, i32 1
+  %t85 = ptrtoint [2 x %TypeDescriptor]* %t84 to i64
+  %t86 = icmp eq i64 %t85, 0
+  %t87 = select i1 %t86, i64 1, i64 %t85
+  %t88 = call i8* @malloc(i64 %t87)
+  %t89 = bitcast i8* %t88 to %TypeDescriptor*
+  %t90 = getelementptr %TypeDescriptor, %TypeDescriptor* %t89, i64 0
+  store %TypeDescriptor %t82, %TypeDescriptor* %t90
+  %t91 = getelementptr %TypeDescriptor, %TypeDescriptor* %t89, i64 1
+  store %TypeDescriptor %t83, %TypeDescriptor* %t91
+  %t92 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* null, i32 1
+  %t93 = ptrtoint { %TypeDescriptor*, i64 }* %t92 to i64
+  %t94 = call i8* @malloc(i64 %t93)
+  %t95 = bitcast i8* %t94 to { %TypeDescriptor*, i64 }*
+  %t96 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t95, i32 0, i32 0
+  store %TypeDescriptor* %t89, %TypeDescriptor** %t96
+  %t97 = getelementptr { %TypeDescriptor*, i64 }, { %TypeDescriptor*, i64 }* %t95, i32 0, i32 1
+  store i64 2, i64* %t97
+  %t98 = call %TypeDescriptor @type_descriptor_union({ %TypeDescriptor*, i64 }* %t95)
+  ret %TypeDescriptor %t98
 merge11:
-  %t92 = load i8*, i8** %l0
-  %t93 = alloca [2 x i8], align 1
-  %t94 = getelementptr [2 x i8], [2 x i8]* %t93, i32 0, i32 0
-  store i8 60, i8* %t94
-  %t95 = getelementptr [2 x i8], [2 x i8]* %t93, i32 0, i32 1
-  store i8 0, i8* %t95
-  %t96 = getelementptr [2 x i8], [2 x i8]* %t93, i32 0, i32 0
-  %t97 = call double @descriptor_find_top_level(i8* %t92, i8* %t96)
-  store double %t97, double* %l7
-  %t98 = load i8*, i8** %l0
-  store i8* %t98, i8** %l8
-  %t99 = load double, double* %l7
-  %t100 = sitofp i64 0 to double
-  %t101 = fcmp oge double %t99, %t100
-  %t102 = load i8*, i8** %l0
-  %t103 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t104 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t105 = load double, double* %l7
-  %t106 = load i8*, i8** %l8
-  br i1 %t101, label %then12, label %merge13
+  %t99 = load i8*, i8** %l0
+  %t100 = alloca [2 x i8], align 1
+  %t101 = getelementptr [2 x i8], [2 x i8]* %t100, i32 0, i32 0
+  store i8 60, i8* %t101
+  %t102 = getelementptr [2 x i8], [2 x i8]* %t100, i32 0, i32 1
+  store i8 0, i8* %t102
+  %t103 = getelementptr [2 x i8], [2 x i8]* %t100, i32 0, i32 0
+  %t104 = call double @descriptor_find_top_level(i8* %t99, i8* %t103)
+  store double %t104, double* %l7
+  %t105 = load i8*, i8** %l0
+  store i8* %t105, i8** %l8
+  %t106 = load double, double* %l7
+  %t107 = sitofp i64 0 to double
+  %t108 = fcmp oge double %t106, %t107
+  %t109 = load i8*, i8** %l0
+  %t110 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t111 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t112 = load double, double* %l7
+  %t113 = load i8*, i8** %l8
+  br i1 %t108, label %then12, label %merge13
 then12:
-  %t107 = load i8*, i8** %l0
-  %t108 = load double, double* %l7
-  %t109 = sitofp i64 0 to double
-  %t110 = call i8* @sailfin_runtime_substring(i8* %t107, double %t109, double %t108)
-  %t111 = call i8* @descriptor_trim(i8* %t110)
-  store i8* %t111, i8** %l8
-  %t112 = load i8*, i8** %l8
+  %t114 = load i8*, i8** %l0
+  %t115 = load double, double* %l7
+  %t116 = sitofp i64 0 to double
+  %t117 = call i8* @sailfin_runtime_substring(i8* %t114, double %t116, double %t115)
+  %t118 = call i8* @descriptor_trim(i8* %t117)
+  store i8* %t118, i8** %l8
+  %t119 = load i8*, i8** %l8
   br label %merge13
 merge13:
-  %t113 = phi i8* [ %t112, %then12 ], [ %t106, %merge11 ]
-  store i8* %t113, i8** %l8
-  %t114 = load i8*, i8** %l8
-  %s115 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h2085806430, i32 0, i32 0
-  %t116 = call i1 @string_starts_with(i8* %t114, i8* %s115)
-  %t117 = load i8*, i8** %l0
-  %t118 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t119 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t120 = load double, double* %l7
+  %t120 = phi i8* [ %t119, %then12 ], [ %t113, %merge11 ]
+  store i8* %t120, i8** %l8
   %t121 = load i8*, i8** %l8
-  br i1 %t116, label %then14, label %merge15
+  %s122 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h2085806430, i32 0, i32 0
+  %t123 = call i1 @string_starts_with(i8* %t121, i8* %s122)
+  %t124 = load i8*, i8** %l0
+  %t125 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t126 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t127 = load double, double* %l7
+  %t128 = load i8*, i8** %l8
+  br i1 %t123, label %then14, label %merge15
 then14:
-  %t122 = load i8*, i8** %l8
-  %t123 = load i8*, i8** %l8
-  %t124 = call i64 @sailfin_runtime_string_length(i8* %t123)
-  %t125 = sitofp i64 8 to double
-  %t126 = sitofp i64 %t124 to double
-  %t127 = call i8* @sailfin_runtime_substring(i8* %t122, double %t125, double %t126)
-  %t128 = call i8* @descriptor_trim(i8* %t127)
-  store i8* %t128, i8** %l8
   %t129 = load i8*, i8** %l8
+  %t130 = load i8*, i8** %l8
+  %t131 = call i64 @sailfin_runtime_string_length(i8* %t130)
+  %t132 = sitofp i64 8 to double
+  %t133 = sitofp i64 %t131 to double
+  %t134 = call i8* @sailfin_runtime_substring(i8* %t129, double %t132, double %t133)
+  %t135 = call i8* @descriptor_trim(i8* %t134)
+  store i8* %t135, i8** %l8
+  %t136 = load i8*, i8** %l8
   br label %merge15
 merge15:
-  %t130 = phi i8* [ %t129, %then14 ], [ %t121, %merge13 ]
-  store i8* %t130, i8** %l8
-  %t132 = load i8*, i8** %l8
-  %s133 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
-  %t134 = icmp eq i8* %t132, %s133
-  br label %logical_or_entry_131
+  %t137 = phi i8* [ %t136, %then14 ], [ %t128, %merge13 ]
+  store i8* %t137, i8** %l8
+  %t139 = load i8*, i8** %l8
+  %s140 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
+  %t141 = icmp eq i8* %t139, %s140
+  br label %logical_or_entry_138
 
-logical_or_entry_131:
-  br i1 %t134, label %logical_or_merge_131, label %logical_or_right_131
+logical_or_entry_138:
+  br i1 %t141, label %logical_or_merge_138, label %logical_or_right_138
 
-logical_or_right_131:
-  %t136 = load i8*, i8** %l8
-  %s137 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h807326654, i32 0, i32 0
-  %t138 = icmp eq i8* %t136, %s137
-  br label %logical_or_entry_135
-
-logical_or_entry_135:
-  br i1 %t138, label %logical_or_merge_135, label %logical_or_right_135
-
-logical_or_right_135:
-  %t140 = load i8*, i8** %l8
-  %s141 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
-  %t142 = icmp eq i8* %t140, %s141
-  br label %logical_or_entry_139
-
-logical_or_entry_139:
-  br i1 %t142, label %logical_or_merge_139, label %logical_or_right_139
-
-logical_or_right_139:
+logical_or_right_138:
   %t143 = load i8*, i8** %l8
-  %s144 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
+  %s144 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h807326654, i32 0, i32 0
   %t145 = icmp eq i8* %t143, %s144
-  br label %logical_or_right_end_139
+  br label %logical_or_entry_142
 
-logical_or_right_end_139:
-  br label %logical_or_merge_139
+logical_or_entry_142:
+  br i1 %t145, label %logical_or_merge_142, label %logical_or_right_142
 
-logical_or_merge_139:
-  %t146 = phi i1 [ true, %logical_or_entry_139 ], [ %t145, %logical_or_right_end_139 ]
-  br label %logical_or_right_end_135
+logical_or_right_142:
+  %t147 = load i8*, i8** %l8
+  %s148 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
+  %t149 = icmp eq i8* %t147, %s148
+  br label %logical_or_entry_146
 
-logical_or_right_end_135:
-  br label %logical_or_merge_135
+logical_or_entry_146:
+  br i1 %t149, label %logical_or_merge_146, label %logical_or_right_146
 
-logical_or_merge_135:
-  %t147 = phi i1 [ true, %logical_or_entry_135 ], [ %t146, %logical_or_right_end_135 ]
-  br label %logical_or_right_end_131
+logical_or_right_146:
+  %t150 = load i8*, i8** %l8
+  %s151 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
+  %t152 = icmp eq i8* %t150, %s151
+  br label %logical_or_right_end_146
 
-logical_or_right_end_131:
-  br label %logical_or_merge_131
+logical_or_right_end_146:
+  br label %logical_or_merge_146
 
-logical_or_merge_131:
-  %t148 = phi i1 [ true, %logical_or_entry_131 ], [ %t147, %logical_or_right_end_131 ]
-  %t149 = load i8*, i8** %l0
-  %t150 = load { i8**, i64 }*, { i8**, i64 }** %l1
-  %t151 = load { i8**, i64 }*, { i8**, i64 }** %l2
-  %t152 = load double, double* %l7
-  %t153 = load i8*, i8** %l8
-  br i1 %t148, label %then16, label %merge17
+logical_or_merge_146:
+  %t153 = phi i1 [ true, %logical_or_entry_146 ], [ %t152, %logical_or_right_end_146 ]
+  br label %logical_or_right_end_142
+
+logical_or_right_end_142:
+  br label %logical_or_merge_142
+
+logical_or_merge_142:
+  %t154 = phi i1 [ true, %logical_or_entry_142 ], [ %t153, %logical_or_right_end_142 ]
+  br label %logical_or_right_end_138
+
+logical_or_right_end_138:
+  br label %logical_or_merge_138
+
+logical_or_merge_138:
+  %t155 = phi i1 [ true, %logical_or_entry_138 ], [ %t154, %logical_or_right_end_138 ]
+  %t156 = load i8*, i8** %l0
+  %t157 = load { i8**, i64 }*, { i8**, i64 }** %l1
+  %t158 = load { i8**, i64 }*, { i8**, i64 }** %l2
+  %t159 = load double, double* %l7
+  %t160 = load i8*, i8** %l8
+  br i1 %t155, label %then16, label %merge17
 then16:
-  %t154 = load i8*, i8** %l8
-  %t155 = call %TypeDescriptor @type_descriptor_primitive(i8* %t154)
-  ret %TypeDescriptor %t155
+  %t161 = load i8*, i8** %l8
+  %t162 = call %TypeDescriptor @type_descriptor_primitive(i8* %t161)
+  ret %TypeDescriptor %t162
 merge17:
-  %t156 = load i8*, i8** %l8
-  %t157 = call %TypeDescriptor @type_descriptor_named(i8* %t156)
-  ret %TypeDescriptor %t157
+  %t163 = load i8*, i8** %l8
+  %t164 = call %TypeDescriptor @type_descriptor_named(i8* %t163)
+  ret %TypeDescriptor %t164
 }
 
 define i1 @check_type_primitive(i8* %value, i8* %name) {
-entry:
+block.entry:
   %s0 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
   %t1 = icmp eq i8* %name, %s0
   br i1 %t1, label %then0, label %merge1
@@ -2634,7 +2753,7 @@ merge7:
 }
 
 define i1 @check_type_descriptor(i8* %value, %TypeDescriptor %descriptor) {
-entry:
+block.entry:
   %l0 = alloca i64
   %l1 = alloca i64
   %l2 = alloca %TypeDescriptor*
@@ -2877,7 +2996,7 @@ merge45:
 }
 
 define i1 @check_type(i8* %value, i8* %descriptor) {
-entry:
+block.entry:
   %l0 = alloca %TypeDescriptor
   %t0 = call %TypeDescriptor @parse_type_descriptor(i8* %descriptor)
   store %TypeDescriptor %t0, %TypeDescriptor* %l0
@@ -2888,13 +3007,13 @@ entry:
 
 ; fn serve effects: ![io, net]
 define void @serve(i8* %handler, i8* %config) {
-entry:
+block.entry:
   call void @sailfin_runtime_serve(i8* %handler, i8* %config)
   ret void
 }
 
 define double @clamp(double %value, double %minimum, double %maximum) {
-entry:
+block.entry:
   %t0 = fcmp olt double %value, %minimum
   br i1 %t0, label %then0, label %merge1
 then0:
@@ -2909,7 +3028,7 @@ merge3:
 }
 
 define i8* @substring(i8* %text, double %start, double %end) {
-entry:
+block.entry:
   %l0 = alloca i64
   %l1 = alloca double
   %l2 = alloca double
@@ -2957,10 +3076,10 @@ merge3:
   %t26 = load i8*, i8** %l4
   br label %loop.header4
 loop.header4:
-  %t51 = phi i8* [ %t26, %merge3 ], [ %t49, %loop.latch6 ]
-  %t52 = phi double [ %t25, %merge3 ], [ %t50, %loop.latch6 ]
-  store i8* %t51, i8** %l4
-  store double %t52, double* %l3
+  %t50 = phi i8* [ %t26, %merge3 ], [ %t48, %loop.latch6 ]
+  %t51 = phi double [ %t25, %merge3 ], [ %t49, %loop.latch6 ]
+  store i8* %t50, i8** %l4
+  store double %t51, double* %l3
   br label %loop.body5
 loop.body5:
   %t27 = load double, double* %l3
@@ -2980,33 +3099,32 @@ merge9:
   %t37 = fptosi double %t36 to i64
   %t38 = getelementptr i8, i8* %text, i64 %t37
   %t39 = load i8, i8* %t38
-  %t40 = load i8, i8* %t35
-  %t41 = add i8 %t40, %t39
-  %t42 = alloca [2 x i8], align 1
-  %t43 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 0
-  store i8 %t41, i8* %t43
-  %t44 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 1
-  store i8 0, i8* %t44
-  %t45 = getelementptr [2 x i8], [2 x i8]* %t42, i32 0, i32 0
-  store i8* %t45, i8** %l4
-  %t46 = load double, double* %l3
-  %t47 = sitofp i64 1 to double
-  %t48 = fadd double %t46, %t47
-  store double %t48, double* %l3
+  %t40 = alloca [2 x i8], align 1
+  %t41 = getelementptr [2 x i8], [2 x i8]* %t40, i32 0, i32 0
+  store i8 %t39, i8* %t41
+  %t42 = getelementptr [2 x i8], [2 x i8]* %t40, i32 0, i32 1
+  store i8 0, i8* %t42
+  %t43 = getelementptr [2 x i8], [2 x i8]* %t40, i32 0, i32 0
+  %t44 = call i8* @sailfin_runtime_string_concat(i8* %t35, i8* %t43)
+  store i8* %t44, i8** %l4
+  %t45 = load double, double* %l3
+  %t46 = sitofp i64 1 to double
+  %t47 = fadd double %t45, %t46
+  store double %t47, double* %l3
   br label %loop.latch6
 loop.latch6:
-  %t49 = load i8*, i8** %l4
-  %t50 = load double, double* %l3
+  %t48 = load i8*, i8** %l4
+  %t49 = load double, double* %l3
   br label %loop.header4
 afterloop7:
-  %t53 = load i8*, i8** %l4
-  %t54 = load double, double* %l3
-  %t55 = load i8*, i8** %l4
-  ret i8* %t55
+  %t52 = load i8*, i8** %l4
+  %t53 = load double, double* %l3
+  %t54 = load i8*, i8** %l4
+  ret i8* %t54
 }
 
 define double @find_char(i8* %text, i8* %character, double %start) {
-entry:
+block.entry:
   %l0 = alloca i64
   %l1 = alloca double
   %l2 = alloca i8*
@@ -3212,7 +3330,7 @@ afterloop19:
 }
 
 define void @match_exhaustive_failed(i8* %value) {
-entry:
+block.entry:
   %l0 = alloca i8*
   %s0 = getelementptr inbounds [43 x i8], [43 x i8]* @.str.len42.h1658844115, i32 0, i32 0
   store i8* %s0, i8** %l0
@@ -3222,7 +3340,7 @@ entry:
 }
 
 define double @char_code(i8* %character) {
-entry:
+block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
   %l2 = alloca double
@@ -3417,13 +3535,13 @@ merge21:
 }
 
 define double @grapheme_count(i8* %text) {
-entry:
+block.entry:
   %t0 = call double @sailfin_runtime_grapheme_count(i8* %text)
   ret double %t0
 }
 
 define i8* @grapheme_at(i8* %text, double %index) {
-entry:
+block.entry:
   %t0 = call i8* @sailfin_runtime_grapheme_at(i8* %text, double %index)
   ret i8* %t0
 }
@@ -3433,3 +3551,11 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
+@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
+@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
+@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
+@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
+@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
