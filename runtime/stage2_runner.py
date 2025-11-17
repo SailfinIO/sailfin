@@ -7,6 +7,7 @@ import ctypes
 import os
 import pathlib
 import re
+import sys
 import traceback
 from dataclasses import dataclass
 from collections import Counter, OrderedDict
@@ -292,6 +293,21 @@ class Stage2Runner:
                 selected_dump_dir = pathlib.Path("build") / "stage2" / "instrumented"
             elif normalized not in {"0", "false", "no", "off"}:
                 selected_dump_dir = pathlib.Path(dump_setting)
+        default_log_limit = 25 * 1024 * 1024  # 25 MB cap to avoid runaway logs
+        log_limit_env = os.environ.get("SAILFIN_STAGE2_DEBUG_MAX_BYTES")
+        self._debug_log_limit = default_log_limit
+        if log_limit_env is not None:
+            try:
+                parsed = int(log_limit_env)
+                if parsed <= 0:
+                    self._debug_log_limit = 0
+                else:
+                    self._debug_log_limit = parsed
+            except ValueError:
+                pass
+        self._debug_log_bytes = 0
+        self._debug_log_suppressed = False
+        self._debug_log_notice_emitted = False
         if selected_dump_dir is not None:
             try:
                 selected_dump_dir.mkdir(parents=True, exist_ok=True)
@@ -368,14 +384,38 @@ class Stage2Runner:
 
     def _debug_log(self, message: str) -> None:
         path = self._debug_log_path
-        if not path:
+        if not path or (self._debug_log_limit and self._debug_log_suppressed):
             return
+        text = message + "\n"
+        text_len = len(text)
+        limit = self._debug_log_limit
+        if limit:
+            remaining = limit - self._debug_log_bytes
+            if remaining <= 0:
+                self._debug_log_suppressed = True
+                self._emit_debug_log_notice()
+                return
+            if text_len > remaining:
+                text = text[:remaining]
+                text_len = remaining
+                self._debug_log_suppressed = True
         try:
             with open(path, "a", encoding="utf-8") as handle:
-                handle.write(message + "\n")
+                handle.write(text)
+            self._debug_log_bytes += text_len
+            if self._debug_log_suppressed:
+                self._emit_debug_log_notice()
         except OSError:
             # Ignore log errors so diagnostics do not mask compilation issues.
             pass
+
+    def _emit_debug_log_notice(self) -> None:
+        if self._debug_log_notice_emitted:
+            return
+        self._debug_log_notice_emitted = True
+        sys.stderr.write(
+            "[stage2] debug log limit reached; suppressing additional entries\n"
+        )
 
     def _write_instrumented_ir(self, filename: str, content: str) -> None:
         dump_dir = self._instrument_dump_dir

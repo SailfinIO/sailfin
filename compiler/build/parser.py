@@ -2844,9 +2844,12 @@ def tokens_to_text(tokens):
             break
         text = text + tokens[index].lexeme
         index += 1
-        if len(text) >= limit:
-            truncated = index < len(tokens)
+        if len(text) > limit:
+            text = substring(text, 0, limit)
+            truncated = True
             break
+    if truncated  and  len(text) > limit:
+        text = substring(text, 0, limit)
     if truncated:
         text = text + "... (truncated)"
     return text
@@ -2889,8 +2892,14 @@ def string_array_contains(values, target):
 def is_trivia_token(token):
     if token.kind.variant == "Whitespace"  or  token.kind.variant == "Comment":
         return True
-    if token.kind.variant == "Symbol":
-        if is_whitespace_lexeme(token.lexeme):
+    lexeme = token.lexeme
+    if len(lexeme) == 0:
+        return False
+    if is_whitespace_lexeme(lexeme):
+        return True
+    if len(lexeme) >= 2:
+        prefix = substring(lexeme, 0, 2)
+        if strings_equal(prefix, "//")  or  strings_equal(prefix, "/*"):
             return True
     return False
 

@@ -4059,10 +4059,14 @@ fn tokens_to_text(tokens -> Token[]) -> string {
         }
         text = text + tokens[index].lexeme;
         index += 1;
-        if text.length >= limit {
-            truncated = index < tokens.length;
+        if text.length > limit {
+            text = substring(text, 0, limit);
+            truncated = true;
             break;
         }
+    }
+    if truncated && text.length > limit {
+        text = substring(text, 0, limit);
     }
     if truncated {
         text = text + "... (truncated)";
@@ -4127,8 +4131,16 @@ fn is_trivia_token(token -> Token) -> boolean {
     if token.kind.variant == "Whitespace" || token.kind.variant == "Comment" {
         return true;
     }
-    if token.kind.variant == "Symbol" {
-        if is_whitespace_lexeme(token.lexeme) {
+    let lexeme = token.lexeme;
+    if lexeme.length == 0 {
+        return false;
+    }
+    if is_whitespace_lexeme(lexeme) {
+        return true;
+    }
+    if lexeme.length >= 2 {
+        let prefix = substring(lexeme, 0, 2);
+        if strings_equal(prefix, "//") || strings_equal(prefix, "/*") {
             return true;
         }
     }
