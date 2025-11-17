@@ -2577,27 +2577,33 @@ fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
     let mut tokens -> Token[] = [];
     let mut current = parser;
     let mut depth -> number = 0;
+    let iteration_limit -> number = 16384;
+    let mut iteration_count -> number = 0;
+    let mut truncated -> boolean = false;
 
     loop {
+        if iteration_count >= iteration_limit {
+            truncated = true;
+            current = parser_advance_raw(current);
+            break;
+        }
+        iteration_count += 1;
         let tok = parser_peek_raw(current);
         tokens = append_token(tokens, tok);
 
-        if tok.kind.variant == "Symbol" {
-            let sym = tok.kind.value;
-            if strings_equal(sym, "{") {
-                depth += 1;
-            } else if strings_equal(sym, "}") {
-                if depth > 0 {
-                    depth -= 1;
-                }
-                if depth == 0 {
-                    current = parser_advance_raw(current);
-                    break;
-                }
-            } else if strings_equal(sym, ";") && depth == 0 {
+        if symbol_matches(tok, "{") {
+            depth += 1;
+        } else if symbol_matches(tok, "}") {
+            if depth > 0 {
+                depth -= 1;
+            }
+            if depth == 0 {
                 current = parser_advance_raw(current);
                 break;
             }
+        } else if depth == 0 && symbol_matches(tok, ";") {
+            current = parser_advance_raw(current);
+            break;
         }
 
         if tok.kind.variant == "EndOfFile" {
@@ -2608,36 +2614,49 @@ fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
         current = parser_advance_raw(current);
     }
 
-    let text = tokens_to_text(tokens);
+    let mut text -> string = tokens_to_text(tokens);
+    if truncated {
+        text = text + " /* parse_unknown truncated */";
+    }
     let block = Statement.Unknown { tokens: tokens, text: text };
     parser = skip_trivia(current);
     return StatementParseResult { parser: parser, statement: block };
 }
 
 fn identifier_matches(token -> Token, expected -> string) -> boolean {
-    if token.kind.variant != "Identifier" {
-        return false;
-    }
-    let value = token.kind.value;
-    if value.length > 0 {
-        if strings_equal(value, expected) {
+    let lexeme = token.lexeme;
+    if lexeme.length > 0 {
+        if strings_equal(lexeme, expected) {
             return true;
         }
     }
-    return strings_equal(token.lexeme, expected);
+    if token.kind.variant == "Identifier" {
+        let value = token.kind.value;
+        if value.length > 0 {
+            if strings_equal(value, expected) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 fn symbol_matches(token -> Token, expected -> string) -> boolean {
-    if token.kind.variant != "Symbol" {
-        return false;
-    }
-    let value = token.kind.value;
-    if value.length > 0 {
-        if strings_equal(value, expected) {
+    let lexeme = token.lexeme;
+    if lexeme.length > 0 {
+        if strings_equal(lexeme, expected) {
             return true;
         }
     }
-    return strings_equal(token.lexeme, expected);
+    if token.kind.variant == "Symbol" {
+        let value = token.kind.value;
+        if value.length > 0 {
+            if strings_equal(value, expected) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 fn identifier_text(token -> Token) -> string {
@@ -4027,12 +4046,26 @@ fn filter_trivia(tokens -> Token[]) -> Token[] {
 fn tokens_to_text(tokens -> Token[]) -> string {
     let mut text -> string = "";
     let mut index -> number = 0;
+    let limit -> number = 8192;
+    let max_tokens -> number = 512;
+    let mut truncated -> boolean = false;
     loop {
         if index >= tokens.length {
             break;
         }
+        if index >= max_tokens {
+            truncated = true;
+            break;
+        }
         text = text + tokens[index].lexeme;
         index += 1;
+        if text.length >= limit {
+            truncated = index < tokens.length;
+            break;
+        }
+    }
+    if truncated {
+        text = text + "... (truncated)";
     }
     return text;
 }

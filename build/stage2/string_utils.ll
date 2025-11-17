@@ -388,6 +388,67 @@ merge13:
   ret i8* %t97
 }
 
+define i1 @strings_equal(i8* %left, i8* %right) {
+block.entry:
+  %l0 = alloca double
+  %l1 = alloca i8*
+  %l2 = alloca i8*
+  %t0 = call i64 @sailfin_runtime_string_length(i8* %left)
+  %t1 = call i64 @sailfin_runtime_string_length(i8* %right)
+  %t2 = icmp ne i64 %t0, %t1
+  br i1 %t2, label %then0, label %merge1
+then0:
+  ret i1 0
+merge1:
+  %t3 = sitofp i64 0 to double
+  store double %t3, double* %l0
+  %t4 = load double, double* %l0
+  br label %loop.header2
+loop.header2:
+  %t26 = phi double [ %t4, %merge1 ], [ %t25, %loop.latch4 ]
+  store double %t26, double* %l0
+  br label %loop.body3
+loop.body3:
+  %t5 = load double, double* %l0
+  %t6 = call i64 @sailfin_runtime_string_length(i8* %left)
+  %t7 = sitofp i64 %t6 to double
+  %t8 = fcmp oge double %t5, %t7
+  %t9 = load double, double* %l0
+  br i1 %t8, label %then6, label %merge7
+then6:
+  br label %afterloop5
+merge7:
+  %t10 = load double, double* %l0
+  %t11 = call i8* @char_at(i8* %left, double %t10)
+  store i8* %t11, i8** %l1
+  %t12 = load double, double* %l0
+  %t13 = call i8* @char_at(i8* %right, double %t12)
+  store i8* %t13, i8** %l2
+  %t14 = load i8*, i8** %l1
+  %t15 = call double @char_code(i8* %t14)
+  %t16 = load i8*, i8** %l2
+  %t17 = call double @char_code(i8* %t16)
+  %t18 = fcmp une double %t15, %t17
+  %t19 = load double, double* %l0
+  %t20 = load i8*, i8** %l1
+  %t21 = load i8*, i8** %l2
+  br i1 %t18, label %then8, label %merge9
+then8:
+  ret i1 0
+merge9:
+  %t22 = load double, double* %l0
+  %t23 = sitofp i64 1 to double
+  %t24 = fadd double %t22, %t23
+  store double %t24, double* %l0
+  br label %loop.latch4
+loop.latch4:
+  %t25 = load double, double* %l0
+  br label %loop.header2
+afterloop5:
+  %t27 = load double, double* %l0
+  ret i1 1
+}
+
 define double @add(double %a, double %b) {
 entry:
   %t0 = fadd double %a, %b

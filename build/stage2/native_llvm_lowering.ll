@@ -289,6 +289,7 @@ declare noalias i8* @malloc(i64)
 @.str.len13.h364690157 = private unnamed_addr constant [14 x i8] c"string.length\00"
 @.str.len29.h1932015666 = private unnamed_addr constant [30 x i8] c"sailfin_runtime_string_length\00"
 @.str.len29.h1437412067 = private unnamed_addr constant [30 x i8] c"sailfin_runtime_string_concat\00"
+@.str.len13.h1526968728 = private unnamed_addr constant [14 x i8] c"strings_equal\00"
 @.str.len9.h778785771 = private unnamed_addr constant [10 x i8] c"char_code\00"
 @.str.len25.h1258284707 = private unnamed_addr constant [26 x i8] c"runtime_grapheme_count_fn\00"
 @.str.len30.h213406005 = private unnamed_addr constant [31 x i8] c"sailfin_runtime_grapheme_count\00"
@@ -17414,117 +17415,117 @@ block.entry:
   %t2423 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2386, %RuntimeHelperDescriptor %t2422)
   store { %RuntimeHelperDescriptor*, i64 }* %t2423, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t2424 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s2425 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h778785771, i32 0, i32 0
+  %s2425 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1526968728, i32 0, i32 0
   %t2426 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2425, 0
-  %s2427 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h778785771, i32 0, i32 0
+  %s2427 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1526968728, i32 0, i32 0
   %t2428 = insertvalue %RuntimeHelperDescriptor %t2426, i8* %s2427, 1
-  %s2429 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
+  %s2429 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
   %t2430 = insertvalue %RuntimeHelperDescriptor %t2428, i8* %s2429, 2
   %s2431 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  %t2432 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
-  %t2433 = ptrtoint [1 x i8*]* %t2432 to i64
-  %t2434 = icmp eq i64 %t2433, 0
-  %t2435 = select i1 %t2434, i64 1, i64 %t2433
-  %t2436 = call i8* @malloc(i64 %t2435)
-  %t2437 = bitcast i8* %t2436 to i8**
-  %t2438 = getelementptr i8*, i8** %t2437, i64 0
-  store i8* %s2431, i8** %t2438
-  %t2439 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2440 = ptrtoint { i8**, i64 }* %t2439 to i64
-  %t2441 = call i8* @malloc(i64 %t2440)
-  %t2442 = bitcast i8* %t2441 to { i8**, i64 }*
-  %t2443 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2442, i32 0, i32 0
-  store i8** %t2437, i8*** %t2443
-  %t2444 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2442, i32 0, i32 1
-  store i64 1, i64* %t2444
-  %t2445 = insertvalue %RuntimeHelperDescriptor %t2430, { i8**, i64 }* %t2442, 3
-  %t2446 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
-  %t2447 = ptrtoint [0 x i8*]* %t2446 to i64
-  %t2448 = icmp eq i64 %t2447, 0
-  %t2449 = select i1 %t2448, i64 1, i64 %t2447
-  %t2450 = call i8* @malloc(i64 %t2449)
-  %t2451 = bitcast i8* %t2450 to i8**
-  %t2452 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2453 = ptrtoint { i8**, i64 }* %t2452 to i64
-  %t2454 = call i8* @malloc(i64 %t2453)
-  %t2455 = bitcast i8* %t2454 to { i8**, i64 }*
-  %t2456 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2455, i32 0, i32 0
-  store i8** %t2451, i8*** %t2456
-  %t2457 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2455, i32 0, i32 1
-  store i64 0, i64* %t2457
-  %t2458 = insertvalue %RuntimeHelperDescriptor %t2445, { i8**, i64 }* %t2455, 4
-  %t2459 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2424, %RuntimeHelperDescriptor %t2458)
-  store { %RuntimeHelperDescriptor*, i64 }* %t2459, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t2460 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s2461 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.len25.h1258284707, i32 0, i32 0
-  %t2462 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2461, 0
-  %s2463 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.len30.h213406005, i32 0, i32 0
-  %t2464 = insertvalue %RuntimeHelperDescriptor %t2462, i8* %s2463, 1
-  %s2465 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
-  %t2466 = insertvalue %RuntimeHelperDescriptor %t2464, i8* %s2465, 2
-  %s2467 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  %t2468 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
-  %t2469 = ptrtoint [1 x i8*]* %t2468 to i64
-  %t2470 = icmp eq i64 %t2469, 0
-  %t2471 = select i1 %t2470, i64 1, i64 %t2469
-  %t2472 = call i8* @malloc(i64 %t2471)
-  %t2473 = bitcast i8* %t2472 to i8**
-  %t2474 = getelementptr i8*, i8** %t2473, i64 0
-  store i8* %s2467, i8** %t2474
-  %t2475 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2476 = ptrtoint { i8**, i64 }* %t2475 to i64
-  %t2477 = call i8* @malloc(i64 %t2476)
-  %t2478 = bitcast i8* %t2477 to { i8**, i64 }*
-  %t2479 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2478, i32 0, i32 0
-  store i8** %t2473, i8*** %t2479
-  %t2480 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2478, i32 0, i32 1
-  store i64 1, i64* %t2480
-  %t2481 = insertvalue %RuntimeHelperDescriptor %t2466, { i8**, i64 }* %t2478, 3
-  %t2482 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
-  %t2483 = ptrtoint [0 x i8*]* %t2482 to i64
-  %t2484 = icmp eq i64 %t2483, 0
-  %t2485 = select i1 %t2484, i64 1, i64 %t2483
-  %t2486 = call i8* @malloc(i64 %t2485)
-  %t2487 = bitcast i8* %t2486 to i8**
-  %t2488 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2489 = ptrtoint { i8**, i64 }* %t2488 to i64
-  %t2490 = call i8* @malloc(i64 %t2489)
-  %t2491 = bitcast i8* %t2490 to { i8**, i64 }*
-  %t2492 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2491, i32 0, i32 0
-  store i8** %t2487, i8*** %t2492
-  %t2493 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2491, i32 0, i32 1
-  store i64 0, i64* %t2493
-  %t2494 = insertvalue %RuntimeHelperDescriptor %t2481, { i8**, i64 }* %t2491, 4
-  %t2495 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2460, %RuntimeHelperDescriptor %t2494)
-  store { %RuntimeHelperDescriptor*, i64 }* %t2495, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t2496 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s2497 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.len22.h1845927258, i32 0, i32 0
-  %t2498 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2497, 0
-  %s2499 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.len27.h826800274, i32 0, i32 0
-  %t2500 = insertvalue %RuntimeHelperDescriptor %t2498, i8* %s2499, 1
-  %s2501 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  %t2502 = insertvalue %RuntimeHelperDescriptor %t2500, i8* %s2501, 2
-  %s2503 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  %s2504 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
-  %t2505 = getelementptr [2 x i8*], [2 x i8*]* null, i32 1
-  %t2506 = ptrtoint [2 x i8*]* %t2505 to i64
-  %t2507 = icmp eq i64 %t2506, 0
-  %t2508 = select i1 %t2507, i64 1, i64 %t2506
-  %t2509 = call i8* @malloc(i64 %t2508)
-  %t2510 = bitcast i8* %t2509 to i8**
-  %t2511 = getelementptr i8*, i8** %t2510, i64 0
-  store i8* %s2503, i8** %t2511
-  %t2512 = getelementptr i8*, i8** %t2510, i64 1
-  store i8* %s2504, i8** %t2512
+  %s2432 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
+  %t2433 = getelementptr [2 x i8*], [2 x i8*]* null, i32 1
+  %t2434 = ptrtoint [2 x i8*]* %t2433 to i64
+  %t2435 = icmp eq i64 %t2434, 0
+  %t2436 = select i1 %t2435, i64 1, i64 %t2434
+  %t2437 = call i8* @malloc(i64 %t2436)
+  %t2438 = bitcast i8* %t2437 to i8**
+  %t2439 = getelementptr i8*, i8** %t2438, i64 0
+  store i8* %s2431, i8** %t2439
+  %t2440 = getelementptr i8*, i8** %t2438, i64 1
+  store i8* %s2432, i8** %t2440
+  %t2441 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2442 = ptrtoint { i8**, i64 }* %t2441 to i64
+  %t2443 = call i8* @malloc(i64 %t2442)
+  %t2444 = bitcast i8* %t2443 to { i8**, i64 }*
+  %t2445 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2444, i32 0, i32 0
+  store i8** %t2438, i8*** %t2445
+  %t2446 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2444, i32 0, i32 1
+  store i64 2, i64* %t2446
+  %t2447 = insertvalue %RuntimeHelperDescriptor %t2430, { i8**, i64 }* %t2444, 3
+  %t2448 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
+  %t2449 = ptrtoint [0 x i8*]* %t2448 to i64
+  %t2450 = icmp eq i64 %t2449, 0
+  %t2451 = select i1 %t2450, i64 1, i64 %t2449
+  %t2452 = call i8* @malloc(i64 %t2451)
+  %t2453 = bitcast i8* %t2452 to i8**
+  %t2454 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2455 = ptrtoint { i8**, i64 }* %t2454 to i64
+  %t2456 = call i8* @malloc(i64 %t2455)
+  %t2457 = bitcast i8* %t2456 to { i8**, i64 }*
+  %t2458 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2457, i32 0, i32 0
+  store i8** %t2453, i8*** %t2458
+  %t2459 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2457, i32 0, i32 1
+  store i64 0, i64* %t2459
+  %t2460 = insertvalue %RuntimeHelperDescriptor %t2447, { i8**, i64 }* %t2457, 4
+  %t2461 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2424, %RuntimeHelperDescriptor %t2460)
+  store { %RuntimeHelperDescriptor*, i64 }* %t2461, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t2462 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s2463 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h778785771, i32 0, i32 0
+  %t2464 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2463, 0
+  %s2465 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h778785771, i32 0, i32 0
+  %t2466 = insertvalue %RuntimeHelperDescriptor %t2464, i8* %s2465, 1
+  %s2467 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
+  %t2468 = insertvalue %RuntimeHelperDescriptor %t2466, i8* %s2467, 2
+  %s2469 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
+  %t2470 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t2471 = ptrtoint [1 x i8*]* %t2470 to i64
+  %t2472 = icmp eq i64 %t2471, 0
+  %t2473 = select i1 %t2472, i64 1, i64 %t2471
+  %t2474 = call i8* @malloc(i64 %t2473)
+  %t2475 = bitcast i8* %t2474 to i8**
+  %t2476 = getelementptr i8*, i8** %t2475, i64 0
+  store i8* %s2469, i8** %t2476
+  %t2477 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2478 = ptrtoint { i8**, i64 }* %t2477 to i64
+  %t2479 = call i8* @malloc(i64 %t2478)
+  %t2480 = bitcast i8* %t2479 to { i8**, i64 }*
+  %t2481 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2480, i32 0, i32 0
+  store i8** %t2475, i8*** %t2481
+  %t2482 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2480, i32 0, i32 1
+  store i64 1, i64* %t2482
+  %t2483 = insertvalue %RuntimeHelperDescriptor %t2468, { i8**, i64 }* %t2480, 3
+  %t2484 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
+  %t2485 = ptrtoint [0 x i8*]* %t2484 to i64
+  %t2486 = icmp eq i64 %t2485, 0
+  %t2487 = select i1 %t2486, i64 1, i64 %t2485
+  %t2488 = call i8* @malloc(i64 %t2487)
+  %t2489 = bitcast i8* %t2488 to i8**
+  %t2490 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2491 = ptrtoint { i8**, i64 }* %t2490 to i64
+  %t2492 = call i8* @malloc(i64 %t2491)
+  %t2493 = bitcast i8* %t2492 to { i8**, i64 }*
+  %t2494 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2493, i32 0, i32 0
+  store i8** %t2489, i8*** %t2494
+  %t2495 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2493, i32 0, i32 1
+  store i64 0, i64* %t2495
+  %t2496 = insertvalue %RuntimeHelperDescriptor %t2483, { i8**, i64 }* %t2493, 4
+  %t2497 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2462, %RuntimeHelperDescriptor %t2496)
+  store { %RuntimeHelperDescriptor*, i64 }* %t2497, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t2498 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s2499 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.len25.h1258284707, i32 0, i32 0
+  %t2500 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2499, 0
+  %s2501 = getelementptr inbounds [31 x i8], [31 x i8]* @.str.len30.h213406005, i32 0, i32 0
+  %t2502 = insertvalue %RuntimeHelperDescriptor %t2500, i8* %s2501, 1
+  %s2503 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
+  %t2504 = insertvalue %RuntimeHelperDescriptor %t2502, i8* %s2503, 2
+  %s2505 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
+  %t2506 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t2507 = ptrtoint [1 x i8*]* %t2506 to i64
+  %t2508 = icmp eq i64 %t2507, 0
+  %t2509 = select i1 %t2508, i64 1, i64 %t2507
+  %t2510 = call i8* @malloc(i64 %t2509)
+  %t2511 = bitcast i8* %t2510 to i8**
+  %t2512 = getelementptr i8*, i8** %t2511, i64 0
+  store i8* %s2505, i8** %t2512
   %t2513 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
   %t2514 = ptrtoint { i8**, i64 }* %t2513 to i64
   %t2515 = call i8* @malloc(i64 %t2514)
   %t2516 = bitcast i8* %t2515 to { i8**, i64 }*
   %t2517 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2516, i32 0, i32 0
-  store i8** %t2510, i8*** %t2517
+  store i8** %t2511, i8*** %t2517
   %t2518 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2516, i32 0, i32 1
-  store i64 2, i64* %t2518
-  %t2519 = insertvalue %RuntimeHelperDescriptor %t2502, { i8**, i64 }* %t2516, 3
+  store i64 1, i64* %t2518
+  %t2519 = insertvalue %RuntimeHelperDescriptor %t2504, { i8**, i64 }* %t2516, 3
   %t2520 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t2521 = ptrtoint [0 x i8*]* %t2520 to i64
   %t2522 = icmp eq i64 %t2521, 0
@@ -17540,162 +17541,162 @@ block.entry:
   %t2531 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2529, i32 0, i32 1
   store i64 0, i64* %t2531
   %t2532 = insertvalue %RuntimeHelperDescriptor %t2519, { i8**, i64 }* %t2529, 4
-  %t2533 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2496, %RuntimeHelperDescriptor %t2532)
+  %t2533 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2498, %RuntimeHelperDescriptor %t2532)
   store { %RuntimeHelperDescriptor*, i64 }* %t2533, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t2534 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s2535 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.len18.h502407246, i32 0, i32 0
+  %s2535 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.len22.h1845927258, i32 0, i32 0
   %t2536 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2535, 0
-  %s2537 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.len34.h450484117, i32 0, i32 0
+  %s2537 = getelementptr inbounds [28 x i8], [28 x i8]* @.str.len27.h826800274, i32 0, i32 0
   %t2538 = insertvalue %RuntimeHelperDescriptor %t2536, i8* %s2537, 1
-  %s2539 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
+  %s2539 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
   %t2540 = insertvalue %RuntimeHelperDescriptor %t2538, i8* %s2539, 2
-  %s2541 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193493192, i32 0, i32 0
-  %t2542 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
-  %t2543 = ptrtoint [1 x i8*]* %t2542 to i64
-  %t2544 = icmp eq i64 %t2543, 0
-  %t2545 = select i1 %t2544, i64 1, i64 %t2543
-  %t2546 = call i8* @malloc(i64 %t2545)
-  %t2547 = bitcast i8* %t2546 to i8**
-  %t2548 = getelementptr i8*, i8** %t2547, i64 0
-  store i8* %s2541, i8** %t2548
-  %t2549 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2550 = ptrtoint { i8**, i64 }* %t2549 to i64
-  %t2551 = call i8* @malloc(i64 %t2550)
-  %t2552 = bitcast i8* %t2551 to { i8**, i64 }*
-  %t2553 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2552, i32 0, i32 0
-  store i8** %t2547, i8*** %t2553
-  %t2554 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2552, i32 0, i32 1
-  store i64 1, i64* %t2554
-  %t2555 = insertvalue %RuntimeHelperDescriptor %t2540, { i8**, i64 }* %t2552, 3
-  %t2556 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
-  %t2557 = ptrtoint [0 x i8*]* %t2556 to i64
-  %t2558 = icmp eq i64 %t2557, 0
-  %t2559 = select i1 %t2558, i64 1, i64 %t2557
-  %t2560 = call i8* @malloc(i64 %t2559)
-  %t2561 = bitcast i8* %t2560 to i8**
-  %t2562 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2563 = ptrtoint { i8**, i64 }* %t2562 to i64
-  %t2564 = call i8* @malloc(i64 %t2563)
-  %t2565 = bitcast i8* %t2564 to { i8**, i64 }*
-  %t2566 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2565, i32 0, i32 0
-  store i8** %t2561, i8*** %t2566
-  %t2567 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2565, i32 0, i32 1
-  store i64 0, i64* %t2567
-  %t2568 = insertvalue %RuntimeHelperDescriptor %t2555, { i8**, i64 }* %t2565, 4
-  %t2569 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2534, %RuntimeHelperDescriptor %t2568)
-  store { %RuntimeHelperDescriptor*, i64 }* %t2569, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t2570 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s2571 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h1418117008, i32 0, i32 0
-  %t2572 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2571, 0
-  %s2573 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.len32.h2045158233, i32 0, i32 0
-  %t2574 = insertvalue %RuntimeHelperDescriptor %t2572, i8* %s2573, 1
-  %s2575 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
-  %t2576 = insertvalue %RuntimeHelperDescriptor %t2574, i8* %s2575, 2
-  %s2577 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193493192, i32 0, i32 0
-  %t2578 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
-  %t2579 = ptrtoint [1 x i8*]* %t2578 to i64
-  %t2580 = icmp eq i64 %t2579, 0
-  %t2581 = select i1 %t2580, i64 1, i64 %t2579
-  %t2582 = call i8* @malloc(i64 %t2581)
-  %t2583 = bitcast i8* %t2582 to i8**
-  %t2584 = getelementptr i8*, i8** %t2583, i64 0
-  store i8* %s2577, i8** %t2584
-  %t2585 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2586 = ptrtoint { i8**, i64 }* %t2585 to i64
-  %t2587 = call i8* @malloc(i64 %t2586)
-  %t2588 = bitcast i8* %t2587 to { i8**, i64 }*
-  %t2589 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2588, i32 0, i32 0
-  store i8** %t2583, i8*** %t2589
-  %t2590 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2588, i32 0, i32 1
-  store i64 1, i64* %t2590
-  %t2591 = insertvalue %RuntimeHelperDescriptor %t2576, { i8**, i64 }* %t2588, 3
-  %t2592 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
-  %t2593 = ptrtoint [0 x i8*]* %t2592 to i64
-  %t2594 = icmp eq i64 %t2593, 0
-  %t2595 = select i1 %t2594, i64 1, i64 %t2593
-  %t2596 = call i8* @malloc(i64 %t2595)
-  %t2597 = bitcast i8* %t2596 to i8**
-  %t2598 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2599 = ptrtoint { i8**, i64 }* %t2598 to i64
-  %t2600 = call i8* @malloc(i64 %t2599)
-  %t2601 = bitcast i8* %t2600 to { i8**, i64 }*
-  %t2602 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2601, i32 0, i32 0
-  store i8** %t2597, i8*** %t2602
-  %t2603 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2601, i32 0, i32 1
-  store i64 0, i64* %t2603
-  %t2604 = insertvalue %RuntimeHelperDescriptor %t2591, { i8**, i64 }* %t2601, 4
-  %t2605 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2570, %RuntimeHelperDescriptor %t2604)
-  store { %RuntimeHelperDescriptor*, i64 }* %t2605, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t2606 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s2607 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1820730605, i32 0, i32 0
-  %t2608 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2607, 0
-  %s2609 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h290971478, i32 0, i32 0
-  %t2610 = insertvalue %RuntimeHelperDescriptor %t2608, i8* %s2609, 1
-  %s2611 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
-  %t2612 = insertvalue %RuntimeHelperDescriptor %t2610, i8* %s2611, 2
-  %s2613 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193493192, i32 0, i32 0
-  %t2614 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
-  %t2615 = ptrtoint [1 x i8*]* %t2614 to i64
-  %t2616 = icmp eq i64 %t2615, 0
-  %t2617 = select i1 %t2616, i64 1, i64 %t2615
-  %t2618 = call i8* @malloc(i64 %t2617)
-  %t2619 = bitcast i8* %t2618 to i8**
-  %t2620 = getelementptr i8*, i8** %t2619, i64 0
-  store i8* %s2613, i8** %t2620
-  %t2621 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2622 = ptrtoint { i8**, i64 }* %t2621 to i64
-  %t2623 = call i8* @malloc(i64 %t2622)
-  %t2624 = bitcast i8* %t2623 to { i8**, i64 }*
-  %t2625 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2624, i32 0, i32 0
-  store i8** %t2619, i8*** %t2625
-  %t2626 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2624, i32 0, i32 1
-  store i64 1, i64* %t2626
-  %t2627 = insertvalue %RuntimeHelperDescriptor %t2612, { i8**, i64 }* %t2624, 3
-  %t2628 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
-  %t2629 = ptrtoint [0 x i8*]* %t2628 to i64
-  %t2630 = icmp eq i64 %t2629, 0
-  %t2631 = select i1 %t2630, i64 1, i64 %t2629
-  %t2632 = call i8* @malloc(i64 %t2631)
-  %t2633 = bitcast i8* %t2632 to i8**
-  %t2634 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t2635 = ptrtoint { i8**, i64 }* %t2634 to i64
-  %t2636 = call i8* @malloc(i64 %t2635)
-  %t2637 = bitcast i8* %t2636 to { i8**, i64 }*
-  %t2638 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2637, i32 0, i32 0
-  store i8** %t2633, i8*** %t2638
-  %t2639 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2637, i32 0, i32 1
-  store i64 0, i64* %t2639
-  %t2640 = insertvalue %RuntimeHelperDescriptor %t2627, { i8**, i64 }* %t2637, 4
-  %t2641 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2606, %RuntimeHelperDescriptor %t2640)
-  store { %RuntimeHelperDescriptor*, i64 }* %t2641, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %t2642 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s2643 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h693205632, i32 0, i32 0
-  %t2644 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2643, 0
-  %s2645 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h1310930152, i32 0, i32 0
-  %t2646 = insertvalue %RuntimeHelperDescriptor %t2644, i8* %s2645, 1
-  %s2647 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1222440456, i32 0, i32 0
-  %t2648 = insertvalue %RuntimeHelperDescriptor %t2646, i8* %s2647, 2
-  %s2649 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1222440456, i32 0, i32 0
-  %s2650 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  %t2651 = getelementptr [2 x i8*], [2 x i8*]* null, i32 1
-  %t2652 = ptrtoint [2 x i8*]* %t2651 to i64
-  %t2653 = icmp eq i64 %t2652, 0
-  %t2654 = select i1 %t2653, i64 1, i64 %t2652
-  %t2655 = call i8* @malloc(i64 %t2654)
-  %t2656 = bitcast i8* %t2655 to i8**
-  %t2657 = getelementptr i8*, i8** %t2656, i64 0
-  store i8* %s2649, i8** %t2657
-  %t2658 = getelementptr i8*, i8** %t2656, i64 1
-  store i8* %s2650, i8** %t2658
+  %s2541 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
+  %s2542 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
+  %t2543 = getelementptr [2 x i8*], [2 x i8*]* null, i32 1
+  %t2544 = ptrtoint [2 x i8*]* %t2543 to i64
+  %t2545 = icmp eq i64 %t2544, 0
+  %t2546 = select i1 %t2545, i64 1, i64 %t2544
+  %t2547 = call i8* @malloc(i64 %t2546)
+  %t2548 = bitcast i8* %t2547 to i8**
+  %t2549 = getelementptr i8*, i8** %t2548, i64 0
+  store i8* %s2541, i8** %t2549
+  %t2550 = getelementptr i8*, i8** %t2548, i64 1
+  store i8* %s2542, i8** %t2550
+  %t2551 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2552 = ptrtoint { i8**, i64 }* %t2551 to i64
+  %t2553 = call i8* @malloc(i64 %t2552)
+  %t2554 = bitcast i8* %t2553 to { i8**, i64 }*
+  %t2555 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2554, i32 0, i32 0
+  store i8** %t2548, i8*** %t2555
+  %t2556 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2554, i32 0, i32 1
+  store i64 2, i64* %t2556
+  %t2557 = insertvalue %RuntimeHelperDescriptor %t2540, { i8**, i64 }* %t2554, 3
+  %t2558 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
+  %t2559 = ptrtoint [0 x i8*]* %t2558 to i64
+  %t2560 = icmp eq i64 %t2559, 0
+  %t2561 = select i1 %t2560, i64 1, i64 %t2559
+  %t2562 = call i8* @malloc(i64 %t2561)
+  %t2563 = bitcast i8* %t2562 to i8**
+  %t2564 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2565 = ptrtoint { i8**, i64 }* %t2564 to i64
+  %t2566 = call i8* @malloc(i64 %t2565)
+  %t2567 = bitcast i8* %t2566 to { i8**, i64 }*
+  %t2568 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2567, i32 0, i32 0
+  store i8** %t2563, i8*** %t2568
+  %t2569 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2567, i32 0, i32 1
+  store i64 0, i64* %t2569
+  %t2570 = insertvalue %RuntimeHelperDescriptor %t2557, { i8**, i64 }* %t2567, 4
+  %t2571 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2534, %RuntimeHelperDescriptor %t2570)
+  store { %RuntimeHelperDescriptor*, i64 }* %t2571, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t2572 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s2573 = getelementptr inbounds [19 x i8], [19 x i8]* @.str.len18.h502407246, i32 0, i32 0
+  %t2574 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2573, 0
+  %s2575 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.len34.h450484117, i32 0, i32 0
+  %t2576 = insertvalue %RuntimeHelperDescriptor %t2574, i8* %s2575, 1
+  %s2577 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
+  %t2578 = insertvalue %RuntimeHelperDescriptor %t2576, i8* %s2577, 2
+  %s2579 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193493192, i32 0, i32 0
+  %t2580 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t2581 = ptrtoint [1 x i8*]* %t2580 to i64
+  %t2582 = icmp eq i64 %t2581, 0
+  %t2583 = select i1 %t2582, i64 1, i64 %t2581
+  %t2584 = call i8* @malloc(i64 %t2583)
+  %t2585 = bitcast i8* %t2584 to i8**
+  %t2586 = getelementptr i8*, i8** %t2585, i64 0
+  store i8* %s2579, i8** %t2586
+  %t2587 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2588 = ptrtoint { i8**, i64 }* %t2587 to i64
+  %t2589 = call i8* @malloc(i64 %t2588)
+  %t2590 = bitcast i8* %t2589 to { i8**, i64 }*
+  %t2591 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2590, i32 0, i32 0
+  store i8** %t2585, i8*** %t2591
+  %t2592 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2590, i32 0, i32 1
+  store i64 1, i64* %t2592
+  %t2593 = insertvalue %RuntimeHelperDescriptor %t2578, { i8**, i64 }* %t2590, 3
+  %t2594 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
+  %t2595 = ptrtoint [0 x i8*]* %t2594 to i64
+  %t2596 = icmp eq i64 %t2595, 0
+  %t2597 = select i1 %t2596, i64 1, i64 %t2595
+  %t2598 = call i8* @malloc(i64 %t2597)
+  %t2599 = bitcast i8* %t2598 to i8**
+  %t2600 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2601 = ptrtoint { i8**, i64 }* %t2600 to i64
+  %t2602 = call i8* @malloc(i64 %t2601)
+  %t2603 = bitcast i8* %t2602 to { i8**, i64 }*
+  %t2604 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2603, i32 0, i32 0
+  store i8** %t2599, i8*** %t2604
+  %t2605 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2603, i32 0, i32 1
+  store i64 0, i64* %t2605
+  %t2606 = insertvalue %RuntimeHelperDescriptor %t2593, { i8**, i64 }* %t2603, 4
+  %t2607 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2572, %RuntimeHelperDescriptor %t2606)
+  store { %RuntimeHelperDescriptor*, i64 }* %t2607, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t2608 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s2609 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h1418117008, i32 0, i32 0
+  %t2610 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2609, 0
+  %s2611 = getelementptr inbounds [33 x i8], [33 x i8]* @.str.len32.h2045158233, i32 0, i32 0
+  %t2612 = insertvalue %RuntimeHelperDescriptor %t2610, i8* %s2611, 1
+  %s2613 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
+  %t2614 = insertvalue %RuntimeHelperDescriptor %t2612, i8* %s2613, 2
+  %s2615 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193493192, i32 0, i32 0
+  %t2616 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t2617 = ptrtoint [1 x i8*]* %t2616 to i64
+  %t2618 = icmp eq i64 %t2617, 0
+  %t2619 = select i1 %t2618, i64 1, i64 %t2617
+  %t2620 = call i8* @malloc(i64 %t2619)
+  %t2621 = bitcast i8* %t2620 to i8**
+  %t2622 = getelementptr i8*, i8** %t2621, i64 0
+  store i8* %s2615, i8** %t2622
+  %t2623 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2624 = ptrtoint { i8**, i64 }* %t2623 to i64
+  %t2625 = call i8* @malloc(i64 %t2624)
+  %t2626 = bitcast i8* %t2625 to { i8**, i64 }*
+  %t2627 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2626, i32 0, i32 0
+  store i8** %t2621, i8*** %t2627
+  %t2628 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2626, i32 0, i32 1
+  store i64 1, i64* %t2628
+  %t2629 = insertvalue %RuntimeHelperDescriptor %t2614, { i8**, i64 }* %t2626, 3
+  %t2630 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
+  %t2631 = ptrtoint [0 x i8*]* %t2630 to i64
+  %t2632 = icmp eq i64 %t2631, 0
+  %t2633 = select i1 %t2632, i64 1, i64 %t2631
+  %t2634 = call i8* @malloc(i64 %t2633)
+  %t2635 = bitcast i8* %t2634 to i8**
+  %t2636 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2637 = ptrtoint { i8**, i64 }* %t2636 to i64
+  %t2638 = call i8* @malloc(i64 %t2637)
+  %t2639 = bitcast i8* %t2638 to { i8**, i64 }*
+  %t2640 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2639, i32 0, i32 0
+  store i8** %t2635, i8*** %t2640
+  %t2641 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2639, i32 0, i32 1
+  store i64 0, i64* %t2641
+  %t2642 = insertvalue %RuntimeHelperDescriptor %t2629, { i8**, i64 }* %t2639, 4
+  %t2643 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2608, %RuntimeHelperDescriptor %t2642)
+  store { %RuntimeHelperDescriptor*, i64 }* %t2643, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t2644 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %s2645 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1820730605, i32 0, i32 0
+  %t2646 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2645, 0
+  %s2647 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h290971478, i32 0, i32 0
+  %t2648 = insertvalue %RuntimeHelperDescriptor %t2646, i8* %s2647, 1
+  %s2649 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
+  %t2650 = insertvalue %RuntimeHelperDescriptor %t2648, i8* %s2649, 2
+  %s2651 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193493192, i32 0, i32 0
+  %t2652 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t2653 = ptrtoint [1 x i8*]* %t2652 to i64
+  %t2654 = icmp eq i64 %t2653, 0
+  %t2655 = select i1 %t2654, i64 1, i64 %t2653
+  %t2656 = call i8* @malloc(i64 %t2655)
+  %t2657 = bitcast i8* %t2656 to i8**
+  %t2658 = getelementptr i8*, i8** %t2657, i64 0
+  store i8* %s2651, i8** %t2658
   %t2659 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
   %t2660 = ptrtoint { i8**, i64 }* %t2659 to i64
   %t2661 = call i8* @malloc(i64 %t2660)
   %t2662 = bitcast i8* %t2661 to { i8**, i64 }*
   %t2663 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2662, i32 0, i32 0
-  store i8** %t2656, i8*** %t2663
+  store i8** %t2657, i8*** %t2663
   %t2664 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2662, i32 0, i32 1
-  store i64 2, i64* %t2664
-  %t2665 = insertvalue %RuntimeHelperDescriptor %t2648, { i8**, i64 }* %t2662, 3
+  store i64 1, i64* %t2664
+  %t2665 = insertvalue %RuntimeHelperDescriptor %t2650, { i8**, i64 }* %t2662, 3
   %t2666 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t2667 = ptrtoint [0 x i8*]* %t2666 to i64
   %t2668 = icmp eq i64 %t2667, 0
@@ -17711,17 +17712,17 @@ block.entry:
   %t2677 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2675, i32 0, i32 1
   store i64 0, i64* %t2677
   %t2678 = insertvalue %RuntimeHelperDescriptor %t2665, { i8**, i64 }* %t2675, 4
-  %t2679 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2642, %RuntimeHelperDescriptor %t2678)
+  %t2679 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2644, %RuntimeHelperDescriptor %t2678)
   store { %RuntimeHelperDescriptor*, i64 }* %t2679, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t2680 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s2681 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1399969734, i32 0, i32 0
+  %s2681 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h693205632, i32 0, i32 0
   %t2682 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2681, 0
-  %s2683 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.len22.h1394341490, i32 0, i32 0
+  %s2683 = getelementptr inbounds [30 x i8], [30 x i8]* @.str.len29.h1310930152, i32 0, i32 0
   %t2684 = insertvalue %RuntimeHelperDescriptor %t2682, i8* %s2683, 1
   %s2685 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1222440456, i32 0, i32 0
   %t2686 = insertvalue %RuntimeHelperDescriptor %t2684, i8* %s2685, 2
   %s2687 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1222440456, i32 0, i32 0
-  %s2688 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1222440456, i32 0, i32 0
+  %s2688 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
   %t2689 = getelementptr [2 x i8*], [2 x i8*]* null, i32 1
   %t2690 = ptrtoint [2 x i8*]* %t2689 to i64
   %t2691 = icmp eq i64 %t2690, 0
@@ -17759,14 +17760,14 @@ block.entry:
   %t2717 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2680, %RuntimeHelperDescriptor %t2716)
   store { %RuntimeHelperDescriptor*, i64 }* %t2717, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t2718 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  %s2719 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1143812295, i32 0, i32 0
+  %s2719 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1399969734, i32 0, i32 0
   %t2720 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2719, 0
-  %s2721 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.len25.h744495509, i32 0, i32 0
+  %s2721 = getelementptr inbounds [23 x i8], [23 x i8]* @.str.len22.h1394341490, i32 0, i32 0
   %t2722 = insertvalue %RuntimeHelperDescriptor %t2720, i8* %s2721, 1
-  %s2723 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
+  %s2723 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1222440456, i32 0, i32 0
   %t2724 = insertvalue %RuntimeHelperDescriptor %t2722, i8* %s2723, 2
-  %s2725 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  %s2726 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
+  %s2725 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1222440456, i32 0, i32 0
+  %s2726 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1222440456, i32 0, i32 0
   %t2727 = getelementptr [2 x i8*], [2 x i8*]* null, i32 1
   %t2728 = ptrtoint [2 x i8*]* %t2727 to i64
   %t2729 = icmp eq i64 %t2728, 0
@@ -17804,7 +17805,52 @@ block.entry:
   %t2755 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2718, %RuntimeHelperDescriptor %t2754)
   store { %RuntimeHelperDescriptor*, i64 }* %t2755, { %RuntimeHelperDescriptor*, i64 }** %l0
   %t2756 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
-  ret { %RuntimeHelperDescriptor*, i64 }* %t2756
+  %s2757 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1143812295, i32 0, i32 0
+  %t2758 = insertvalue %RuntimeHelperDescriptor undef, i8* %s2757, 0
+  %s2759 = getelementptr inbounds [26 x i8], [26 x i8]* @.str.len25.h744495509, i32 0, i32 0
+  %t2760 = insertvalue %RuntimeHelperDescriptor %t2758, i8* %s2759, 1
+  %s2761 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
+  %t2762 = insertvalue %RuntimeHelperDescriptor %t2760, i8* %s2761, 2
+  %s2763 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
+  %s2764 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
+  %t2765 = getelementptr [2 x i8*], [2 x i8*]* null, i32 1
+  %t2766 = ptrtoint [2 x i8*]* %t2765 to i64
+  %t2767 = icmp eq i64 %t2766, 0
+  %t2768 = select i1 %t2767, i64 1, i64 %t2766
+  %t2769 = call i8* @malloc(i64 %t2768)
+  %t2770 = bitcast i8* %t2769 to i8**
+  %t2771 = getelementptr i8*, i8** %t2770, i64 0
+  store i8* %s2763, i8** %t2771
+  %t2772 = getelementptr i8*, i8** %t2770, i64 1
+  store i8* %s2764, i8** %t2772
+  %t2773 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2774 = ptrtoint { i8**, i64 }* %t2773 to i64
+  %t2775 = call i8* @malloc(i64 %t2774)
+  %t2776 = bitcast i8* %t2775 to { i8**, i64 }*
+  %t2777 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2776, i32 0, i32 0
+  store i8** %t2770, i8*** %t2777
+  %t2778 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2776, i32 0, i32 1
+  store i64 2, i64* %t2778
+  %t2779 = insertvalue %RuntimeHelperDescriptor %t2762, { i8**, i64 }* %t2776, 3
+  %t2780 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
+  %t2781 = ptrtoint [0 x i8*]* %t2780 to i64
+  %t2782 = icmp eq i64 %t2781, 0
+  %t2783 = select i1 %t2782, i64 1, i64 %t2781
+  %t2784 = call i8* @malloc(i64 %t2783)
+  %t2785 = bitcast i8* %t2784 to i8**
+  %t2786 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t2787 = ptrtoint { i8**, i64 }* %t2786 to i64
+  %t2788 = call i8* @malloc(i64 %t2787)
+  %t2789 = bitcast i8* %t2788 to { i8**, i64 }*
+  %t2790 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2789, i32 0, i32 0
+  store i8** %t2785, i8*** %t2790
+  %t2791 = getelementptr { i8**, i64 }, { i8**, i64 }* %t2789, i32 0, i32 1
+  store i64 0, i64* %t2791
+  %t2792 = insertvalue %RuntimeHelperDescriptor %t2779, { i8**, i64 }* %t2789, 4
+  %t2793 = call { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %t2756, %RuntimeHelperDescriptor %t2792)
+  store { %RuntimeHelperDescriptor*, i64 }* %t2793, { %RuntimeHelperDescriptor*, i64 }** %l0
+  %t2794 = load { %RuntimeHelperDescriptor*, i64 }*, { %RuntimeHelperDescriptor*, i64 }** %l0
+  ret { %RuntimeHelperDescriptor*, i64 }* %t2794
 }
 
 define { %RuntimeHelperDescriptor*, i64 }* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }* %values, %RuntimeHelperDescriptor %value) {
@@ -88201,384 +88247,384 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len70.h134995567 = private unnamed_addr constant [71 x i8] c"llvm lowering: `.for` stride expression must evaluate to `number` in `\00"
-@.str.len6.h536277508 = private unnamed_addr constant [7 x i8] c"Return\00"
-@.str.len49.h95349196 = private unnamed_addr constant [50 x i8] c"llvm lowering: unable to lower match subject in `\00"
-@.str.len33.h1082729604 = private unnamed_addr constant [34 x i8] c"` is not a simple identifier in `\00"
-@.str.len34.h858864034 = private unnamed_addr constant [35 x i8] c" = private unnamed_addr constant [\00"
-@.str.len48.h839589728 = private unnamed_addr constant [49 x i8] c"llvm lowering: struct literal field missing name\00"
-@.str.len3.h2087662534 = private unnamed_addr constant [4 x i8] c" ![\00"
-@.str.len25.h1254414760 = private unnamed_addr constant [26 x i8] c"layout manifest: struct `\00"
-@.str.len7.h1794206627 = private unnamed_addr constant [8 x i8] c" to i8*\00"
-@.str.len7.h770651283 = private unnamed_addr constant [8 x i8] c"icmp eq\00"
-@.str.len6.h78255107 = private unnamed_addr constant [7 x i8] c"Affine\00"
-@.str.len40.h900070345 = private unnamed_addr constant [41 x i8] c"` conflicts with active mutable borrow `\00"
-@.str.len3.h2089839742 = private unnamed_addr constant [4 x i8] c"\5C5C\00"
-@.str.len54.h280353426 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to coerce assignment value for `\00"
-@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
-@.str.len23.h301159061 = private unnamed_addr constant [24 x i8] c"llvm lowering: method `\00"
-@.str.len9.h1117872508 = private unnamed_addr constant [10 x i8] c"matchcase\00"
-@.str.len4.h274283861 = private unnamed_addr constant [5 x i8] c"self\00"
-@.str.len58.h1022810589 = private unnamed_addr constant [59 x i8] c"native lowering: missing native text artifact for import `\00"
-@.str.len25.h2067177893 = private unnamed_addr constant [26 x i8] c" (if true, out of bounds)\00"
-@.enum.NativeInstruction.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len7.h332613328 = private unnamed_addr constant [8 x i8] c"%trait.\00"
-@.str.len3.h2090521720 = private unnamed_addr constant [4 x i8] c"mul\00"
-@.str.len23.h96319572 = private unnamed_addr constant [24 x i8] c"` lacks struct metadata\00"
-@.str.len4.h219990644 = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len47.h1472191274 = private unnamed_addr constant [48 x i8] c"llvm lowering: struct literal missing type name\00"
-@.str.len57.h2014856169 = private unnamed_addr constant [58 x i8] c"llvm lowering: unable to compare `.for` range bounds in `\00"
-@.str.len4.h257940116 = private unnamed_addr constant [5 x i8] c"else\00"
-@.str.len51.h1154611981 = private unnamed_addr constant [52 x i8] c"llvm lowering: ternary expression missing condition\00"
-@.str.len16.h251499985 = private unnamed_addr constant [17 x i8] c" = alloca double\00"
-@.str.len10.h1629914700 = private unnamed_addr constant [11 x i8] c"Expression\00"
-@.str.len7.h1755163029 = private unnamed_addr constant [8 x i8] c"runtime\00"
-@.str.len6.h1736497781 = private unnamed_addr constant [7 x i8] c"Borrow\00"
-@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
-@.str.len4.h273085895 = private unnamed_addr constant [5 x i8] c"read\00"
-@.str.len55.h55260472 = private unnamed_addr constant [56 x i8] c"llvm lowering: unable to increment `.for` iterator in `\00"
-@.str.len60.h1664343531 = private unnamed_addr constant [61 x i8] c"llvm lowering: array literal element could not be boxed to `\00"
-@.str.len4.h245035433 = private unnamed_addr constant [5 x i8] c"\5C00\22\00"
-@.str.len41.h17849796 = private unnamed_addr constant [42 x i8] c"llvm lowering: malformed let expression `\00"
-@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
-@.str.len55.h463798869 = private unnamed_addr constant [56 x i8] c"llvm lowering: let expression missing binding name in `\00"
-@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
-@.str.len33.h1674155807 = private unnamed_addr constant [34 x i8] c"llvm lowering: enum literal for `\00"
-@.str.len57.h1542174776 = private unnamed_addr constant [58 x i8] c"llvm lowering: struct literal references unknown struct `\00"
-@.str.len2.h193423034 = private unnamed_addr constant [3 x i8] c")*\00"
-@.str.len4.h274245185 = private unnamed_addr constant [5 x i8] c"sdiv\00"
-@.str.len33.h1306641126 = private unnamed_addr constant [34 x i8] c"llvm lowering: method call base `\00"
-@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
-@.str.len5.h1925437637 = private unnamed_addr constant [6 x i8] c"await\00"
-@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
-@.str.len55.h1124826835 = private unnamed_addr constant [56 x i8] c"llvm lowering: unable to coerce index expression to i64\00"
-@.str.len3.h2090302138 = private unnamed_addr constant [4 x i8] c"i16\00"
-@.str.len6.h1203620195 = private unnamed_addr constant [7 x i8] c".const\00"
-@.str.len69.h1474512693 = private unnamed_addr constant [70 x i8] c"llvm lowering: `.for` start expression must evaluate to `number` in `\00"
-@.str.len12.h340562855 = private unnamed_addr constant [13 x i8] c" effects: ![\00"
-@.str.len44.h1827416098 = private unnamed_addr constant [45 x i8] c"llvm lowering: malformed binary expression `\00"
-@.str.len48.h1208326627 = private unnamed_addr constant [49 x i8] c"llvm lowering: struct literal trailing content `\00"
-@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
-@.str.len52.h1450163979 = private unnamed_addr constant [53 x i8] c"llvm lowering: instructions after break ignored in `\00"
-@.str.len9.h769510343 = private unnamed_addr constant [10 x i8] c"; struct \00"
-@.str.len53.h409079501 = private unnamed_addr constant [54 x i8] c"llvm lowering: instructions after return ignored in `\00"
-@.str.len53.h1448111568 = private unnamed_addr constant [54 x i8] c"llvm lowering: unsupported array literal element type\00"
-@.str.len24.h91596683 = private unnamed_addr constant [25 x i8] c"` due to argument errors\00"
-@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.str.len16.h1361993478 = private unnamed_addr constant [17 x i8] c"  ret double %t0\00"
-@.str.len48.h971335843 = private unnamed_addr constant [49 x i8] c"llvm lowering: malformed trait dispatch target `\00"
-@.str.len57.h1507377927 = private unnamed_addr constant [58 x i8] c"llvm lowering: `.for` loop missing iteration binding in `\00"
-@.str.len59.h1700212648 = private unnamed_addr constant [60 x i8] c"llvm lowering: ternary expression missing true branch value\00"
-@.str.len15.h1900227975 = private unnamed_addr constant [16 x i8] c"` missing value\00"
-@.str.len48.h887886391 = private unnamed_addr constant [49 x i8] c"llvm lowering: enum literal missing variant name\00"
-@.str.len40.h1596119513 = private unnamed_addr constant [41 x i8] c"llvm lowering: malformed && expression `\00"
-@.str.len2.h193444352 = private unnamed_addr constant [3 x i8] c"<=\00"
-@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
-@.str.len40.h1039467311 = private unnamed_addr constant [41 x i8] c"llvm lowering: missing return value in `\00"
-@.str.len30.h766090624 = private unnamed_addr constant [31 x i8] c"` not found for trait dispatch\00"
-@.str.len3.h2089834231 = private unnamed_addr constant [4 x i8] c"\5C0A\00"
-@.str.len32.h331553312 = private unnamed_addr constant [33 x i8] c"` implements unknown interface `\00"
-@.str.len28.h1667882524 = private unnamed_addr constant [29 x i8] c"` missing from native module\00"
-@.str.len10.h634268966 = private unnamed_addr constant [11 x i8] c"` repeated\00"
-@.str.len2.h193415972 = private unnamed_addr constant [3 x i8] c" }\00"
-@.str.len37.h749417010 = private unnamed_addr constant [38 x i8] c"llvm lowering: struct literal field `\00"
-@.str.len11.h1291126021 = private unnamed_addr constant [12 x i8] c" = bitcast \00"
-@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
-@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.str.len34.h1529470002 = private unnamed_addr constant [35 x i8] c"llvm lowering: call target missing\00"
-@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len15.h202150329 = private unnamed_addr constant [16 x i8] c" = fadd double \00"
-@.str.len26.h1205961643 = private unnamed_addr constant [27 x i8] c"  %t0 = fadd double %a, %b\00"
-@.str.len68.h1804274948 = private unnamed_addr constant [69 x i8] c"llvm lowering: `.for` stride expression did not produce a value in `\00"
-@.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
-@.str.len44.h1570405729 = private unnamed_addr constant [45 x i8] c"llvm lowering: array index assignment base `\00"
-@.str.len7.h770660688 = private unnamed_addr constant [8 x i8] c"icmp ne\00"
-@.str.len48.h1606060438 = private unnamed_addr constant [49 x i8] c"llvm lowering: malformed comparison expression `\00"
-@.str.len3.h2089833967 = private unnamed_addr constant [4 x i8] c"\5C09\00"
-@.str.len48.h37492210 = private unnamed_addr constant [49 x i8] c"llvm lowering: unsupported comparison operator `\00"
-@.str.len58.h1744114411 = private unnamed_addr constant [59 x i8] c"llvm lowering: expected boolean operand for `and`, found `\00"
-@.str.len23.h675789051 = private unnamed_addr constant [24 x i8] c"llvm lowering: struct `\00"
-@.str.len4.h205307558 = private unnamed_addr constant [5 x i8] c";   \00"
-@.str.len52.h2121219822 = private unnamed_addr constant [53 x i8] c"llvm lowering: `.for` range missing start expression\00"
-@.str.len21.h799966347 = private unnamed_addr constant [22 x i8] c"` remains active in `\00"
-@.str.len8.h1809668055 = private unnamed_addr constant [9 x i8] c"icmp sgt\00"
-@.str.len15.h1036821136 = private unnamed_addr constant [16 x i8] c" = icmp ne i64 \00"
-@.str.len21.h860019855 = private unnamed_addr constant [22 x i8] c"llvm lowering: enum `\00"
-@.str.len3.h2089834330 = private unnamed_addr constant [4 x i8] c"\5C0D\00"
-@.str.len9.h719556312 = private unnamed_addr constant [10 x i8] c"bitcast (\00"
-@.str.len39.h33026892 = private unnamed_addr constant [40 x i8] c"llvm lowering: match without cases in `\00"
-@.str.len54.h288837174 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to lower `.for` range start in `\00"
-@.str.len2.h193446530 = private unnamed_addr constant [3 x i8] c">=\00"
-@.str.len16.h418770507 = private unnamed_addr constant [17 x i8] c"trait_dispatch::\00"
-@.str.len8.h241551797 = private unnamed_addr constant [9 x i8] c"fcmp oge\00"
-@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.str.len12.h1804972052 = private unnamed_addr constant [13 x i8] c" = bitcast [\00"
-@.str.len5.h1895800173 = private unnamed_addr constant [6 x i8] c", i64\00"
-@.str.len17.h1635915066 = private unnamed_addr constant [18 x i8] c"` missing field `\00"
-@.str.len69.h1402407334 = private unnamed_addr constant [70 x i8] c"llvm lowering: ternary expression branches have incompatible types: `\00"
-@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len7.h1064168743 = private unnamed_addr constant [8 x i8] c".concat\00"
-@.str.len66.h2076742536 = private unnamed_addr constant [67 x i8] c"llvm lowering: `.for` iterable must resolve to an array value in `\00"
-@.str.len53.h1441489102 = private unnamed_addr constant [54 x i8] c"llvm lowering: `.for` range missing stride expression\00"
-@.str.len40.h924126065 = private unnamed_addr constant [41 x i8] c"llvm lowering: `break` outside loop in `\00"
-@.str.len39.h1908765533 = private unnamed_addr constant [40 x i8] c"llvm lowering: struct literal context `\00"
-@.enum.NativeInstruction.Loop.variant = private unnamed_addr constant [5 x i8] c"Loop\00"
-@.str.len26.h549134517 = private unnamed_addr constant [27 x i8] c"` not found in interface `\00"
-@.str.len16.h1727760345 = private unnamed_addr constant [17 x i8] c"` has no field `\00"
-@.str.len38.h1035741733 = private unnamed_addr constant [39 x i8] c"llvm lowering: unterminated `.if` in `\00"
-@.str.len6.h877543008 = private unnamed_addr constant [7 x i8] c"` of `\00"
-@.str.len8.h241775042 = private unnamed_addr constant [9 x i8] c"fcmp une\00"
-@.str.len31.h1428761244 = private unnamed_addr constant [32 x i8] c"llvm lowering: mutable borrow `\00"
-@.str.len43.h372676400 = private unnamed_addr constant [44 x i8] c"llvm lowering: empty expression encountered\00"
-@.str.len51.h577773560 = private unnamed_addr constant [52 x i8] c"llvm lowering: unable to lower `.for` iterable in `\00"
-@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len36.h1435214388 = private unnamed_addr constant [37 x i8] c"llvm lowering: method call expects `\00"
-@.str.len11.h701810522 = private unnamed_addr constant [12 x i8] c"` variant `\00"
-@.str.len49.h893069065 = private unnamed_addr constant [50 x i8] c"` missing layout metadata; skipping type emission\00"
-@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
-@.str.len40.h1941426741 = private unnamed_addr constant [41 x i8] c"llvm lowering: unsupported instruction `\00"
-@.str.len24.h1068290701 = private unnamed_addr constant [25 x i8] c" arguments but received \00"
-@.str.len26.h645889856 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
-@.str.len51.h189411679 = private unnamed_addr constant [52 x i8] c"llvm lowering: borrow expression trailing content `\00"
-@.str.len39.h1924108502 = private unnamed_addr constant [40 x i8] c"llvm lowering: enum member access for `\00"
-@.str.len4.h274743650 = private unnamed_addr constant [5 x i8] c"srem\00"
-@.str.len3.h2088286201 = private unnamed_addr constant [4 x i8] c"1.0\00"
-@.str.len34.h1024520411 = private unnamed_addr constant [35 x i8] c" = getelementptr inbounds i8, i8* \00"
 @.str.len15.h491517152 = private unnamed_addr constant [16 x i8] c"  store double \00"
-@.str.len18.h1203765633 = private unnamed_addr constant [19 x i8] c"` has no variant `\00"
-@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
-@.str.len47.h1642247268 = private unnamed_addr constant [48 x i8] c" = call i8* @sailfin_runtime_string_concat(i8* \00"
-@.str.len65.h534894571 = private unnamed_addr constant [66 x i8] c"llvm lowering: failed to lower assignment value for array index `\00"
-@.str.len46.h964824710 = private unnamed_addr constant [47 x i8] c"  call void @sailfin_runtime_bounds_check(i64 \00"
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
-@.str.len76.h547986414 = private unnamed_addr constant [77 x i8] c"llvm lowering: unable to determine element type for array indexing on type `\00"
-@.str.len54.h800459588 = private unnamed_addr constant [55 x i8] c"llvm lowering: array literal element produced no value\00"
-@.str.len29.h538291009 = private unnamed_addr constant [30 x i8] c"` shadows existing local in `\00"
-@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
+@.str.len36.h1435214388 = private unnamed_addr constant [37 x i8] c"llvm lowering: method call expects `\00"
+@.str.len2.h193446530 = private unnamed_addr constant [3 x i8] c">=\00"
+@.str.len33.h1306641126 = private unnamed_addr constant [34 x i8] c"llvm lowering: method call base `\00"
+@.str.len39.h1908765533 = private unnamed_addr constant [40 x i8] c"llvm lowering: struct literal context `\00"
+@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
+@.str.len54.h2016727512 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to coerce return expression to `\00"
+@.str.len25.h1254414760 = private unnamed_addr constant [26 x i8] c"layout manifest: struct `\00"
+@.str.len56.h2066709411 = private unnamed_addr constant [57 x i8] c"llvm lowering: unable to lower guard in match case for `\00"
+@.str.len23.h301159061 = private unnamed_addr constant [24 x i8] c"llvm lowering: method `\00"
+@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
+@.str.len3.h2089834231 = private unnamed_addr constant [4 x i8] c"\5C0A\00"
+@.str.len26.h487122250 = private unnamed_addr constant [27 x i8] c"` provides unknown field `\00"
+@.str.len10.h1189337400 = private unnamed_addr constant [11 x i8] c" = xor i1 \00"
+@.str.len48.h971335843 = private unnamed_addr constant [49 x i8] c"llvm lowering: malformed trait dispatch target `\00"
+@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
+@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
+@.str.len4.h258828212 = private unnamed_addr constant [5 x i8] c"fdiv\00"
+@.str.len28.h1667882524 = private unnamed_addr constant [29 x i8] c"` missing from native module\00"
+@.str.len27.h1104677867 = private unnamed_addr constant [28 x i8] c" = alloca [2 x i8], align 1\00"
+@.str.len4.h274743650 = private unnamed_addr constant [5 x i8] c"srem\00"
+@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len4.h205307558 = private unnamed_addr constant [5 x i8] c";   \00"
+@.str.len9.h2096692279 = private unnamed_addr constant [10 x i8] c"` is zero\00"
+@.str.len5.h459182890 = private unnamed_addr constant [6 x i8] c"scope\00"
+@.str.len20.h1455768642 = private unnamed_addr constant [21 x i8] c"`; lowering as `i8*`\00"
+@.str.len37.h749417010 = private unnamed_addr constant [38 x i8] c"llvm lowering: struct literal field `\00"
+@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
+@.str.len10.h1663630719 = private unnamed_addr constant [11 x i8] c", double* \00"
+@.str.len69.h1474512693 = private unnamed_addr constant [70 x i8] c"llvm lowering: `.for` start expression must evaluate to `number` in `\00"
+@.str.len54.h1022899003 = private unnamed_addr constant [55 x i8] c"llvm lowering: match pattern references unknown enum `\00"
+@.str.len10.h1616295671 = private unnamed_addr constant [11 x i8] c"  ret void\00"
+@.str.len7.h1614723655 = private unnamed_addr constant [8 x i8] c"suspend\00"
+@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
+@.str.len11.h1295974565 = private unnamed_addr constant [12 x i8] c"len(string)\00"
+@.str.len52.h432720005 = private unnamed_addr constant [53 x i8] c"llvm lowering: borrow expression missing opening `(`\00"
+@.str.len5.h335299934 = private unnamed_addr constant [6 x i8] c"; fn \00"
+@.str.len15.h1772400708 = private unnamed_addr constant [16 x i8] c" = insertvalue \00"
+@.str.len26.h287370135 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
+@.str.len16.h1361993478 = private unnamed_addr constant [17 x i8] c"  ret double %t0\00"
 @.str.len2.h193491872 = private unnamed_addr constant [3 x i8] c"fs\00"
+@.str.len46.h1298670716 = private unnamed_addr constant [47 x i8] c"layout manifest: missing artifact for import `\00"
+@.str.len65.h1008432364 = private unnamed_addr constant [66 x i8] c"llvm lowering: internal error loading `.for` iteration value in `\00"
 @.str.len50.h965784474 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` iterable expression is empty\00"
 @.str.len20.h93992129 = private unnamed_addr constant [21 x i8] c"llvm lowering: let `\00"
-@.str.len4.h230767751 = private unnamed_addr constant [5 x i8] c"Noop\00"
-@.str.len53.h1836297594 = private unnamed_addr constant [54 x i8] c"llvm lowering: enum literal references unknown enum `\00"
-@.str.len48.h5787697 = private unnamed_addr constant [49 x i8] c"llvm lowering: unable to lower if condition in `\00"
-@.str.len36.h828265436 = private unnamed_addr constant [37 x i8] c"llvm lowering: match pattern field `\00"
-@.str.len7.h1614723655 = private unnamed_addr constant [8 x i8] c"suspend\00"
-@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
-@.str.len12.h1775642273 = private unnamed_addr constant [13 x i8] c"; interface \00"
-@.str.len49.h756173294 = private unnamed_addr constant [50 x i8] c"llvm lowering: index expression produced no value\00"
-@.str.len67.h1243369623 = private unnamed_addr constant [68 x i8] c"llvm lowering: cannot determine element type for array assignment `\00"
-@.str.len6.h1526236955 = private unnamed_addr constant [7 x i8] c"Linear\00"
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
-@.str.len26.h287370135 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
-@.str.len7.h513898090 = private unnamed_addr constant [8 x i8] c"variant\00"
-@.str.len47.h859819331 = private unnamed_addr constant [48 x i8] c"llvm lowering: borrow expression missing target\00"
-@.str.len43.h1628793500 = private unnamed_addr constant [44 x i8] c"llvm lowering: `continue` outside loop in `\00"
-@.str.len47.h867637971 = private unnamed_addr constant [48 x i8] c" = call i64 @sailfin_runtime_string_length(i8* \00"
-@.str.len54.h1022899003 = private unnamed_addr constant [55 x i8] c"llvm lowering: match pattern references unknown enum `\00"
-@.str.len4.h258828212 = private unnamed_addr constant [5 x i8] c"fdiv\00"
-@.str.len6.h1803965435 = private unnamed_addr constant [7 x i8] c"entry:\00"
-@.str.len50.h993566140 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` range missing end expression\00"
-@.str.len40.h341281823 = private unnamed_addr constant [41 x i8] c"llvm lowering: unterminated `.loop` in `\00"
-@.str.len3.h2089835914 = private unnamed_addr constant [4 x i8] c"\5C22\00"
-@.str.len26.h244643851 = private unnamed_addr constant [27 x i8] c"` missing initializer in `\00"
-@.str.len10.h759000579 = private unnamed_addr constant [11 x i8] c" = global \00"
-@.str.len10.h1663630719 = private unnamed_addr constant [11 x i8] c", double* \00"
-@.str.len27.h1104677867 = private unnamed_addr constant [28 x i8] c" = alloca [2 x i8], align 1\00"
-@.str.len47.h982576353 = private unnamed_addr constant [48 x i8] c"llvm lowering: condition produced no value in `\00"
-@.str.len10.h1616295671 = private unnamed_addr constant [11 x i8] c"  ret void\00"
-@.str.len17.h1795612323 = private unnamed_addr constant [18 x i8] c"` is incompatible\00"
-@.str.len11.h1907139655 = private unnamed_addr constant [12 x i8] c" = icmp eq \00"
-@.str.len42.h514999820 = private unnamed_addr constant [43 x i8] c"define double @add(double %a, double %b) {\00"
-@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
-@.str.len14.h1830305299 = private unnamed_addr constant [15 x i8] c" = sitofp i64 \00"
-@.str.len8.h241557242 = private unnamed_addr constant [9 x i8] c"fcmp ole\00"
-@.str.len7.h973697423 = private unnamed_addr constant [8 x i8] c"Linear<\00"
-@.str.len8.h241550015 = private unnamed_addr constant [9 x i8] c"fcmp oeq\00"
-@.str.len65.h1008432364 = private unnamed_addr constant [66 x i8] c"llvm lowering: internal error loading `.for` iteration value in `\00"
-@.str.len9.h1514414502 = private unnamed_addr constant [10 x i8] c" x i8] c\22\00"
-@.str.len13.h752234821 = private unnamed_addr constant [14 x i8] c"` missing `:`\00"
-@.str.len52.h432720005 = private unnamed_addr constant [53 x i8] c"llvm lowering: borrow expression missing opening `(`\00"
-@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
-@.str.len46.h1399920227 = private unnamed_addr constant [47 x i8] c"llvm lowering: enum literal trailing content `\00"
-@.str.len37.h126290176 = private unnamed_addr constant [38 x i8] c" = getelementptr [2 x i8], [2 x i8]* \00"
-@.str.len8.h241552292 = private unnamed_addr constant [9 x i8] c"fcmp ogt\00"
-@.str.len3.h2088031936 = private unnamed_addr constant [4 x i8] c"*, \00"
-@.str.len60.h550929947 = private unnamed_addr constant [61 x i8] c"llvm lowering: ternary expression missing false branch value\00"
-@.str.len39.h176231850 = private unnamed_addr constant [40 x i8] c"llvm lowering: unable to emit call to `\00"
-@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
-@.str.len35.h364700043 = private unnamed_addr constant [36 x i8] c"llvm lowering: enum literal field `\00"
-@.str.len65.h1925587422 = private unnamed_addr constant [66 x i8] c"llvm lowering: `.for` iterable must use `start..end` range syntax\00"
-@.str.len24.h1893561446 = private unnamed_addr constant [25 x i8] c"llvm lowering: call to `\00"
-@.str.len23.h1217803504 = private unnamed_addr constant [24 x i8] c"llvm lowering: borrow `\00"
-@.str.len28.h1602830880 = private unnamed_addr constant [29 x i8] c"llvm lowering: array index `\00"
-@.str.len4.h259164383 = private unnamed_addr constant [5 x i8] c"fmul\00"
-@.str.len8.h183758879 = private unnamed_addr constant [9 x i8] c" = type \00"
-@.str.len19.h779801773 = private unnamed_addr constant [20 x i8] c"` produced no value\00"
-@.str.len40.h975266936 = private unnamed_addr constant [41 x i8] c"[sfn-debug] lower_struct_literal locals=\00"
-@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
-@.str.len16.h403825543 = private unnamed_addr constant [17 x i8] c" = icmp uge i64 \00"
-@.str.len3.h2088092689 = private unnamed_addr constant [4 x i8] c", [\00"
-@.str.len14.h1387946067 = private unnamed_addr constant [15 x i8] c" for call to `\00"
-@.str.len12.h603915651 = private unnamed_addr constant [13 x i8] c"  call void \00"
-@.str.len17.h1905584788 = private unnamed_addr constant [18 x i8] c" = fptosi double \00"
-@.str.len16.h2138981313 = private unnamed_addr constant [17 x i8] c"string_constants\00"
-@.str.len43.h765759141 = private unnamed_addr constant [44 x i8] c"llvm lowering: missing return in function `\00"
-@.str.len55.h522772778 = private unnamed_addr constant [56 x i8] c"llvm lowering: let expression missing initializer for `\00"
-@.str.len52.h39804487 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to convert left operand from `\00"
-@.str.len6.h1894573333 = private unnamed_addr constant [7 x i8] c"length\00"
-@.str.len42.h1019849180 = private unnamed_addr constant [43 x i8] c"` missing type annotation; defaulting to `\00"
-@.str.len68.h1900616918 = private unnamed_addr constant [69 x i8] c"llvm lowering: unable to compare descending `.for` range bounds in `\00"
-@.str.len55.h1292034827 = private unnamed_addr constant [56 x i8] c"llvm lowering: instructions after continue ignored in `\00"
-@.str.len43.h396338520 = private unnamed_addr constant [44 x i8] c"llvm lowering: unsupported local type for `\00"
-@.str.len8.h1809667560 = private unnamed_addr constant [9 x i8] c"icmp sge\00"
-@.str.len3.h2090521984 = private unnamed_addr constant [4 x i8] c"mut\00"
-@.str.len50.h1070755019 = private unnamed_addr constant [51 x i8] c"llvm lowering: computed heap allocation size for `\00"
-@.str.len5.h199018843 = private unnamed_addr constant [6 x i8] c"local\00"
-@.str.len5.h1783417286 = private unnamed_addr constant [6 x i8] c"` in \00"
-@.str.len26.h1591462212 = private unnamed_addr constant [27 x i8] c"llvm lowering: interface `\00"
-@.str.len24.h1530531128 = private unnamed_addr constant [25 x i8] c"` not found in variant `\00"
-@.str.len2.h193515071 = private unnamed_addr constant [3 x i8] c"{}\00"
-@.str.len8.h241557737 = private unnamed_addr constant [9 x i8] c"fcmp olt\00"
-@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
-@.str.len21.h1816480386 = private unnamed_addr constant [22 x i8] c"` when assigning to `\00"
-@.str.len79.h2027294639 = private unnamed_addr constant [80 x i8] c"llvm lowering: trait dispatch requires at least one argument (the trait object)\00"
-@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.str.len23.h721422858 = private unnamed_addr constant [24 x i8] c"` escapes lifetime of `\00"
-@.str.len13.h1278011845 = private unnamed_addr constant [14 x i8] c" = uitofp i1 \00"
-@.str.len25.h9921935 = private unnamed_addr constant [26 x i8] c"` uses unsupported type `\00"
-@.str.len60.h484372876 = private unnamed_addr constant [61 x i8] c"llvm lowering: member access assignment on non-struct type `\00"
-@.str.len47.h769984802 = private unnamed_addr constant [48 x i8] c"llvm lowering: unhandled return expression in `\00"
-@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
-@.str.len12.h1027822751 = private unnamed_addr constant [13 x i8] c" undef, i8* \00"
-@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.str.len4.h259326677 = private unnamed_addr constant [5 x i8] c"frem\00"
-@.str.len60.h80215049 = private unnamed_addr constant [61 x i8] c"llvm lowering: malformed ternary expression - `:` before `?`\00"
-@.str.len6.h113799849 = private unnamed_addr constant [7 x i8] c"borrow\00"
-@.str.len67.h845324059 = private unnamed_addr constant [68 x i8] c"llvm lowering: `.for` end expression must evaluate to `number` in `\00"
-@.str.len4.h173787542 = private unnamed_addr constant [5 x i8] c" -> \00"
-@.str.len19.h512381535 = private unnamed_addr constant [20 x i8] c" = fcmp ogt double \00"
-@.str.len3.h2088250264 = private unnamed_addr constant [4 x i8] c"0.0\00"
-@.str.len30.h747463311 = private unnamed_addr constant [31 x i8] c"llvm lowering: shared borrow `\00"
-@.str.len6.h886311636 = private unnamed_addr constant [7 x i8] c"` vs `\00"
-@.str.len62.h41486523 = private unnamed_addr constant [63 x i8] c"llvm lowering: array literal element could not be coerced to `\00"
-@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
-@.str.len46.h1298670716 = private unnamed_addr constant [47 x i8] c"layout manifest: missing artifact for import `\00"
-@.str.len12.h1213469728 = private unnamed_addr constant [13 x i8] c"; intrinsic \00"
-@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len23.h1424536798 = private unnamed_addr constant [24 x i8] c"layout manifest: enum `\00"
-@.str.len41.h1217234939 = private unnamed_addr constant [42 x i8] c"llvm lowering: unable to coerce argument \00"
-@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
-@.str.len4.h259379675 = private unnamed_addr constant [5 x i8] c"fsub\00"
-@.str.len52.h1115033155 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to allocate heap storage for `\00"
-@.str.len8.h1230132454 = private unnamed_addr constant [9 x i8] c"@vtable.\00"
-@.str.len16.h2115533553 = private unnamed_addr constant [17 x i8] c" = load i8, i8* \00"
-@.str.len3.h2088178324 = private unnamed_addr constant [4 x i8] c"...\00"
-@.str.len11.h790843313 = private unnamed_addr constant [12 x i8] c" = sext i8 \00"
-@.str.len40.h400700341 = private unnamed_addr constant [41 x i8] c"llvm lowering: malformed || expression `\00"
-@.str.len30.h2098798495 = private unnamed_addr constant [31 x i8] c"llvm lowering: void function `\00"
-@.str.len2.h193477154 = private unnamed_addr constant [3 x i8] c"[ \00"
-@.str.len35.h317788470 = private unnamed_addr constant [36 x i8] c"llvm lowering: struct literal for `\00"
-@.str.len15.h1772400708 = private unnamed_addr constant [16 x i8] c" = insertvalue \00"
-@.str.len19.h129761630 = private unnamed_addr constant [20 x i8] c" = fcmp one double \00"
-@.str.len4.h260733302 = private unnamed_addr constant [5 x i8] c"i8* \00"
-@.str.len47.h1239048531 = private unnamed_addr constant [48 x i8] c"` uses incompatible field types across variants\00"
-@.str.len40.h203794297 = private unnamed_addr constant [41 x i8] c"llvm lowering: failed to lower argument \00"
-@.str.len8.h1809673500 = private unnamed_addr constant [9 x i8] c"icmp slt\00"
-@.str.len51.h1951972123 = private unnamed_addr constant [52 x i8] c"llvm lowering: enum literal references unknown enum\00"
-@.str.len26.h786724930 = private unnamed_addr constant [27 x i8] c" requires capabilities: ![\00"
-@.str.len19.h965756485 = private unnamed_addr constant [20 x i8] c" = fcmp olt double \00"
-@.str.len32.h2027311032 = private unnamed_addr constant [33 x i8] c" suspends while mutable borrow `\00"
-@.str.len11.h539202395 = private unnamed_addr constant [12 x i8] c"  store i8 \00"
-@.str.len55.h1287145578 = private unnamed_addr constant [56 x i8] c"llvm lowering: struct literal references unknown struct\00"
-@.str.len3.h2088029758 = private unnamed_addr constant [4 x i8] c"** \00"
-@.str.len45.h313159578 = private unnamed_addr constant [46 x i8] c"llvm lowering: empty element in array literal\00"
-@.str.len5.h459182890 = private unnamed_addr constant [6 x i8] c"scope\00"
-@.str.len12.h255876057 = private unnamed_addr constant [13 x i8] c"{ i8*, i8* }\00"
-@.str.len41.h637692462 = private unnamed_addr constant [42 x i8] c"llvm lowering: unterminated `.match` in `\00"
-@.str.len44.h288551526 = private unnamed_addr constant [45 x i8] c"llvm lowering: assignment to unknown local `\00"
-@.str.len26.h487122250 = private unnamed_addr constant [27 x i8] c"` provides unknown field `\00"
-@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
-@.str.len5.h700747015 = private unnamed_addr constant [6 x i8] c"yield\00"
-@.str.len4.h175715072 = private unnamed_addr constant [5 x i8] c" at \00"
-@.str.len7.h434936673 = private unnamed_addr constant [8 x i8] c"Affine<\00"
-@.str.len8.h1809673005 = private unnamed_addr constant [9 x i8] c"icmp sle\00"
-@.str.len50.h1873110523 = private unnamed_addr constant [51 x i8] c"llvm lowering: duplicate `.else` in `.if` within `\00"
-@.str.len60.h1498420593 = private unnamed_addr constant [61 x i8] c"llvm lowering: failed to lower assignment value for member `\00"
-@.str.len13.h601865389 = private unnamed_addr constant [14 x i8] c"  call void @\00"
-@.str.len47.h1674492337 = private unnamed_addr constant [48 x i8] c"llvm lowering: enum literal missing closing `}`\00"
-@.str.len58.h821437208 = private unnamed_addr constant [59 x i8] c"llvm lowering: failed to lower assignment expression for `\00"
-@.str.len46.h440287758 = private unnamed_addr constant [47 x i8] c"llvm lowering: member access assignment base `\00"
-@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
-@.str.len9.h1449250559 = private unnamed_addr constant [10 x i8] c"` field `\00"
-@.str.len52.h1898023432 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to lower `.for` range end in `\00"
-@.str.len26.h1631903096 = private unnamed_addr constant [27 x i8] c"llvm lowering: parameter `\00"
-@.str.len35.h1273062999 = private unnamed_addr constant [36 x i8] c"llvm lowering: member access base `\00"
-@.str.len9.h1117174030 = private unnamed_addr constant [10 x i8] c"matchbody\00"
-@.str.len8.h3286201 = private unnamed_addr constant [9 x i8] c"%vtable.\00"
-@.str.len54.h445851502 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to lower match case pattern in `\00"
-@.str.len10.h1189337400 = private unnamed_addr constant [11 x i8] c" = xor i1 \00"
-@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
-@.str.len4.h258714362 = private unnamed_addr constant [5 x i8] c"fadd\00"
-@.str.len56.h2066709411 = private unnamed_addr constant [57 x i8] c"llvm lowering: unable to lower guard in match case for `\00"
-@.str.len51.h535923040 = private unnamed_addr constant [52 x i8] c"llvm lowering: unsupported return type in call to `\00"
-@.str.len20.h819247583 = private unnamed_addr constant [21 x i8] c"` is not addressable\00"
-@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
-@.str.len8.h169883590 = private unnamed_addr constant [9 x i8] c".variant\00"
-@.str.len13.h142498599 = private unnamed_addr constant [14 x i8] c", i32 0, i32 \00"
-@.str.len49.h640106322 = private unnamed_addr constant [50 x i8] c"llvm lowering: unable to coerce initializer for `\00"
-@.str.len39.h2032947624 = private unnamed_addr constant [40 x i8] c"` conflicts with active shared borrow `\00"
-@.str.len42.h1364986286 = private unnamed_addr constant [43 x i8] c" suspends while mutable borrow parameter `\00"
-@.str.len12.h35447896 = private unnamed_addr constant [13 x i8] c"` but base `\00"
-@.str.len33.h1240255260 = private unnamed_addr constant [34 x i8] c"` compatible with expected type `\00"
-@.str.len52.h382324263 = private unnamed_addr constant [53 x i8] c"llvm lowering: borrow expression missing closing `)`\00"
-@.str.len9.h2096692279 = private unnamed_addr constant [10 x i8] c"` is zero\00"
-@.str.len18.h1375510272 = private unnamed_addr constant [19 x i8] c"` returned a value\00"
-@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
-@.str.len58.h583386627 = private unnamed_addr constant [59 x i8] c"llvm lowering: comparison operands have mismatched types `\00"
-@.str.len9.h1747065903 = private unnamed_addr constant [10 x i8] c"parameter\00"
-@.str.len4.h254486039 = private unnamed_addr constant [5 x i8] c"bool\00"
-@.str.len50.h440106603 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` stride must not be zero in `\00"
-@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
-@.str.len2.h193491707 = private unnamed_addr constant [3 x i8] c"fn\00"
-@.str.len53.h1204093150 = private unnamed_addr constant [54 x i8] c"llvm lowering: unable to convert right operand from `\00"
-@.str.len9.h1385528440 = private unnamed_addr constant [10 x i8] c" = or i1 \00"
-@.str.len46.h1031183328 = private unnamed_addr constant [47 x i8] c"llvm lowering: enum literal field missing name\00"
-@.str.len4.h265988816 = private unnamed_addr constant [5 x i8] c"let \00"
-@.str.len5.h1893742920 = private unnamed_addr constant [6 x i8] c", 0.0\00"
-@.str.len8.h1607706290 = private unnamed_addr constant [9 x i8] c" x i8]* \00"
-@.str.len18.h871374945 = private unnamed_addr constant [19 x i8] c"  store i8 0, i8* \00"
-@.str.len12.h937346004 = private unnamed_addr constant [13 x i8] c"` for type `\00"
-@.str.len3.h2090737012 = private unnamed_addr constant [4 x i8] c"sub\00"
-@.str.len11.h1424822679 = private unnamed_addr constant [12 x i8] c"` expected \00"
-@.str.len16.h519580441 = private unnamed_addr constant [17 x i8] c"` on any variant\00"
-@.str.len7.h505600716 = private unnamed_addr constant [8 x i8] c"` and `\00"
-@.str.len32.h1899104257 = private unnamed_addr constant [33 x i8] c"` does not implement interface `\00"
-@.str.len11.h1295974565 = private unnamed_addr constant [12 x i8] c"len(string)\00"
-@.str.len40.h731245554 = private unnamed_addr constant [41 x i8] c"llvm lowering: unsupported return type `\00"
-@.str.len7.h1425458391 = private unnamed_addr constant [8 x i8] c"@.enum.\00"
-@.str.len7.h794634624 = private unnamed_addr constant [8 x i8] c", i64 0\00"
-@.str.len42.h78527754 = private unnamed_addr constant [43 x i8] c"llvm lowering: empty argument in call to `\00"
-@.str.len35.h573475662 = private unnamed_addr constant [36 x i8] c"llvm lowering: `.for` loop target `\00"
-@.str.len2.h193442306 = private unnamed_addr constant [3 x i8] c"; \00"
-@.str.len49.h1794354414 = private unnamed_addr constant [50 x i8] c"llvm lowering: struct literal missing closing `}`\00"
-@.str.len3.h2090370613 = private unnamed_addr constant [4 x i8] c"int\00"
-@.str.len15.h1007423837 = private unnamed_addr constant [16 x i8] c"llvm lowering: \00"
-@.str.len11.h1586125529 = private unnamed_addr constant [12 x i8] c" = zext i1 \00"
-@.str.len54.h2016727512 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to coerce return expression to `\00"
-@.str.len5.h335299934 = private unnamed_addr constant [6 x i8] c"; fn \00"
-@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
-@.str.len10.h289462685 = private unnamed_addr constant [11 x i8] c" to double\00"
-@.str.len25.h1696931368 = private unnamed_addr constant [26 x i8] c" = getelementptr i8, i8* \00"
-@.str.len41.h980447798 = private unnamed_addr constant [42 x i8] c"llvm lowering: call to unknown function `\00"
-@.str.len20.h1455768642 = private unnamed_addr constant [21 x i8] c"`; lowering as `i8*`\00"
-@.str.len16.h1310846896 = private unnamed_addr constant [17 x i8] c".variant.default\00"
-@.str.len28.h379765914 = private unnamed_addr constant [29 x i8] c";   ; no signatures recorded\00"
+@.str.len29.h538291009 = private unnamed_addr constant [30 x i8] c"` shadows existing local in `\00"
 @.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
-@.str.len18.h1107402921 = private unnamed_addr constant [19 x i8] c"  ; bounds check: \00"
-@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len8.h2003785447 = private unnamed_addr constant [9 x i8] c"declare \00"
-@.str.len12.h438755048 = private unnamed_addr constant [13 x i8] c"` (expected \00"
-@.str.len11.h1907450020 = private unnamed_addr constant [12 x i8] c" = icmp ne \00"
-@.enum.NativeInstruction.Expression.variant = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.len52.h2121219822 = private unnamed_addr constant [53 x i8] c"llvm lowering: `.for` range missing start expression\00"
+@.str.len12.h340562855 = private unnamed_addr constant [13 x i8] c" effects: ![\00"
+@.str.len53.h1441489102 = private unnamed_addr constant [54 x i8] c"llvm lowering: `.for` range missing stride expression\00"
+@.str.len31.h1428761244 = private unnamed_addr constant [32 x i8] c"llvm lowering: mutable borrow `\00"
+@.enum.NativeInstruction.Loop.variant = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.str.len16.h1310846896 = private unnamed_addr constant [17 x i8] c".variant.default\00"
+@.str.len4.h259326677 = private unnamed_addr constant [5 x i8] c"frem\00"
+@.str.len62.h41486523 = private unnamed_addr constant [63 x i8] c"llvm lowering: array literal element could not be coerced to `\00"
+@.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
+@.str.len20.h819247583 = private unnamed_addr constant [21 x i8] c"` is not addressable\00"
+@.str.len39.h176231850 = private unnamed_addr constant [40 x i8] c"llvm lowering: unable to emit call to `\00"
+@.str.len11.h539202395 = private unnamed_addr constant [12 x i8] c"  store i8 \00"
+@.str.len23.h1424536798 = private unnamed_addr constant [24 x i8] c"layout manifest: enum `\00"
+@.str.len7.h794634624 = private unnamed_addr constant [8 x i8] c", i64 0\00"
+@.str.len53.h1448111568 = private unnamed_addr constant [54 x i8] c"llvm lowering: unsupported array literal element type\00"
+@.str.len25.h2067177893 = private unnamed_addr constant [26 x i8] c" (if true, out of bounds)\00"
+@.str.len55.h1124826835 = private unnamed_addr constant [56 x i8] c"llvm lowering: unable to coerce index expression to i64\00"
+@.str.len4.h257940116 = private unnamed_addr constant [5 x i8] c"else\00"
+@.str.len65.h534894571 = private unnamed_addr constant [66 x i8] c"llvm lowering: failed to lower assignment value for array index `\00"
+@.str.len7.h1794206627 = private unnamed_addr constant [8 x i8] c" to i8*\00"
+@.str.len13.h752234821 = private unnamed_addr constant [14 x i8] c"` missing `:`\00"
+@.str.len39.h1924108502 = private unnamed_addr constant [40 x i8] c"llvm lowering: enum member access for `\00"
+@.str.len19.h779801773 = private unnamed_addr constant [20 x i8] c"` produced no value\00"
+@.str.len9.h1449250559 = private unnamed_addr constant [10 x i8] c"` field `\00"
+@.str.len19.h129761630 = private unnamed_addr constant [20 x i8] c" = fcmp one double \00"
+@.str.len34.h858864034 = private unnamed_addr constant [35 x i8] c" = private unnamed_addr constant [\00"
+@.str.len2.h193442306 = private unnamed_addr constant [3 x i8] c"; \00"
+@.str.len4.h273085895 = private unnamed_addr constant [5 x i8] c"read\00"
+@.str.len3.h2090521984 = private unnamed_addr constant [4 x i8] c"mut\00"
+@.str.len50.h1873110523 = private unnamed_addr constant [51 x i8] c"llvm lowering: duplicate `.else` in `.if` within `\00"
+@.str.len54.h800459588 = private unnamed_addr constant [55 x i8] c"llvm lowering: array literal element produced no value\00"
+@.str.len10.h1629914700 = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.len19.h512381535 = private unnamed_addr constant [20 x i8] c" = fcmp ogt double \00"
+@.str.len57.h2014856169 = private unnamed_addr constant [58 x i8] c"llvm lowering: unable to compare `.for` range bounds in `\00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
+@.str.len51.h535923040 = private unnamed_addr constant [52 x i8] c"llvm lowering: unsupported return type in call to `\00"
+@.str.len47.h769984802 = private unnamed_addr constant [48 x i8] c"llvm lowering: unhandled return expression in `\00"
+@.str.len45.h313159578 = private unnamed_addr constant [46 x i8] c"llvm lowering: empty element in array literal\00"
+@.str.len16.h2138981313 = private unnamed_addr constant [17 x i8] c"string_constants\00"
+@.str.len49.h1794354414 = private unnamed_addr constant [50 x i8] c"llvm lowering: struct literal missing closing `}`\00"
+@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
+@.str.len12.h255876057 = private unnamed_addr constant [13 x i8] c"{ i8*, i8* }\00"
+@.str.len70.h134995567 = private unnamed_addr constant [71 x i8] c"llvm lowering: `.for` stride expression must evaluate to `number` in `\00"
+@.str.len46.h1399920227 = private unnamed_addr constant [47 x i8] c"llvm lowering: enum literal trailing content `\00"
+@.str.len47.h867637971 = private unnamed_addr constant [48 x i8] c" = call i64 @sailfin_runtime_string_length(i8* \00"
+@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
+@.str.len50.h1070755019 = private unnamed_addr constant [51 x i8] c"llvm lowering: computed heap allocation size for `\00"
+@.str.len3.h2088031936 = private unnamed_addr constant [4 x i8] c"*, \00"
+@.str.len67.h1243369623 = private unnamed_addr constant [68 x i8] c"llvm lowering: cannot determine element type for array assignment `\00"
+@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
+@.str.len46.h440287758 = private unnamed_addr constant [47 x i8] c"llvm lowering: member access assignment base `\00"
+@.str.len5.h1783417286 = private unnamed_addr constant [6 x i8] c"` in \00"
+@.str.len8.h1809673005 = private unnamed_addr constant [9 x i8] c"icmp sle\00"
+@.str.len42.h1019849180 = private unnamed_addr constant [43 x i8] c"` missing type annotation; defaulting to `\00"
+@.str.len34.h1529470002 = private unnamed_addr constant [35 x i8] c"llvm lowering: call target missing\00"
+@.str.len6.h1203620195 = private unnamed_addr constant [7 x i8] c".const\00"
+@.str.len5.h1895800173 = private unnamed_addr constant [6 x i8] c", i64\00"
+@.str.len6.h1803965435 = private unnamed_addr constant [7 x i8] c"entry:\00"
+@.str.len3.h2088286201 = private unnamed_addr constant [4 x i8] c"1.0\00"
+@.str.len16.h2115533553 = private unnamed_addr constant [17 x i8] c" = load i8, i8* \00"
+@.str.len55.h55260472 = private unnamed_addr constant [56 x i8] c"llvm lowering: unable to increment `.for` iterator in `\00"
+@.str.len65.h1925587422 = private unnamed_addr constant [66 x i8] c"llvm lowering: `.for` iterable must use `start..end` range syntax\00"
+@.str.len39.h2032947624 = private unnamed_addr constant [40 x i8] c"` conflicts with active shared borrow `\00"
+@.str.len11.h1907139655 = private unnamed_addr constant [12 x i8] c" = icmp eq \00"
+@.str.len12.h1213469728 = private unnamed_addr constant [13 x i8] c"; intrinsic \00"
+@.str.len24.h1068290701 = private unnamed_addr constant [25 x i8] c" arguments but received \00"
+@.str.len53.h409079501 = private unnamed_addr constant [54 x i8] c"llvm lowering: instructions after return ignored in `\00"
+@.str.len41.h637692462 = private unnamed_addr constant [42 x i8] c"llvm lowering: unterminated `.match` in `\00"
 @.str.len24.h442937996 = private unnamed_addr constant [25 x i8] c" = load double, double* \00"
+@.str.len23.h721422858 = private unnamed_addr constant [24 x i8] c"` escapes lifetime of `\00"
+@.str.len9.h1117174030 = private unnamed_addr constant [10 x i8] c"matchbody\00"
+@.str.len23.h675789051 = private unnamed_addr constant [24 x i8] c"llvm lowering: struct `\00"
+@.str.len4.h254486039 = private unnamed_addr constant [5 x i8] c"bool\00"
+@.str.len46.h964824710 = private unnamed_addr constant [47 x i8] c"  call void @sailfin_runtime_bounds_check(i64 \00"
+@.str.len60.h1664343531 = private unnamed_addr constant [61 x i8] c"llvm lowering: array literal element could not be boxed to `\00"
+@.str.len14.h1387946067 = private unnamed_addr constant [15 x i8] c" for call to `\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
+@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
+@.str.len24.h1893561446 = private unnamed_addr constant [25 x i8] c"llvm lowering: call to `\00"
+@.str.len5.h1925437637 = private unnamed_addr constant [6 x i8] c"await\00"
+@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
+@.str.len14.h1830305299 = private unnamed_addr constant [15 x i8] c" = sitofp i64 \00"
+@.str.len38.h1035741733 = private unnamed_addr constant [39 x i8] c"llvm lowering: unterminated `.if` in `\00"
+@.str.len6.h1894573333 = private unnamed_addr constant [7 x i8] c"length\00"
+@.str.len8.h1809668055 = private unnamed_addr constant [9 x i8] c"icmp sgt\00"
+@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.str.len2.h193515071 = private unnamed_addr constant [3 x i8] c"{}\00"
+@.str.len2.h193423034 = private unnamed_addr constant [3 x i8] c")*\00"
+@.str.len7.h332613328 = private unnamed_addr constant [8 x i8] c"%trait.\00"
+@.str.len28.h1602830880 = private unnamed_addr constant [29 x i8] c"llvm lowering: array index `\00"
+@.str.len11.h790843313 = private unnamed_addr constant [12 x i8] c" = sext i8 \00"
+@.str.len8.h169883590 = private unnamed_addr constant [9 x i8] c".variant\00"
+@.str.len6.h877543008 = private unnamed_addr constant [7 x i8] c"` of `\00"
+@.str.len9.h1385528440 = private unnamed_addr constant [10 x i8] c" = or i1 \00"
+@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.str.len30.h2098798495 = private unnamed_addr constant [31 x i8] c"llvm lowering: void function `\00"
+@.str.len4.h260733302 = private unnamed_addr constant [5 x i8] c"i8* \00"
+@.str.len52.h39804487 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to convert left operand from `\00"
+@.str.len28.h379765914 = private unnamed_addr constant [29 x i8] c";   ; no signatures recorded\00"
+@.str.len43.h396338520 = private unnamed_addr constant [44 x i8] c"llvm lowering: unsupported local type for `\00"
+@.str.len9.h1747065903 = private unnamed_addr constant [10 x i8] c"parameter\00"
+@.str.len26.h244643851 = private unnamed_addr constant [27 x i8] c"` missing initializer in `\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
+@.str.len15.h202150329 = private unnamed_addr constant [16 x i8] c" = fadd double \00"
+@.str.len16.h251499985 = private unnamed_addr constant [17 x i8] c" = alloca double\00"
+@.str.len11.h1424822679 = private unnamed_addr constant [12 x i8] c"` expected \00"
+@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len7.h505600716 = private unnamed_addr constant [8 x i8] c"` and `\00"
+@.str.len52.h1450163979 = private unnamed_addr constant [53 x i8] c"llvm lowering: instructions after break ignored in `\00"
+@.str.len18.h1107402921 = private unnamed_addr constant [19 x i8] c"  ; bounds check: \00"
+@.str.len3.h2088178324 = private unnamed_addr constant [4 x i8] c"...\00"
+@.str.len4.h245035433 = private unnamed_addr constant [5 x i8] c"\5C00\22\00"
+@.str.len4.h265988816 = private unnamed_addr constant [5 x i8] c"let \00"
+@.str.len13.h1278011845 = private unnamed_addr constant [14 x i8] c" = uitofp i1 \00"
+@.str.len6.h1526236955 = private unnamed_addr constant [7 x i8] c"Linear\00"
+@.str.len6.h113799849 = private unnamed_addr constant [7 x i8] c"borrow\00"
+@.str.len53.h1836297594 = private unnamed_addr constant [54 x i8] c"llvm lowering: enum literal references unknown enum `\00"
+@.str.len5.h199018843 = private unnamed_addr constant [6 x i8] c"local\00"
+@.str.len7.h770660688 = private unnamed_addr constant [8 x i8] c"icmp ne\00"
+@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.str.len12.h1775642273 = private unnamed_addr constant [13 x i8] c"; interface \00"
+@.str.len4.h259379675 = private unnamed_addr constant [5 x i8] c"fsub\00"
+@.str.len8.h2003785447 = private unnamed_addr constant [9 x i8] c"declare \00"
+@.str.len42.h1364986286 = private unnamed_addr constant [43 x i8] c" suspends while mutable borrow parameter `\00"
+@.str.len8.h183758879 = private unnamed_addr constant [9 x i8] c" = type \00"
+@.str.len8.h1230132454 = private unnamed_addr constant [9 x i8] c"@vtable.\00"
+@.str.len12.h603915651 = private unnamed_addr constant [13 x i8] c"  call void \00"
+@.str.len50.h993566140 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` range missing end expression\00"
+@.str.len48.h1208326627 = private unnamed_addr constant [49 x i8] c"llvm lowering: struct literal trailing content `\00"
+@.str.len12.h35447896 = private unnamed_addr constant [13 x i8] c"` but base `\00"
+@.enum.NativeInstruction.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
+@.str.len34.h1024520411 = private unnamed_addr constant [35 x i8] c" = getelementptr inbounds i8, i8* \00"
+@.str.len40.h1596119513 = private unnamed_addr constant [41 x i8] c"llvm lowering: malformed && expression `\00"
+@.str.len13.h601865389 = private unnamed_addr constant [14 x i8] c"  call void @\00"
+@.str.len16.h403825543 = private unnamed_addr constant [17 x i8] c" = icmp uge i64 \00"
+@.str.len32.h2027311032 = private unnamed_addr constant [33 x i8] c" suspends while mutable borrow `\00"
+@.str.len8.h1809673500 = private unnamed_addr constant [9 x i8] c"icmp slt\00"
+@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
+@.str.len6.h886311636 = private unnamed_addr constant [7 x i8] c"` vs `\00"
+@.str.len12.h1804972052 = private unnamed_addr constant [13 x i8] c" = bitcast [\00"
+@.str.len26.h786724930 = private unnamed_addr constant [27 x i8] c" requires capabilities: ![\00"
+@.str.len9.h769510343 = private unnamed_addr constant [10 x i8] c"; struct \00"
+@.str.len51.h1154611981 = private unnamed_addr constant [52 x i8] c"llvm lowering: ternary expression missing condition\00"
+@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
+@.str.len32.h1899104257 = private unnamed_addr constant [33 x i8] c"` does not implement interface `\00"
+@.str.len40.h341281823 = private unnamed_addr constant [41 x i8] c"llvm lowering: unterminated `.loop` in `\00"
+@.str.len26.h1631903096 = private unnamed_addr constant [27 x i8] c"llvm lowering: parameter `\00"
+@.str.len48.h1606060438 = private unnamed_addr constant [49 x i8] c"llvm lowering: malformed comparison expression `\00"
+@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
+@.str.len4.h175715072 = private unnamed_addr constant [5 x i8] c" at \00"
+@.str.len58.h1744114411 = private unnamed_addr constant [59 x i8] c"llvm lowering: expected boolean operand for `and`, found `\00"
+@.str.len11.h1586125529 = private unnamed_addr constant [12 x i8] c" = zext i1 \00"
+@.str.len35.h317788470 = private unnamed_addr constant [36 x i8] c"llvm lowering: struct literal for `\00"
+@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.str.len4.h173787542 = private unnamed_addr constant [5 x i8] c" -> \00"
+@.str.len26.h549134517 = private unnamed_addr constant [27 x i8] c"` not found in interface `\00"
+@.str.len47.h982576353 = private unnamed_addr constant [48 x i8] c"llvm lowering: condition produced no value in `\00"
+@.str.len49.h756173294 = private unnamed_addr constant [50 x i8] c"llvm lowering: index expression produced no value\00"
+@.str.len58.h821437208 = private unnamed_addr constant [59 x i8] c"llvm lowering: failed to lower assignment expression for `\00"
+@.str.len15.h1007423837 = private unnamed_addr constant [16 x i8] c"llvm lowering: \00"
+@.str.len11.h701810522 = private unnamed_addr constant [12 x i8] c"` variant `\00"
+@.str.len60.h80215049 = private unnamed_addr constant [61 x i8] c"llvm lowering: malformed ternary expression - `:` before `?`\00"
+@.str.len33.h1082729604 = private unnamed_addr constant [34 x i8] c"` is not a simple identifier in `\00"
+@.str.len44.h288551526 = private unnamed_addr constant [45 x i8] c"llvm lowering: assignment to unknown local `\00"
+@.str.len40.h731245554 = private unnamed_addr constant [41 x i8] c"llvm lowering: unsupported return type `\00"
+@.str.len40.h1941426741 = private unnamed_addr constant [41 x i8] c"llvm lowering: unsupported instruction `\00"
+@.str.len3.h2090737012 = private unnamed_addr constant [4 x i8] c"sub\00"
+@.str.len4.h259164383 = private unnamed_addr constant [5 x i8] c"fmul\00"
+@.str.len11.h1291126021 = private unnamed_addr constant [12 x i8] c" = bitcast \00"
+@.str.len18.h1203765633 = private unnamed_addr constant [19 x i8] c"` has no variant `\00"
+@.str.len76.h547986414 = private unnamed_addr constant [77 x i8] c"llvm lowering: unable to determine element type for array indexing on type `\00"
+@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len11.h1907450020 = private unnamed_addr constant [12 x i8] c" = icmp ne \00"
+@.str.len25.h9921935 = private unnamed_addr constant [26 x i8] c"` uses unsupported type `\00"
+@.str.len17.h1905584788 = private unnamed_addr constant [18 x i8] c" = fptosi double \00"
+@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
+@.str.len32.h331553312 = private unnamed_addr constant [33 x i8] c"` implements unknown interface `\00"
+@.str.len7.h1425458391 = private unnamed_addr constant [8 x i8] c"@.enum.\00"
+@.str.len40.h203794297 = private unnamed_addr constant [41 x i8] c"llvm lowering: failed to lower argument \00"
+@.str.len55.h463798869 = private unnamed_addr constant [56 x i8] c"llvm lowering: let expression missing binding name in `\00"
+@.str.len4.h274283861 = private unnamed_addr constant [5 x i8] c"self\00"
+@.str.len23.h1217803504 = private unnamed_addr constant [24 x i8] c"llvm lowering: borrow `\00"
+@.str.len47.h859819331 = private unnamed_addr constant [48 x i8] c"llvm lowering: borrow expression missing target\00"
+@.str.len8.h241551797 = private unnamed_addr constant [9 x i8] c"fcmp oge\00"
+@.str.len8.h1809667560 = private unnamed_addr constant [9 x i8] c"icmp sge\00"
+@.str.len9.h1117872508 = private unnamed_addr constant [10 x i8] c"matchcase\00"
+@.str.len3.h2088250264 = private unnamed_addr constant [4 x i8] c"0.0\00"
+@.str.len50.h440106603 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` stride must not be zero in `\00"
+@.str.len51.h577773560 = private unnamed_addr constant [52 x i8] c"llvm lowering: unable to lower `.for` iterable in `\00"
+@.str.len8.h1607706290 = private unnamed_addr constant [9 x i8] c" x i8]* \00"
+@.str.len5.h700747015 = private unnamed_addr constant [6 x i8] c"yield\00"
+@.str.len3.h2089833967 = private unnamed_addr constant [4 x i8] c"\5C09\00"
+@.str.len51.h1951972123 = private unnamed_addr constant [52 x i8] c"llvm lowering: enum literal references unknown enum\00"
+@.str.len3.h2089839742 = private unnamed_addr constant [4 x i8] c"\5C5C\00"
+@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
+@.str.len7.h434936673 = private unnamed_addr constant [8 x i8] c"Affine<\00"
+@.str.len42.h78527754 = private unnamed_addr constant [43 x i8] c"llvm lowering: empty argument in call to `\00"
+@.str.len58.h583386627 = private unnamed_addr constant [59 x i8] c"llvm lowering: comparison operands have mismatched types `\00"
+@.str.len3.h2088092689 = private unnamed_addr constant [4 x i8] c", [\00"
+@.str.len6.h1736497781 = private unnamed_addr constant [7 x i8] c"Borrow\00"
+@.str.len41.h980447798 = private unnamed_addr constant [42 x i8] c"llvm lowering: call to unknown function `\00"
+@.str.len40.h975266936 = private unnamed_addr constant [41 x i8] c"[sfn-debug] lower_struct_literal locals=\00"
+@.str.len48.h37492210 = private unnamed_addr constant [49 x i8] c"llvm lowering: unsupported comparison operator `\00"
+@.str.len49.h95349196 = private unnamed_addr constant [50 x i8] c"llvm lowering: unable to lower match subject in `\00"
+@.str.len68.h1900616918 = private unnamed_addr constant [69 x i8] c"llvm lowering: unable to compare descending `.for` range bounds in `\00"
+@.str.len47.h1642247268 = private unnamed_addr constant [48 x i8] c" = call i8* @sailfin_runtime_string_concat(i8* \00"
+@.str.len9.h1514414502 = private unnamed_addr constant [10 x i8] c" x i8] c\22\00"
+@.str.len54.h288837174 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to lower `.for` range start in `\00"
+@.str.len15.h1900227975 = private unnamed_addr constant [16 x i8] c"` missing value\00"
+@.str.len21.h860019855 = private unnamed_addr constant [22 x i8] c"llvm lowering: enum `\00"
+@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
+@.str.len8.h241557242 = private unnamed_addr constant [9 x i8] c"fcmp ole\00"
+@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
+@.str.len10.h759000579 = private unnamed_addr constant [11 x i8] c" = global \00"
+@.str.len18.h1375510272 = private unnamed_addr constant [19 x i8] c"` returned a value\00"
+@.str.len4.h219990644 = private unnamed_addr constant [5 x i8] c"Else\00"
+@.str.len49.h640106322 = private unnamed_addr constant [50 x i8] c"llvm lowering: unable to coerce initializer for `\00"
+@.str.len52.h1115033155 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to allocate heap storage for `\00"
+@.str.len54.h445851502 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to lower match case pattern in `\00"
+@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
+@.str.len41.h1217234939 = private unnamed_addr constant [42 x i8] c"llvm lowering: unable to coerce argument \00"
+@.str.len67.h845324059 = private unnamed_addr constant [68 x i8] c"llvm lowering: `.for` end expression must evaluate to `number` in `\00"
+@.str.len41.h17849796 = private unnamed_addr constant [42 x i8] c"llvm lowering: malformed let expression `\00"
+@.str.len7.h1755163029 = private unnamed_addr constant [8 x i8] c"runtime\00"
+@.str.len7.h513898090 = private unnamed_addr constant [8 x i8] c"variant\00"
+@.str.len58.h1022810589 = private unnamed_addr constant [59 x i8] c"native lowering: missing native text artifact for import `\00"
+@.str.len55.h1292034827 = private unnamed_addr constant [56 x i8] c"llvm lowering: instructions after continue ignored in `\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.str.len15.h1036821136 = private unnamed_addr constant [16 x i8] c" = icmp ne i64 \00"
+@.str.len17.h1795612323 = private unnamed_addr constant [18 x i8] c"` is incompatible\00"
+@.str.len79.h2027294639 = private unnamed_addr constant [80 x i8] c"llvm lowering: trait dispatch requires at least one argument (the trait object)\00"
+@.str.len57.h1542174776 = private unnamed_addr constant [58 x i8] c"llvm lowering: struct literal references unknown struct `\00"
+@.str.len10.h634268966 = private unnamed_addr constant [11 x i8] c"` repeated\00"
+@.str.len16.h519580441 = private unnamed_addr constant [17 x i8] c"` on any variant\00"
+@.str.len25.h1696931368 = private unnamed_addr constant [26 x i8] c" = getelementptr i8, i8* \00"
+@.str.len60.h550929947 = private unnamed_addr constant [61 x i8] c"llvm lowering: ternary expression missing false branch value\00"
+@.str.len49.h893069065 = private unnamed_addr constant [50 x i8] c"` missing layout metadata; skipping type emission\00"
+@.str.len60.h484372876 = private unnamed_addr constant [61 x i8] c"llvm lowering: member access assignment on non-struct type `\00"
+@.str.len48.h839589728 = private unnamed_addr constant [49 x i8] c"llvm lowering: struct literal field missing name\00"
+@.str.len47.h1239048531 = private unnamed_addr constant [48 x i8] c"` uses incompatible field types across variants\00"
+@.str.len3.h2089835914 = private unnamed_addr constant [4 x i8] c"\5C22\00"
+@.str.len54.h280353426 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to coerce assignment value for `\00"
+@.str.len33.h1674155807 = private unnamed_addr constant [34 x i8] c"llvm lowering: enum literal for `\00"
+@.str.len7.h1064168743 = private unnamed_addr constant [8 x i8] c".concat\00"
+@.str.len2.h193444352 = private unnamed_addr constant [3 x i8] c"<=\00"
+@.str.len4.h258714362 = private unnamed_addr constant [5 x i8] c"fadd\00"
+@.str.len43.h1628793500 = private unnamed_addr constant [44 x i8] c"llvm lowering: `continue` outside loop in `\00"
+@.str.len2.h193477154 = private unnamed_addr constant [3 x i8] c"[ \00"
+@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
+@.str.len43.h765759141 = private unnamed_addr constant [44 x i8] c"llvm lowering: missing return in function `\00"
+@.str.len6.h78255107 = private unnamed_addr constant [7 x i8] c"Affine\00"
+@.str.len23.h96319572 = private unnamed_addr constant [24 x i8] c"` lacks struct metadata\00"
+@.str.len26.h645889856 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
+@.str.len12.h438755048 = private unnamed_addr constant [13 x i8] c"` (expected \00"
+@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
+@.str.len30.h766090624 = private unnamed_addr constant [31 x i8] c"` not found for trait dispatch\00"
+@.str.len48.h887886391 = private unnamed_addr constant [49 x i8] c"llvm lowering: enum literal missing variant name\00"
+@.str.len40.h400700341 = private unnamed_addr constant [41 x i8] c"llvm lowering: malformed || expression `\00"
+@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
+@.str.len47.h1674492337 = private unnamed_addr constant [48 x i8] c"llvm lowering: enum literal missing closing `}`\00"
+@.str.len53.h1204093150 = private unnamed_addr constant [54 x i8] c"llvm lowering: unable to convert right operand from `\00"
+@.str.len35.h573475662 = private unnamed_addr constant [36 x i8] c"llvm lowering: `.for` loop target `\00"
+@.str.len35.h364700043 = private unnamed_addr constant [36 x i8] c"llvm lowering: enum literal field `\00"
+@.str.len19.h965756485 = private unnamed_addr constant [20 x i8] c" = fcmp olt double \00"
+@.str.len21.h1816480386 = private unnamed_addr constant [22 x i8] c"` when assigning to `\00"
+@.str.len60.h1498420593 = private unnamed_addr constant [61 x i8] c"llvm lowering: failed to lower assignment value for member `\00"
+@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.str.len8.h241775042 = private unnamed_addr constant [9 x i8] c"fcmp une\00"
+@.str.len57.h1507377927 = private unnamed_addr constant [58 x i8] c"llvm lowering: `.for` loop missing iteration binding in `\00"
+@.str.len39.h33026892 = private unnamed_addr constant [40 x i8] c"llvm lowering: match without cases in `\00"
+@.str.len8.h241550015 = private unnamed_addr constant [9 x i8] c"fcmp oeq\00"
+@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.enum.NativeInstruction.Expression.variant = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.len35.h1273062999 = private unnamed_addr constant [36 x i8] c"llvm lowering: member access base `\00"
+@.str.len8.h3286201 = private unnamed_addr constant [9 x i8] c"%vtable.\00"
+@.str.len30.h747463311 = private unnamed_addr constant [31 x i8] c"llvm lowering: shared borrow `\00"
+@.str.len43.h372676400 = private unnamed_addr constant [44 x i8] c"llvm lowering: empty expression encountered\00"
+@.str.len7.h770651283 = private unnamed_addr constant [8 x i8] c"icmp eq\00"
+@.str.len12.h937346004 = private unnamed_addr constant [13 x i8] c"` for type `\00"
+@.str.len10.h289462685 = private unnamed_addr constant [11 x i8] c" to double\00"
+@.str.len59.h1700212648 = private unnamed_addr constant [60 x i8] c"llvm lowering: ternary expression missing true branch value\00"
+@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len55.h522772778 = private unnamed_addr constant [56 x i8] c"llvm lowering: let expression missing initializer for `\00"
+@.str.len37.h126290176 = private unnamed_addr constant [38 x i8] c" = getelementptr [2 x i8], [2 x i8]* \00"
+@.str.len26.h1205961643 = private unnamed_addr constant [27 x i8] c"  %t0 = fadd double %a, %b\00"
+@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.str.len44.h1827416098 = private unnamed_addr constant [45 x i8] c"llvm lowering: malformed binary expression `\00"
+@.str.len4.h274245185 = private unnamed_addr constant [5 x i8] c"sdiv\00"
+@.str.len2.h193491707 = private unnamed_addr constant [3 x i8] c"fn\00"
+@.str.len40.h1039467311 = private unnamed_addr constant [41 x i8] c"llvm lowering: missing return value in `\00"
+@.str.len3.h2090370613 = private unnamed_addr constant [4 x i8] c"int\00"
+@.str.len7.h973697423 = private unnamed_addr constant [8 x i8] c"Linear<\00"
+@.str.len69.h1402407334 = private unnamed_addr constant [70 x i8] c"llvm lowering: ternary expression branches have incompatible types: `\00"
+@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
+@.str.len3.h2088029758 = private unnamed_addr constant [4 x i8] c"** \00"
+@.str.len16.h1727760345 = private unnamed_addr constant [17 x i8] c"` has no field `\00"
+@.str.len24.h1530531128 = private unnamed_addr constant [25 x i8] c"` not found in variant `\00"
+@.str.len12.h1027822751 = private unnamed_addr constant [13 x i8] c" undef, i8* \00"
+@.str.len24.h91596683 = private unnamed_addr constant [25 x i8] c"` due to argument errors\00"
+@.str.len42.h514999820 = private unnamed_addr constant [43 x i8] c"define double @add(double %a, double %b) {\00"
+@.str.len3.h2087662534 = private unnamed_addr constant [4 x i8] c" ![\00"
+@.str.len44.h1570405729 = private unnamed_addr constant [45 x i8] c"llvm lowering: array index assignment base `\00"
+@.str.len8.h241557737 = private unnamed_addr constant [9 x i8] c"fcmp olt\00"
+@.str.len8.h241552292 = private unnamed_addr constant [9 x i8] c"fcmp ogt\00"
+@.str.len5.h1893742920 = private unnamed_addr constant [6 x i8] c", 0.0\00"
+@.str.len52.h1898023432 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to lower `.for` range end in `\00"
+@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len47.h1472191274 = private unnamed_addr constant [48 x i8] c"llvm lowering: struct literal missing type name\00"
+@.str.len9.h719556312 = private unnamed_addr constant [10 x i8] c"bitcast (\00"
+@.str.len66.h2076742536 = private unnamed_addr constant [67 x i8] c"llvm lowering: `.for` iterable must resolve to an array value in `\00"
+@.str.len18.h871374945 = private unnamed_addr constant [19 x i8] c"  store i8 0, i8* \00"
+@.str.len40.h924126065 = private unnamed_addr constant [41 x i8] c"llvm lowering: `break` outside loop in `\00"
+@.str.len26.h1591462212 = private unnamed_addr constant [27 x i8] c"llvm lowering: interface `\00"
+@.str.len48.h5787697 = private unnamed_addr constant [49 x i8] c"llvm lowering: unable to lower if condition in `\00"
+@.str.len17.h1635915066 = private unnamed_addr constant [18 x i8] c"` missing field `\00"
+@.str.len33.h1240255260 = private unnamed_addr constant [34 x i8] c"` compatible with expected type `\00"
+@.str.len68.h1804274948 = private unnamed_addr constant [69 x i8] c"llvm lowering: `.for` stride expression did not produce a value in `\00"
+@.str.len3.h2090521720 = private unnamed_addr constant [4 x i8] c"mul\00"
+@.str.len2.h193415972 = private unnamed_addr constant [3 x i8] c" }\00"
+@.str.len36.h828265436 = private unnamed_addr constant [37 x i8] c"llvm lowering: match pattern field `\00"
+@.str.len21.h799966347 = private unnamed_addr constant [22 x i8] c"` remains active in `\00"
+@.str.len51.h189411679 = private unnamed_addr constant [52 x i8] c"llvm lowering: borrow expression trailing content `\00"
+@.str.len13.h142498599 = private unnamed_addr constant [14 x i8] c", i32 0, i32 \00"
+@.str.len3.h2089834330 = private unnamed_addr constant [4 x i8] c"\5C0D\00"
+@.str.len46.h1031183328 = private unnamed_addr constant [47 x i8] c"llvm lowering: enum literal field missing name\00"
+@.str.len6.h536277508 = private unnamed_addr constant [7 x i8] c"Return\00"
+@.str.len40.h900070345 = private unnamed_addr constant [41 x i8] c"` conflicts with active mutable borrow `\00"
+@.str.len55.h1287145578 = private unnamed_addr constant [56 x i8] c"llvm lowering: struct literal references unknown struct\00"
+@.str.len4.h230767751 = private unnamed_addr constant [5 x i8] c"Noop\00"
+@.str.len3.h2090302138 = private unnamed_addr constant [4 x i8] c"i16\00"
+@.str.len52.h382324263 = private unnamed_addr constant [53 x i8] c"llvm lowering: borrow expression missing closing `)`\00"
+@.str.len16.h418770507 = private unnamed_addr constant [17 x i8] c"trait_dispatch::\00"

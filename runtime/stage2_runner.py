@@ -280,6 +280,26 @@ class Stage2Runner:
                     handle.write("")
             except OSError:
                 self._debug_log_path = None
+        dump_dir_override = os.environ.get("SAILFIN_STAGE2_INSTRUMENT_DIR")
+        dump_setting = os.environ.get("SAILFIN_STAGE2_DUMP_INSTRUMENTED_IR")
+        self._instrument_dump_dir: pathlib.Path | None = None
+        selected_dump_dir: pathlib.Path | None = None
+        if dump_dir_override:
+            selected_dump_dir = pathlib.Path(dump_dir_override)
+        elif dump_setting:
+            normalized = dump_setting.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                selected_dump_dir = pathlib.Path("build") / "stage2" / "instrumented"
+            elif normalized not in {"0", "false", "no", "off"}:
+                selected_dump_dir = pathlib.Path(dump_setting)
+        if selected_dump_dir is not None:
+            try:
+                selected_dump_dir.mkdir(parents=True, exist_ok=True)
+                self._instrument_dump_dir = selected_dump_dir
+            except OSError:
+                self._debug_log(
+                    f"[stage2] failed to create instrument dump dir: {selected_dump_dir}"
+                )
         self._lowered_modules = self._normalise_lowered(lowered)
         self._string_abi = self._detect_string_abi(self._lowered_modules)
         self._use_struct_strings = self._string_abi != "cstring"
@@ -355,6 +375,17 @@ class Stage2Runner:
                 handle.write(message + "\n")
         except OSError:
             # Ignore log errors so diagnostics do not mask compilation issues.
+            pass
+
+    def _write_instrumented_ir(self, filename: str, content: str) -> None:
+        dump_dir = self._instrument_dump_dir
+        if not dump_dir:
+            return
+        try:
+            target = dump_dir / filename
+            target.write_text(content, encoding="utf-8")
+        except OSError:
+            # Ignore dump errors; instrumentation is best-effort only.
             pass
 
     @staticmethod
@@ -501,8 +532,7 @@ class Stage2Runner:
             return ir_text
         return "\n".join(result_lines)
 
-    @staticmethod
-    def _instrument_lex_ir(ir_text: str) -> str:
+    def _instrument_lex_ir(self, ir_text: str) -> str:
         candidates = [
             "define ptr @lex(",
             "define { %Token*, i64 }* @lex(",
@@ -575,16 +605,11 @@ class Stage2Runner:
             )
             lex_body = lex_body.replace(identifier_probe, id_injection, 1)
 
-        try:
-            instrumentation_path = pathlib.Path("scratch/instrumented_lex.ll")
-            instrumentation_path.write_text(lex_body, encoding="utf-8")
-        except Exception:
-            pass
+        self._write_instrumented_ir("instrumented_lex.ll", lex_body)
 
         return ir_text[:lex_start] + lex_body + ir_text[lex_end:]
 
-    @staticmethod
-    def _instrument_compile_pipeline_ir(ir_text: str) -> str:
+    def _instrument_compile_pipeline_ir(self, ir_text: str) -> str:
         if "define i8* @compile_to_sailfin(" not in ir_text:
             return ir_text
         if "declare void @stage2_debug_marker(i64)" not in ir_text:
@@ -646,17 +671,11 @@ class Stage2Runner:
                 1,
             )
 
-        try:
-            pathlib.Path("scratch/instrumented_compile.ll").write_text(
-                body, encoding="utf-8"
-            )
-        except Exception:
-            pass
+        self._write_instrumented_ir("instrumented_compile.ll", body)
 
         return ir_text[:start] + body + ir_text[end:]
 
-    @staticmethod
-    def _instrument_parse_tokens_ir(ir_text: str) -> str:
+    def _instrument_parse_tokens_ir(self, ir_text: str) -> str:
         if "define %Program @parse_tokens(" not in ir_text:
             return ir_text
         if "declare void @stage2_debug_marker(i64)" not in ir_text:
@@ -722,17 +741,11 @@ class Stage2Runner:
             )
             body = body.replace(token_pattern, token_replacement, 1)
 
-        try:
-            pathlib.Path("scratch/instrumented_parse_tokens.ll").write_text(
-                body, encoding="utf-8"
-            )
-        except Exception:
-            pass
+        self._write_instrumented_ir("instrumented_parse_tokens.ll", body)
 
         return ir_text[:start] + body + ir_text[end:]
 
-    @staticmethod
-    def _instrument_parse_block_ir(ir_text: str) -> str:
+    def _instrument_parse_block_ir(self, ir_text: str) -> str:
         if "define %BlockParseResult @parse_block(" not in ir_text:
             return ir_text
         if "declare void @stage2_debug_marker(i64)" not in ir_text:
@@ -777,17 +790,11 @@ class Stage2Runner:
             )
             body = body.replace(token_pattern, token_replacement, 1)
 
-        try:
-            pathlib.Path("scratch/instrumented_parse_block.ll").write_text(
-                body, encoding="utf-8"
-            )
-        except Exception:
-            pass
+        self._write_instrumented_ir("instrumented_parse_block.ll", body)
 
         return ir_text[:start] + body + ir_text[end:]
 
-    @staticmethod
-    def _instrument_parse_unknown_ir(ir_text: str) -> str:
+    def _instrument_parse_unknown_ir(self, ir_text: str) -> str:
         if "define %StatementParseResult @parse_unknown(" not in ir_text:
             return ir_text
         if "declare void @stage2_debug_marker(i64)" not in ir_text:
@@ -836,17 +843,11 @@ class Stage2Runner:
             )
             body = body.replace(token_pattern, token_replacement, 1)
 
-        try:
-            pathlib.Path("scratch/instrumented_parse_unknown.ll").write_text(
-                body, encoding="utf-8"
-            )
-        except Exception:
-            pass
+        self._write_instrumented_ir("instrumented_parse_unknown.ll", body)
 
         return ir_text[:start] + body + ir_text[end:]
 
-    @staticmethod
-    def _instrument_parse_statement_ir(ir_text: str) -> str:
+    def _instrument_parse_statement_ir(self, ir_text: str) -> str:
         """
         Insert debug markers in parse_statement to record which branch is taken.
 
@@ -895,6 +896,7 @@ class Stage2Runner:
         lines = body.splitlines()
         patched_lines: list[str] = []
         inserted_entry_marker = False
+        pending_token_marker = False
         for line in lines:
             stripped = line.lstrip()
             inserted = False
@@ -904,6 +906,24 @@ class Stage2Runner:
                 patched_lines.append(
                     "  call void @stage2_debug_marker(i64 12100)")
                 inserted_entry_marker = True
+                continue
+            if stripped.startswith("%t12 = call %Token @parser_peek_raw("):
+                patched_lines.append(line)
+                pending_token_marker = True
+                continue
+            if pending_token_marker and "store %Token %t12" in stripped:
+                patched_lines.append(line)
+                patched_lines.append(
+                    "  %stage2_stmt_token_kind = extractvalue %Token %t12, 0")
+                patched_lines.append(
+                    "  %stage2_stmt_token_variant = extractvalue %TokenKind %stage2_stmt_token_kind, 0")
+                patched_lines.append(
+                    "  %stage2_stmt_token_variant_i64 = sext i32 %stage2_stmt_token_variant to i64")
+                patched_lines.append(
+                    "  %stage2_stmt_token_marker = add i64 %stage2_stmt_token_variant_i64, 12200")
+                patched_lines.append(
+                    "  call void @stage2_debug_marker(i64 %stage2_stmt_token_marker)")
+                pending_token_marker = False
                 continue
             # Only consider actual call instructions to our known callees
             if stripped.startswith("%") or stripped.startswith("br ") or stripped.startswith("ret "):
@@ -919,17 +939,11 @@ class Stage2Runner:
                 patched_lines.append(line)
         body = "\n".join(patched_lines)
 
-        try:
-            pathlib.Path("scratch/instrumented_parse_statement.ll").write_text(
-                body, encoding="utf-8"
-            )
-        except Exception:
-            pass
+        self._write_instrumented_ir("instrumented_parse_statement.ll", body)
 
         return ir_text[:start] + body + ir_text[end:]
 
-    @staticmethod
-    def _instrument_parse_program_ir(ir_text: str) -> str:
+    def _instrument_parse_program_ir(self, ir_text: str) -> str:
         """
         Insert debug markers in parse_program around the dispatch to parse_statement.
 
@@ -975,11 +989,7 @@ class Stage2Runner:
                 patched_lines.append(line)
         body = "\n".join(patched_lines)
 
-        try:
-            pathlib.Path(
-                "scratch/instrumented_parse_program.ll").write_text(body, encoding="utf-8")
-        except Exception:
-            pass
+        self._write_instrumented_ir("instrumented_parse_program.ll", body)
 
         return ir_text[:start] + body + ir_text[end:]
 

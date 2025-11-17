@@ -115,4 +115,36 @@
     ret result
 .endfn
 
-.export "" { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at, sanitize_symbol }
+.fn strings_equal(left -> string, right -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 76 18 76 32
+    .param left -> string
+    .span 76 34 76 49
+    .param right -> string
+    .if left.length != right.length
+        .span 78 3 78 16
+        ret false
+    .endif
+    .span 80 2 80 30
+    eval let mut index -> number = 0
+    .loop
+        .if index >= left.length
+            break
+        .endif
+        .span 85 3 85 40
+        eval let left_char = char_at(left, index)
+        .span 86 3 86 42
+        eval let right_char = char_at(right, index)
+        .if char_code(left_char) != char_code(right_char)
+            .span 88 4 88 17
+            ret false
+        .endif
+        .span 90 3 90 14
+        eval index += 1
+    .endloop
+    .span 92 2 92 14
+    ret true
+.endfn
+
+.export "" { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at, sanitize_symbol, strings_equal }

@@ -26,6 +26,7 @@ This note records the fixes that have landed, what we can reliably reproduce tod
   - `_ptr_to_str` can recover strings from both tracked buffers and arbitrary heap pointers, logging the path it takes (`reuse`, `struct decode`, or `cstring decode/fallback`). `sailfin_runtime_string_length` now records pointer status, length, and a 40-character preview to make lex traces easier to read.
   - New helper `Stage2Runner.encode_host_string(text)` registers host strings so the runtime can recognise them during string-length calls.
   - Additional IR instrumentation now drops debug markers throughout `compile_to_sailfin`, `parse_tokens`, `parse_block`, and `parse_unknown`, making it easy to correlate log output with parser progress (`2000+`, `6000+`, `8000+`, `10000+`/`11000+`/`13000+` ranges).
+   - Set `SAILFIN_STAGE2_DUMP_INSTRUMENTED_IR=1` to dump the patched IR for instrumented functions into `build/stage2/instrumented/`. Override the destination directory entirely with `SAILFIN_STAGE2_INSTRUMENT_DIR=/abs/path`. Dumps are disabled by default to keep `/scratch` clean.
 
 - **Test harness updates**
 

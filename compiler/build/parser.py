@@ -1869,50 +1869,64 @@ def parse_unknown(initial_parser):
     tokens = []
     current = parser
     depth = 0
+    iteration_limit = 16384
+    iteration_count = 0
+    truncated = False
     while True:
+        if iteration_count >= iteration_limit:
+            truncated = True
+            current = parser_advance_raw(current)
+            break
+        iteration_count += 1
         tok = parser_peek_raw(current)
         tokens = append_token(tokens, tok)
-        if tok.kind.variant == "Symbol":
-            sym = tok.kind.value
-            if strings_equal(sym, "{"):
-                depth += 1
+        if symbol_matches(tok, "{"):
+            depth += 1
+        else:
+            if symbol_matches(tok, "}"):
+                if depth > 0:
+                    depth -= 1
+                if depth == 0:
+                    current = parser_advance_raw(current)
+                    break
             else:
-                if strings_equal(sym, "}"):
-                    if depth > 0:
-                        depth -= 1
-                    if depth == 0:
-                        current = parser_advance_raw(current)
-                        break
-                else:
-                    if strings_equal(sym, ";")  and  depth == 0:
-                        current = parser_advance_raw(current)
-                        break
+                if depth == 0  and  symbol_matches(tok, ";"):
+                    current = parser_advance_raw(current)
+                    break
         if tok.kind.variant == "EndOfFile":
             current = parser_advance_raw(current)
             break
         current = parser_advance_raw(current)
     text = tokens_to_text(tokens)
+    if truncated:
+        text = text + " /* parse_unknown truncated */"
     block = runtime.enum_instantiate(Statement, 'Unknown', [runtime.enum_field('tokens', tokens), runtime.enum_field('text', text)])
     parser = skip_trivia(current)
     return StatementParseResult(parser=parser, statement=block)
 
 def identifier_matches(token, expected):
-    if token.kind.variant != "Identifier":
-        return False
-    value = token.kind.value
-    if len(value) > 0:
-        if strings_equal(value, expected):
+    lexeme = token.lexeme
+    if len(lexeme) > 0:
+        if strings_equal(lexeme, expected):
             return True
-    return strings_equal(token.lexeme, expected)
+    if token.kind.variant == "Identifier":
+        value = token.kind.value
+        if len(value) > 0:
+            if strings_equal(value, expected):
+                return True
+    return False
 
 def symbol_matches(token, expected):
-    if token.kind.variant != "Symbol":
-        return False
-    value = token.kind.value
-    if len(value) > 0:
-        if strings_equal(value, expected):
+    lexeme = token.lexeme
+    if len(lexeme) > 0:
+        if strings_equal(lexeme, expected):
             return True
-    return strings_equal(token.lexeme, expected)
+    if token.kind.variant == "Symbol":
+        value = token.kind.value
+        if len(value) > 0:
+            if strings_equal(value, expected):
+                return True
+    return False
 
 def identifier_text(token):
     if token.kind.variant == "Identifier":
@@ -2819,11 +2833,22 @@ def filter_trivia(tokens):
 def tokens_to_text(tokens):
     text = ""
     index = 0
+    limit = 8192
+    max_tokens = 512
+    truncated = False
     while True:
         if index >= len(tokens):
             break
+        if index >= max_tokens:
+            truncated = True
+            break
         text = text + tokens[index].lexeme
         index += 1
+        if len(text) >= limit:
+            truncated = index < len(tokens)
+            break
+    if truncated:
+        text = text + "... (truncated)"
     return text
 
 def trim_text(value):
