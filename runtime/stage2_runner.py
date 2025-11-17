@@ -677,6 +677,27 @@ class Stage2Runner:
         end += 3
         body = ir_text[start:end]
 
+        # Emit a function entry marker to confirm we reach parse_tokens at runtime.
+        entry_pattern = "block.entry:\n  %l0 = alloca %Parser\n"
+        if entry_pattern in body:
+            entry_replacement = (
+                "block.entry:\n"
+                "  call void @stage2_debug_marker(i64 12010)\n"
+                "  %l0 = alloca %Parser\n"
+            )
+            body = body.replace(entry_pattern, entry_replacement, 1)
+
+        # Emit a marker before the dispatch to parse_statement so we can
+        # distinguish crashes occurring inside statement parsing from earlier phases.
+        parse_stmt_call = "  %t56 = call %StatementParseResult @parse_statement(%Parser %t55)\n"
+        if parse_stmt_call in body:
+            body = body.replace(
+                parse_stmt_call,
+                "  call void @stage2_debug_marker(i64 12000)\n" +
+                parse_stmt_call,
+                1,
+            )
+
         loop_pattern = "loop.body1:\n  %t20 = load %Parser, %Parser* %l0\n"
         if loop_pattern in body:
             loop_replacement = (
@@ -819,6 +840,144 @@ class Stage2Runner:
             pathlib.Path("scratch/instrumented_parse_unknown.ll").write_text(
                 body, encoding="utf-8"
             )
+        except Exception:
+            pass
+
+        return ir_text[:start] + body + ir_text[end:]
+
+    @staticmethod
+    def _instrument_parse_statement_ir(ir_text: str) -> str:
+        """
+        Insert debug markers in parse_statement to record which branch is taken.
+
+        We add a marker immediately before calls to specific parse_* routines so the
+        stage2_debug.log will show which statement kind was selected prior to any
+        deeper parsing that may trap.
+        """
+        if "define %StatementParseResult @parse_statement(" not in ir_text:
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
+
+        start = ir_text.find("define %StatementParseResult @parse_statement(")
+        if start == -1:
+            return ir_text
+        end = ir_text.find("\n}\n", start)
+        if end == -1:
+            return ir_text
+        end += 3
+        body = ir_text[start:end]
+
+        # Map of callee symbol -> marker code base
+        marker_map = {
+            "@parse_import(": 12101,
+            "@parse_export(": 12102,
+            "@parse_variable(": 12103,
+            "@parse_model(": 12104,
+            "@parse_pipeline(": 12105,
+            "@parse_tool(": 12106,
+            "@parse_test(": 12107,
+            "@parse_function(": 12108,
+            "@parse_struct(": 12109,
+            "@parse_type_alias(": 12110,
+            "@parse_interface(": 12111,
+            "@parse_enum(": 12112,
+            "@parse_unknown(": 12113,
+        }
+
+        # Inject markers line-by-line to avoid corrupting SSA assignments
+        lines = body.splitlines()
+        patched_lines: list[str] = []
+        inserted_entry_marker = False
+        for line in lines:
+            stripped = line.lstrip()
+            inserted = False
+            # Insert an entry marker right after the first basic block label
+            if not inserted_entry_marker and stripped.endswith(":") and stripped.startswith("block.entry"):
+                patched_lines.append(line)
+                patched_lines.append(
+                    "  call void @stage2_debug_marker(i64 12100)")
+                inserted_entry_marker = True
+                continue
+            # Only consider actual call instructions to our known callees
+            if stripped.startswith("%") or stripped.startswith("br ") or stripped.startswith("ret "):
+                for callee, code in marker_map.items():
+                    if f"@{callee[1:]}" in line and " call " in line and "%StatementParseResult" in line:
+                        # Insert a standalone marker immediately before the call line
+                        patched_lines.append(
+                            "  call void @stage2_debug_marker(i64 " + str(code) + ")")
+                        patched_lines.append(line)
+                        inserted = True
+                        break
+            if not inserted:
+                patched_lines.append(line)
+        body = "\n".join(patched_lines)
+
+        try:
+            pathlib.Path("scratch/instrumented_parse_statement.ll").write_text(
+                body, encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+        return ir_text[:start] + body + ir_text[end:]
+
+    @staticmethod
+    def _instrument_parse_program_ir(ir_text: str) -> str:
+        """
+        Insert debug markers in parse_program around the dispatch to parse_statement.
+
+        - Emit 12001 at function entry
+        - Emit 12000 immediately before calling parse_statement
+        """
+        if "define %Program @parse_program(" not in ir_text:
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
+
+        start = ir_text.find("define %Program @parse_program(")
+        if start == -1:
+            return ir_text
+        end = ir_text.find("\n}\n", start)
+        if end == -1:
+            return ir_text
+        end += 3
+        body = ir_text[start:end]
+
+        lines = body.splitlines()
+        patched_lines: list[str] = []
+        inserted_entry = False
+        for line in lines:
+            stripped = line.lstrip()
+            if not inserted_entry and stripped.endswith(":") and stripped.startswith("block.entry"):
+                patched_lines.append(line)
+                patched_lines.append(
+                    "  call void @stage2_debug_marker(i64 12001)")
+                inserted_entry = True
+                continue
+            if " call %StatementParseResult @parse_statement(" in line:
+                patched_lines.append(
+                    "  call void @stage2_debug_marker(i64 12000)")
+                patched_lines.append(line)
+            else:
+                patched_lines.append(line)
+        body = "\n".join(patched_lines)
+
+        try:
+            pathlib.Path(
+                "scratch/instrumented_parse_program.ll").write_text(body, encoding="utf-8")
         except Exception:
             pass
 
@@ -2327,6 +2486,8 @@ class Stage2Runner:
             rewritten_ir = self._instrument_parse_tokens_ir(rewritten_ir)
             rewritten_ir = self._instrument_parse_block_ir(rewritten_ir)
             rewritten_ir = self._instrument_parse_unknown_ir(rewritten_ir)
+            rewritten_ir = self._instrument_parse_program_ir(rewritten_ir)
+            rewritten_ir = self._instrument_parse_statement_ir(rewritten_ir)
             self._register_type_definitions(rewritten_ir, type_definitions)
             if duplicates:
                 duplicate_registry[str(
@@ -2411,6 +2572,14 @@ class Stage2Runner:
                 if function.is_declaration:
                     continue
                 name = function.name
+                # Treat local/private functions as module-scoped; they cannot collide across modules
+                try:
+                    func_linkage = str(function.linkage)
+                except Exception:
+                    func_linkage = ""
+                if func_linkage in {"internal", "private"}:
+                    # Do not record in seen_functions; keep original local name
+                    continue
                 if name in seen_functions:
                     unique_name = name
                     counter = 1
@@ -2428,6 +2597,14 @@ class Stage2Runner:
                 if global_var.is_declaration:
                     continue
                 name = global_var.name
+                # Treat local/private globals as module-scoped; they cannot collide across modules
+                try:
+                    glob_linkage = str(global_var.linkage)
+                except Exception:
+                    glob_linkage = ""
+                if glob_linkage in {"internal", "private"}:
+                    # Do not record in seen_globals; keep original local name
+                    continue
                 if name in seen_globals:
                     unique_name = name
                     counter = 1
