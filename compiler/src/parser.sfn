@@ -4131,15 +4131,20 @@ fn is_trivia_token(token -> Token) -> boolean {
     if token.kind.variant == "Whitespace" || token.kind.variant == "Comment" {
         return true;
     }
-    let lexeme = token.lexeme;
-    if lexeme.length == 0 {
+    let mut text = token.lexeme;
+    if text.length == 0 {
+        if token.kind.variant == "Symbol" {
+            text = token.kind.value;
+        }
+    }
+    if text.length == 0 {
         return false;
     }
-    if is_whitespace_lexeme(lexeme) {
+    if is_whitespace_lexeme(text) {
         return true;
     }
-    if lexeme.length >= 2 {
-        let prefix = substring(lexeme, 0, 2);
+    if text.length >= 2 {
+        let prefix = substring(text, 0, 2);
         if strings_equal(prefix, "//") || strings_equal(prefix, "/*") {
             return true;
         }
