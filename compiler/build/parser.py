@@ -2892,13 +2892,16 @@ def string_array_contains(values, target):
 def is_trivia_token(token):
     if token.kind.variant == "Whitespace"  or  token.kind.variant == "Comment":
         return True
-    lexeme = token.lexeme
-    if len(lexeme) == 0:
+    text = token.lexeme
+    if len(text) == 0:
+        if token.kind.variant == "Symbol":
+            text = token.kind.value
+    if len(text) == 0:
         return False
-    if is_whitespace_lexeme(lexeme):
+    if is_whitespace_lexeme(text):
         return True
-    if len(lexeme) >= 2:
-        prefix = substring(lexeme, 0, 2)
+    if len(text) >= 2:
+        prefix = substring(text, 0, 2)
         if strings_equal(prefix, "//")  or  strings_equal(prefix, "/*"):
             return True
     return False
