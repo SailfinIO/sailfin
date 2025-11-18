@@ -1192,10 +1192,11 @@ class Stage2Runner:
 
     def _instrument_parse_program_ir(self, ir_text: str) -> str:
         """
-        Insert debug markers in parse_program around the dispatch to parse_statement.
+        Insert debug markers in parse_program to trace parser entry.
 
         - Emit 12001 at function entry
-        - Emit 12000 immediately before calling parse_statement
+        - Emit 12005 immediately before calling parse_tokens
+        - Emit 12000 immediately before calling parse_statement (legacy signal)
         """
         if "define %Program @parse_program(" not in ir_text:
             return ir_text
@@ -1227,6 +1228,11 @@ class Stage2Runner:
                 patched_lines.append(
                     "  call void @stage2_debug_marker(i64 12001)")
                 inserted_entry = True
+                continue
+            if " call %Program @parse_tokens(" in line:
+                patched_lines.append(
+                    "  call void @stage2_debug_marker(i64 12005)")
+                patched_lines.append(line)
                 continue
             if " call %StatementParseResult @parse_statement(" in line:
                 patched_lines.append(
@@ -2143,8 +2149,8 @@ class Stage2Runner:
                         import json
                         result = json.dumps(entries)
                     except Exception:  # pragma: no cover - fall back to comma join on JSON issues.
-                        result = "[" + \
-                            ", ".join(f'\"{name}\"' for name in entries) + "]"
+                        result = "[" + ", ".join(
+                            f'\"{name}\"' for name in entries) + "]"
                     return _str_to_ptr(result)
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:
