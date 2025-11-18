@@ -849,38 +849,108 @@ class Stage2Runner:
         return ir_text[:start] + body + ir_text[end:]
 
     def _instrument_is_trivia_token_ir(self, ir_text: str) -> str:
-        if "define i1 @is_trivia_token(" not in ir_text:
+        if "@is_trivia_token" not in ir_text:
             return ir_text
-        if "declare void @stage2_debug_marker(i64)" not in ir_text:
-            declare_index = ir_text.find("declare")
+
+        def _instrument_body(body: str) -> tuple[str, bool]:
+            inserted = False
+
+            def _insert_marker(label: str, code: int) -> None:
+                nonlocal body, inserted
+                label_marker = f"{label}:\n"
+                label_index = body.find(label_marker)
+                if label_index == -1:
+                    return
+                ret_index = body.find(
+                    "  ret i1 1", label_index + len(label_marker)
+                )
+                if ret_index == -1:
+                    return
+                insertion = f"  call void @stage2_debug_marker(i64 {code})\n"
+                body = body[:ret_index] + insertion + body[ret_index:]
+                inserted = True
+
+            _insert_marker("then0", 53001)
+            _insert_marker("then8", 53002)
+            _insert_marker("then12", 53003)
+
+            if not inserted:
+                merge_label = "logical_or_merge_0:\n"
+                merge_index = body.find(merge_label)
+                if merge_index != -1:
+                    ret_index = body.find(
+                        "  ret i1", merge_index + len(merge_label)
+                    )
+                    if ret_index != -1:
+                        insertion = (
+                            "  call void @stage2_debug_marker(i64 53050)\n"
+                        )
+                        body = body[:ret_index] + insertion + body[ret_index:]
+                        inserted = True
+
+            return body, inserted
+
+        pattern = re.compile(
+            r"^define\s+[^\n]*@is_trivia_token(?=[^A-Za-z0-9_])",
+            re.MULTILINE,
+        )
+
+        def _find_function_end(brace_start: int) -> int:
+            depth = 0
+            index = brace_start
+            text_length = len(ir_text)
+            while index < text_length:
+                ch = ir_text[index]
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        index += 1
+                        while index < text_length and ir_text[index] in "\r\n":
+                            index += 1
+                        return index
+                index += 1
+            return -1
+
+        cursor = 0
+        pieces: list[str] = []
+        modified_any = False
+        for match in pattern.finditer(ir_text):
+            start = match.start()
+            brace_start = ir_text.find("{", match.end())
+            if brace_start == -1:
+                continue
+            end = _find_function_end(brace_start)
+            if end == -1:
+                continue
+            pieces.append(ir_text[cursor:start])
+            body, modified = _instrument_body(ir_text[start:end])
+            pieces.append(body)
+            cursor = end
+            modified_any = modified_any or modified
+
+        if not pieces:
+            return ir_text
+
+        pieces.append(ir_text[cursor:])
+        result = "".join(pieces)
+
+        if not modified_any:
+            return ir_text
+
+        if "declare void @stage2_debug_marker(i64)" not in result:
+            declare_index = result.find("declare")
             declaration = "declare void @stage2_debug_marker(i64)\n"
             if declare_index == -1:
-                ir_text = ir_text + "\n" + declaration
+                result = result + "\n" + declaration
             else:
-                ir_text = ir_text[:declare_index] + \
-                    declaration + ir_text[declare_index:]
+                result = result[:declare_index] + \
+                    declaration + result[declare_index:]
 
-        start = ir_text.find("define i1 @is_trivia_token(")
-        if start == -1:
-            return ir_text
-        end = ir_text.find("\n}\n", start)
-        if end == -1:
-            return ir_text
-        end += 3
-        body = ir_text[start:end]
-
-        replacements = {
-            "then0:\n  ret i1 1": "then0:\n  call void @stage2_debug_marker(i64 53001)\n  ret i1 1",
-            "then8:\n  ret i1 1": "then8:\n  call void @stage2_debug_marker(i64 53002)\n  ret i1 1",
-            "then12:\n  ret i1 1": "then12:\n  call void @stage2_debug_marker(i64 53003)\n  ret i1 1",
-        }
-        for pattern, replacement in replacements.items():
-            if pattern in body:
-                body = body.replace(pattern, replacement, 1)
-
-        self._write_instrumented_ir("instrumented_is_trivia_token.ll", body)
-
-        return ir_text[:start] + body + ir_text[end:]
+        self._write_instrumented_ir(
+            "instrumented_is_trivia_token.ll", result)
+        return result
 
     def _instrument_parse_block_ir(self, ir_text: str) -> str:
         if "define %BlockParseResult @parse_block(" not in ir_text:
