@@ -22,6 +22,8 @@ loop.body1:
   %t7 = sitofp i64 %t6 to double
   %t8 = fcmp oge double %t2, %t7
   %t9 = load %Parser, %Parser* %l0
+  %stage2_skip_bounds_marker = select i1 %t8, i64 52100, i64 52101
+  call void @stage2_debug_marker(i64 %stage2_skip_bounds_marker)
   br i1 %t8, label %then4, label %merge5
 then4:
   br label %afterloop3
@@ -47,9 +49,12 @@ merge5:
   %stage2_skip_token_variant_i64 = sext i32 %stage2_skip_token_variant to i64
   %stage2_skip_token_marker = add i64 %stage2_skip_token_variant_i64, 5100
   call void @stage2_debug_marker(i64 %stage2_skip_token_marker)
+  call void @stage2_debug_marker(i64 53080)
   %t23 = call i1 @is_trivia_token(%Token %t22)
   %t24 = load %Parser, %Parser* %l0
   %t25 = load %Token*, %Token** %l1
+  %stage2_skip_trivia_decision = select i1 %t23, i64 52021, i64 52020
+  call void @stage2_debug_marker(i64 %stage2_skip_trivia_decision)
   br i1 %t23, label %then6, label %merge7
 then6:
   call void @stage2_debug_marker(i64 52001)

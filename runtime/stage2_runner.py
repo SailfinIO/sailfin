@@ -835,6 +835,15 @@ class Stage2Runner:
             )
             body = body.replace(token_pattern, token_replacement, 1)
 
+        eof_branch_pattern = "  br i1 %t8, label %then4, label %merge5\n"
+        if eof_branch_pattern in body:
+            eof_branch_replacement = (
+                "  %stage2_skip_bounds_marker = select i1 %t8, i64 52100, i64 52101\n"
+                "  call void @stage2_debug_marker(i64 %stage2_skip_bounds_marker)\n"
+                "  br i1 %t8, label %then4, label %merge5\n"
+            )
+            body = body.replace(eof_branch_pattern, eof_branch_replacement, 1)
+
         then6_pattern = "then6:\n  %t26 = load %Parser, %Parser* %l0\n"
         if then6_pattern in body:
             then6_replacement = (
@@ -843,6 +852,25 @@ class Stage2Runner:
                 "  %t26 = load %Parser, %Parser* %l0\n"
             )
             body = body.replace(then6_pattern, then6_replacement, 1)
+
+        trivia_call_pattern = "  %t23 = call i1 @is_trivia_token(%Token %t22)\n"
+        if trivia_call_pattern in body:
+            trivia_call_replacement = (
+                "  call void @stage2_debug_marker(i64 53080)\n"
+                "  %t23 = call i1 @is_trivia_token(%Token %t22)\n"
+            )
+            body = body.replace(trivia_call_pattern,
+                                trivia_call_replacement, 1)
+
+        trivia_branch_pattern = "  br i1 %t23, label %then6, label %merge7\n"
+        if trivia_branch_pattern in body:
+            trivia_branch_replacement = (
+                "  %stage2_skip_trivia_decision = select i1 %t23, i64 52021, i64 52020\n"
+                "  call void @stage2_debug_marker(i64 %stage2_skip_trivia_decision)\n"
+                "  br i1 %t23, label %then6, label %merge7\n"
+            )
+            body = body.replace(trivia_branch_pattern,
+                                trivia_branch_replacement, 1)
 
         self._write_instrumented_ir("instrumented_skip_trivia.ll", body)
 
@@ -854,6 +882,12 @@ class Stage2Runner:
 
         def _instrument_body(body: str) -> tuple[str, bool]:
             inserted = False
+
+            entry_label = "block.entry:\n"
+            entry_marker = "  call void @stage2_debug_marker(i64 53090)\n"
+            if entry_label in body and entry_marker not in body:
+                body = body.replace(entry_label, entry_label + entry_marker, 1)
+                inserted = True
 
             def _insert_marker(label: str, code: int) -> None:
                 nonlocal body, inserted
