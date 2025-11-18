@@ -290,7 +290,8 @@ class Stage2Runner:
         elif dump_setting:
             normalized = dump_setting.strip().lower()
             if normalized in {"1", "true", "yes", "on"}:
-                selected_dump_dir = pathlib.Path("build") / "stage2" / "instrumented"
+                selected_dump_dir = pathlib.Path(
+                    "build") / "stage2" / "instrumented"
             elif normalized not in {"0", "false", "no", "off"}:
                 selected_dump_dir = pathlib.Path(dump_setting)
         default_log_limit = 25 * 1024 * 1024  # 25 MB cap to avoid runaway logs
@@ -785,6 +786,102 @@ class Stage2Runner:
 
         return ir_text[:start] + body + ir_text[end:]
 
+    def _instrument_skip_trivia_ir(self, ir_text: str) -> str:
+        if "define %Parser @skip_trivia(" not in ir_text:
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
+
+        start = ir_text.find("define %Parser @skip_trivia(")
+        if start == -1:
+            return ir_text
+        end = ir_text.find("\n}\n", start)
+        if end == -1:
+            return ir_text
+        end += 3
+        body = ir_text[start:end]
+
+        index_pattern = (
+            "loop.body1:\n"
+            "  %t1 = load %Parser, %Parser* %l0\n"
+            "  %t2 = extractvalue %Parser %t1, 1\n"
+        )
+        if index_pattern in body:
+            index_replacement = (
+                "loop.body1:\n"
+                "  %t1 = load %Parser, %Parser* %l0\n"
+                "  %t2 = extractvalue %Parser %t1, 1\n"
+                "  %stage2_skip_index_i64 = fptosi double %t2 to i64\n"
+                "  %stage2_skip_index_marker = add i64 %stage2_skip_index_i64, 5000\n"
+                "  call void @stage2_debug_marker(i64 %stage2_skip_index_marker)\n"
+            )
+            body = body.replace(index_pattern, index_replacement, 1)
+
+        token_pattern = "  %t22 = load %Token, %Token* %t21\n"
+        if token_pattern in body:
+            token_replacement = (
+                "  %t22 = load %Token, %Token* %t21\n"
+                "  %stage2_skip_token_kind = extractvalue %Token %t22, 0\n"
+                "  %stage2_skip_token_variant = extractvalue %TokenKind %stage2_skip_token_kind, 0\n"
+                "  %stage2_skip_token_variant_i64 = sext i32 %stage2_skip_token_variant to i64\n"
+                "  %stage2_skip_token_marker = add i64 %stage2_skip_token_variant_i64, 5100\n"
+                "  call void @stage2_debug_marker(i64 %stage2_skip_token_marker)\n"
+            )
+            body = body.replace(token_pattern, token_replacement, 1)
+
+        then6_pattern = "then6:\n  %t26 = load %Parser, %Parser* %l0\n"
+        if then6_pattern in body:
+            then6_replacement = (
+                "then6:\n"
+                "  call void @stage2_debug_marker(i64 52001)\n"
+                "  %t26 = load %Parser, %Parser* %l0\n"
+            )
+            body = body.replace(then6_pattern, then6_replacement, 1)
+
+        self._write_instrumented_ir("instrumented_skip_trivia.ll", body)
+
+        return ir_text[:start] + body + ir_text[end:]
+
+    def _instrument_is_trivia_token_ir(self, ir_text: str) -> str:
+        if "define i1 @is_trivia_token(" not in ir_text:
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
+
+        start = ir_text.find("define i1 @is_trivia_token(")
+        if start == -1:
+            return ir_text
+        end = ir_text.find("\n}\n", start)
+        if end == -1:
+            return ir_text
+        end += 3
+        body = ir_text[start:end]
+
+        replacements = {
+            "then0:\n  ret i1 1": "then0:\n  call void @stage2_debug_marker(i64 53001)\n  ret i1 1",
+            "then8:\n  ret i1 1": "then8:\n  call void @stage2_debug_marker(i64 53002)\n  ret i1 1",
+            "then12:\n  ret i1 1": "then12:\n  call void @stage2_debug_marker(i64 53003)\n  ret i1 1",
+        }
+        for pattern, replacement in replacements.items():
+            if pattern in body:
+                body = body.replace(pattern, replacement, 1)
+
+        self._write_instrumented_ir("instrumented_is_trivia_token.ll", body)
+
+        return ir_text[:start] + body + ir_text[end:]
+
     def _instrument_parse_block_ir(self, ir_text: str) -> str:
         if "define %BlockParseResult @parse_block(" not in ir_text:
             return ir_text
@@ -855,33 +952,39 @@ class Stage2Runner:
         end += 3
         body = ir_text[start:end]
 
-        loop_pattern = "loop.body1:\n  %t20 = load %Parser, %Parser* %l2\n"
-        if loop_pattern in body:
-            loop_replacement = (
+        entry_label = "block.entry:\n"
+        entry_marker = "  call void @stage2_debug_marker(i64 10000)\n"
+        if entry_label in body and entry_marker not in body:
+            body = body.replace(entry_label, entry_label + entry_marker, 1)
+
+        loop_label = "loop.body1:\n"
+        if loop_label in body and "%stage2_unknown_marker" not in body:
+            loop_instrument = (
                 "loop.body1:\n"
-                "  %t20 = load %Parser, %Parser* %l2\n"
-                "  %stage2_unknown_index = extractvalue %Parser %t20, 1\n"
+                "  %stage2_unknown_parser = load %Parser, %Parser* %l2\n"
+                "  %stage2_unknown_index = extractvalue %Parser %stage2_unknown_parser, 1\n"
                 "  %stage2_unknown_index_i64 = fptosi double %stage2_unknown_index to i64\n"
                 "  %stage2_unknown_marker = add i64 %stage2_unknown_index_i64, 10000\n"
                 "  call void @stage2_debug_marker(i64 %stage2_unknown_marker)\n"
             )
-            body = body.replace(loop_pattern, loop_replacement, 1)
+            body = body.replace(loop_label, loop_instrument, 1)
 
-        token_pattern = "  %t25 = load %Token, %Token* %l4\n"
-        if token_pattern in body:
-            token_replacement = (
-                "  %t25 = load %Token, %Token* %l4\n"
-                "  %stage2_unknown_token_kind = extractvalue %Token %t25, 0\n"
-                "  %stage2_unknown_token_variant = extractvalue %TokenKind %stage2_unknown_token_kind, 0\n"
-                "  %stage2_unknown_token_variant_i64 = sext i32 %stage2_unknown_token_variant to i64\n"
-                "  %stage2_unknown_token_marker = add i64 %stage2_unknown_token_variant_i64, 11000\n"
-                "  call void @stage2_debug_marker(i64 %stage2_unknown_token_marker)\n"
-                "  %stage2_unknown_depth_value = load double, double* %l3\n"
-                "  %stage2_unknown_depth_i64 = fptosi double %stage2_unknown_depth_value to i64\n"
-                "  %stage2_unknown_depth_marker = add i64 %stage2_unknown_depth_i64, 13000\n"
-                "  call void @stage2_debug_marker(i64 %stage2_unknown_depth_marker)\n"
-            )
-            body = body.replace(token_pattern, token_replacement, 1)
+        token_store_pattern = r"(  store %Token %t\\d+, %Token\\* %l7\\n)"
+        token_store_replacement = (
+            r"\1"
+            "  %stage2_unknown_token = load %Token, %Token* %l7\n"
+            "  %stage2_unknown_token_kind = extractvalue %Token %stage2_unknown_token, 0\n"
+            "  %stage2_unknown_token_variant = extractvalue %TokenKind %stage2_unknown_token_kind, 0\n"
+            "  %stage2_unknown_token_variant_i64 = sext i32 %stage2_unknown_token_variant to i64\n"
+            "  %stage2_unknown_token_marker = add i64 %stage2_unknown_token_variant_i64, 11000\n"
+            "  call void @stage2_debug_marker(i64 %stage2_unknown_token_marker)\n"
+            "  %stage2_unknown_depth_value = load double, double* %l3\n"
+            "  %stage2_unknown_depth_i64 = fptosi double %stage2_unknown_depth_value to i64\n"
+            "  %stage2_unknown_depth_marker = add i64 %stage2_unknown_depth_i64, 13000\n"
+            "  call void @stage2_debug_marker(i64 %stage2_unknown_depth_marker)\n"
+        )
+        body, _ = re.subn(token_store_pattern,
+                          token_store_replacement, body, count=1)
 
         self._write_instrumented_ir("instrumented_parse_unknown.ll", body)
 
@@ -2534,6 +2637,8 @@ class Stage2Runner:
             rewritten_ir = self._instrument_lex_ir(rewritten_ir)
             rewritten_ir = self._instrument_compile_pipeline_ir(rewritten_ir)
             rewritten_ir = self._instrument_parse_tokens_ir(rewritten_ir)
+            rewritten_ir = self._instrument_skip_trivia_ir(rewritten_ir)
+            rewritten_ir = self._instrument_is_trivia_token_ir(rewritten_ir)
             rewritten_ir = self._instrument_parse_block_ir(rewritten_ir)
             rewritten_ir = self._instrument_parse_unknown_ir(rewritten_ir)
             rewritten_ir = self._instrument_parse_program_ir(rewritten_ir)
