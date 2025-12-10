@@ -50,6 +50,7 @@ declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare i1 @strings_equal(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
@@ -361,7 +362,7 @@ merge5:
   %t117 = icmp eq i32 %t48, 22
   %t118 = select i1 %t117, i8* %t116, i8* %t115
   %s119 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1842783069, i32 0, i32 0
-  %t120 = icmp eq i8* %t118, %s119
+  %t120 = call i1 @strings_equal(i8* %t118, i8* %s119)
   %t121 = load { %LayoutStructDefinition*, i64 }*, { %LayoutStructDefinition*, i64 }** %l0
   %t122 = load { %LayoutEnumDefinition*, i64 }*, { %LayoutEnumDefinition*, i64 }** %l1
   %t123 = load double, double* %l2
@@ -512,7 +513,7 @@ merge7:
   %t261 = icmp eq i32 %t192, 22
   %t262 = select i1 %t261, i8* %t260, i8* %t259
   %s263 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h579804543, i32 0, i32 0
-  %t264 = icmp eq i8* %t262, %s263
+  %t264 = call i1 @strings_equal(i8* %t262, i8* %s263)
   %t265 = load { %LayoutStructDefinition*, i64 }*, { %LayoutStructDefinition*, i64 }** %l0
   %t266 = load { %LayoutEnumDefinition*, i64 }*, { %LayoutEnumDefinition*, i64 }** %l1
   %t267 = load double, double* %l2
@@ -946,7 +947,7 @@ block.entry:
   %t69 = icmp eq i32 %t0, 22
   %t70 = select i1 %t69, i8* %t68, i8* %t67
   %s71 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h689147423, i32 0, i32 0
-  %t72 = icmp eq i8* %t70, %s71
+  %t72 = call i1 @strings_equal(i8* %t70, i8* %s71)
   br i1 %t72, label %then0, label %merge1
 then0:
   %s73 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1814778076, i32 0, i32 0
@@ -1084,7 +1085,7 @@ merge1:
   %t191 = icmp eq i32 %t122, 22
   %t192 = select i1 %t191, i8* %t190, i8* %t189
   %s193 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1813262795, i32 0, i32 0
-  %t194 = icmp eq i8* %t192, %s193
+  %t194 = call i1 @strings_equal(i8* %t192, i8* %s193)
   br i1 %t194, label %then4, label %merge5
 then4:
   %s195 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1091414306, i32 0, i32 0
@@ -1222,7 +1223,7 @@ merge5:
   %t313 = icmp eq i32 %t244, 22
   %t314 = select i1 %t313, i8* %t312, i8* %t311
   %s315 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h1204027478, i32 0, i32 0
-  %t316 = icmp eq i8* %t314, %s315
+  %t316 = call i1 @strings_equal(i8* %t314, i8* %s315)
   br i1 %t316, label %then8, label %merge9
 then8:
   %t317 = call %NativeState @emit_variable(%NativeState %state, %Statement %statement)
@@ -1300,7 +1301,7 @@ merge9:
   %t387 = icmp eq i32 %t318, 22
   %t388 = select i1 %t387, i8* %t386, i8* %t385
   %s389 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h486335986, i32 0, i32 0
-  %t390 = icmp eq i8* %t388, %s389
+  %t390 = call i1 @strings_equal(i8* %t388, i8* %s389)
   br i1 %t390, label %then10, label %merge11
 then10:
   %t391 = extractvalue %Statement %statement, 0
@@ -1566,7 +1567,7 @@ merge11:
   %t646 = icmp eq i32 %t577, 22
   %t647 = select i1 %t646, i8* %t645, i8* %t644
   %s648 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1842783069, i32 0, i32 0
-  %t649 = icmp eq i8* %t647, %s648
+  %t649 = call i1 @strings_equal(i8* %t647, i8* %s648)
   br i1 %t649, label %then12, label %merge13
 then12:
   %t650 = call %NativeState @emit_struct(%NativeState %state, %Statement %statement)
@@ -1644,7 +1645,7 @@ merge13:
   %t720 = icmp eq i32 %t651, 22
   %t721 = select i1 %t720, i8* %t719, i8* %t718
   %s722 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h479148896, i32 0, i32 0
-  %t723 = icmp eq i8* %t721, %s722
+  %t723 = call i1 @strings_equal(i8* %t721, i8* %s722)
   br i1 %t723, label %then14, label %merge15
 then14:
   %t724 = call %NativeState @emit_pipeline(%NativeState %state, %Statement %statement)
@@ -1722,7 +1723,7 @@ merge15:
   %t794 = icmp eq i32 %t725, 22
   %t795 = select i1 %t794, i8* %t793, i8* %t792
   %s796 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h571715647, i32 0, i32 0
-  %t797 = icmp eq i8* %t795, %s796
+  %t797 = call i1 @strings_equal(i8* %t795, i8* %s796)
   br i1 %t797, label %then16, label %merge17
 then16:
   %t798 = call %NativeState @emit_tool(%NativeState %state, %Statement %statement)
@@ -1800,7 +1801,7 @@ merge17:
   %t868 = icmp eq i32 %t799, 22
   %t869 = select i1 %t868, i8* %t867, i8* %t866
   %s870 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h889179835, i32 0, i32 0
-  %t871 = icmp eq i8* %t869, %s870
+  %t871 = call i1 @strings_equal(i8* %t869, i8* %s870)
   br i1 %t871, label %then18, label %merge19
 then18:
   %t872 = call %NativeState @emit_test(%NativeState %state, %Statement %statement)
@@ -1878,7 +1879,7 @@ merge19:
   %t942 = icmp eq i32 %t873, 22
   %t943 = select i1 %t942, i8* %t941, i8* %t940
   %s944 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h2043328844, i32 0, i32 0
-  %t945 = icmp eq i8* %t943, %s944
+  %t945 = call i1 @strings_equal(i8* %t943, i8* %s944)
   br i1 %t945, label %then20, label %merge21
 then20:
   %t946 = call %NativeState @emit_model(%NativeState %state, %Statement %statement)
@@ -1956,7 +1957,7 @@ merge21:
   %t1016 = icmp eq i32 %t947, 22
   %t1017 = select i1 %t1016, i8* %t1015, i8* %t1014
   %s1018 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h1496093543, i32 0, i32 0
-  %t1019 = icmp eq i8* %t1017, %s1018
+  %t1019 = call i1 @strings_equal(i8* %t1017, i8* %s1018)
   br i1 %t1019, label %then22, label %merge23
 then22:
   %t1020 = call %NativeState @emit_type_alias(%NativeState %state, %Statement %statement)
@@ -2034,7 +2035,7 @@ merge23:
   %t1090 = icmp eq i32 %t1021, 22
   %t1091 = select i1 %t1090, i8* %t1089, i8* %t1088
   %s1092 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h666604742, i32 0, i32 0
-  %t1093 = icmp eq i8* %t1091, %s1092
+  %t1093 = call i1 @strings_equal(i8* %t1091, i8* %s1092)
   br i1 %t1093, label %then24, label %merge25
 then24:
   %t1094 = call %NativeState @emit_interface(%NativeState %state, %Statement %statement)
@@ -2112,7 +2113,7 @@ merge25:
   %t1164 = icmp eq i32 %t1095, 22
   %t1165 = select i1 %t1164, i8* %t1163, i8* %t1162
   %s1166 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h579804543, i32 0, i32 0
-  %t1167 = icmp eq i8* %t1165, %s1166
+  %t1167 = call i1 @strings_equal(i8* %t1165, i8* %s1166)
   br i1 %t1167, label %then26, label %merge27
 then26:
   %t1168 = call %NativeState @emit_enum(%NativeState %state, %Statement %statement)
@@ -2190,7 +2191,7 @@ merge27:
   %t1238 = icmp eq i32 %t1169, 22
   %t1239 = select i1 %t1238, i8* %t1237, i8* %t1236
   %s1240 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1067284810, i32 0, i32 0
-  %t1241 = icmp eq i8* %t1239, %s1240
+  %t1241 = call i1 @strings_equal(i8* %t1239, i8* %s1240)
   br i1 %t1241, label %then28, label %merge29
 then28:
   %t1242 = call %NativeState @emit_prompt(%NativeState %state, %Statement %statement)
@@ -2268,7 +2269,7 @@ merge29:
   %t1312 = icmp eq i32 %t1243, 22
   %t1313 = select i1 %t1312, i8* %t1311, i8* %t1310
   %s1314 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1925822000, i32 0, i32 0
-  %t1315 = icmp eq i8* %t1313, %s1314
+  %t1315 = call i1 @strings_equal(i8* %t1313, i8* %s1314)
   br i1 %t1315, label %then30, label %merge31
 then30:
   %t1316 = call %NativeState @emit_with(%NativeState %state, %Statement %statement)
@@ -2346,7 +2347,7 @@ merge31:
   %t1386 = icmp eq i32 %t1317, 22
   %t1387 = select i1 %t1386, i8* %t1385, i8* %t1384
   %s1388 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h84042670, i32 0, i32 0
-  %t1389 = icmp eq i8* %t1387, %s1388
+  %t1389 = call i1 @strings_equal(i8* %t1387, i8* %s1388)
   br i1 %t1389, label %then32, label %merge33
 then32:
   %t1390 = call %NativeState @emit_for(%NativeState %state, %Statement %statement)
@@ -2424,7 +2425,7 @@ merge33:
   %t1460 = icmp eq i32 %t1391, 22
   %t1461 = select i1 %t1460, i8* %t1459, i8* %t1458
   %s1462 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h196308685, i32 0, i32 0
-  %t1463 = icmp eq i8* %t1461, %s1462
+  %t1463 = call i1 @strings_equal(i8* %t1461, i8* %s1462)
   br i1 %t1463, label %then34, label %merge35
 then34:
   %t1464 = call %NativeState @emit_match(%NativeState %state, %Statement %statement)
@@ -2502,7 +2503,7 @@ merge35:
   %t1534 = icmp eq i32 %t1465, 22
   %t1535 = select i1 %t1534, i8* %t1533, i8* %t1532
   %s1536 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1678412334, i32 0, i32 0
-  %t1537 = icmp eq i8* %t1535, %s1536
+  %t1537 = call i1 @strings_equal(i8* %t1535, i8* %s1536)
   br i1 %t1537, label %then36, label %merge37
 then36:
   %t1538 = call %NativeState @emit_loop(%NativeState %state, %Statement %statement)
@@ -2580,7 +2581,7 @@ merge37:
   %t1608 = icmp eq i32 %t1539, 22
   %t1609 = select i1 %t1608, i8* %t1607, i8* %t1606
   %s1610 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h88846349, i32 0, i32 0
-  %t1611 = icmp eq i8* %t1609, %s1610
+  %t1611 = call i1 @strings_equal(i8* %t1609, i8* %s1610)
   br i1 %t1611, label %then38, label %merge39
 then38:
   %s1612 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1958778164, i32 0, i32 0
@@ -2659,7 +2660,7 @@ merge39:
   %t1683 = icmp eq i32 %t1614, 22
   %t1684 = select i1 %t1683, i8* %t1682, i8* %t1681
   %s1685 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1998778048, i32 0, i32 0
-  %t1686 = icmp eq i8* %t1684, %s1685
+  %t1686 = call i1 @strings_equal(i8* %t1684, i8* %s1685)
   br i1 %t1686, label %then40, label %merge41
 then40:
   %s1687 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h528348603, i32 0, i32 0
@@ -2738,7 +2739,7 @@ merge41:
   %t1758 = icmp eq i32 %t1689, 22
   %t1759 = select i1 %t1758, i8* %t1757, i8* %t1756
   %s1760 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h1566780570, i32 0, i32 0
-  %t1761 = icmp eq i8* %t1759, %s1760
+  %t1761 = call i1 @strings_equal(i8* %t1759, i8* %s1760)
   br i1 %t1761, label %then42, label %merge43
 then42:
   %t1762 = call %NativeState @emit_if(%NativeState %state, %Statement %statement)
@@ -2816,7 +2817,7 @@ merge43:
   %t1832 = icmp eq i32 %t1763, 22
   %t1833 = select i1 %t1832, i8* %t1831, i8* %t1830
   %s1834 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1613933868, i32 0, i32 0
-  %t1835 = icmp eq i8* %t1833, %s1834
+  %t1835 = call i1 @strings_equal(i8* %t1833, i8* %s1834)
   br i1 %t1835, label %then44, label %merge45
 then44:
   %t1836 = call %NativeState @emit_return(%NativeState %state, %Statement %statement)
@@ -2894,7 +2895,7 @@ merge45:
   %t1906 = icmp eq i32 %t1837, 22
   %t1907 = select i1 %t1906, i8* %t1905, i8* %t1904
   %s1908 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h868168677, i32 0, i32 0
-  %t1909 = icmp eq i8* %t1907, %s1908
+  %t1909 = call i1 @strings_equal(i8* %t1907, i8* %s1908)
   br i1 %t1909, label %then46, label %merge47
 then46:
   %t1910 = call %NativeState @emit_expression_statement(%NativeState %state, %Statement %statement)
@@ -7602,7 +7603,7 @@ merge1:
   %t83 = icmp eq i32 %t14, 22
   %t84 = select i1 %t83, i8* %t82, i8* %t81
   %s85 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h868168677, i32 0, i32 0
-  %t86 = icmp eq i8* %t84, %s85
+  %t86 = call i1 @strings_equal(i8* %t84, i8* %s85)
   %t87 = load %Statement*, %Statement** %l0
   br i1 %t86, label %then2, label %merge3
 then2:
@@ -7683,7 +7684,7 @@ merge3:
   %t160 = icmp eq i32 %t91, 22
   %t161 = select i1 %t160, i8* %t159, i8* %t158
   %s162 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1613933868, i32 0, i32 0
-  %t163 = icmp eq i8* %t161, %s162
+  %t163 = call i1 @strings_equal(i8* %t161, i8* %s162)
   %t164 = load %Statement*, %Statement** %l0
   br i1 %t163, label %then4, label %merge5
 then4:
@@ -7817,7 +7818,7 @@ block.entry:
   %t69 = icmp eq i32 %t0, 22
   %t70 = select i1 %t69, i8* %t68, i8* %t67
   %s71 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h868168677, i32 0, i32 0
-  %t72 = icmp eq i8* %t70, %s71
+  %t72 = call i1 @strings_equal(i8* %t70, i8* %s71)
   br i1 %t72, label %then0, label %merge1
 then0:
   %t73 = extractvalue %Statement %statement, 0
@@ -7910,7 +7911,7 @@ merge1:
   %t157 = icmp eq i32 %t88, 22
   %t158 = select i1 %t157, i8* %t156, i8* %t155
   %s159 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1613933868, i32 0, i32 0
-  %t160 = icmp eq i8* %t158, %s159
+  %t160 = call i1 @strings_equal(i8* %t158, i8* %s159)
   br i1 %t160, label %then2, label %merge3
 then2:
   %t161 = extractvalue %Statement %statement, 0
@@ -10843,7 +10844,7 @@ then0:
 merge1:
   %t36 = load i8*, i8** %l0
   %s37 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h807326654, i32 0, i32 0
-  %t38 = icmp eq i8* %t36, %s37
+  %t38 = call i1 @strings_equal(i8* %t36, i8* %s37)
   %t39 = load i8*, i8** %l0
   %t40 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br i1 %t38, label %then2, label %merge3
@@ -10858,7 +10859,7 @@ then2:
 merge3:
   %t48 = load i8*, i8** %l0
   %s49 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090370613, i32 0, i32 0
-  %t50 = icmp eq i8* %t48, %s49
+  %t50 = call i1 @strings_equal(i8* %t48, i8* %s49)
   br label %logical_or_entry_47
 
 logical_or_entry_47:
@@ -10867,7 +10868,7 @@ logical_or_entry_47:
 logical_or_right_47:
   %t51 = load i8*, i8** %l0
   %s52 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090307517, i32 0, i32 0
-  %t53 = icmp eq i8* %t51, %s52
+  %t53 = call i1 @strings_equal(i8* %t51, i8* %s52)
   br label %logical_or_right_end_47
 
 logical_or_right_end_47:
@@ -10889,7 +10890,7 @@ then4:
 merge5:
   %t63 = load i8*, i8** %l0
   %s64 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090304184, i32 0, i32 0
-  %t65 = icmp eq i8* %t63, %s64
+  %t65 = call i1 @strings_equal(i8* %t63, i8* %s64)
   %t66 = load i8*, i8** %l0
   %t67 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br i1 %t65, label %then6, label %merge7
@@ -10904,7 +10905,7 @@ then6:
 merge7:
   %t75 = load i8*, i8** %l0
   %s76 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
-  %t77 = icmp eq i8* %t75, %s76
+  %t77 = call i1 @strings_equal(i8* %t75, i8* %s76)
   br label %logical_or_entry_74
 
 logical_or_entry_74:
@@ -10913,7 +10914,7 @@ logical_or_entry_74:
 logical_or_right_74:
   %t79 = load i8*, i8** %l0
   %s80 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h254486039, i32 0, i32 0
-  %t81 = icmp eq i8* %t79, %s80
+  %t81 = call i1 @strings_equal(i8* %t79, i8* %s80)
   br label %logical_or_entry_78
 
 logical_or_entry_78:
@@ -10922,7 +10923,7 @@ logical_or_entry_78:
 logical_or_right_78:
   %t82 = load i8*, i8** %l0
   %s83 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
-  %t84 = icmp eq i8* %t82, %s83
+  %t84 = call i1 @strings_equal(i8* %t82, i8* %s83)
   br label %logical_or_right_end_78
 
 logical_or_right_end_78:
@@ -10951,7 +10952,7 @@ then8:
 merge9:
   %t95 = load i8*, i8** %l0
   %s96 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090083282, i32 0, i32 0
-  %t97 = icmp eq i8* %t95, %s96
+  %t97 = call i1 @strings_equal(i8* %t95, i8* %s96)
   %t98 = load i8*, i8** %l0
   %t99 = load { i8**, i64 }*, { i8**, i64 }** %l1
   br i1 %t97, label %then10, label %merge11
@@ -11003,7 +11004,7 @@ then14:
 merge15:
   %t134 = load i8*, i8** %l0
   %s135 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
-  %t136 = icmp eq i8* %t134, %s135
+  %t136 = call i1 @strings_equal(i8* %t134, i8* %s135)
   %t137 = load i8*, i8** %l0
   %t138 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t139 = load %CanonicalTypeLayout*, %CanonicalTypeLayout** %l2
@@ -11499,7 +11500,7 @@ merge5:
   %t18 = load %LayoutStructDefinition*, %LayoutStructDefinition** %l1
   %t19 = getelementptr %LayoutStructDefinition, %LayoutStructDefinition* %t18, i32 0, i32 0
   %t20 = load i8*, i8** %t19
-  %t21 = icmp eq i8* %t20, %name
+  %t21 = call i1 @strings_equal(i8* %t20, i8* %name)
   %t22 = load double, double* %l0
   %t23 = load %LayoutStructDefinition*, %LayoutStructDefinition** %l1
   br i1 %t21, label %then6, label %merge7
@@ -11560,7 +11561,7 @@ merge5:
   %t18 = load %LayoutEnumDefinition*, %LayoutEnumDefinition** %l1
   %t19 = getelementptr %LayoutEnumDefinition, %LayoutEnumDefinition* %t18, i32 0, i32 0
   %t20 = load i8*, i8** %t19
-  %t21 = icmp eq i8* %t20, %name
+  %t21 = call i1 @strings_equal(i8* %t20, i8* %name)
   %t22 = load double, double* %l0
   %t23 = load %LayoutEnumDefinition*, %LayoutEnumDefinition** %l1
   br i1 %t21, label %then6, label %merge7
@@ -11944,7 +11945,7 @@ merge5:
   store %CanonicalTypeLayout %t20, %CanonicalTypeLayout* %l2
   %t21 = load %CanonicalTypeLayout, %CanonicalTypeLayout* %l2
   %t22 = extractvalue %CanonicalTypeLayout %t21, 0
-  %t23 = icmp eq i8* %t22, %name
+  %t23 = call i1 @strings_equal(i8* %t22, i8* %name)
   %t24 = load { %CanonicalTypeLayout*, i64 }*, { %CanonicalTypeLayout*, i64 }** %l0
   %t25 = load double, double* %l1
   %t26 = load %CanonicalTypeLayout, %CanonicalTypeLayout* %l2
@@ -12307,7 +12308,7 @@ block.entry:
   %t48 = icmp eq i32 %t0, 15
   %t49 = select i1 %t48, i8* %t47, i8* %t46
   %s50 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
-  %t51 = icmp eq i8* %t49, %s50
+  %t51 = call i1 @strings_equal(i8* %t49, i8* %s50)
   br i1 %t51, label %then0, label %merge1
 then0:
   %t52 = extractvalue %Expression %expression, 0
@@ -12372,7 +12373,7 @@ merge1:
   %t108 = icmp eq i32 %t60, 15
   %t109 = select i1 %t108, i8* %t107, i8* %t106
   %s110 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1570408460, i32 0, i32 0
-  %t111 = icmp eq i8* %t109, %s110
+  %t111 = call i1 @strings_equal(i8* %t109, i8* %s110)
   br i1 %t111, label %then2, label %merge3
 then2:
   %t112 = extractvalue %Expression %expression, 0
@@ -12449,7 +12450,7 @@ merge3:
   %t180 = icmp eq i32 %t132, 15
   %t181 = select i1 %t180, i8* %t179, i8* %t178
   %s182 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1318614710, i32 0, i32 0
-  %t183 = icmp eq i8* %t181, %s182
+  %t183 = call i1 @strings_equal(i8* %t181, i8* %s182)
   br i1 %t183, label %then4, label %merge5
 then4:
   %t184 = extractvalue %Expression %expression, 0
@@ -12526,7 +12527,7 @@ merge5:
   %t252 = icmp eq i32 %t204, 15
   %t253 = select i1 %t252, i8* %t251, i8* %t250
   %s254 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h1571993816, i32 0, i32 0
-  %t255 = icmp eq i8* %t253, %s254
+  %t255 = call i1 @strings_equal(i8* %t253, i8* %s254)
   br i1 %t255, label %then6, label %merge7
 then6:
   %s256 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h268929446, i32 0, i32 0
@@ -12583,7 +12584,7 @@ merge7:
   %t305 = icmp eq i32 %t257, 15
   %t306 = select i1 %t305, i8* %t304, i8* %t303
   %s307 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h590768815, i32 0, i32 0
-  %t308 = icmp eq i8* %t306, %s307
+  %t308 = call i1 @strings_equal(i8* %t306, i8* %s307)
   br i1 %t308, label %then8, label %merge9
 then8:
   %t309 = extractvalue %Expression %expression, 0
@@ -12661,7 +12662,7 @@ merge9:
   %t378 = icmp eq i32 %t330, 15
   %t379 = select i1 %t378, i8* %t377, i8* %t376
   %s380 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1445149598, i32 0, i32 0
-  %t381 = icmp eq i8* %t379, %s380
+  %t381 = call i1 @strings_equal(i8* %t379, i8* %s380)
   br i1 %t381, label %then10, label %merge11
 then10:
   %t382 = extractvalue %Expression %expression, 0
@@ -12745,7 +12746,7 @@ merge11:
   %t456 = icmp eq i32 %t408, 15
   %t457 = select i1 %t456, i8* %t455, i8* %t454
   %s458 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1496334143, i32 0, i32 0
-  %t459 = icmp eq i8* %t457, %s458
+  %t459 = call i1 @strings_equal(i8* %t457, i8* %s458)
   br i1 %t459, label %then12, label %merge13
 then12:
   %t460 = extractvalue %Expression %expression, 0
@@ -12860,7 +12861,7 @@ merge13:
   %t558 = icmp eq i32 %t510, 15
   %t559 = select i1 %t558, i8* %t557, i8* %t556
   %s560 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h512390329, i32 0, i32 0
-  %t561 = icmp eq i8* %t559, %s560
+  %t561 = call i1 @strings_equal(i8* %t559, i8* %s560)
   br i1 %t561, label %then14, label %merge15
 then14:
   %t562 = extractvalue %Expression %expression, 0
@@ -12945,7 +12946,7 @@ merge15:
   %t635 = icmp eq i32 %t587, 15
   %t636 = select i1 %t635, i8* %t634, i8* %t633
   %s637 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h217216103, i32 0, i32 0
-  %t638 = icmp eq i8* %t636, %s637
+  %t638 = call i1 @strings_equal(i8* %t636, i8* %s637)
   br i1 %t638, label %then16, label %merge17
 then16:
   %t639 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
@@ -13117,7 +13118,7 @@ merge17:
   %t773 = icmp eq i32 %t725, 15
   %t774 = select i1 %t773, i8* %t772, i8* %t771
   %s775 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h975618503, i32 0, i32 0
-  %t776 = icmp eq i8* %t774, %s775
+  %t776 = call i1 @strings_equal(i8* %t774, i8* %s775)
   br i1 %t776, label %then24, label %merge25
 then24:
   %t777 = extractvalue %Expression %expression, 0
@@ -13211,7 +13212,7 @@ merge25:
   %t857 = icmp eq i32 %t809, 15
   %t858 = select i1 %t857, i8* %t856, i8* %t855
   %s859 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h667777838, i32 0, i32 0
-  %t860 = icmp eq i8* %t858, %s859
+  %t860 = call i1 @strings_equal(i8* %t858, i8* %s859)
   br i1 %t860, label %then26, label %merge27
 then26:
   %t861 = extractvalue %Expression %expression, 0
@@ -13278,7 +13279,7 @@ merge27:
   %t919 = icmp eq i32 %t871, 15
   %t920 = select i1 %t919, i8* %t918, i8* %t917
   %s921 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h826984377, i32 0, i32 0
-  %t922 = icmp eq i8* %t920, %s921
+  %t922 = call i1 @strings_equal(i8* %t920, i8* %s921)
   br i1 %t922, label %then28, label %merge29
 then28:
   %t923 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
@@ -13447,7 +13448,7 @@ merge29:
   %t1059 = icmp eq i32 %t1011, 15
   %t1060 = select i1 %t1059, i8* %t1058, i8* %t1057
   %s1061 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h264904746, i32 0, i32 0
-  %t1062 = icmp eq i8* %t1060, %s1061
+  %t1062 = call i1 @strings_equal(i8* %t1060, i8* %s1061)
   br i1 %t1062, label %then36, label %merge37
 then36:
   %t1063 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
@@ -13635,7 +13636,7 @@ merge37:
   %t1214 = icmp eq i32 %t1166, 15
   %t1215 = select i1 %t1214, i8* %t1213, i8* %t1212
   %s1216 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1312780988, i32 0, i32 0
-  %t1217 = icmp eq i8* %t1215, %s1216
+  %t1217 = call i1 @strings_equal(i8* %t1215, i8* %s1216)
   br i1 %t1217, label %then44, label %merge45
 then44:
   %t1218 = extractvalue %Expression %expression, 0
@@ -13717,7 +13718,7 @@ merge45:
   %t1290 = icmp eq i32 %t1242, 15
   %t1291 = select i1 %t1290, i8* %t1289, i8* %t1288
   %s1292 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1211862785, i32 0, i32 0
-  %t1293 = icmp eq i8* %t1291, %s1292
+  %t1293 = call i1 @strings_equal(i8* %t1291, i8* %s1292)
   br i1 %t1293, label %then46, label %merge47
 then46:
   %s1294 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h573909064, i32 0, i32 0
@@ -13774,7 +13775,7 @@ merge47:
   %t1343 = icmp eq i32 %t1295, 15
   %t1344 = select i1 %t1343, i8* %t1342, i8* %t1341
   %s1345 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2089530004, i32 0, i32 0
-  %t1346 = icmp eq i8* %t1344, %s1345
+  %t1346 = call i1 @strings_equal(i8* %t1344, i8* %s1345)
   br i1 %t1346, label %then48, label %merge49
 then48:
   %t1347 = extractvalue %Expression %expression, 0
@@ -14030,10 +14031,10 @@ merge1:
   %t7 = load double, double* %l1
   br label %loop.header2
 loop.header2:
-  %t52 = phi i8* [ %t6, %merge1 ], [ %t50, %loop.latch4 ]
-  %t53 = phi double [ %t7, %merge1 ], [ %t51, %loop.latch4 ]
-  store i8* %t52, i8** %l0
-  store double %t53, double* %l1
+  %t53 = phi i8* [ %t6, %merge1 ], [ %t51, %loop.latch4 ]
+  %t54 = phi double [ %t7, %merge1 ], [ %t52, %loop.latch4 ]
+  store i8* %t53, i8** %l0
+  store double %t54, double* %l1
   br label %loop.body3
 loop.body3:
   %t8 = load double, double* %l1
@@ -14085,33 +14086,34 @@ then10:
 else11:
   %t39 = load i8*, i8** %l0
   %t40 = load i8*, i8** %l2
-  %t41 = icmp ne i8* %t39, %t40
-  %t42 = load i8*, i8** %l0
-  %t43 = load double, double* %l1
-  %t44 = load i8*, i8** %l2
-  br i1 %t41, label %then13, label %merge14
+  %t41 = call i1 @strings_equal(i8* %t39, i8* %t40)
+  %t42 = xor i1 %t41, true
+  %t43 = load i8*, i8** %l0
+  %t44 = load double, double* %l1
+  %t45 = load i8*, i8** %l2
+  br i1 %t42, label %then13, label %merge14
 then13:
-  %s45 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  ret i8* %s45
+  %s46 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
+  ret i8* %s46
 merge14:
   br label %merge12
 merge12:
-  %t46 = phi i8* [ %t38, %then10 ], [ %t34, %merge14 ]
-  store i8* %t46, i8** %l0
-  %t47 = load double, double* %l1
-  %t48 = sitofp i64 1 to double
-  %t49 = fadd double %t47, %t48
-  store double %t49, double* %l1
+  %t47 = phi i8* [ %t38, %then10 ], [ %t34, %merge14 ]
+  store i8* %t47, i8** %l0
+  %t48 = load double, double* %l1
+  %t49 = sitofp i64 1 to double
+  %t50 = fadd double %t48, %t49
+  store double %t50, double* %l1
   br label %loop.latch4
 loop.latch4:
-  %t50 = load i8*, i8** %l0
-  %t51 = load double, double* %l1
+  %t51 = load i8*, i8** %l0
+  %t52 = load double, double* %l1
   br label %loop.header2
 afterloop5:
-  %t54 = load i8*, i8** %l0
-  %t55 = load double, double* %l1
-  %t56 = load i8*, i8** %l0
-  ret i8* %t56
+  %t55 = load i8*, i8** %l0
+  %t56 = load double, double* %l1
+  %t57 = load i8*, i8** %l0
+  ret i8* %t57
 }
 
 define i8* @infer_expression_type(%Expression %expression) {
@@ -14168,7 +14170,7 @@ block.entry:
   %t48 = icmp eq i32 %t0, 15
   %t49 = select i1 %t48, i8* %t47, i8* %t46
   %s50 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1570408460, i32 0, i32 0
-  %t51 = icmp eq i8* %t49, %s50
+  %t51 = call i1 @strings_equal(i8* %t49, i8* %s50)
   br i1 %t51, label %then0, label %merge1
 then0:
   %s52 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h807326654, i32 0, i32 0
@@ -14225,7 +14227,7 @@ merge1:
   %t101 = icmp eq i32 %t53, 15
   %t102 = select i1 %t101, i8* %t100, i8* %t99
   %s103 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h1318614710, i32 0, i32 0
-  %t104 = icmp eq i8* %t102, %s103
+  %t104 = call i1 @strings_equal(i8* %t102, i8* %s103)
   br i1 %t104, label %then2, label %merge3
 then2:
   %s105 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
@@ -14282,7 +14284,7 @@ merge3:
   %t154 = icmp eq i32 %t106, 15
   %t155 = select i1 %t154, i8* %t153, i8* %t152
   %s156 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h590768815, i32 0, i32 0
-  %t157 = icmp eq i8* %t155, %s156
+  %t157 = call i1 @strings_equal(i8* %t155, i8* %s156)
   br i1 %t157, label %then4, label %merge5
 then4:
   %s158 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
@@ -14339,7 +14341,7 @@ merge5:
   %t207 = icmp eq i32 %t159, 15
   %t208 = select i1 %t207, i8* %t206, i8* %t205
   %s209 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h264904746, i32 0, i32 0
-  %t210 = icmp eq i8* %t208, %s209
+  %t210 = call i1 @strings_equal(i8* %t208, i8* %s209)
   br i1 %t210, label %then6, label %merge7
 then6:
   %t211 = extractvalue %Expression %expression, 0
@@ -14461,7 +14463,7 @@ merge7:
   %t309 = icmp eq i32 %t261, 15
   %t310 = select i1 %t309, i8* %t308, i8* %t307
   %s311 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h512390329, i32 0, i32 0
-  %t312 = icmp eq i8* %t310, %s311
+  %t312 = call i1 @strings_equal(i8* %t310, i8* %s311)
   br i1 %t312, label %then12, label %merge13
 then12:
   %t313 = extractvalue %Expression %expression, 0
@@ -14525,7 +14527,7 @@ then12:
   %t370 = icmp eq i32 %t322, 15
   %t371 = select i1 %t370, i8* %t369, i8* %t368
   %s372 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
-  %t373 = icmp eq i8* %t371, %s372
+  %t373 = call i1 @strings_equal(i8* %t371, i8* %s372)
   br i1 %t373, label %then14, label %merge15
 then14:
   %t374 = extractvalue %Expression %expression, 0
@@ -14608,7 +14610,7 @@ merge15:
   %t447 = icmp eq i32 %t399, 15
   %t448 = select i1 %t447, i8* %t446, i8* %t445
   %s449 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h512390329, i32 0, i32 0
-  %t450 = icmp eq i8* %t448, %s449
+  %t450 = call i1 @strings_equal(i8* %t448, i8* %s449)
   br i1 %t450, label %then16, label %merge17
 then16:
   %t451 = extractvalue %Expression %expression, 0
@@ -14678,7 +14680,7 @@ merge13:
   %t510 = icmp eq i32 %t462, 15
   %t511 = select i1 %t510, i8* %t509, i8* %t508
   %s512 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h667777838, i32 0, i32 0
-  %t513 = icmp eq i8* %t511, %s512
+  %t513 = call i1 @strings_equal(i8* %t511, i8* %s512)
   br i1 %t513, label %then18, label %merge19
 then18:
   %t514 = extractvalue %Expression %expression, 0
@@ -15146,7 +15148,7 @@ merge5:
   %t103 = icmp eq i32 %t34, 22
   %t104 = select i1 %t103, i8* %t102, i8* %t101
   %s105 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h486335986, i32 0, i32 0
-  %t106 = icmp eq i8* %t104, %s105
+  %t106 = call i1 @strings_equal(i8* %t104, i8* %s105)
   %t107 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t108 = load double, double* %l1
   %t109 = load %Statement*, %Statement** %l2
@@ -15256,7 +15258,7 @@ merge7:
   %t207 = icmp eq i32 %t138, 22
   %t208 = select i1 %t207, i8* %t206, i8* %t205
   %s209 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h889179835, i32 0, i32 0
-  %t210 = icmp eq i8* %t208, %s209
+  %t210 = call i1 @strings_equal(i8* %t208, i8* %s209)
   %t211 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t212 = load double, double* %l1
   %t213 = load %Statement*, %Statement** %l2
@@ -15450,7 +15452,7 @@ merge5:
   %t93 = icmp eq i32 %t24, 22
   %t94 = select i1 %t93, i8* %t92, i8* %t91
   %s95 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h486335986, i32 0, i32 0
-  %t96 = icmp eq i8* %t94, %s95
+  %t96 = call i1 @strings_equal(i8* %t94, i8* %s95)
   br label %logical_or_entry_21
 
 logical_or_entry_21:
@@ -15531,7 +15533,7 @@ logical_or_right_21:
   %t169 = icmp eq i32 %t100, 22
   %t170 = select i1 %t169, i8* %t168, i8* %t167
   %s171 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1842783069, i32 0, i32 0
-  %t172 = icmp eq i8* %t170, %s171
+  %t172 = call i1 @strings_equal(i8* %t170, i8* %s171)
   br label %logical_or_entry_97
 
 logical_or_entry_97:
@@ -15612,7 +15614,7 @@ logical_or_right_97:
   %t245 = icmp eq i32 %t176, 22
   %t246 = select i1 %t245, i8* %t244, i8* %t243
   %s247 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h579804543, i32 0, i32 0
-  %t248 = icmp eq i8* %t246, %s247
+  %t248 = call i1 @strings_equal(i8* %t246, i8* %s247)
   br label %logical_or_entry_173
 
 logical_or_entry_173:
@@ -15693,7 +15695,7 @@ logical_or_right_173:
   %t321 = icmp eq i32 %t252, 22
   %t322 = select i1 %t321, i8* %t320, i8* %t319
   %s323 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h479148896, i32 0, i32 0
-  %t324 = icmp eq i8* %t322, %s323
+  %t324 = call i1 @strings_equal(i8* %t322, i8* %s323)
   br label %logical_or_entry_249
 
 logical_or_entry_249:
@@ -15774,7 +15776,7 @@ logical_or_right_249:
   %t397 = icmp eq i32 %t328, 22
   %t398 = select i1 %t397, i8* %t396, i8* %t395
   %s399 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h571715647, i32 0, i32 0
-  %t400 = icmp eq i8* %t398, %s399
+  %t400 = call i1 @strings_equal(i8* %t398, i8* %s399)
   br label %logical_or_entry_325
 
 logical_or_entry_325:
@@ -15855,7 +15857,7 @@ logical_or_right_325:
   %t473 = icmp eq i32 %t404, 22
   %t474 = select i1 %t473, i8* %t472, i8* %t471
   %s475 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h2043328844, i32 0, i32 0
-  %t476 = icmp eq i8* %t474, %s475
+  %t476 = call i1 @strings_equal(i8* %t474, i8* %s475)
   br label %logical_or_entry_401
 
 logical_or_entry_401:
@@ -15936,7 +15938,7 @@ logical_or_right_401:
   %t549 = icmp eq i32 %t480, 22
   %t550 = select i1 %t549, i8* %t548, i8* %t547
   %s551 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h889179835, i32 0, i32 0
-  %t552 = icmp eq i8* %t550, %s551
+  %t552 = call i1 @strings_equal(i8* %t550, i8* %s551)
   br label %logical_or_entry_477
 
 logical_or_entry_477:
@@ -16017,7 +16019,7 @@ logical_or_right_477:
   %t625 = icmp eq i32 %t556, 22
   %t626 = select i1 %t625, i8* %t624, i8* %t623
   %s627 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h1496093543, i32 0, i32 0
-  %t628 = icmp eq i8* %t626, %s627
+  %t628 = call i1 @strings_equal(i8* %t626, i8* %s627)
   br label %logical_or_entry_553
 
 logical_or_entry_553:
@@ -16098,7 +16100,7 @@ logical_or_right_553:
   %t700 = icmp eq i32 %t631, 22
   %t701 = select i1 %t700, i8* %t699, i8* %t698
   %s702 = getelementptr inbounds [21 x i8], [21 x i8]* @.str.len20.h666604742, i32 0, i32 0
-  %t703 = icmp eq i8* %t701, %s702
+  %t703 = call i1 @strings_equal(i8* %t701, i8* %s702)
   br label %logical_or_right_end_553
 
 logical_or_right_end_553:
@@ -16228,7 +16230,7 @@ merge5:
   call void @sailfin_runtime_bounds_check(i64 %t9, i64 %t12)
   %t14 = getelementptr i8*, i8** %t11, i64 %t9
   %t15 = load i8*, i8** %t14
-  %t16 = icmp eq i8* %t15, %target
+  %t16 = call i1 @strings_equal(i8* %t15, i8* %target)
   %t17 = load double, double* %l0
   br i1 %t16, label %then6, label %merge7
 then6:
@@ -16539,7 +16541,7 @@ merge5:
   %t100 = icmp eq i32 %t31, 22
   %t101 = select i1 %t100, i8* %t99, i8* %t98
   %s102 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1842783069, i32 0, i32 0
-  %t103 = icmp eq i8* %t101, %s102
+  %t103 = call i1 @strings_equal(i8* %t101, i8* %s102)
   %t104 = load %TextBuilder, %TextBuilder* %l0
   %t105 = load double, double* %l1
   %t106 = load %Statement*, %Statement** %l2
@@ -16794,7 +16796,7 @@ merge19:
   %t309 = icmp eq i32 %t240, 22
   %t310 = select i1 %t309, i8* %t308, i8* %t307
   %s311 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h579804543, i32 0, i32 0
-  %t312 = icmp eq i8* %t310, %s311
+  %t312 = call i1 @strings_equal(i8* %t310, i8* %s311)
   %t313 = load %TextBuilder, %TextBuilder* %l0
   %t314 = load double, double* %l1
   %t315 = load %Statement*, %Statement** %l5
@@ -17385,91 +17387,91 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
-@.str.len3.h2090370613 = private unnamed_addr constant [4 x i8] c"int\00"
-@.str.len11.h1482555192 = private unnamed_addr constant [12 x i8] c".decorator \00"
-@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
-@.str.len6.h980153509 = private unnamed_addr constant [7 x i8] c" type=\00"
-@.str.len3.h2090083282 = private unnamed_addr constant [4 x i8] c"any\00"
-@.str.len4.h268717223 = private unnamed_addr constant [5 x i8] c"noop\00"
-@.str.len3.h2087662534 = private unnamed_addr constant [4 x i8] c" ![\00"
-@.str.len15.h1897143060 = private unnamed_addr constant [16 x i8] c".meta generics \00"
 @.str.len19.h868168677 = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.str.len7.h130169768 = private unnamed_addr constant [8 x i8] c".param \00"
-@.str.len2.h193512002 = private unnamed_addr constant [3 x i8] c"{ \00"
-@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
 @.str.len13.h1678412334 = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.str.len14.h88846349 = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
-@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
-@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
-@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
-@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.str.len8.h573909064 = private unnamed_addr constant [9 x i8] c"<lambda>\00"
-@.str.len17.h689147423 = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
-@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.str.len5.h500836810 = private unnamed_addr constant [6 x i8] c"test:\00"
-@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.str.len2.h193492961 = private unnamed_addr constant [3 x i8] c"i1\00"
-@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len8.h455185518 = private unnamed_addr constant [9 x i8] c" offset=\00"
-@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len13.h1610966039 = private unnamed_addr constant [14 x i8] c".meta return \00"
 @.str.len4.h254486039 = private unnamed_addr constant [5 x i8] c"bool\00"
+@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len3.h2090684245 = private unnamed_addr constant [4 x i8] c"ret\00"
+@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
 @.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
 @.str.len17.h1970266448 = private unnamed_addr constant [18 x i8] c".meta return void\00"
-@.str.len9.h1091414306 = private unnamed_addr constant [10 x i8] c".export \22\00"
-@.str.len3.h2090304184 = private unnamed_addr constant [4 x i8] c"i32\00"
-@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
-@.str.len17.h1998778048 = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.str.len14.h1053492670 = private unnamed_addr constant [15 x i8] c".layout field \00"
-@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
+@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
 @.str.len2.h193478309 = private unnamed_addr constant [3 x i8] c"\5C\22\00"
-@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
-@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
-@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.str.len70.h1478160845 = private unnamed_addr constant [71 x i8] c"` optional type missing inner annotation; defaulting to pointer layout\00"
+@.str.len2.h193512002 = private unnamed_addr constant [3 x i8] c"{ \00"
+@.str.len7.h398443637 = private unnamed_addr constant [8 x i8] c".field \00"
+@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
+@.str.len5.h1525558983 = private unnamed_addr constant [6 x i8] c" tag=\00"
 @.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
 @.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
-@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
-@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.str.len6.h1187178968 = private unnamed_addr constant [7 x i8] c".case \00"
-@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
-@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.str.len14.h110444378 = private unnamed_addr constant [15 x i8] c".meta effects \00"
-@.str.len55.h700951597 = private unnamed_addr constant [56 x i8] c"` missing type annotation; defaulting to pointer layout\00"
-@.str.len10.h381722796 = private unnamed_addr constant [11 x i8] c".property \00"
 @.str.len5.h2072555103 = private unnamed_addr constant [6 x i8] c".sig \00"
-@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
-@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.str.len16.h1290415774 = private unnamed_addr constant [17 x i8] c".layout payload \00"
-@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
-@.str.len5.h1958778164 = private unnamed_addr constant [6 x i8] c"break\00"
-@.str.len5.h1525558983 = private unnamed_addr constant [6 x i8] c" tag=\00"
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
-@.str.len7.h513898090 = private unnamed_addr constant [8 x i8] c"variant\00"
-@.str.len3.h2090684245 = private unnamed_addr constant [4 x i8] c"ret\00"
-@.str.len16.h1695010494 = private unnamed_addr constant [17 x i8] c".layout variant \00"
-@.str.len3.h2090307517 = private unnamed_addr constant [4 x i8] c"i64\00"
-@.str.len9.h1814778076 = private unnamed_addr constant [10 x i8] c".import \22\00"
+@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
+@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
 @.str.len17.h1813262795 = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
-@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
-@.str.len18.h1250048525 = private unnamed_addr constant [19 x i8] c".meta effects none\00"
-@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
-@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
+@.str.len3.h2090307517 = private unnamed_addr constant [4 x i8] c"i64\00"
+@.str.len55.h700951597 = private unnamed_addr constant [56 x i8] c"` missing type annotation; defaulting to pointer layout\00"
+@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len8.h573909064 = private unnamed_addr constant [9 x i8] c"<lambda>\00"
+@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
 @.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len9.h1311191977 = private unnamed_addr constant [10 x i8] c".variant \00"
-@.str.len7.h398443637 = private unnamed_addr constant [8 x i8] c".field \00"
+@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
+@.str.len9.h1091414306 = private unnamed_addr constant [10 x i8] c".export \22\00"
+@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
+@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
+@.str.len4.h268717223 = private unnamed_addr constant [5 x i8] c"noop\00"
+@.str.len13.h1610966039 = private unnamed_addr constant [14 x i8] c".meta return \00"
+@.str.len17.h689147423 = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
+@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
+@.str.len9.h1814778076 = private unnamed_addr constant [10 x i8] c".import \22\00"
 @.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
+@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len2.h193492961 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
+@.str.len15.h1897143060 = private unnamed_addr constant [16 x i8] c".meta generics \00"
+@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.str.len9.h1311191977 = private unnamed_addr constant [10 x i8] c".variant \00"
+@.str.len3.h2090304184 = private unnamed_addr constant [4 x i8] c"i32\00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
+@.str.len70.h1478160845 = private unnamed_addr constant [71 x i8] c"` optional type missing inner annotation; defaulting to pointer layout\00"
+@.str.len8.h455185518 = private unnamed_addr constant [9 x i8] c" offset=\00"
+@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.str.len16.h1290415774 = private unnamed_addr constant [17 x i8] c".layout payload \00"
+@.str.len3.h2090083282 = private unnamed_addr constant [4 x i8] c"any\00"
+@.str.len10.h381722796 = private unnamed_addr constant [11 x i8] c".property \00"
+@.str.len3.h2087662534 = private unnamed_addr constant [4 x i8] c" ![\00"
+@.str.len17.h1998778048 = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.str.len14.h110444378 = private unnamed_addr constant [15 x i8] c".meta effects \00"
+@.str.len11.h1482555192 = private unnamed_addr constant [12 x i8] c".decorator \00"
+@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.str.len6.h980153509 = private unnamed_addr constant [7 x i8] c" type=\00"
+@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
+@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
+@.str.len14.h1053492670 = private unnamed_addr constant [15 x i8] c".layout field \00"
+@.str.len16.h1695010494 = private unnamed_addr constant [17 x i8] c".layout variant \00"
+@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
+@.str.len18.h1250048525 = private unnamed_addr constant [19 x i8] c".meta effects none\00"
+@.str.len5.h1958778164 = private unnamed_addr constant [6 x i8] c"break\00"
+@.str.len7.h130169768 = private unnamed_addr constant [8 x i8] c".param \00"
+@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
+@.str.len6.h1187178968 = private unnamed_addr constant [7 x i8] c".case \00"
+@.str.len3.h2090370613 = private unnamed_addr constant [4 x i8] c"int\00"
+@.str.len5.h500836810 = private unnamed_addr constant [6 x i8] c"test:\00"
+@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
+@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
+@.str.len7.h513898090 = private unnamed_addr constant [8 x i8] c"variant\00"
+@.str.len14.h88846349 = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"

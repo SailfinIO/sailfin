@@ -45,6 +45,7 @@ declare i8* @sailfin_runtime_array_reduce(i8*, i8*, i8*)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare i1 @strings_equal(i8*, i8*)
 declare double @sailfin_runtime_grapheme_count(i8*)
 declare i8* @sailfin_runtime_grapheme_at(i8*, double)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
@@ -287,7 +288,7 @@ merge5:
   store %EnumField %t12, %EnumField* %l1
   %t13 = load %EnumField, %EnumField* %l1
   %t14 = extractvalue %EnumField %t13, 0
-  %t15 = icmp eq i8* %t14, %name
+  %t15 = call i1 @strings_equal(i8* %t14, i8* %name)
   %t16 = load i64, i64* %l0
   %t17 = load %EnumField, %EnumField* %l1
   br i1 %t15, label %then6, label %merge7
@@ -346,7 +347,7 @@ merge5:
   %t15 = load %EnumVariantDefinition*, %EnumVariantDefinition** %l1
   %t16 = getelementptr %EnumVariantDefinition, %EnumVariantDefinition* %t15, i32 0, i32 0
   %t17 = load i8*, i8** %t16
-  %t18 = icmp eq i8* %t17, %variant_name
+  %t18 = call i1 @strings_equal(i8* %t17, i8* %variant_name)
   %t19 = load i64, i64* %l0
   %t20 = load %EnumVariantDefinition*, %EnumVariantDefinition** %l1
   br i1 %t18, label %then6, label %merge7
@@ -575,7 +576,7 @@ merge5:
   %t15 = load %EnumField*, %EnumField** %l1
   %t16 = getelementptr %EnumField, %EnumField* %t15, i32 0, i32 0
   %t17 = load i8*, i8** %t16
-  %t18 = icmp eq i8* %t17, %name
+  %t18 = call i1 @strings_equal(i8* %t17, i8* %name)
   %t19 = load i64, i64* %l0
   %t20 = load %EnumField*, %EnumField** %l1
   br i1 %t18, label %then6, label %merge7
@@ -1132,8 +1133,8 @@ merge1:
   %t3 = load i64, i64* %l0
   br label %loop.header2
 loop.header2:
-  %t23 = phi i64 [ %t3, %merge1 ], [ %t22, %loop.latch4 ]
-  store i64 %t23, i64* %l0
+  %t24 = phi i64 [ %t3, %merge1 ], [ %t23, %loop.latch4 ]
+  store i64 %t24, i64* %l0
   br label %loop.body3
 loop.body3:
   %t4 = load i64, i64* %l0
@@ -1154,23 +1155,24 @@ merge7:
   store i8* %t13, i8** %l2
   %t14 = load i8*, i8** %l1
   %t15 = load i8*, i8** %l2
-  %t16 = icmp ne i8* %t14, %t15
-  %t17 = load i64, i64* %l0
-  %t18 = load i8*, i8** %l1
-  %t19 = load i8*, i8** %l2
-  br i1 %t16, label %then8, label %merge9
+  %t16 = call i1 @strings_equal(i8* %t14, i8* %t15)
+  %t17 = xor i1 %t16, true
+  %t18 = load i64, i64* %l0
+  %t19 = load i8*, i8** %l1
+  %t20 = load i8*, i8** %l2
+  br i1 %t17, label %then8, label %merge9
 then8:
   ret i1 0
 merge9:
-  %t20 = load i64, i64* %l0
-  %t21 = add i64 %t20, 1
-  store i64 %t21, i64* %l0
+  %t21 = load i64, i64* %l0
+  %t22 = add i64 %t21, 1
+  store i64 %t22, i64* %l0
   br label %loop.latch4
 loop.latch4:
-  %t22 = load i64, i64* %l0
+  %t23 = load i64, i64* %l0
   br label %loop.header2
 afterloop5:
-  %t24 = load i64, i64* %l0
+  %t25 = load i64, i64* %l0
   ret i1 1
 }
 
@@ -1196,8 +1198,8 @@ merge1:
   %t7 = load i64, i64* %l1
   br label %loop.header2
 loop.header2:
-  %t31 = phi i64 [ %t7, %merge1 ], [ %t30, %loop.latch4 ]
-  store i64 %t31, i64* %l1
+  %t32 = phi i64 [ %t7, %merge1 ], [ %t31, %loop.latch4 ]
+  store i64 %t32, i64* %l1
   br label %loop.body3
 loop.body3:
   %t8 = load i64, i64* %l1
@@ -1221,24 +1223,25 @@ merge7:
   store i8* %t20, i8** %l3
   %t21 = load i8*, i8** %l2
   %t22 = load i8*, i8** %l3
-  %t23 = icmp ne i8* %t21, %t22
-  %t24 = load i64, i64* %l0
-  %t25 = load i64, i64* %l1
-  %t26 = load i8*, i8** %l2
-  %t27 = load i8*, i8** %l3
-  br i1 %t23, label %then8, label %merge9
+  %t23 = call i1 @strings_equal(i8* %t21, i8* %t22)
+  %t24 = xor i1 %t23, true
+  %t25 = load i64, i64* %l0
+  %t26 = load i64, i64* %l1
+  %t27 = load i8*, i8** %l2
+  %t28 = load i8*, i8** %l3
+  br i1 %t24, label %then8, label %merge9
 then8:
   ret i1 0
 merge9:
-  %t28 = load i64, i64* %l1
-  %t29 = add i64 %t28, 1
-  store i64 %t29, i64* %l1
+  %t29 = load i64, i64* %l1
+  %t30 = add i64 %t29, 1
+  store i64 %t30, i64* %l1
   br label %loop.latch4
 loop.latch4:
-  %t30 = load i64, i64* %l1
+  %t31 = load i64, i64* %l1
   br label %loop.header2
 afterloop5:
-  %t32 = load i64, i64* %l1
+  %t33 = load i64, i64* %l1
   ret i1 1
 }
 
@@ -1512,7 +1515,7 @@ merge10:
   store i64 %t164, i64* %l5
   %t166 = load i8*, i8** %l6
   %t167 = load i8*, i8** %l1
-  %t168 = icmp eq i8* %t166, %t167
+  %t168 = call i1 @strings_equal(i8* %t166, i8* %t167)
   br label %logical_and_entry_165
 
 logical_and_entry_165:
@@ -2156,7 +2159,7 @@ merge10:
   store i64 %t211, i64* %l6
   %t213 = load i8*, i8** %l8
   %t214 = load i8*, i8** %l7
-  %t215 = icmp eq i8* %t213, %t214
+  %t215 = call i1 @strings_equal(i8* %t213, i8* %t214)
   br label %logical_and_entry_212
 
 logical_and_entry_212:
@@ -2654,7 +2657,7 @@ merge15:
   store i8* %t137, i8** %l8
   %t139 = load i8*, i8** %l8
   %s140 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
-  %t141 = icmp eq i8* %t139, %s140
+  %t141 = call i1 @strings_equal(i8* %t139, i8* %s140)
   br label %logical_or_entry_138
 
 logical_or_entry_138:
@@ -2663,7 +2666,7 @@ logical_or_entry_138:
 logical_or_right_138:
   %t143 = load i8*, i8** %l8
   %s144 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h807326654, i32 0, i32 0
-  %t145 = icmp eq i8* %t143, %s144
+  %t145 = call i1 @strings_equal(i8* %t143, i8* %s144)
   br label %logical_or_entry_142
 
 logical_or_entry_142:
@@ -2672,7 +2675,7 @@ logical_or_entry_142:
 logical_or_right_142:
   %t147 = load i8*, i8** %l8
   %s148 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
-  %t149 = icmp eq i8* %t147, %s148
+  %t149 = call i1 @strings_equal(i8* %t147, i8* %s148)
   br label %logical_or_entry_146
 
 logical_or_entry_146:
@@ -2681,7 +2684,7 @@ logical_or_entry_146:
 logical_or_right_146:
   %t150 = load i8*, i8** %l8
   %s151 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
-  %t152 = icmp eq i8* %t150, %s151
+  %t152 = call i1 @strings_equal(i8* %t150, i8* %s151)
   br label %logical_or_right_end_146
 
 logical_or_right_end_146:
@@ -2722,28 +2725,28 @@ merge17:
 define i1 @check_type_primitive(i8* %value, i8* %name) {
 block.entry:
   %s0 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
-  %t1 = icmp eq i8* %name, %s0
+  %t1 = call i1 @strings_equal(i8* %name, i8* %s0)
   br i1 %t1, label %then0, label %merge1
 then0:
   %t2 = call i1 @sailfin_runtime_is_string(i8* %value)
   ret i1 %t2
 merge1:
   %s3 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h807326654, i32 0, i32 0
-  %t4 = icmp eq i8* %name, %s3
+  %t4 = call i1 @strings_equal(i8* %name, i8* %s3)
   br i1 %t4, label %then2, label %merge3
 then2:
   %t5 = call i1 @sailfin_runtime_is_number(i8* %value)
   ret i1 %t5
 merge3:
   %s6 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
-  %t7 = icmp eq i8* %name, %s6
+  %t7 = call i1 @strings_equal(i8* %name, i8* %s6)
   br i1 %t7, label %then4, label %merge5
 then4:
   %t8 = call i1 @sailfin_runtime_is_boolean(i8* %value)
   ret i1 %t8
 merge5:
   %s9 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
-  %t10 = icmp eq i8* %name, %s9
+  %t10 = call i1 @strings_equal(i8* %name, i8* %s9)
   br i1 %t10, label %then6, label %merge7
 then6:
   %t11 = call i1 @sailfin_runtime_is_void(i8* %value)
@@ -2761,7 +2764,7 @@ block.entry:
   %l4 = alloca i8*
   %t0 = extractvalue %TypeDescriptor %descriptor, 0
   %s1 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1770336441, i32 0, i32 0
-  %t2 = icmp eq i8* %t0, %s1
+  %t2 = call i1 @strings_equal(i8* %t0, i8* %s1)
   br i1 %t2, label %then0, label %merge1
 then0:
   %t3 = extractvalue %TypeDescriptor %descriptor, 1
@@ -2776,7 +2779,7 @@ merge3:
 merge1:
   %t7 = extractvalue %TypeDescriptor %descriptor, 0
   %s8 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h550282393, i32 0, i32 0
-  %t9 = icmp eq i8* %t7, %s8
+  %t9 = call i1 @strings_equal(i8* %t7, i8* %s8)
   br i1 %t9, label %then4, label %merge5
 then4:
   store i64 0, i64* %l0
@@ -2827,7 +2830,7 @@ afterloop9:
 merge5:
   %t33 = extractvalue %TypeDescriptor %descriptor, 0
   %s34 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h22148892, i32 0, i32 0
-  %t35 = icmp eq i8* %t33, %s34
+  %t35 = call i1 @strings_equal(i8* %t33, i8* %s34)
   br i1 %t35, label %then14, label %merge15
 then14:
   store i64 0, i64* %l1
@@ -2883,7 +2886,7 @@ afterloop19:
 merge15:
   %t64 = extractvalue %TypeDescriptor %descriptor, 0
   %s65 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1920110414, i32 0, i32 0
-  %t66 = icmp eq i8* %t64, %s65
+  %t66 = call i1 @strings_equal(i8* %t64, i8* %s65)
   br i1 %t66, label %then24, label %merge25
 then24:
   %t67 = extractvalue %TypeDescriptor %descriptor, 2
@@ -2961,7 +2964,7 @@ afterloop33:
 merge25:
   %t106 = extractvalue %TypeDescriptor %descriptor, 0
   %s107 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1603982015, i32 0, i32 0
-  %t108 = icmp eq i8* %t106, %s107
+  %t108 = call i1 @strings_equal(i8* %t106, i8* %s107)
   br i1 %t108, label %then38, label %merge39
 then38:
   %t109 = call i1 @sailfin_runtime_is_callable(i8* %value)
@@ -2969,7 +2972,7 @@ then38:
 merge39:
   %t110 = extractvalue %TypeDescriptor %descriptor, 0
   %s111 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h261050197, i32 0, i32 0
-  %t112 = icmp eq i8* %t110, %s111
+  %t112 = call i1 @strings_equal(i8* %t110, i8* %s111)
   br i1 %t112, label %then40, label %merge41
 then40:
   %t113 = extractvalue %TypeDescriptor %descriptor, 1
@@ -2987,7 +2990,7 @@ merge43:
 merge41:
   %t119 = extractvalue %TypeDescriptor %descriptor, 0
   %s120 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h186837049, i32 0, i32 0
-  %t121 = icmp eq i8* %t119, %s120
+  %t121 = call i1 @strings_equal(i8* %t119, i8* %s120)
   br i1 %t121, label %then44, label %merge45
 then44:
   ret i1 0
@@ -3121,6 +3124,66 @@ afterloop7:
   %t53 = load double, double* %l3
   %t54 = load i8*, i8** %l4
   ret i8* %t54
+}
+
+define i1 @strings_equal(i8* %left, i8* %right) {
+block.entry:
+  %l0 = alloca i64
+  %l1 = alloca i8*
+  %l2 = alloca i8*
+  %t0 = call i64 @sailfin_runtime_string_length(i8* %left)
+  %t1 = call i64 @sailfin_runtime_string_length(i8* %right)
+  %t2 = icmp ne i64 %t0, %t1
+  br i1 %t2, label %then0, label %merge1
+then0:
+  ret i1 0
+merge1:
+  store i64 0, i64* %l0
+  %t3 = load i64, i64* %l0
+  br label %loop.header2
+loop.header2:
+  %t25 = phi i64 [ %t3, %merge1 ], [ %t24, %loop.latch4 ]
+  store i64 %t25, i64* %l0
+  br label %loop.body3
+loop.body3:
+  %t4 = load i64, i64* %l0
+  %t5 = call i64 @sailfin_runtime_string_length(i8* %left)
+  %t6 = icmp sge i64 %t4, %t5
+  %t7 = load i64, i64* %l0
+  br i1 %t6, label %then6, label %merge7
+then6:
+  br label %afterloop5
+merge7:
+  %t8 = load i64, i64* %l0
+  %t9 = sitofp i64 %t8 to double
+  %t10 = call i8* @char_at(i8* %left, double %t9)
+  store i8* %t10, i8** %l1
+  %t11 = load i64, i64* %l0
+  %t12 = sitofp i64 %t11 to double
+  %t13 = call i8* @char_at(i8* %right, double %t12)
+  store i8* %t13, i8** %l2
+  %t14 = load i8*, i8** %l1
+  %t15 = call double @sailfin_runtime_char_code(i8* %t14)
+  %t16 = load i8*, i8** %l2
+  %t17 = call double @sailfin_runtime_char_code(i8* %t16)
+  %t18 = fcmp une double %t15, %t17
+  %t19 = load i64, i64* %l0
+  %t20 = load i8*, i8** %l1
+  %t21 = load i8*, i8** %l2
+  br i1 %t18, label %then8, label %merge9
+then8:
+  ret i1 0
+merge9:
+  %t22 = load i64, i64* %l0
+  %t23 = add i64 %t22, 1
+  store i64 %t23, i64* %l0
+  br label %loop.latch4
+loop.latch4:
+  %t24 = load i64, i64* %l0
+  br label %loop.header2
+afterloop5:
+  %t26 = load i64, i64* %l0
+  ret i1 1
 }
 
 define double @find_char(i8* %text, i8* %character, double %start) {
@@ -3305,7 +3368,7 @@ merge21:
   %t97 = load double, double* %l4
   %t98 = call i8* @char_at(i8* %text, double %t97)
   %t99 = load i8*, i8** %l2
-  %t100 = icmp eq i8* %t98, %t99
+  %t100 = call i1 @strings_equal(i8* %t98, i8* %t99)
   %t101 = load i64, i64* %l0
   %t102 = load double, double* %l1
   %t103 = load i8*, i8** %l2
@@ -3551,11 +3614,11 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
-@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
 @.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
+@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
 @.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
+@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
+@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"

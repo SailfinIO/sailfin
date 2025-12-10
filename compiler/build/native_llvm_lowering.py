@@ -971,6 +971,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     runtime_helpers = collect_runtime_helper_targets(local_functions)
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field")
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat")
+    runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal")
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check")
     direct_effects = collect_direct_function_effects(context_functions)
     call_graph = collect_function_call_graph(context_functions)
@@ -7732,6 +7733,22 @@ def emit_comparison_instruction(symbol, left_operand, right_operand, temp_index,
     current_lines = lines
     if left_operand.llvm_type != right_operand.llvm_type:
         diagnostics = append_string(diagnostics, "llvm lowering: comparison operands have mismatched types `" + left_operand.llvm_type + "` and `" + right_operand.llvm_type + "`")
+    symbol_is_equality = symbol == "=="  or  symbol == "!="
+    left_is_string = is_string_pointer_type(left_operand.llvm_type)
+    right_is_string = is_string_pointer_type(right_operand.llvm_type)
+    left_is_null = left_operand.value == "null"
+    right_is_null = right_operand.value == "null"
+    if symbol_is_equality  and  left_is_string  and  right_is_string  and  not left_is_null  and  not right_is_null:
+        compare_temp = format_temp_name(temp_index)
+        current_lines = append_string(current_lines, "  " + compare_temp + " = call i1 @strings_equal(i8* " + left_operand.value + ", i8* " + right_operand.value + ")")
+        next_index = temp_index + 1
+        operand = LLVMOperand(llvm_type="i1", value=compare_temp)
+        if symbol == "!=":
+            inverted_temp = format_temp_name(next_index)
+            current_lines = append_string(current_lines, "  " + inverted_temp + " = xor i1 " + compare_temp + ", true")
+            operand = LLVMOperand(llvm_type="i1", value=inverted_temp)
+            next_index += 1
+        return ComparisonEmission(lines=current_lines, temp_index=next_index, operand=operand, diagnostics=diagnostics)
     llvm_type = left_operand.llvm_type
     predicate = comparison_predicate_for_symbol(symbol, llvm_type)
     if len(predicate) == 0:
@@ -7810,6 +7827,11 @@ def comparison_predicate_for_symbol(symbol, llvm_type):
             return "icmp ne"
         return ""
     return ""
+
+def is_string_pointer_type(llvm_type):
+    if llvm_type == "i8*":
+        return True
+    return False
 
 def collect_parameter_types(context, parameters):
     types = []

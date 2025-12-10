@@ -680,6 +680,25 @@ fn substring(text -> string, start -> number, end -> number) -> string {
     return result;
 }
 
+fn strings_equal(left -> string, right -> string) -> boolean {
+    if left.length != right.length {
+        return false;
+    }
+    let mut index = 0;
+    loop {
+        if index >= left.length {
+            break;
+        }
+        let left_char = char_at(left, index);
+        let right_char = char_at(right, index);
+        if runtime_char_code_fn(left_char) != runtime_char_code_fn(right_char) {
+            return false;
+        }
+        index = index + 1;
+    }
+    return true;
+}
+
 fn find_char(text -> string, character -> string, start -> number = 0) -> number {
     let length = text.length;
     if length == 0 {
@@ -711,7 +730,7 @@ fn find_char(text -> string, character -> string, start -> number = 0) -> number
         if index >= length {
             break;
         }
-        if char_at(text, index) == target {
+        if strings_equal(char_at(text, index), target) {
             return index;
         }
         index = index + 1;

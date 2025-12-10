@@ -73,6 +73,7 @@ declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare i1 @strings_equal(i8*, i8*)
 declare double @char_code(i8*)
 declare i1 @sailfin_runtime_is_whitespace_char(i8)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
@@ -727,7 +728,7 @@ merge5:
   %t32 = load %NativeImport, %NativeImport* %l3
   %t33 = extractvalue %NativeImport %t32, 0
   %s34 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h42978514, i32 0, i32 0
-  %t35 = icmp eq i8* %t33, %s34
+  %t35 = call i1 @strings_equal(i8* %t33, i8* %s34)
   %t36 = load %PythonBuilder, %PythonBuilder* %l0
   %t37 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t38 = load double, double* %l2
@@ -1545,7 +1546,7 @@ merge11:
   %t55 = getelementptr i8*, i8** %t52, i64 %t50
   %t56 = load i8*, i8** %t55
   %t57 = load i8*, i8** %l2
-  %t58 = icmp eq i8* %t56, %t57
+  %t58 = call i1 @strings_equal(i8* %t56, i8* %t57)
   %t59 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t60 = load double, double* %l1
   %t61 = load i8*, i8** %l2
@@ -2023,7 +2024,7 @@ merge4:
   store %PythonBuilder %t145, %PythonBuilder* %l1
   %t146 = load i8*, i8** %l0
   %s147 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h300877395, i32 0, i32 0
-  %t148 = icmp eq i8* %t146, %s147
+  %t148 = call i1 @strings_equal(i8* %t146, i8* %s147)
   %t149 = load i8*, i8** %l0
   %t150 = load %PythonBuilder, %PythonBuilder* %l1
   %t151 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -3295,7 +3296,7 @@ then6:
   %t23 = getelementptr [2 x i8], [2 x i8]* %t20, i32 0, i32 0
   ret i8* %t23
 merge7:
-  %t24 = icmp eq i8* %escape, %quote
+  %t24 = call i1 @strings_equal(i8* %escape, i8* %quote)
   br i1 %t24, label %then8, label %merge9
 then8:
   ret i8* %quote
@@ -4998,14 +4999,14 @@ merge3:
   %t35 = load double, double* %l4
   br label %loop.header4
 loop.header4:
-  %t170 = phi i8* [ %t32, %merge3 ], [ %t166, %loop.latch6 ]
-  %t171 = phi double [ %t35, %merge3 ], [ %t167, %loop.latch6 ]
-  %t172 = phi double [ %t34, %merge3 ], [ %t168, %loop.latch6 ]
-  %t173 = phi double [ %t33, %merge3 ], [ %t169, %loop.latch6 ]
-  store i8* %t170, i8** %l1
-  store double %t171, double* %l4
-  store double %t172, double* %l3
-  store double %t173, double* %l2
+  %t171 = phi i8* [ %t32, %merge3 ], [ %t167, %loop.latch6 ]
+  %t172 = phi double [ %t35, %merge3 ], [ %t168, %loop.latch6 ]
+  %t173 = phi double [ %t34, %merge3 ], [ %t169, %loop.latch6 ]
+  %t174 = phi double [ %t33, %merge3 ], [ %t170, %loop.latch6 ]
+  store i8* %t171, i8** %l1
+  store double %t172, double* %l4
+  store double %t173, double* %l3
+  store double %t174, double* %l2
   br label %loop.body5
 loop.body5:
   %t36 = load double, double* %l2
@@ -5088,164 +5089,165 @@ merge9:
   %t106 = icmp eq i32 %t55, 16
   %t107 = select i1 %t106, i8* %t105, i8* %t104
   %s108 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h48777630, i32 0, i32 0
-  %t109 = icmp ne i8* %t107, %s108
-  %t110 = load i8*, i8** %l0
-  %t111 = load i8*, i8** %l1
-  %t112 = load double, double* %l2
-  %t113 = load double, double* %l3
-  %t114 = load double, double* %l4
-  %t115 = load %NativeInstruction, %NativeInstruction* %l5
-  br i1 %t109, label %then10, label %merge11
+  %t109 = call i1 @strings_equal(i8* %t107, i8* %s108)
+  %t110 = xor i1 %t109, true
+  %t111 = load i8*, i8** %l0
+  %t112 = load i8*, i8** %l1
+  %t113 = load double, double* %l2
+  %t114 = load double, double* %l3
+  %t115 = load double, double* %l4
+  %t116 = load %NativeInstruction, %NativeInstruction* %l5
+  br i1 %t110, label %then10, label %merge11
 then10:
   br label %afterloop7
 merge11:
-  %t116 = load %NativeInstruction, %NativeInstruction* %l5
-  %t117 = extractvalue %NativeInstruction %t116, 0
-  %t118 = alloca %NativeInstruction
-  store %NativeInstruction %t116, %NativeInstruction* %t118
-  %t119 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t118, i32 0, i32 1
-  %t120 = bitcast [8 x i8]* %t119 to i8*
-  %t121 = bitcast i8* %t120 to i8**
-  %t122 = load i8*, i8** %t121
-  %t123 = icmp eq i32 %t117, 16
-  %t124 = select i1 %t123, i8* %t122, i8* null
-  %t125 = call i8* @trim_text(i8* %t124)
-  store i8* %t125, i8** %l6
-  %t126 = load i8*, i8** %l6
-  %t127 = call i64 @sailfin_runtime_string_length(i8* %t126)
-  %t128 = icmp sgt i64 %t127, 0
-  %t129 = load i8*, i8** %l0
-  %t130 = load i8*, i8** %l1
-  %t131 = load double, double* %l2
-  %t132 = load double, double* %l3
-  %t133 = load double, double* %l4
-  %t134 = load %NativeInstruction, %NativeInstruction* %l5
-  %t135 = load i8*, i8** %l6
-  br i1 %t128, label %then12, label %merge13
+  %t117 = load %NativeInstruction, %NativeInstruction* %l5
+  %t118 = extractvalue %NativeInstruction %t117, 0
+  %t119 = alloca %NativeInstruction
+  store %NativeInstruction %t117, %NativeInstruction* %t119
+  %t120 = getelementptr inbounds %NativeInstruction, %NativeInstruction* %t119, i32 0, i32 1
+  %t121 = bitcast [8 x i8]* %t120 to i8*
+  %t122 = bitcast i8* %t121 to i8**
+  %t123 = load i8*, i8** %t122
+  %t124 = icmp eq i32 %t118, 16
+  %t125 = select i1 %t124, i8* %t123, i8* null
+  %t126 = call i8* @trim_text(i8* %t125)
+  store i8* %t126, i8** %l6
+  %t127 = load i8*, i8** %l6
+  %t128 = call i64 @sailfin_runtime_string_length(i8* %t127)
+  %t129 = icmp sgt i64 %t128, 0
+  %t130 = load i8*, i8** %l0
+  %t131 = load i8*, i8** %l1
+  %t132 = load double, double* %l2
+  %t133 = load double, double* %l3
+  %t134 = load double, double* %l4
+  %t135 = load %NativeInstruction, %NativeInstruction* %l5
+  %t136 = load i8*, i8** %l6
+  br i1 %t129, label %then12, label %merge13
 then12:
-  %t136 = load i8*, i8** %l1
-  %t137 = alloca [2 x i8], align 1
-  %t138 = getelementptr [2 x i8], [2 x i8]* %t137, i32 0, i32 0
-  store i8 32, i8* %t138
-  %t139 = getelementptr [2 x i8], [2 x i8]* %t137, i32 0, i32 1
-  store i8 0, i8* %t139
-  %t140 = getelementptr [2 x i8], [2 x i8]* %t137, i32 0, i32 0
-  %t141 = call i8* @sailfin_runtime_string_concat(i8* %t136, i8* %t140)
-  %t142 = load i8*, i8** %l6
-  %t143 = call i8* @sailfin_runtime_string_concat(i8* %t141, i8* %t142)
-  store i8* %t143, i8** %l1
-  %t144 = load i8*, i8** %l1
+  %t137 = load i8*, i8** %l1
+  %t138 = alloca [2 x i8], align 1
+  %t139 = getelementptr [2 x i8], [2 x i8]* %t138, i32 0, i32 0
+  store i8 32, i8* %t139
+  %t140 = getelementptr [2 x i8], [2 x i8]* %t138, i32 0, i32 1
+  store i8 0, i8* %t140
+  %t141 = getelementptr [2 x i8], [2 x i8]* %t138, i32 0, i32 0
+  %t142 = call i8* @sailfin_runtime_string_concat(i8* %t137, i8* %t141)
+  %t143 = load i8*, i8** %l6
+  %t144 = call i8* @sailfin_runtime_string_concat(i8* %t142, i8* %t143)
+  store i8* %t144, i8** %l1
+  %t145 = load i8*, i8** %l1
   br label %merge13
 merge13:
-  %t145 = phi i8* [ %t144, %then12 ], [ %t130, %merge11 ]
-  store i8* %t145, i8** %l1
-  %t146 = load double, double* %l4
-  %t147 = load i8*, i8** %l6
-  %t148 = call double @compute_brace_balance(i8* %t147)
-  %t149 = fadd double %t146, %t148
-  store double %t149, double* %l4
-  %t150 = load double, double* %l3
-  %t151 = sitofp i64 1 to double
-  %t152 = fadd double %t150, %t151
-  store double %t152, double* %l3
-  %t153 = load double, double* %l2
-  %t154 = sitofp i64 1 to double
-  %t155 = fadd double %t153, %t154
-  store double %t155, double* %l2
-  %t156 = load double, double* %l4
-  %t157 = sitofp i64 0 to double
-  %t158 = fcmp ole double %t156, %t157
-  %t159 = load i8*, i8** %l0
-  %t160 = load i8*, i8** %l1
-  %t161 = load double, double* %l2
-  %t162 = load double, double* %l3
-  %t163 = load double, double* %l4
-  %t164 = load %NativeInstruction, %NativeInstruction* %l5
-  %t165 = load i8*, i8** %l6
-  br i1 %t158, label %then14, label %merge15
+  %t146 = phi i8* [ %t145, %then12 ], [ %t131, %merge11 ]
+  store i8* %t146, i8** %l1
+  %t147 = load double, double* %l4
+  %t148 = load i8*, i8** %l6
+  %t149 = call double @compute_brace_balance(i8* %t148)
+  %t150 = fadd double %t147, %t149
+  store double %t150, double* %l4
+  %t151 = load double, double* %l3
+  %t152 = sitofp i64 1 to double
+  %t153 = fadd double %t151, %t152
+  store double %t153, double* %l3
+  %t154 = load double, double* %l2
+  %t155 = sitofp i64 1 to double
+  %t156 = fadd double %t154, %t155
+  store double %t156, double* %l2
+  %t157 = load double, double* %l4
+  %t158 = sitofp i64 0 to double
+  %t159 = fcmp ole double %t157, %t158
+  %t160 = load i8*, i8** %l0
+  %t161 = load i8*, i8** %l1
+  %t162 = load double, double* %l2
+  %t163 = load double, double* %l3
+  %t164 = load double, double* %l4
+  %t165 = load %NativeInstruction, %NativeInstruction* %l5
+  %t166 = load i8*, i8** %l6
+  br i1 %t159, label %then14, label %merge15
 then14:
   br label %afterloop7
 merge15:
   br label %loop.latch6
 loop.latch6:
-  %t166 = load i8*, i8** %l1
-  %t167 = load double, double* %l4
-  %t168 = load double, double* %l3
-  %t169 = load double, double* %l2
+  %t167 = load i8*, i8** %l1
+  %t168 = load double, double* %l4
+  %t169 = load double, double* %l3
+  %t170 = load double, double* %l2
   br label %loop.header4
 afterloop7:
-  %t174 = load i8*, i8** %l1
-  %t175 = load double, double* %l4
-  %t176 = load double, double* %l3
-  %t177 = load double, double* %l2
-  %t178 = load double, double* %l4
-  %t179 = sitofp i64 0 to double
-  %t180 = fcmp une double %t178, %t179
-  %t181 = load i8*, i8** %l0
-  %t182 = load i8*, i8** %l1
-  %t183 = load double, double* %l2
-  %t184 = load double, double* %l3
-  %t185 = load double, double* %l4
-  br i1 %t180, label %then16, label %merge17
+  %t175 = load i8*, i8** %l1
+  %t176 = load double, double* %l4
+  %t177 = load double, double* %l3
+  %t178 = load double, double* %l2
+  %t179 = load double, double* %l4
+  %t180 = sitofp i64 0 to double
+  %t181 = fcmp une double %t179, %t180
+  %t182 = load i8*, i8** %l0
+  %t183 = load i8*, i8** %l1
+  %t184 = load double, double* %l2
+  %t185 = load double, double* %l3
+  %t186 = load double, double* %l4
+  br i1 %t181, label %then16, label %merge17
 then16:
-  %t186 = load i8*, i8** %l0
-  %t187 = insertvalue %StructLiteralCapture undef, i8* %t186, 0
-  %t188 = sitofp i64 0 to double
-  %t189 = insertvalue %StructLiteralCapture %t187, double %t188, 1
-  %t190 = insertvalue %StructLiteralCapture %t189, i1 0, 2
-  ret %StructLiteralCapture %t190
+  %t187 = load i8*, i8** %l0
+  %t188 = insertvalue %StructLiteralCapture undef, i8* %t187, 0
+  %t189 = sitofp i64 0 to double
+  %t190 = insertvalue %StructLiteralCapture %t188, double %t189, 1
+  %t191 = insertvalue %StructLiteralCapture %t190, i1 0, 2
+  ret %StructLiteralCapture %t191
 merge17:
-  %t191 = load double, double* %l3
-  %t192 = sitofp i64 0 to double
-  %t193 = fcmp oeq double %t191, %t192
-  %t194 = load i8*, i8** %l0
-  %t195 = load i8*, i8** %l1
-  %t196 = load double, double* %l2
-  %t197 = load double, double* %l3
-  %t198 = load double, double* %l4
-  br i1 %t193, label %then18, label %merge19
+  %t192 = load double, double* %l3
+  %t193 = sitofp i64 0 to double
+  %t194 = fcmp oeq double %t192, %t193
+  %t195 = load i8*, i8** %l0
+  %t196 = load i8*, i8** %l1
+  %t197 = load double, double* %l2
+  %t198 = load double, double* %l3
+  %t199 = load double, double* %l4
+  br i1 %t194, label %then18, label %merge19
 then18:
-  %t199 = load i8*, i8** %l0
-  %t200 = insertvalue %StructLiteralCapture undef, i8* %t199, 0
-  %t201 = sitofp i64 0 to double
-  %t202 = insertvalue %StructLiteralCapture %t200, double %t201, 1
-  %t203 = insertvalue %StructLiteralCapture %t202, i1 0, 2
-  ret %StructLiteralCapture %t203
+  %t200 = load i8*, i8** %l0
+  %t201 = insertvalue %StructLiteralCapture undef, i8* %t200, 0
+  %t202 = sitofp i64 0 to double
+  %t203 = insertvalue %StructLiteralCapture %t201, double %t202, 1
+  %t204 = insertvalue %StructLiteralCapture %t203, i1 0, 2
+  ret %StructLiteralCapture %t204
 merge19:
-  %t204 = load i8*, i8** %l1
-  %t205 = call i8* @trim_text(i8* %t204)
-  %t206 = call i8* @trim_trailing_delimiters(i8* %t205)
-  store i8* %t206, i8** %l7
-  %t207 = load i8*, i8** %l7
-  %t208 = alloca [2 x i8], align 1
-  %t209 = getelementptr [2 x i8], [2 x i8]* %t208, i32 0, i32 0
-  store i8 125, i8* %t209
-  %t210 = getelementptr [2 x i8], [2 x i8]* %t208, i32 0, i32 1
-  store i8 0, i8* %t210
-  %t211 = getelementptr [2 x i8], [2 x i8]* %t208, i32 0, i32 0
-  %t212 = call i1 @ends_with(i8* %t207, i8* %t211)
-  %t213 = xor i1 %t212, 1
-  %t214 = load i8*, i8** %l0
-  %t215 = load i8*, i8** %l1
-  %t216 = load double, double* %l2
-  %t217 = load double, double* %l3
-  %t218 = load double, double* %l4
-  %t219 = load i8*, i8** %l7
-  br i1 %t213, label %then20, label %merge21
+  %t205 = load i8*, i8** %l1
+  %t206 = call i8* @trim_text(i8* %t205)
+  %t207 = call i8* @trim_trailing_delimiters(i8* %t206)
+  store i8* %t207, i8** %l7
+  %t208 = load i8*, i8** %l7
+  %t209 = alloca [2 x i8], align 1
+  %t210 = getelementptr [2 x i8], [2 x i8]* %t209, i32 0, i32 0
+  store i8 125, i8* %t210
+  %t211 = getelementptr [2 x i8], [2 x i8]* %t209, i32 0, i32 1
+  store i8 0, i8* %t211
+  %t212 = getelementptr [2 x i8], [2 x i8]* %t209, i32 0, i32 0
+  %t213 = call i1 @ends_with(i8* %t208, i8* %t212)
+  %t214 = xor i1 %t213, 1
+  %t215 = load i8*, i8** %l0
+  %t216 = load i8*, i8** %l1
+  %t217 = load double, double* %l2
+  %t218 = load double, double* %l3
+  %t219 = load double, double* %l4
+  %t220 = load i8*, i8** %l7
+  br i1 %t214, label %then20, label %merge21
 then20:
-  %t220 = load i8*, i8** %l0
-  %t221 = insertvalue %StructLiteralCapture undef, i8* %t220, 0
-  %t222 = sitofp i64 0 to double
-  %t223 = insertvalue %StructLiteralCapture %t221, double %t222, 1
-  %t224 = insertvalue %StructLiteralCapture %t223, i1 0, 2
-  ret %StructLiteralCapture %t224
+  %t221 = load i8*, i8** %l0
+  %t222 = insertvalue %StructLiteralCapture undef, i8* %t221, 0
+  %t223 = sitofp i64 0 to double
+  %t224 = insertvalue %StructLiteralCapture %t222, double %t223, 1
+  %t225 = insertvalue %StructLiteralCapture %t224, i1 0, 2
+  ret %StructLiteralCapture %t225
 merge21:
-  %t225 = load i8*, i8** %l7
-  %t226 = insertvalue %StructLiteralCapture undef, i8* %t225, 0
-  %t227 = load double, double* %l3
-  %t228 = insertvalue %StructLiteralCapture %t226, double %t227, 1
-  %t229 = insertvalue %StructLiteralCapture %t228, i1 1, 2
-  ret %StructLiteralCapture %t229
+  %t226 = load i8*, i8** %l7
+  %t227 = insertvalue %StructLiteralCapture undef, i8* %t226, 0
+  %t228 = load double, double* %l3
+  %t229 = insertvalue %StructLiteralCapture %t227, double %t228, 1
+  %t230 = insertvalue %StructLiteralCapture %t229, i1 1, 2
+  ret %StructLiteralCapture %t230
 }
 
 define i8* @rewrite_expression_intrinsics(i8* %expression) {
@@ -5732,7 +5734,7 @@ afterloop15:
   store i8* %t83, i8** %l6
   %t84 = load i8*, i8** %l6
   %s85 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h268929446, i32 0, i32 0
-  %t86 = icmp eq i8* %t84, %s85
+  %t86 = call i1 @strings_equal(i8* %t84, i8* %s85)
   %t87 = load i8*, i8** %l0
   %t88 = load double, double* %l1
   %t89 = load i8*, i8** %l2
@@ -5749,7 +5751,7 @@ then20:
 else21:
   %t96 = load i8*, i8** %l6
   %s97 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h275946731, i32 0, i32 0
-  %t98 = icmp eq i8* %t96, %s97
+  %t98 = call i1 @strings_equal(i8* %t96, i8* %s97)
   %t99 = load i8*, i8** %l0
   %t100 = load double, double* %l1
   %t101 = load i8*, i8** %l2
@@ -5766,7 +5768,7 @@ then23:
 else24:
   %t108 = load i8*, i8** %l6
   %s109 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
-  %t110 = icmp eq i8* %t108, %s109
+  %t110 = call i1 @strings_equal(i8* %t108, i8* %s109)
   %t111 = load i8*, i8** %l0
   %t112 = load double, double* %l1
   %t113 = load i8*, i8** %l2
@@ -5948,7 +5950,7 @@ then10:
   store i8* %t69, i8** %l6
   %t70 = load i8*, i8** %l6
   %t71 = load i8*, i8** %l0
-  %t72 = icmp eq i8* %t70, %t71
+  %t72 = call i1 @strings_equal(i8* %t70, i8* %t71)
   %t73 = load i8*, i8** %l0
   %t74 = load i8*, i8** %l1
   %t75 = load i8*, i8** %l2
@@ -6728,7 +6730,7 @@ then6:
 merge7:
   %t31 = load i8*, i8** %l2
   %t32 = load i8*, i8** %l0
-  %t33 = icmp eq i8* %t31, %t32
+  %t33 = call i1 @strings_equal(i8* %t31, i8* %t32)
   %t34 = load i8*, i8** %l0
   %t35 = load double, double* %l1
   %t36 = load i8*, i8** %l2
@@ -7389,7 +7391,7 @@ block.entry:
   %t51 = icmp eq i32 %t0, 16
   %t52 = select i1 %t51, i8* %t50, i8* %t49
   %s53 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h48777630, i32 0, i32 0
-  %t54 = icmp eq i8* %t52, %s53
+  %t54 = call i1 @strings_equal(i8* %t52, i8* %s53)
   br i1 %t54, label %then0, label %merge1
 then0:
   %t55 = extractvalue %NativeInstruction %instruction, 0
@@ -7457,7 +7459,7 @@ merge1:
   %t114 = icmp eq i32 %t63, 16
   %t115 = select i1 %t114, i8* %t113, i8* %t112
   %s116 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1629914700, i32 0, i32 0
-  %t117 = icmp eq i8* %t115, %s116
+  %t117 = call i1 @strings_equal(i8* %t115, i8* %s116)
   br i1 %t117, label %then2, label %merge3
 then2:
   %t118 = extractvalue %NativeInstruction %instruction, 0
@@ -7737,7 +7739,7 @@ merge7:
   %t14 = call i8* @char_at(i8* %text, double %t13)
   store i8* %t14, i8** %l2
   %t15 = load i8*, i8** %l2
-  %t16 = icmp eq i8* %t15, %open
+  %t16 = call i1 @strings_equal(i8* %t15, i8* %open)
   %t17 = load double, double* %l0
   %t18 = load double, double* %l1
   %t19 = load i8*, i8** %l2
@@ -7751,7 +7753,7 @@ then8:
   br label %merge10
 else9:
   %t24 = load i8*, i8** %l2
-  %t25 = icmp eq i8* %t24, %close
+  %t25 = call i1 @strings_equal(i8* %t24, i8* %close)
   %t26 = load double, double* %l0
   %t27 = load double, double* %l1
   %t28 = load i8*, i8** %l2
@@ -7918,7 +7920,7 @@ merge12:
 else9:
   %t77 = load i8*, i8** %l6
   %t78 = load i8*, i8** %l5
-  %t79 = icmp eq i8* %t77, %t78
+  %t79 = call i1 @strings_equal(i8* %t77, i8* %t78)
   %t80 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t81 = load i8*, i8** %l1
   %t82 = load double, double* %l2
@@ -8340,7 +8342,7 @@ merge12:
 else9:
   %t77 = load i8*, i8** %l6
   %t78 = load i8*, i8** %l5
-  %t79 = icmp eq i8* %t77, %t78
+  %t79 = call i1 @strings_equal(i8* %t77, i8* %t78)
   %t80 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t81 = load i8*, i8** %l1
   %t82 = load double, double* %l2
@@ -8727,8 +8729,8 @@ merge1:
   %t4 = load double, double* %l0
   br label %loop.header2
 loop.header2:
-  %t56 = phi double [ %t4, %merge1 ], [ %t55, %loop.latch4 ]
-  store double %t56, double* %l0
+  %t57 = phi double [ %t4, %merge1 ], [ %t56, %loop.latch4 ]
+  store double %t57, double* %l0
   br label %loop.body3
 loop.body3:
   %t5 = load double, double* %l0
@@ -8751,10 +8753,10 @@ merge7:
   %t16 = load i1, i1* %l2
   br label %loop.header8
 loop.header8:
-  %t43 = phi i1 [ %t16, %merge7 ], [ %t41, %loop.latch10 ]
-  %t44 = phi double [ %t15, %merge7 ], [ %t42, %loop.latch10 ]
-  store i1 %t43, i1* %l2
-  store double %t44, double* %l1
+  %t44 = phi i1 [ %t16, %merge7 ], [ %t42, %loop.latch10 ]
+  %t45 = phi double [ %t15, %merge7 ], [ %t43, %loop.latch10 ]
+  store i1 %t44, i1* %l2
+  store double %t45, double* %l1
   br label %loop.body9
 loop.body9:
   %t17 = load double, double* %l1
@@ -8778,50 +8780,51 @@ merge13:
   store i8* %t29, i8** %l4
   %t30 = load i8*, i8** %l3
   %t31 = load i8*, i8** %l4
-  %t32 = icmp ne i8* %t30, %t31
-  %t33 = load double, double* %l0
-  %t34 = load double, double* %l1
-  %t35 = load i1, i1* %l2
-  %t36 = load i8*, i8** %l3
-  %t37 = load i8*, i8** %l4
-  br i1 %t32, label %then14, label %merge15
+  %t32 = call i1 @strings_equal(i8* %t30, i8* %t31)
+  %t33 = xor i1 %t32, true
+  %t34 = load double, double* %l0
+  %t35 = load double, double* %l1
+  %t36 = load i1, i1* %l2
+  %t37 = load i8*, i8** %l3
+  %t38 = load i8*, i8** %l4
+  br i1 %t33, label %then14, label %merge15
 then14:
   store i1 0, i1* %l2
   br label %afterloop11
 merge15:
-  %t38 = load double, double* %l1
-  %t39 = sitofp i64 1 to double
-  %t40 = fadd double %t38, %t39
-  store double %t40, double* %l1
+  %t39 = load double, double* %l1
+  %t40 = sitofp i64 1 to double
+  %t41 = fadd double %t39, %t40
+  store double %t41, double* %l1
   br label %loop.latch10
 loop.latch10:
-  %t41 = load i1, i1* %l2
-  %t42 = load double, double* %l1
+  %t42 = load i1, i1* %l2
+  %t43 = load double, double* %l1
   br label %loop.header8
 afterloop11:
-  %t45 = load i1, i1* %l2
-  %t46 = load double, double* %l1
-  %t47 = load i1, i1* %l2
-  %t48 = load double, double* %l0
-  %t49 = load double, double* %l1
-  %t50 = load i1, i1* %l2
-  br i1 %t47, label %then16, label %merge17
+  %t46 = load i1, i1* %l2
+  %t47 = load double, double* %l1
+  %t48 = load i1, i1* %l2
+  %t49 = load double, double* %l0
+  %t50 = load double, double* %l1
+  %t51 = load i1, i1* %l2
+  br i1 %t48, label %then16, label %merge17
 then16:
-  %t51 = load double, double* %l0
-  ret double %t51
-merge17:
   %t52 = load double, double* %l0
-  %t53 = sitofp i64 1 to double
-  %t54 = fadd double %t52, %t53
-  store double %t54, double* %l0
+  ret double %t52
+merge17:
+  %t53 = load double, double* %l0
+  %t54 = sitofp i64 1 to double
+  %t55 = fadd double %t53, %t54
+  store double %t55, double* %l0
   br label %loop.latch4
 loop.latch4:
-  %t55 = load double, double* %l0
+  %t56 = load double, double* %l0
   br label %loop.header2
 afterloop5:
-  %t57 = load double, double* %l0
-  %t58 = sitofp i64 -1 to double
-  ret double %t58
+  %t58 = load double, double* %l0
+  %t59 = sitofp i64 -1 to double
+  ret double %t59
 }
 
 define double @find_matching_brace(i8* %text, double %open_index) {
@@ -9862,7 +9865,7 @@ merge9:
   %t168 = icmp eq i32 %t117, 16
   %t169 = select i1 %t168, i8* %t167, i8* %t166
   %s170 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h536277508, i32 0, i32 0
-  %t171 = icmp eq i8* %t169, %s170
+  %t171 = call i1 @strings_equal(i8* %t169, i8* %s170)
   %t172 = load %PythonBuilder, %PythonBuilder* %l0
   %t173 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t174 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -10100,7 +10103,7 @@ else11:
   %t369 = icmp eq i32 %t318, 16
   %t370 = select i1 %t369, i8* %t368, i8* %t367
   %s371 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1629914700, i32 0, i32 0
-  %t372 = icmp eq i8* %t370, %s371
+  %t372 = call i1 @strings_equal(i8* %t370, i8* %s371)
   %t373 = load %PythonBuilder, %PythonBuilder* %l0
   %t374 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t375 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -10286,7 +10289,7 @@ else22:
   %t527 = icmp eq i32 %t476, 16
   %t528 = select i1 %t527, i8* %t526, i8* %t525
   %s529 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2089318639, i32 0, i32 0
-  %t530 = icmp eq i8* %t528, %s529
+  %t530 = call i1 @strings_equal(i8* %t528, i8* %s529)
   %t531 = load %PythonBuilder, %PythonBuilder* %l0
   %t532 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t533 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -10523,7 +10526,7 @@ else30:
   %t724 = icmp eq i32 %t673, 16
   %t725 = select i1 %t724, i8* %t723, i8* %t722
   %s726 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193459862, i32 0, i32 0
-  %t727 = icmp eq i8* %t725, %s726
+  %t727 = call i1 @strings_equal(i8* %t725, i8* %s726)
   %t728 = load %PythonBuilder, %PythonBuilder* %l0
   %t729 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t730 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -10628,7 +10631,7 @@ else41:
   %t819 = icmp eq i32 %t768, 16
   %t820 = select i1 %t819, i8* %t818, i8* %t817
   %s821 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h219990644, i32 0, i32 0
-  %t822 = icmp eq i8* %t820, %s821
+  %t822 = call i1 @strings_equal(i8* %t820, i8* %s821)
   %t823 = load %PythonBuilder, %PythonBuilder* %l0
   %t824 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t825 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -10741,7 +10744,7 @@ else44:
   %t916 = icmp eq i32 %t865, 16
   %t917 = select i1 %t916, i8* %t915, i8* %t914
   %s918 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h819045845, i32 0, i32 0
-  %t919 = icmp eq i8* %t917, %s918
+  %t919 = call i1 @strings_equal(i8* %t917, i8* %s918)
   %t920 = load %PythonBuilder, %PythonBuilder* %l0
   %t921 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t922 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -10853,7 +10856,7 @@ else50:
   %t1012 = icmp eq i32 %t961, 16
   %t1013 = select i1 %t1012, i8* %t1011, i8* %t1010
   %s1014 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2089113841, i32 0, i32 0
-  %t1015 = icmp eq i8* %t1013, %s1014
+  %t1015 = call i1 @strings_equal(i8* %t1013, i8* %s1014)
   %t1016 = load %PythonBuilder, %PythonBuilder* %l0
   %t1017 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1018 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -10971,7 +10974,7 @@ else56:
   %t1120 = icmp eq i32 %t1069, 16
   %t1121 = select i1 %t1120, i8* %t1119, i8* %t1118
   %s1122 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1258614714, i32 0, i32 0
-  %t1123 = icmp eq i8* %t1121, %s1122
+  %t1123 = call i1 @strings_equal(i8* %t1121, i8* %s1122)
   %t1124 = load %PythonBuilder, %PythonBuilder* %l0
   %t1125 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1126 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -11083,7 +11086,7 @@ else59:
   %t1216 = icmp eq i32 %t1165, 16
   %t1217 = select i1 %t1216, i8* %t1215, i8* %t1214
   %s1218 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h228395909, i32 0, i32 0
-  %t1219 = icmp eq i8* %t1217, %s1218
+  %t1219 = call i1 @strings_equal(i8* %t1217, i8* %s1218)
   %t1220 = load %PythonBuilder, %PythonBuilder* %l0
   %t1221 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1222 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -11167,7 +11170,7 @@ else65:
   %t1293 = icmp eq i32 %t1242, 16
   %t1294 = select i1 %t1293, i8* %t1292, i8* %t1291
   %s1295 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h739212033, i32 0, i32 0
-  %t1296 = icmp eq i8* %t1294, %s1295
+  %t1296 = call i1 @strings_equal(i8* %t1294, i8* %s1295)
   %t1297 = load %PythonBuilder, %PythonBuilder* %l0
   %t1298 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1299 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -11279,7 +11282,7 @@ else68:
   %t1389 = icmp eq i32 %t1338, 16
   %t1390 = select i1 %t1389, i8* %t1388, i8* %t1387
   %s1391 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h706445588, i32 0, i32 0
-  %t1392 = icmp eq i8* %t1390, %s1391
+  %t1392 = call i1 @strings_equal(i8* %t1390, i8* %s1391)
   %t1393 = load %PythonBuilder, %PythonBuilder* %l0
   %t1394 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1395 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -11354,7 +11357,7 @@ else74:
   %t1459 = icmp eq i32 %t1408, 16
   %t1460 = select i1 %t1459, i8* %t1458, i8* %t1457
   %s1461 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h267355070, i32 0, i32 0
-  %t1462 = icmp eq i8* %t1460, %s1461
+  %t1462 = call i1 @strings_equal(i8* %t1460, i8* %s1461)
   %t1463 = load %PythonBuilder, %PythonBuilder* %l0
   %t1464 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1465 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -11429,7 +11432,7 @@ else77:
   %t1529 = icmp eq i32 %t1478, 16
   %t1530 = select i1 %t1529, i8* %t1528, i8* %t1527
   %s1531 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1117315388, i32 0, i32 0
-  %t1532 = icmp eq i8* %t1530, %s1531
+  %t1532 = call i1 @strings_equal(i8* %t1530, i8* %s1531)
   %t1533 = load %PythonBuilder, %PythonBuilder* %l0
   %t1534 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1535 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -11550,7 +11553,7 @@ else80:
   %t1640 = icmp eq i32 %t1589, 16
   %t1641 = select i1 %t1640, i8* %t1639, i8* %t1638
   %s1642 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h217223495, i32 0, i32 0
-  %t1643 = icmp eq i8* %t1641, %s1642
+  %t1643 = call i1 @strings_equal(i8* %t1641, i8* %s1642)
   %t1644 = load %PythonBuilder, %PythonBuilder* %l0
   %t1645 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1646 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -11897,7 +11900,7 @@ else83:
   %t1916 = icmp eq i32 %t1865, 16
   %t1917 = select i1 %t1916, i8* %t1915, i8* %t1914
   %s1918 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h794378208, i32 0, i32 0
-  %t1919 = icmp eq i8* %t1917, %s1918
+  %t1919 = call i1 @strings_equal(i8* %t1917, i8* %s1918)
   %t1920 = load %PythonBuilder, %PythonBuilder* %l0
   %t1921 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t1922 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -12053,7 +12056,7 @@ else99:
   %t2046 = icmp eq i32 %t1995, 16
   %t2047 = select i1 %t2046, i8* %t2045, i8* %t2044
   %s2048 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h230767751, i32 0, i32 0
-  %t2049 = icmp eq i8* %t2047, %s2048
+  %t2049 = call i1 @strings_equal(i8* %t2047, i8* %s2048)
   %t2050 = load %PythonBuilder, %PythonBuilder* %l0
   %t2051 = load { i8**, i64 }*, { i8**, i64 }** %l1
   %t2052 = load { i8**, i64 }*, { i8**, i64 }** %l2
@@ -14764,118 +14767,118 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
-@.str.len29.h610920064 = private unnamed_addr constant [30 x i8] c"if index >= len(self.fields):\00"
 @.str.len4.h219990644 = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
-@.str.len11.h1898426375 = private unnamed_addr constant [12 x i8] c"while True:\00"
-@.str.len31.h568140000 = private unnamed_addr constant [32 x i8] c" = runtime.enum_define_variant(\00"
-@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
-@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
-@.str.len3.h2087691079 = private unnamed_addr constant [4 x i8] c" = \00"
-@.str.len6.h536277508 = private unnamed_addr constant [7 x i8] c"Return\00"
-@.str.len31.h1736570074 = private unnamed_addr constant [32 x i8] c"unterminated control-flow block\00"
-@.str.len24.h2028465620 = private unnamed_addr constant [25 x i8] c"else without matching if\00"
-@.str.len2.h193517249 = private unnamed_addr constant [3 x i8] c"}}\00"
-@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
-@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
-@.str.len11.h1460619898 = private unnamed_addr constant [12 x i8] c" (pattern: \00"
-@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
-@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
-@.str.len32.h1370567591 = private unnamed_addr constant [33 x i8] c"endfor without matching for loop\00"
-@.str.len10.h1629914700 = private unnamed_addr constant [11 x i8] c"Expression\00"
-@.str.len6.h653919037 = private unnamed_addr constant [7 x i8] c"', [])\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len4.h176216012 = private unnamed_addr constant [5 x i8] c" or \00"
-@.enum.NativeInstruction.Loop.variant = private unnamed_addr constant [5 x i8] c"Loop\00"
-@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
 @.str.len2.h193428644 = private unnamed_addr constant [3 x i8] c"./\00"
-@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
-@.str.len29.h1122035900 = private unnamed_addr constant [30 x i8] c"endloop without matching loop\00"
-@.str.len2.h193478474 = private unnamed_addr constant [3 x i8] c"\5C'\00"
-@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
-@.str.len15.h1309566598 = private unnamed_addr constant [16 x i8] c"compiler.build.\00"
-@.str.len8.h757831264 = private unnamed_addr constant [9 x i8] c".concat(\00"
-@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
-@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
-@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
-@.str.len4.h237997259 = private unnamed_addr constant [5 x i8] c"True\00"
-@.str.len5.h2069574674 = private unnamed_addr constant [6 x i8] c"else:\00"
-@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len42.h9444846 = private unnamed_addr constant [43 x i8] c"unsupported instruction emitted as comment\00"
-@.str.len4.h270590402 = private unnamed_addr constant [5 x i8] c"pass\00"
-@.str.len28.h430828782 = private unnamed_addr constant [29 x i8] c"def __getattr__(self, item):\00"
-@.str.len5.h2069215535 = private unnamed_addr constant [6 x i8] c"elif \00"
-@.str.len18.h1387621460 = private unnamed_addr constant [19 x i8] c"generated_function\00"
-@.str.len4.h265982546 = private unnamed_addr constant [5 x i8] c"len(\00"
-@.str.len26.h1088202076 = private unnamed_addr constant [27 x i8] c"field = self.fields[index]\00"
-@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
-@.str.len4.h175996034 = private unnamed_addr constant [5 x i8] c" in \00"
-@.str.len29.h1409903806 = private unnamed_addr constant [30 x i8] c"unterminated match expression\00"
-@.str.len5.h1503489441 = private unnamed_addr constant [6 x i8] c" and \00"
-@.str.len11.h1779553665 = private unnamed_addr constant [12 x i8] c"# effects: \00"
-@.str.len5.h843097466 = private unnamed_addr constant [6 x i8] c"False\00"
-@.str.len22.h983476432 = private unnamed_addr constant [23 x i8] c"if field.name == item:\00"
-@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
-@.str.len2.h193515005 = private unnamed_addr constant [3 x i8] c"{{\00"
+@.str.len29.h610920064 = private unnamed_addr constant [30 x i8] c"if index >= len(self.fields):\00"
 @.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len4.h230767751 = private unnamed_addr constant [5 x i8] c"Noop\00"
+@.str.len6.h42978514 = private unnamed_addr constant [7 x i8] c"export\00"
+@.str.len5.h1776141546 = private unnamed_addr constant [6 x i8] c") + (\00"
+@.str.len6.h536277508 = private unnamed_addr constant [7 x i8] c"Return\00"
+@.str.len4.h230766299 = private unnamed_addr constant [5 x i8] c"None\00"
+@.str.len25.h117462910 = private unnamed_addr constant [26 x i8] c"runtime.enum_instantiate(\00"
+@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
+@.str.len4.h265982546 = private unnamed_addr constant [5 x i8] c"len(\00"
+@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
 @.enum.NativeInstruction.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len9.h320851598 = private unnamed_addr constant [10 x i8] c"index = 0\00"
-@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
-@.str.len4.h268720028 = private unnamed_addr constant [5 x i8] c"not \00"
-@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
-@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
-@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
-@.str.len20.h728584192 = private unnamed_addr constant [21 x i8] c"runtime.enum_field('\00"
 @.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.str.len3.h2088090973 = private unnamed_addr constant [4 x i8] c", '\00"
-@.enum.NativeInstruction.Expression.variant = private unnamed_addr constant [11 x i8] c"Expression\00"
-@.str.len41.h1804821690 = private unnamed_addr constant [42 x i8] c"# unsupported: match case without context\00"
-@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
+@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
+@.str.len20.h728584192 = private unnamed_addr constant [21 x i8] c"runtime.enum_field('\00"
+@.str.len2.h193478474 = private unnamed_addr constant [3 x i8] c"\5C'\00"
+@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
+@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
+@.str.len11.h1779553665 = private unnamed_addr constant [12 x i8] c"# effects: \00"
+@.str.len29.h1409903806 = private unnamed_addr constant [30 x i8] c"unterminated match expression\00"
+@.str.len2.h193515005 = private unnamed_addr constant [3 x i8] c"{{\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
 @.str.len5.h468448796 = private unnamed_addr constant [6 x i8] c"=None\00"
+@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
+@.str.len29.h1122035900 = private unnamed_addr constant [30 x i8] c"endloop without matching loop\00"
+@.str.len5.h843097466 = private unnamed_addr constant [6 x i8] c"False\00"
+@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len8.h104511138 = private unnamed_addr constant [9 x i8] c"', self.\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
+@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.str.len5.h2069215535 = private unnamed_addr constant [6 x i8] c"elif \00"
+@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
+@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
+@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
+@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
+@.str.len39.h2079567388 = private unnamed_addr constant [40 x i8] c"match case without active match context\00"
+@.str.len4.h268720028 = private unnamed_addr constant [5 x i8] c"not \00"
+@.str.len31.h1736570074 = private unnamed_addr constant [32 x i8] c"unterminated control-flow block\00"
+@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
+@.str.len3.h2088090973 = private unnamed_addr constant [4 x i8] c", '\00"
+@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
+@.str.len10.h1629914700 = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.len5.h461434216 = private unnamed_addr constant [6 x i8] c"self.\00"
+@.enum.NativeInstruction.Expression.variant = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
+@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
+@.str.len32.h1370567591 = private unnamed_addr constant [33 x i8] c"endfor without matching for loop\00"
+@.str.len15.h1983072220 = private unnamed_addr constant [16 x i8] c"# unsupported: \00"
+@.str.len3.h2090359129 = private unnamed_addr constant [4 x i8] c"if \00"
+@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
+@.str.len9.h320851598 = private unnamed_addr constant [10 x i8] c"index = 0\00"
+@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
+@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
+@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len3.h2087691079 = private unnamed_addr constant [4 x i8] c" = \00"
+@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
+@.str.len24.h2028465620 = private unnamed_addr constant [25 x i8] c"else without matching if\00"
+@.str.len6.h653919037 = private unnamed_addr constant [7 x i8] c"', [])\00"
+@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
+@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
+@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
+@.str.len3.h2087924125 = private unnamed_addr constant [4 x i8] c"', \00"
+@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
+@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.str.len31.h568140000 = private unnamed_addr constant [32 x i8] c" = runtime.enum_define_variant(\00"
+@.str.len7.h1543377657 = private unnamed_addr constant [8 x i8] c") and (\00"
+@.str.len4.h259230482 = private unnamed_addr constant [5 x i8] c"for \00"
+@.str.len8.h757831264 = private unnamed_addr constant [9 x i8] c".concat(\00"
+@.str.len41.h1804821690 = private unnamed_addr constant [42 x i8] c"# unsupported: match case without context\00"
+@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
+@.str.len15.h1309566598 = private unnamed_addr constant [16 x i8] c"compiler.build.\00"
+@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len26.h1984174475 = private unnamed_addr constant [27 x i8] c"raise AttributeError(item)\00"
+@.str.len39.h198700275 = private unnamed_addr constant [40 x i8] c"# unsupported: endmatch without context\00"
+@.str.len18.h1387621460 = private unnamed_addr constant [19 x i8] c"generated_function\00"
+@.str.len2.h193517249 = private unnamed_addr constant [3 x i8] c"}}\00"
+@.str.len5.h1503489441 = private unnamed_addr constant [6 x i8] c" and \00"
+@.str.len4.h270590402 = private unnamed_addr constant [5 x i8] c"pass\00"
+@.str.len5.h2069574674 = private unnamed_addr constant [6 x i8] c"else:\00"
+@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
+@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
 @.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
 @.str.len8.h2085806463 = private unnamed_addr constant [9 x i8] c"runtime/\00"
-@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
-@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len18.h1456282769 = private unnamed_addr constant [19 x i8] c"return field.value\00"
-@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.str.len3.h2090359129 = private unnamed_addr constant [4 x i8] c"if \00"
-@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
-@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
-@.str.len4.h259230482 = private unnamed_addr constant [5 x i8] c"for \00"
-@.str.len7.h1543377657 = private unnamed_addr constant [8 x i8] c") and (\00"
-@.str.len39.h198700275 = private unnamed_addr constant [40 x i8] c"# unsupported: endmatch without context\00"
-@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len15.h1983072220 = private unnamed_addr constant [16 x i8] c"# unsupported: \00"
-@.str.len4.h230767751 = private unnamed_addr constant [5 x i8] c"Noop\00"
-@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
-@.str.len3.h2087924125 = private unnamed_addr constant [4 x i8] c"', \00"
-@.str.len25.h458257002 = private unnamed_addr constant [26 x i8] c"endif without matching if\00"
-@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.str.len5.h1776141546 = private unnamed_addr constant [6 x i8] c") + (\00"
-@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
-@.str.len4.h230766299 = private unnamed_addr constant [5 x i8] c"None\00"
-@.str.len37.h314404344 = private unnamed_addr constant [38 x i8] c"endmatch without active match context\00"
-@.str.len12.h300877395 = private unnamed_addr constant [13 x i8] c"EnumInstance\00"
-@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
-@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
-@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
-@.str.len25.h117462910 = private unnamed_addr constant [26 x i8] c"runtime.enum_instantiate(\00"
 @.str.len5.h1958778164 = private unnamed_addr constant [6 x i8] c"break\00"
-@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
-@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len7.h919609845 = private unnamed_addr constant [8 x i8] c"import \00"
-@.str.len6.h42978514 = private unnamed_addr constant [7 x i8] c"export\00"
-@.str.len8.h104511138 = private unnamed_addr constant [9 x i8] c"', self.\00"
-@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
+@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.str.len11.h1460619898 = private unnamed_addr constant [12 x i8] c" (pattern: \00"
+@.str.len4.h175996034 = private unnamed_addr constant [5 x i8] c" in \00"
 @.str.len10.h1977847647 = private unnamed_addr constant [11 x i8] c"index += 1\00"
-@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
-@.str.len26.h1984174475 = private unnamed_addr constant [27 x i8] c"raise AttributeError(item)\00"
-@.str.len39.h2079567388 = private unnamed_addr constant [40 x i8] c"match case without active match context\00"
-@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
-@.str.len5.h461434216 = private unnamed_addr constant [6 x i8] c"self.\00"
+@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
+@.str.len4.h176216012 = private unnamed_addr constant [5 x i8] c" or \00"
+@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
+@.str.len28.h430828782 = private unnamed_addr constant [29 x i8] c"def __getattr__(self, item):\00"
+@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len18.h1456282769 = private unnamed_addr constant [19 x i8] c"return field.value\00"
 @.str.len22.h1038501153 = private unnamed_addr constant [23 x i8] c"runtime.struct_field('\00"
-@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.str.len7.h919609845 = private unnamed_addr constant [8 x i8] c"import \00"
+@.str.len26.h1088202076 = private unnamed_addr constant [27 x i8] c"field = self.fields[index]\00"
+@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
+@.enum.NativeInstruction.Loop.variant = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.str.len11.h1898426375 = private unnamed_addr constant [12 x i8] c"while True:\00"
+@.str.len12.h300877395 = private unnamed_addr constant [13 x i8] c"EnumInstance\00"
+@.str.len25.h458257002 = private unnamed_addr constant [26 x i8] c"endif without matching if\00"
+@.str.len22.h983476432 = private unnamed_addr constant [23 x i8] c"if field.name == item:\00"
+@.str.len42.h9444846 = private unnamed_addr constant [43 x i8] c"unsupported instruction emitted as comment\00"
+@.str.len37.h314404344 = private unnamed_addr constant [38 x i8] c"endmatch without active match context\00"
+@.str.len4.h237997259 = private unnamed_addr constant [5 x i8] c"True\00"

@@ -225,6 +225,7 @@ declare i8* @sailfin_adapter_fs_read_file(i8*)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare i1 @strings_equal(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
@@ -3249,7 +3250,7 @@ then0:
   %t9 = fptosi double %t6 to i64
   %t10 = fptosi double %t8 to i64
   %t11 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t9, i64 %t10)
-  %t12 = icmp eq i8* %t11, %delimiter
+  %t12 = call i1 @strings_equal(i8* %t11, i8* %delimiter)
   br i1 %t12, label %then2, label %merge3
 then2:
   %t13 = sitofp i64 2 to double
@@ -3259,7 +3260,7 @@ then2:
   %t17 = fptosi double %t14 to i64
   %t18 = fptosi double %t16 to i64
   %t19 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t17, i64 %t18)
-  %t20 = icmp eq i8* %t19, %delimiter
+  %t20 = call i1 @strings_equal(i8* %t19, i8* %delimiter)
   br i1 %t20, label %then4, label %merge5
 then4:
   %t21 = sitofp i64 3 to double
@@ -3342,7 +3343,7 @@ then10:
   br label %loop.latch4
 merge11:
   %t31 = load i8*, i8** %l2
-  %t32 = icmp eq i8* %t31, %delimiter
+  %t32 = call i1 @strings_equal(i8* %t31, i8* %delimiter)
   %t33 = load double, double* %l0
   %t34 = load i1, i1* %l1
   %t35 = load i8*, i8** %l2
@@ -3365,8 +3366,8 @@ merge1:
   %t43 = load double, double* %l3
   br label %loop.header14
 loop.header14:
-  %t97 = phi double [ %t43, %merge1 ], [ %t96, %loop.latch16 ]
-  store double %t97, double* %l3
+  %t98 = phi double [ %t43, %merge1 ], [ %t97, %loop.latch16 ]
+  store double %t98, double* %l3
   br label %loop.body15
 loop.body15:
   %t44 = load double, double* %l3
@@ -3389,10 +3390,10 @@ merge19:
   %t55 = load double, double* %l5
   br label %loop.header20
 loop.header20:
-  %t83 = phi i1 [ %t54, %merge19 ], [ %t81, %loop.latch22 ]
-  %t84 = phi double [ %t55, %merge19 ], [ %t82, %loop.latch22 ]
-  store i1 %t83, i1* %l4
-  store double %t84, double* %l5
+  %t84 = phi i1 [ %t54, %merge19 ], [ %t82, %loop.latch22 ]
+  %t85 = phi double [ %t55, %merge19 ], [ %t83, %loop.latch22 ]
+  store i1 %t84, i1* %l4
+  store double %t85, double* %l5
   br label %loop.body21
 loop.body21:
   %t56 = load double, double* %l5
@@ -3417,51 +3418,52 @@ merge25:
   %t71 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t69, i64 %t70)
   store i8* %t71, i8** %l6
   %t72 = load i8*, i8** %l6
-  %t73 = icmp ne i8* %t72, %delimiter
-  %t74 = load double, double* %l3
-  %t75 = load i1, i1* %l4
-  %t76 = load double, double* %l5
-  %t77 = load i8*, i8** %l6
-  br i1 %t73, label %then26, label %merge27
+  %t73 = call i1 @strings_equal(i8* %t72, i8* %delimiter)
+  %t74 = xor i1 %t73, true
+  %t75 = load double, double* %l3
+  %t76 = load i1, i1* %l4
+  %t77 = load double, double* %l5
+  %t78 = load i8*, i8** %l6
+  br i1 %t74, label %then26, label %merge27
 then26:
   store i1 0, i1* %l4
   br label %afterloop23
 merge27:
-  %t78 = load double, double* %l5
-  %t79 = sitofp i64 1 to double
-  %t80 = fadd double %t78, %t79
-  store double %t80, double* %l5
+  %t79 = load double, double* %l5
+  %t80 = sitofp i64 1 to double
+  %t81 = fadd double %t79, %t80
+  store double %t81, double* %l5
   br label %loop.latch22
 loop.latch22:
-  %t81 = load i1, i1* %l4
-  %t82 = load double, double* %l5
+  %t82 = load i1, i1* %l4
+  %t83 = load double, double* %l5
   br label %loop.header20
 afterloop23:
-  %t85 = load i1, i1* %l4
-  %t86 = load double, double* %l5
-  %t87 = load i1, i1* %l4
-  %t88 = load double, double* %l3
-  %t89 = load i1, i1* %l4
-  %t90 = load double, double* %l5
-  br i1 %t87, label %then28, label %merge29
+  %t86 = load i1, i1* %l4
+  %t87 = load double, double* %l5
+  %t88 = load i1, i1* %l4
+  %t89 = load double, double* %l3
+  %t90 = load i1, i1* %l4
+  %t91 = load double, double* %l5
+  br i1 %t88, label %then28, label %merge29
 then28:
-  %t91 = load double, double* %l3
-  %t92 = fadd double %t91, %quote_length
-  ret double %t92
+  %t92 = load double, double* %l3
+  %t93 = fadd double %t92, %quote_length
+  ret double %t93
 merge29:
-  %t93 = load double, double* %l3
-  %t94 = sitofp i64 1 to double
-  %t95 = fadd double %t93, %t94
-  store double %t95, double* %l3
+  %t94 = load double, double* %l3
+  %t95 = sitofp i64 1 to double
+  %t96 = fadd double %t94, %t95
+  store double %t96, double* %l3
   br label %loop.latch16
 loop.latch16:
-  %t96 = load double, double* %l3
+  %t97 = load double, double* %l3
   br label %loop.header14
 afterloop17:
-  %t98 = load double, double* %l3
-  %t99 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t100 = sitofp i64 %t99 to double
-  ret double %t100
+  %t99 = load double, double* %l3
+  %t100 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t101 = sitofp i64 %t100 to double
+  ret double %t101
 }
 
 define i8* @repeat_character(i8* %ch, double %count) {
@@ -3812,18 +3814,18 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
 @.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
-@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
-@.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
-@.str.len85.h1706301526 = private unnamed_addr constant [86 x i8] c"native backend: lowering produced unsupported python output; stage0 fallback disabled\00"
-@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
-@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
-@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
-@.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
-@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
-@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
-@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
 @.str.len5.h655249917 = private unnamed_addr constant [6 x i8] c"\0Alet \00"
+@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
+@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
+@.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
+@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
+@.str.len85.h1706301526 = private unnamed_addr constant [86 x i8] c"native backend: lowering produced unsupported python output; stage0 fallback disabled\00"
+@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
+@.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
 @.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
+@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
+@.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
+@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
+@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
 @.str.len14.h129277126 = private unnamed_addr constant [15 x i8] c"ExpressionRaw(\00"

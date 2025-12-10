@@ -1280,163 +1280,195 @@
     ret result
 .endfn
 
+.fn strings_equal(left -> string, right -> string) -> boolean
+.meta return boolean
+.meta effects none
+    .span 683 18 683 32
+    .param left -> string
+    .span 683 34 683 49
+    .param right -> string
+    .if left.length != right.length
+        .span 685 9 685 22
+        ret false
+    .endif
+    .span 687 5 687 23
+    eval let mut index = 0
+    .loop
+        .if index >= left.length
+            break
+        .endif
+        .span 692 9 692 46
+        eval let left_char = char_at(left, index)
+        .span 693 9 693 48
+        eval let right_char = char_at(right, index)
+        .if runtime_char_code_fn(left_char) != runtime_char_code_fn(right_char)
+            .span 695 13 695 26
+            ret false
+        .endif
+        .span 697 9 697 27
+        eval index = index + 1
+    .endloop
+    .span 699 5 699 17
+    ret true
+.endfn
+
 .fn find_char(text -> string, character -> string, start -> number = 0) -> number
 .meta return number
 .meta effects none
-    .span 683 14 683 28
+    .span 702 14 702 28
     .param text -> string
-    .span 683 30 683 49
+    .span 702 30 702 49
     .param character -> string
-    .span 683 51 683 70
+    .span 702 51 702 70
     .param start -> number = 0
-    .span 684 5 684 30
+    .span 703 5 703 30
     eval let length = text.length
     .if length == 0
-        .span 686 9 686 19
+        .span 705 9 705 19
         ret -1
     .endif
-    .span 689 5 689 38
+    .span 708 5 708 38
     eval let mut normalized_start = start
     .if normalized_start < 0
-        .span 691 9 691 30
+        .span 710 9 710 30
         eval normalized_start = 0
     .endif
     .if normalized_start >= length
-        .span 694 9 694 19
+        .span 713 9 713 19
         ret -1
     .endif
-    .span 697 5 697 32
+    .span 716 5 716 32
     eval let mut target = character
     .if target.length == 2 && char_at(target, 0) == "\\"
-        .span 699 9 699 41
+        .span 718 9 718 41
         eval let escape = char_at(target, 1)
         .if escape == "n"
-            .span 701 13 701 27
+            .span 720 13 720 27
             eval target = "\n"
         .else
             .if escape == "r"
-                .span 703 13 703 27
+                .span 722 13 722 27
                 eval target = "\r"
             .else
                 .if escape == "t"
-                    .span 705 13 705 27
+                    .span 724 13 724 27
                     eval target = "\t"
                 .endif
             .endif
         .endif
     .endif
-    .span 709 5 709 38
+    .span 728 5 728 38
     eval let mut index = normalized_start
     .loop
         .if index >= length
             break
         .endif
-        .if char_at(text, index) == target
-            .span 715 13 715 26
+        .if strings_equal(char_at(text, index), target)
+            .span 734 13 734 26
             ret index
         .endif
-        .span 717 9 717 27
+        .span 736 9 736 27
         eval index = index + 1
     .endloop
-    .span 720 5 720 15
+    .span 739 5 739 15
     ret -1
 .endfn
 
 .fn match_exhaustive_failed(value -> any) -> void
 .meta return void
 .meta effects none
-    .span 723 28 723 40
+    .span 742 28 742 40
     .param value -> any
-    .span 724 5 724 64
+    .span 743 5 743 64
     eval let message = "Non-exhaustive match for value {{ value }}"
-    .span 725 5 725 43
+    .span 744 5 744 43
     eval runtime_raise_value_error_fn(message)
 .endfn
 
 .fn char_code(character -> string) -> number
 .meta return number
 .meta effects none
-    .span 728 14 728 33
+    .span 747 14 747 33
     .param character -> string
     .if character.length == 0
-        .span 730 9 730 19
+        .span 749 9 749 19
         ret -1
     .endif
-    .span 733 5 733 36
+    .span 752 5 752 36
     eval let ch = char_at(character, 0)
-    .span 735 5 735 31
+    .span 754 5 754 31
     eval let digits = "0123456789"
-    .span 736 5 736 48
+    .span 755 5 755 48
     eval let digit_index = find_char(digits, ch, 0)
     .if digit_index >= 0
-        .span 739 9 739 33
+        .span 758 9 758 33
         ret 48 + digit_index
     .endif
-    .span 742 5 742 50
+    .span 761 5 761 50
     eval let lowercase = "abcdefghijklmnopqrstuvwxyz"
-    .span 743 5 743 55
+    .span 762 5 762 55
     eval let lowercase_index = find_char(lowercase, ch, 0)
     .if lowercase_index >= 0
-        .span 746 9 746 37
+        .span 765 9 765 37
         ret 97 + lowercase_index
     .endif
-    .span 749 5 749 50
+    .span 768 5 768 50
     eval let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    .span 750 5 750 55
+    .span 769 5 769 55
     eval let uppercase_index = find_char(uppercase, ch, 0)
     .if uppercase_index >= 0
-        .span 753 9 753 37
+        .span 772 9 772 37
         ret 65 + uppercase_index
     .endif
     .if ch == " "
-        .span 757 9 757 19
+        .span 776 9 776 19
         ret 32
     .endif
     .if ch == "\n"
-        .span 761 9 761 19
+        .span 780 9 780 19
         ret 10
     .endif
     .if ch == "\r"
-        .span 765 9 765 19
+        .span 784 9 784 19
         ret 13
     .endif
     .if ch == "\t"
-        .span 769 9 769 18
+        .span 788 9 788 18
         ret 9
     .endif
     .if ch == "\""
-        .span 773 9 773 19
+        .span 792 9 792 19
         ret 34
     .endif
     .if ch == "\\"
-        .span 777 9 777 19
+        .span 796 9 796 19
         ret 92
     .endif
     .if ch == "_"
-        .span 781 9 781 19
+        .span 800 9 800 19
         ret 95
     .endif
-    .span 783 5 783 37
+    .span 802 5 802 37
     ret runtime_char_code_fn(ch)
 .endfn
 
 .fn grapheme_count(text -> string) -> number
 .meta return number
 .meta effects none
-    .span 787 19 787 33
+    .span 806 19 806 33
     .param text -> string
-    .span 788 5 788 44
+    .span 807 5 807 44
     ret runtime_grapheme_count_fn(text)
 .endfn
 
 .fn grapheme_at(text -> string, index -> number) -> string
 .meta return string
 .meta effects none
-    .span 791 16 791 30
+    .span 810 16 810 30
     .param text -> string
-    .span 791 32 791 47
+    .span 810 32 810 47
     .param index -> number
-    .span 792 5 792 48
+    .span 811 5 811 48
     ret runtime_grapheme_at_fn(text, index)
 .endfn
 

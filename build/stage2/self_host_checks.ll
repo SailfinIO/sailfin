@@ -11,6 +11,7 @@ source_filename = "sailfin"
 declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare i1 @strings_equal(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
@@ -352,7 +353,7 @@ merge5:
   %t14 = getelementptr %CompiledModule, %CompiledModule* %t11, i64 %t9
   %t15 = load %CompiledModule, %CompiledModule* %t14
   %t16 = extractvalue %CompiledModule %t15, 0
-  %t17 = icmp eq i8* %t16, %target
+  %t17 = call i1 @strings_equal(i8* %t16, i8* %target)
   %t18 = load double, double* %l0
   br i1 %t17, label %then6, label %merge7
 then6:

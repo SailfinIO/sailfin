@@ -795,6 +795,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
+    runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
     let direct_effects = collect_direct_function_effects(context_functions);
     let call_graph = collect_function_call_graph(context_functions);
@@ -11235,6 +11236,24 @@ fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, ri
     if left_operand.llvm_type != right_operand.llvm_type {
         diagnostics = append_string(diagnostics, "llvm lowering: comparison operands have mismatched types `" + left_operand.llvm_type + "` and `" + right_operand.llvm_type + "`");
     }
+    let symbol_is_equality = symbol == "==" || symbol == "!=";
+    let left_is_string = is_string_pointer_type(left_operand.llvm_type);
+    let right_is_string = is_string_pointer_type(right_operand.llvm_type);
+    let left_is_null = left_operand.value == "null";
+    let right_is_null = right_operand.value == "null";
+    if symbol_is_equality && left_is_string && right_is_string && !left_is_null && !right_is_null {
+        let compare_temp = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + compare_temp + " = call i1 @strings_equal(i8* " + left_operand.value + ", i8* " + right_operand.value + ")");
+        let mut next_index = temp_index + 1;
+        let mut operand = LLVMOperand { llvm_type: "i1", value: compare_temp };
+        if symbol == "!=" {
+            let inverted_temp = format_temp_name(next_index);
+            current_lines = append_string(current_lines, "  " + inverted_temp + " = xor i1 " + compare_temp + ", true");
+            operand = LLVMOperand { llvm_type: "i1", value: inverted_temp };
+            next_index += 1;
+        }
+        return ComparisonEmission { lines: current_lines, temp_index: next_index, operand: operand, diagnostics: diagnostics };
+    }
     let llvm_type = left_operand.llvm_type;
     let predicate = comparison_predicate_for_symbol(symbol, llvm_type);
     if predicate.length == 0 {
@@ -11347,6 +11366,13 @@ fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> str
         return "";
     }
     return "";
+}
+
+fn is_string_pointer_type(llvm_type -> string) -> boolean {
+    if llvm_type == "i8*" {
+        return true;
+    }
+    return false;
 }
 
 fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[]) -> string[] {

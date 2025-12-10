@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.token import Token, TokenKind, eof_token
-from compiler.build.string_utils import substring, char_code
+from compiler.build.string_utils import substring, char_code, strings_equal
 
 print = runtime.console
 sleep = runtime.sleep
@@ -46,7 +46,7 @@ def lex(source):
                     break
                 if not is_whitespace(state.source[state.index]):
                     break
-                if state.source[state.index] == "\n":
+                if strings_equal(state.source[state.index], "\n"):
                     state.index += 1
                     state.line += 1
                     state.column = 1
@@ -56,9 +56,9 @@ def lex(source):
             lexeme = slice(state.source, start_index, state.index)
             tokens = append(tokens, Token(kind=TokenKind.Whitespace(), lexeme=lexeme, line=start_line, column=start_column))
             continue
-        if ch == "/":
+        if strings_equal(ch, "/"):
             next = peek_next_char(state)
-            if next == "/":
+            if strings_equal(next, "/"):
                 start_index = state.index
                 start_line = state.line
                 start_column = state.column
@@ -70,7 +70,7 @@ def lex(source):
                     if scan_index >= len(state.source):
                         break
                     scan_character = state.source[scan_index]
-                    if scan_character == "\n"  or  scan_character == "\r":
+                    if strings_equal(scan_character, "\n")  or  strings_equal(scan_character, "\r"):
                         comment_end = scan_index
                         break
                     scan_index += 1
@@ -80,7 +80,7 @@ def lex(source):
                 state.column += consumed_columns
                 tokens = append(tokens, Token(kind=TokenKind.Comment(), lexeme=lexeme, line=start_line, column=start_column))
                 continue
-            if next == "*":
+            if strings_equal(next, "*"):
                 start_index = state.index
                 start_line = state.line
                 start_column = state.column
@@ -89,11 +89,11 @@ def lex(source):
                 while True:
                     if state.index >= len(state.source):
                         break
-                    if state.source[state.index] == "*"  and  peek_next_char(state) == "/":
+                    if strings_equal(state.source[state.index], "*")  and  strings_equal(peek_next_char(state), "/"):
                         state.index += 2
                         state.column += 2
                         break
-                    if state.source[state.index] == "\n":
+                    if strings_equal(state.source[state.index], "\n"):
                         state.index += 1
                         state.line += 1
                         state.column = 1
@@ -129,7 +129,7 @@ def lex(source):
                     escaped = False
                 else:
                     literal = literal + current
-                if current == "\n":
+                if strings_equal(current, "\n"):
                     state.index += 1
                     state.line += 1
                     state.column = 1
@@ -152,7 +152,7 @@ def lex(source):
                     break
                 state.index += 1
                 state.column += 1
-            if state.index < len(state.source)  and  state.source[state.index] == ".":
+            if state.index < len(state.source)  and  strings_equal(state.source[state.index], "."):
                 next_is_digit = state.index + 1 < len(state.source)  and  is_digit(state.source[state.index + 1])
                 if next_is_digit:
                     state.index += 1
@@ -181,7 +181,7 @@ def lex(source):
                 state.index += 1
                 state.column += 1
             value = slice(state.source, start, state.index)
-            if value == "true"  or  value == "false":
+            if strings_equal(value, "true")  or  strings_equal(value, "false"):
                 tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'BooleanLiteral', [runtime.enum_field('value', value)]), lexeme=value, line=start_line, column=start_column))
             else:
                 tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Identifier', [runtime.enum_field('value', value)]), lexeme=value, line=start_line, column=start_column))
@@ -190,7 +190,7 @@ def lex(source):
         start_column = state.column
         lexeme = ch
         next_symbol = peek_next_char(state)
-        if next_symbol != "":
+        if not strings_equal(next_symbol, ""):
             pair = ch + next_symbol
             if is_two_char_symbol(pair):
                 lexeme = pair
@@ -199,7 +199,7 @@ def lex(source):
                 tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Symbol', [runtime.enum_field('value', lexeme)]), lexeme=lexeme, line=start_line, column=start_column))
                 continue
         state.index += 1
-        if ch == "\n":
+        if strings_equal(ch, "\n"):
             state.line += 1
             state.column = 1
         else:
@@ -209,10 +209,10 @@ def lex(source):
     return tokens
 
 def is_whitespace(ch):
-    return ch == " "  or  ch == "\t"  or  ch == "\n"  or  ch == "\r"
+    return strings_equal(ch, " ")  or  strings_equal(ch, "\t")  or  strings_equal(ch, "\n")  or  strings_equal(ch, "\r")
 
 def is_identifier_start(ch):
-    return is_letter(ch)  or  ch == "_"
+    return is_letter(ch)  or  strings_equal(ch, "_")
 
 def is_identifier_part(ch):
     return is_identifier_start(ch)  or  is_digit(ch)
@@ -244,11 +244,11 @@ def peek_next_char(state):
     return state.source[next_index]
 
 def interpret_escape(ch):
-    if ch == "n":
+    if strings_equal(ch, "n"):
         return "\n"
-    if ch == "t":
+    if strings_equal(ch, "t"):
         return "\t"
-    if ch == "r":
+    if strings_equal(ch, "r"):
         return "\r"
     if is_double_quote(ch):
         return "\""
@@ -257,4 +257,4 @@ def interpret_escape(ch):
     return ch
 
 def is_two_char_symbol(value):
-    return value == "->"  or  value == "=>"  or  value == "=="  or  value == "!="  or  value == "<="  or  value == ">="  or  value == "&&"  or  value == "||"  or  value == ".."
+    return strings_equal(value, "->")  or  strings_equal(value, "=>")  or  strings_equal(value, "==")  or  strings_equal(value, "!=")  or  strings_equal(value, "<=")  or  strings_equal(value, ">=")  or  strings_equal(value, "&&")  or  strings_equal(value, "||")  or  strings_equal(value, "..")

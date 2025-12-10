@@ -585,6 +585,20 @@ def substring(text, start, end):
         index = index + 1
     return result
 
+def strings_equal(left, right):
+    if len(left) != len(right):
+        return False
+    index = 0
+    while True:
+        if index >= len(left):
+            break
+        left_char = char_at(left, index)
+        right_char = char_at(right, index)
+        if runtime_char_code_fn(left_char) != runtime_char_code_fn(right_char):
+            return False
+        index = index + 1
+    return True
+
 def find_char(text, character, start = 0):
     length = len(text)
     if length == 0:
@@ -609,7 +623,7 @@ def find_char(text, character, start = 0):
     while True:
         if index >= length:
             break
-        if char_at(text, index) == target:
+        if strings_equal(char_at(text, index), target):
             return index
         index = index + 1
     return -1

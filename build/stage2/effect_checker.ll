@@ -39,6 +39,7 @@ source_filename = "sailfin"
 declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare i1 @strings_equal(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
@@ -239,7 +240,7 @@ block.entry:
   %t69 = icmp eq i32 %t0, 22
   %t70 = select i1 %t69, i8* %t68, i8* %t67
   %s71 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h486335986, i32 0, i32 0
-  %t72 = icmp eq i8* %t70, %s71
+  %t72 = call i1 @strings_equal(i8* %t70, i8* %s71)
   br i1 %t72, label %then0, label %merge1
 then0:
   %t73 = extractvalue %Statement %statement, 0
@@ -527,7 +528,7 @@ merge1:
   %t349 = icmp eq i32 %t280, 22
   %t350 = select i1 %t349, i8* %t348, i8* %t347
   %s351 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h479148896, i32 0, i32 0
-  %t352 = icmp eq i8* %t350, %s351
+  %t352 = call i1 @strings_equal(i8* %t350, i8* %s351)
   br i1 %t352, label %then2, label %merge3
 then2:
   %t353 = extractvalue %Statement %statement, 0
@@ -801,7 +802,7 @@ merge3:
   %t614 = icmp eq i32 %t545, 22
   %t615 = select i1 %t614, i8* %t613, i8* %t612
   %s616 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h571715647, i32 0, i32 0
-  %t617 = icmp eq i8* %t615, %s616
+  %t617 = call i1 @strings_equal(i8* %t615, i8* %s616)
   br i1 %t617, label %then4, label %merge5
 then4:
   %t618 = extractvalue %Statement %statement, 0
@@ -1075,7 +1076,7 @@ merge5:
   %t879 = icmp eq i32 %t810, 22
   %t880 = select i1 %t879, i8* %t878, i8* %t877
   %s881 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h889179835, i32 0, i32 0
-  %t882 = icmp eq i8* %t880, %s881
+  %t882 = call i1 @strings_equal(i8* %t880, i8* %s881)
   br i1 %t882, label %then6, label %merge7
 then6:
   %t883 = extractvalue %Statement %statement, 0
@@ -1470,7 +1471,7 @@ merge7:
   %t1259 = icmp eq i32 %t1190, 22
   %t1260 = select i1 %t1259, i8* %t1258, i8* %t1257
   %s1261 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1842783069, i32 0, i32 0
-  %t1262 = icmp eq i8* %t1260, %s1261
+  %t1262 = call i1 @strings_equal(i8* %t1260, i8* %s1261)
   br i1 %t1262, label %then8, label %merge9
 then8:
   %t1263 = getelementptr [0 x %EffectViolation], [0 x %EffectViolation]* null, i32 1
@@ -1777,7 +1778,7 @@ merge11:
   %t73 = load %DecoratorInfo, %DecoratorInfo* %l5
   %t74 = extractvalue %DecoratorInfo %t73, 0
   %s75 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h515589823, i32 0, i32 0
-  %t76 = icmp eq i8* %t74, %s75
+  %t76 = call i1 @strings_equal(i8* %t74, i8* %s75)
   br label %logical_or_entry_72
 
 logical_or_entry_72:
@@ -1787,7 +1788,7 @@ logical_or_right_72:
   %t78 = load %DecoratorInfo, %DecoratorInfo* %l5
   %t79 = extractvalue %DecoratorInfo %t78, 0
   %s80 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h1147459442, i32 0, i32 0
-  %t81 = icmp eq i8* %t79, %s80
+  %t81 = call i1 @strings_equal(i8* %t79, i8* %s80)
   br label %logical_or_entry_77
 
 logical_or_entry_77:
@@ -1797,7 +1798,7 @@ logical_or_right_77:
   %t82 = load %DecoratorInfo, %DecoratorInfo* %l5
   %t83 = extractvalue %DecoratorInfo %t82, 0
   %s84 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h1170311443, i32 0, i32 0
-  %t85 = icmp eq i8* %t83, %s84
+  %t85 = call i1 @strings_equal(i8* %t83, i8* %s84)
   br label %logical_or_right_end_77
 
 logical_or_right_end_77:
@@ -1941,7 +1942,7 @@ merge21:
   store i8* %t174, i8** %l11
   %t176 = load i8*, i8** %l11
   %s177 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193495007, i32 0, i32 0
-  %t178 = icmp eq i8* %t176, %s177
+  %t178 = call i1 @strings_equal(i8* %t176, i8* %s177)
   br label %logical_and_entry_175
 
 logical_and_entry_175:
@@ -2309,7 +2310,7 @@ block.entry:
   %t69 = icmp eq i32 %t0, 22
   %t70 = select i1 %t69, i8* %t68, i8* %t67
   %s71 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1067284810, i32 0, i32 0
-  %t72 = icmp eq i8* %t70, %s71
+  %t72 = call i1 @strings_equal(i8* %t70, i8* %s71)
   br i1 %t72, label %then0, label %merge1
 then0:
   %t73 = extractvalue %Statement %statement, 0
@@ -2484,7 +2485,7 @@ merge1:
   %t232 = icmp eq i32 %t163, 22
   %t233 = select i1 %t232, i8* %t231, i8* %t230
   %s234 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1925822000, i32 0, i32 0
-  %t235 = icmp eq i8* %t233, %s234
+  %t235 = call i1 @strings_equal(i8* %t233, i8* %s234)
   br i1 %t235, label %then2, label %merge3
 then2:
   %t236 = extractvalue %Statement %statement, 0
@@ -2695,7 +2696,7 @@ merge3:
   %t414 = icmp eq i32 %t345, 22
   %t415 = select i1 %t414, i8* %t413, i8* %t412
   %s416 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h84042670, i32 0, i32 0
-  %t417 = icmp eq i8* %t415, %s416
+  %t417 = call i1 @strings_equal(i8* %t415, i8* %s416)
   br i1 %t417, label %then10, label %merge11
 then10:
   %t418 = extractvalue %Statement %statement, 0
@@ -2865,7 +2866,7 @@ merge11:
   %t572 = icmp eq i32 %t503, 22
   %t573 = select i1 %t572, i8* %t571, i8* %t570
   %s574 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1678412334, i32 0, i32 0
-  %t575 = icmp eq i8* %t573, %s574
+  %t575 = call i1 @strings_equal(i8* %t573, i8* %s574)
   br i1 %t575, label %then12, label %merge13
 then12:
   %t576 = extractvalue %Statement %statement, 0
@@ -3001,7 +3002,7 @@ merge13:
   %t703 = icmp eq i32 %t634, 22
   %t704 = select i1 %t703, i8* %t702, i8* %t701
   %s705 = getelementptr inbounds [15 x i8], [15 x i8]* @.str.len14.h196308685, i32 0, i32 0
-  %t706 = icmp eq i8* %t704, %s705
+  %t706 = call i1 @strings_equal(i8* %t704, i8* %s705)
   br i1 %t706, label %then14, label %merge15
 then14:
   %t707 = extractvalue %Statement %statement, 0
@@ -3160,7 +3161,7 @@ merge15:
   %t835 = icmp eq i32 %t766, 22
   %t836 = select i1 %t835, i8* %t834, i8* %t833
   %s837 = getelementptr inbounds [12 x i8], [12 x i8]* @.str.len11.h1566780570, i32 0, i32 0
-  %t838 = icmp eq i8* %t836, %s837
+  %t838 = call i1 @strings_equal(i8* %t836, i8* %s837)
   br i1 %t838, label %then22, label %merge23
 then22:
   %t839 = extractvalue %Statement %statement, 0
@@ -3291,7 +3292,7 @@ merge23:
   %t950 = icmp eq i32 %t881, 22
   %t951 = select i1 %t950, i8* %t949, i8* %t948
   %s952 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h1613933868, i32 0, i32 0
-  %t953 = icmp eq i8* %t951, %s952
+  %t953 = call i1 @strings_equal(i8* %t951, i8* %s952)
   br i1 %t953, label %then26, label %merge27
 then26:
   %t954 = extractvalue %Statement %statement, 0
@@ -3378,7 +3379,7 @@ merge27:
   %t1032 = icmp eq i32 %t963, 22
   %t1033 = select i1 %t1032, i8* %t1031, i8* %t1030
   %s1034 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h868168677, i32 0, i32 0
-  %t1035 = icmp eq i8* %t1033, %s1034
+  %t1035 = call i1 @strings_equal(i8* %t1033, i8* %s1034)
   br i1 %t1035, label %then28, label %merge29
 then28:
   %t1036 = extractvalue %Statement %statement, 0
@@ -3465,7 +3466,7 @@ merge29:
   %t1114 = icmp eq i32 %t1045, 22
   %t1115 = select i1 %t1114, i8* %t1113, i8* %t1112
   %s1116 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h1204027478, i32 0, i32 0
-  %t1117 = icmp eq i8* %t1115, %s1116
+  %t1117 = call i1 @strings_equal(i8* %t1115, i8* %s1116)
   br i1 %t1117, label %then30, label %merge31
 then30:
   %t1118 = extractvalue %Statement %statement, 0
@@ -3553,7 +3554,7 @@ merge31:
   %t1197 = icmp eq i32 %t1128, 22
   %t1198 = select i1 %t1197, i8* %t1196, i8* %t1195
   %s1199 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h486335986, i32 0, i32 0
-  %t1200 = icmp eq i8* %t1198, %s1199
+  %t1200 = call i1 @strings_equal(i8* %t1198, i8* %s1199)
   br i1 %t1200, label %then32, label %merge33
 then32:
   %t1201 = extractvalue %Statement %statement, 0
@@ -3689,7 +3690,7 @@ merge33:
   %t1328 = icmp eq i32 %t1259, 22
   %t1329 = select i1 %t1328, i8* %t1327, i8* %t1326
   %s1330 = getelementptr inbounds [20 x i8], [20 x i8]* @.str.len19.h479148896, i32 0, i32 0
-  %t1331 = icmp eq i8* %t1329, %s1330
+  %t1331 = call i1 @strings_equal(i8* %t1329, i8* %s1330)
   br i1 %t1331, label %then34, label %merge35
 then34:
   %t1332 = extractvalue %Statement %statement, 0
@@ -3825,7 +3826,7 @@ merge35:
   %t1459 = icmp eq i32 %t1390, 22
   %t1460 = select i1 %t1459, i8* %t1458, i8* %t1457
   %s1461 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h571715647, i32 0, i32 0
-  %t1462 = icmp eq i8* %t1460, %s1461
+  %t1462 = call i1 @strings_equal(i8* %t1460, i8* %s1461)
   br i1 %t1462, label %then36, label %merge37
 then36:
   %t1463 = extractvalue %Statement %statement, 0
@@ -3961,7 +3962,7 @@ merge37:
   %t1590 = icmp eq i32 %t1521, 22
   %t1591 = select i1 %t1590, i8* %t1589, i8* %t1588
   %s1592 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h889179835, i32 0, i32 0
-  %t1593 = icmp eq i8* %t1591, %s1592
+  %t1593 = call i1 @strings_equal(i8* %t1591, i8* %s1592)
   br i1 %t1593, label %then38, label %merge39
 then38:
   %t1594 = extractvalue %Statement %statement, 0
@@ -4097,7 +4098,7 @@ merge39:
   %t1721 = icmp eq i32 %t1652, 22
   %t1722 = select i1 %t1721, i8* %t1720, i8* %t1719
   %s1723 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1842783069, i32 0, i32 0
-  %t1724 = icmp eq i8* %t1722, %s1723
+  %t1724 = call i1 @strings_equal(i8* %t1722, i8* %s1723)
   br i1 %t1724, label %then40, label %merge41
 then40:
   %t1725 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* null, i32 1
@@ -4261,7 +4262,7 @@ merge41:
   %t1857 = icmp eq i32 %t1788, 22
   %t1858 = select i1 %t1857, i8* %t1856, i8* %t1855
   %s1859 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h2043328844, i32 0, i32 0
-  %t1860 = icmp eq i8* %t1858, %s1859
+  %t1860 = call i1 @strings_equal(i8* %t1858, i8* %s1859)
   br i1 %t1860, label %then48, label %merge49
 then48:
   %t1861 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* null, i32 1
@@ -4427,7 +4428,7 @@ merge49:
   %t1994 = icmp eq i32 %t1925, 22
   %t1995 = select i1 %t1994, i8* %t1993, i8* %t1992
   %s1996 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h48777630, i32 0, i32 0
-  %t1997 = icmp eq i8* %t1995, %s1996
+  %t1997 = call i1 @strings_equal(i8* %t1995, i8* %s1996)
   br i1 %t1997, label %then56, label %merge57
 then56:
   %t1998 = extractvalue %Statement %statement, 0
@@ -4598,7 +4599,7 @@ merge1:
   %t62 = icmp eq i32 %t14, 15
   %t63 = select i1 %t62, i8* %t61, i8* %t60
   %s64 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h217216103, i32 0, i32 0
-  %t65 = icmp eq i8* %t63, %s64
+  %t65 = call i1 @strings_equal(i8* %t63, i8* %s64)
   br i1 %t65, label %then2, label %merge3
 then2:
   %t66 = getelementptr inbounds %Expression, %Expression* %expression, i32 0, i32 0
@@ -4733,7 +4734,7 @@ merge3:
   %t173 = icmp eq i32 %t125, 15
   %t174 = select i1 %t173, i8* %t172, i8* %t171
   %s175 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h512390329, i32 0, i32 0
-  %t176 = icmp eq i8* %t174, %s175
+  %t176 = call i1 @strings_equal(i8* %t174, i8* %s175)
   br i1 %t176, label %then10, label %merge11
 then10:
   %t177 = getelementptr inbounds %Expression, %Expression* %expression, i32 0, i32 0
@@ -4799,7 +4800,7 @@ merge11:
   %t235 = icmp eq i32 %t187, 15
   %t236 = select i1 %t235, i8* %t234, i8* %t233
   %s237 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1445149598, i32 0, i32 0
-  %t238 = icmp eq i8* %t236, %s237
+  %t238 = call i1 @strings_equal(i8* %t236, i8* %s237)
   br i1 %t238, label %then12, label %merge13
 then12:
   %t239 = getelementptr inbounds %Expression, %Expression* %expression, i32 0, i32 0
@@ -4866,7 +4867,7 @@ merge13:
   %t298 = icmp eq i32 %t250, 15
   %t299 = select i1 %t298, i8* %t297, i8* %t296
   %s300 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1496334143, i32 0, i32 0
-  %t301 = icmp eq i8* %t299, %s300
+  %t301 = call i1 @strings_equal(i8* %t299, i8* %s300)
   br i1 %t301, label %then14, label %merge15
 then14:
   %t302 = getelementptr inbounds %Expression, %Expression* %expression, i32 0, i32 0
@@ -4948,7 +4949,7 @@ merge15:
   %t374 = icmp eq i32 %t326, 15
   %t375 = select i1 %t374, i8* %t373, i8* %t372
   %s376 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h667777838, i32 0, i32 0
-  %t377 = icmp eq i8* %t375, %s376
+  %t377 = call i1 @strings_equal(i8* %t375, i8* %s376)
   br i1 %t377, label %then16, label %merge17
 then16:
   %t378 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* null, i32 1
@@ -5086,7 +5087,7 @@ merge17:
   %t486 = icmp eq i32 %t438, 15
   %t487 = select i1 %t486, i8* %t485, i8* %t484
   %s488 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h826984377, i32 0, i32 0
-  %t489 = icmp eq i8* %t487, %s488
+  %t489 = call i1 @strings_equal(i8* %t487, i8* %s488)
   br i1 %t489, label %then24, label %merge25
 then24:
   %t490 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* null, i32 1
@@ -5242,7 +5243,7 @@ merge25:
   %t615 = icmp eq i32 %t567, 15
   %t616 = select i1 %t615, i8* %t614, i8* %t613
   %s617 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h264904746, i32 0, i32 0
-  %t618 = icmp eq i8* %t616, %s617
+  %t618 = call i1 @strings_equal(i8* %t616, i8* %s617)
   br i1 %t618, label %then32, label %merge33
 then32:
   %t619 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* null, i32 1
@@ -5398,7 +5399,7 @@ merge33:
   %t744 = icmp eq i32 %t696, 15
   %t745 = select i1 %t744, i8* %t743, i8* %t742
   %s746 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h1211862785, i32 0, i32 0
-  %t747 = icmp eq i8* %t745, %s746
+  %t747 = call i1 @strings_equal(i8* %t745, i8* %s746)
   br i1 %t747, label %then40, label %merge41
 then40:
   %t748 = getelementptr inbounds %Expression, %Expression* %expression, i32 0, i32 0
@@ -5465,7 +5466,7 @@ merge41:
   %t807 = icmp eq i32 %t759, 15
   %t808 = select i1 %t807, i8* %t806, i8* %t805
   %s809 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h975618503, i32 0, i32 0
-  %t810 = icmp eq i8* %t808, %s809
+  %t810 = call i1 @strings_equal(i8* %t808, i8* %s809)
   br i1 %t810, label %then42, label %merge43
 then42:
   %t811 = getelementptr inbounds %Expression, %Expression* %expression, i32 0, i32 0
@@ -5546,7 +5547,7 @@ merge43:
   %t882 = icmp eq i32 %t834, 15
   %t883 = select i1 %t882, i8* %t881, i8* %t880
   %s884 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1312780988, i32 0, i32 0
-  %t885 = icmp eq i8* %t883, %s884
+  %t885 = call i1 @strings_equal(i8* %t883, i8* %s884)
   br i1 %t885, label %then44, label %merge45
 then44:
   %t886 = getelementptr inbounds %Expression, %Expression* %expression, i32 0, i32 0
@@ -5627,7 +5628,7 @@ merge45:
   %t957 = icmp eq i32 %t909, 15
   %t958 = select i1 %t957, i8* %t956, i8* %t955
   %s959 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2089530004, i32 0, i32 0
-  %t960 = icmp eq i8* %t958, %s959
+  %t960 = call i1 @strings_equal(i8* %t958, i8* %s959)
   br i1 %t960, label %then46, label %merge47
 then46:
   %t961 = getelementptr [0 x %EffectRequirement], [0 x %EffectRequirement]* null, i32 1
@@ -5845,7 +5846,7 @@ then8:
   %t72 = icmp eq i32 %t48, 7
   %t73 = select i1 %t72, i8* %t71, i8* %t70
   %s74 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
-  %t75 = icmp eq i8* %t73, %s74
+  %t75 = call i1 @strings_equal(i8* %t73, i8* %s74)
   br label %logical_or_entry_45
 
 logical_or_entry_45:
@@ -5881,7 +5882,7 @@ logical_or_right_45:
   %t102 = icmp eq i32 %t78, 7
   %t103 = select i1 %t102, i8* %t101, i8* %t100
   %s104 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h590768815, i32 0, i32 0
-  %t105 = icmp eq i8* %t103, %s104
+  %t105 = call i1 @strings_equal(i8* %t103, i8* %s104)
   br label %logical_or_right_end_45
 
 logical_or_right_end_45:
@@ -6573,7 +6574,7 @@ block.entry:
   %t26 = icmp eq i32 %t2, 7
   %t27 = select i1 %t26, i8* %t25, i8* %t24
   %s28 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h715288307, i32 0, i32 0
-  %t29 = icmp eq i8* %t27, %s28
+  %t29 = call i1 @strings_equal(i8* %t27, i8* %s28)
   br label %logical_or_entry_0
 
 logical_or_entry_0:
@@ -6608,7 +6609,7 @@ logical_or_right_0:
   %t55 = icmp eq i32 %t31, 7
   %t56 = select i1 %t55, i8* %t54, i8* %t53
   %s57 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h936649884, i32 0, i32 0
-  %t58 = icmp eq i8* %t56, %s57
+  %t58 = call i1 @strings_equal(i8* %t56, i8* %s57)
   br label %logical_or_right_end_0
 
 logical_or_right_end_0:
@@ -6650,7 +6651,7 @@ block.entry:
   %t25 = icmp eq i32 %t1, 7
   %t26 = select i1 %t25, i8* %t24, i8* %t23
   %s27 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h1576352120, i32 0, i32 0
-  %t28 = icmp eq i8* %t26, %s27
+  %t28 = call i1 @strings_equal(i8* %t26, i8* %s27)
   br i1 %t28, label %then0, label %merge1
 then0:
   %t29 = extractvalue %Token %token, 0
@@ -6695,13 +6696,13 @@ then0:
   br i1 %t64, label %then2, label %merge3
 then2:
   %t66 = load i8*, i8** %l0
-  %t67 = icmp eq i8* %t66, %expected
+  %t67 = call i1 @strings_equal(i8* %t66, i8* %expected)
   ret i1 %t67
 merge3:
   br label %merge1
 merge1:
   %t68 = extractvalue %Token %token, 1
-  %t69 = icmp eq i8* %t68, %expected
+  %t69 = call i1 @strings_equal(i8* %t68, i8* %expected)
   ret i1 %t69
 }
 
@@ -6736,7 +6737,7 @@ block.entry:
   %t25 = icmp eq i32 %t1, 7
   %t26 = select i1 %t25, i8* %t24, i8* %t23
   %s27 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h453982107, i32 0, i32 0
-  %t28 = icmp eq i8* %t26, %s27
+  %t28 = call i1 @strings_equal(i8* %t26, i8* %s27)
   br i1 %t28, label %then0, label %merge1
 then0:
   %t29 = extractvalue %Token %token, 0
@@ -6781,13 +6782,13 @@ then0:
   br i1 %t64, label %then2, label %merge3
 then2:
   %t66 = load i8*, i8** %l0
-  %t67 = icmp eq i8* %t66, %expected
+  %t67 = call i1 @strings_equal(i8* %t66, i8* %expected)
   ret i1 %t67
 merge3:
   br label %merge1
 merge1:
   %t68 = extractvalue %Token %token, 1
-  %t69 = icmp eq i8* %t68, %expected
+  %t69 = call i1 @strings_equal(i8* %t68, i8* %expected)
   ret i1 %t69
 }
 
@@ -6955,7 +6956,7 @@ merge5:
   call void @sailfin_runtime_bounds_check(i64 %t9, i64 %t12)
   %t14 = getelementptr i8*, i8** %t11, i64 %t9
   %t15 = load i8*, i8** %t14
-  %t16 = icmp eq i8* %t15, %effect
+  %t16 = call i1 @strings_equal(i8* %t15, i8* %effect)
   %t17 = load double, double* %l0
   br i1 %t16, label %then6, label %merge7
 then6:
@@ -7112,7 +7113,7 @@ merge5:
   %t14 = getelementptr %EffectRequirement, %EffectRequirement* %t11, i64 %t9
   %t15 = load %EffectRequirement, %EffectRequirement* %t14
   %t16 = extractvalue %EffectRequirement %t15, 0
-  %t17 = icmp eq i8* %t16, %effect
+  %t17 = call i1 @strings_equal(i8* %t16, i8* %effect)
   %t18 = load double, double* %l0
   br i1 %t17, label %then6, label %merge7
 then6:
@@ -7136,85 +7137,85 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.str.len9.h1700456022 = private unnamed_addr constant [10 x i8] c"pipeline \00"
-@.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
-@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len5.h238194529 = private unnamed_addr constant [6 x i8] c"model\00"
-@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
-@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.str.len5.h500835952 = private unnamed_addr constant [6 x i8] c"test \00"
-@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
 @.str.len19.h868168677 = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.str.len5.h512542702 = private unnamed_addr constant [6 x i8] c"tool \00"
-@.str.len5.h515589823 = private unnamed_addr constant [6 x i8] c"trace\00"
 @.str.len13.h1678412334 = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
-@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
-@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len15.h571715647 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len12.h1147459442 = private unnamed_addr constant [13 x i8] c"logExecution\00"
+@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len12.h10983220 = private unnamed_addr constant [13 x i8] c"prompt block\00"
+@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
+@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
 @.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
+@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.str.len5.h238194529 = private unnamed_addr constant [6 x i8] c"model\00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
+@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len12.h1170311443 = private unnamed_addr constant [13 x i8] c"logexecution\00"
+@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
+@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
+@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.str.len5.h500835952 = private unnamed_addr constant [6 x i8] c"test \00"
+@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.str.len5.h515589823 = private unnamed_addr constant [6 x i8] c"trace\00"
+@.str.len6.h453982107 = private unnamed_addr constant [7 x i8] c"Symbol\00"
+@.str.len6.h1128151960 = private unnamed_addr constant [7 x i8] c"prompt\00"
+@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.str.len7.h721793546 = private unnamed_addr constant [8 x i8] c"prompt \00"
+@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
+@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.str.len5.h512542702 = private unnamed_addr constant [6 x i8] c"tool \00"
+@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.str.len8.h196867800 = private unnamed_addr constant [9 x i8] c"prompt \22\00"
 @.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
 @.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.str.len8.h196867800 = private unnamed_addr constant [9 x i8] c"prompt \22\00"
-@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
-@.str.len12.h1170311443 = private unnamed_addr constant [13 x i8] c"logexecution\00"
-@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.str.len6.h453982107 = private unnamed_addr constant [7 x i8] c"Symbol\00"
-@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
-@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
-@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
-@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.str.len12.h1147459442 = private unnamed_addr constant [13 x i8] c"logExecution\00"
-@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len15.h571715647 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.str.len9.h1700456022 = private unnamed_addr constant [10 x i8] c"pipeline \00"
+@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
 @.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len7.h721793546 = private unnamed_addr constant [8 x i8] c"prompt \00"
+@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
 @.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.str.len6.h1128151960 = private unnamed_addr constant [7 x i8] c"prompt\00"
-@.str.len12.h10983220 = private unnamed_addr constant [13 x i8] c"prompt block\00"
-@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
-@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"

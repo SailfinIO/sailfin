@@ -3,7 +3,7 @@
 
 .import "./token" { Token, TokenKind, eof_token }
 
-.import "./string_utils" { substring, char_code }
+.import "./string_utils" { substring, char_code, strings_equal }
 
 .struct LexerState
     .layout struct name=LexerState size=32 align=8
@@ -51,7 +51,7 @@
                 .if !is_whitespace(state.source[state.index])
                     break
                 .endif
-                .if state.source[state.index] == "\n"
+                .if strings_equal(state.source[state.index], "\n")
                     .span 47 21 47 38
                     eval state.index += 1
                     .span 48 21 48 37
@@ -76,10 +76,10 @@
             })
             continue
         .endif
-        .if ch == "/"
+        .if strings_equal(ch, "/")
             .span 66 13 66 46
             eval let next = peek_next_char(state)
-            .if next == "/"
+            .if strings_equal(next, "/")
                 .span 68 17 68 47
                 eval let start_index = state.index
                 .span 69 17 69 45
@@ -100,7 +100,7 @@
                     .endif
                     .span 81 21 81 67
                     eval let scan_character = state.source[scan_index]
-                    .if scan_character == "\n" || scan_character == "\r"
+                    .if strings_equal(scan_character, "\n") || strings_equal(scan_character, "\r")
                         .span 83 25 83 50
                         eval comment_end = scan_index
                         break
@@ -125,7 +125,7 @@
                 })
                 continue
             .endif
-            .if next == "*"
+            .if strings_equal(next, "*")
                 .span 102 17 102 47
                 eval let start_index = state.index
                 .span 103 17 103 45
@@ -140,14 +140,14 @@
                     .if state.index >= state.source.length
                         break
                     .endif
-                    .if state.source[state.index] == "*" && peek_next_char(state) == "/"
+                    .if strings_equal(state.source[state.index], "*") && strings_equal(peek_next_char(state), "/")
                         .span 114 25 114 42
                         eval state.index += 2
                         .span 115 25 115 43
                         eval state.column += 2
                         break
                     .endif
-                    .if state.source[state.index] == "\n"
+                    .if strings_equal(state.source[state.index], "\n")
                         .span 119 25 119 42
                         eval state.index += 1
                         .span 120 25 120 41
@@ -219,7 +219,7 @@
                     .span 170 21 170 49
                     eval literal = literal + current
                 .endif
-                .if current == "\n"
+                .if strings_equal(current, "\n")
                     .span 174 21 174 38
                     eval state.index += 1
                     .span 175 21 175 37
@@ -267,7 +267,7 @@
                 .span 209 17 209 35
                 eval state.column += 1
             .endloop
-            .if state.index < state.source.length && state.source[state.index] == "."
+            .if state.index < state.source.length && strings_equal(state.source[state.index], ".")
                 .span 213 17 213 118
                 eval let next_is_digit = state.index + 1 < state.source.length && is_digit(state.source[state.index + 1])
                 .if next_is_digit
@@ -325,7 +325,7 @@
             .endloop
             .span 256 13 256 65
             eval let value = slice(state.source, start, state.index)
-            .if value == "true" || value == "false"
+            .if strings_equal(value, "true") || strings_equal(value, "false")
                 .span 258 17 263 20
                 eval tokens = append(tokens, Token {
                     kind: TokenKind.BooleanLiteral { value: value },
@@ -352,7 +352,7 @@
         eval let lexeme = ch
         .span 278 9 278 49
         eval let next_symbol = peek_next_char(state)
-        .if next_symbol != ""
+        .if !strings_equal(next_symbol, "")
             .span 280 13 280 41
             eval let pair = ch + next_symbol
             .if is_two_char_symbol(pair)
@@ -374,7 +374,7 @@
         .endif
         .span 295 9 295 26
         eval state.index += 1
-        .if ch == "\n"
+        .if strings_equal(ch, "\n")
             .span 297 13 297 29
             eval state.line += 1
             .span 298 13 298 30
@@ -402,8 +402,8 @@
 .meta effects none
     .span 315 18 315 30
     .param ch -> string
-    .span 316 5 316 64
-    ret ch == " " || ch == "\t" || ch == "\n" || ch == "\r"
+    .span 316 5 316 116
+    ret strings_equal(ch, " ") || strings_equal(ch, "\t") || strings_equal(ch, "\n") || strings_equal(ch, "\r")
 .endfn
 
 .fn is_identifier_start(ch -> string) -> boolean
@@ -411,8 +411,8 @@
 .meta effects none
     .span 319 24 319 36
     .param ch -> string
-    .span 320 5 320 39
-    ret is_letter(ch) || ch == "_"
+    .span 320 5 320 52
+    ret is_letter(ch) || strings_equal(ch, "_")
 .endfn
 
 .fn is_identifier_part(ch -> string) -> boolean
@@ -508,15 +508,15 @@
 .meta effects none
     .span 362 21 362 33
     .param ch -> string
-    .if ch == "n"
+    .if strings_equal(ch, "n")
         .span 364 9 364 21
         ret "\n"
     .endif
-    .if ch == "t"
+    .if strings_equal(ch, "t")
         .span 367 9 367 21
         ret "\t"
     .endif
-    .if ch == "r"
+    .if strings_equal(ch, "r")
         .span 370 9 370 21
         ret "\r"
     .endif
@@ -537,6 +537,6 @@
 .meta effects none
     .span 381 23 381 38
     .param value -> string
-    .span 382 5 390 22
-    ret value == "->" || value == "=>" || value == "==" || value == "!=" || value == "<=" || value == ">=" || value == "&&" || value == "||" || value == ".."
+    .span 382 5 390 35
+    ret strings_equal(value, "->") || strings_equal(value, "=>") || strings_equal(value, "==") || strings_equal(value, "!=") || strings_equal(value, "<=") || strings_equal(value, ">=") || strings_equal(value, "&&") || strings_equal(value, "||") || strings_equal(value, "..")
 .endfn
