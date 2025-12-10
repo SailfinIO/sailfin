@@ -238,6 +238,7 @@ def test_struct_method_lowering() -> None:
     assert pair_instance.sum() == 3
 
 
+@pytest.mark.integration
 @pytest.mark.usefixtures("stage1_environment")
 def test_stage1_builtin_ast_layouts_do_not_warn() -> None:
     stage1_main = importlib.import_module("compiler.build.main")

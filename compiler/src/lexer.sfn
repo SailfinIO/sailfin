@@ -6,7 +6,7 @@
 // parser can decide what to ignore.
 
 import { Token, TokenKind, eof_token } from "./token";
-import { substring, char_code, strings_equal } from "./string_utils";
+import { substring, char_code } from "./string_utils";
 
 struct LexerState {
     source -> string;
@@ -43,7 +43,7 @@ fn lex(source -> string) -> Token[] {
                 if !is_whitespace(state.source[state.index]) {
                     break;
                 }
-                if strings_equal(state.source[state.index], "\n") {
+                if state.source[state.index] == "\n" {
                     state.index += 1;
                     state.line += 1;
                     state.column = 1;
@@ -62,9 +62,9 @@ fn lex(source -> string) -> Token[] {
             continue;
         }
 
-        if strings_equal(ch, "/") {
+        if ch == "/" {
             let next = peek_next_char(state);
-            if strings_equal(next, "/") {
+            if next == "/" {
                 let start_index = state.index;
                 let start_line = state.line;
                 let start_column = state.column;
@@ -79,7 +79,7 @@ fn lex(source -> string) -> Token[] {
                         break;
                     }
                     let scan_character = state.source[scan_index];
-                    if strings_equal(scan_character, "\n") || strings_equal(scan_character, "\r") {
+                    if scan_character == "\n" || scan_character == "\r" {
                         comment_end = scan_index;
                         break;
                     }
@@ -98,7 +98,7 @@ fn lex(source -> string) -> Token[] {
                 });
                 continue;
             }
-            if strings_equal(next, "*") {
+            if next == "*" {
                 let start_index = state.index;
                 let start_line = state.line;
                 let start_column = state.column;
@@ -110,12 +110,12 @@ fn lex(source -> string) -> Token[] {
                     if state.index >= state.source.length {
                         break;
                     }
-                    if strings_equal(state.source[state.index], "*") && strings_equal(peek_next_char(state), "/") {
+                    if state.source[state.index] == "*" && peek_next_char(state) == "/" {
                         state.index += 2;
                         state.column += 2;
                         break;
                     }
-                    if strings_equal(state.source[state.index], "\n") {
+                    if state.source[state.index] == "\n" {
                         state.index += 1;
                         state.line += 1;
                         state.column = 1;
@@ -170,7 +170,7 @@ fn lex(source -> string) -> Token[] {
                     literal = literal + current;
                 }
 
-                if strings_equal(current, "\n") {
+                if current == "\n" {
                     state.index += 1;
                     state.line += 1;
                     state.column = 1;
@@ -209,7 +209,7 @@ fn lex(source -> string) -> Token[] {
                 state.column += 1;
             }
 
-            if state.index < state.source.length && strings_equal(state.source[state.index], ".") {
+            if state.index < state.source.length && state.source[state.index] == "." {
                 let next_is_digit = state.index + 1 < state.source.length && is_digit(state.source[state.index + 1]);
                 if next_is_digit {
                     state.index += 1;
@@ -254,7 +254,7 @@ fn lex(source -> string) -> Token[] {
                 state.column += 1;
             }
             let value = slice(state.source, start, state.index);
-            if strings_equal(value, "true") || strings_equal(value, "false") {
+            if value == "true" || value == "false" {
                 tokens = append(tokens, Token {
                     kind: TokenKind.BooleanLiteral { value: value },
                     lexeme: value,
@@ -276,7 +276,7 @@ fn lex(source -> string) -> Token[] {
         let start_column = state.column;
         let lexeme = ch;
         let next_symbol = peek_next_char(state);
-        if !strings_equal(next_symbol, "") {
+        if next_symbol != "" {
             let pair = ch + next_symbol;
             if is_two_char_symbol(pair) {
                 lexeme = pair;
@@ -293,7 +293,7 @@ fn lex(source -> string) -> Token[] {
         }
 
         state.index += 1;
-        if strings_equal(ch, "\n") {
+        if ch == "\n" {
             state.line += 1;
             state.column = 1;
         } else {
@@ -313,11 +313,11 @@ fn lex(source -> string) -> Token[] {
 }
 
 fn is_whitespace(ch -> string) -> boolean {
-    return strings_equal(ch, " ") || strings_equal(ch, "\t") || strings_equal(ch, "\n") || strings_equal(ch, "\r");
+    return ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
 }
 
 fn is_identifier_start(ch -> string) -> boolean {
-    return is_letter(ch) || strings_equal(ch, "_");
+    return is_letter(ch) || ch == "_";
 }
 
 fn is_identifier_part(ch -> string) -> boolean {
@@ -360,13 +360,13 @@ fn peek_next_char(state -> LexerState) -> string {
 }
 
 fn interpret_escape(ch -> string) -> string {
-    if strings_equal(ch, "n") {
+    if ch == "n" {
         return "\n";
     }
-    if strings_equal(ch, "t") {
+    if ch == "t" {
         return "\t";
     }
-    if strings_equal(ch, "r") {
+    if ch == "r" {
         return "\r";
     }
     if is_double_quote(ch) {
@@ -379,13 +379,13 @@ fn interpret_escape(ch -> string) -> string {
 }
 
 fn is_two_char_symbol(value -> string) -> boolean {
-    return strings_equal(value, "->")
-        || strings_equal(value, "=>")
-        || strings_equal(value, "==")
-        || strings_equal(value, "!=")
-        || strings_equal(value, "<=")
-        || strings_equal(value, ">=")
-        || strings_equal(value, "&&")
-    || strings_equal(value, "||")
-    || strings_equal(value, "..");
+    return value == "->"
+        || value == "=>"
+        || value == "=="
+        || value == "!="
+        || value == "<="
+        || value == ">="
+        || value == "&&"
+    || value == "||"
+    || value == "..";
 }

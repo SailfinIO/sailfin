@@ -165,10 +165,40 @@ def ensure_stage1_cache(cache_root: pathlib.Path, *, debug: bool = False) -> pat
         _STAGE1_CACHE_STATS["builds"] += 1
         if debug:
             print(f"[stage1-cache] built {cache_key} -> {cache_dir}")
+
+        # Clean up old cache entries
+        _cleanup_old_cache_entries(cache_root, max_entries=10, debug=debug)
+
         return cache_dir
     finally:
         if not success and staging_dir.exists():
             shutil.rmtree(staging_dir, ignore_errors=True)
+
+
+def _cleanup_old_cache_entries(cache_root: pathlib.Path, max_entries: int = 10, *, debug: bool = False) -> None:
+    """Remove old cache entries, keeping only the most recent max_entries."""
+
+    if not cache_root.exists():
+        return
+
+    # Find all cache directories (those with .complete marker)
+    cache_entries = []
+    for entry in cache_root.iterdir():
+        if entry.is_dir() and (entry / ".complete").exists():
+            cache_entries.append((entry.stat().st_mtime, entry))
+
+    # Sort by modification time (newest first)
+    cache_entries.sort(reverse=True, key=lambda x: x[0])
+
+    # Remove entries beyond max_entries
+    for _, entry in cache_entries[max_entries:]:
+        if debug:
+            print(f"[stage1-cache] cleaning up old cache entry: {entry.name}")
+        try:
+            shutil.rmtree(entry)
+        except Exception as exc:
+            if debug:
+                print(f"[stage1-cache] warning: failed to remove {entry.name}: {exc}")
 
 
 def stage1_cache_stats() -> Dict[str, int]:

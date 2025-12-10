@@ -84,6 +84,7 @@ class Stage2Harness:
     def __init__(self) -> None:
         self._native_cache: Dict[Tuple[str, str], object] = {}
         self._llvm_cache: Dict[Tuple[str, str], object] = {}
+        self._python_cache: Dict[Tuple[str, str], object] = {}
 
     def compile_to_native(self, source: str, *, module_name: str = "<memory>") -> object:
         key = (module_name, source)
@@ -126,6 +127,20 @@ class Stage2Harness:
     def compile_to_native_llvm_full_from_path(self, path: pathlib.Path) -> object:
         source = path.read_text(encoding="utf-8")
         return self.compile_to_native_llvm_full(source, module_name=str(path))
+
+    def compile_to_native_python(self, source: str, *, module_name: str = "<memory>") -> object:
+        key = (module_name, source)
+        cached = self._python_cache.get(key)
+        if cached is not None:
+            return cached
+        stage1_main = importlib.import_module("compiler.build.main")
+        result = stage1_main.compile_to_native_python(source)
+        self._python_cache[key] = result
+        return result
+
+    def compile_to_native_python_from_path(self, path: pathlib.Path) -> object:
+        source = path.read_text(encoding="utf-8")
+        return self.compile_to_native_python(source, module_name=str(path))
 
 
 def _clear_stage1_modules() -> None:
