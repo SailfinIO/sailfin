@@ -27,8 +27,8 @@ source_filename = "sailfin"
 %ExportSpecifier = type { i8*, i8* }
 %Token = type { %TokenKind, i8*, double, double }
 
-%Expression = type { i32, [24 x i8] }
-%Statement = type { i32, [56 x i8] }
+%Expression = type { i32, [40 x i8] }
+%Statement = type { i32, [136 x i8] }
 %TokenKind = type { i32, [8 x i8] }
 
 declare void @sailfin_runtime_bounds_check(i64, i64)

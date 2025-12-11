@@ -917,9 +917,6 @@ def analyze_type_layout(context, visiting, type_annotation, container_kind, cont
         return TypeLayoutInfo(size=1, align=1, diagnostics=diagnostics)
     if trimmed == "any":
         return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
-    canonical = lookup_canonical_type_layout(trimmed)
-    if canonical != None:
-        return TypeLayoutInfo(size=canonical.size, align=canonical.align, diagnostics=diagnostics)
     if is_array_type(trimmed):
         return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
     if trimmed == "string":
@@ -943,6 +940,9 @@ def analyze_type_layout(context, visiting, type_annotation, container_kind, cont
         aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting)
         diagnostics = (diagnostics) + (aggregate.diagnostics)
         return TypeLayoutInfo(size=aggregate.size, align=aggregate.align, diagnostics=diagnostics)
+    canonical = lookup_canonical_type_layout(trimmed)
+    if canonical != None:
+        return TypeLayoutInfo(size=canonical.size, align=canonical.align, diagnostics=diagnostics)
     diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout")
     return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
 
@@ -1006,8 +1006,8 @@ def find_layout_enum_definition(context, name):
 
 def canonical_type_layouts():
     layouts = []
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Token", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TokenKind", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Token", size=40, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TokenKind", size=16, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Program", size=8, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TypeAnnotation", size=8, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TypeParameter", size=8, align=8))

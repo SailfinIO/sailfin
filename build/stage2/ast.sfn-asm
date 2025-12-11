@@ -48,7 +48,7 @@
 .endstruct
 
 .enum Expression
-    .layout enum name=Expression size=32 align=8 tag_type=i32 tag_size=4 tag_align=4
+    .layout enum name=Expression size=48 align=8 tag_type=i32 tag_size=4 tag_align=4
     .layout variant Identifier tag=0 offset=8 size=8 align=8
     .layout payload Identifier.name type=string offset=8 size=8 align=8
     .layout variant NumberLiteral tag=1 offset=8 size=8 align=8
@@ -81,10 +81,10 @@
     .layout variant Struct tag=12 offset=8 size=16 align=8
     .layout payload Struct.type_name type=string[] offset=8 size=8 align=8
     .layout payload Struct.fields type=ObjectField[] offset=16 size=8 align=8
-    .layout variant Lambda tag=13 offset=8 size=24 align=8
+    .layout variant Lambda tag=13 offset=8 size=40 align=8
     .layout payload Lambda.parameters type=Parameter[] offset=8 size=8 align=8
-    .layout payload Lambda.body type=Block offset=16 size=8 align=8
-    .layout payload Lambda.return_type type=TypeAnnotation? offset=24 size=8 align=8
+    .layout payload Lambda.body type=Block offset=16 size=24 align=8
+    .layout payload Lambda.return_type type=TypeAnnotation? offset=40 size=8 align=8
     .layout variant Range tag=14 offset=8 size=16 align=8
     .layout payload Range.start type=Expression offset=8 size=8 align=8
     .layout payload Range.end type=Expression offset=16 size=8 align=8
@@ -123,15 +123,15 @@
 .endstruct
 
 .struct WithClause
-    .layout struct name=WithClause size=8 align=8
-    .layout field expression type=Expression offset=0 size=8 align=8
+    .layout struct name=WithClause size=48 align=8
+    .layout field expression type=Expression offset=0 size=48 align=8
     .field expression -> Expression
 .endstruct
 
 .struct ObjectField
-    .layout struct name=ObjectField size=16 align=8
+    .layout struct name=ObjectField size=56 align=8
     .layout field name type=string offset=0 size=8 align=8
-    .layout field value type=Expression offset=8 size=8 align=8
+    .layout field value type=Expression offset=8 size=48 align=8
     .field name -> string
     .field value -> Expression
 .endstruct
@@ -145,30 +145,30 @@
 .endstruct
 
 .struct ForClause
-    .layout struct name=ForClause size=24 align=8
-    .layout field target type=Expression offset=0 size=8 align=8
-    .layout field iterable type=Expression offset=8 size=8 align=8
-    .layout field tokens type=Token[] offset=16 size=8 align=8
+    .layout struct name=ForClause size=104 align=8
+    .layout field target type=Expression offset=0 size=48 align=8
+    .layout field iterable type=Expression offset=48 size=48 align=8
+    .layout field tokens type=Token[] offset=96 size=8 align=8
     .field target -> Expression
     .field iterable -> Expression
     .field tokens -> Token[]
 .endstruct
 
 .struct MatchCase
-    .layout struct name=MatchCase size=24 align=8
-    .layout field pattern type=Expression offset=0 size=8 align=8
-    .layout field guard type=Expression? offset=8 size=8 align=8
-    .layout field body type=Block offset=16 size=8 align=8
+    .layout struct name=MatchCase size=80 align=8
+    .layout field pattern type=Expression offset=0 size=48 align=8
+    .layout field guard type=Expression? offset=48 size=8 align=8
+    .layout field body type=Block offset=56 size=24 align=8
     .field pattern -> Expression
     .field guard -> Expression?
     .field body -> Block
 .endstruct
 
 .struct ModelProperty
-    .layout struct name=ModelProperty size=24 align=8
+    .layout struct name=ModelProperty size=64 align=8
     .layout field name type=string offset=0 size=8 align=8
-    .layout field value type=Expression offset=8 size=8 align=8
-    .layout field span type=SourceSpan? offset=16 size=8 align=8
+    .layout field value type=Expression offset=8 size=48 align=8
+    .layout field span type=SourceSpan? offset=56 size=8 align=8
     .field name -> string
     .field value -> Expression
     .field span -> SourceSpan?
@@ -187,10 +187,10 @@
 .endstruct
 
 .struct MethodDeclaration
-    .layout struct name=MethodDeclaration size=24 align=8
-    .layout field signature type=FunctionSignature offset=0 size=8 align=8
-    .layout field body type=Block offset=8 size=8 align=8
-    .layout field decorators type=Decorator[] offset=16 size=8 align=8
+    .layout struct name=MethodDeclaration size=88 align=8
+    .layout field signature type=FunctionSignature offset=0 size=56 align=8
+    .layout field body type=Block offset=56 size=24 align=8
+    .layout field decorators type=Decorator[] offset=80 size=8 align=8
     .field signature -> FunctionSignature
     .field body -> Block
     .field decorators -> Decorator[]
@@ -225,31 +225,31 @@
 .endstruct
 
 .struct PipelineDeclaration
-    .layout struct name=PipelineDeclaration size=24 align=8
-    .layout field signature type=FunctionSignature offset=0 size=8 align=8
-    .layout field body type=Block offset=8 size=8 align=8
-    .layout field decorators type=Decorator[] offset=16 size=8 align=8
+    .layout struct name=PipelineDeclaration size=88 align=8
+    .layout field signature type=FunctionSignature offset=0 size=56 align=8
+    .layout field body type=Block offset=56 size=24 align=8
+    .layout field decorators type=Decorator[] offset=80 size=8 align=8
     .field signature -> FunctionSignature
     .field body -> Block
     .field decorators -> Decorator[]
 .endstruct
 
 .struct ToolDeclaration
-    .layout struct name=ToolDeclaration size=24 align=8
-    .layout field signature type=FunctionSignature offset=0 size=8 align=8
-    .layout field body type=Block offset=8 size=8 align=8
-    .layout field decorators type=Decorator[] offset=16 size=8 align=8
+    .layout struct name=ToolDeclaration size=88 align=8
+    .layout field signature type=FunctionSignature offset=0 size=56 align=8
+    .layout field body type=Block offset=56 size=24 align=8
+    .layout field decorators type=Decorator[] offset=80 size=8 align=8
     .field signature -> FunctionSignature
     .field body -> Block
     .field decorators -> Decorator[]
 .endstruct
 
 .struct TestDeclaration
-    .layout struct name=TestDeclaration size=32 align=8
+    .layout struct name=TestDeclaration size=48 align=8
     .layout field name type=string offset=0 size=8 align=8
-    .layout field body type=Block offset=8 size=8 align=8
-    .layout field effects type=string[] offset=16 size=8 align=8
-    .layout field decorators type=Decorator[] offset=24 size=8 align=8
+    .layout field body type=Block offset=8 size=24 align=8
+    .layout field effects type=string[] offset=32 size=8 align=8
+    .layout field decorators type=Decorator[] offset=40 size=8 align=8
     .field name -> string
     .field body -> Block
     .field effects -> string[]
@@ -279,9 +279,9 @@
 .endstruct
 
 .struct DecoratorArgument
-    .layout struct name=DecoratorArgument size=16 align=8
+    .layout struct name=DecoratorArgument size=56 align=8
     .layout field name type=string? offset=0 size=8 align=8
-    .layout field expression type=Expression offset=8 size=8 align=8
+    .layout field expression type=Expression offset=8 size=48 align=8
     .field name -> string?
     .field expression -> Expression
 .endstruct
@@ -303,7 +303,7 @@
 .endstruct
 
 .enum Statement
-    .layout enum name=Statement size=64 align=8 tag_type=i32 tag_size=4 tag_align=4
+    .layout enum name=Statement size=144 align=8 tag_type=i32 tag_size=4 tag_align=4
     .layout variant ImportDeclaration tag=0 offset=8 size=16 align=8
     .layout payload ImportDeclaration.import_specifiers type=ImportSpecifier[] offset=8 size=8 align=8
     .layout payload ImportDeclaration.source type=string offset=16 size=8 align=8
@@ -324,24 +324,24 @@
     .layout payload ModelDeclaration.properties type=ModelProperty[] offset=32 size=8 align=8
     .layout payload ModelDeclaration.effects type=string[] offset=40 size=8 align=8
     .layout payload ModelDeclaration.decorators type=Decorator[] offset=48 size=8 align=8
-    .layout variant PipelineDeclaration tag=4 offset=8 size=24 align=8
-    .layout payload PipelineDeclaration.signature type=FunctionSignature offset=8 size=8 align=8
-    .layout payload PipelineDeclaration.body type=Block offset=16 size=8 align=8
-    .layout payload PipelineDeclaration.decorators type=Decorator[] offset=24 size=8 align=8
-    .layout variant ToolDeclaration tag=5 offset=8 size=24 align=8
-    .layout payload ToolDeclaration.signature type=FunctionSignature offset=8 size=8 align=8
-    .layout payload ToolDeclaration.body type=Block offset=16 size=8 align=8
-    .layout payload ToolDeclaration.decorators type=Decorator[] offset=24 size=8 align=8
-    .layout variant TestDeclaration tag=6 offset=8 size=40 align=8
+    .layout variant PipelineDeclaration tag=4 offset=8 size=88 align=8
+    .layout payload PipelineDeclaration.signature type=FunctionSignature offset=8 size=56 align=8
+    .layout payload PipelineDeclaration.body type=Block offset=64 size=24 align=8
+    .layout payload PipelineDeclaration.decorators type=Decorator[] offset=88 size=8 align=8
+    .layout variant ToolDeclaration tag=5 offset=8 size=88 align=8
+    .layout payload ToolDeclaration.signature type=FunctionSignature offset=8 size=56 align=8
+    .layout payload ToolDeclaration.body type=Block offset=64 size=24 align=8
+    .layout payload ToolDeclaration.decorators type=Decorator[] offset=88 size=8 align=8
+    .layout variant TestDeclaration tag=6 offset=8 size=56 align=8
     .layout payload TestDeclaration.name type=string offset=8 size=8 align=8
     .layout payload TestDeclaration.name_span type=SourceSpan? offset=16 size=8 align=8
-    .layout payload TestDeclaration.body type=Block offset=24 size=8 align=8
-    .layout payload TestDeclaration.effects type=string[] offset=32 size=8 align=8
-    .layout payload TestDeclaration.decorators type=Decorator[] offset=40 size=8 align=8
-    .layout variant FunctionDeclaration tag=7 offset=8 size=24 align=8
-    .layout payload FunctionDeclaration.signature type=FunctionSignature offset=8 size=8 align=8
-    .layout payload FunctionDeclaration.body type=Block offset=16 size=8 align=8
-    .layout payload FunctionDeclaration.decorators type=Decorator[] offset=24 size=8 align=8
+    .layout payload TestDeclaration.body type=Block offset=24 size=24 align=8
+    .layout payload TestDeclaration.effects type=string[] offset=48 size=8 align=8
+    .layout payload TestDeclaration.decorators type=Decorator[] offset=56 size=8 align=8
+    .layout variant FunctionDeclaration tag=7 offset=8 size=88 align=8
+    .layout payload FunctionDeclaration.signature type=FunctionSignature offset=8 size=56 align=8
+    .layout payload FunctionDeclaration.body type=Block offset=64 size=24 align=8
+    .layout payload FunctionDeclaration.decorators type=Decorator[] offset=88 size=8 align=8
     .layout variant StructDeclaration tag=8 offset=8 size=56 align=8
     .layout payload StructDeclaration.name type=string offset=8 size=8 align=8
     .layout payload StructDeclaration.name_span type=SourceSpan? offset=16 size=8 align=8
@@ -368,40 +368,40 @@
     .layout payload EnumDeclaration.type_parameters type=TypeParameter[] offset=24 size=8 align=8
     .layout payload EnumDeclaration.variants type=EnumVariant[] offset=32 size=8 align=8
     .layout payload EnumDeclaration.decorators type=Decorator[] offset=40 size=8 align=8
-    .layout variant PromptStatement tag=12 offset=8 size=40 align=8
+    .layout variant PromptStatement tag=12 offset=8 size=120 align=8
     .layout payload PromptStatement.channel type=string offset=8 size=8 align=8
-    .layout payload PromptStatement.keyword_token type=Token offset=16 size=8 align=8
-    .layout payload PromptStatement.channel_token type=Token offset=24 size=8 align=8
-    .layout payload PromptStatement.body type=Block offset=32 size=8 align=8
-    .layout payload PromptStatement.decorators type=Decorator[] offset=40 size=8 align=8
-    .layout variant WithStatement tag=13 offset=8 size=24 align=8
+    .layout payload PromptStatement.keyword_token type=Token offset=16 size=40 align=8
+    .layout payload PromptStatement.channel_token type=Token offset=56 size=40 align=8
+    .layout payload PromptStatement.body type=Block offset=96 size=24 align=8
+    .layout payload PromptStatement.decorators type=Decorator[] offset=120 size=8 align=8
+    .layout variant WithStatement tag=13 offset=8 size=40 align=8
     .layout payload WithStatement.clauses type=WithClause[] offset=8 size=8 align=8
-    .layout payload WithStatement.body type=Block offset=16 size=8 align=8
-    .layout payload WithStatement.decorators type=Decorator[] offset=24 size=8 align=8
-    .layout variant ForStatement tag=14 offset=8 size=24 align=8
-    .layout payload ForStatement.clause type=ForClause offset=8 size=8 align=8
-    .layout payload ForStatement.body type=Block offset=16 size=8 align=8
-    .layout payload ForStatement.decorators type=Decorator[] offset=24 size=8 align=8
-    .layout variant LoopStatement tag=15 offset=8 size=16 align=8
-    .layout payload LoopStatement.body type=Block offset=8 size=8 align=8
-    .layout payload LoopStatement.decorators type=Decorator[] offset=16 size=8 align=8
+    .layout payload WithStatement.body type=Block offset=16 size=24 align=8
+    .layout payload WithStatement.decorators type=Decorator[] offset=40 size=8 align=8
+    .layout variant ForStatement tag=14 offset=8 size=136 align=8
+    .layout payload ForStatement.clause type=ForClause offset=8 size=104 align=8
+    .layout payload ForStatement.body type=Block offset=112 size=24 align=8
+    .layout payload ForStatement.decorators type=Decorator[] offset=136 size=8 align=8
+    .layout variant LoopStatement tag=15 offset=8 size=32 align=8
+    .layout payload LoopStatement.body type=Block offset=8 size=24 align=8
+    .layout payload LoopStatement.decorators type=Decorator[] offset=32 size=8 align=8
     .layout variant BreakStatement tag=16 offset=4 size=0 align=1
     .layout variant ContinueStatement tag=17 offset=4 size=0 align=1
-    .layout variant MatchStatement tag=18 offset=8 size=24 align=8
-    .layout payload MatchStatement.expression type=Expression offset=8 size=8 align=8
-    .layout payload MatchStatement.cases type=MatchCase[] offset=16 size=8 align=8
-    .layout payload MatchStatement.decorators type=Decorator[] offset=24 size=8 align=8
-    .layout variant IfStatement tag=19 offset=8 size=32 align=8
-    .layout payload IfStatement.condition type=Expression offset=8 size=8 align=8
-    .layout payload IfStatement.then_block type=Block offset=16 size=8 align=8
-    .layout payload IfStatement.else_branch type=ElseBranch? offset=24 size=8 align=8
-    .layout payload IfStatement.decorators type=Decorator[] offset=32 size=8 align=8
+    .layout variant MatchStatement tag=18 offset=8 size=64 align=8
+    .layout payload MatchStatement.expression type=Expression offset=8 size=48 align=8
+    .layout payload MatchStatement.cases type=MatchCase[] offset=56 size=8 align=8
+    .layout payload MatchStatement.decorators type=Decorator[] offset=64 size=8 align=8
+    .layout variant IfStatement tag=19 offset=8 size=88 align=8
+    .layout payload IfStatement.condition type=Expression offset=8 size=48 align=8
+    .layout payload IfStatement.then_block type=Block offset=56 size=24 align=8
+    .layout payload IfStatement.else_branch type=ElseBranch? offset=80 size=8 align=8
+    .layout payload IfStatement.decorators type=Decorator[] offset=88 size=8 align=8
     .layout variant ReturnStatement tag=20 offset=8 size=16 align=8
     .layout payload ReturnStatement.expression type=Expression? offset=8 size=8 align=8
     .layout payload ReturnStatement.span type=SourceSpan? offset=16 size=8 align=8
-    .layout variant ExpressionStatement tag=21 offset=8 size=16 align=8
-    .layout payload ExpressionStatement.expression type=Expression offset=8 size=8 align=8
-    .layout payload ExpressionStatement.span type=SourceSpan? offset=16 size=8 align=8
+    .layout variant ExpressionStatement tag=21 offset=8 size=56 align=8
+    .layout payload ExpressionStatement.expression type=Expression offset=8 size=48 align=8
+    .layout payload ExpressionStatement.span type=SourceSpan? offset=56 size=8 align=8
     .layout variant Unknown tag=22 offset=8 size=16 align=8
     .layout payload Unknown.tokens type=Token[] offset=8 size=8 align=8
     .layout payload Unknown.text type=string offset=16 size=8 align=8

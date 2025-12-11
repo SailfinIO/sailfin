@@ -1136,10 +1136,6 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
     if trimmed == "any" {
         return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
     }
-    let canonical = lookup_canonical_type_layout(trimmed);
-    if canonical != null {
-        return TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics };
-    }
     if is_array_type(trimmed) {
         return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
     }
@@ -1169,6 +1165,10 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
         let aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting);
         diagnostics = diagnostics.concat(aggregate.diagnostics);
         return TypeLayoutInfo { size: aggregate.size, align: aggregate.align, diagnostics: diagnostics };
+    }
+    let canonical = lookup_canonical_type_layout(trimmed);
+    if canonical != null {
+        return TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics };
     }
     diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout");
     return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
@@ -1253,8 +1253,8 @@ fn find_layout_enum_definition(context -> LayoutContext, name -> string) -> Layo
 
 fn canonical_type_layouts() -> CanonicalTypeLayout[] {
     let mut layouts -> CanonicalTypeLayout[] = [];
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Token", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TokenKind", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Token", size: 40, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TokenKind", size: 16, align: 8 });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Program", size: 8, align: 8 });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeAnnotation", size: 8, align: 8 });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeParameter", size: 8, align: 8 });

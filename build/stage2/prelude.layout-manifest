@@ -13,10 +13,10 @@
 .layout field name type=string offset=0 size=8 align=8
 .layout field variants type=EnumVariantDefinition[] offset=8 size=8 align=8
 
-.layout struct name=EnumInstance size=24 align=8
-.layout field type type=EnumType offset=0 size=8 align=8
-.layout field variant type=string offset=8 size=8 align=8
-.layout field fields type=EnumField[] offset=16 size=8 align=8
+.layout struct name=EnumInstance size=32 align=8
+.layout field type type=EnumType offset=0 size=16 align=8
+.layout field variant type=string offset=16 size=8 align=8
+.layout field fields type=EnumField[] offset=24 size=8 align=8
 
 .layout struct name=StructField size=16 align=8
 .layout field name type=string offset=0 size=8 align=8

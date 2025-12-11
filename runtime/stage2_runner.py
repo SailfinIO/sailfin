@@ -20,6 +20,8 @@ from runtime import runtime_support as runtime
 
 __all__ = ["Stage2Runner", "current_capability_grant"]
 
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
 
 CapabilityDelegate = Callable[[ctypes.c_void_p], None]
 SleepDelegate = Callable[[float], None]
@@ -33,6 +35,29 @@ class Stage2RuntimeHooks:
     print_warn: CapabilityDelegate | None = None
     print_error: CapabilityDelegate | None = None
     sleep: SleepDelegate | None = None
+
+
+@dataclass
+class DebugLogSink:
+    path: pathlib.Path
+    bytes_written: int = 0
+    suppressed: bool = False
+
+
+@dataclass
+class AllocationRecord:
+    base: int
+    size: int
+    guard: int
+    total: int
+    sequence: int
+    marker: int | None = None
+
+
+_DEFAULT_ALLOC_GUARD_BYTES = 32
+_DEFAULT_GUARD_SCAN_INTERVAL = 128
+_FRONT_GUARD_VALUE = 0xAB
+_BACK_GUARD_VALUE = 0xEF
 
 
 _HELPER_ALIASES: Mapping[str, str] = {
@@ -121,12 +146,15 @@ _ACTIVE_GRANT: contextvars.ContextVar[runtime.CapabilityGrant | None] = contextv
 _LAST_RUNTIME_ERROR: contextvars.ContextVar[Exception | None] = contextvars.ContextVar(
     "stage2_last_runtime_error", default=None
 )
+_ACTIVE_RUNNER: contextvars.ContextVar["Stage2Runner" | None] = contextvars.ContextVar(
+    "stage2_active_runner_instance", default=None
+)
 
 _LLVM_INITIALISED = False
 _LIBC_HANDLE: ctypes.CDLL | None = None
 _LIBC_FUNCTIONS: dict[str, ctypes._CFuncPtr] = {}
 _LIBC_SYMBOL_ADDRESSES: dict[str, int] = {}
-_LIBC_ALLOCATIONS: dict[int, int] = {}
+_LIBC_ALLOCATIONS: dict[int, AllocationRecord] = {}
 
 
 def current_capability_grant() -> runtime.CapabilityGrant | None:
@@ -163,9 +191,110 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
 
         logger = debug_log
 
-        # Track total allocated memory to prevent runaway allocations
-        total_allocated = [0]  # Use list to allow modification in nested function
+        total_allocated = [0]
         max_total_memory = 2 * 1024 * 1024 * 1024  # 2GB limit
+        guard_bytes_env = os.environ.get("SAILFIN_STAGE2_ALLOC_GUARD_BYTES")
+        guard_scan_env = os.environ.get(
+            "SAILFIN_STAGE2_ALLOC_GUARD_SCAN_INTERVAL")
+        try:
+            guard_bytes = max(0, int(
+                guard_bytes_env)) if guard_bytes_env is not None else _DEFAULT_ALLOC_GUARD_BYTES
+        except ValueError:
+            guard_bytes = _DEFAULT_ALLOC_GUARD_BYTES
+        try:
+            guard_scan_interval = max(1, int(
+                guard_scan_env)) if guard_scan_env is not None else _DEFAULT_GUARD_SCAN_INTERVAL
+        except ValueError:
+            guard_scan_interval = _DEFAULT_GUARD_SCAN_INTERVAL
+        guard_patterns: dict[int, tuple[bytes, bytes]] = {}
+        allocation_counter = [0]
+        MAX_PREVIEW = 64
+
+        def _safe_bytes(address: int, length: int) -> bytes | None:
+            if address <= 0 or length <= 0:
+                return None
+            sample = min(length, MAX_PREVIEW)
+            try:
+                return ctypes.string_at(address, sample)
+            except (ValueError, OSError):
+                return None
+
+        def _bytes_hex(blob: bytes | None) -> str:
+            if blob is None:
+                return "<unreadable>"
+            if not blob:
+                return "<empty>"
+            return blob.hex()
+
+        def _payload_preview(address: int, size: int, *, tail: bool) -> bytes | None:
+            if size <= 0:
+                return None
+            span = min(size, MAX_PREVIEW)
+            start = address if not tail or size <= span else address + size - span
+            return _safe_bytes(start, span)
+
+        def _format_guard_violation(kind: str, user_ptr: int, record: AllocationRecord, reason: str) -> str:
+            payload_head = _payload_preview(user_ptr, record.size, tail=False)
+            payload_tail = _payload_preview(user_ptr, record.size, tail=True)
+            if kind == "front":
+                guard_addr = record.base
+            else:
+                guard_addr = record.base + record.guard + record.size
+            guard_bytes = _safe_bytes(guard_addr, record.guard)
+            runner = _ACTIVE_RUNNER.get()
+            recent_markers: Sequence[int] = ()
+            if runner is not None:
+                try:
+                    recent_markers = runner._recent_debug_markers()
+                except Exception:
+                    recent_markers = ()
+            marker_value = record.marker
+            return (
+                f"[stage2] {kind} guard corrupted: ptr=0x{user_ptr:x} base=0x{record.base:x} size={record.size} "
+                f"guard={record.guard} reason={reason} id={record.sequence} marker={marker_value} "
+                f"recent_markers={list(recent_markers)} payload_head={_bytes_hex(payload_head)} "
+                f"payload_tail={_bytes_hex(payload_tail)} guard_sample={_bytes_hex(guard_bytes)}"
+            )
+
+        def _guard_patterns(length: int) -> tuple[bytes, bytes]:
+            if length <= 0:
+                return (b"", b"")
+            pattern = guard_patterns.get(length)
+            if pattern is None:
+                pattern = (
+                    bytes([_FRONT_GUARD_VALUE]) * length,
+                    bytes([_BACK_GUARD_VALUE]) * length,
+                )
+                guard_patterns[length] = pattern
+            return pattern
+
+        def _check_guard(user_ptr: int, record: AllocationRecord, reason: str) -> str | None:
+            guard = record.guard
+            if guard <= 0:
+                return None
+            front_pattern, back_pattern = _guard_patterns(guard)
+            try:
+                front_bytes = ctypes.string_at(record.base, guard)
+                tail_addr = record.base + guard + record.size
+                back_bytes = ctypes.string_at(tail_addr, guard)
+            except (ValueError, OSError) as exc:
+                return (
+                    f"[stage2] guard check failed: ptr=0x{user_ptr:x} size={record.size} reason={reason} error={exc}"
+                )
+            if front_bytes != front_pattern:
+                return _format_guard_violation("front", user_ptr, record, reason)
+            if back_bytes != back_pattern:
+                return _format_guard_violation("tail", user_ptr, record, reason)
+            return None
+
+        def _scan_allocation_guards() -> str | None:
+            if guard_bytes <= 0:
+                return None
+            for user_ptr, record in list(_LIBC_ALLOCATIONS.items()):
+                violation = _check_guard(user_ptr, record, "scan")
+                if violation:
+                    return violation
+            return None
 
         def _malloc_wrapper(size: int) -> int:
             try:
@@ -175,37 +304,64 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
             if request <= 0:
                 request = 1
 
-            # Safety: check for unreasonably large allocations (> 1GB)
-            # Also check for negative or suspiciously large values that might be garbage
             if request > 1024 * 1024 * 1024 or request < 0:
                 if logger:
                     logger(
                         f"[stage2] malloc REJECTED: request size={request} bytes (out of bounds)"
                     )
-                return 0  # Return null instead of aborting
+                return 0
 
-            # Check if we're approaching memory limits
-            if total_allocated[0] + request > max_total_memory:
+            guard = guard_bytes
+            total_request = request + (guard * 2 if guard > 0 else 0)
+            if total_allocated[0] + total_request > max_total_memory:
                 if logger:
                     logger(
                         f"[stage2] malloc REJECTED: would exceed memory limit (current={total_allocated[0] // (1024*1024)} MB, request={request // 1024} KB)"
                     )
                 return 0
 
-            result = libc_malloc(request)
-            total_allocated[0] += request
+            result = libc_malloc(total_request)
             pointer = 0 if result is None else int(result)
-            if pointer != 0:
-                _LIBC_ALLOCATIONS[pointer] = request
-                if logger and request > 1024 * 1024:  # Log allocations > 1MB
-                    logger(
-                        f"[stage2] malloc LARGE: size={request} bytes ({request // 1024} KB) result=0x{pointer:x}"
-                    )
-            else:
+            if pointer == 0:
                 if logger:
                     logger(
                         f"[stage2] malloc FAILED: size={request} bytes result=null")
-            return pointer
+                return 0
+
+            user_pointer = pointer + (guard if guard > 0 else 0)
+            if guard > 0:
+                front_pattern, back_pattern = _guard_patterns(guard)
+                ctypes.memmove(pointer, front_pattern, guard)
+                tail_addr = pointer + guard + request
+                ctypes.memmove(tail_addr, back_pattern, guard)
+            allocation_counter[0] += 1
+            runner = _ACTIVE_RUNNER.get()
+            marker_snapshot = None
+            if runner is not None:
+                marker_snapshot = getattr(runner, "_last_debug_marker", None)
+            record = AllocationRecord(
+                base=pointer,
+                size=request,
+                guard=guard,
+                total=total_request,
+                sequence=allocation_counter[0],
+                marker=marker_snapshot,
+            )
+            _LIBC_ALLOCATIONS[user_pointer] = record
+            total_allocated[0] += total_request
+            if logger and request > 1024 * 1024:
+                logger(
+                    f"[stage2] malloc LARGE: size={request} bytes ({request // 1024} KB) result=0x{user_pointer:x}"
+                )
+            if guard > 0 and allocation_counter[0] % guard_scan_interval == 0:
+                violation = _scan_allocation_guards()
+                if violation:
+                    if logger:
+                        logger(violation)
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(RuntimeError(violation))
+                    return 0
+            return user_pointer
 
         def _free_wrapper(ptr: ctypes.c_void_p | int) -> None:
             try:
@@ -217,8 +373,8 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
                 if logger:
                     logger("[stage2] free ptr=null (ignored)")
                 return
-            allocation = _LIBC_ALLOCATIONS.pop(address, None)
-            if allocation is None:
+            record = _LIBC_ALLOCATIONS.pop(address, None)
+            if record is None:
                 if logger:
                     logger(
                         f"[stage2] free unknown ptr=0x{address:x} (skipped)")
@@ -229,9 +385,15 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
                         )
                     )
                 return
+            violation = _check_guard(address, record, "free")
+            if violation and logger:
+                logger(violation)
+            total_allocated[0] = max(0, total_allocated[0] - record.total)
             if logger:
-                logger(f"[stage2] free ptr=0x{address:x} size={allocation}")
-            libc_free(ctypes.c_void_p(address))
+                logger(
+                    f"[stage2] free ptr=0x{address:x} base=0x{record.base:x} size={record.size} id={record.sequence}"
+                )
+            libc_free(ctypes.c_void_p(record.base))
 
         malloc_cfunc = ctypes.CFUNCTYPE(
             ctypes.c_void_p, ctypes.c_size_t)(_malloc_wrapper)
@@ -297,14 +459,37 @@ class Stage2Runner:
         runtime_hooks: Stage2RuntimeHooks | Mapping[str,
                                                     Callable[..., None]] | None = None,
     ) -> None:
-        log_path = os.environ.get("SAILFIN_STAGE2_DEBUG_LOG")
-        self._debug_log_path = log_path if log_path else None
-        if self._debug_log_path:
+        raw_log_setting = os.environ.get(
+            "SAILFIN_STAGE2_DEBUG_LOG", "").strip()
+        requested_paths: list[pathlib.Path] = []
+        if raw_log_setting:
+            for candidate in raw_log_setting.split(os.pathsep):
+                candidate_path = candidate.strip()
+                if not candidate_path:
+                    continue
+                requested_paths.append(
+                    pathlib.Path(candidate_path).expanduser())
+        fallback_pref = os.environ.get(
+            "SAILFIN_STAGE2_DEBUG_FALLBACK", "1").strip().lower()
+        if fallback_pref not in {"0", "false", "off", "no"}:
+            requested_paths.append(
+                _REPO_ROOT / "build" / "stage2" / "stage2_debug.log")
+        unique_paths: list[pathlib.Path] = []
+        for path in requested_paths:
+            if path not in unique_paths:
+                unique_paths.append(path)
+        self._debug_log_sinks: list[DebugLogSink] = []
+        for log_path in unique_paths:
             try:
-                with open(self._debug_log_path, "w", encoding="utf-8") as handle:
-                    handle.write("")
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(log_path, "w", encoding="utf-8"):
+                    pass
+                self._debug_log_sinks.append(DebugLogSink(path=log_path))
             except OSError:
-                self._debug_log_path = None
+                continue
+        self._primary_debug_log_path = (
+            str(self._debug_log_sinks[0].path) if self._debug_log_sinks else None
+        )
         dump_dir_override = os.environ.get("SAILFIN_STAGE2_INSTRUMENT_DIR")
         dump_setting = os.environ.get("SAILFIN_STAGE2_DUMP_INSTRUMENTED_IR")
         self._instrument_dump_dir: pathlib.Path | None = None
@@ -330,8 +515,6 @@ class Stage2Runner:
                     self._debug_log_limit = parsed
             except ValueError:
                 pass
-        self._debug_log_bytes = 0
-        self._debug_log_suppressed = False
         self._debug_log_notice_emitted = False
         if selected_dump_dir is not None:
             try:
@@ -352,12 +535,17 @@ class Stage2Runner:
         self._hooks = _normalise_hooks(runtime_hooks)
         self._adapter_string_buffers = []
         self._result_buffers = []  # Dedicated storage for large final results
-        self._string_cache: dict[int, str] = {}  # Cache strings by pointer address
-        self._string_pool: list[ctypes.Array] = []  # Global pool: keeps ALL strings alive forever
+        # Cache strings by pointer address
+        self._string_cache: dict[int, str] = {}
+        # Global pool: keeps ALL strings alive forever
+        self._string_pool: list[ctypes.Array] = []
         self._tracked_string_addresses: dict[int, tuple[str, str, int]] = {}
         self._adapter_object_handles: dict[int, object] = {}
         self._function_info_cache = {}
         self._adapter_functions: dict[str, ctypes._CFuncPtr] = {}
+        self._last_debug_marker: int | None = None
+        self._debug_marker_history: list[int] = []
+        self._debug_marker_history_limit = 64
         self._initialise_runtime_helpers()
         self._compile_ir()
 
@@ -411,9 +599,11 @@ class Stage2Runner:
         # This function is mainly a no-op since strings are already kept alive
         # But we log for debugging
         if ptr in self._tracked_string_addresses:
-            self._debug_log(f"[stage2] mark_persistent: ptr 0x{ptr:x} already tracked")
+            self._debug_log(
+                f"[stage2] mark_persistent: ptr 0x{ptr:x} already tracked")
         else:
-            self._debug_log(f"[stage2] mark_persistent: WARNING ptr 0x{ptr:x} NOT tracked")
+            self._debug_log(
+                f"[stage2] mark_persistent: WARNING ptr 0x{ptr:x} NOT tracked")
 
     @staticmethod
     def _detect_string_abi(lowered_modules: Sequence) -> str:
@@ -446,31 +636,43 @@ class Stage2Runner:
         return "cstring"
 
     def _debug_log(self, message: str) -> None:
-        path = self._debug_log_path
-        if not path or (self._debug_log_limit and self._debug_log_suppressed):
+        if not self._debug_log_sinks:
             return
         text = message + "\n"
-        text_len = len(text)
         limit = self._debug_log_limit
-        if limit:
-            remaining = limit - self._debug_log_bytes
-            if remaining <= 0:
-                self._debug_log_suppressed = True
+        for sink in self._debug_log_sinks:
+            if limit and sink.suppressed:
+                continue
+            chunk = text
+            chunk_len = len(chunk)
+            truncated = False
+            if limit:
+                remaining = limit - sink.bytes_written
+                if remaining <= 0:
+                    sink.suppressed = True
+                    self._emit_debug_log_notice()
+                    continue
+                if chunk_len > remaining:
+                    chunk = chunk[:remaining]
+                    chunk_len = remaining
+                    sink.suppressed = True
+                    truncated = True
+            try:
+                with open(sink.path, "a", encoding="utf-8") as handle:
+                    handle.write(chunk)
+                sink.bytes_written += chunk_len
+            except OSError:
+                continue
+            if truncated:
                 self._emit_debug_log_notice()
-                return
-            if text_len > remaining:
-                text = text[:remaining]
-                text_len = remaining
-                self._debug_log_suppressed = True
-        try:
-            with open(path, "a", encoding="utf-8") as handle:
-                handle.write(text)
-            self._debug_log_bytes += text_len
-            if self._debug_log_suppressed:
-                self._emit_debug_log_notice()
-        except OSError:
-            # Ignore log errors so diagnostics do not mask compilation issues.
-            pass
+
+    def _recent_debug_markers(self, limit: int = 8) -> list[int]:
+        if limit <= 0:
+            return []
+        if not self._debug_marker_history:
+            return []
+        slice_start = max(0, len(self._debug_marker_history) - limit)
+        return list(self._debug_marker_history[slice_start:])
 
     def _emit_debug_log_notice(self) -> None:
         if self._debug_log_notice_emitted:
@@ -1707,6 +1909,35 @@ class Stage2Runner:
         except (ValueError, OSError):
             return b""
 
+    def _validate_structure_result(self, entry_point: str, result: object) -> None:
+        if result is None or not isinstance(result, ctypes.Structure):
+            return
+        fields = getattr(result.__class__, "_fields_", ())
+        if not fields:
+            return
+        for field_name, field_type in fields:
+            if field_name != "ir":
+                continue
+            pointer_value = getattr(result, field_name, None)
+            address = 0
+            if isinstance(pointer_value, ctypes.c_void_p):
+                address = int(pointer_value.value or 0)
+            elif isinstance(pointer_value, ctypes.c_char_p):
+                address = int(ctypes.cast(
+                    pointer_value, ctypes.c_void_p).value or 0)
+            else:
+                try:
+                    address = int(
+                        getattr(pointer_value, "value", pointer_value) or 0)
+                except (TypeError, ValueError):
+                    address = 0
+            if address == 0:
+                log_hint = self._primary_debug_log_path or "<no stage2 debug log configured>"
+                raise RuntimeError(
+                    f"{entry_point} returned NULL pointer for field '{field_name}'. "
+                    f"Review Stage2 debug log at {log_hint} to inspect the failing helper."
+                )
+
     @staticmethod
     def _is_aggregate_return_type(return_type: str | None) -> bool:
         if not return_type:
@@ -1893,10 +2124,10 @@ class Stage2Runner:
                 return meta[1]
 
             def _bytes_from_allocation(ptr_address: int, limit: int | None = None) -> bytes | None:
-                entry = _LIBC_ALLOCATIONS.get(ptr_address)
-                if entry is None:
+                record = _LIBC_ALLOCATIONS.get(ptr_address)
+                if record is None:
                     return None
-                size = entry
+                size = record.size
                 read_size = size if limit is None else min(size, max(limit, 0))
                 if read_size <= 0:
                     read_size = size
@@ -2015,10 +2246,12 @@ class Stage2Runner:
                         if null_pos >= 0:
                             raw_bytes = full_bytes[:null_pos]
                         else:
-                            raw_bytes = full_bytes[:1024]  # Give up, use first 1KB
+                            # Give up, use first 1KB
+                            raw_bytes = full_bytes[:1024]
 
                     text = raw_bytes.decode("utf-8", errors="ignore")
-                    self._tracked_string_addresses[address] = ("llvm_literal", text, len(raw_bytes))
+                    self._tracked_string_addresses[address] = (
+                        "llvm_literal", text, len(raw_bytes))
                     self._debug_log(
                         f"[stage2] ptr_to_str llvm_literal 0x{address:x} size={len(raw_bytes)}"
                     )
@@ -2054,17 +2287,20 @@ class Stage2Runner:
                 if bytes_list:
                     raw_bytes = b''.join(bytes_list)
                     text = raw_bytes.decode("utf-8", errors="ignore")
-                    self._tracked_string_addresses[address] = ("llvm_literal", text, len(raw_bytes))
+                    self._tracked_string_addresses[address] = (
+                        "llvm_literal", text, len(raw_bytes))
                     self._debug_log(
                         f"[stage2] ptr_to_str llvm_literal 0x{address:x} size={len(raw_bytes)}"
                     )
                     return text
             except (ValueError, OSError, AttributeError, UnicodeDecodeError, MemoryError, SystemError) as e:
-                self._debug_log(f"[stage2] ptr_to_str failed to read 0x{address:x}: {type(e).__name__}")
+                self._debug_log(
+                    f"[stage2] ptr_to_str failed to read 0x{address:x}: {type(e).__name__}")
                 pass
             except BaseException as e:
                 # Catch segfaults that somehow become Python exceptions
-                self._debug_log(f"[stage2] ptr_to_str CRITICAL error at 0x{address:x}: {type(e).__name__}")
+                self._debug_log(
+                    f"[stage2] ptr_to_str CRITICAL error at 0x{address:x}: {type(e).__name__}")
                 pass
 
             message = f"runtime string pointer 0x{address:x} not tracked and unreadable"
@@ -2082,10 +2318,12 @@ class Stage2Runner:
             # Validate buffer size before creation
             size = len(encoded) + 1  # +1 for null terminator
             if size > 200_000_000:  # 200MB limit
-                self._debug_log(f"[stage2] _str_to_ptr: REJECTED string size={size} bytes ({size // 1024} KB)")
+                self._debug_log(
+                    f"[stage2] _str_to_ptr: REJECTED string size={size} bytes ({size // 1024} KB)")
                 return 0  # Return NULL instead of creating huge buffer
             if size > 10_000_000:  # 10MB warning
-                self._debug_log(f"[stage2] _str_to_ptr: LARGE string size={size} bytes ({size // 1024} KB)")
+                self._debug_log(
+                    f"[stage2] _str_to_ptr: LARGE string size={size} bytes ({size // 1024} KB)")
 
             # Use ctypes buffers to keep strings alive
             buf = ctypes.create_string_buffer(encoded + b"\0")
@@ -2096,7 +2334,8 @@ class Stage2Runner:
             self._adapter_string_buffers.append(buf)  # Keep for compatibility
 
             if size > 50_000:  # Log large strings
-                self._debug_log(f"[stage2] _str_to_ptr: POOL added large string size={size} bytes (pool_size={len(self._string_pool)})")
+                self._debug_log(
+                    f"[stage2] _str_to_ptr: POOL added large string size={size} bytes (pool_size={len(self._string_pool)})")
 
             data_address = ctypes.cast(buf, ctypes.c_void_p).value
             data_int = 0 if data_address is None else int(data_address)
@@ -2184,6 +2423,12 @@ class Stage2Runner:
             array_ptr = ctypes.cast(
                 ctypes.pointer(array_struct), ctypes.c_void_p).value
             return 0 if array_ptr is None else int(array_ptr)
+
+        def _record_adapter_exception(context: str, exc: Exception) -> None:
+            message = f"[stage2] {context} error: {type(exc).__name__}: {exc}"
+            self._debug_log(message)
+            if _LAST_RUNTIME_ERROR.get() is None:
+                _LAST_RUNTIME_ERROR.set(exc)
 
         def _build_fallback():
             cfunc_type = (
@@ -2298,9 +2543,8 @@ class Stage2Runner:
                     contents = runtime.fs.readFile(path)
                     return _str_to_ptr(contents)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("fs.read_file", exc)
+                    return _str_to_ptr("")
 
             return cfunc_type(_fs_read_file)
 
@@ -2336,9 +2580,8 @@ class Stage2Runner:
                             f'\"{name}\"' for name in entries) + "]"
                     return _str_to_ptr(result)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("fs.list_directory", exc)
+                    return _str_to_ptr("")
 
             return cfunc_type(_fs_list_directory)
 
@@ -2422,11 +2665,10 @@ class Stage2Runner:
                     _require_effects()
                     text = _ptr_to_str(text_ptr)
                     result = runtime.substring(text, int(start), int(end))
-                    return _str_to_ptr(result)
+                    return _str_to_ptr(result or "")
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("runtime substring", exc)
+                    return _str_to_ptr("")
 
             return cfunc_type(_substring)
 
@@ -2442,16 +2684,16 @@ class Stage2Runner:
 
                     # Validate string lengths before concatenating
                     if len(first) > 100_000_000 or len(second) > 100_000_000:
-                        self._debug_log(f"[stage2] string_concat: LARGE strings detected first={len(first)} second={len(second)}")
+                        self._debug_log(
+                            f"[stage2] string_concat: LARGE strings detected first={len(first)} second={len(second)}")
                     result = first + second
                     if len(result) > 100_000_000:
-                        self._debug_log(f"[stage2] string_concat: LARGE result={len(result)} bytes")
+                        self._debug_log(
+                            f"[stage2] string_concat: LARGE result={len(result)} bytes")
 
                     return _str_to_ptr(result)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    # Return valid empty string pointer instead of NULL to prevent cascading failures
+                    _record_adapter_exception("runtime string_concat", exc)
                     return _str_to_ptr("")
 
             return cfunc_type(_string_concat)
@@ -2488,9 +2730,8 @@ class Stage2Runner:
                     )
                     return result
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("runtime concat", exc)
+                    return _handles_to_array(())
 
             return cfunc_type(_concat)
 
@@ -2502,6 +2743,7 @@ class Stage2Runner:
 
             def _append_string(array_ptr: ctypes.c_void_p, value_ptr: ctypes.c_void_p) -> int:
                 nonlocal append_debug_count
+                existing: list[str] | None = None
                 try:
                     existing = _array_to_list(array_ptr)
                     appended = list(existing or [])
@@ -2516,9 +2758,8 @@ class Stage2Runner:
                     append_debug_count += 1
                     return _list_to_array(appended)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("runtime append_string", exc)
+                    return _list_to_array(existing or [])
 
             return cfunc_type(_append_string)
 
@@ -2662,9 +2903,8 @@ class Stage2Runner:
                     result = runtime.grapheme_at(text, position)
                     return _str_to_ptr(result or "")
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("runtime grapheme_at", exc)
+                    return _str_to_ptr("")
 
             return cfunc_type(_grapheme_at)
 
@@ -2729,9 +2969,8 @@ class Stage2Runner:
                         {"status": response.status, "body": response.body})
                     return _str_to_ptr(result)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("http.get", exc)
+                    return _str_to_ptr("")
 
             return cfunc_type(_http_get)
 
@@ -2750,9 +2989,8 @@ class Stage2Runner:
                         {"status": 200, "body": f"Posted to {url}: {body}"})
                     return _str_to_ptr(result)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("http.post", exc)
+                    return _str_to_ptr("")
 
             return cfunc_type(_http_post)
 
@@ -2769,9 +3007,8 @@ class Stage2Runner:
                     result = f"[mock:model] Response to: {prompt}"
                     return _str_to_ptr(result)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("model.invoke_with_prompt", exc)
+                    return _str_to_ptr("")
 
             return cfunc_type(_model_invoke)
 
@@ -2802,9 +3039,8 @@ class Stage2Runner:
                     result = '{"status": 200, "body": "OK"}'
                     return _str_to_ptr(result)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("serve.handler_dispatch", exc)
+                    return _str_to_ptr("")
 
             return cfunc_type(_serve_dispatch)
 
@@ -2835,11 +3071,9 @@ class Stage2Runner:
                     capacity_value = int(capacity)
                     ch = runtime.channel(
                         capacity_value if capacity_value > 0 else None)
-                    # Return a pointer to the channel (simplified - real implementation needs proper object management)
-                    return id(ch)
+                    return _store_handle(ch)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
+                    _record_adapter_exception("channel.create", exc)
                     return 0
 
             return cfunc_type(_channel_create)
@@ -2869,9 +3103,8 @@ class Stage2Runner:
                     result = "mock_value"
                     return _str_to_ptr(result)
                 except Exception as exc:
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    _record_adapter_exception("channel.receive", exc)
+                    return _str_to_ptr("")
 
             return cfunc_type(_channel_receive)
 
@@ -2899,7 +3132,14 @@ class Stage2Runner:
             cfunc_type = ctypes.CFUNCTYPE(None, ctypes.c_longlong)
 
             def _debug_marker(code: ctypes.c_longlong) -> None:
-                self._debug_log(f"[stage2] debug_marker code={int(code)}")
+                marker_value = int(code)
+                self._last_debug_marker = marker_value
+                self._debug_marker_history.append(marker_value)
+                limit = getattr(self, "_debug_marker_history_limit", 64)
+                overflow = len(self._debug_marker_history) - limit
+                if overflow > 0:
+                    del self._debug_marker_history[:overflow]
+                self._debug_log(f"[stage2] debug_marker code={marker_value}")
 
             return cfunc_type(_debug_marker)
 
@@ -2910,7 +3150,8 @@ class Stage2Runner:
                 try:
                     address = _normalise_ptr(ptr)
                     if address != 0:
-                        self._debug_log(f"[stage2] mark_persistent ptr=0x{address:x}")
+                        self._debug_log(
+                            f"[stage2] mark_persistent ptr=0x{address:x}")
                         self.mark_persistent(address)
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:
@@ -3270,9 +3511,11 @@ class Stage2Runner:
         )
         effects = self._manifest.get(entry_point, ())
         grant = runtime.create_capability_grant(effects)
+        runner_token = _ACTIVE_RUNNER.set(self)
         token = _ACTIVE_GRANT.set(grant)
         error_token = _LAST_RUNTIME_ERROR.set(None)
         result = None
+        runtime_error = None
         try:
             self._debug_log(
                 f"[stage2] invoke {entry_point}: aggregate={use_aggregate}"
@@ -3291,6 +3534,7 @@ class Stage2Runner:
             _ACTIVE_GRANT.reset(token)
             runtime_error = _LAST_RUNTIME_ERROR.get()
             _LAST_RUNTIME_ERROR.reset(error_token)
+            _ACTIVE_RUNNER.reset(runner_token)
         if runtime_error is not None:
             raise runtime_error
         if use_aggregate:
@@ -3300,6 +3544,10 @@ class Stage2Runner:
                 )
             if restype is None:
                 return aggregate_address
-            return self._extract_sret_result(aggregate_address, aggregate_size, restype)
+            extracted = self._extract_sret_result(
+                aggregate_address, aggregate_size, restype)
+            self._validate_structure_result(entry_point, extracted)
+            return extracted
 
+        self._validate_structure_result(entry_point, result)
         return result

@@ -64,8 +64,8 @@ source_filename = "sailfin"
 %DecoratorInfo = type { i8*, { %DecoratorArgumentInfo**, i64 }* }
 
 %TokenKind = type { i32, [8 x i8] }
-%Expression = type { i32, [24 x i8] }
-%Statement = type { i32, [56 x i8] }
+%Expression = type { i32, [40 x i8] }
+%Statement = type { i32, [136 x i8] }
 %LiteralValue = type { i32, [8 x i8] }
 
 declare void @sailfin_runtime_bounds_check(i64, i64)
@@ -5446,19 +5446,19 @@ merge1:
   store i32 4, i32* %t171
   %t172 = load %FunctionSignature, %FunctionSignature* %l18
   %t173 = getelementptr inbounds %Statement, %Statement* %t170, i32 0, i32 1
-  %t174 = bitcast [24 x i8]* %t173 to i8*
+  %t174 = bitcast [88 x i8]* %t173 to i8*
   %t175 = bitcast i8* %t174 to %FunctionSignature*
   store %FunctionSignature %t172, %FunctionSignature* %t175
   %t176 = load %Block, %Block* %l17
   %t177 = getelementptr inbounds %Statement, %Statement* %t170, i32 0, i32 1
-  %t178 = bitcast [24 x i8]* %t177 to i8*
-  %t179 = getelementptr inbounds i8, i8* %t178, i64 8
+  %t178 = bitcast [88 x i8]* %t177 to i8*
+  %t179 = getelementptr inbounds i8, i8* %t178, i64 56
   %t180 = bitcast i8* %t179 to %Block*
   store %Block %t176, %Block* %t180
   %t181 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t182 = getelementptr inbounds %Statement, %Statement* %t170, i32 0, i32 1
-  %t183 = bitcast [24 x i8]* %t182 to i8*
-  %t184 = getelementptr inbounds i8, i8* %t183, i64 16
+  %t183 = bitcast [88 x i8]* %t182 to i8*
+  %t184 = getelementptr inbounds i8, i8* %t183, i64 80
   %t185 = bitcast i8* %t184 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t181, { %Decorator**, i64 }** %t185
   %t186 = load %Statement, %Statement* %t170
@@ -5724,19 +5724,19 @@ merge1:
   store i32 5, i32* %t161
   %t162 = load %FunctionSignature, %FunctionSignature* %l16
   %t163 = getelementptr inbounds %Statement, %Statement* %t160, i32 0, i32 1
-  %t164 = bitcast [24 x i8]* %t163 to i8*
+  %t164 = bitcast [88 x i8]* %t163 to i8*
   %t165 = bitcast i8* %t164 to %FunctionSignature*
   store %FunctionSignature %t162, %FunctionSignature* %t165
   %t166 = load %Block, %Block* %l15
   %t167 = getelementptr inbounds %Statement, %Statement* %t160, i32 0, i32 1
-  %t168 = bitcast [24 x i8]* %t167 to i8*
-  %t169 = getelementptr inbounds i8, i8* %t168, i64 8
+  %t168 = bitcast [88 x i8]* %t167 to i8*
+  %t169 = getelementptr inbounds i8, i8* %t168, i64 56
   %t170 = bitcast i8* %t169 to %Block*
   store %Block %t166, %Block* %t170
   %t171 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t172 = getelementptr inbounds %Statement, %Statement* %t160, i32 0, i32 1
-  %t173 = bitcast [24 x i8]* %t172 to i8*
-  %t174 = getelementptr inbounds i8, i8* %t173, i64 16
+  %t173 = bitcast [88 x i8]* %t172 to i8*
+  %t174 = getelementptr inbounds i8, i8* %t173, i64 80
   %t175 = bitcast i8* %t174 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t171, { %Decorator**, i64 }** %t175
   %t176 = load %Statement, %Statement* %t160
@@ -5860,31 +5860,31 @@ merge1:
   store i32 6, i32* %t66
   %t67 = load i8*, i8** %l5
   %t68 = getelementptr inbounds %Statement, %Statement* %t65, i32 0, i32 1
-  %t69 = bitcast [40 x i8]* %t68 to i8*
+  %t69 = bitcast [56 x i8]* %t68 to i8*
   %t70 = bitcast i8* %t69 to i8**
   store i8* %t67, i8** %t70
   %t71 = load %SourceSpan*, %SourceSpan** %l4
   %t72 = getelementptr inbounds %Statement, %Statement* %t65, i32 0, i32 1
-  %t73 = bitcast [40 x i8]* %t72 to i8*
+  %t73 = bitcast [56 x i8]* %t72 to i8*
   %t74 = getelementptr inbounds i8, i8* %t73, i64 8
   %t75 = bitcast i8* %t74 to %SourceSpan**
   store %SourceSpan* %t71, %SourceSpan** %t75
   %t76 = load %Block, %Block* %l11
   %t77 = getelementptr inbounds %Statement, %Statement* %t65, i32 0, i32 1
-  %t78 = bitcast [40 x i8]* %t77 to i8*
+  %t78 = bitcast [56 x i8]* %t77 to i8*
   %t79 = getelementptr inbounds i8, i8* %t78, i64 16
   %t80 = bitcast i8* %t79 to %Block*
   store %Block %t76, %Block* %t80
   %t81 = load { i8**, i64 }*, { i8**, i64 }** %l9
   %t82 = getelementptr inbounds %Statement, %Statement* %t65, i32 0, i32 1
-  %t83 = bitcast [40 x i8]* %t82 to i8*
-  %t84 = getelementptr inbounds i8, i8* %t83, i64 24
+  %t83 = bitcast [56 x i8]* %t82 to i8*
+  %t84 = getelementptr inbounds i8, i8* %t83, i64 40
   %t85 = bitcast i8* %t84 to { i8**, i64 }**
   store { i8**, i64 }* %t81, { i8**, i64 }** %t85
   %t86 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t87 = getelementptr inbounds %Statement, %Statement* %t65, i32 0, i32 1
-  %t88 = bitcast [40 x i8]* %t87 to i8*
-  %t89 = getelementptr inbounds i8, i8* %t88, i64 32
+  %t88 = bitcast [56 x i8]* %t87 to i8*
+  %t89 = getelementptr inbounds i8, i8* %t88, i64 48
   %t90 = bitcast i8* %t89 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t86, { %Decorator**, i64 }** %t90
   %t91 = load %Statement, %Statement* %t65
@@ -6243,19 +6243,19 @@ merge8:
   store i32 7, i32* %t215
   %t216 = load %FunctionSignature, %FunctionSignature* %l22
   %t217 = getelementptr inbounds %Statement, %Statement* %t214, i32 0, i32 1
-  %t218 = bitcast [24 x i8]* %t217 to i8*
+  %t218 = bitcast [88 x i8]* %t217 to i8*
   %t219 = bitcast i8* %t218 to %FunctionSignature*
   store %FunctionSignature %t216, %FunctionSignature* %t219
   %t220 = load %Block, %Block* %l21
   %t221 = getelementptr inbounds %Statement, %Statement* %t214, i32 0, i32 1
-  %t222 = bitcast [24 x i8]* %t221 to i8*
-  %t223 = getelementptr inbounds i8, i8* %t222, i64 8
+  %t222 = bitcast [88 x i8]* %t221 to i8*
+  %t223 = getelementptr inbounds i8, i8* %t222, i64 56
   %t224 = bitcast i8* %t223 to %Block*
   store %Block %t220, %Block* %t224
   %t225 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t226 = getelementptr inbounds %Statement, %Statement* %t214, i32 0, i32 1
-  %t227 = bitcast [24 x i8]* %t226 to i8*
-  %t228 = getelementptr inbounds i8, i8* %t227, i64 16
+  %t227 = bitcast [88 x i8]* %t226 to i8*
+  %t228 = getelementptr inbounds i8, i8* %t227, i64 80
   %t229 = bitcast i8* %t228 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t225, { %Decorator**, i64 }** %t229
   %t230 = load %Statement, %Statement* %t214
@@ -10634,19 +10634,19 @@ merge11:
   store i32 14, i32* %t173
   %t174 = load %ForClause, %ForClause* %l9
   %t175 = getelementptr inbounds %Statement, %Statement* %t172, i32 0, i32 1
-  %t176 = bitcast [24 x i8]* %t175 to i8*
+  %t176 = bitcast [136 x i8]* %t175 to i8*
   %t177 = bitcast i8* %t176 to %ForClause*
   store %ForClause %t174, %ForClause* %t177
   %t178 = load %Block, %Block* %l11
   %t179 = getelementptr inbounds %Statement, %Statement* %t172, i32 0, i32 1
-  %t180 = bitcast [24 x i8]* %t179 to i8*
-  %t181 = getelementptr inbounds i8, i8* %t180, i64 8
+  %t180 = bitcast [136 x i8]* %t179 to i8*
+  %t181 = getelementptr inbounds i8, i8* %t180, i64 104
   %t182 = bitcast i8* %t181 to %Block*
   store %Block %t178, %Block* %t182
   %t183 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t184 = getelementptr inbounds %Statement, %Statement* %t172, i32 0, i32 1
-  %t185 = bitcast [24 x i8]* %t184 to i8*
-  %t186 = getelementptr inbounds i8, i8* %t185, i64 16
+  %t185 = bitcast [136 x i8]* %t184 to i8*
+  %t186 = getelementptr inbounds i8, i8* %t185, i64 128
   %t187 = bitcast i8* %t186 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t183, { %Decorator**, i64 }** %t187
   %t188 = load %Statement, %Statement* %t172
@@ -10749,13 +10749,13 @@ merge5:
   %t54 = load %BlockParseResult, %BlockParseResult* %l2
   %t55 = extractvalue %BlockParseResult %t54, 1
   %t56 = getelementptr inbounds %Statement, %Statement* %t52, i32 0, i32 1
-  %t57 = bitcast [16 x i8]* %t56 to i8*
+  %t57 = bitcast [32 x i8]* %t56 to i8*
   %t58 = bitcast i8* %t57 to %Block*
   store %Block %t55, %Block* %t58
   %t59 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t60 = getelementptr inbounds %Statement, %Statement* %t52, i32 0, i32 1
-  %t61 = bitcast [16 x i8]* %t60 to i8*
-  %t62 = getelementptr inbounds i8, i8* %t61, i64 8
+  %t61 = bitcast [32 x i8]* %t60 to i8*
+  %t62 = getelementptr inbounds i8, i8* %t61, i64 24
   %t63 = bitcast i8* %t62 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t59, { %Decorator**, i64 }** %t63
   %t64 = load %Statement, %Statement* %t52
@@ -11252,25 +11252,25 @@ merge7:
   store i32 19, i32* %t249
   %t250 = load %Expression, %Expression* %l4
   %t251 = getelementptr inbounds %Statement, %Statement* %t248, i32 0, i32 1
-  %t252 = bitcast [32 x i8]* %t251 to i8*
+  %t252 = bitcast [88 x i8]* %t251 to i8*
   %t253 = bitcast i8* %t252 to %Expression*
   store %Expression %t250, %Expression* %t253
   %t254 = load %Block, %Block* %l6
   %t255 = getelementptr inbounds %Statement, %Statement* %t248, i32 0, i32 1
-  %t256 = bitcast [32 x i8]* %t255 to i8*
-  %t257 = getelementptr inbounds i8, i8* %t256, i64 8
+  %t256 = bitcast [88 x i8]* %t255 to i8*
+  %t257 = getelementptr inbounds i8, i8* %t256, i64 48
   %t258 = bitcast i8* %t257 to %Block*
   store %Block %t254, %Block* %t258
   %t259 = load %ElseBranch*, %ElseBranch** %l7
   %t260 = getelementptr inbounds %Statement, %Statement* %t248, i32 0, i32 1
-  %t261 = bitcast [32 x i8]* %t260 to i8*
-  %t262 = getelementptr inbounds i8, i8* %t261, i64 16
+  %t261 = bitcast [88 x i8]* %t260 to i8*
+  %t262 = getelementptr inbounds i8, i8* %t261, i64 72
   %t263 = bitcast i8* %t262 to %ElseBranch**
   store %ElseBranch* %t259, %ElseBranch** %t263
   %t264 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t265 = getelementptr inbounds %Statement, %Statement* %t248, i32 0, i32 1
-  %t266 = bitcast [32 x i8]* %t265 to i8*
-  %t267 = getelementptr inbounds i8, i8* %t266, i64 24
+  %t266 = bitcast [88 x i8]* %t265 to i8*
+  %t267 = getelementptr inbounds i8, i8* %t266, i64 80
   %t268 = bitcast i8* %t267 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t264, { %Decorator**, i64 }** %t268
   %t269 = load %Statement, %Statement* %t248
@@ -11450,20 +11450,20 @@ merge7:
   store i32 18, i32* %t111
   %t112 = load %Expression, %Expression* %l4
   %t113 = getelementptr inbounds %Statement, %Statement* %t110, i32 0, i32 1
-  %t114 = bitcast [24 x i8]* %t113 to i8*
+  %t114 = bitcast [64 x i8]* %t113 to i8*
   %t115 = bitcast i8* %t114 to %Expression*
   store %Expression %t112, %Expression* %t115
   %t116 = load %MatchCasesParseResult, %MatchCasesParseResult* %l5
   %t117 = extractvalue %MatchCasesParseResult %t116, 1
   %t118 = getelementptr inbounds %Statement, %Statement* %t110, i32 0, i32 1
-  %t119 = bitcast [24 x i8]* %t118 to i8*
-  %t120 = getelementptr inbounds i8, i8* %t119, i64 8
+  %t119 = bitcast [64 x i8]* %t118 to i8*
+  %t120 = getelementptr inbounds i8, i8* %t119, i64 48
   %t121 = bitcast i8* %t120 to { %MatchCase**, i64 }**
   store { %MatchCase**, i64 }* %t117, { %MatchCase**, i64 }** %t121
   %t122 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t123 = getelementptr inbounds %Statement, %Statement* %t110, i32 0, i32 1
-  %t124 = bitcast [24 x i8]* %t123 to i8*
-  %t125 = getelementptr inbounds i8, i8* %t124, i64 16
+  %t124 = bitcast [64 x i8]* %t123 to i8*
+  %t125 = getelementptr inbounds i8, i8* %t124, i64 56
   %t126 = bitcast i8* %t125 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t122, { %Decorator**, i64 }** %t126
   %t127 = load %Statement, %Statement* %t110
@@ -12457,13 +12457,13 @@ merge37:
   store i32 21, i32* %t507
   %t508 = load %Expression, %Expression* %l20
   %t509 = getelementptr inbounds %Statement, %Statement* %t506, i32 0, i32 1
-  %t510 = bitcast [16 x i8]* %t509 to i8*
+  %t510 = bitcast [56 x i8]* %t509 to i8*
   %t511 = bitcast i8* %t510 to %Expression*
   store %Expression %t508, %Expression* %t511
   %t512 = load %SourceSpan*, %SourceSpan** %l24
   %t513 = getelementptr inbounds %Statement, %Statement* %t506, i32 0, i32 1
-  %t514 = bitcast [16 x i8]* %t513 to i8*
-  %t515 = getelementptr inbounds i8, i8* %t514, i64 8
+  %t514 = bitcast [56 x i8]* %t513 to i8*
+  %t515 = getelementptr inbounds i8, i8* %t514, i64 48
   %t516 = bitcast i8* %t515 to %SourceSpan**
   store %SourceSpan* %t512, %SourceSpan** %t516
   %t517 = load %Statement, %Statement* %t506
@@ -12760,31 +12760,31 @@ merge11:
   store i32 12, i32* %t158
   %t159 = load i8*, i8** %l4
   %t160 = getelementptr inbounds %Statement, %Statement* %t157, i32 0, i32 1
-  %t161 = bitcast [40 x i8]* %t160 to i8*
+  %t161 = bitcast [120 x i8]* %t160 to i8*
   %t162 = bitcast i8* %t161 to i8**
   store i8* %t159, i8** %t162
   %t163 = load %Token, %Token* %l2
   %t164 = getelementptr inbounds %Statement, %Statement* %t157, i32 0, i32 1
-  %t165 = bitcast [40 x i8]* %t164 to i8*
+  %t165 = bitcast [120 x i8]* %t164 to i8*
   %t166 = getelementptr inbounds i8, i8* %t165, i64 8
   %t167 = bitcast i8* %t166 to %Token*
   store %Token %t163, %Token* %t167
   %t168 = load %Token, %Token* %l3
   %t169 = getelementptr inbounds %Statement, %Statement* %t157, i32 0, i32 1
-  %t170 = bitcast [40 x i8]* %t169 to i8*
-  %t171 = getelementptr inbounds i8, i8* %t170, i64 16
+  %t170 = bitcast [120 x i8]* %t169 to i8*
+  %t171 = getelementptr inbounds i8, i8* %t170, i64 48
   %t172 = bitcast i8* %t171 to %Token*
   store %Token %t168, %Token* %t172
   %t173 = load %Block, %Block* %l6
   %t174 = getelementptr inbounds %Statement, %Statement* %t157, i32 0, i32 1
-  %t175 = bitcast [40 x i8]* %t174 to i8*
-  %t176 = getelementptr inbounds i8, i8* %t175, i64 24
+  %t175 = bitcast [120 x i8]* %t174 to i8*
+  %t176 = getelementptr inbounds i8, i8* %t175, i64 88
   %t177 = bitcast i8* %t176 to %Block*
   store %Block %t173, %Block* %t177
   %t178 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t179 = getelementptr inbounds %Statement, %Statement* %t157, i32 0, i32 1
-  %t180 = bitcast [40 x i8]* %t179 to i8*
-  %t181 = getelementptr inbounds i8, i8* %t180, i64 32
+  %t180 = bitcast [120 x i8]* %t179 to i8*
+  %t181 = getelementptr inbounds i8, i8* %t180, i64 112
   %t182 = bitcast i8* %t181 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t178, { %Decorator**, i64 }** %t182
   %t183 = load %Statement, %Statement* %t157
@@ -13033,19 +13033,19 @@ merge13:
   %t158 = load { %WithClause*, i64 }*, { %WithClause*, i64 }** %l4
   %t159 = bitcast { %WithClause*, i64 }* %t158 to { %WithClause**, i64 }*
   %t160 = getelementptr inbounds %Statement, %Statement* %t156, i32 0, i32 1
-  %t161 = bitcast [24 x i8]* %t160 to i8*
+  %t161 = bitcast [40 x i8]* %t160 to i8*
   %t162 = bitcast i8* %t161 to { %WithClause**, i64 }**
   store { %WithClause**, i64 }* %t159, { %WithClause**, i64 }** %t162
   %t163 = load %Block, %Block* %l9
   %t164 = getelementptr inbounds %Statement, %Statement* %t156, i32 0, i32 1
-  %t165 = bitcast [24 x i8]* %t164 to i8*
+  %t165 = bitcast [40 x i8]* %t164 to i8*
   %t166 = getelementptr inbounds i8, i8* %t165, i64 8
   %t167 = bitcast i8* %t166 to %Block*
   store %Block %t163, %Block* %t167
   %t168 = bitcast { %Decorator*, i64 }* %decorators to { %Decorator**, i64 }*
   %t169 = getelementptr inbounds %Statement, %Statement* %t156, i32 0, i32 1
-  %t170 = bitcast [24 x i8]* %t169 to i8*
-  %t171 = getelementptr inbounds i8, i8* %t170, i64 16
+  %t170 = bitcast [40 x i8]* %t169 to i8*
+  %t171 = getelementptr inbounds i8, i8* %t170, i64 32
   %t172 = bitcast i8* %t171 to { %Decorator**, i64 }**
   store { %Decorator**, i64 }* %t168, { %Decorator**, i64 }** %t172
   %t173 = load %Statement, %Statement* %t156
@@ -13675,13 +13675,13 @@ merge19:
   store i32 21, i32* %t267
   %t268 = load %Expression, %Expression* %l8
   %t269 = getelementptr inbounds %Statement, %Statement* %t266, i32 0, i32 1
-  %t270 = bitcast [16 x i8]* %t269 to i8*
+  %t270 = bitcast [56 x i8]* %t269 to i8*
   %t271 = bitcast i8* %t270 to %Expression*
   store %Expression %t268, %Expression* %t271
   %t272 = load %SourceSpan*, %SourceSpan** %l9
   %t273 = getelementptr inbounds %Statement, %Statement* %t266, i32 0, i32 1
-  %t274 = bitcast [16 x i8]* %t273 to i8*
-  %t275 = getelementptr inbounds i8, i8* %t274, i64 8
+  %t274 = bitcast [56 x i8]* %t273 to i8*
+  %t275 = getelementptr inbounds i8, i8* %t274, i64 48
   %t276 = bitcast i8* %t275 to %SourceSpan**
   store %SourceSpan* %t272, %SourceSpan** %t276
   %t277 = load %Statement, %Statement* %t266
@@ -20784,19 +20784,19 @@ merge21:
   store i32 13, i32* %t228
   %t229 = load { %Parameter**, i64 }*, { %Parameter**, i64 }** %l4
   %t230 = getelementptr inbounds %Expression, %Expression* %t227, i32 0, i32 1
-  %t231 = bitcast [24 x i8]* %t230 to i8*
+  %t231 = bitcast [40 x i8]* %t230 to i8*
   %t232 = bitcast i8* %t231 to { %Parameter**, i64 }**
   store { %Parameter**, i64 }* %t229, { %Parameter**, i64 }** %t232
   %t233 = load %Block, %Block* %l13
   %t234 = getelementptr inbounds %Expression, %Expression* %t227, i32 0, i32 1
-  %t235 = bitcast [24 x i8]* %t234 to i8*
+  %t235 = bitcast [40 x i8]* %t234 to i8*
   %t236 = getelementptr inbounds i8, i8* %t235, i64 8
   %t237 = bitcast i8* %t236 to %Block*
   store %Block %t233, %Block* %t237
   %t238 = load %TypeAnnotation*, %TypeAnnotation** %l5
   %t239 = getelementptr inbounds %Expression, %Expression* %t227, i32 0, i32 1
-  %t240 = bitcast [24 x i8]* %t239 to i8*
-  %t241 = getelementptr inbounds i8, i8* %t240, i64 16
+  %t240 = bitcast [40 x i8]* %t239 to i8*
+  %t241 = getelementptr inbounds i8, i8* %t240, i64 32
   %t242 = bitcast i8* %t241 to %TypeAnnotation**
   store %TypeAnnotation* %t238, %TypeAnnotation** %t242
   %t243 = load %Expression, %Expression* %t227
@@ -21000,7 +21000,7 @@ then16:
   %t139 = getelementptr inbounds %Expression, %Expression* %t138, i32 0, i32 0
   store i32 14, i32* %t139
   %t140 = load %Expression, %Expression* %l2
-  %t141 = call noalias i8* @malloc(i64 32)
+  %t141 = call noalias i8* @malloc(i64 48)
   %t142 = bitcast i8* %t141 to %Expression*
   store %Expression %t140, %Expression* %t142
   %t143 = bitcast i8* %t141 to %Expression*
@@ -21010,7 +21010,7 @@ then16:
   store %Expression* %t143, %Expression** %t146
   %t147 = load %ExpressionParseResult, %ExpressionParseResult* %l6
   %t148 = extractvalue %ExpressionParseResult %t147, 1
-  %t149 = call noalias i8* @malloc(i64 32)
+  %t149 = call noalias i8* @malloc(i64 48)
   %t150 = bitcast i8* %t149 to %Expression*
   store %Expression %t148, %Expression* %t150
   %t151 = bitcast i8* %t149 to %Expression*
@@ -21033,7 +21033,7 @@ else17:
   %t163 = bitcast i8* %t162 to i8**
   store i8* %t160, i8** %t163
   %t164 = load %Expression, %Expression* %l2
-  %t165 = call noalias i8* @malloc(i64 32)
+  %t165 = call noalias i8* @malloc(i64 48)
   %t166 = bitcast i8* %t165 to %Expression*
   store %Expression %t164, %Expression* %t166
   %t167 = bitcast i8* %t165 to %Expression*
@@ -21044,7 +21044,7 @@ else17:
   store %Expression* %t167, %Expression** %t171
   %t172 = load %ExpressionParseResult, %ExpressionParseResult* %l6
   %t173 = extractvalue %ExpressionParseResult %t172, 1
-  %t174 = call noalias i8* @malloc(i64 32)
+  %t174 = call noalias i8* @malloc(i64 48)
   %t175 = bitcast i8* %t174 to %Expression*
   store %Expression %t173, %Expression* %t175
   %t176 = bitcast i8* %t174 to %Expression*
@@ -21225,7 +21225,7 @@ merge7:
   store i8* %t101, i8** %t104
   %t105 = load %ExpressionParseResult, %ExpressionParseResult* %l3
   %t106 = extractvalue %ExpressionParseResult %t105, 1
-  %t107 = call noalias i8* @malloc(i64 32)
+  %t107 = call noalias i8* @malloc(i64 48)
   %t108 = bitcast i8* %t107 to %Expression*
   store %Expression %t106, %Expression* %t108
   %t109 = bitcast i8* %t107 to %Expression*
@@ -22047,7 +22047,7 @@ merge13:
   %t139 = getelementptr inbounds %Expression, %Expression* %t138, i32 0, i32 0
   store i32 7, i32* %t139
   %t140 = load %Expression, %Expression* %l1
-  %t141 = call noalias i8* @malloc(i64 32)
+  %t141 = call noalias i8* @malloc(i64 48)
   %t142 = bitcast i8* %t141 to %Expression*
   store %Expression %t140, %Expression* %t142
   %t143 = bitcast i8* %t141 to %Expression*
@@ -22103,7 +22103,7 @@ merge17:
   %t178 = getelementptr inbounds %Expression, %Expression* %t177, i32 0, i32 0
   store i32 8, i32* %t178
   %t179 = load %Expression, %Expression* %l1
-  %t180 = call noalias i8* @malloc(i64 32)
+  %t180 = call noalias i8* @malloc(i64 48)
   %t181 = bitcast i8* %t180 to %Expression*
   store %Expression %t179, %Expression* %t181
   %t182 = bitcast i8* %t180 to %Expression*
@@ -22206,7 +22206,7 @@ merge25:
   %t251 = getelementptr inbounds %Expression, %Expression* %t250, i32 0, i32 0
   store i32 9, i32* %t251
   %t252 = load %Expression, %Expression* %l1
-  %t253 = call noalias i8* @malloc(i64 32)
+  %t253 = call noalias i8* @malloc(i64 48)
   %t254 = bitcast i8* %t253 to %Expression*
   store %Expression %t252, %Expression* %t254
   %t255 = bitcast i8* %t253 to %Expression*
@@ -22216,7 +22216,7 @@ merge25:
   store %Expression* %t255, %Expression** %t258
   %t259 = load %ExpressionParseResult, %ExpressionParseResult* %l8
   %t260 = extractvalue %ExpressionParseResult %t259, 1
-  %t261 = call noalias i8* @malloc(i64 32)
+  %t261 = call noalias i8* @malloc(i64 48)
   %t262 = bitcast i8* %t261 to %Expression*
   store %Expression %t260, %Expression* %t262
   %t263 = bitcast i8* %t261 to %Expression*
@@ -28189,7 +28189,7 @@ afterloop3:
 
 define { %Statement*, i64 }* @append_statement({ %Statement*, i64 }* %statements, %Statement %statement) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 64)
+  %t0 = call noalias i8* @malloc(i64 144)
   %t1 = bitcast i8* %t0 to %Statement*
   store %Statement %statement, %Statement* %t1
   %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
@@ -28265,7 +28265,7 @@ block.entry:
 
 define { %ModelProperty*, i64 }* @append_model_property({ %ModelProperty*, i64 }* %properties, %ModelProperty %property) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 24)
+  %t0 = call noalias i8* @malloc(i64 64)
   %t1 = bitcast i8* %t0 to %ModelProperty*
   store %ModelProperty %property, %ModelProperty* %t1
   %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
@@ -28319,7 +28319,7 @@ block.entry:
 
 define { %MethodDeclaration*, i64 }* @append_method({ %MethodDeclaration*, i64 }* %methods, %MethodDeclaration %method) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 24)
+  %t0 = call noalias i8* @malloc(i64 88)
   %t1 = bitcast i8* %t0 to %MethodDeclaration*
   store %MethodDeclaration %method, %MethodDeclaration* %t1
   %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
@@ -28481,7 +28481,7 @@ block.entry:
 
 define { %DecoratorArgument*, i64 }* @append_decorator_argument({ %DecoratorArgument*, i64 }* %arguments, %DecoratorArgument %argument) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 16)
+  %t0 = call noalias i8* @malloc(i64 56)
   %t1 = bitcast i8* %t0 to %DecoratorArgument*
   store %DecoratorArgument %argument, %DecoratorArgument* %t1
   %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
@@ -28508,7 +28508,7 @@ block.entry:
 
 define { %WithClause*, i64 }* @append_with_clause({ %WithClause*, i64 }* %clauses, %WithClause %clause) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 8)
+  %t0 = call noalias i8* @malloc(i64 48)
   %t1 = bitcast i8* %t0 to %WithClause*
   store %WithClause %clause, %WithClause* %t1
   %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
@@ -28535,7 +28535,7 @@ block.entry:
 
 define { %MatchCase*, i64 }* @append_match_case({ %MatchCase*, i64 }* %cases, %MatchCase %case) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 24)
+  %t0 = call noalias i8* @malloc(i64 80)
   %t1 = bitcast i8* %t0 to %MatchCase*
   store %MatchCase %case, %MatchCase* %t1
   %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
@@ -28562,7 +28562,7 @@ block.entry:
 
 define { %Expression*, i64 }* @append_expression({ %Expression*, i64 }* %expressions, %Expression %expression) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 32)
+  %t0 = call noalias i8* @malloc(i64 48)
   %t1 = bitcast i8* %t0 to %Expression*
   store %Expression %expression, %Expression* %t1
   %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
@@ -28589,7 +28589,7 @@ block.entry:
 
 define { %ObjectField*, i64 }* @append_object_field({ %ObjectField*, i64 }* %fields, %ObjectField %field) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 16)
+  %t0 = call noalias i8* @malloc(i64 56)
   %t1 = bitcast i8* %t0 to %ObjectField*
   store %ObjectField %field, %ObjectField* %t1
   %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
@@ -28616,7 +28616,7 @@ block.entry:
 
 define { %Token*, i64 }* @append_token({ %Token*, i64 }* %tokens, %Token %token) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 32)
+  %t0 = call noalias i8* @malloc(i64 40)
   %t1 = bitcast i8* %t0 to %Token*
   store %Token %token, %Token* %t1
   %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
@@ -28669,85 +28669,85 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.enum.TokenKind.EndOfFile.variant = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
-@.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
-@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.str.len2.h193486427 = private unnamed_addr constant [3 x i8] c"as\00"
-@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len4.h255172967 = private unnamed_addr constant [5 x i8] c"case\00"
-@.str.len2.h193429733 = private unnamed_addr constant [3 x i8] c"//\00"
-@.str.len6.h453982107 = private unnamed_addr constant [7 x i8] c"Symbol\00"
 @.enum.TokenKind.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
-@.str.len9.h1021477046 = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
-@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
-@.str.len2.h193446530 = private unnamed_addr constant [3 x i8] c">=\00"
-@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
-@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len4.h257940116 = private unnamed_addr constant [5 x i8] c"else\00"
-@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
-@.str.len30.h1141851511 = private unnamed_addr constant [31 x i8] c" /* parse_unknown truncated */\00"
-@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
-@.str.len2.h193429568 = private unnamed_addr constant [3 x i8] c"/*\00"
-@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len10.h715288307 = private unnamed_addr constant [11 x i8] c"Whitespace\00"
-@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
-@.enum.TokenKind.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.enum.TokenKind.Comment.variant = private unnamed_addr constant [8 x i8] c"Comment\00"
-@.enum.TokenKind.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len2.h193445474 = private unnamed_addr constant [3 x i8] c"=>\00"
-@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.enum.TokenKind.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len7.h936649884 = private unnamed_addr constant [8 x i8] c"Comment\00"
-@.enum.TokenKind.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.str.len2.h193444352 = private unnamed_addr constant [3 x i8] c"<=\00"
-@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len2.h193445441 = private unnamed_addr constant [3 x i8] c"==\00"
-@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
-@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
-@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
-@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
-@.str.len3.h2090521984 = private unnamed_addr constant [4 x i8] c"mut\00"
-@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
-@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len5.h1921561325 = private unnamed_addr constant [6 x i8] c"async\00"
-@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
-@.str.len15.h1896695889 = private unnamed_addr constant [16 x i8] c"... (truncated)\00"
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
-@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.enum.TokenKind.Whitespace.variant = private unnamed_addr constant [11 x i8] c"Whitespace\00"
-@.enum.TokenKind.Symbol.variant = private unnamed_addr constant [7 x i8] c"Symbol\00"
-@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
-@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
 @.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
+@.str.len30.h1141851511 = private unnamed_addr constant [31 x i8] c" /* parse_unknown truncated */\00"
+@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.str.len4.h255172967 = private unnamed_addr constant [5 x i8] c"case\00"
+@.str.len6.h453982107 = private unnamed_addr constant [7 x i8] c"Symbol\00"
+@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len4.h257940116 = private unnamed_addr constant [5 x i8] c"else\00"
+@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len15.h1896695889 = private unnamed_addr constant [16 x i8] c"... (truncated)\00"
+@.enum.TokenKind.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
+@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
+@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.str.len2.h193486427 = private unnamed_addr constant [3 x i8] c"as\00"
+@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
+@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
+@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
+@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
+@.str.len3.h2090521984 = private unnamed_addr constant [4 x i8] c"mut\00"
+@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.enum.TokenKind.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len5.h1921561325 = private unnamed_addr constant [6 x i8] c"async\00"
+@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
+@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.enum.TokenKind.Whitespace.variant = private unnamed_addr constant [11 x i8] c"Whitespace\00"
+@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.enum.TokenKind.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
+@.str.len2.h193429733 = private unnamed_addr constant [3 x i8] c"//\00"
+@.str.len2.h193445441 = private unnamed_addr constant [3 x i8] c"==\00"
+@.str.len10.h715288307 = private unnamed_addr constant [11 x i8] c"Whitespace\00"
+@.str.len7.h936649884 = private unnamed_addr constant [8 x i8] c"Comment\00"
+@.enum.TokenKind.Comment.variant = private unnamed_addr constant [8 x i8] c"Comment\00"
+@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
+@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.enum.TokenKind.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len9.h1021477046 = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
+@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.str.len2.h193445474 = private unnamed_addr constant [3 x i8] c"=>\00"
+@.enum.TokenKind.Symbol.variant = private unnamed_addr constant [7 x i8] c"Symbol\00"
+@.str.len2.h193446530 = private unnamed_addr constant [3 x i8] c">=\00"
+@.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.enum.TokenKind.EndOfFile.variant = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.str.len2.h193444352 = private unnamed_addr constant [3 x i8] c"<=\00"
+@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
+@.str.len2.h193429568 = private unnamed_addr constant [3 x i8] c"/*\00"
+@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"

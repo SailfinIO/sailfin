@@ -27,11 +27,11 @@
 .endenum
 
 .struct Token
-    .layout struct name=Token size=32 align=8
-    .layout field kind type=TokenKind offset=0 size=8 align=8
-    .layout field lexeme type=string offset=8 size=8 align=8
-    .layout field line type=number offset=16 size=8 align=8
-    .layout field column type=number offset=24 size=8 align=8
+    .layout struct name=Token size=40 align=8
+    .layout field kind type=TokenKind offset=0 size=16 align=8
+    .layout field lexeme type=string offset=16 size=8 align=8
+    .layout field line type=number offset=24 size=8 align=8
+    .layout field column type=number offset=32 size=8 align=8
     .field kind -> TokenKind
     .field lexeme -> string
     .field line -> number

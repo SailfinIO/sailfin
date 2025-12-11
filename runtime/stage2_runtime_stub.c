@@ -14,31 +14,34 @@ typedef struct
     int64_t length;
 } SailfinArray;
 
+static SailfinString sailfin_empty_string(void)
+{
+    static char empty_buffer[1] = {'\0'};
+    return empty_buffer;
+}
+
 static SailfinString alloc_string(int64_t length)
 {
     if (length < 0)
     {
         length = 0;
     }
-    char *buffer = malloc((size_t)length + 1);
+    size_t size = (size_t)length + 1;
+    char *buffer = malloc(size);
     if (!buffer)
     {
-        return NULL;
+        return sailfin_empty_string();
     }
-    if (length > 0)
-    {
-        memset(buffer, 0, (size_t)length + 1);
-    }
-    buffer[length] = '\0';
+    memset(buffer, 0, size);
     return buffer;
 }
 
 static SailfinString string_from_span(const char *data, int64_t length)
 {
     SailfinString value = alloc_string(length);
-    if (!value)
+    if (value == sailfin_empty_string())
     {
-        return NULL;
+        return value;
     }
     if (data && length > 0)
     {
@@ -142,9 +145,9 @@ void *sailfin_runtime_string_concat(SailfinString a, SailfinString b)
     int64_t len_a = string_length(a);
     int64_t len_b = string_length(b);
     SailfinString result = alloc_string(len_a + len_b);
-    if (!result)
+    if (result == sailfin_empty_string())
     {
-        return NULL;
+        return result;
     }
     if (len_a > 0)
     {

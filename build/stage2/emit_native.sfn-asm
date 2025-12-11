@@ -1916,57 +1916,57 @@
         .span 1137 9 1137 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
-    .span 1139 5 1139 59
-    eval let canonical = lookup_canonical_type_layout(trimmed)
-    .if canonical != null
-        .span 1141 9 1141 106
-        ret TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics }
-    .endif
     .if is_array_type(trimmed)
-        .span 1144 9 1144 79
+        .span 1140 9 1140 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
     .if trimmed == "string"
-        .span 1147 9 1147 79
+        .span 1143 9 1143 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
     .if is_optional_annotation(trimmed)
-        .span 1150 9 1150 63
+        .span 1146 9 1146 63
         eval let inner = trim_text(strip_optional_suffix(trimmed))
         .if inner.length == 0
-            .span 1152 13 1152 216
+            .span 1148 13 1148 216
             eval diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` optional type missing inner annotation; defaulting to pointer layout")
         .endif
-        .span 1154 9 1154 79
+        .span 1150 9 1150 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
     .if contains_string(visiting, trimmed)
-        .span 1157 9 1157 79
+        .span 1153 9 1153 79
         ret TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics }
     .endif
-    .span 1159 5 1159 77
+    .span 1155 5 1155 77
     eval let struct_definition = find_layout_struct_definition(context, trimmed)
     .if struct_definition != null
-        .span 1161 9 1161 64
+        .span 1157 9 1157 64
         eval let nested_visiting = append_string(visiting, trimmed)
-        .span 1162 9 1162 117
+        .span 1158 9 1158 117
         eval let record = calculate_record_layout(context, struct_definition.fields, "struct", trimmed, nested_visiting)
-        .span 1163 9 1163 62
+        .span 1159 9 1159 62
         eval diagnostics = diagnostics.concat(record.diagnostics)
-        .span 1164 9 1164 100
+        .span 1160 9 1160 100
         ret TypeLayoutInfo { size: record.size, align: record.align, diagnostics: diagnostics }
     .endif
-    .span 1166 5 1166 73
+    .span 1162 5 1162 73
     eval let enum_definition = find_layout_enum_definition(context, trimmed)
     .if enum_definition != null
-        .span 1168 9 1168 64
+        .span 1164 9 1164 64
         eval let nested_visiting = append_string(visiting, trimmed)
-        .span 1169 9 1169 114
+        .span 1165 9 1165 114
         eval let aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting)
-        .span 1170 9 1170 65
+        .span 1166 9 1166 65
         eval diagnostics = diagnostics.concat(aggregate.diagnostics)
-        .span 1171 9 1171 106
+        .span 1167 9 1167 106
         ret TypeLayoutInfo { size: aggregate.size, align: aggregate.align, diagnostics: diagnostics }
+    .endif
+    .span 1169 5 1169 59
+    eval let canonical = lookup_canonical_type_layout(trimmed)
+    .if canonical != null
+        .span 1171 9 1171 106
+        ret TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics }
     .endif
     .span 1173 5 1173 209
     eval diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout")
@@ -2143,10 +2143,10 @@
 .meta effects none
     .span 1255 5 1255 51
     eval let mut layouts -> CanonicalTypeLayout[] = []
-    .span 1256 5 1256 111
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Token", size: 8, align: 8 })
-    .span 1257 5 1257 115
-    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TokenKind", size: 8, align: 8 })
+    .span 1256 5 1256 112
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Token", size: 40, align: 8 })
+    .span 1257 5 1257 116
+    eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TokenKind", size: 16, align: 8 })
     .span 1258 5 1258 113
     eval layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Program", size: 8, align: 8 })
     .span 1259 5 1259 120

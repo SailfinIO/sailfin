@@ -3643,11 +3643,11 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
 @.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
-@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
 @.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
-@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
+@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
+@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
 @.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
