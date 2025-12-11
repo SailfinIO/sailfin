@@ -22,24 +22,23 @@ declare noalias i8* @malloc(i64)
 
 @.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
 
-; NOTE: Returns string via output parameter %out_result
-define void @char_at(i8* %value, double %index, i8** %out_result) {
+define i8* @char_at(i8* %value, double %index) {
 block.entry:
   %t0 = call i64 @sailfin_runtime_string_length(i8* %value)
   %t1 = icmp eq i64 %t0, 0
   br i1 %t1, label %then0, label %merge1
 then0:
   %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s2)
+  ret i8* %s2
 merge1:
   %t3 = sitofp i64 0 to double
   %t4 = fcmp olt double %index, %t3
   br i1 %t4, label %then2, label %merge3
 then2:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge3:
   %t6 = call i64 @sailfin_runtime_string_length(i8* %value)
   %t7 = sitofp i64 %t6 to double
@@ -47,14 +46,14 @@ merge3:
   br i1 %t8, label %then4, label %merge5
 then4:
   %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s9, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s9)
+  ret i8* %s9
 merge5:
   %t10 = sitofp i64 1 to double
   %t11 = fadd double %index, %t10
   %t12 = call i8* @sailfin_runtime_substring(i8* %value, double %index, double %t11)
-  store i8* %t12, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t12)
+  ret i8* %t12
 }
 
 define i1 @is_symbol_char(i8* %ch) {
@@ -215,8 +214,7 @@ merge9:
   ret i1 0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @sanitize_symbol(i8* %name, i8** %out_result) {
+define i8* @sanitize_symbol(i8* %name) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -235,8 +233,8 @@ then0:
   %t4 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 1
   store i8 0, i8* %t4
   %t5 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s6, i8** %l0
@@ -321,8 +319,8 @@ then10:
   %t55 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 1
   store i8 0, i8* %t55
   %t56 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 0
-  store i8* %t56, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t56)
+  ret i8* %t56
 merge11:
   %t57 = load i8*, i8** %l0
   %t58 = getelementptr i8, i8* %t57, i64 0
@@ -395,8 +393,8 @@ merge13:
   %t97 = phi i8* [ %t96, %then12 ], [ %t84, %logical_and_merge_76 ]
   store i8* %t97, i8** %l0
   %t98 = load i8*, i8** %l0
-  store i8* %t98, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t98)
+  ret i8* %t98
 }
 
 define i1 @strings_equal(i8* %left, i8* %right) {

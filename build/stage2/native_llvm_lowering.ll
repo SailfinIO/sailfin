@@ -869,8 +869,7 @@ afterloop3:
   ret %ImportedModuleContext %t315
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @resolve_import_module_slug(i8* %module, i8** %out_result) {
+define i8* @resolve_import_module_slug(i8* %module) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -887,8 +886,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = call i8* @normalize_import_module_path(i8* %t6)
@@ -1010,38 +1009,35 @@ then12:
   %t79 = call double @llvm.round.f64(double %t76)
   %t80 = fptosi double %t79 to i64
   %t81 = call i8* @sailfin_runtime_substring(i8* %t73, i64 %t80, i64 %t78)
-  store i8* %t81, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t81)
+  ret i8* %t81
 merge13:
   %t82 = load i8*, i8** %l4
-  store i8* %t82, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t82)
+  ret i8* %t82
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @layout_manifest_path_for_slug(i8* %slug, i8** %out_result) {
+define i8* @layout_manifest_path_for_slug(i8* %slug) {
 block.entry:
   %s0 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1690231036, i32 0, i32 0
   %t1 = call i8* @sailfin_runtime_string_concat(i8* %s0, i8* %slug)
   %s2 = getelementptr inbounds [17 x i8], [17 x i8]* @.str.len16.h1302463873, i32 0, i32 0
   %t3 = call i8* @sailfin_runtime_string_concat(i8* %t1, i8* %s2)
-  store i8* %t3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t3)
+  ret i8* %t3
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @native_text_path_for_slug(i8* %slug, i8** %out_result) {
+define i8* @native_text_path_for_slug(i8* %slug) {
 block.entry:
   %s0 = getelementptr inbounds [14 x i8], [14 x i8]* @.str.len13.h1690231036, i32 0, i32 0
   %t1 = call i8* @sailfin_runtime_string_concat(i8* %s0, i8* %slug)
   %s2 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h950770765, i32 0, i32 0
   %t3 = call i8* @sailfin_runtime_string_concat(i8* %t1, i8* %s2)
-  store i8* %t3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t3)
+  ret i8* %t3
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @normalize_import_module_path(i8* %value, i8** %out_result) {
+define i8* @normalize_import_module_path(i8* %value) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -1123,8 +1119,8 @@ afterloop3:
   %t43 = load i8*, i8** %l0
   %t44 = load double, double* %l1
   %t45 = load i8*, i8** %l0
-  store i8* %t45, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t45)
+  ret i8* %t45
 }
 
 define %LayoutManifestApplication @apply_layout_manifest_to_module({ %NativeStruct*, i64 }* %structs, { %NativeEnum*, i64 }* %enums, %LayoutManifest* %manifest) {
@@ -8015,8 +8011,7 @@ afterloop7:
   ret i1 0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_type_annotation(i8* %annotation, i8** %out_result) {
+define i8* @map_type_annotation(i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -8037,8 +8032,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = call i8* @unwrap_move_wrapper(i8* %t6)
@@ -8081,8 +8076,8 @@ then4:
   br i1 %t32, label %then6, label %merge7
 then6:
   %s37 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s37, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s37)
+  ret i8* %s37
 merge7:
   %t38 = load i8*, i8** %l3
   %t39 = call i8* @map_type_annotation(i8* %t38)
@@ -8114,8 +8109,8 @@ logical_or_merge_40:
   br i1 %t47, label %then8, label %merge9
 then8:
   %s53 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s53, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s53)
+  ret i8* %s53
 merge9:
   %t55 = load i8*, i8** %l4
   %t56 = call i64 @sailfin_runtime_string_length(i8* %t55)
@@ -8148,8 +8143,8 @@ logical_and_merge_54:
   br i1 %t65, label %then10, label %merge11
 then10:
   %t71 = load i8*, i8** %l4
-  store i8* %t71, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t71)
+  ret i8* %t71
 merge11:
   %t72 = load i8*, i8** %l4
   %t73 = alloca [2 x i8], align 1
@@ -8159,8 +8154,8 @@ merge11:
   store i8 0, i8* %t75
   %t76 = getelementptr [2 x i8], [2 x i8]* %t73, i32 0, i32 0
   %t77 = call i8* @sailfin_runtime_string_concat(i8* %t72, i8* %t76)
-  store i8* %t77, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t77)
+  ret i8* %t77
 merge5:
   br label %merge3
 merge3:
@@ -8172,8 +8167,8 @@ merge3:
   br i1 %t80, label %then12, label %merge13
 then12:
   %s83 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
-  store i8* %s83, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s83)
+  ret i8* %s83
 merge13:
   %t85 = load i8*, i8** %l1
   %s86 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
@@ -8199,8 +8194,8 @@ logical_or_merge_84:
   br i1 %t91, label %then14, label %merge15
 then14:
   %s94 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
-  store i8* %s94, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s94)
+  ret i8* %s94
 merge15:
   %t96 = load i8*, i8** %l1
   %s97 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090370613, i32 0, i32 0
@@ -8226,8 +8221,8 @@ logical_or_merge_95:
   br i1 %t102, label %then16, label %merge17
 then16:
   %s105 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090307517, i32 0, i32 0
-  store i8* %s105, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s105)
+  ret i8* %s105
 merge17:
   %t106 = load i8*, i8** %l1
   %s107 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090304184, i32 0, i32 0
@@ -8237,8 +8232,8 @@ merge17:
   br i1 %t108, label %then18, label %merge19
 then18:
   %s111 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090304184, i32 0, i32 0
-  store i8* %s111, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s111)
+  ret i8* %s111
 merge19:
   %t112 = load i8*, i8** %l1
   %s113 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
@@ -8248,8 +8243,8 @@ merge19:
   br i1 %t114, label %then20, label %merge21
 then20:
   %s117 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s117, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s117)
+  ret i8* %s117
 merge21:
   %t118 = load i8*, i8** %l1
   %s119 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
@@ -8259,8 +8254,8 @@ merge21:
   br i1 %t120, label %then22, label %merge23
 then22:
   %s123 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
-  store i8* %s123, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s123)
+  ret i8* %s123
 merge23:
   %t124 = load i8*, i8** %l1
   %t125 = call i64 @sailfin_runtime_string_length(i8* %t124)
@@ -8306,8 +8301,8 @@ then26:
   br i1 %t152, label %then28, label %merge29
 then28:
   %s158 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s158, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s158)
+  ret i8* %s158
 merge29:
   %t159 = load i8*, i8** %l7
   %t160 = call i8* @array_struct_type_for_element(i8* %t159)
@@ -8320,8 +8315,8 @@ merge29:
   store i8 0, i8* %t164
   %t165 = getelementptr [2 x i8], [2 x i8]* %t162, i32 0, i32 0
   %t166 = call i8* @sailfin_runtime_string_concat(i8* %t161, i8* %t165)
-  store i8* %t166, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t166)
+  ret i8* %t166
 merge27:
   br label %merge25
 merge25:
@@ -8349,16 +8344,15 @@ then30:
   store i8 0, i8* %t181
   %t182 = getelementptr [2 x i8], [2 x i8]* %t179, i32 0, i32 0
   %t183 = call i8* @sailfin_runtime_string_concat(i8* %t178, i8* %t182)
-  store i8* %t183, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t183)
+  ret i8* %t183
 merge31:
   %s184 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s184, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s184)
+  ret i8* %s184
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_struct_field_annotation(i8* %annotation, i8** %out_result) {
+define i8* @map_struct_field_annotation(i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %t0 = call i8* @map_type_annotation(i8* %annotation)
@@ -8370,12 +8364,12 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
-  store i8* %t6, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t6)
+  ret i8* %t6
 }
 
 define i1 @layout_annotation_requires_pointer(i8* %annotation) {
@@ -8512,8 +8506,7 @@ merge17:
   ret i1 0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @layout_annotation_base_type(i8* %annotation, i8** %out_result) {
+define i8* @layout_annotation_base_type(i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -8533,8 +8526,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = call i8* @unwrap_move_wrapper(i8* %t6)
@@ -8547,8 +8540,8 @@ merge1:
   br i1 %t10, label %then2, label %merge3
 then2:
   %s13 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s13, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s13)
+  ret i8* %s13
 merge3:
   %t14 = load i8*, i8** %l1
   %s15 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h267749729, i32 0, i32 0
@@ -8565,8 +8558,8 @@ then4:
   store i8* %t23, i8** %l2
   %t24 = load i8*, i8** %l2
   %t25 = call i8* @layout_annotation_base_type(i8* %t24)
-  store i8* %t25, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t25)
+  ret i8* %t25
 merge5:
   %t26 = load i8*, i8** %l1
   %t27 = call i64 @sailfin_runtime_string_length(i8* %t26)
@@ -8594,8 +8587,8 @@ then8:
   store i8* %t43, i8** %l4
   %t44 = load i8*, i8** %l4
   %t45 = call i8* @layout_annotation_base_type(i8* %t44)
-  store i8* %t45, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t45)
+  ret i8* %t45
 merge9:
   br label %merge7
 merge7:
@@ -8629,8 +8622,8 @@ then12:
   store i8* %t67, i8** %l6
   %t68 = load i8*, i8** %l6
   %t69 = call i8* @layout_annotation_base_type(i8* %t68)
-  store i8* %t69, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t69)
+  ret i8* %t69
 merge13:
   br label %merge11
 merge11:
@@ -8666,14 +8659,14 @@ then16:
   store i8* %t93, i8** %l8
   %t94 = load i8*, i8** %l8
   %t95 = call i8* @layout_annotation_base_type(i8* %t94)
-  store i8* %t95, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t95)
+  ret i8* %t95
 merge17:
   br label %merge15
 merge15:
   %t96 = load i8*, i8** %l1
-  store i8* %t96, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t96)
+  ret i8* %t96
 }
 
 define i1 @layout_annotation_represents_user_value(i8* %annotation) {
@@ -19818,8 +19811,7 @@ merge3:
   ret i1 0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @render_interface_signature(%NativeInterfaceSignature %signature, i8** %out_result) {
+define i8* @render_interface_signature(%NativeInterfaceSignature %signature) {
 block.entry:
   %l0 = alloca i8*
   %s0 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090260030, i32 0, i32 0
@@ -19953,12 +19945,11 @@ merge7:
   %t82 = phi i8* [ %t81, %then6 ], [ %t77, %merge5 ]
   store i8* %t82, i8** %l0
   %t83 = load i8*, i8** %l0
-  store i8* %t83, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t83)
+  ret i8* %t83
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @render_interface_parameters({ %NativeParameter*, i64 }* %parameters, i8** %out_result) {
+define i8* @render_interface_parameters({ %NativeParameter*, i64 }* %parameters) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -19970,8 +19961,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s3)
+  ret i8* %s3
 merge1:
   %t4 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t5 = ptrtoint [0 x i8*]* %t4 to i64
@@ -20105,8 +20096,8 @@ afterloop5:
   %t91 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %s92 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t93 = call i8* @join_with_separator({ i8**, i64 }* %t91, i8* %s92)
-  store i8* %t93, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t93)
+  ret i8* %t93
 }
 
 ; fn emit_function effects: ![io]
@@ -37622,8 +37613,7 @@ merge7:
   ret %ConditionConversion %t197
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @find_preloaded_value({ %LocalBinding*, i64 }* %locals, { i8**, i64 }* %preloaded_values, i8* %name, i8** %out_result) {
+define i8* @find_preloaded_value({ %LocalBinding*, i64 }* %locals, { i8**, i64 }* %preloaded_values, i8* %name) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca %LocalBinding
@@ -37694,8 +37684,8 @@ then6:
   call void @sailfin_runtime_bounds_check(i64 %t31, i64 %t34)
   %t36 = getelementptr i8*, i8** %t33, i64 %t31
   %t37 = load i8*, i8** %t36
-  store i8* %t37, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t37)
+  ret i8* %t37
 merge7:
   %t38 = load double, double* %l0
   %t39 = sitofp i64 1 to double
@@ -37707,8 +37697,8 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t43 = load double, double* %l0
-  store i8* null, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* null)
+  ret i8* null
 }
 
 define { i8**, i64 }* @collect_mutation_names({ %LocalMutation*, i64 }* %mutations) {
@@ -37938,8 +37928,7 @@ afterloop3:
   ret %LocalMutation* %t36
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @join_strings({ i8**, i64 }* %strings, i8* %separator, i8** %out_result) {
+define i8* @join_strings({ i8**, i64 }* %strings, i8* %separator) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -38010,8 +37999,8 @@ afterloop3:
   %t38 = load i8*, i8** %l0
   %t39 = load double, double* %l1
   %t40 = load i8*, i8** %l0
-  store i8* %t40, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t40)
+  ret i8* %t40
 }
 
 define %PhiStoreEntry @build_phi_and_store(%LocalBinding %local, i8* %llvm_type, { i8**, i64 }* %phi_inputs, double %temp_index) {
@@ -38067,8 +38056,7 @@ block.entry:
   ret %PhiStoreEntry %t35
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @find_last_label({ i8**, i64 }* %lines, i8* %fallback, i8** %out_result) {
+define i8* @find_last_label({ i8**, i64 }* %lines, i8* %fallback) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -38132,8 +38120,8 @@ then8:
   %t36 = call i64 @sailfin_runtime_string_length(i8* %t35)
   %t37 = sub i64 %t36, 1
   %t38 = call i8* @sailfin_runtime_substring(i8* %t34, i64 0, i64 %t37)
-  store i8* %t38, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t38)
+  ret i8* %t38
 merge9:
   br label %loop.latch2
 loop.latch2:
@@ -38141,8 +38129,8 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t41 = load double, double* %l0
-  store i8* %fallback, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %fallback)
+  ret i8* %fallback
 }
 
 define { %LocalMutation*, i64 }* @retarget_recent_mutations({ %LocalMutation*, i64 }* %mutations, double %start_index, i8* %target_label) {
@@ -49150,8 +49138,7 @@ afterloop3:
   ret %ParameterPreparation %t242
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_struct_type_annotation(%TypeContext %context, i8* %annotation, i8** %out_result) {
+define i8* @map_struct_type_annotation(%TypeContext %context, i8* %annotation) {
 block.entry:
   %l0 = alloca %StructTypeInfo*
   %t0 = call %StructTypeInfo* @find_struct_info_by_name(%TypeContext %context, i8* %annotation)
@@ -49164,16 +49151,15 @@ then0:
   %t4 = load %StructTypeInfo*, %StructTypeInfo** %l0
   %t5 = getelementptr %StructTypeInfo, %StructTypeInfo* %t4, i32 0, i32 1
   %t6 = load i8*, i8** %t5
-  store i8* %t6, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t6)
+  ret i8* %t6
 merge1:
   %s7 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s7, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s7)
+  ret i8* %s7
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_enum_type_annotation(%TypeContext %context, i8* %annotation, i8** %out_result) {
+define i8* @map_enum_type_annotation(%TypeContext %context, i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -49187,8 +49173,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = sitofp i64 0 to double
   store double %t6, double* %l1
@@ -49238,8 +49224,8 @@ then8:
   %t35 = load %EnumTypeInfo*, %EnumTypeInfo** %l2
   %t36 = getelementptr %EnumTypeInfo, %EnumTypeInfo* %t35, i32 0, i32 1
   %t37 = load i8*, i8** %t36
-  store i8* %t37, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t37)
+  ret i8* %t37
 merge9:
   %t38 = load double, double* %l1
   %t39 = sitofp i64 1 to double
@@ -49252,12 +49238,11 @@ loop.latch4:
 afterloop5:
   %t43 = load double, double* %l1
   %s44 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s44, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s44)
+  ret i8* %s44
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_interface_type_annotation(%TypeContext %context, i8* %annotation, i8** %out_result) {
+define i8* @map_interface_type_annotation(%TypeContext %context, i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca %InterfaceTypeInfo*
@@ -49270,8 +49255,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = call %InterfaceTypeInfo* @find_interface_info_by_name(%TypeContext %context, i8* %t6)
@@ -49285,16 +49270,15 @@ then2:
   %t12 = load %InterfaceTypeInfo*, %InterfaceTypeInfo** %l1
   %t13 = getelementptr %InterfaceTypeInfo, %InterfaceTypeInfo* %t12, i32 0, i32 1
   %t14 = load i8*, i8** %t13
-  store i8* %t14, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t14)
+  ret i8* %t14
 merge3:
   %s15 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s15, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s15)
+  ret i8* %s15
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_primitive_type(%TypeContext %context, i8* %annotation, i8** %out_result) {
+define i8* @map_primitive_type(%TypeContext %context, i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -49304,8 +49288,8 @@ block.entry:
   br i1 %t1, label %then0, label %merge1
 then0:
   %s2 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
-  store i8* %s2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s2)
+  ret i8* %s2
 merge1:
   %s4 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h1483009776, i32 0, i32 0
   %t5 = call i1 @strings_equal(i8* %annotation, i8* %s4)
@@ -49327,8 +49311,8 @@ logical_or_merge_3:
   br i1 %t8, label %then2, label %merge3
 then2:
   %s9 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
-  store i8* %s9, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s9)
+  ret i8* %s9
 merge3:
   %s11 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090370613, i32 0, i32 0
   %t12 = call i1 @strings_equal(i8* %annotation, i8* %s11)
@@ -49350,16 +49334,16 @@ logical_or_merge_10:
   br i1 %t15, label %then4, label %merge5
 then4:
   %s16 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090307517, i32 0, i32 0
-  store i8* %s16, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s16)
+  ret i8* %s16
 merge5:
   %s17 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090304184, i32 0, i32 0
   %t18 = call i1 @strings_equal(i8* %annotation, i8* %s17)
   br i1 %t18, label %then6, label %merge7
 then6:
   %s19 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090304184, i32 0, i32 0
-  store i8* %s19, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s19)
+  ret i8* %s19
 merge7:
   %t20 = call i8* @map_struct_type_annotation(%TypeContext %context, i8* %annotation)
   store i8* %t20, i8** %l0
@@ -49370,8 +49354,8 @@ merge7:
   br i1 %t23, label %then8, label %merge9
 then8:
   %t25 = load i8*, i8** %l0
-  store i8* %t25, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t25)
+  ret i8* %t25
 merge9:
   %t26 = call i8* @map_enum_type_annotation(%TypeContext %context, i8* %annotation)
   store i8* %t26, i8** %l1
@@ -49383,8 +49367,8 @@ merge9:
   br i1 %t29, label %then10, label %merge11
 then10:
   %t32 = load i8*, i8** %l1
-  store i8* %t32, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t32)
+  ret i8* %t32
 merge11:
   %t33 = call i8* @map_interface_type_annotation(%TypeContext %context, i8* %annotation)
   store i8* %t33, i8** %l2
@@ -49397,8 +49381,8 @@ merge11:
   br i1 %t36, label %then12, label %merge13
 then12:
   %t40 = load i8*, i8** %l2
-  store i8* %t40, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t40)
+  ret i8* %t40
 merge13:
   %s41 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h789270767, i32 0, i32 0
   %t42 = call i1 @strings_equal(i8* %annotation, i8* %s41)
@@ -49408,16 +49392,15 @@ merge13:
   br i1 %t42, label %then14, label %merge15
 then14:
   %s46 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s46, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s46)
+  ret i8* %s46
 merge15:
   %s47 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s47, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s47)
+  ret i8* %s47
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_optional_type(%TypeContext %context, i8* %annotation, i8** %out_result) {
+define i8* @map_optional_type(%TypeContext %context, i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -49434,8 +49417,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = load i8*, i8** %l0
@@ -49448,8 +49431,8 @@ merge1:
   br i1 %t12, label %then2, label %merge3
 then2:
   %s14 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s14, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s14)
+  ret i8* %s14
 merge3:
   %t15 = load i8*, i8** %l0
   %t16 = load i8*, i8** %l0
@@ -49466,8 +49449,8 @@ merge3:
   br i1 %t23, label %then4, label %merge5
 then4:
   %s26 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s26, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s26)
+  ret i8* %s26
 merge5:
   %t27 = load i8*, i8** %l1
   %t28 = call i8* @map_struct_type_annotation(%TypeContext %context, i8* %t27)
@@ -49488,8 +49471,8 @@ then6:
   store i8 0, i8* %t38
   %t39 = getelementptr [2 x i8], [2 x i8]* %t36, i32 0, i32 0
   %t40 = call i8* @sailfin_runtime_string_concat(i8* %t35, i8* %t39)
-  store i8* %t40, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t40)
+  ret i8* %t40
 merge7:
   %t41 = load i8*, i8** %l1
   %t42 = call i8* @map_enum_type_annotation(%TypeContext %context, i8* %t41)
@@ -49511,8 +49494,8 @@ then8:
   store i8 0, i8* %t53
   %t54 = getelementptr [2 x i8], [2 x i8]* %t51, i32 0, i32 0
   %t55 = call i8* @sailfin_runtime_string_concat(i8* %t50, i8* %t54)
-  store i8* %t55, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t55)
+  ret i8* %t55
 merge9:
   %t56 = load i8*, i8** %l1
   %t57 = call i8* @map_interface_type_annotation(%TypeContext %context, i8* %t56)
@@ -49535,8 +49518,8 @@ then10:
   store i8 0, i8* %t69
   %t70 = getelementptr [2 x i8], [2 x i8]* %t67, i32 0, i32 0
   %t71 = call i8* @sailfin_runtime_string_concat(i8* %t66, i8* %t70)
-  store i8* %t71, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t71)
+  ret i8* %t71
 merge11:
   %t72 = load i8*, i8** %l1
   %t73 = call i8* @map_type_annotation(i8* %t72)
@@ -49569,8 +49552,8 @@ logical_or_merge_74:
   br i1 %t81, label %then12, label %merge13
 then12:
   %s88 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s88, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s88)
+  ret i8* %s88
 merge13:
   %t89 = load i8*, i8** %l5
   %t90 = load i8*, i8** %l5
@@ -49588,8 +49571,8 @@ merge13:
   br i1 %t95, label %then14, label %merge15
 then14:
   %t102 = load i8*, i8** %l5
-  store i8* %t102, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t102)
+  ret i8* %t102
 merge15:
   %t103 = load i8*, i8** %l5
   %t104 = alloca [2 x i8], align 1
@@ -49599,12 +49582,11 @@ merge15:
   store i8 0, i8* %t106
   %t107 = getelementptr [2 x i8], [2 x i8]* %t104, i32 0, i32 0
   %t108 = call i8* @sailfin_runtime_string_concat(i8* %t103, i8* %t107)
-  store i8* %t108, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t108)
+  ret i8* %t108
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_reference_inner_type(%TypeContext %context, i8* %annotation, i8** %out_result) {
+define i8* @map_reference_inner_type(%TypeContext %context, i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -49618,8 +49600,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = call i8* @map_reference_type(%TypeContext %context, i8* %t6)
@@ -49632,8 +49614,8 @@ merge1:
   br i1 %t10, label %then2, label %merge3
 then2:
   %t13 = load i8*, i8** %l1
-  store i8* %t13, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t13)
+  ret i8* %t13
 merge3:
   %t14 = load i8*, i8** %l0
   %t15 = call i8* @map_array_pointer_type(%TypeContext %context, i8* %t14)
@@ -49647,17 +49629,16 @@ merge3:
   br i1 %t18, label %then4, label %merge5
 then4:
   %t22 = load i8*, i8** %l2
-  store i8* %t22, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t22)
+  ret i8* %t22
 merge5:
   %t23 = load i8*, i8** %l0
   %t24 = call i8* @map_primitive_type(%TypeContext %context, i8* %t23)
-  store i8* %t24, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t24)
+  ret i8* %t24
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_reference_type(%TypeContext %context, i8* %annotation, i8** %out_result) {
+define i8* @map_reference_type(%TypeContext %context, i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -49672,8 +49653,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = alloca [2 x i8], align 1
@@ -49688,8 +49669,8 @@ merge1:
   br i1 %t12, label %then2, label %merge3
 then2:
   %s14 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s14, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s14)
+  ret i8* %s14
 merge3:
   %t15 = load i8*, i8** %l0
   %s16 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193419635, i32 0, i32 0
@@ -49698,8 +49679,8 @@ merge3:
   br i1 %t17, label %then4, label %merge5
 then4:
   %s19 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s19, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s19)
+  ret i8* %s19
 merge5:
   %t20 = load i8*, i8** %l0
   %t21 = load i8*, i8** %l0
@@ -49735,8 +49716,8 @@ merge7:
   br i1 %t40, label %then8, label %merge9
 then8:
   %s43 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s43, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s43)
+  ret i8* %s43
 merge9:
   %t45 = load i8*, i8** %l1
   %t46 = getelementptr i8, i8* %t45, i64 0
@@ -49790,8 +49771,8 @@ merge11:
   br i1 %t71, label %then12, label %merge13
 then12:
   %s75 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s75, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s75)
+  ret i8* %s75
 merge13:
   %t76 = load i8*, i8** %l3
   %t77 = alloca [2 x i8], align 1
@@ -49801,12 +49782,11 @@ merge13:
   store i8 0, i8* %t79
   %t80 = getelementptr [2 x i8], [2 x i8]* %t77, i32 0, i32 0
   %t81 = call i8* @sailfin_runtime_string_concat(i8* %t76, i8* %t80)
-  store i8* %t81, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t81)
+  ret i8* %t81
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_array_pointer_type(%TypeContext %context, i8* %annotation, i8** %out_result) {
+define i8* @map_array_pointer_type(%TypeContext %context, i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -49821,8 +49801,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = load i8*, i8** %l0
@@ -49841,8 +49821,8 @@ merge1:
   br i1 %t16, label %then2, label %merge3
 then2:
   %s19 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s19, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s19)
+  ret i8* %s19
 merge3:
   %t20 = load i8*, i8** %l0
   %t21 = load i8*, i8** %l0
@@ -49875,23 +49855,21 @@ merge5:
   %t40 = call i8* @sailfin_runtime_string_concat(i8* %s38, i8* %t39)
   %s41 = getelementptr inbounds [10 x i8], [10 x i8]* @.str.len9.h1714355238, i32 0, i32 0
   %t42 = call i8* @sailfin_runtime_string_concat(i8* %t40, i8* %s41)
-  store i8* %t42, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t42)
+  ret i8* %t42
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @array_struct_type_for_element(i8* %element_type, i8** %out_result) {
+define i8* @array_struct_type_for_element(i8* %element_type) {
 block.entry:
   %s0 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193512002, i32 0, i32 0
   %t1 = call i8* @sailfin_runtime_string_concat(i8* %s0, i8* %element_type)
   %s2 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1223304841, i32 0, i32 0
   %t3 = call i8* @sailfin_runtime_string_concat(i8* %t1, i8* %s2)
-  store i8* %t3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t3)
+  ret i8* %t3
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @array_pointer_element_type(i8* %llvm_type, i8** %out_result) {
+define i8* @array_pointer_element_type(i8* %llvm_type) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -49908,8 +49886,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = load i8*, i8** %l0
@@ -49922,8 +49900,8 @@ merge1:
   br i1 %t12, label %then2, label %merge3
 then2:
   %s14 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s14, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s14)
+  ret i8* %s14
 merge3:
   %t15 = load i8*, i8** %l0
   %t16 = load i8*, i8** %l0
@@ -49940,8 +49918,8 @@ merge3:
   br i1 %t23, label %then4, label %merge5
 then4:
   %s26 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s26, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s26)
+  ret i8* %s26
 merge5:
   %t27 = load i8*, i8** %l1
   %t28 = getelementptr i8, i8* %t27, i64 0
@@ -49952,8 +49930,8 @@ merge5:
   br i1 %t30, label %then6, label %merge7
 then6:
   %s33 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s33, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s33)
+  ret i8* %s33
 merge7:
   %t34 = load i8*, i8** %l1
   %t35 = load i8*, i8** %l1
@@ -49967,8 +49945,8 @@ merge7:
   br i1 %t40, label %then8, label %merge9
 then8:
   %s43 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s43, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s43)
+  ret i8* %s43
 merge9:
   %t44 = load i8*, i8** %l1
   %t45 = load i8*, i8** %l1
@@ -49986,8 +49964,8 @@ merge9:
   br i1 %t52, label %then10, label %merge11
 then10:
   %s56 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s56, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s56)
+  ret i8* %s56
 merge11:
   %t57 = load i8*, i8** %l2
   %t58 = alloca [2 x i8], align 1
@@ -50008,8 +49986,8 @@ merge11:
   br i1 %t65, label %then12, label %merge13
 then12:
   %s70 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s70, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s70)
+  ret i8* %s70
 merge13:
   %t71 = load i8*, i8** %l2
   %t72 = load double, double* %l3
@@ -50029,8 +50007,8 @@ merge13:
   br i1 %t79, label %then14, label %merge15
 then14:
   %s85 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s85, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s85)
+  ret i8* %s85
 merge15:
   %t86 = load i8*, i8** %l4
   %t87 = load i8*, i8** %l4
@@ -50047,8 +50025,8 @@ merge15:
   br i1 %t92, label %then16, label %merge17
 then16:
   %s98 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s98, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s98)
+  ret i8* %s98
 merge17:
   %t99 = load i8*, i8** %l4
   %t100 = load i8*, i8** %l4
@@ -50069,16 +50047,15 @@ merge17:
   br i1 %t107, label %then18, label %merge19
 then18:
   %s114 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s114, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s114)
+  ret i8* %s114
 merge19:
   %t115 = load i8*, i8** %l5
-  store i8* %t115, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t115)
+  ret i8* %t115
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @unwrap_move_wrapper(i8* %annotation, i8** %out_result) {
+define i8* @unwrap_move_wrapper(i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -50092,8 +50069,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %t5 = load i8*, i8** %l0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %t7 = load i8*, i8** %l0
   %s8 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h434936673, i32 0, i32 0
@@ -50158,16 +50135,16 @@ then6:
   %t45 = load i8*, i8** %l2
   %t46 = call i8* @trim_text(i8* %t45)
   %t47 = call i8* @unwrap_move_wrapper(i8* %t46)
-  store i8* %t47, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t47)
+  ret i8* %t47
 merge7:
   br label %merge5
 merge5:
   br label %merge3
 merge3:
   %t48 = load i8*, i8** %l0
-  store i8* %t48, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t48)
+  ret i8* %t48
 }
 
 define i1 @contains_keyword_outside_strings(i8* %value, i8* %keyword) {
@@ -50484,28 +50461,27 @@ afterloop5:
   ret i1 0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @find_suspension_keyword(i8* %expression, i8** %out_result) {
+define i8* @find_suspension_keyword(i8* %expression) {
 block.entry:
   %s0 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1925437637, i32 0, i32 0
   %t1 = call i1 @contains_keyword_outside_strings(i8* %expression, i8* %s0)
   br i1 %t1, label %then0, label %merge1
 then0:
   %s2 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h1925437637, i32 0, i32 0
-  store i8* %s2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s2)
+  ret i8* %s2
 merge1:
   %s3 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h700747015, i32 0, i32 0
   %t4 = call i1 @contains_keyword_outside_strings(i8* %expression, i8* %s3)
   br i1 %t4, label %then2, label %merge3
 then2:
   %s5 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h700747015, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge3:
   %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s6, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s6)
+  ret i8* %s6
 }
 
 define i1 @is_mutable_borrow_annotation(i8* %annotation) {
@@ -50854,8 +50830,7 @@ afterloop13:
   ret { i8**, i64 }* %t172
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @normalise_borrow_base(i8* %raw_base, i8** %out_result) {
+define i8* @normalise_borrow_base(i8* %raw_base) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -50935,8 +50910,8 @@ then12:
   br i1 %t44, label %then14, label %merge15
 then14:
   %t47 = load i8*, i8** %l1
-  store i8* %t47, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t47)
+  ret i8* %t47
 merge15:
   br label %merge13
 merge13:
@@ -50945,8 +50920,8 @@ merge11:
   br label %merge9
 merge9:
   %t48 = load i8*, i8** %l0
-  store i8* %t48, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t48)
+  ret i8* %t48
 }
 
 define { i8**, i64 }* @detect_suspension_conflicts(i8* %expression, { %LocalBinding*, i64 }* %locals, { %ParameterBinding*, i64 }* %bindings, i8* %function_name, %NativeSourceSpan* %suspension_span) {
@@ -51027,8 +51002,7 @@ merge5:
   ret { i8**, i64 }* %t50
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_return_type(%TypeContext %context, i8* %return_type, i8** %out_result) {
+define i8* @map_return_type(%TypeContext %context, i8* %return_type) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -51061,8 +51035,8 @@ logical_or_merge_1:
   br i1 %t8, label %then0, label %merge1
 then0:
   %s10 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h278197661, i32 0, i32 0
-  store i8* %s10, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s10)
+  ret i8* %s10
 merge1:
   %t11 = load i8*, i8** %l0
   %t12 = call i8* @unwrap_move_wrapper(i8* %t11)
@@ -51079,8 +51053,8 @@ merge1:
   br i1 %t17, label %then2, label %merge3
 then2:
   %t21 = load i8*, i8** %l2
-  store i8* %t21, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t21)
+  ret i8* %t21
 merge3:
   %t22 = load i8*, i8** %l1
   %t23 = call i8* @map_reference_type(%TypeContext %context, i8* %t22)
@@ -51095,8 +51069,8 @@ merge3:
   br i1 %t26, label %then4, label %merge5
 then4:
   %t31 = load i8*, i8** %l3
-  store i8* %t31, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t31)
+  ret i8* %t31
 merge5:
   %t32 = load i8*, i8** %l1
   %t33 = call i8* @map_array_pointer_type(%TypeContext %context, i8* %t32)
@@ -51112,8 +51086,8 @@ merge5:
   br i1 %t36, label %then6, label %merge7
 then6:
   %t42 = load i8*, i8** %l4
-  store i8* %t42, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t42)
+  ret i8* %t42
 merge7:
   %t43 = load i8*, i8** %l1
   %t44 = call i8* @map_primitive_type(%TypeContext %context, i8* %t43)
@@ -51130,16 +51104,15 @@ merge7:
   br i1 %t47, label %then8, label %merge9
 then8:
   %t54 = load i8*, i8** %l5
-  store i8* %t54, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t54)
+  ret i8* %t54
 merge9:
   %s55 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s55, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s55)
+  ret i8* %s55
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_parameter_type(%TypeContext %context, i8* %parameter_type, i8** %out_result) {
+define i8* @map_parameter_type(%TypeContext %context, i8* %parameter_type) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -51156,8 +51129,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = call i8* @unwrap_move_wrapper(i8* %t6)
@@ -51174,8 +51147,8 @@ merge1:
   br i1 %t12, label %then2, label %merge3
 then2:
   %t16 = load i8*, i8** %l2
-  store i8* %t16, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t16)
+  ret i8* %t16
 merge3:
   %t17 = load i8*, i8** %l1
   %t18 = call i8* @map_reference_type(%TypeContext %context, i8* %t17)
@@ -51190,8 +51163,8 @@ merge3:
   br i1 %t21, label %then4, label %merge5
 then4:
   %t26 = load i8*, i8** %l3
-  store i8* %t26, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t26)
+  ret i8* %t26
 merge5:
   %t27 = load i8*, i8** %l1
   %t28 = call i8* @map_array_pointer_type(%TypeContext %context, i8* %t27)
@@ -51207,8 +51180,8 @@ merge5:
   br i1 %t31, label %then6, label %merge7
 then6:
   %t37 = load i8*, i8** %l4
-  store i8* %t37, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t37)
+  ret i8* %t37
 merge7:
   %t38 = load i8*, i8** %l1
   %t39 = call i8* @map_primitive_type(%TypeContext %context, i8* %t38)
@@ -51225,16 +51198,15 @@ merge7:
   br i1 %t42, label %then8, label %merge9
 then8:
   %t49 = load i8*, i8** %l5
-  store i8* %t49, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t49)
+  ret i8* %t49
 merge9:
   %s50 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s50, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s50)
+  ret i8* %s50
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_local_type(%TypeContext %context, i8* %type_annotation, i8** %out_result) {
+define i8* @map_local_type(%TypeContext %context, i8* %type_annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -51251,8 +51223,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = call i8* @unwrap_move_wrapper(i8* %t6)
@@ -51269,8 +51241,8 @@ merge1:
   br i1 %t12, label %then2, label %merge3
 then2:
   %t16 = load i8*, i8** %l2
-  store i8* %t16, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t16)
+  ret i8* %t16
 merge3:
   %t17 = load i8*, i8** %l1
   %t18 = call i8* @map_reference_type(%TypeContext %context, i8* %t17)
@@ -51285,8 +51257,8 @@ merge3:
   br i1 %t21, label %then4, label %merge5
 then4:
   %t26 = load i8*, i8** %l3
-  store i8* %t26, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t26)
+  ret i8* %t26
 merge5:
   %t27 = load i8*, i8** %l1
   %t28 = call i8* @map_array_pointer_type(%TypeContext %context, i8* %t27)
@@ -51302,8 +51274,8 @@ merge5:
   br i1 %t31, label %then6, label %merge7
 then6:
   %t37 = load i8*, i8** %l4
-  store i8* %t37, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t37)
+  ret i8* %t37
 merge7:
   %t38 = load i8*, i8** %l1
   %t39 = call i8* @map_primitive_type(%TypeContext %context, i8* %t38)
@@ -51320,12 +51292,12 @@ merge7:
   br i1 %t42, label %then8, label %merge9
 then8:
   %t49 = load i8*, i8** %l5
-  store i8* %t49, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t49)
+  ret i8* %t49
 merge9:
   %s50 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090309365, i32 0, i32 0
-  store i8* %s50, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s50)
+  ret i8* %s50
 }
 
 define %ParameterBinding* @find_parameter_binding({ %ParameterBinding*, i64 }* %bindings, i8* %name) {
@@ -55123,8 +55095,7 @@ merge11:
   ret %OwnershipAnalysis %t227
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_use_after_move_message(i8* %name, %NativeSourceSpan* %span, i8** %out_result) {
+define i8* @format_use_after_move_message(i8* %name, %NativeSourceSpan* %span) {
 block.entry:
   %t0 = icmp eq %NativeSourceSpan* %span, null
   br i1 %t0, label %then0, label %merge1
@@ -55138,8 +55109,8 @@ then0:
   store i8 0, i8* %t5
   %t6 = getelementptr [2 x i8], [2 x i8]* %t3, i32 0, i32 0
   %t7 = call i8* @sailfin_runtime_string_concat(i8* %t2, i8* %t6)
-  store i8* %t7, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t7)
+  ret i8* %t7
 merge1:
   %s8 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.len34.h1466707734, i32 0, i32 0
   %t9 = call i8* @sailfin_runtime_string_concat(i8* %s8, i8* %name)
@@ -55148,12 +55119,11 @@ merge1:
   %t12 = load %NativeSourceSpan, %NativeSourceSpan* %span
   %t13 = call i8* @format_span_location(%NativeSourceSpan %t12)
   %t14 = call i8* @sailfin_runtime_string_concat(i8* %t11, i8* %t13)
-  store i8* %t14, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t14)
+  ret i8* %t14
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_span_location(%NativeSourceSpan %span, i8** %out_result) {
+define i8* @format_span_location(%NativeSourceSpan %span) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -55193,12 +55163,11 @@ block.entry:
   %t25 = call i8* @sailfin_runtime_string_concat(i8* %t20, i8* %t24)
   %t26 = load i8*, i8** %l1
   %t27 = call i8* @sailfin_runtime_string_concat(i8* %t25, i8* %t26)
-  store i8* %t27, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t27)
+  ret i8* %t27
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_suspension_location(i8* %keyword, %NativeSourceSpan* %borrow_span, %NativeSourceSpan* %suspension_span, i8** %out_result) {
+define i8* @format_suspension_location(i8* %keyword, %NativeSourceSpan* %borrow_span, %NativeSourceSpan* %suspension_span) {
 block.entry:
   %l0 = alloca i1
   %l1 = alloca i8*
@@ -55280,8 +55249,8 @@ merge1:
   br i1 %t42, label %then7, label %merge8
 then7:
   %s45 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s45, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s45)
+  ret i8* %s45
 merge8:
   %s46 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193413167, i32 0, i32 0
   %t47 = load i8*, i8** %l1
@@ -55293,8 +55262,8 @@ merge8:
   store i8 0, i8* %t51
   %t52 = getelementptr [2 x i8], [2 x i8]* %t49, i32 0, i32 0
   %t53 = call i8* @sailfin_runtime_string_concat(i8* %t48, i8* %t52)
-  store i8* %t53, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t53)
+  ret i8* %t53
 }
 
 define { i8**, i64 }* @detect_borrow_conflicts(%OwnershipInfo* %ownership, { %LocalBinding*, i64 }* %locals, i8* %binding_name, i8* %function_name) {
@@ -55594,18 +55563,16 @@ afterloop7:
   ret { i8**, i64 }* %t203
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @resolve_borrow_base(i8* %target, { %LocalBinding*, i64 }* %locals, i8** %out_result) {
+define i8* @resolve_borrow_base(i8* %target, { %LocalBinding*, i64 }* %locals) {
 block.entry:
   %t0 = call i8* @trim_text(i8* %target)
   %t1 = sitofp i64 0 to double
   %t2 = call i8* @resolve_borrow_base_inner(i8* %t0, { %LocalBinding*, i64 }* %locals, double %t1)
-  store i8* %t2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t2)
+  ret i8* %t2
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @resolve_borrow_base_inner(i8* %target, { %LocalBinding*, i64 }* %locals, double %depth, i8** %out_result) {
+define i8* @resolve_borrow_base_inner(i8* %target, { %LocalBinding*, i64 }* %locals, double %depth) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca %LocalBinding*
@@ -55619,8 +55586,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %t5 = load i8*, i8** %l0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %t6 = sitofp i64 8 to double
   %t7 = fcmp oge double %depth, %t6
@@ -55628,8 +55595,8 @@ merge1:
   br i1 %t7, label %then2, label %merge3
 then2:
   %t9 = load i8*, i8** %l0
-  store i8* %t9, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t9)
+  ret i8* %t9
 merge3:
   %t10 = load i8*, i8** %l0
   %t11 = call i1 @is_simple_identifier(i8* %t10)
@@ -55638,8 +55605,8 @@ merge3:
   br i1 %t12, label %then4, label %merge5
 then4:
   %t14 = load i8*, i8** %l0
-  store i8* %t14, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t14)
+  ret i8* %t14
 merge5:
   %t15 = load i8*, i8** %l0
   %t16 = call %LocalBinding* @find_local_binding({ %LocalBinding*, i64 }* %locals, i8* %t15)
@@ -55651,8 +55618,8 @@ merge5:
   br i1 %t18, label %then6, label %merge7
 then6:
   %t21 = load i8*, i8** %l0
-  store i8* %t21, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t21)
+  ret i8* %t21
 merge7:
   %t22 = load %LocalBinding*, %LocalBinding** %l1
   %t23 = getelementptr %LocalBinding, %LocalBinding* %t22, i32 0, i32 4
@@ -55663,8 +55630,8 @@ merge7:
   br i1 %t25, label %then8, label %merge9
 then8:
   %t28 = load i8*, i8** %l0
-  store i8* %t28, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t28)
+  ret i8* %t28
 merge9:
   %t29 = load %LocalBinding*, %LocalBinding** %l1
   %t30 = getelementptr %LocalBinding, %LocalBinding* %t29, i32 0, i32 4
@@ -55682,8 +55649,8 @@ merge9:
   br i1 %t37, label %then10, label %merge11
 then10:
   %t41 = load i8*, i8** %l0
-  store i8* %t41, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t41)
+  ret i8* %t41
 merge11:
   %t42 = load %OwnershipInfo*, %OwnershipInfo** %l2
   %t43 = getelementptr %OwnershipInfo, %OwnershipInfo* %t42, i32 0, i32 1
@@ -55691,8 +55658,8 @@ merge11:
   %t45 = sitofp i64 1 to double
   %t46 = fadd double %depth, %t45
   %t47 = call i8* @resolve_borrow_base_inner(i8* %t44, { %LocalBinding*, i64 }* %locals, double %t46)
-  store i8* %t47, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t47)
+  ret i8* %t47
 }
 
 define %ExpressionResult @lower_borrow_expression(%BorrowParseResult %parse, { %ParameterBinding*, i64 }* %bindings, { %LocalBinding*, i64 }* %locals, double %temp_index, { i8**, i64 }* %lines) {
@@ -75637,8 +75604,7 @@ merge3:
   ret %ComparisonEmission %t75
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @comparison_predicate_for_symbol(i8* %symbol, i8* %llvm_type, i8** %out_result) {
+define i8* @comparison_predicate_for_symbol(i8* %symbol, i8* %llvm_type) {
 block.entry:
   %s0 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
   %t1 = call i1 @strings_equal(i8* %llvm_type, i8* %s0)
@@ -75649,52 +75615,52 @@ then0:
   br i1 %t3, label %then2, label %merge3
 then2:
   %s4 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h241550015, i32 0, i32 0
-  store i8* %s4, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s4)
+  ret i8* %s4
 merge3:
   %s5 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193414949, i32 0, i32 0
   %t6 = call i1 @strings_equal(i8* %symbol, i8* %s5)
   br i1 %t6, label %then4, label %merge5
 then4:
   %s7 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h241775042, i32 0, i32 0
-  store i8* %s7, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s7)
+  ret i8* %s7
 merge5:
   %t8 = load i8, i8* %symbol
   %t9 = icmp eq i8 %t8, 60
   br i1 %t9, label %then6, label %merge7
 then6:
   %s10 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h241557737, i32 0, i32 0
-  store i8* %s10, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s10)
+  ret i8* %s10
 merge7:
   %s11 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193444352, i32 0, i32 0
   %t12 = call i1 @strings_equal(i8* %symbol, i8* %s11)
   br i1 %t12, label %then8, label %merge9
 then8:
   %s13 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h241557242, i32 0, i32 0
-  store i8* %s13, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s13)
+  ret i8* %s13
 merge9:
   %t14 = load i8, i8* %symbol
   %t15 = icmp eq i8 %t14, 62
   br i1 %t15, label %then10, label %merge11
 then10:
   %s16 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h241552292, i32 0, i32 0
-  store i8* %s16, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s16)
+  ret i8* %s16
 merge11:
   %s17 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193446530, i32 0, i32 0
   %t18 = call i1 @strings_equal(i8* %symbol, i8* %s17)
   br i1 %t18, label %then12, label %merge13
 then12:
   %s19 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h241551797, i32 0, i32 0
-  store i8* %s19, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s19)
+  ret i8* %s19
 merge13:
   %s20 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s20, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s20)
+  ret i8* %s20
 merge1:
   %s22 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090304184, i32 0, i32 0
   %t23 = call i1 @strings_equal(i8* %llvm_type, i8* %s22)
@@ -75720,52 +75686,52 @@ then14:
   br i1 %t28, label %then16, label %merge17
 then16:
   %s29 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h770651283, i32 0, i32 0
-  store i8* %s29, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s29)
+  ret i8* %s29
 merge17:
   %s30 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193414949, i32 0, i32 0
   %t31 = call i1 @strings_equal(i8* %symbol, i8* %s30)
   br i1 %t31, label %then18, label %merge19
 then18:
   %s32 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h770660688, i32 0, i32 0
-  store i8* %s32, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s32)
+  ret i8* %s32
 merge19:
   %t33 = load i8, i8* %symbol
   %t34 = icmp eq i8 %t33, 60
   br i1 %t34, label %then20, label %merge21
 then20:
   %s35 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1809673500, i32 0, i32 0
-  store i8* %s35, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s35)
+  ret i8* %s35
 merge21:
   %s36 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193444352, i32 0, i32 0
   %t37 = call i1 @strings_equal(i8* %symbol, i8* %s36)
   br i1 %t37, label %then22, label %merge23
 then22:
   %s38 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1809673005, i32 0, i32 0
-  store i8* %s38, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s38)
+  ret i8* %s38
 merge23:
   %t39 = load i8, i8* %symbol
   %t40 = icmp eq i8 %t39, 62
   br i1 %t40, label %then24, label %merge25
 then24:
   %s41 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1809668055, i32 0, i32 0
-  store i8* %s41, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s41)
+  ret i8* %s41
 merge25:
   %s42 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193446530, i32 0, i32 0
   %t43 = call i1 @strings_equal(i8* %symbol, i8* %s42)
   br i1 %t43, label %then26, label %merge27
 then26:
   %s44 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1809667560, i32 0, i32 0
-  store i8* %s44, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s44)
+  ret i8* %s44
 merge27:
   %s45 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s45, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s45)
+  ret i8* %s45
 merge15:
   %s46 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
   %t47 = call i1 @strings_equal(i8* %llvm_type, i8* %s46)
@@ -75776,20 +75742,20 @@ then28:
   br i1 %t49, label %then30, label %merge31
 then30:
   %s50 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h770651283, i32 0, i32 0
-  store i8* %s50, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s50)
+  ret i8* %s50
 merge31:
   %s51 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193414949, i32 0, i32 0
   %t52 = call i1 @strings_equal(i8* %symbol, i8* %s51)
   br i1 %t52, label %then32, label %merge33
 then32:
   %s53 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h770660688, i32 0, i32 0
-  store i8* %s53, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s53)
+  ret i8* %s53
 merge33:
   %s54 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s54, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s54)
+  ret i8* %s54
 merge29:
   %s55 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193493192, i32 0, i32 0
   %t56 = call i1 @strings_equal(i8* %llvm_type, i8* %s55)
@@ -75800,52 +75766,52 @@ then34:
   br i1 %t58, label %then36, label %merge37
 then36:
   %s59 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h770651283, i32 0, i32 0
-  store i8* %s59, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s59)
+  ret i8* %s59
 merge37:
   %s60 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193414949, i32 0, i32 0
   %t61 = call i1 @strings_equal(i8* %symbol, i8* %s60)
   br i1 %t61, label %then38, label %merge39
 then38:
   %s62 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h770660688, i32 0, i32 0
-  store i8* %s62, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s62)
+  ret i8* %s62
 merge39:
   %t63 = load i8, i8* %symbol
   %t64 = icmp eq i8 %t63, 60
   br i1 %t64, label %then40, label %merge41
 then40:
   %s65 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1809673500, i32 0, i32 0
-  store i8* %s65, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s65)
+  ret i8* %s65
 merge41:
   %s66 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193444352, i32 0, i32 0
   %t67 = call i1 @strings_equal(i8* %symbol, i8* %s66)
   br i1 %t67, label %then42, label %merge43
 then42:
   %s68 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1809673005, i32 0, i32 0
-  store i8* %s68, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s68)
+  ret i8* %s68
 merge43:
   %t69 = load i8, i8* %symbol
   %t70 = icmp eq i8 %t69, 62
   br i1 %t70, label %then44, label %merge45
 then44:
   %s71 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1809668055, i32 0, i32 0
-  store i8* %s71, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s71)
+  ret i8* %s71
 merge45:
   %s72 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193446530, i32 0, i32 0
   %t73 = call i1 @strings_equal(i8* %symbol, i8* %s72)
   br i1 %t73, label %then46, label %merge47
 then46:
   %s74 = getelementptr inbounds [9 x i8], [9 x i8]* @.str.len8.h1809667560, i32 0, i32 0
-  store i8* %s74, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s74)
+  ret i8* %s74
 merge47:
   %s75 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s75, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s75)
+  ret i8* %s75
 merge35:
   %t76 = call i1 @ends_with_pointer_suffix(i8* %llvm_type)
   br i1 %t76, label %then48, label %merge49
@@ -75855,24 +75821,24 @@ then48:
   br i1 %t78, label %then50, label %merge51
 then50:
   %s79 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h770651283, i32 0, i32 0
-  store i8* %s79, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s79)
+  ret i8* %s79
 merge51:
   %s80 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193414949, i32 0, i32 0
   %t81 = call i1 @strings_equal(i8* %symbol, i8* %s80)
   br i1 %t81, label %then52, label %merge53
 then52:
   %s82 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h770660688, i32 0, i32 0
-  store i8* %s82, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s82)
+  ret i8* %s82
 merge53:
   %s83 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s83, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s83)
+  ret i8* %s83
 merge49:
   %s84 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s84, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s84)
+  ret i8* %s84
 }
 
 define i1 @is_string_pointer_type(i8* %llvm_type) {
@@ -77329,8 +77295,7 @@ merge49:
   ret %CoercionResult %t862
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @dominant_type(i8* %first, i8* %second, i8** %out_result) {
+define i8* @dominant_type(i8* %first, i8* %second) {
 block.entry:
   %l0 = alloca i1
   %l1 = alloca i1
@@ -77338,21 +77303,21 @@ block.entry:
   %t1 = icmp eq i64 %t0, 0
   br i1 %t1, label %then0, label %merge1
 then0:
-  store i8* %second, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %second)
+  ret i8* %second
 merge1:
   %t2 = call i64 @sailfin_runtime_string_length(i8* %second)
   %t3 = icmp eq i64 %t2, 0
   br i1 %t3, label %then2, label %merge3
 then2:
-  store i8* %first, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %first)
+  ret i8* %first
 merge3:
   %t4 = call i1 @strings_equal(i8* %first, i8* %second)
   br i1 %t4, label %then4, label %merge5
 then4:
-  store i8* %first, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %first)
+  ret i8* %first
 merge5:
   %t5 = call i1 @ends_with_pointer_suffix(i8* %first)
   store i1 %t5, i1* %l0
@@ -77378,8 +77343,8 @@ logical_and_merge_7:
   %t13 = load i1, i1* %l1
   br i1 %t11, label %then6, label %merge7
 then6:
-  store i8* %first, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %first)
+  ret i8* %first
 merge7:
   %t15 = load i1, i1* %l1
   br label %logical_and_entry_14
@@ -77401,8 +77366,8 @@ logical_and_merge_14:
   %t20 = load i1, i1* %l1
   br i1 %t18, label %then8, label %merge9
 then8:
-  store i8* %second, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %second)
+  ret i8* %second
 merge9:
   %t22 = load i1, i1* %l0
   br label %logical_and_entry_21
@@ -77423,8 +77388,8 @@ logical_and_merge_21:
   %t26 = load i1, i1* %l1
   br i1 %t24, label %then10, label %merge11
 then10:
-  store i8* %first, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %first)
+  ret i8* %first
 merge11:
   %s28 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
   %t29 = call i1 @strings_equal(i8* %first, i8* %s28)
@@ -77448,8 +77413,8 @@ logical_or_merge_27:
   br i1 %t32, label %then12, label %merge13
 then12:
   %s35 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
-  store i8* %s35, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s35)
+  ret i8* %s35
 merge13:
   %s37 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090307517, i32 0, i32 0
   %t38 = call i1 @strings_equal(i8* %first, i8* %s37)
@@ -77473,8 +77438,8 @@ logical_or_merge_36:
   br i1 %t41, label %then14, label %merge15
 then14:
   %s44 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090307517, i32 0, i32 0
-  store i8* %s44, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s44)
+  ret i8* %s44
 merge15:
   %s47 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193493192, i32 0, i32 0
   %t48 = call i1 @strings_equal(i8* %first, i8* %s47)
@@ -77528,8 +77493,8 @@ logical_or_merge_45:
   br i1 %t58, label %then16, label %merge17
 then16:
   %s61 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090307517, i32 0, i32 0
-  store i8* %s61, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s61)
+  ret i8* %s61
 merge17:
   %s63 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
   %t64 = call i1 @strings_equal(i8* %first, i8* %s63)
@@ -77553,11 +77518,11 @@ logical_or_merge_62:
   br i1 %t67, label %then18, label %merge19
 then18:
   %s70 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
-  store i8* %s70, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s70)
+  ret i8* %s70
 merge19:
-  store i8* %first, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %first)
+  ret i8* %first
 }
 
 define %BinaryAlignmentResult @harmonise_operands(%LLVMOperand %left, %LLVMOperand %right, double %temp_index, { i8**, i64 }* %lines) {
@@ -77856,8 +77821,7 @@ merge9:
   ret %BinaryAlignmentResult %t208
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @strip_enclosing_parentheses(i8* %expression, i8** %out_result) {
+define i8* @strip_enclosing_parentheses(i8* %expression) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -77873,8 +77837,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %t5 = load i8*, i8** %l0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %t7 = load i8*, i8** %l0
   %t8 = getelementptr i8, i8* %t7, i64 0
@@ -77904,8 +77868,8 @@ logical_or_merge_6:
   br i1 %t18, label %then2, label %merge3
 then2:
   %t20 = load i8*, i8** %l0
-  store i8* %t20, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t20)
+  ret i8* %t20
 merge3:
   %t21 = sitofp i64 0 to double
   store double %t21, double* %l1
@@ -77997,12 +77961,12 @@ then17:
   store i8* %t80, i8** %l4
   %t81 = load i8*, i8** %l4
   %t82 = call i8* @strip_enclosing_parentheses(i8* %t81)
-  store i8* %t82, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t82)
+  ret i8* %t82
 merge18:
   %t83 = load i8*, i8** %l0
-  store i8* %t83, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t83)
+  ret i8* %t83
 merge16:
   %t84 = load double, double* %l1
   br label %merge14
@@ -78027,8 +77991,8 @@ afterloop7:
   %t95 = load double, double* %l1
   %t96 = load double, double* %l2
   %t97 = load i8*, i8** %l0
-  store i8* %t97, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t97)
+  ret i8* %t97
 }
 
 define %OperatorMatch @find_top_level_operator(i8* %expression, i8* %operators) {
@@ -79926,8 +79890,7 @@ merge7:
   ret i1 1
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @find_previous_non_space_char(i8* %value, double %index, i8** %out_result) {
+define i8* @find_previous_non_space_char(i8* %value, double %index) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca i8
@@ -79977,8 +79940,8 @@ then6:
   %t25 = getelementptr [2 x i8], [2 x i8]* %t23, i32 0, i32 1
   store i8 0, i8* %t25
   %t26 = getelementptr [2 x i8], [2 x i8]* %t23, i32 0, i32 0
-  store i8* %t26, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t26)
+  ret i8* %t26
 merge7:
   br label %loop.latch2
 loop.latch2:
@@ -79986,12 +79949,11 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t29 = load double, double* %l0
-  store i8* null, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* null)
+  ret i8* null
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @find_next_non_space_char(i8* %value, double %index, i8** %out_result) {
+define i8* @find_next_non_space_char(i8* %value, double %index) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca i8
@@ -80040,8 +80002,8 @@ then6:
   %t25 = getelementptr [2 x i8], [2 x i8]* %t23, i32 0, i32 1
   store i8 0, i8* %t25
   %t26 = getelementptr [2 x i8], [2 x i8]* %t23, i32 0, i32 0
-  store i8* %t26, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t26)
+  ret i8* %t26
 merge7:
   %t27 = load double, double* %l0
   %t28 = sitofp i64 1 to double
@@ -80053,8 +80015,8 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t32 = load double, double* %l0
-  store i8* null, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* null)
+  ret i8* null
 }
 
 define double @find_call_site(i8* %expression) {
@@ -82031,8 +81993,7 @@ merge7:
   ret %ArrayLiteralMetadata %t54
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @map_metadata_annotation(%TypeContext %context, i8* %annotation, i8** %out_result) {
+define i8* @map_metadata_annotation(%TypeContext %context, i8* %annotation) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -82049,8 +82010,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = call i8* @map_primitive_type(%TypeContext %context, i8* %t6)
@@ -82063,8 +82024,8 @@ merge1:
   br i1 %t10, label %then2, label %merge3
 then2:
   %t13 = load i8*, i8** %l1
-  store i8* %t13, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t13)
+  ret i8* %t13
 merge3:
   %t14 = load i8*, i8** %l0
   %t15 = call i64 @sailfin_runtime_string_length(i8* %t14)
@@ -82110,8 +82071,8 @@ then6:
   br i1 %t42, label %then8, label %merge9
 then8:
   %s48 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s48, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s48)
+  ret i8* %s48
 merge9:
   %t49 = load i8*, i8** %l4
   %t50 = call i8* @array_struct_type_for_element(i8* %t49)
@@ -82124,18 +82085,17 @@ merge9:
   store i8 0, i8* %t54
   %t55 = getelementptr [2 x i8], [2 x i8]* %t52, i32 0, i32 0
   %t56 = call i8* @sailfin_runtime_string_concat(i8* %t51, i8* %t55)
-  store i8* %t56, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t56)
+  ret i8* %t56
 merge7:
   br label %merge5
 merge5:
   %s57 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s57, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s57)
+  ret i8* %s57
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @operation_name_for_symbol(i8* %symbol, i8* %llvm_type, i8** %out_result) {
+define i8* @operation_name_for_symbol(i8* %symbol, i8* %llvm_type) {
 block.entry:
   %s0 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
   %t1 = call i1 @strings_equal(i8* %llvm_type, i8* %s0)
@@ -82146,40 +82106,40 @@ then0:
   br i1 %t3, label %then2, label %merge3
 then2:
   %s4 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h258714362, i32 0, i32 0
-  store i8* %s4, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s4)
+  ret i8* %s4
 merge3:
   %t5 = load i8, i8* %symbol
   %t6 = icmp eq i8 %t5, 45
   br i1 %t6, label %then4, label %merge5
 then4:
   %s7 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h259379675, i32 0, i32 0
-  store i8* %s7, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s7)
+  ret i8* %s7
 merge5:
   %t8 = load i8, i8* %symbol
   %t9 = icmp eq i8 %t8, 42
   br i1 %t9, label %then6, label %merge7
 then6:
   %s10 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h259164383, i32 0, i32 0
-  store i8* %s10, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s10)
+  ret i8* %s10
 merge7:
   %t11 = load i8, i8* %symbol
   %t12 = icmp eq i8 %t11, 47
   br i1 %t12, label %then8, label %merge9
 then8:
   %s13 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h258828212, i32 0, i32 0
-  store i8* %s13, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s13)
+  ret i8* %s13
 merge9:
   %t14 = load i8, i8* %symbol
   %t15 = icmp eq i8 %t14, 37
   br i1 %t15, label %then10, label %merge11
 then10:
   %s16 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h259326677, i32 0, i32 0
-  store i8* %s16, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s16)
+  ret i8* %s16
 merge11:
   br label %merge1
 merge1:
@@ -82188,68 +82148,65 @@ merge1:
   br i1 %t18, label %then12, label %merge13
 then12:
   %s19 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090071699, i32 0, i32 0
-  store i8* %s19, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s19)
+  ret i8* %s19
 merge13:
   %t20 = load i8, i8* %symbol
   %t21 = icmp eq i8 %t20, 45
   br i1 %t21, label %then14, label %merge15
 then14:
   %s22 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090737012, i32 0, i32 0
-  store i8* %s22, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s22)
+  ret i8* %s22
 merge15:
   %t23 = load i8, i8* %symbol
   %t24 = icmp eq i8 %t23, 42
   br i1 %t24, label %then16, label %merge17
 then16:
   %s25 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090521720, i32 0, i32 0
-  store i8* %s25, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s25)
+  ret i8* %s25
 merge17:
   %t26 = load i8, i8* %symbol
   %t27 = icmp eq i8 %t26, 47
   br i1 %t27, label %then18, label %merge19
 then18:
   %s28 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h274245185, i32 0, i32 0
-  store i8* %s28, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s28)
+  ret i8* %s28
 merge19:
   %t29 = load i8, i8* %symbol
   %t30 = icmp eq i8 %t29, 37
   br i1 %t30, label %then20, label %merge21
 then20:
   %s31 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h274743650, i32 0, i32 0
-  store i8* %s31, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s31)
+  ret i8* %s31
 merge21:
   %s32 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090071699, i32 0, i32 0
-  store i8* %s32, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s32)
+  ret i8* %s32
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_temp_name(double %index, i8** %out_result) {
+define i8* @format_temp_name(double %index) {
 block.entry:
   %s0 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193421120, i32 0, i32 0
   %t1 = call i8* @number_to_string(double %index)
   %t2 = call i8* @sailfin_runtime_string_concat(i8* %s0, i8* %t1)
-  store i8* %t2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t2)
+  ret i8* %t2
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_local_pointer_name(double %index, i8** %out_result) {
+define i8* @format_local_pointer_name(double %index) {
 block.entry:
   %s0 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193420856, i32 0, i32 0
   %t1 = call i8* @number_to_string(double %index)
   %t2 = call i8* @sailfin_runtime_string_concat(i8* %s0, i8* %t1)
-  store i8* %t2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t2)
+  ret i8* %t2
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_typed_operand(%LLVMOperand %operand, i8** %out_result) {
+define i8* @format_typed_operand(%LLVMOperand %operand) {
 block.entry:
   %t0 = extractvalue %LLVMOperand %operand, 0
   %t1 = alloca [2 x i8], align 1
@@ -82261,8 +82218,8 @@ block.entry:
   %t5 = call i8* @sailfin_runtime_string_concat(i8* %t0, i8* %t4)
   %t6 = extractvalue %LLVMOperand %operand, 1
   %t7 = call i8* @sailfin_runtime_string_concat(i8* %t5, i8* %t6)
-  store i8* %t7, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t7)
+  ret i8* %t7
 }
 
 define i1 @ends_with_pointer_suffix(i8* %value) {
@@ -82288,8 +82245,7 @@ merge1:
   ret i1 %t11
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @strip_pointer_suffix(i8* %value, i8** %out_result) {
+define i8* @strip_pointer_suffix(i8* %value) {
 block.entry:
   %l0 = alloca i8*
   %t0 = call i8* @trim_text(i8* %value)
@@ -82301,8 +82257,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %t5 = load i8*, i8** %l0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = load i8*, i8** %l0
@@ -82315,8 +82271,8 @@ merge1:
   br i1 %t12, label %then2, label %merge3
 then2:
   %t14 = load i8*, i8** %l0
-  store i8* %t14, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t14)
+  ret i8* %t14
 merge3:
   %t15 = load i8*, i8** %l0
   %t16 = load i8*, i8** %l0
@@ -82324,8 +82280,8 @@ merge3:
   %t18 = sub i64 %t17, 1
   %t19 = call i8* @sailfin_runtime_substring(i8* %t15, i64 0, i64 %t18)
   %t20 = call i8* @trim_text(i8* %t19)
-  store i8* %t20, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t20)
+  ret i8* %t20
 }
 
 define i1 @is_copy_type(i8* %type_annotation, i8* %llvm_type) {
@@ -82466,16 +82422,15 @@ merge19:
   ret i1 0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @default_return_literal(i8* %llvm_type, i8** %out_result) {
+define i8* @default_return_literal(i8* %llvm_type) {
 block.entry:
   %s0 = getelementptr inbounds [7 x i8], [7 x i8]* @.str.len6.h552231050, i32 0, i32 0
   %t1 = call i1 @strings_equal(i8* %llvm_type, i8* %s0)
   br i1 %t1, label %then0, label %merge1
 then0:
   %s2 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2088250264, i32 0, i32 0
-  store i8* %s2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s2)
+  ret i8* %s2
 merge1:
   %s3 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090304184, i32 0, i32 0
   %t4 = call i1 @strings_equal(i8* %llvm_type, i8* %s3)
@@ -82487,8 +82442,8 @@ then2:
   %t7 = getelementptr [2 x i8], [2 x i8]* %t5, i32 0, i32 1
   store i8 0, i8* %t7
   %t8 = getelementptr [2 x i8], [2 x i8]* %t5, i32 0, i32 0
-  store i8* %t8, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t8)
+  ret i8* %t8
 merge3:
   %s9 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090307517, i32 0, i32 0
   %t10 = call i1 @strings_equal(i8* %llvm_type, i8* %s9)
@@ -82500,27 +82455,27 @@ then4:
   %t13 = getelementptr [2 x i8], [2 x i8]* %t11, i32 0, i32 1
   store i8 0, i8* %t13
   %t14 = getelementptr [2 x i8], [2 x i8]* %t11, i32 0, i32 0
-  store i8* %t14, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t14)
+  ret i8* %t14
 merge5:
   %s15 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193492961, i32 0, i32 0
   %t16 = call i1 @strings_equal(i8* %llvm_type, i8* %s15)
   br i1 %t16, label %then6, label %merge7
 then6:
   %s17 = getelementptr inbounds [6 x i8], [6 x i8]* @.str.len5.h2095430042, i32 0, i32 0
-  store i8* %s17, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s17)
+  ret i8* %s17
 merge7:
   %t18 = call i1 @ends_with_pointer_suffix(i8* %llvm_type)
   br i1 %t18, label %then8, label %merge9
 then8:
   %s19 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h268929446, i32 0, i32 0
-  store i8* %s19, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s19)
+  ret i8* %s19
 merge9:
   %s20 = getelementptr inbounds [16 x i8], [16 x i8]* @.str.len15.h2103632386, i32 0, i32 0
-  store i8* %s20, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s20)
+  ret i8* %s20
 }
 
 define i1 @starts_with(i8* %value, i8* %prefix) {
@@ -82617,8 +82572,7 @@ afterloop7:
   ret i1 0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @strip_mut_prefix(i8* %value, i8** %out_result) {
+define i8* @strip_mut_prefix(i8* %value) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -82631,8 +82585,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %t5 = load i8*, i8** %l0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %t6 = load i8*, i8** %l0
   %t7 = call i8* @sailfin_runtime_substring(i8* %t6, i64 0, i64 4)
@@ -82649,12 +82603,12 @@ then2:
   %t15 = call i64 @sailfin_runtime_string_length(i8* %t14)
   %t16 = call i8* @sailfin_runtime_substring(i8* %t13, i64 4, i64 %t15)
   %t17 = call i8* @trim_text(i8* %t16)
-  store i8* %t17, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t17)
+  ret i8* %t17
 merge3:
   %t18 = load i8*, i8** %l0
-  store i8* %t18, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t18)
+  ret i8* %t18
 }
 
 define i1 @is_simple_identifier(i8* %value) {
@@ -85199,8 +85153,7 @@ block.entry:
   ret %LifetimeRegionMetadata %t16
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_root_scope_id(i8* %function_name, i8** %out_result) {
+define i8* @format_root_scope_id(i8* %function_name) {
 block.entry:
   %l0 = alloca i8*
   %t0 = call i8* @sanitize_symbol(i8* %function_name)
@@ -85221,12 +85174,11 @@ merge1:
   %s8 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2090260888, i32 0, i32 0
   %t9 = load i8*, i8** %l0
   %t10 = call i8* @sailfin_runtime_string_concat(i8* %s8, i8* %t9)
-  store i8* %t10, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t10)
+  ret i8* %t10
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @make_child_scope_id(i8* %parent, i8* %child, i8** %out_result) {
+define i8* @make_child_scope_id(i8* %parent, i8* %child) {
 block.entry:
   %l0 = alloca i8*
   %t0 = call i8* @sanitize_symbol(i8* %child)
@@ -85250,15 +85202,15 @@ merge1:
   br i1 %t9, label %then2, label %merge3
 then2:
   %t11 = load i8*, i8** %l0
-  store i8* %t11, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t11)
+  ret i8* %t11
 merge3:
   %s12 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193442075, i32 0, i32 0
   %t13 = call i8* @sailfin_runtime_string_concat(i8* %parent, i8* %s12)
   %t14 = load i8*, i8** %l0
   %t15 = call i8* @sailfin_runtime_string_concat(i8* %t13, i8* %t14)
-  store i8* %t15, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t15)
+  ret i8* %t15
 }
 
 define i1 @is_scope_descendant(i8* %parent, i8* %candidate) {
@@ -85877,8 +85829,7 @@ afterloop3:
   ret double %t27
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @number_to_string(double %value, i8** %out_result) {
+define i8* @number_to_string(double %value) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca { double*, i64 }*
@@ -85900,8 +85851,8 @@ then0:
   %t4 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 1
   store i8 0, i8* %t4
   %t5 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %s6 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h626550212, i32 0, i32 0
   store i8* %s6, i8** %l0
@@ -86207,12 +86158,12 @@ then20:
   store i8 0, i8* %t205
   %t206 = getelementptr [2 x i8], [2 x i8]* %t203, i32 0, i32 0
   %t207 = call i8* @sailfin_runtime_string_concat(i8* %t206, i8* %t202)
-  store i8* %t207, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t207)
+  ret i8* %t207
 merge21:
   %t208 = load i8*, i8** %l4
-  store i8* %t208, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t208)
+  ret i8* %t208
 }
 
 define double @lower_char_code(double %code) {
@@ -86684,8 +86635,7 @@ afterloop9:
   ret i1 %t85
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @normalise_number_literal(i8* %text, i8** %out_result) {
+define i8* @normalise_number_literal(i8* %text) {
 block.entry:
   %l0 = alloca i8*
   %t0 = call i8* @trim_text(i8* %text)
@@ -86704,14 +86654,14 @@ block.entry:
   br i1 %t8, label %then0, label %merge1
 then0:
   %t10 = load i8*, i8** %l0
-  store i8* %t10, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t10)
+  ret i8* %t10
 merge1:
   %t11 = load i8*, i8** %l0
   %s12 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193428677, i32 0, i32 0
   %t13 = call i8* @sailfin_runtime_string_concat(i8* %t11, i8* %s12)
-  store i8* %t13, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t13)
+  ret i8* %t13
 }
 
 define i1 @is_string_literal(i8* %text) {
@@ -86970,8 +86920,7 @@ merge3:
   ret double %t79
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @make_string_constant_name(i8* %content, i8** %out_result) {
+define i8* @make_string_constant_name(i8* %content) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -86992,8 +86941,8 @@ block.entry:
   %t10 = call i8* @sailfin_runtime_string_concat(i8* %t8, i8* %s9)
   %t11 = load i8*, i8** %l2
   %t12 = call i8* @sailfin_runtime_string_concat(i8* %t10, i8* %t11)
-  store i8* %t12, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t12)
+  ret i8* %t12
 }
 
 define double @compute_string_constant_hash(i8* %content) {
@@ -87236,8 +87185,7 @@ block.entry:
   ret %ExpressionResult %t75
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @unescape_string_literal(i8* %literal, i8** %out_result) {
+define i8* @unescape_string_literal(i8* %literal) {
 block.entry:
   %l0 = alloca i64
   %l1 = alloca i64
@@ -87251,8 +87199,8 @@ block.entry:
   br i1 %t1, label %then0, label %merge1
 then0:
   %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s2)
+  ret i8* %s2
 merge1:
   store i64 1, i64* %l0
   %t3 = call i64 @sailfin_runtime_string_length(i8* %literal)
@@ -87552,12 +87500,11 @@ afterloop5:
   %t200 = load i8*, i8** %l3
   %t201 = load double, double* %l4
   %t202 = load i8*, i8** %l3
-  store i8* %t202, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t202)
+  ret i8* %t202
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @trim_text(i8* %value, i8** %out_result) {
+define i8* @trim_text(i8* %value) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -87690,8 +87637,8 @@ logical_and_merge_59:
   %t69 = load double, double* %l1
   br i1 %t67, label %then16, label %merge17
 then16:
-  store i8* %value, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %value)
+  ret i8* %value
 merge17:
   %t70 = load double, double* %l0
   %t71 = load double, double* %l1
@@ -87700,8 +87647,8 @@ merge17:
   %t74 = call double @llvm.round.f64(double %t71)
   %t75 = fptosi double %t74 to i64
   %t76 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t73, i64 %t75)
-  store i8* %t76, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t76)
+  ret i8* %t76
 }
 
 define i1 @is_trim_char(i8* %ch) {
@@ -88185,8 +88132,7 @@ block.entry:
   ret { %ParameterBinding*, i64 }* %t17
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @join_with_separator({ i8**, i64 }* %values, i8* %separator, i8** %out_result) {
+define i8* @join_with_separator({ i8**, i64 }* %values, i8* %separator) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -88196,8 +88142,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s3)
+  ret i8* %s3
 merge1:
   %t4 = load { i8**, i64 }, { i8**, i64 }* %values
   %t5 = extractvalue { i8**, i64 } %t4, 0
@@ -88259,8 +88205,8 @@ afterloop5:
   %t39 = load i8*, i8** %l0
   %t40 = load double, double* %l1
   %t41 = load i8*, i8** %l0
-  store i8* %t41, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t41)
+  ret i8* %t41
 }
 
 define { %StringConstant*, i64 }* @empty_string_constant_set() {
@@ -88705,8 +88651,7 @@ afterloop3:
   ret { i8**, i64 }* %t63
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @escape_string_for_llvm(i8* %content, i8** %out_result) {
+define i8* @escape_string_for_llvm(i8* %content) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -88869,8 +88814,8 @@ afterloop3:
   %t94 = load i8*, i8** %l0
   %t95 = load double, double* %l1
   %t96 = load i8*, i8** %l0
-  store i8* %t96, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t96)
+  ret i8* %t96
 }
 
 define i1 @is_symbol_char(i8* %ch) {
@@ -89031,8 +88976,7 @@ merge9:
   ret i1 0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @sanitize_symbol(i8* %name, i8** %out_result) {
+define i8* @sanitize_symbol(i8* %name) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -89051,8 +88995,8 @@ then0:
   %t4 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 1
   store i8 0, i8* %t4
   %t5 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %s6 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   store i8* %s6, i8** %l0
@@ -89137,8 +89081,8 @@ then10:
   %t55 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 1
   store i8 0, i8* %t55
   %t56 = getelementptr [2 x i8], [2 x i8]* %t53, i32 0, i32 0
-  store i8* %t56, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t56)
+  ret i8* %t56
 merge11:
   %t57 = load i8*, i8** %l0
   %t58 = getelementptr i8, i8* %t57, i64 0
@@ -89211,8 +89155,8 @@ merge13:
   %t97 = phi i8* [ %t96, %then12 ], [ %t84, %logical_and_merge_76 ]
   store i8* %t97, i8** %l0
   %t98 = load i8*, i8** %l0
-  store i8* %t98, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t98)
+  ret i8* %t98
 }
 
 define double @add(double %a, double %b) {
@@ -89220,387 +89164,387 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
-@.str.len15.h1772400708 = private unnamed_addr constant [16 x i8] c" = insertvalue \00"
-@.str.len53.h1441489102 = private unnamed_addr constant [54 x i8] c"llvm lowering: `.for` range missing stride expression\00"
-@.str.len46.h1298670716 = private unnamed_addr constant [47 x i8] c"layout manifest: missing artifact for import `\00"
-@.str.len39.h1908765533 = private unnamed_addr constant [40 x i8] c"llvm lowering: struct literal context `\00"
-@.str.len35.h573475662 = private unnamed_addr constant [36 x i8] c"llvm lowering: `.for` loop target `\00"
-@.str.len3.h2090521720 = private unnamed_addr constant [4 x i8] c"mul\00"
-@.str.len2.h193446530 = private unnamed_addr constant [3 x i8] c">=\00"
-@.str.len35.h1273062999 = private unnamed_addr constant [36 x i8] c"llvm lowering: member access base `\00"
-@.str.len25.h9921935 = private unnamed_addr constant [26 x i8] c"` uses unsupported type `\00"
-@.str.len37.h126290176 = private unnamed_addr constant [38 x i8] c" = getelementptr [2 x i8], [2 x i8]* \00"
-@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
-@.str.len26.h487122250 = private unnamed_addr constant [27 x i8] c"` provides unknown field `\00"
-@.str.len6.h1803965435 = private unnamed_addr constant [7 x i8] c"entry:\00"
-@.str.len8.h1809668055 = private unnamed_addr constant [9 x i8] c"icmp sgt\00"
-@.str.len8.h1809673005 = private unnamed_addr constant [9 x i8] c"icmp sle\00"
-@.str.len49.h95349196 = private unnamed_addr constant [50 x i8] c"llvm lowering: unable to lower match subject in `\00"
-@.str.len12.h35447896 = private unnamed_addr constant [13 x i8] c"` but base `\00"
-@.str.len9.h1449250559 = private unnamed_addr constant [10 x i8] c"` field `\00"
-@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.str.len3.h2088029758 = private unnamed_addr constant [4 x i8] c"** \00"
-@.str.len32.h1899104257 = private unnamed_addr constant [33 x i8] c"` does not implement interface `\00"
-@.str.len7.h973697423 = private unnamed_addr constant [8 x i8] c"Linear<\00"
-@.str.len2.h193477154 = private unnamed_addr constant [3 x i8] c"[ \00"
-@.str.len4.h230767751 = private unnamed_addr constant [5 x i8] c"Noop\00"
-@.str.len48.h5787697 = private unnamed_addr constant [49 x i8] c"llvm lowering: unable to lower if condition in `\00"
-@.str.len12.h603915651 = private unnamed_addr constant [13 x i8] c"  call void \00"
-@.str.len5.h199018843 = private unnamed_addr constant [6 x i8] c"local\00"
-@.str.len7.h1064168743 = private unnamed_addr constant [8 x i8] c".concat\00"
-@.str.len17.h1635915066 = private unnamed_addr constant [18 x i8] c"` missing field `\00"
-@.str.len23.h675789051 = private unnamed_addr constant [24 x i8] c"llvm lowering: struct `\00"
-@.str.len15.h202150329 = private unnamed_addr constant [16 x i8] c" = fadd double \00"
-@.str.len9.h1747065903 = private unnamed_addr constant [10 x i8] c"parameter\00"
-@.str.len5.h1925437637 = private unnamed_addr constant [6 x i8] c"await\00"
-@.str.len26.h549134517 = private unnamed_addr constant [27 x i8] c"` not found in interface `\00"
-@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.str.len13.h142498599 = private unnamed_addr constant [14 x i8] c", i32 0, i32 \00"
-@.str.len40.h900070345 = private unnamed_addr constant [41 x i8] c"` conflicts with active mutable borrow `\00"
-@.str.len40.h1039467311 = private unnamed_addr constant [41 x i8] c"llvm lowering: missing return value in `\00"
-@.str.len9.h1117872508 = private unnamed_addr constant [10 x i8] c"matchcase\00"
-@.str.len17.h1795612323 = private unnamed_addr constant [18 x i8] c"` is incompatible\00"
-@.str.len31.h1428761244 = private unnamed_addr constant [32 x i8] c"llvm lowering: mutable borrow `\00"
-@.str.len6.h1736497781 = private unnamed_addr constant [7 x i8] c"Borrow\00"
-@.str.len33.h1240255260 = private unnamed_addr constant [34 x i8] c"` compatible with expected type `\00"
-@.str.len16.h519580441 = private unnamed_addr constant [17 x i8] c"` on any variant\00"
-@.str.len4.h274245185 = private unnamed_addr constant [5 x i8] c"sdiv\00"
-@.str.len55.h463798869 = private unnamed_addr constant [56 x i8] c"llvm lowering: let expression missing binding name in `\00"
-@.str.len7.h332613328 = private unnamed_addr constant [8 x i8] c"%trait.\00"
-@.str.len15.h1007423837 = private unnamed_addr constant [16 x i8] c"llvm lowering: \00"
-@.str.len35.h364700043 = private unnamed_addr constant [36 x i8] c"llvm lowering: enum literal field `\00"
-@.str.len4.h257940116 = private unnamed_addr constant [5 x i8] c"else\00"
-@.str.len8.h241550015 = private unnamed_addr constant [9 x i8] c"fcmp oeq\00"
-@.str.len48.h1606060438 = private unnamed_addr constant [49 x i8] c"llvm lowering: malformed comparison expression `\00"
-@.str.len6.h113799849 = private unnamed_addr constant [7 x i8] c"borrow\00"
-@.str.len4.h259326677 = private unnamed_addr constant [5 x i8] c"frem\00"
-@.str.len14.h1387946067 = private unnamed_addr constant [15 x i8] c" for call to `\00"
-@.str.len79.h2027294639 = private unnamed_addr constant [80 x i8] c"llvm lowering: trait dispatch requires at least one argument (the trait object)\00"
-@.str.len2.h193515071 = private unnamed_addr constant [3 x i8] c"{}\00"
-@.str.len34.h1024520411 = private unnamed_addr constant [35 x i8] c" = getelementptr inbounds i8, i8* \00"
-@.str.len47.h867637971 = private unnamed_addr constant [48 x i8] c" = call i64 @sailfin_runtime_string_length(i8* \00"
-@.str.len40.h1596119513 = private unnamed_addr constant [41 x i8] c"llvm lowering: malformed && expression `\00"
-@.str.len8.h241775042 = private unnamed_addr constant [9 x i8] c"fcmp une\00"
-@.str.len44.h288551526 = private unnamed_addr constant [45 x i8] c"llvm lowering: assignment to unknown local `\00"
-@.str.len51.h1154611981 = private unnamed_addr constant [52 x i8] c"llvm lowering: ternary expression missing condition\00"
-@.str.len10.h1616295671 = private unnamed_addr constant [11 x i8] c"  ret void\00"
-@.str.len39.h2032947624 = private unnamed_addr constant [40 x i8] c"` conflicts with active shared borrow `\00"
-@.str.len43.h396338520 = private unnamed_addr constant [44 x i8] c"llvm lowering: unsupported local type for `\00"
-@.str.len25.h1696931368 = private unnamed_addr constant [26 x i8] c" = getelementptr i8, i8* \00"
-@.str.len76.h547986414 = private unnamed_addr constant [77 x i8] c"llvm lowering: unable to determine element type for array indexing on type `\00"
-@.str.len4.h219990644 = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len13.h752234821 = private unnamed_addr constant [14 x i8] c"` missing `:`\00"
-@.str.len55.h1287145578 = private unnamed_addr constant [56 x i8] c"llvm lowering: struct literal references unknown struct\00"
-@.str.len52.h1115033155 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to allocate heap storage for `\00"
-@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
-@.str.len33.h1674155807 = private unnamed_addr constant [34 x i8] c"llvm lowering: enum literal for `\00"
-@.str.len4.h173787542 = private unnamed_addr constant [5 x i8] c" -> \00"
-@.str.len50.h1873110523 = private unnamed_addr constant [51 x i8] c"llvm lowering: duplicate `.else` in `.if` within `\00"
-@.str.len3.h2089839742 = private unnamed_addr constant [4 x i8] c"\5C5C\00"
-@.str.len13.h601865389 = private unnamed_addr constant [14 x i8] c"  call void @\00"
-@.str.len19.h965756485 = private unnamed_addr constant [20 x i8] c" = fcmp olt double \00"
-@.str.len3.h2088178324 = private unnamed_addr constant [4 x i8] c"...\00"
-@.str.len51.h535923040 = private unnamed_addr constant [52 x i8] c"llvm lowering: unsupported return type in call to `\00"
-@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
-@.str.len59.h1700212648 = private unnamed_addr constant [60 x i8] c"llvm lowering: ternary expression missing true branch value\00"
-@.str.len55.h1124826835 = private unnamed_addr constant [56 x i8] c"llvm lowering: unable to coerce index expression to i64\00"
-@.str.len8.h2003785447 = private unnamed_addr constant [9 x i8] c"declare \00"
-@.str.len36.h1435214388 = private unnamed_addr constant [37 x i8] c"llvm lowering: method call expects `\00"
-@.str.len25.h1254414760 = private unnamed_addr constant [26 x i8] c"layout manifest: struct `\00"
-@.str.len32.h331553312 = private unnamed_addr constant [33 x i8] c"` implements unknown interface `\00"
-@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
-@.str.len5.h335299934 = private unnamed_addr constant [6 x i8] c"; fn \00"
-@.str.len9.h769510343 = private unnamed_addr constant [10 x i8] c"; struct \00"
-@.str.len12.h255876057 = private unnamed_addr constant [13 x i8] c"{ i8*, i8* }\00"
-@.str.len12.h340562855 = private unnamed_addr constant [13 x i8] c" effects: ![\00"
-@.str.len10.h289462685 = private unnamed_addr constant [11 x i8] c" to double\00"
-@.str.len58.h583386627 = private unnamed_addr constant [59 x i8] c"llvm lowering: comparison operands have mismatched types `\00"
-@.str.len12.h1804972052 = private unnamed_addr constant [13 x i8] c" = bitcast [\00"
-@.str.len49.h1794354414 = private unnamed_addr constant [50 x i8] c"llvm lowering: struct literal missing closing `}`\00"
-@.str.len56.h2066709411 = private unnamed_addr constant [57 x i8] c"llvm lowering: unable to lower guard in match case for `\00"
-@.str.len68.h1804274948 = private unnamed_addr constant [69 x i8] c"llvm lowering: `.for` stride expression did not produce a value in `\00"
-@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
-@.str.len58.h1744114411 = private unnamed_addr constant [59 x i8] c"llvm lowering: expected boolean operand for `and`, found `\00"
-@.str.len60.h484372876 = private unnamed_addr constant [61 x i8] c"llvm lowering: member access assignment on non-struct type `\00"
-@.str.len4.h254486039 = private unnamed_addr constant [5 x i8] c"bool\00"
-@.str.len10.h1189337400 = private unnamed_addr constant [11 x i8] c" = xor i1 \00"
-@.str.len39.h176231850 = private unnamed_addr constant [40 x i8] c"llvm lowering: unable to emit call to `\00"
-@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
-@.str.len3.h2088286201 = private unnamed_addr constant [4 x i8] c"1.0\00"
-@.str.len44.h1570405729 = private unnamed_addr constant [45 x i8] c"llvm lowering: array index assignment base `\00"
-@.str.len52.h39804487 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to convert left operand from `\00"
-@.str.len7.h794634624 = private unnamed_addr constant [8 x i8] c", i64 0\00"
-@.str.len52.h2121219822 = private unnamed_addr constant [53 x i8] c"llvm lowering: `.for` range missing start expression\00"
-@.str.len44.h1827416098 = private unnamed_addr constant [45 x i8] c"llvm lowering: malformed binary expression `\00"
-@.str.len40.h341281823 = private unnamed_addr constant [41 x i8] c"llvm lowering: unterminated `.loop` in `\00"
-@.str.len40.h1941426741 = private unnamed_addr constant [41 x i8] c"llvm lowering: unsupported instruction `\00"
-@.str.len3.h2090521984 = private unnamed_addr constant [4 x i8] c"mut\00"
-@.str.len16.h2138981313 = private unnamed_addr constant [17 x i8] c"string_constants\00"
-@.str.len23.h96319572 = private unnamed_addr constant [24 x i8] c"` lacks struct metadata\00"
-@.str.len12.h937346004 = private unnamed_addr constant [13 x i8] c"` for type `\00"
-@.str.len49.h181712441 = private unnamed_addr constant [50 x i8] c"  call void @sailfin_runtime_mark_persistent(i8* \00"
-@.str.len40.h400700341 = private unnamed_addr constant [41 x i8] c"llvm lowering: malformed || expression `\00"
-@.str.len68.h1900616918 = private unnamed_addr constant [69 x i8] c"llvm lowering: unable to compare descending `.for` range bounds in `\00"
-@.str.len69.h1402407334 = private unnamed_addr constant [70 x i8] c"llvm lowering: ternary expression branches have incompatible types: `\00"
-@.str.len7.h505600716 = private unnamed_addr constant [8 x i8] c"` and `\00"
-@.str.len19.h129761630 = private unnamed_addr constant [20 x i8] c" = fcmp one double \00"
-@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
-@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
-@.str.len10.h759000579 = private unnamed_addr constant [11 x i8] c" = global \00"
-@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len33.h1306641126 = private unnamed_addr constant [34 x i8] c"llvm lowering: method call base `\00"
-@.str.len21.h1816480386 = private unnamed_addr constant [22 x i8] c"` when assigning to `\00"
-@.str.len6.h78255107 = private unnamed_addr constant [7 x i8] c"Affine\00"
-@.str.len49.h893069065 = private unnamed_addr constant [50 x i8] c"` missing layout metadata; skipping type emission\00"
-@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.str.len55.h55260472 = private unnamed_addr constant [56 x i8] c"llvm lowering: unable to increment `.for` iterator in `\00"
-@.str.len62.h41486523 = private unnamed_addr constant [63 x i8] c"llvm lowering: array literal element could not be coerced to `\00"
-@.str.len54.h445851502 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to lower match case pattern in `\00"
-@.str.len11.h790843313 = private unnamed_addr constant [12 x i8] c" = sext i8 \00"
-@.str.len47.h1472191274 = private unnamed_addr constant [48 x i8] c"llvm lowering: struct literal missing type name\00"
-@.str.len58.h1022810589 = private unnamed_addr constant [59 x i8] c"native lowering: missing native text artifact for import `\00"
-@.str.len40.h924126065 = private unnamed_addr constant [41 x i8] c"llvm lowering: `break` outside loop in `\00"
-@.str.len16.h2115533553 = private unnamed_addr constant [17 x i8] c" = load i8, i8* \00"
-@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len8.h241551797 = private unnamed_addr constant [9 x i8] c"fcmp oge\00"
 @.str.len46.h1399920227 = private unnamed_addr constant [47 x i8] c"llvm lowering: enum literal trailing content `\00"
-@.str.len60.h1498420593 = private unnamed_addr constant [61 x i8] c"llvm lowering: failed to lower assignment value for member `\00"
-@.str.len51.h577773560 = private unnamed_addr constant [52 x i8] c"llvm lowering: unable to lower `.for` iterable in `\00"
-@.str.len7.h1425458391 = private unnamed_addr constant [8 x i8] c"@.enum.\00"
-@.str.len70.h134995567 = private unnamed_addr constant [71 x i8] c"llvm lowering: `.for` stride expression must evaluate to `number` in `\00"
-@.str.len28.h379765914 = private unnamed_addr constant [29 x i8] c";   ; no signatures recorded\00"
-@.str.len47.h982576353 = private unnamed_addr constant [48 x i8] c"llvm lowering: condition produced no value in `\00"
-@.str.len3.h2089833967 = private unnamed_addr constant [4 x i8] c"\5C09\00"
-@.str.len42.h1019849180 = private unnamed_addr constant [43 x i8] c"` missing type annotation; defaulting to `\00"
-@.str.len38.h1035741733 = private unnamed_addr constant [39 x i8] c"llvm lowering: unterminated `.if` in `\00"
-@.str.len7.h434936673 = private unnamed_addr constant [8 x i8] c"Affine<\00"
-@.enum.NativeInstruction.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len41.h17849796 = private unnamed_addr constant [42 x i8] c"llvm lowering: malformed let expression `\00"
-@.str.len20.h93992129 = private unnamed_addr constant [21 x i8] c"llvm lowering: let `\00"
-@.str.len50.h993566140 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` range missing end expression\00"
-@.str.len6.h1894573333 = private unnamed_addr constant [7 x i8] c"length\00"
-@.str.len6.h299655256 = private unnamed_addr constant [7 x i8] c", true\00"
-@.str.len16.h1361993478 = private unnamed_addr constant [17 x i8] c"  ret double %t0\00"
-@.str.len5.h700747015 = private unnamed_addr constant [6 x i8] c"yield\00"
-@.str.len65.h1008432364 = private unnamed_addr constant [66 x i8] c"llvm lowering: internal error loading `.for` iteration value in `\00"
-@.str.len30.h766090624 = private unnamed_addr constant [31 x i8] c"` not found for trait dispatch\00"
-@.str.len29.h538291009 = private unnamed_addr constant [30 x i8] c"` shadows existing local in `\00"
-@.str.len45.h313159578 = private unnamed_addr constant [46 x i8] c"llvm lowering: empty element in array literal\00"
-@.str.len3.h2090302138 = private unnamed_addr constant [4 x i8] c"i16\00"
-@.str.len37.h749417010 = private unnamed_addr constant [38 x i8] c"llvm lowering: struct literal field `\00"
-@.str.len24.h1530531128 = private unnamed_addr constant [25 x i8] c"` not found in variant `\00"
-@.str.len52.h382324263 = private unnamed_addr constant [53 x i8] c"llvm lowering: borrow expression missing closing `)`\00"
-@.str.len4.h259164383 = private unnamed_addr constant [5 x i8] c"fmul\00"
-@.str.len4.h245035433 = private unnamed_addr constant [5 x i8] c"\5C00\22\00"
-@.str.len69.h1474512693 = private unnamed_addr constant [70 x i8] c"llvm lowering: `.for` start expression must evaluate to `number` in `\00"
-@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
-@.str.len3.h2088250264 = private unnamed_addr constant [4 x i8] c"0.0\00"
-@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
-@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
-@.str.len43.h372676400 = private unnamed_addr constant [44 x i8] c"llvm lowering: empty expression encountered\00"
-@.str.len11.h539202395 = private unnamed_addr constant [12 x i8] c"  store i8 \00"
-@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
-@.str.len26.h1205961643 = private unnamed_addr constant [27 x i8] c"  %t0 = fadd double %a, %b\00"
-@.str.len21.h799966347 = private unnamed_addr constant [22 x i8] c"` remains active in `\00"
-@.str.len23.h1217803504 = private unnamed_addr constant [24 x i8] c"llvm lowering: borrow `\00"
-@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
-@.str.len54.h288837174 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to lower `.for` range start in `\00"
-@.str.len13.h1278011845 = private unnamed_addr constant [14 x i8] c" = uitofp i1 \00"
-@.str.len43.h1628793500 = private unnamed_addr constant [44 x i8] c"llvm lowering: `continue` outside loop in `\00"
-@.str.len23.h1424536798 = private unnamed_addr constant [24 x i8] c"layout manifest: enum `\00"
-@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
-@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.str.len33.h1082729604 = private unnamed_addr constant [34 x i8] c"` is not a simple identifier in `\00"
-@.str.len47.h1642247268 = private unnamed_addr constant [48 x i8] c" = call i8* @sailfin_runtime_string_concat(i8* \00"
-@.str.len10.h634268966 = private unnamed_addr constant [11 x i8] c"` repeated\00"
-@.str.len54.h1022899003 = private unnamed_addr constant [55 x i8] c"llvm lowering: match pattern references unknown enum `\00"
-@.str.len24.h442937996 = private unnamed_addr constant [25 x i8] c" = load double, double* \00"
-@.str.len46.h1031183328 = private unnamed_addr constant [47 x i8] c"llvm lowering: enum literal field missing name\00"
-@.str.len5.h1893742920 = private unnamed_addr constant [6 x i8] c", 0.0\00"
-@.str.len7.h770660688 = private unnamed_addr constant [8 x i8] c"icmp ne\00"
-@.str.len53.h1448111568 = private unnamed_addr constant [54 x i8] c"llvm lowering: unsupported array literal element type\00"
-@.str.len3.h2088092689 = private unnamed_addr constant [4 x i8] c", [\00"
-@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
-@.str.len57.h2014856169 = private unnamed_addr constant [58 x i8] c"llvm lowering: unable to compare `.for` range bounds in `\00"
-@.str.len30.h669837087 = private unnamed_addr constant [31 x i8] c" = call i1 @strings_equal(i8* \00"
-@.str.len4.h258714362 = private unnamed_addr constant [5 x i8] c"fadd\00"
-@.str.len55.h522772778 = private unnamed_addr constant [56 x i8] c"llvm lowering: let expression missing initializer for `\00"
-@.str.len55.h1292034827 = private unnamed_addr constant [56 x i8] c"llvm lowering: instructions after continue ignored in `\00"
-@.str.len48.h1208326627 = private unnamed_addr constant [49 x i8] c"llvm lowering: struct literal trailing content `\00"
-@.str.len34.h1529470002 = private unnamed_addr constant [35 x i8] c"llvm lowering: call target missing\00"
-@.str.len15.h1036821136 = private unnamed_addr constant [16 x i8] c" = icmp ne i64 \00"
-@.str.len12.h1775642273 = private unnamed_addr constant [13 x i8] c"; interface \00"
-@.str.len2.h193423034 = private unnamed_addr constant [3 x i8] c")*\00"
-@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
-@.str.len51.h1951972123 = private unnamed_addr constant [52 x i8] c"llvm lowering: enum literal references unknown enum\00"
-@.str.len16.h403825543 = private unnamed_addr constant [17 x i8] c" = icmp uge i64 \00"
-@.str.len19.h779801773 = private unnamed_addr constant [20 x i8] c"` produced no value\00"
-@.str.len35.h317788470 = private unnamed_addr constant [36 x i8] c"llvm lowering: struct literal for `\00"
 @.str.len20.h1455768642 = private unnamed_addr constant [21 x i8] c"`; lowering as `i8*`\00"
-@.str.len53.h409079501 = private unnamed_addr constant [54 x i8] c"llvm lowering: instructions after return ignored in `\00"
-@.str.len30.h2098798495 = private unnamed_addr constant [31 x i8] c"llvm lowering: void function `\00"
-@.str.len18.h871374945 = private unnamed_addr constant [19 x i8] c"  store i8 0, i8* \00"
-@.str.len26.h287370135 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
-@.str.len52.h1450163979 = private unnamed_addr constant [53 x i8] c"llvm lowering: instructions after break ignored in `\00"
-@.str.len8.h183758879 = private unnamed_addr constant [9 x i8] c" = type \00"
-@.str.len3.h2088031936 = private unnamed_addr constant [4 x i8] c"*, \00"
-@.str.len34.h858864034 = private unnamed_addr constant [35 x i8] c" = private unnamed_addr constant [\00"
-@.str.len4.h260733302 = private unnamed_addr constant [5 x i8] c"i8* \00"
-@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
-@.str.len48.h971335843 = private unnamed_addr constant [49 x i8] c"llvm lowering: malformed trait dispatch target `\00"
-@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
-@.enum.NativeInstruction.Expression.variant = private unnamed_addr constant [11 x i8] c"Expression\00"
-@.str.len4.h175715072 = private unnamed_addr constant [5 x i8] c" at \00"
-@.str.len51.h189411679 = private unnamed_addr constant [52 x i8] c"llvm lowering: borrow expression trailing content `\00"
-@.str.len38.h1274232498 = private unnamed_addr constant [39 x i8] c" = call double @llvm.round.f64(double \00"
-@.str.len18.h1203765633 = private unnamed_addr constant [19 x i8] c"` has no variant `\00"
-@.str.len4.h274743650 = private unnamed_addr constant [5 x i8] c"srem\00"
-@.str.len18.h1375510272 = private unnamed_addr constant [19 x i8] c"` returned a value\00"
-@.str.len65.h534894571 = private unnamed_addr constant [66 x i8] c"llvm lowering: failed to lower assignment value for array index `\00"
-@.str.len49.h756173294 = private unnamed_addr constant [50 x i8] c"llvm lowering: index expression produced no value\00"
-@.str.len7.h770651283 = private unnamed_addr constant [8 x i8] c"icmp eq\00"
-@.str.len12.h1027822751 = private unnamed_addr constant [13 x i8] c" undef, i8* \00"
-@.str.len7.h1755163029 = private unnamed_addr constant [8 x i8] c"runtime\00"
-@.str.len48.h887886391 = private unnamed_addr constant [49 x i8] c"llvm lowering: enum literal missing variant name\00"
-@.str.len23.h301159061 = private unnamed_addr constant [24 x i8] c"llvm lowering: method `\00"
-@.str.len26.h1591462212 = private unnamed_addr constant [27 x i8] c"llvm lowering: interface `\00"
-@.str.len16.h1310846896 = private unnamed_addr constant [17 x i8] c".variant.default\00"
-@.str.len4.h205307558 = private unnamed_addr constant [5 x i8] c";   \00"
-@.str.len8.h3286201 = private unnamed_addr constant [9 x i8] c"%vtable.\00"
-@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
-@.str.len7.h1794206627 = private unnamed_addr constant [8 x i8] c" to i8*\00"
-@.str.len26.h786724930 = private unnamed_addr constant [27 x i8] c" requires capabilities: ![\00"
-@.str.len8.h1809673500 = private unnamed_addr constant [9 x i8] c"icmp slt\00"
-@.str.len60.h1664343531 = private unnamed_addr constant [61 x i8] c"llvm lowering: array literal element could not be boxed to `\00"
-@.str.len42.h1364986286 = private unnamed_addr constant [43 x i8] c" suspends while mutable borrow parameter `\00"
-@.str.len12.h1213469728 = private unnamed_addr constant [13 x i8] c"; intrinsic \00"
-@.enum.NativeInstruction.Loop.variant = private unnamed_addr constant [5 x i8] c"Loop\00"
-@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len52.h1898023432 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to lower `.for` range end in `\00"
-@.str.len4.h258828212 = private unnamed_addr constant [5 x i8] c"fdiv\00"
-@.str.len3.h2089834231 = private unnamed_addr constant [4 x i8] c"\5C0A\00"
-@.str.len10.h1663630719 = private unnamed_addr constant [11 x i8] c", double* \00"
-@.str.len11.h1907450020 = private unnamed_addr constant [12 x i8] c" = icmp ne \00"
-@.str.len9.h1385528440 = private unnamed_addr constant [10 x i8] c" = or i1 \00"
-@.str.len8.h241557737 = private unnamed_addr constant [9 x i8] c"fcmp olt\00"
-@.str.len26.h1631903096 = private unnamed_addr constant [27 x i8] c"llvm lowering: parameter `\00"
-@.str.len6.h1203620195 = private unnamed_addr constant [7 x i8] c".const\00"
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
-@.str.len12.h438755048 = private unnamed_addr constant [13 x i8] c"` (expected \00"
-@.str.len52.h432720005 = private unnamed_addr constant [53 x i8] c"llvm lowering: borrow expression missing opening `(`\00"
-@.str.len40.h203794297 = private unnamed_addr constant [41 x i8] c"llvm lowering: failed to lower argument \00"
-@.str.len11.h1424822679 = private unnamed_addr constant [12 x i8] c"` expected \00"
-@.str.len47.h1239048531 = private unnamed_addr constant [48 x i8] c"` uses incompatible field types across variants\00"
-@.str.len14.h1830305299 = private unnamed_addr constant [15 x i8] c" = sitofp i64 \00"
-@.str.len39.h1924108502 = private unnamed_addr constant [40 x i8] c"llvm lowering: enum member access for `\00"
-@.str.len40.h731245554 = private unnamed_addr constant [41 x i8] c"llvm lowering: unsupported return type `\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len24.h1893561446 = private unnamed_addr constant [25 x i8] c"llvm lowering: call to `\00"
-@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
-@.str.len67.h845324059 = private unnamed_addr constant [68 x i8] c"llvm lowering: `.for` end expression must evaluate to `number` in `\00"
-@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
-@.str.len53.h1836297594 = private unnamed_addr constant [54 x i8] c"llvm lowering: enum literal references unknown enum `\00"
-@.str.len48.h839589728 = private unnamed_addr constant [49 x i8] c"llvm lowering: struct literal field missing name\00"
-@.str.len50.h1070755019 = private unnamed_addr constant [51 x i8] c"llvm lowering: computed heap allocation size for `\00"
-@.str.len6.h1526236955 = private unnamed_addr constant [7 x i8] c"Linear\00"
-@.str.len23.h721422858 = private unnamed_addr constant [24 x i8] c"` escapes lifetime of `\00"
-@.str.len11.h1295974565 = private unnamed_addr constant [12 x i8] c"len(string)\00"
-@.str.len8.h169883590 = private unnamed_addr constant [9 x i8] c".variant\00"
-@.str.len58.h821437208 = private unnamed_addr constant [59 x i8] c"llvm lowering: failed to lower assignment expression for `\00"
-@.str.len41.h1217234939 = private unnamed_addr constant [42 x i8] c"llvm lowering: unable to coerce argument \00"
-@.str.len57.h1542174776 = private unnamed_addr constant [58 x i8] c"llvm lowering: struct literal references unknown struct `\00"
-@.str.len53.h1204093150 = private unnamed_addr constant [54 x i8] c"llvm lowering: unable to convert right operand from `\00"
-@.str.len19.h512381535 = private unnamed_addr constant [20 x i8] c" = fcmp ogt double \00"
-@.str.len10.h1629914700 = private unnamed_addr constant [11 x i8] c"Expression\00"
-@.str.len20.h819247583 = private unnamed_addr constant [21 x i8] c"` is not addressable\00"
-@.str.len5.h1895800173 = private unnamed_addr constant [6 x i8] c", i64\00"
-@.str.len54.h280353426 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to coerce assignment value for `\00"
-@.str.len7.h1614723655 = private unnamed_addr constant [8 x i8] c"suspend\00"
-@.str.len11.h701810522 = private unnamed_addr constant [12 x i8] c"` variant `\00"
-@.str.len41.h637692462 = private unnamed_addr constant [42 x i8] c"llvm lowering: unterminated `.match` in `\00"
-@.str.len50.h440106603 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` stride must not be zero in `\00"
-@.str.len65.h1925587422 = private unnamed_addr constant [66 x i8] c"llvm lowering: `.for` iterable must use `start..end` range syntax\00"
-@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len11.h1586125529 = private unnamed_addr constant [12 x i8] c" = zext i1 \00"
-@.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
-@.str.len42.h514999820 = private unnamed_addr constant [43 x i8] c"define double @add(double %a, double %b) {\00"
-@.str.len60.h550929947 = private unnamed_addr constant [61 x i8] c"llvm lowering: ternary expression missing false branch value\00"
-@.str.len28.h1667882524 = private unnamed_addr constant [29 x i8] c"` missing from native module\00"
-@.str.len39.h33026892 = private unnamed_addr constant [40 x i8] c"llvm lowering: match without cases in `\00"
-@.str.len7.h513898090 = private unnamed_addr constant [8 x i8] c"variant\00"
-@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
-@.str.len54.h800459588 = private unnamed_addr constant [55 x i8] c"llvm lowering: array literal element produced no value\00"
-@.str.len5.h1783417286 = private unnamed_addr constant [6 x i8] c"` in \00"
-@.str.len5.h459182890 = private unnamed_addr constant [6 x i8] c"scope\00"
-@.str.len32.h2027311032 = private unnamed_addr constant [33 x i8] c" suspends while mutable borrow `\00"
-@.str.len49.h640106322 = private unnamed_addr constant [50 x i8] c"llvm lowering: unable to coerce initializer for `\00"
-@.str.len26.h645889856 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
-@.str.len47.h769984802 = private unnamed_addr constant [48 x i8] c"llvm lowering: unhandled return expression in `\00"
-@.str.len26.h244643851 = private unnamed_addr constant [27 x i8] c"` missing initializer in `\00"
+@.str.len51.h535923040 = private unnamed_addr constant [52 x i8] c"llvm lowering: unsupported return type in call to `\00"
 @.str.len3.h2087662534 = private unnamed_addr constant [4 x i8] c" ![\00"
-@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
-@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
-@.str.len16.h1727760345 = private unnamed_addr constant [17 x i8] c"` has no field `\00"
-@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
-@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
-@.str.len27.h1104677867 = private unnamed_addr constant [28 x i8] c" = alloca [2 x i8], align 1\00"
-@.str.len42.h78527754 = private unnamed_addr constant [43 x i8] c"llvm lowering: empty argument in call to `\00"
-@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
-@.str.len66.h2076742536 = private unnamed_addr constant [67 x i8] c"llvm lowering: `.for` iterable must resolve to an array value in `\00"
-@.str.len50.h965784474 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` iterable expression is empty\00"
-@.str.len9.h2096692279 = private unnamed_addr constant [10 x i8] c"` is zero\00"
-@.str.len2.h193415972 = private unnamed_addr constant [3 x i8] c" }\00"
-@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
-@.str.len8.h1607706290 = private unnamed_addr constant [9 x i8] c" x i8]* \00"
-@.str.len36.h828265436 = private unnamed_addr constant [37 x i8] c"llvm lowering: match pattern field `\00"
-@.str.len46.h964824710 = private unnamed_addr constant [47 x i8] c"  call void @sailfin_runtime_bounds_check(i64 \00"
-@.str.len3.h2089835914 = private unnamed_addr constant [4 x i8] c"\5C22\00"
-@.str.len6.h886311636 = private unnamed_addr constant [7 x i8] c"` vs `\00"
-@.str.len11.h1291126021 = private unnamed_addr constant [12 x i8] c" = bitcast \00"
-@.str.len4.h274283861 = private unnamed_addr constant [5 x i8] c"self\00"
-@.str.len8.h1230132454 = private unnamed_addr constant [9 x i8] c"@vtable.\00"
-@.str.len16.h418770507 = private unnamed_addr constant [17 x i8] c"trait_dispatch::\00"
-@.str.len41.h980447798 = private unnamed_addr constant [42 x i8] c"llvm lowering: call to unknown function `\00"
-@.str.len11.h1907139655 = private unnamed_addr constant [12 x i8] c" = icmp eq \00"
-@.str.len8.h1809667560 = private unnamed_addr constant [9 x i8] c"icmp sge\00"
-@.str.len2.h193491872 = private unnamed_addr constant [3 x i8] c"fs\00"
+@.str.len10.h289462685 = private unnamed_addr constant [11 x i8] c" to double\00"
+@.str.len4.h274245185 = private unnamed_addr constant [5 x i8] c"sdiv\00"
+@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
+@.str.len7.h1614723655 = private unnamed_addr constant [8 x i8] c"suspend\00"
+@.str.len26.h549134517 = private unnamed_addr constant [27 x i8] c"` not found in interface `\00"
+@.str.len2.h193515071 = private unnamed_addr constant [3 x i8] c"{}\00"
+@.str.len16.h2138981313 = private unnamed_addr constant [17 x i8] c"string_constants\00"
 @.str.len28.h1602830880 = private unnamed_addr constant [29 x i8] c"llvm lowering: array index `\00"
-@.str.len3.h2090737012 = private unnamed_addr constant [4 x i8] c"sub\00"
-@.str.len2.h193442306 = private unnamed_addr constant [3 x i8] c"; \00"
-@.str.len57.h1507377927 = private unnamed_addr constant [58 x i8] c"llvm lowering: `.for` loop missing iteration binding in `\00"
-@.str.len67.h1243369623 = private unnamed_addr constant [68 x i8] c"llvm lowering: cannot determine element type for array assignment `\00"
-@.str.len47.h859819331 = private unnamed_addr constant [48 x i8] c"llvm lowering: borrow expression missing target\00"
-@.str.len30.h747463311 = private unnamed_addr constant [31 x i8] c"llvm lowering: shared borrow `\00"
-@.str.len9.h1514414502 = private unnamed_addr constant [10 x i8] c" x i8] c\22\00"
-@.str.len3.h2090370613 = private unnamed_addr constant [4 x i8] c"int\00"
-@.str.len9.h1117174030 = private unnamed_addr constant [10 x i8] c"matchbody\00"
-@.str.len60.h80215049 = private unnamed_addr constant [61 x i8] c"llvm lowering: malformed ternary expression - `:` before `?`\00"
-@.str.len46.h440287758 = private unnamed_addr constant [47 x i8] c"llvm lowering: member access assignment base `\00"
-@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
-@.str.len18.h1107402921 = private unnamed_addr constant [19 x i8] c"  ; bounds check: \00"
-@.str.len6.h536277508 = private unnamed_addr constant [7 x i8] c"Return\00"
-@.str.len43.h765759141 = private unnamed_addr constant [44 x i8] c"llvm lowering: missing return in function `\00"
-@.str.len24.h1068290701 = private unnamed_addr constant [25 x i8] c" arguments but received \00"
-@.str.len2.h193491707 = private unnamed_addr constant [3 x i8] c"fn\00"
-@.str.len4.h273085895 = private unnamed_addr constant [5 x i8] c"read\00"
-@.str.len15.h491517152 = private unnamed_addr constant [16 x i8] c"  store double \00"
-@.str.len15.h1900227975 = private unnamed_addr constant [16 x i8] c"` missing value\00"
+@.str.len7.h1755163029 = private unnamed_addr constant [8 x i8] c"runtime\00"
 @.str.len16.h251499985 = private unnamed_addr constant [17 x i8] c" = alloca double\00"
-@.str.len3.h2089834330 = private unnamed_addr constant [4 x i8] c"\5C0D\00"
-@.str.len48.h37492210 = private unnamed_addr constant [49 x i8] c"llvm lowering: unsupported comparison operator `\00"
-@.str.len8.h241552292 = private unnamed_addr constant [9 x i8] c"fcmp ogt\00"
-@.str.len4.h265988816 = private unnamed_addr constant [5 x i8] c"let \00"
-@.str.len6.h877543008 = private unnamed_addr constant [7 x i8] c"` of `\00"
-@.str.len9.h719556312 = private unnamed_addr constant [10 x i8] c"bitcast (\00"
-@.str.len17.h1905584788 = private unnamed_addr constant [18 x i8] c" = fptosi double \00"
+@.str.len52.h2121219822 = private unnamed_addr constant [53 x i8] c"llvm lowering: `.for` range missing start expression\00"
 @.str.len24.h91596683 = private unnamed_addr constant [25 x i8] c"` due to argument errors\00"
-@.str.len47.h1674492337 = private unnamed_addr constant [48 x i8] c"llvm lowering: enum literal missing closing `}`\00"
-@.str.len54.h2016727512 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to coerce return expression to `\00"
+@.str.len5.h459182890 = private unnamed_addr constant [6 x i8] c"scope\00"
+@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len40.h900070345 = private unnamed_addr constant [41 x i8] c"` conflicts with active mutable borrow `\00"
+@.str.len47.h1472191274 = private unnamed_addr constant [48 x i8] c"llvm lowering: struct literal missing type name\00"
+@.str.len3.h2090370613 = private unnamed_addr constant [4 x i8] c"int\00"
+@.str.len50.h1070755019 = private unnamed_addr constant [51 x i8] c"llvm lowering: computed heap allocation size for `\00"
+@.str.len33.h1674155807 = private unnamed_addr constant [34 x i8] c"llvm lowering: enum literal for `\00"
 @.str.len4.h259379675 = private unnamed_addr constant [5 x i8] c"fsub\00"
-@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
-@.str.len8.h241557242 = private unnamed_addr constant [9 x i8] c"fcmp ole\00"
-@.str.len40.h975266936 = private unnamed_addr constant [41 x i8] c"[sfn-debug] lower_struct_literal locals=\00"
-@.str.len21.h860019855 = private unnamed_addr constant [22 x i8] c"llvm lowering: enum `\00"
-@.str.len2.h193444352 = private unnamed_addr constant [3 x i8] c"<=\00"
+@.str.len12.h603915651 = private unnamed_addr constant [13 x i8] c"  call void \00"
+@.str.len4.h259326677 = private unnamed_addr constant [5 x i8] c"frem\00"
+@.str.len51.h577773560 = private unnamed_addr constant [52 x i8] c"llvm lowering: unable to lower `.for` iterable in `\00"
 @.str.len25.h2067177893 = private unnamed_addr constant [26 x i8] c" (if true, out of bounds)\00"
+@.str.len4.h205307558 = private unnamed_addr constant [5 x i8] c";   \00"
+@.str.len8.h241557737 = private unnamed_addr constant [9 x i8] c"fcmp olt\00"
+@.str.len9.h1385528440 = private unnamed_addr constant [10 x i8] c" = or i1 \00"
+@.str.len3.h2090737012 = private unnamed_addr constant [4 x i8] c"sub\00"
+@.str.len4.h175715072 = private unnamed_addr constant [5 x i8] c" at \00"
+@.str.len15.h1900227975 = private unnamed_addr constant [16 x i8] c"` missing value\00"
+@.str.len40.h341281823 = private unnamed_addr constant [41 x i8] c"llvm lowering: unterminated `.loop` in `\00"
+@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
+@.str.len55.h55260472 = private unnamed_addr constant [56 x i8] c"llvm lowering: unable to increment `.for` iterator in `\00"
+@.str.len2.h193442306 = private unnamed_addr constant [3 x i8] c"; \00"
+@.str.len41.h980447798 = private unnamed_addr constant [42 x i8] c"llvm lowering: call to unknown function `\00"
+@.str.len32.h1899104257 = private unnamed_addr constant [33 x i8] c"` does not implement interface `\00"
+@.str.len12.h340562855 = private unnamed_addr constant [13 x i8] c" effects: ![\00"
+@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.str.len7.h794634624 = private unnamed_addr constant [8 x i8] c", i64 0\00"
+@.str.len53.h409079501 = private unnamed_addr constant [54 x i8] c"llvm lowering: instructions after return ignored in `\00"
+@.str.len79.h2027294639 = private unnamed_addr constant [80 x i8] c"llvm lowering: trait dispatch requires at least one argument (the trait object)\00"
+@.str.len48.h5787697 = private unnamed_addr constant [49 x i8] c"llvm lowering: unable to lower if condition in `\00"
+@.str.len54.h288837174 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to lower `.for` range start in `\00"
+@.str.len51.h1951972123 = private unnamed_addr constant [52 x i8] c"llvm lowering: enum literal references unknown enum\00"
+@.str.len11.h1907450020 = private unnamed_addr constant [12 x i8] c" = icmp ne \00"
+@.str.len31.h1428761244 = private unnamed_addr constant [32 x i8] c"llvm lowering: mutable borrow `\00"
+@.str.len2.h193446530 = private unnamed_addr constant [3 x i8] c">=\00"
+@.str.len28.h1667882524 = private unnamed_addr constant [29 x i8] c"` missing from native module\00"
+@.str.len7.h770660688 = private unnamed_addr constant [8 x i8] c"icmp ne\00"
+@.str.len2.h193477154 = private unnamed_addr constant [3 x i8] c"[ \00"
+@.str.len67.h845324059 = private unnamed_addr constant [68 x i8] c"llvm lowering: `.for` end expression must evaluate to `number` in `\00"
+@.str.len8.h1809673005 = private unnamed_addr constant [9 x i8] c"icmp sle\00"
+@.str.len32.h331553312 = private unnamed_addr constant [33 x i8] c"` implements unknown interface `\00"
+@.str.len16.h403825543 = private unnamed_addr constant [17 x i8] c" = icmp uge i64 \00"
+@.enum.NativeInstruction.Expression.variant = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.len13.h601865389 = private unnamed_addr constant [14 x i8] c"  call void @\00"
+@.str.len17.h1635915066 = private unnamed_addr constant [18 x i8] c"` missing field `\00"
+@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
+@.str.len10.h1616295671 = private unnamed_addr constant [11 x i8] c"  ret void\00"
+@.str.len4.h258714362 = private unnamed_addr constant [5 x i8] c"fadd\00"
+@.str.len8.h183758879 = private unnamed_addr constant [9 x i8] c" = type \00"
+@.str.len15.h202150329 = private unnamed_addr constant [16 x i8] c" = fadd double \00"
+@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len9.h1117872508 = private unnamed_addr constant [10 x i8] c"matchcase\00"
+@.str.len3.h2088029758 = private unnamed_addr constant [4 x i8] c"** \00"
+@.str.len10.h1189337400 = private unnamed_addr constant [11 x i8] c" = xor i1 \00"
+@.str.len40.h731245554 = private unnamed_addr constant [41 x i8] c"llvm lowering: unsupported return type `\00"
+@.str.len7.h770651283 = private unnamed_addr constant [8 x i8] c"icmp eq\00"
+@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.str.len39.h1924108502 = private unnamed_addr constant [40 x i8] c"llvm lowering: enum member access for `\00"
+@.str.len50.h965784474 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` iterable expression is empty\00"
+@.str.len16.h1310846896 = private unnamed_addr constant [17 x i8] c".variant.default\00"
+@.str.len3.h2089833967 = private unnamed_addr constant [4 x i8] c"\5C09\00"
+@.str.len60.h1664343531 = private unnamed_addr constant [61 x i8] c"llvm lowering: array literal element could not be boxed to `\00"
+@.str.len16.h519580441 = private unnamed_addr constant [17 x i8] c"` on any variant\00"
+@.str.len2.h193415972 = private unnamed_addr constant [3 x i8] c" }\00"
+@.str.len4.h274283861 = private unnamed_addr constant [5 x i8] c"self\00"
+@.str.len23.h301159061 = private unnamed_addr constant [24 x i8] c"llvm lowering: method `\00"
+@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
+@.str.len20.h93992129 = private unnamed_addr constant [21 x i8] c"llvm lowering: let `\00"
+@.str.len8.h169883590 = private unnamed_addr constant [9 x i8] c".variant\00"
+@.str.len48.h887886391 = private unnamed_addr constant [49 x i8] c"llvm lowering: enum literal missing variant name\00"
+@.str.len24.h442937996 = private unnamed_addr constant [25 x i8] c" = load double, double* \00"
+@.str.len54.h800459588 = private unnamed_addr constant [55 x i8] c"llvm lowering: array literal element produced no value\00"
+@.str.len41.h637692462 = private unnamed_addr constant [42 x i8] c"llvm lowering: unterminated `.match` in `\00"
+@.str.len49.h95349196 = private unnamed_addr constant [50 x i8] c"llvm lowering: unable to lower match subject in `\00"
+@.str.len21.h799966347 = private unnamed_addr constant [22 x i8] c"` remains active in `\00"
+@.str.len3.h2088092689 = private unnamed_addr constant [4 x i8] c", [\00"
+@.str.len26.h786724930 = private unnamed_addr constant [27 x i8] c" requires capabilities: ![\00"
+@.str.len47.h867637971 = private unnamed_addr constant [48 x i8] c" = call i64 @sailfin_runtime_string_length(i8* \00"
+@.str.len8.h241550015 = private unnamed_addr constant [9 x i8] c"fcmp oeq\00"
+@.str.len62.h41486523 = private unnamed_addr constant [63 x i8] c"llvm lowering: array literal element could not be coerced to `\00"
+@.str.len13.h752234821 = private unnamed_addr constant [14 x i8] c"` missing `:`\00"
+@.str.len34.h858864034 = private unnamed_addr constant [35 x i8] c" = private unnamed_addr constant [\00"
+@.str.len3.h2089835914 = private unnamed_addr constant [4 x i8] c"\5C22\00"
+@.str.len8.h2003785447 = private unnamed_addr constant [9 x i8] c"declare \00"
+@.str.len37.h749417010 = private unnamed_addr constant [38 x i8] c"llvm lowering: struct literal field `\00"
+@.str.len47.h769984802 = private unnamed_addr constant [48 x i8] c"llvm lowering: unhandled return expression in `\00"
+@.str.len18.h1203765633 = private unnamed_addr constant [19 x i8] c"` has no variant `\00"
+@.str.len19.h779801773 = private unnamed_addr constant [20 x i8] c"` produced no value\00"
+@.str.len7.h1425458391 = private unnamed_addr constant [8 x i8] c"@.enum.\00"
+@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
+@.str.len49.h1794354414 = private unnamed_addr constant [50 x i8] c"llvm lowering: struct literal missing closing `}`\00"
+@.str.len8.h241552292 = private unnamed_addr constant [9 x i8] c"fcmp ogt\00"
+@.str.len54.h280353426 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to coerce assignment value for `\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
+@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
+@.str.len6.h1526236955 = private unnamed_addr constant [7 x i8] c"Linear\00"
+@.str.len45.h313159578 = private unnamed_addr constant [46 x i8] c"llvm lowering: empty element in array literal\00"
+@.str.len39.h2032947624 = private unnamed_addr constant [40 x i8] c"` conflicts with active shared borrow `\00"
+@.str.len27.h1104677867 = private unnamed_addr constant [28 x i8] c" = alloca [2 x i8], align 1\00"
+@.str.len4.h257940116 = private unnamed_addr constant [5 x i8] c"else\00"
+@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
+@.str.len9.h2096692279 = private unnamed_addr constant [10 x i8] c"` is zero\00"
+@.str.len6.h1803965435 = private unnamed_addr constant [7 x i8] c"entry:\00"
+@.str.len12.h1775642273 = private unnamed_addr constant [13 x i8] c"; interface \00"
+@.str.len42.h1019849180 = private unnamed_addr constant [43 x i8] c"` missing type annotation; defaulting to `\00"
+@.str.len59.h1700212648 = private unnamed_addr constant [60 x i8] c"llvm lowering: ternary expression missing true branch value\00"
+@.str.len3.h2089834231 = private unnamed_addr constant [4 x i8] c"\5C0A\00"
+@.str.len12.h255876057 = private unnamed_addr constant [13 x i8] c"{ i8*, i8* }\00"
+@.str.len40.h1941426741 = private unnamed_addr constant [41 x i8] c"llvm lowering: unsupported instruction `\00"
+@.str.len55.h522772778 = private unnamed_addr constant [56 x i8] c"llvm lowering: let expression missing initializer for `\00"
+@.str.len4.h254486039 = private unnamed_addr constant [5 x i8] c"bool\00"
+@.str.len11.h1907139655 = private unnamed_addr constant [12 x i8] c" = icmp eq \00"
+@.str.len26.h1631903096 = private unnamed_addr constant [27 x i8] c"llvm lowering: parameter `\00"
+@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.str.len52.h382324263 = private unnamed_addr constant [53 x i8] c"llvm lowering: borrow expression missing closing `)`\00"
+@.str.len7.h513898090 = private unnamed_addr constant [8 x i8] c"variant\00"
+@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
+@.str.len19.h965756485 = private unnamed_addr constant [20 x i8] c" = fcmp olt double \00"
+@.str.len30.h669837087 = private unnamed_addr constant [31 x i8] c" = call i1 @strings_equal(i8* \00"
+@.str.len4.h173787542 = private unnamed_addr constant [5 x i8] c" -> \00"
+@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
+@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.str.len4.h230767751 = private unnamed_addr constant [5 x i8] c"Noop\00"
+@.str.len6.h113799849 = private unnamed_addr constant [7 x i8] c"borrow\00"
+@.str.len60.h550929947 = private unnamed_addr constant [61 x i8] c"llvm lowering: ternary expression missing false branch value\00"
+@.str.len47.h1674492337 = private unnamed_addr constant [48 x i8] c"llvm lowering: enum literal missing closing `}`\00"
+@.str.len3.h2090302138 = private unnamed_addr constant [4 x i8] c"i16\00"
+@.str.len34.h1529470002 = private unnamed_addr constant [35 x i8] c"llvm lowering: call target missing\00"
+@.str.len9.h1117174030 = private unnamed_addr constant [10 x i8] c"matchbody\00"
+@.str.len6.h78255107 = private unnamed_addr constant [7 x i8] c"Affine\00"
+@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
+@.str.len40.h924126065 = private unnamed_addr constant [41 x i8] c"llvm lowering: `break` outside loop in `\00"
+@.str.len17.h1795612323 = private unnamed_addr constant [18 x i8] c"` is incompatible\00"
+@.str.len70.h134995567 = private unnamed_addr constant [71 x i8] c"llvm lowering: `.for` stride expression must evaluate to `number` in `\00"
+@.str.len11.h701810522 = private unnamed_addr constant [12 x i8] c"` variant `\00"
+@.str.len46.h1031183328 = private unnamed_addr constant [47 x i8] c"llvm lowering: enum literal field missing name\00"
+@.str.len6.h1894573333 = private unnamed_addr constant [7 x i8] c"length\00"
+@.str.len39.h176231850 = private unnamed_addr constant [40 x i8] c"llvm lowering: unable to emit call to `\00"
+@.str.len24.h1893561446 = private unnamed_addr constant [25 x i8] c"llvm lowering: call to `\00"
+@.str.len18.h871374945 = private unnamed_addr constant [19 x i8] c"  store i8 0, i8* \00"
+@.str.len5.h1895800173 = private unnamed_addr constant [6 x i8] c", i64\00"
+@.str.len30.h766090624 = private unnamed_addr constant [31 x i8] c"` not found for trait dispatch\00"
+@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
+@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
+@.str.len5.h335299934 = private unnamed_addr constant [6 x i8] c"; fn \00"
+@.str.len56.h2066709411 = private unnamed_addr constant [57 x i8] c"llvm lowering: unable to lower guard in match case for `\00"
+@.str.len46.h440287758 = private unnamed_addr constant [47 x i8] c"llvm lowering: member access assignment base `\00"
+@.str.len58.h1744114411 = private unnamed_addr constant [59 x i8] c"llvm lowering: expected boolean operand for `and`, found `\00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
+@.str.len40.h400700341 = private unnamed_addr constant [41 x i8] c"llvm lowering: malformed || expression `\00"
+@.str.len55.h1124826835 = private unnamed_addr constant [56 x i8] c"llvm lowering: unable to coerce index expression to i64\00"
+@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.str.len23.h96319572 = private unnamed_addr constant [24 x i8] c"` lacks struct metadata\00"
+@.str.len19.h512381535 = private unnamed_addr constant [20 x i8] c" = fcmp ogt double \00"
+@.str.len39.h1908765533 = private unnamed_addr constant [40 x i8] c"llvm lowering: struct literal context `\00"
+@.str.len4.h219990644 = private unnamed_addr constant [5 x i8] c"Else\00"
+@.str.len50.h440106603 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` stride must not be zero in `\00"
+@.str.len35.h364700043 = private unnamed_addr constant [36 x i8] c"llvm lowering: enum literal field `\00"
+@.str.len50.h993566140 = private unnamed_addr constant [51 x i8] c"llvm lowering: `.for` range missing end expression\00"
+@.str.len6.h1203620195 = private unnamed_addr constant [7 x i8] c".const\00"
+@.enum.NativeInstruction.Loop.variant = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.str.len11.h1291126021 = private unnamed_addr constant [12 x i8] c" = bitcast \00"
+@.str.len33.h1240255260 = private unnamed_addr constant [34 x i8] c"` compatible with expected type `\00"
+@.str.len34.h1024520411 = private unnamed_addr constant [35 x i8] c" = getelementptr inbounds i8, i8* \00"
+@.str.len33.h1082729604 = private unnamed_addr constant [34 x i8] c"` is not a simple identifier in `\00"
+@.str.len24.h1068290701 = private unnamed_addr constant [25 x i8] c" arguments but received \00"
+@.str.len23.h721422858 = private unnamed_addr constant [24 x i8] c"` escapes lifetime of `\00"
+@.str.len12.h438755048 = private unnamed_addr constant [13 x i8] c"` (expected \00"
+@.str.len44.h1570405729 = private unnamed_addr constant [45 x i8] c"llvm lowering: array index assignment base `\00"
+@.str.len3.h2089834330 = private unnamed_addr constant [4 x i8] c"\5C0D\00"
+@.str.len26.h487122250 = private unnamed_addr constant [27 x i8] c"` provides unknown field `\00"
+@.str.len38.h1274232498 = private unnamed_addr constant [39 x i8] c" = call double @llvm.round.f64(double \00"
+@.str.len8.h1230132454 = private unnamed_addr constant [9 x i8] c"@vtable.\00"
+@.str.len44.h1827416098 = private unnamed_addr constant [45 x i8] c"llvm lowering: malformed binary expression `\00"
+@.str.len12.h937346004 = private unnamed_addr constant [13 x i8] c"` for type `\00"
+@.str.len6.h536277508 = private unnamed_addr constant [7 x i8] c"Return\00"
+@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
+@.str.len24.h1530531128 = private unnamed_addr constant [25 x i8] c"` not found in variant `\00"
+@.str.len19.h129761630 = private unnamed_addr constant [20 x i8] c" = fcmp one double \00"
+@.str.len53.h1441489102 = private unnamed_addr constant [54 x i8] c"llvm lowering: `.for` range missing stride expression\00"
+@.str.len36.h828265436 = private unnamed_addr constant [37 x i8] c"llvm lowering: match pattern field `\00"
+@.str.len53.h1448111568 = private unnamed_addr constant [54 x i8] c"llvm lowering: unsupported array literal element type\00"
+@.str.len20.h819247583 = private unnamed_addr constant [21 x i8] c"` is not addressable\00"
+@.str.len7.h332613328 = private unnamed_addr constant [8 x i8] c"%trait.\00"
+@.str.len2.h193444352 = private unnamed_addr constant [3 x i8] c"<=\00"
+@.str.len8.h3286201 = private unnamed_addr constant [9 x i8] c"%vtable.\00"
+@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
+@.str.len18.h1107402921 = private unnamed_addr constant [19 x i8] c"  ; bounds check: \00"
+@.str.len48.h839589728 = private unnamed_addr constant [49 x i8] c"llvm lowering: struct literal field missing name\00"
+@.str.len52.h1115033155 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to allocate heap storage for `\00"
+@.str.len9.h1514414502 = private unnamed_addr constant [10 x i8] c" x i8] c\22\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
+@.str.len12.h35447896 = private unnamed_addr constant [13 x i8] c"` but base `\00"
+@.str.len68.h1900616918 = private unnamed_addr constant [69 x i8] c"llvm lowering: unable to compare descending `.for` range bounds in `\00"
+@.str.len39.h33026892 = private unnamed_addr constant [40 x i8] c"llvm lowering: match without cases in `\00"
+@.str.len16.h1361993478 = private unnamed_addr constant [17 x i8] c"  ret double %t0\00"
+@.str.len35.h1273062999 = private unnamed_addr constant [36 x i8] c"llvm lowering: member access base `\00"
+@.str.len40.h975266936 = private unnamed_addr constant [41 x i8] c"[sfn-debug] lower_struct_literal locals=\00"
+@.str.len2.h193491872 = private unnamed_addr constant [3 x i8] c"fs\00"
+@.str.len49.h640106322 = private unnamed_addr constant [50 x i8] c"llvm lowering: unable to coerce initializer for `\00"
+@.str.len14.h1387946067 = private unnamed_addr constant [15 x i8] c" for call to `\00"
+@.str.len21.h860019855 = private unnamed_addr constant [22 x i8] c"llvm lowering: enum `\00"
+@.str.len12.h1213469728 = private unnamed_addr constant [13 x i8] c"; intrinsic \00"
+@.str.len9.h719556312 = private unnamed_addr constant [10 x i8] c"bitcast (\00"
+@.str.len68.h1804274948 = private unnamed_addr constant [69 x i8] c"llvm lowering: `.for` stride expression did not produce a value in `\00"
+@.str.len46.h1298670716 = private unnamed_addr constant [47 x i8] c"layout manifest: missing artifact for import `\00"
+@.str.len57.h1507377927 = private unnamed_addr constant [58 x i8] c"llvm lowering: `.for` loop missing iteration binding in `\00"
+@.str.len43.h1628793500 = private unnamed_addr constant [44 x i8] c"llvm lowering: `continue` outside loop in `\00"
+@.str.len43.h396338520 = private unnamed_addr constant [44 x i8] c"llvm lowering: unsupported local type for `\00"
+@.str.len65.h1925587422 = private unnamed_addr constant [66 x i8] c"llvm lowering: `.for` iterable must use `start..end` range syntax\00"
+@.str.len57.h2014856169 = private unnamed_addr constant [58 x i8] c"llvm lowering: unable to compare `.for` range bounds in `\00"
+@.str.len18.h1375510272 = private unnamed_addr constant [19 x i8] c"` returned a value\00"
+@.str.len3.h2090521720 = private unnamed_addr constant [4 x i8] c"mul\00"
+@.str.len48.h971335843 = private unnamed_addr constant [49 x i8] c"llvm lowering: malformed trait dispatch target `\00"
+@.str.len10.h759000579 = private unnamed_addr constant [11 x i8] c" = global \00"
+@.str.len6.h886311636 = private unnamed_addr constant [7 x i8] c"` vs `\00"
+@.str.len54.h1022899003 = private unnamed_addr constant [55 x i8] c"llvm lowering: match pattern references unknown enum `\00"
+@.str.len52.h39804487 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to convert left operand from `\00"
+@.str.len35.h573475662 = private unnamed_addr constant [36 x i8] c"llvm lowering: `.for` loop target `\00"
+@.str.len33.h1306641126 = private unnamed_addr constant [34 x i8] c"llvm lowering: method call base `\00"
+@.str.len3.h2088031936 = private unnamed_addr constant [4 x i8] c"*, \00"
+@.str.len41.h17849796 = private unnamed_addr constant [42 x i8] c"llvm lowering: malformed let expression `\00"
+@.str.len3.h2088250264 = private unnamed_addr constant [4 x i8] c"0.0\00"
+@.str.len47.h982576353 = private unnamed_addr constant [48 x i8] c"llvm lowering: condition produced no value in `\00"
+@.str.len53.h1204093150 = private unnamed_addr constant [54 x i8] c"llvm lowering: unable to convert right operand from `\00"
+@.str.len17.h1905584788 = private unnamed_addr constant [18 x i8] c" = fptosi double \00"
+@.str.len4.h260733302 = private unnamed_addr constant [5 x i8] c"i8* \00"
+@.str.len12.h1804972052 = private unnamed_addr constant [13 x i8] c" = bitcast [\00"
+@.str.len69.h1474512693 = private unnamed_addr constant [70 x i8] c"llvm lowering: `.for` start expression must evaluate to `number` in `\00"
+@.str.len11.h539202395 = private unnamed_addr constant [12 x i8] c"  store i8 \00"
+@.str.len48.h1606060438 = private unnamed_addr constant [49 x i8] c"llvm lowering: malformed comparison expression `\00"
+@.str.len47.h1642247268 = private unnamed_addr constant [48 x i8] c" = call i8* @sailfin_runtime_string_concat(i8* \00"
+@.str.len15.h1772400708 = private unnamed_addr constant [16 x i8] c" = insertvalue \00"
+@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
+@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.str.len37.h126290176 = private unnamed_addr constant [38 x i8] c" = getelementptr [2 x i8], [2 x i8]* \00"
+@.str.len16.h418770507 = private unnamed_addr constant [17 x i8] c"trait_dispatch::\00"
+@.str.len52.h1450163979 = private unnamed_addr constant [53 x i8] c"llvm lowering: instructions after break ignored in `\00"
+@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
+@.str.len5.h1925437637 = private unnamed_addr constant [6 x i8] c"await\00"
+@.str.len26.h1591462212 = private unnamed_addr constant [27 x i8] c"llvm lowering: interface `\00"
+@.str.len48.h1208326627 = private unnamed_addr constant [49 x i8] c"llvm lowering: struct literal trailing content `\00"
+@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
+@.str.len53.h1836297594 = private unnamed_addr constant [54 x i8] c"llvm lowering: enum literal references unknown enum `\00"
+@.str.len60.h484372876 = private unnamed_addr constant [61 x i8] c"llvm lowering: member access assignment on non-struct type `\00"
+@.str.len15.h1036821136 = private unnamed_addr constant [16 x i8] c" = icmp ne i64 \00"
+@.str.len58.h1022810589 = private unnamed_addr constant [59 x i8] c"native lowering: missing native text artifact for import `\00"
+@.str.len54.h445851502 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to lower match case pattern in `\00"
+@.str.len29.h538291009 = private unnamed_addr constant [30 x i8] c"` shadows existing local in `\00"
+@.str.len69.h1402407334 = private unnamed_addr constant [70 x i8] c"llvm lowering: ternary expression branches have incompatible types: `\00"
+@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
+@.str.len26.h645889856 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
+@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
+@.str.len9.h1747065903 = private unnamed_addr constant [10 x i8] c"parameter\00"
+@.str.len8.h241775042 = private unnamed_addr constant [9 x i8] c"fcmp une\00"
+@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
+@.str.len11.h1424822679 = private unnamed_addr constant [12 x i8] c"` expected \00"
+@.str.len28.h379765914 = private unnamed_addr constant [29 x i8] c";   ; no signatures recorded\00"
+@.str.len2.h193423034 = private unnamed_addr constant [3 x i8] c")*\00"
+@.str.len43.h372676400 = private unnamed_addr constant [44 x i8] c"llvm lowering: empty expression encountered\00"
+@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
+@.str.len10.h1663630719 = private unnamed_addr constant [11 x i8] c", double* \00"
+@.str.len15.h491517152 = private unnamed_addr constant [16 x i8] c"  store double \00"
+@.str.len51.h189411679 = private unnamed_addr constant [52 x i8] c"llvm lowering: borrow expression trailing content `\00"
+@.str.len7.h1064168743 = private unnamed_addr constant [8 x i8] c".concat\00"
+@.str.len4.h274743650 = private unnamed_addr constant [5 x i8] c"srem\00"
+@.str.len35.h317788470 = private unnamed_addr constant [36 x i8] c"llvm lowering: struct literal for `\00"
+@.str.len65.h1008432364 = private unnamed_addr constant [66 x i8] c"llvm lowering: internal error loading `.for` iteration value in `\00"
+@.str.len4.h245035433 = private unnamed_addr constant [5 x i8] c"\5C00\22\00"
+@.str.len40.h203794297 = private unnamed_addr constant [41 x i8] c"llvm lowering: failed to lower argument \00"
+@.str.len5.h1893742920 = private unnamed_addr constant [6 x i8] c", 0.0\00"
+@.str.len49.h893069065 = private unnamed_addr constant [50 x i8] c"` missing layout metadata; skipping type emission\00"
+@.str.len26.h244643851 = private unnamed_addr constant [27 x i8] c"` missing initializer in `\00"
+@.str.len23.h1424536798 = private unnamed_addr constant [24 x i8] c"layout manifest: enum `\00"
+@.str.len40.h1039467311 = private unnamed_addr constant [41 x i8] c"llvm lowering: missing return value in `\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.str.len8.h1809673500 = private unnamed_addr constant [9 x i8] c"icmp slt\00"
+@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
+@.str.len50.h1873110523 = private unnamed_addr constant [51 x i8] c"llvm lowering: duplicate `.else` in `.if` within `\00"
+@.str.len13.h142498599 = private unnamed_addr constant [14 x i8] c", i32 0, i32 \00"
+@.str.len11.h1586125529 = private unnamed_addr constant [12 x i8] c" = zext i1 \00"
+@.str.len42.h514999820 = private unnamed_addr constant [43 x i8] c"define double @add(double %a, double %b) {\00"
+@.str.len21.h1816480386 = private unnamed_addr constant [22 x i8] c"` when assigning to `\00"
+@.str.len26.h1205961643 = private unnamed_addr constant [27 x i8] c"  %t0 = fadd double %a, %b\00"
+@.str.len10.h634268966 = private unnamed_addr constant [11 x i8] c"` repeated\00"
+@.str.len55.h463798869 = private unnamed_addr constant [56 x i8] c"llvm lowering: let expression missing binding name in `\00"
+@.str.len7.h973697423 = private unnamed_addr constant [8 x i8] c"Linear<\00"
+@.str.len9.h769510343 = private unnamed_addr constant [10 x i8] c"; struct \00"
+@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
+@.str.len4.h265988816 = private unnamed_addr constant [5 x i8] c"let \00"
+@.str.len57.h1542174776 = private unnamed_addr constant [58 x i8] c"llvm lowering: struct literal references unknown struct `\00"
+@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
+@.str.len46.h964824710 = private unnamed_addr constant [47 x i8] c"  call void @sailfin_runtime_bounds_check(i64 \00"
+@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.enum.NativeInstruction.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len11.h790843313 = private unnamed_addr constant [12 x i8] c" = sext i8 \00"
+@.str.len23.h675789051 = private unnamed_addr constant [24 x i8] c"llvm lowering: struct `\00"
+@.str.len6.h877543008 = private unnamed_addr constant [7 x i8] c"` of `\00"
+@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
+@.str.len10.h1629914700 = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.len65.h534894571 = private unnamed_addr constant [66 x i8] c"llvm lowering: failed to lower assignment value for array index `\00"
+@.str.len4.h259164383 = private unnamed_addr constant [5 x i8] c"fmul\00"
+@.str.len55.h1292034827 = private unnamed_addr constant [56 x i8] c"llvm lowering: instructions after continue ignored in `\00"
+@.str.len11.h1295974565 = private unnamed_addr constant [12 x i8] c"len(string)\00"
+@.str.len3.h2090521984 = private unnamed_addr constant [4 x i8] c"mut\00"
+@.str.len43.h765759141 = private unnamed_addr constant [44 x i8] c"llvm lowering: missing return in function `\00"
+@.str.len6.h1736497781 = private unnamed_addr constant [7 x i8] c"Borrow\00"
+@.str.len42.h1364986286 = private unnamed_addr constant [43 x i8] c" suspends while mutable borrow parameter `\00"
+@.str.len52.h432720005 = private unnamed_addr constant [53 x i8] c"llvm lowering: borrow expression missing opening `(`\00"
+@.str.len4.h273085895 = private unnamed_addr constant [5 x i8] c"read\00"
+@.str.len14.h1830305299 = private unnamed_addr constant [15 x i8] c" = sitofp i64 \00"
+@.str.len25.h1696931368 = private unnamed_addr constant [26 x i8] c" = getelementptr i8, i8* \00"
+@.str.len13.h1278011845 = private unnamed_addr constant [14 x i8] c" = uitofp i1 \00"
+@.str.len38.h1035741733 = private unnamed_addr constant [39 x i8] c"llvm lowering: unterminated `.if` in `\00"
+@.str.len30.h2098798495 = private unnamed_addr constant [31 x i8] c"llvm lowering: void function `\00"
+@.str.len51.h1154611981 = private unnamed_addr constant [52 x i8] c"llvm lowering: ternary expression missing condition\00"
+@.str.len3.h2088178324 = private unnamed_addr constant [4 x i8] c"...\00"
+@.str.len16.h2115533553 = private unnamed_addr constant [17 x i8] c" = load i8, i8* \00"
+@.str.len32.h2027311032 = private unnamed_addr constant [33 x i8] c" suspends while mutable borrow `\00"
+@.str.len5.h1783417286 = private unnamed_addr constant [6 x i8] c"` in \00"
+@.str.len25.h9921935 = private unnamed_addr constant [26 x i8] c"` uses unsupported type `\00"
+@.str.len5.h199018843 = private unnamed_addr constant [6 x i8] c"local\00"
+@.str.len9.h1449250559 = private unnamed_addr constant [10 x i8] c"` field `\00"
+@.str.len48.h37492210 = private unnamed_addr constant [49 x i8] c"llvm lowering: unsupported comparison operator `\00"
+@.str.len6.h299655256 = private unnamed_addr constant [7 x i8] c", true\00"
+@.str.len3.h2089839742 = private unnamed_addr constant [4 x i8] c"\5C5C\00"
+@.str.len47.h859819331 = private unnamed_addr constant [48 x i8] c"llvm lowering: borrow expression missing target\00"
+@.str.len12.h1027822751 = private unnamed_addr constant [13 x i8] c" undef, i8* \00"
+@.str.len66.h2076742536 = private unnamed_addr constant [67 x i8] c"llvm lowering: `.for` iterable must resolve to an array value in `\00"
+@.str.len36.h1435214388 = private unnamed_addr constant [37 x i8] c"llvm lowering: method call expects `\00"
+@.str.len44.h288551526 = private unnamed_addr constant [45 x i8] c"llvm lowering: assignment to unknown local `\00"
+@.str.len8.h1607706290 = private unnamed_addr constant [9 x i8] c" x i8]* \00"
+@.str.len8.h241551797 = private unnamed_addr constant [9 x i8] c"fcmp oge\00"
+@.str.len58.h583386627 = private unnamed_addr constant [59 x i8] c"llvm lowering: comparison operands have mismatched types `\00"
+@.str.len54.h2016727512 = private unnamed_addr constant [55 x i8] c"llvm lowering: unable to coerce return expression to `\00"
+@.str.len3.h2088286201 = private unnamed_addr constant [4 x i8] c"1.0\00"
+@.str.len15.h1007423837 = private unnamed_addr constant [16 x i8] c"llvm lowering: \00"
+@.str.len26.h287370135 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
+@.str.len42.h78527754 = private unnamed_addr constant [43 x i8] c"llvm lowering: empty argument in call to `\00"
+@.str.len40.h1596119513 = private unnamed_addr constant [41 x i8] c"llvm lowering: malformed && expression `\00"
+@.str.len49.h756173294 = private unnamed_addr constant [50 x i8] c"llvm lowering: index expression produced no value\00"
+@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len55.h1287145578 = private unnamed_addr constant [56 x i8] c"llvm lowering: struct literal references unknown struct\00"
+@.str.len60.h80215049 = private unnamed_addr constant [61 x i8] c"llvm lowering: malformed ternary expression - `:` before `?`\00"
+@.str.len25.h1254414760 = private unnamed_addr constant [26 x i8] c"layout manifest: struct `\00"
+@.str.len7.h1794206627 = private unnamed_addr constant [8 x i8] c" to i8*\00"
+@.str.len30.h747463311 = private unnamed_addr constant [31 x i8] c"llvm lowering: shared borrow `\00"
+@.str.len5.h700747015 = private unnamed_addr constant [6 x i8] c"yield\00"
+@.str.len47.h1239048531 = private unnamed_addr constant [48 x i8] c"` uses incompatible field types across variants\00"
+@.str.len7.h505600716 = private unnamed_addr constant [8 x i8] c"` and `\00"
+@.str.len4.h258828212 = private unnamed_addr constant [5 x i8] c"fdiv\00"
+@.str.len8.h241557242 = private unnamed_addr constant [9 x i8] c"fcmp ole\00"
+@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len52.h1898023432 = private unnamed_addr constant [53 x i8] c"llvm lowering: unable to lower `.for` range end in `\00"
+@.str.len49.h181712441 = private unnamed_addr constant [50 x i8] c"  call void @sailfin_runtime_mark_persistent(i8* \00"
+@.str.len23.h1217803504 = private unnamed_addr constant [24 x i8] c"llvm lowering: borrow `\00"
+@.str.len60.h1498420593 = private unnamed_addr constant [61 x i8] c"llvm lowering: failed to lower assignment value for member `\00"
+@.str.len7.h434936673 = private unnamed_addr constant [8 x i8] c"Affine<\00"
+@.str.len8.h1809667560 = private unnamed_addr constant [9 x i8] c"icmp sge\00"
+@.str.len41.h1217234939 = private unnamed_addr constant [42 x i8] c"llvm lowering: unable to coerce argument \00"
+@.str.len2.h193491707 = private unnamed_addr constant [3 x i8] c"fn\00"
+@.str.len16.h1727760345 = private unnamed_addr constant [17 x i8] c"` has no field `\00"
+@.str.len76.h547986414 = private unnamed_addr constant [77 x i8] c"llvm lowering: unable to determine element type for array indexing on type `\00"
+@.str.len67.h1243369623 = private unnamed_addr constant [68 x i8] c"llvm lowering: cannot determine element type for array assignment `\00"
+@.str.len58.h821437208 = private unnamed_addr constant [59 x i8] c"llvm lowering: failed to lower assignment expression for `\00"
+@.str.len8.h1809668055 = private unnamed_addr constant [9 x i8] c"icmp sgt\00"

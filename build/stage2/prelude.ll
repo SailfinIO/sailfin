@@ -68,37 +68,33 @@ declare noalias i8* @malloc(i64)
 @.str.len26.h287370135 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
 @.str.len26.h645889856 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
 
-; NOTE: Returns string via output parameter %out_result
-define void @capability_grant({ i8**, i64 }* %effects, i8** %out_result) {
+define i8* @capability_grant({ i8**, i64 }* %effects) {
 block.entry:
   %t0 = bitcast { i8**, i64 }* %effects to i8*
   %t1 = call i8* @sailfin_runtime_create_capability_grant(i8* %t0)
-  store i8* %t1, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t1)
+  ret i8* %t1
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @fs_bridge(i8* %grant, i8** %out_result) {
+define i8* @fs_bridge(i8* %grant) {
 block.entry:
   %t0 = call i8* @sailfin_runtime_create_filesystem_bridge(i8* %grant)
-  store i8* %t0, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t0)
+  ret i8* %t0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @http_bridge(i8* %grant, i8** %out_result) {
+define i8* @http_bridge(i8* %grant) {
 block.entry:
   %t0 = call i8* @sailfin_runtime_create_http_bridge(i8* %grant)
-  store i8* %t0, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t0)
+  ret i8* %t0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @model_bridge(i8* %grant, i8** %out_result) {
+define i8* @model_bridge(i8* %grant) {
 block.entry:
   %t0 = call i8* @sailfin_runtime_create_model_bridge(i8* %grant)
-  store i8* %t0, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t0)
+  ret i8* %t0
 }
 
 ; fn sleep effects: ![clock]
@@ -109,12 +105,11 @@ block.entry:
 }
 
 ; fn channel effects: ![io]
-; NOTE: Returns string via output parameter %out_result
-define void @channel(double %capacity, i8** %out_result) {
+define i8* @channel(double %capacity) {
 block.entry:
   %t0 = call i8* @sailfin_runtime_channel(double %capacity)
-  store i8* %t0, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t0)
+  ret i8* %t0
 }
 
 ; fn parallel effects: ![io]
@@ -133,12 +128,11 @@ block.entry:
   ret void
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @logExecution(i8* %callable, i8** %out_result) {
+define i8* @logExecution(i8* %callable) {
 block.entry:
   %t0 = call i8* @sailfin_runtime_log_execution(i8* %callable)
-  store i8* %t0, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t0)
+  ret i8* %t0
 }
 
 define { i8**, i64 }* @array_map({ i8**, i64 }* %items, i8* %mapper) {
@@ -157,33 +151,31 @@ block.entry:
   ret { i8**, i64 }* %t2
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @array_reduce({ i8**, i64 }* %items, i8* %initial, i8* %reducer, i8** %out_result) {
+define i8* @array_reduce({ i8**, i64 }* %items, i8* %initial, i8* %reducer) {
 block.entry:
   %t0 = bitcast { i8**, i64 }* %items to i8*
   %t1 = call i8* @sailfin_runtime_array_reduce(i8* %t0, i8* %initial, i8* %reducer)
-  store i8* %t1, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t1)
+  ret i8* %t1
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @char_at(i8* %value, double %index, i8** %out_result) {
+define i8* @char_at(i8* %value, double %index) {
 block.entry:
   %t0 = call i64 @sailfin_runtime_string_length(i8* %value)
   %t1 = icmp eq i64 %t0, 0
   br i1 %t1, label %then0, label %merge1
 then0:
   %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s2)
+  ret i8* %s2
 merge1:
   %t3 = sitofp i64 0 to double
   %t4 = fcmp olt double %index, %t3
   br i1 %t4, label %then2, label %merge3
 then2:
   %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge3:
   %t6 = call i64 @sailfin_runtime_string_length(i8* %value)
   %t7 = sitofp i64 %t6 to double
@@ -191,8 +183,8 @@ merge3:
   br i1 %t8, label %then4, label %merge5
 then4:
   %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s9, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s9)
+  ret i8* %s9
 merge5:
   %t10 = call double @llvm.round.f64(double %index)
   %t11 = fptosi double %t10 to i64
@@ -204,8 +196,8 @@ merge5:
   %t16 = getelementptr [2 x i8], [2 x i8]* %t14, i32 0, i32 1
   store i8 0, i8* %t16
   %t17 = getelementptr [2 x i8], [2 x i8]* %t14, i32 0, i32 0
-  store i8* %t17, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t17)
+  ret i8* %t17
 }
 
 define %EnumType @enum_type(i8* %name) {
@@ -560,8 +552,7 @@ block.entry:
   ret %EnumInstance %t7
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @enum_get_field(%EnumInstance %instance, i8* %name, i8** %out_result) {
+define i8* @enum_get_field(%EnumInstance %instance, i8* %name) {
 block.entry:
   %l0 = alloca i64
   %l1 = alloca %EnumField*
@@ -605,8 +596,8 @@ then6:
   %t21 = load %EnumField*, %EnumField** %l1
   %t22 = getelementptr %EnumField, %EnumField* %t21, i32 0, i32 1
   %t23 = load i8*, i8** %t22
-  store i8* %t23, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t23)
+  ret i8* %t23
 merge7:
   %t24 = load i64, i64* %l0
   %t25 = add i64 %t24, 1
@@ -617,8 +608,8 @@ loop.latch2:
   br label %loop.header0
 afterloop3:
   %t28 = load i64, i64* %l0
-  store i8* null, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* null)
+  ret i8* null
 }
 
 define %StructField @struct_field(i8* %name, i8* %value) {
@@ -628,8 +619,7 @@ block.entry:
   ret %StructField %t1
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @struct_repr(i8* %name, { %StructField*, i64 }* %fields, i8** %out_result) {
+define i8* @struct_repr(i8* %name, { %StructField*, i64 }* %fields) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i64
@@ -728,20 +718,18 @@ afterloop3:
   %t56 = call i8* @sailfin_runtime_string_concat(i8* %t51, i8* %t55)
   store i8* %t56, i8** %l0
   %t57 = load i8*, i8** %l0
-  store i8* %t57, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t57)
+  ret i8* %t57
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @to_debug_string(i8* %value, i8** %out_result) {
+define i8* @to_debug_string(i8* %value) {
 block.entry:
   %t0 = call i8* @sailfin_runtime_to_debug_string(i8* %value)
-  store i8* %t0, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t0)
+  ret i8* %t0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_interpolated({ i8**, i64 }* %parts, { i8**, i64 }* %values, i8** %out_result) {
+define i8* @format_interpolated({ i8**, i64 }* %parts, { i8**, i64 }* %values) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i64
@@ -818,8 +806,8 @@ afterloop3:
   %t42 = load i8*, i8** %l0
   %t43 = load i64, i64* %l1
   %t44 = load i8*, i8** %l0
-  store i8* %t44, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t44)
+  ret i8* %t44
 }
 
 define %TypeDescriptor @type_descriptor(i8* %kind, i8* %name, { %TypeDescriptor*, i64 }* %items) {
@@ -952,8 +940,7 @@ block.entry:
   ret %TypeDescriptor %t13
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @descriptor_trim(i8* %value, i8** %out_result) {
+define i8* @descriptor_trim(i8* %value) {
 block.entry:
   %l0 = alloca i64
   %l1 = alloca i64
@@ -1144,8 +1131,8 @@ afterloop11:
   %t76 = sitofp i64 %t74 to double
   %t77 = sitofp i64 %t75 to double
   %t78 = call i8* @sailfin_runtime_substring(i8* %value, double %t76, double %t77)
-  store i8* %t78, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t78)
+  ret i8* %t78
 }
 
 define i1 @string_starts_with(i8* %value, i8* %prefix) {
@@ -1624,8 +1611,7 @@ afterloop5:
   ret double %t203
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @descriptor_strip_outer_parens(i8* %value, i8** %out_result) {
+define i8* @descriptor_strip_outer_parens(i8* %value) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i64
@@ -1648,8 +1634,8 @@ loop.body1:
   br i1 %t4, label %then4, label %merge5
 then4:
   %t6 = load i8*, i8** %l0
-  store i8* %t6, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t6)
+  ret i8* %t6
 merge5:
   %t7 = load i8*, i8** %l0
   %t8 = sitofp i64 0 to double
@@ -1660,8 +1646,8 @@ merge5:
   br i1 %t11, label %then6, label %merge7
 then6:
   %t13 = load i8*, i8** %l0
-  store i8* %t13, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t13)
+  ret i8* %t13
 merge7:
   %t14 = load i8*, i8** %l0
   %t15 = load i8*, i8** %l0
@@ -1675,8 +1661,8 @@ merge7:
   br i1 %t21, label %then8, label %merge9
 then8:
   %t23 = load i8*, i8** %l0
-  store i8* %t23, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t23)
+  ret i8* %t23
 merge9:
   store i64 0, i64* %l1
   store i64 0, i64* %l2
@@ -1840,8 +1826,8 @@ logical_or_merge_104:
   br i1 %t109, label %then25, label %merge26
 then25:
   %t114 = load i8*, i8** %l0
-  store i8* %t114, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t114)
+  ret i8* %t114
 merge26:
   %t115 = load i8*, i8** %l0
   %t116 = load i8*, i8** %l0
@@ -1859,8 +1845,8 @@ loop.latch2:
 afterloop3:
   %t125 = load i8*, i8** %l0
   %t126 = load i8*, i8** %l0
-  store i8* %t126, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t126)
+  ret i8* %t126
 }
 
 define { i8**, i64 }* @split_descriptor(i8* %value, i8* %separator) {
@@ -3067,8 +3053,7 @@ merge3:
   ret double %value
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @substring(i8* %text, double %start, double %end, i8** %out_result) {
+define i8* @substring(i8* %text, double %start, double %end) {
 block.entry:
   %l0 = alloca i64
   %l1 = alloca double
@@ -3083,8 +3068,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s4 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s4, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s4)
+  ret i8* %s4
 merge1:
   %t5 = load i64, i64* %l0
   %t6 = sitofp i64 0 to double
@@ -3105,8 +3090,8 @@ merge1:
   br i1 %t15, label %then2, label %merge3
 then2:
   %s19 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s19, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s19)
+  ret i8* %s19
 merge3:
   %t20 = load double, double* %l1
   store double %t20, double* %l3
@@ -3164,8 +3149,8 @@ afterloop7:
   %t53 = load i8*, i8** %l4
   %t54 = load double, double* %l3
   %t55 = load i8*, i8** %l4
-  store i8* %t55, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t55)
+  ret i8* %t55
 }
 
 define i1 @strings_equal(i8* %left, i8* %right) {
@@ -3645,12 +3630,11 @@ block.entry:
   ret double %t0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @grapheme_at(i8* %text, double %index, i8** %out_result) {
+define i8* @grapheme_at(i8* %text, double %index) {
 block.entry:
   %t0 = call i8* @sailfin_runtime_grapheme_at(i8* %text, double %index)
-  store i8* %t0, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t0)
+  ret i8* %t0
 }
 
 define double @add(double %a, double %b) {
@@ -3658,11 +3642,11 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
 @.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
-@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
-@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
 @.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
+@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
 @.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
+@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
+@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"

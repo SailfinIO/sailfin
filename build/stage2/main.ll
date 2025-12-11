@@ -246,8 +246,7 @@ declare noalias i8* @malloc(i64)
 @.str.len12.h1175821684 = private unnamed_addr constant [13 x i8] c"return False\00"
 
 ; fn compile_to_sailfin effects: ![io]
-; NOTE: Returns string via output parameter %out_result
-define void @compile_to_sailfin(i8* %source, i8** %out_result) {
+define i8* @compile_to_sailfin(i8* %source) {
 block.entry:
   %l0 = alloca %Program
   %l1 = alloca %TypecheckResult
@@ -270,13 +269,13 @@ then0:
   %t12 = bitcast { %Diagnostic**, i64 }* %t11 to { %Diagnostic*, i64 }*
   call void @report_typecheck_errors({ %Diagnostic*, i64 }* %t12, i8* %source)
   %s13 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s13, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s13)
+  ret i8* %s13
 merge1:
   %t14 = load %Program, %Program* %l0
   %t15 = call i8* @emit_program(%Program %t14)
-  store i8* %t15, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t15)
+  ret i8* %t15
 }
 
 ; fn compile_to_native effects: ![io]
@@ -1686,8 +1685,7 @@ afterloop3:
   ret void
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_typecheck_diagnostic(%Diagnostic %entry, { i8**, i64 }* %source_lines, double %line_padding, i8** %out_result) {
+define i8* @format_typecheck_diagnostic(%Diagnostic %entry, { i8**, i64 }* %source_lines, double %line_padding) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca %Token*
@@ -1705,8 +1703,8 @@ block.entry:
   br i1 %t1, label %then0, label %merge1
 then0:
   %t2 = extractvalue %Diagnostic %entry, 1
-  store i8* %t2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t2)
+  ret i8* %t2
 merge1:
   %t3 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t4 = ptrtoint [0 x i8*]* %t3 to i64
@@ -1781,8 +1779,8 @@ logical_or_merge_37:
 then2:
   %t52 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t53 = call i8* @join_lines({ i8**, i64 }* %t52)
-  store i8* %t53, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t53)
+  ret i8* %t53
 merge3:
   %t54 = load double, double* %l2
   %t55 = sitofp i64 1 to double
@@ -1921,8 +1919,8 @@ merge7:
   store { i8**, i64 }* %t155, { i8**, i64 }** %l0
   %t156 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %t157 = call i8* @join_lines({ i8**, i64 }* %t156)
-  store i8* %t157, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t157)
+  ret i8* %t157
 }
 
 define { i8**, i64 }* @split_source_lines(i8* %source) {
@@ -2098,8 +2096,7 @@ afterloop3:
   ret { i8**, i64 }* %t113
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @build_pointer_line(double %column, i8* %lexeme, i8* %line_text, i8** %out_result) {
+define i8* @build_pointer_line(double %column, i8* %lexeme, i8* %line_text) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -2118,8 +2115,8 @@ then0:
   %t4 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 1
   store i8 0, i8* %t4
   %t5 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   store double %column, double* %l0
   %t6 = load double, double* %l0
@@ -2370,12 +2367,11 @@ afterloop27:
   %t159 = load i8*, i8** %l1
   %t160 = load double, double* %l6
   %t161 = load i8*, i8** %l1
-  store i8* %t161, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t161)
+  ret i8* %t161
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @join_lines({ i8**, i64 }* %lines, i8** %out_result) {
+define i8* @join_lines({ i8**, i64 }* %lines) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -2385,8 +2381,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s3)
+  ret i8* %s3
 merge1:
   %t4 = load { i8**, i64 }, { i8**, i64 }* %lines
   %t5 = extractvalue { i8**, i64 } %t4, 0
@@ -2454,8 +2450,8 @@ afterloop5:
   %t43 = load i8*, i8** %l0
   %t44 = load double, double* %l1
   %t45 = load i8*, i8** %l0
-  store i8* %t45, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t45)
+  ret i8* %t45
 }
 
 define { i8**, i64 }* @append_string({ i8**, i64 }* %values, i8* %value) {
@@ -2480,8 +2476,7 @@ block.entry:
   ret { i8**, i64 }* %t13
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @number_to_string(double %value, i8** %out_result) {
+define i8* @number_to_string(double %value) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca i1
@@ -2501,8 +2496,8 @@ then0:
   %t4 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 1
   store i8 0, i8* %t4
   %t5 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   store double %value, double* %l0
   store i1 0, i1* %l1
@@ -2654,8 +2649,8 @@ merge17:
   %t98 = phi i8* [ %t97, %then16 ], [ %t90, %afterloop7 ]
   store i8* %t98, i8** %l4
   %t99 = load i8*, i8** %l4
-  store i8* %t99, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t99)
+  ret i8* %t99
 }
 
 define %NativeModule @empty_native_module() {
@@ -3052,8 +3047,7 @@ afterloop7:
   ret i1 0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @strip_needs_python_fallback_literals(i8* %source, i8** %out_result) {
+define i8* @strip_needs_python_fallback_literals(i8* %source) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -3074,8 +3068,8 @@ block.entry:
   %t7 = load double, double* %l1
   br i1 %t5, label %then0, label %merge1
 then0:
-  store i8* %source, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %source)
+  ret i8* %source
 merge1:
   %s8 = getelementptr inbounds [13 x i8], [13 x i8]* @.str.len12.h1175821684, i32 0, i32 0
   store i8* %s8, i8** %l2
@@ -3092,8 +3086,8 @@ merge1:
   %t18 = load double, double* %l3
   br i1 %t14, label %then2, label %merge3
 then2:
-  store i8* %source, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %source)
+  ret i8* %source
 merge3:
   %t19 = load double, double* %l3
   %t20 = load i8*, i8** %l2
@@ -3118,12 +3112,11 @@ merge3:
   %t35 = load i8*, i8** %l5
   %t36 = load i8*, i8** %l6
   %t37 = call i8* @sailfin_runtime_string_concat(i8* %t35, i8* %t36)
-  store i8* %t37, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t37)
+  ret i8* %t37
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @strip_python_string_literals(i8* %value, i8** %out_result) {
+define i8* @strip_python_string_literals(i8* %value) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -3279,8 +3272,8 @@ afterloop3:
   %t95 = load i8*, i8** %l1
   %t96 = load double, double* %l0
   %t97 = load i8*, i8** %l1
-  store i8* %t97, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t97)
+  ret i8* %t97
 }
 
 define double @python_quote_length(i8* %value, double %start, i8* %delimiter) {
@@ -3523,8 +3516,7 @@ afterloop17:
   ret double %t105
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @repeat_character(i8* %ch, double %count, i8** %out_result) {
+define i8* @repeat_character(i8* %ch, double %count) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca i8*
@@ -3533,8 +3525,8 @@ block.entry:
   br i1 %t1, label %then0, label %merge1
 then0:
   %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s2)
+  ret i8* %s2
 merge1:
   %t3 = sitofp i64 0 to double
   store double %t3, double* %l0
@@ -3574,8 +3566,8 @@ afterloop5:
   %t20 = load i8*, i8** %l1
   %t21 = load double, double* %l0
   %t22 = load i8*, i8** %l1
-  store i8* %t22, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t22)
+  ret i8* %t22
 }
 
 define double @find_substring(i8* %value, i8* %pattern) {
@@ -3880,18 +3872,18 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
-@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
-@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
-@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
-@.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
-@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
-@.str.len14.h129277126 = private unnamed_addr constant [15 x i8] c"ExpressionRaw(\00"
-@.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
-@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
-@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
-@.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
-@.str.len5.h655249917 = private unnamed_addr constant [6 x i8] c"\0Alet \00"
-@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
 @.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
 @.str.len85.h1706301526 = private unnamed_addr constant [86 x i8] c"native backend: lowering produced unsupported python output; stage0 fallback disabled\00"
+@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
+@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
+@.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
+@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
+@.str.len5.h655249917 = private unnamed_addr constant [6 x i8] c"\0Alet \00"
+@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
+@.str.len14.h129277126 = private unnamed_addr constant [15 x i8] c"ExpressionRaw(\00"
+@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
+@.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
+@.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
+@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
+@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
+@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"

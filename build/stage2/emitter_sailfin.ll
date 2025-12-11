@@ -109,8 +109,7 @@ declare noalias i8* @malloc(i64)
 @.str.len2.h193392014 = private unnamed_addr constant [3 x i8] c"\0A}\00"
 @.str.len39.h1477088561 = private unnamed_addr constant [40 x i8] c"// TODO: unsupported lambda statement: \00"
 
-; NOTE: Returns string via output parameter %out_result
-define void @emit_program(%Program %program, i8** %out_result) {
+define i8* @emit_program(%Program %program) {
 block.entry:
   %l0 = alloca %TextBuilder
   %l1 = alloca double
@@ -204,8 +203,8 @@ afterloop3:
   %t57 = load double, double* %l1
   %t58 = load %TextBuilder, %TextBuilder* %l0
   %t59 = call i8* @builder_to_string(%TextBuilder %t58)
-  store i8* %t59, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t59)
+  ret i8* %t59
 }
 
 define %TextBuilder @emit_statement(%TextBuilder %builder, %Statement %statement) {
@@ -2788,8 +2787,7 @@ merge9:
   ret %TextBuilder %t309
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_import_specifiers({ %ImportSpecifier*, i64 }* %specifiers, i8** %out_result) {
+define i8* @format_import_specifiers({ %ImportSpecifier*, i64 }* %specifiers) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -2877,12 +2875,11 @@ afterloop3:
   %t55 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %s56 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t57 = call i8* @join_with_separator({ i8**, i64 }* %t55, i8* %s56)
-  store i8* %t57, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t57)
+  ret i8* %t57
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_export_specifiers({ %ExportSpecifier*, i64 }* %specifiers, i8** %out_result) {
+define i8* @format_export_specifiers({ %ExportSpecifier*, i64 }* %specifiers) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -2970,12 +2967,11 @@ afterloop3:
   %t55 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %s56 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t57 = call i8* @join_with_separator({ i8**, i64 }* %t55, i8* %s56)
-  store i8* %t57, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t57)
+  ret i8* %t57
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_specifier_entry(i8* %name, i8* %alias, i8** %out_result) {
+define i8* @format_specifier_entry(i8* %name, i8* %alias) {
 block.entry:
   %t1 = icmp eq i8* %alias, null
   br label %logical_or_entry_0
@@ -2995,14 +2991,14 @@ logical_or_merge_0:
   %t4 = phi i1 [ true, %logical_or_entry_0 ], [ %t3, %logical_or_right_end_0 ]
   br i1 %t4, label %then0, label %merge1
 then0:
-  store i8* %name, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %name)
+  ret i8* %name
 merge1:
   %s5 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h175713983, i32 0, i32 0
   %t6 = call i8* @sailfin_runtime_string_concat(i8* %name, i8* %s5)
   %t7 = call i8* @sailfin_runtime_string_concat(i8* %t6, i8* %alias)
-  store i8* %t7, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t7)
+  ret i8* %t7
 }
 
 define %TextBuilder @emit_type_alias(%TextBuilder %builder, %Statement %statement) {
@@ -7084,8 +7080,7 @@ afterloop3:
   ret %TextBuilder %t31
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_decorator(%Decorator %decorator, i8** %out_result) {
+define i8* @format_decorator(%Decorator %decorator) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca { i8**, i64 }*
@@ -7107,8 +7102,8 @@ block.entry:
   br i1 %t9, label %then0, label %merge1
 then0:
   %t11 = load i8*, i8** %l0
-  store i8* %t11, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t11)
+  ret i8* %t11
 merge1:
   %t12 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t13 = ptrtoint [0 x i8*]* %t12 to i64
@@ -7199,12 +7194,11 @@ afterloop5:
   store i8 0, i8* %t72
   %t73 = getelementptr [2 x i8], [2 x i8]* %t70, i32 0, i32 0
   %t74 = call i8* @sailfin_runtime_string_concat(i8* %t69, i8* %t73)
-  store i8* %t74, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t74)
+  ret i8* %t74
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_decorator_argument(%DecoratorArgument %argument, i8** %out_result) {
+define i8* @format_decorator_argument(%DecoratorArgument %argument) {
 block.entry:
   %l0 = alloca i8*
   %t0 = extractvalue %DecoratorArgument %argument, 1
@@ -7216,20 +7210,19 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %t5 = load i8*, i8** %l0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %t6 = extractvalue %DecoratorArgument %argument, 0
   %s7 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193441217, i32 0, i32 0
   %t8 = call i8* @sailfin_runtime_string_concat(i8* %t6, i8* %s7)
   %t9 = load i8*, i8** %l0
   %t10 = call i8* @sailfin_runtime_string_concat(i8* %t8, i8* %t9)
-  store i8* %t10, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t10)
+  ret i8* %t10
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_for_clause(%ForClause %clause, i8** %out_result) {
+define i8* @format_for_clause(%ForClause %clause) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -7265,46 +7258,42 @@ then0:
   %t14 = extractvalue %ForClause %clause, 2
   %t15 = bitcast { %Token**, i64 }* %t14 to { %Token*, i64 }*
   %t16 = call i8* @tokens_to_source({ %Token*, i64 }* %t15)
-  store i8* %t16, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t16)
+  ret i8* %t16
 merge1:
   %t17 = load i8*, i8** %l0
   %s18 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h175996034, i32 0, i32 0
   %t19 = call i8* @sailfin_runtime_string_concat(i8* %t17, i8* %s18)
   %t20 = load i8*, i8** %l1
   %t21 = call i8* @sailfin_runtime_string_concat(i8* %t19, i8* %t20)
-  store i8* %t21, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t21)
+  ret i8* %t21
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_function_header(%FunctionSignature %signature, i8** %out_result) {
+define i8* @format_function_header(%FunctionSignature %signature) {
 block.entry:
   %s0 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t1 = call i8* @format_signature_line(i8* %s0, %FunctionSignature %signature)
-  store i8* %t1, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t1)
+  ret i8* %t1
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_method_header(%FunctionSignature %signature, i8** %out_result) {
+define i8* @format_method_header(%FunctionSignature %signature) {
 block.entry:
   %s0 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193491707, i32 0, i32 0
   %t1 = call i8* @format_signature_line(i8* %s0, %FunctionSignature %signature)
-  store i8* %t1, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t1)
+  ret i8* %t1
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_callable_header(i8* %keyword, %FunctionSignature %signature, i8** %out_result) {
+define i8* @format_callable_header(i8* %keyword, %FunctionSignature %signature) {
 block.entry:
   %t0 = call i8* @format_signature_line(i8* %keyword, %FunctionSignature %signature)
-  store i8* %t0, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t0)
+  ret i8* %t0
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_signature_line(i8* %keyword, %FunctionSignature %signature, i8** %out_result) {
+define i8* @format_signature_line(i8* %keyword, %FunctionSignature %signature) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -7407,12 +7396,11 @@ merge5:
   %t65 = phi i8* [ %t64, %then4 ], [ %t54, %merge3 ]
   store i8* %t65, i8** %l1
   %t66 = load i8*, i8** %l1
-  store i8* %t66, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t66)
+  ret i8* %t66
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_field(%FieldDeclaration %field, i8** %out_result) {
+define i8* @format_field(%FieldDeclaration %field) {
 block.entry:
   %l0 = alloca i8*
   %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
@@ -7442,12 +7430,11 @@ merge1:
   %t16 = call i8* @sailfin_runtime_string_concat(i8* %t13, i8* %t15)
   store i8* %t16, i8** %l0
   %t17 = load i8*, i8** %l0
-  store i8* %t17, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t17)
+  ret i8* %t17
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_enum_variant(%EnumVariant %variant, i8** %out_result) {
+define i8* @format_enum_variant(%EnumVariant %variant) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -7458,8 +7445,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %t4 = extractvalue %EnumVariant %variant, 0
-  store i8* %t4, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t4)
+  ret i8* %t4
 merge1:
   %t5 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t6 = ptrtoint [0 x i8*]* %t5 to i64
@@ -7538,12 +7525,11 @@ afterloop5:
   %t57 = call i8* @sailfin_runtime_string_concat(i8* %t53, i8* %t56)
   %s58 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193415972, i32 0, i32 0
   %t59 = call i8* @sailfin_runtime_string_concat(i8* %t57, i8* %s58)
-  store i8* %t59, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t59)
+  ret i8* %t59
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_parameters({ %Parameter*, i64 }* %parameters, i8** %out_result) {
+define i8* @format_parameters({ %Parameter*, i64 }* %parameters) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -7553,8 +7539,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s3)
+  ret i8* %s3
 merge1:
   %t4 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t5 = ptrtoint [0 x i8*]* %t4 to i64
@@ -7624,12 +7610,11 @@ afterloop5:
   %t47 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %s48 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t49 = call i8* @join_with_separator({ i8**, i64 }* %t47, i8* %s48)
-  store i8* %t49, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t49)
+  ret i8* %t49
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_parameter(%Parameter %parameter, i8** %out_result) {
+define i8* @format_parameter(%Parameter %parameter) {
 block.entry:
   %l0 = alloca i8*
   %s0 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
@@ -7689,12 +7674,11 @@ merge6:
   %t33 = phi i8* [ %t32, %then5 ], [ %t24, %merge4 ]
   store i8* %t33, i8** %l0
   %t34 = load i8*, i8** %l0
-  store i8* %t34, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t34)
+  ret i8* %t34
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_type_parameters({ %TypeParameter*, i64 }* %parameters, i8** %out_result) {
+define i8* @format_type_parameters({ %TypeParameter*, i64 }* %parameters) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -7706,8 +7690,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s3)
+  ret i8* %s3
 merge1:
   %t4 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t5 = ptrtoint [0 x i8*]* %t4 to i64
@@ -7818,38 +7802,36 @@ afterloop5:
   store i8 0, i8* %t76
   %t77 = getelementptr [2 x i8], [2 x i8]* %t74, i32 0, i32 0
   %t78 = call i8* @sailfin_runtime_string_concat(i8* %t73, i8* %t77)
-  store i8* %t78, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t78)
+  ret i8* %t78
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_type_annotation(%TypeAnnotation* %annotation, i8** %out_result) {
+define i8* @format_type_annotation(%TypeAnnotation* %annotation) {
 block.entry:
   %t0 = icmp eq %TypeAnnotation* %annotation, null
   br i1 %t0, label %then0, label %merge1
 then0:
   %s1 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s1, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s1)
+  ret i8* %s1
 merge1:
   %s2 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h173787542, i32 0, i32 0
   %t3 = getelementptr %TypeAnnotation, %TypeAnnotation* %annotation, i32 0, i32 0
   %t4 = load i8*, i8** %t3
   %t5 = call i8* @sailfin_runtime_string_concat(i8* %s2, i8* %t4)
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_initializer(%Expression* %initializer, i8** %out_result) {
+define i8* @format_initializer(%Expression* %initializer) {
 block.entry:
   %l0 = alloca i8*
   %t0 = icmp eq %Expression* %initializer, null
   br i1 %t0, label %then0, label %merge1
 then0:
   %s1 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s1, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s1)
+  ret i8* %s1
 merge1:
   %t2 = load %Expression, %Expression* %initializer
   %t3 = call i8* @format_expression(%Expression %t2)
@@ -7861,18 +7843,17 @@ merge1:
   br i1 %t6, label %then2, label %merge3
 then2:
   %s8 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s8, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s8)
+  ret i8* %s8
 merge3:
   %s9 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087691079, i32 0, i32 0
   %t10 = load i8*, i8** %l0
   %t11 = call i8* @sailfin_runtime_string_concat(i8* %s9, i8* %t10)
-  store i8* %t11, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t11)
+  ret i8* %t11
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_effects({ i8**, i64 }* %effects, i8** %out_result) {
+define i8* @format_effects({ i8**, i64 }* %effects) {
 block.entry:
   %t0 = load { i8**, i64 }, { i8**, i64 }* %effects
   %t1 = extractvalue { i8**, i64 } %t0, 1
@@ -7880,8 +7861,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s3)
+  ret i8* %s3
 merge1:
   %s4 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193415939, i32 0, i32 0
   %s5 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
@@ -7894,12 +7875,11 @@ merge1:
   store i8 0, i8* %t10
   %t11 = getelementptr [2 x i8], [2 x i8]* %t8, i32 0, i32 0
   %t12 = call i8* @sailfin_runtime_string_concat(i8* %t7, i8* %t11)
-  store i8* %t12, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t12)
+  ret i8* %t12
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @join_type_annotations({ %TypeAnnotation*, i64 }* %values, i8** %out_result) {
+define i8* @join_type_annotations({ %TypeAnnotation*, i64 }* %values) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -7909,8 +7889,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s3)
+  ret i8* %s3
 merge1:
   %t4 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t5 = ptrtoint [0 x i8*]* %t4 to i64
@@ -7980,12 +7960,11 @@ afterloop5:
   %t47 = load { i8**, i64 }*, { i8**, i64 }** %l0
   %s48 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
   %t49 = call i8* @join_with_separator({ i8**, i64 }* %t47, i8* %s48)
-  store i8* %t49, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t49)
+  ret i8* %t49
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_expression(%Expression %expression, i8** %out_result) {
+define i8* @format_expression(%Expression %expression) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -8076,8 +8055,8 @@ then0:
   %t57 = load i8*, i8** %t56
   %t58 = icmp eq i32 %t52, 0
   %t59 = select i1 %t58, i8* %t57, i8* null
-  store i8* %t59, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t59)
+  ret i8* %t59
 merge1:
   %t60 = extractvalue %Expression %expression, 0
   %t61 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -8154,8 +8133,8 @@ then2:
   %t129 = load i8*, i8** %t128
   %t130 = icmp eq i32 %t112, 3
   %t131 = select i1 %t130, i8* %t129, i8* %t125
-  store i8* %t131, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t131)
+  ret i8* %t131
 merge3:
   %t132 = extractvalue %Expression %expression, 0
   %t133 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -8232,8 +8211,8 @@ then4:
   %t201 = load i8*, i8** %t200
   %t202 = icmp eq i32 %t184, 3
   %t203 = select i1 %t202, i8* %t201, i8* %t197
-  store i8* %t203, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t203)
+  ret i8* %t203
 merge5:
   %t204 = extractvalue %Expression %expression, 0
   %t205 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -8290,8 +8269,8 @@ merge5:
   br i1 %t255, label %then6, label %merge7
 then6:
   %s256 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h268929446, i32 0, i32 0
-  store i8* %s256, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s256)
+  ret i8* %s256
 merge7:
   %t257 = extractvalue %Expression %expression, 0
   %t258 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -8369,8 +8348,8 @@ then8:
   %t327 = icmp eq i32 %t309, 3
   %t328 = select i1 %t327, i8* %t326, i8* %t322
   %t329 = call i8* @quote_string(i8* %t328)
-  store i8* %t329, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t329)
+  ret i8* %t329
 merge9:
   %t330 = extractvalue %Expression %expression, 0
   %t331 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -8467,8 +8446,8 @@ then12:
   store i8 0, i8* %t413
   %t414 = getelementptr [2 x i8], [2 x i8]* %t411, i32 0, i32 0
   %t415 = call i8* @sailfin_runtime_string_concat(i8* %t414, i8* %t410)
-  store i8* %t415, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t415)
+  ret i8* %t415
 merge13:
   %t416 = extractvalue %Expression %expression, 0
   %t417 = alloca %Expression
@@ -8487,8 +8466,8 @@ merge13:
   %t429 = select i1 %t428, i8* %t427, i8* %t423
   %t430 = load i8*, i8** %l0
   %t431 = call i8* @sailfin_runtime_string_concat(i8* %t429, i8* %t430)
-  store i8* %t431, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t431)
+  ret i8* %t431
 merge11:
   %t432 = extractvalue %Expression %expression, 0
   %t433 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -8607,8 +8586,8 @@ then14:
   %t533 = call i8* @sailfin_runtime_string_concat(i8* %t531, i8* %t532)
   %t534 = load i8*, i8** %l2
   %t535 = call i8* @sailfin_runtime_string_concat(i8* %t533, i8* %t534)
-  store i8* %t535, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t535)
+  ret i8* %t535
 merge15:
   %t536 = extractvalue %Expression %expression, 0
   %t537 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -8693,8 +8672,8 @@ then16:
   %t610 = icmp eq i32 %t603, 7
   %t611 = select i1 %t610, i8* %t609, i8* null
   %t612 = call i8* @sailfin_runtime_string_concat(i8* %t602, i8* %t611)
-  store i8* %t612, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t612)
+  ret i8* %t612
 merge17:
   %t613 = extractvalue %Expression %expression, 0
   %t614 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -8867,8 +8846,8 @@ afterloop23:
   store i8 0, i8* %t749
   %t750 = getelementptr [2 x i8], [2 x i8]* %t747, i32 0, i32 0
   %t751 = call i8* @sailfin_runtime_string_concat(i8* %t746, i8* %t750)
-  store i8* %t751, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t751)
+  ret i8* %t751
 merge19:
   %t752 = extractvalue %Expression %expression, 0
   %t753 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -8966,8 +8945,8 @@ then26:
   store i8 0, i8* %t835
   %t836 = getelementptr [2 x i8], [2 x i8]* %t833, i32 0, i32 0
   %t837 = call i8* @sailfin_runtime_string_concat(i8* %t832, i8* %t836)
-  store i8* %t837, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t837)
+  ret i8* %t837
 merge27:
   %t838 = extractvalue %Expression %expression, 0
   %t839 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -9126,8 +9105,8 @@ afterloop33:
   store i8 0, i8* %t961
   %t962 = getelementptr [2 x i8], [2 x i8]* %t959, i32 0, i32 0
   %t963 = call i8* @sailfin_runtime_string_concat(i8* %t958, i8* %t962)
-  store i8* %t963, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t963)
+  ret i8* %t963
 merge29:
   %t964 = extractvalue %Expression %expression, 0
   %t965 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -9319,8 +9298,8 @@ afterloop41:
   store i8 0, i8* %t1116
   %t1117 = getelementptr [2 x i8], [2 x i8]* %t1114, i32 0, i32 0
   %t1118 = call i8* @sailfin_runtime_string_concat(i8* %t1113, i8* %t1117)
-  store i8* %t1118, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t1118)
+  ret i8* %t1118
 merge37:
   %t1119 = extractvalue %Expression %expression, 0
   %t1120 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -9515,8 +9494,8 @@ afterloop49:
   %t1276 = call i8* @sailfin_runtime_string_concat(i8* %t1274, i8* %t1275)
   %s1277 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193415972, i32 0, i32 0
   %t1278 = call i8* @sailfin_runtime_string_concat(i8* %t1276, i8* %s1277)
-  store i8* %t1278, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t1278)
+  ret i8* %t1278
 merge45:
   %t1279 = extractvalue %Expression %expression, 0
   %t1280 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -9602,8 +9581,8 @@ then52:
   %t1354 = call i8* @sailfin_runtime_string_concat(i8* %t1352, i8* %s1353)
   %t1355 = load i8*, i8** %l25
   %t1356 = call i8* @sailfin_runtime_string_concat(i8* %t1354, i8* %t1355)
-  store i8* %t1356, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t1356)
+  ret i8* %t1356
 merge53:
   %t1357 = extractvalue %Expression %expression, 0
   %t1358 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -9660,8 +9639,8 @@ merge53:
   br i1 %t1408, label %then54, label %merge55
 then54:
   %t1409 = call i8* @format_lambda_expression(%Expression %expression)
-  store i8* %t1409, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t1409)
+  ret i8* %t1409
 merge55:
   %t1410 = extractvalue %Expression %expression, 0
   %t1411 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Expression.variant.default, i32 0, i32 0
@@ -9727,16 +9706,15 @@ then56:
   %t1468 = icmp eq i32 %t1462, 15
   %t1469 = select i1 %t1468, i8* %t1467, i8* null
   %t1470 = call i8* @trim_text(i8* %t1469)
-  store i8* %t1470, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t1470)
+  ret i8* %t1470
 merge57:
   %s1471 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s1471, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s1471)
+  ret i8* %s1471
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_lambda_expression(%Expression %expression, i8** %out_result) {
+define i8* @format_lambda_expression(%Expression %expression) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca i8*
@@ -9793,12 +9771,11 @@ block.entry:
   %t40 = call i8* @sailfin_runtime_string_concat(i8* %t35, i8* %t39)
   %t41 = load i8*, i8** %l2
   %t42 = call i8* @sailfin_runtime_string_concat(i8* %t40, i8* %t41)
-  store i8* %t42, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t42)
+  ret i8* %t42
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_lambda_parameters({ %Parameter*, i64 }* %parameters, i8** %out_result) {
+define i8* @format_lambda_parameters({ %Parameter*, i64 }* %parameters) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -9899,12 +9876,11 @@ afterloop3:
   store i8 0, i8* %t61
   %t62 = getelementptr [2 x i8], [2 x i8]* %t59, i32 0, i32 0
   %t63 = call i8* @sailfin_runtime_string_concat(i8* %t58, i8* %t62)
-  store i8* %t63, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t63)
+  ret i8* %t63
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_lambda_body(%Block %body, i8** %out_result) {
+define i8* @format_lambda_body(%Block %body) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -10012,12 +9988,11 @@ merge2:
   %t67 = call i8* @sailfin_runtime_string_concat(i8* %s60, i8* %t66)
   %s68 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193392014, i32 0, i32 0
   %t69 = call i8* @sailfin_runtime_string_concat(i8* %t67, i8* %s68)
-  store i8* %t69, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t69)
+  ret i8* %t69
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_lambda_statement(%Statement %statement, i8** %out_result) {
+define i8* @format_lambda_statement(%Statement %statement) {
 block.entry:
   %l0 = alloca i8*
   %t0 = extractvalue %Statement %statement, 0
@@ -10118,8 +10093,8 @@ then0:
   br i1 %t91, label %then2, label %merge3
 then2:
   %s92 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h655349763, i32 0, i32 0
-  store i8* %s92, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s92)
+  ret i8* %s92
 merge3:
   %s93 = getelementptr inbounds [8 x i8], [8 x i8]* @.str.len7.h655348872, i32 0, i32 0
   %t94 = extractvalue %Statement %statement, 0
@@ -10146,8 +10121,8 @@ merge3:
   store i8 0, i8* %t112
   %t113 = getelementptr [2 x i8], [2 x i8]* %t110, i32 0, i32 0
   %t114 = call i8* @sailfin_runtime_string_concat(i8* %t109, i8* %t113)
-  store i8* %t114, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t114)
+  ret i8* %t114
 merge1:
   %t115 = extractvalue %Statement %statement, 0
   %t116 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Statement.variant.default, i32 0, i32 0
@@ -10247,8 +10222,8 @@ then4:
   store i8 0, i8* %t205
   %t206 = getelementptr [2 x i8], [2 x i8]* %t203, i32 0, i32 0
   %t207 = call i8* @sailfin_runtime_string_concat(i8* %t202, i8* %t206)
-  store i8* %t207, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t207)
+  ret i8* %t207
 merge5:
   %t208 = extractvalue %Statement %statement, 0
   %t209 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Statement.variant.default, i32 0, i32 0
@@ -10433,8 +10408,8 @@ merge9:
   store i8 0, i8* %t370
   %t371 = getelementptr [2 x i8], [2 x i8]* %t368, i32 0, i32 0
   %t372 = call i8* @sailfin_runtime_string_concat(i8* %t367, i8* %t371)
-  store i8* %t372, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t372)
+  ret i8* %t372
 merge7:
   %t373 = extractvalue %Statement %statement, 0
   %t374 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Statement.variant.default, i32 0, i32 0
@@ -10524,8 +10499,8 @@ then10:
   %t455 = select i1 %t454, i8* %t453, i8* null
   %t456 = call i8* @collapse_whitespace(i8* %t455)
   %t457 = call i8* @sailfin_runtime_string_concat(i8* %s446, i8* %t456)
-  store i8* %t457, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t457)
+  ret i8* %t457
 merge11:
   %s458 = getelementptr inbounds [40 x i8], [40 x i8]* @.str.len39.h1477088561, i32 0, i32 0
   %t459 = extractvalue %Statement %statement, 0
@@ -10600,8 +10575,8 @@ merge11:
   %t528 = icmp eq i32 %t459, 22
   %t529 = select i1 %t528, i8* %t527, i8* %t526
   %t530 = call i8* @sailfin_runtime_string_concat(i8* %s458, i8* %t529)
-  store i8* %t530, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t530)
+  ret i8* %t530
 }
 
 define { i8**, i64 }* @indent_lines({ i8**, i64 }* %lines, double %depth) {
@@ -10722,8 +10697,7 @@ afterloop3:
   ret { i8**, i64 }* %t68
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @quote_string(i8* %value, i8** %out_result) {
+define i8* @quote_string(i8* %value) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -10793,63 +10767,61 @@ afterloop3:
   %t39 = call i8* @sailfin_runtime_string_concat(i8* %t34, i8* %t38)
   store i8* %t39, i8** %l0
   %t40 = load i8*, i8** %l0
-  store i8* %t40, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t40)
+  ret i8* %t40
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @escape_string_char(i8* %ch, i8** %out_result) {
+define i8* @escape_string_char(i8* %ch) {
 block.entry:
   %t0 = load i8, i8* %ch
   %t1 = icmp eq i8 %t0, 34
   br i1 %t1, label %then0, label %merge1
 then0:
   %s2 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193478309, i32 0, i32 0
-  store i8* %s2, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s2)
+  ret i8* %s2
 merge1:
   %t3 = load i8, i8* %ch
   %t4 = icmp eq i8 %t3, 92
   br i1 %t4, label %then2, label %merge3
 then2:
   %s5 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193480223, i32 0, i32 0
-  store i8* %s5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s5)
+  ret i8* %s5
 merge3:
   %t6 = load i8, i8* %ch
   %t7 = icmp eq i8 %t6, 10
   br i1 %t7, label %then4, label %merge5
 then4:
   %s8 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193480817, i32 0, i32 0
-  store i8* %s8, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s8)
+  ret i8* %s8
 merge5:
   %t9 = load i8, i8* %ch
   %t10 = icmp eq i8 %t9, 13
   br i1 %t10, label %then6, label %merge7
 then6:
   %s11 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193480949, i32 0, i32 0
-  store i8* %s11, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s11)
+  ret i8* %s11
 merge7:
   %t12 = load i8, i8* %ch
   %t13 = icmp eq i8 %t12, 9
   br i1 %t13, label %then8, label %merge9
 then8:
   %s14 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193481015, i32 0, i32 0
-  store i8* %s14, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s14)
+  ret i8* %s14
 merge9:
-  store i8* %ch, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %ch)
+  ret i8* %ch
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @format_test_name(i8* %name, i8** %out_result) {
+define i8* @format_test_name(i8* %name) {
 block.entry:
   %t0 = call i8* @quote_string(i8* %name)
-  store i8* %t0, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t0)
+  ret i8* %t0
 }
 
 define i1 @is_identifier(i8* %value) {
@@ -11064,8 +11036,7 @@ logical_and_merge_2:
   ret i1 %t17
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @trim_block_body(i8* %text, i8** %out_result) {
+define i8* @trim_block_body(i8* %text) {
 block.entry:
   %l0 = alloca i8*
   %t0 = call i8* @trim_text(i8* %text)
@@ -11077,8 +11048,8 @@ block.entry:
   br i1 %t3, label %then0, label %merge1
 then0:
   %t5 = load i8*, i8** %l0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %t7 = load i8*, i8** %l0
   %t8 = getelementptr i8, i8* %t7, i64 0
@@ -11113,16 +11084,15 @@ then2:
   %t23 = sub i64 %t22, 1
   %t24 = call i8* @sailfin_runtime_substring(i8* %t20, i64 1, i64 %t23)
   %t25 = call i8* @trim_text(i8* %t24)
-  store i8* %t25, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t25)
+  ret i8* %t25
 merge3:
   %t26 = load i8*, i8** %l0
-  store i8* %t26, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t26)
+  ret i8* %t26
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @collapse_whitespace(i8* %value, i8** %out_result) {
+define i8* @collapse_whitespace(i8* %value) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -11286,12 +11256,11 @@ afterloop3:
   %t78 = load double, double* %l1
   %t79 = load i8*, i8** %l0
   %t80 = call i8* @trim_text(i8* %t79)
-  store i8* %t80, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t80)
+  ret i8* %t80
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @tokens_to_source({ %Token*, i64 }* %tokens, i8** %out_result) {
+define i8* @tokens_to_source({ %Token*, i64 }* %tokens) {
 block.entry:
   %l0 = alloca { i8**, i64 }*
   %l1 = alloca double
@@ -11301,8 +11270,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s3)
+  ret i8* %s3
 merge1:
   %t4 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t5 = ptrtoint [0 x i8*]* %t4 to i64
@@ -11373,8 +11342,8 @@ afterloop5:
   %s48 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
   %t49 = call i8* @join_with_separator({ i8**, i64 }* %t47, i8* %s48)
   %t50 = call i8* @collapse_whitespace(i8* %t49)
-  store i8* %t50, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t50)
+  ret i8* %t50
 }
 
 define %TextBuilder @builder_new() {
@@ -11511,8 +11480,7 @@ merge1:
   ret %TextBuilder %t13
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @builder_to_string(%TextBuilder %builder, i8** %out_result) {
+define i8* @builder_to_string(%TextBuilder %builder) {
 block.entry:
   %l0 = alloca i8*
   %t0 = extractvalue %TextBuilder %builder, 0
@@ -11531,8 +11499,8 @@ block.entry:
   br i1 %t8, label %then0, label %merge1
 then0:
   %s10 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s10, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s10)
+  ret i8* %s10
 merge1:
   %t11 = load i8*, i8** %l0
   %t12 = alloca [2 x i8], align 1
@@ -11542,12 +11510,11 @@ merge1:
   store i8 0, i8* %t14
   %t15 = getelementptr [2 x i8], [2 x i8]* %t12, i32 0, i32 0
   %t16 = call i8* @sailfin_runtime_string_concat(i8* %t11, i8* %t15)
-  store i8* %t16, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t16)
+  ret i8* %t16
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @trim_right(i8* %value, i8** %out_result) {
+define i8* @trim_right(i8* %value) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca i8
@@ -11617,15 +11584,15 @@ afterloop3:
   %t32 = load double, double* %l0
   br i1 %t31, label %then8, label %merge9
 then8:
-  store i8* %value, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %value)
+  ret i8* %value
 merge9:
   %t33 = load double, double* %l0
   %t34 = call double @llvm.round.f64(double %t33)
   %t35 = fptosi double %t34 to i64
   %t36 = call i8* @sailfin_runtime_substring(i8* %value, i64 0, i64 %t35)
-  store i8* %t36, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t36)
+  ret i8* %t36
 }
 
 define { i8**, i64 }* @append_string({ i8**, i64 }* %values, i8* %value) {
@@ -11650,8 +11617,7 @@ block.entry:
   ret { i8**, i64 }* %t13
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @join_with_separator({ i8**, i64 }* %values, i8* %separator, i8** %out_result) {
+define i8* @join_with_separator({ i8**, i64 }* %values, i8* %separator) {
 block.entry:
   %l0 = alloca i8*
   %l1 = alloca double
@@ -11661,8 +11627,8 @@ block.entry:
   br i1 %t2, label %then0, label %merge1
 then0:
   %s3 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s3, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s3)
+  ret i8* %s3
 merge1:
   %t4 = load { i8**, i64 }, { i8**, i64 }* %values
   %t5 = extractvalue { i8**, i64 } %t4, 0
@@ -11724,12 +11690,11 @@ afterloop5:
   %t39 = load i8*, i8** %l0
   %t40 = load double, double* %l1
   %t41 = load i8*, i8** %l0
-  store i8* %t41, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t41)
+  ret i8* %t41
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @trim_text(i8* %value, i8** %out_result) {
+define i8* @trim_text(i8* %value) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca double
@@ -11862,8 +11827,8 @@ logical_and_merge_59:
   %t69 = load double, double* %l1
   br i1 %t67, label %then16, label %merge17
 then16:
-  store i8* %value, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %value)
+  ret i8* %value
 merge17:
   %t70 = load double, double* %l0
   %t71 = load double, double* %l1
@@ -11872,8 +11837,8 @@ merge17:
   %t74 = call double @llvm.round.f64(double %t71)
   %t75 = fptosi double %t74 to i64
   %t76 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t73, i64 %t75)
-  store i8* %t76, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t76)
+  ret i8* %t76
 }
 
 define i1 @is_trim_char(i8* %ch) {
@@ -11933,78 +11898,78 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
 @.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
-@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
-@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
-@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
-@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
-@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
-@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len15.h306395716 = private unnamed_addr constant [16 x i8] c"// empty struct\00"
-@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
-@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.str.len17.h689147423 = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
-@.str.len8.h2003786807 = private unnamed_addr constant [9 x i8] c"pipeline\00"
-@.str.len13.h1882501715 = private unnamed_addr constant [14 x i8] c"// original: \00"
-@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
-@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
-@.str.len4.h175987322 = private unnamed_addr constant [5 x i8] c" if \00"
-@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.str.len5.h1459000260 = private unnamed_addr constant [6 x i8] c" => {\00"
-@.str.len15.h571715647 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
-@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.str.len7.h655349763 = private unnamed_addr constant [8 x i8] c"return;\00"
-@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len19.h868168677 = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
-@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.str.len13.h1853304565 = private unnamed_addr constant [14 x i8] c"// empty body\00"
-@.str.len2.h193478309 = private unnamed_addr constant [3 x i8] c"\5C\22\00"
-@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len4.h275832617 = private unnamed_addr constant [5 x i8] c"tool\00"
-@.str.len19.h965279776 = private unnamed_addr constant [20 x i8] c"// empty model body\00"
-@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
-@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
-@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
-@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
 @.str.len8.h476784883 = private unnamed_addr constant [9 x i8] c"else if \00"
-@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
+@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len17.h1813262795 = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
+@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
+@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
+@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
+@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.str.len5.h1459000260 = private unnamed_addr constant [6 x i8] c" => {\00"
+@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
+@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.str.len4.h275832617 = private unnamed_addr constant [5 x i8] c"tool\00"
+@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
+@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.str.len2.h193478309 = private unnamed_addr constant [3 x i8] c"\5C\22\00"
+@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
+@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
 @.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
 @.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.str.len15.h306395716 = private unnamed_addr constant [16 x i8] c"// empty struct\00"
+@.str.len13.h1853304565 = private unnamed_addr constant [14 x i8] c"// empty body\00"
+@.str.len19.h868168677 = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
+@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.str.len17.h689147423 = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
+@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.str.len8.h2003786807 = private unnamed_addr constant [9 x i8] c"pipeline\00"
+@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
+@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
+@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.str.len4.h175987322 = private unnamed_addr constant [5 x i8] c" if \00"
+@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len7.h655349763 = private unnamed_addr constant [8 x i8] c"return;\00"
+@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
+@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
 @.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
+@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
+@.str.len15.h571715647 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.str.len13.h1882501715 = private unnamed_addr constant [14 x i8] c"// original: \00"
+@.str.len19.h965279776 = private unnamed_addr constant [20 x i8] c"// empty model body\00"
+@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
+@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
 @.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.str.len17.h1813262795 = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
+@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"

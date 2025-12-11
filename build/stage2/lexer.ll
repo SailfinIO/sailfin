@@ -1885,16 +1885,15 @@ block.entry:
   ret i1 %t2
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @slice(i8* %text, double %start, double %end, i8** %out_result) {
+define i8* @slice(i8* %text, double %start, double %end) {
 block.entry:
   %t0 = call double @llvm.round.f64(double %start)
   %t1 = fptosi double %t0 to i64
   %t2 = call double @llvm.round.f64(double %end)
   %t3 = fptosi double %t2 to i64
   %t4 = call i8* @sailfin_runtime_substring(i8* %text, i64 %t1, i64 %t3)
-  store i8* %t4, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t4)
+  ret i8* %t4
 }
 
 define { %Token*, i64 }* @append({ %Token*, i64 }* %tokens, %Token %token) {
@@ -1924,8 +1923,7 @@ block.entry:
   ret { %Token*, i64 }* %t17
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @peek_next_char(%LexerState %state, i8** %out_result) {
+define i8* @peek_next_char(%LexerState %state) {
 block.entry:
   %l0 = alloca double
   %t0 = extractvalue %LexerState %state, 1
@@ -1941,8 +1939,8 @@ block.entry:
   br i1 %t7, label %then0, label %merge1
 then0:
   %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s9, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %s9)
+  ret i8* %s9
 merge1:
   %t10 = extractvalue %LexerState %state, 0
   %t11 = load double, double* %l0
@@ -1956,12 +1954,11 @@ merge1:
   %t18 = getelementptr [2 x i8], [2 x i8]* %t16, i32 0, i32 1
   store i8 0, i8* %t18
   %t19 = getelementptr [2 x i8], [2 x i8]* %t16, i32 0, i32 0
-  store i8* %t19, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t19)
+  ret i8* %t19
 }
 
-; NOTE: Returns string via output parameter %out_result
-define void @interpret_escape(i8* %ch, i8** %out_result) {
+define i8* @interpret_escape(i8* %ch) {
 block.entry:
   %t0 = load i8, i8* %ch
   %t1 = icmp eq i8 %t0, 110
@@ -1973,8 +1970,8 @@ then0:
   %t4 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 1
   store i8 0, i8* %t4
   %t5 = getelementptr [2 x i8], [2 x i8]* %t2, i32 0, i32 0
-  store i8* %t5, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t5)
+  ret i8* %t5
 merge1:
   %t6 = load i8, i8* %ch
   %t7 = icmp eq i8 %t6, 116
@@ -1986,8 +1983,8 @@ then2:
   %t10 = getelementptr [2 x i8], [2 x i8]* %t8, i32 0, i32 1
   store i8 0, i8* %t10
   %t11 = getelementptr [2 x i8], [2 x i8]* %t8, i32 0, i32 0
-  store i8* %t11, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t11)
+  ret i8* %t11
 merge3:
   %t12 = load i8, i8* %ch
   %t13 = icmp eq i8 %t12, 114
@@ -1999,8 +1996,8 @@ then4:
   %t16 = getelementptr [2 x i8], [2 x i8]* %t14, i32 0, i32 1
   store i8 0, i8* %t16
   %t17 = getelementptr [2 x i8], [2 x i8]* %t14, i32 0, i32 0
-  store i8* %t17, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t17)
+  ret i8* %t17
 merge5:
   %t18 = call i1 @is_double_quote(i8* %ch)
   br i1 %t18, label %then6, label %merge7
@@ -2011,8 +2008,8 @@ then6:
   %t21 = getelementptr [2 x i8], [2 x i8]* %t19, i32 0, i32 1
   store i8 0, i8* %t21
   %t22 = getelementptr [2 x i8], [2 x i8]* %t19, i32 0, i32 0
-  store i8* %t22, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t22)
+  ret i8* %t22
 merge7:
   %t23 = call i1 @is_backslash(i8* %ch)
   br i1 %t23, label %then8, label %merge9
@@ -2023,11 +2020,11 @@ then8:
   %t26 = getelementptr [2 x i8], [2 x i8]* %t24, i32 0, i32 1
   store i8 0, i8* %t26
   %t27 = getelementptr [2 x i8], [2 x i8]* %t24, i32 0, i32 0
-  store i8* %t27, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %t27)
+  ret i8* %t27
 merge9:
-  store i8* %ch, i8** %out_result
-  ret void
+  call void @sailfin_runtime_mark_persistent(i8* %ch)
+  ret i8* %ch
 }
 
 define i1 @is_two_char_symbol(i8* %value) {
