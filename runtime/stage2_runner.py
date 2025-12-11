@@ -77,6 +77,7 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
     "strings_equal": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_bool),
     "char_code": (None, (ctypes.c_void_p,), ctypes.c_double),
     "sailfin_runtime_bounds_check": (None, (ctypes.c_longlong, ctypes.c_longlong), None),
+    "sailfin_runtime_mark_persistent": (None, (ctypes.c_void_p,), None),
     "abort": (None, (), None),
     # Generic runtime helpers
     "sailfin_runtime_channel": ("io", (ctypes.c_double,), ctypes.c_void_p),
@@ -169,18 +170,27 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
                 request = 0
             if request <= 0:
                 request = 1
+
+            # Safety: check for unreasonably large allocations (> 1GB)
+            if request > 1024 * 1024 * 1024:
+                if logger:
+                    logger(
+                        f"[stage2] malloc REJECTED: request size={request} bytes ({request // (1024*1024)} MB) exceeds limit"
+                    )
+                return 0  # Return null instead of aborting
+
             result = libc_malloc(request)
             pointer = 0 if result is None else int(result)
             if pointer != 0:
                 _LIBC_ALLOCATIONS[pointer] = request
-                if logger:
+                if logger and request > 1024 * 1024:  # Log allocations > 1MB
                     logger(
-                        f"[stage2] malloc request size={request} result=0x{pointer:x}"
+                        f"[stage2] malloc LARGE: size={request} bytes ({request // 1024} KB) result=0x{pointer:x}"
                     )
             else:
                 if logger:
                     logger(
-                        f"[stage2] malloc request size={request} result=null")
+                        f"[stage2] malloc FAILED: size={request} bytes result=null")
             return pointer
 
         def _free_wrapper(ptr: ctypes.c_void_p | int) -> None:
@@ -327,6 +337,9 @@ class Stage2Runner:
         self._registered_helpers = []
         self._hooks = _normalise_hooks(runtime_hooks)
         self._adapter_string_buffers = []
+        self._result_buffers = []  # Dedicated storage for large final results
+        self._string_cache: dict[int, str] = {}  # Cache strings by pointer address
+        self._string_pool: list[ctypes.Array] = []  # Global pool: keeps ALL strings alive forever
         self._tracked_string_addresses: dict[int, tuple[str, str, int]] = {}
         self._adapter_object_handles: dict[int, object] = {}
         self._function_info_cache = {}
@@ -352,6 +365,38 @@ class Stage2Runner:
             self._tracked_string_addresses[int(address)] = (
                 "cstring", text, len(encoded))
         return pointer
+
+    def bounds_check(self, index: int, length: int) -> None:
+        """
+        Validate array bounds access. Called by LLVM-generated code.
+
+        Args:
+            index: Array index being accessed
+            length: Array length
+
+        Raises:
+            IndexError: If index >= length (out of bounds)
+        """
+        if index < 0 or index >= length:
+            raise IndexError(
+                f"Array bounds violation: index {index} out of range for array of length {length}"
+            )
+
+    def mark_persistent(self, ptr: int) -> None:
+        """
+        Mark a string pointer as persistent to prevent garbage collection.
+        Called by LLVM-generated code before returning string values.
+
+        Args:
+            ptr: String pointer address to keep alive
+        """
+        if ptr and ptr not in [addr for addr, _ in self._string_pool]:
+            # Add to string pool to prevent GC - extract buffer from tracked addresses
+            if ptr in self._tracked_string_addresses:
+                buf_info = self._tracked_string_addresses[ptr]
+                if len(buf_info) >= 2:
+                    buf = buf_info[1]  # Buffer is second element in tuple
+                    self._string_pool.append((ptr, buf))
 
     @staticmethod
     def _detect_string_abi(lowered_modules: Sequence) -> str:
@@ -1637,7 +1682,13 @@ class Stage2Runner:
                 return getattr(instance, "value", instance)
             except Exception:
                 pass
-        return ctypes.string_at(address, size)
+        # Safety check: avoid segfault on invalid addresses
+        if address == 0 or address < 0x1000:
+            return b""
+        try:
+            return ctypes.string_at(address, size)
+        except (ValueError, OSError):
+            return b""
 
     @staticmethod
     def _is_aggregate_return_type(return_type: str | None) -> bool:
@@ -1887,21 +1938,54 @@ class Stage2Runner:
                     f"[stage2] ptr_to_str cstring decode 0x{address:x} size={len(raw)}"
                 )
                 return text
-            try:
-                raw_cstring = ctypes.string_at(address)
-            except (ValueError, OSError):
-                raw_cstring = None
-            if raw_cstring is not None:
-                raw, _, _ = raw_cstring.partition(b"\0")
-                text = raw.decode("utf-8", errors="ignore")
-                self._tracked_string_addresses[address] = (
-                    "cstring", text, len(raw))
-                self._debug_log(
-                    f"[stage2] ptr_to_str cstring fallback 0x{address:x} size={len(raw)}"
-                )
-                return text
 
-            message = f"runtime string pointer 0x{address:x} not tracked"
+            # Untracked address - might be an LLVM string literal (safe) or invalid pointer (unsafe).
+            # Reject NULL and very low addresses (definitely invalid).
+            if address == 0 or address < 0x1000:
+                message = f"runtime string pointer 0x{address:x} is NULL or invalid"
+                self._debug_log(f"[stage2] {message}")
+                error = RuntimeError(message)
+                if _LAST_RUNTIME_ERROR.get() is None:
+                    _LAST_RUNTIME_ERROR.set(error)
+                return ""
+
+            # For other untracked addresses, attempt careful byte-by-byte read with size limit.
+            # This is safer than c_char_p.value for very large strings or invalid pointers.
+            try:
+                # Read byte-by-byte up to 10MB max to avoid ctypes size limits
+                max_size = 10 * 1024 * 1024
+                byte_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_char))
+                bytes_list = []
+                for i in range(max_size):
+                    try:
+                        byte_val = byte_ptr[i]
+                        if byte_val == b'\x00':
+                            break
+                        bytes_list.append(byte_val)
+                    except (ValueError, OSError):
+                        # Hit invalid memory
+                        if i == 0:
+                            # Couldn't read even first byte
+                            raise
+                        break
+
+                if bytes_list:
+                    raw_bytes = b''.join(bytes_list)
+                    text = raw_bytes.decode("utf-8", errors="ignore")
+                    self._tracked_string_addresses[address] = ("llvm_literal", text, len(raw_bytes))
+                    self._debug_log(
+                        f"[stage2] ptr_to_str llvm_literal 0x{address:x} size={len(raw_bytes)}"
+                    )
+                    return text
+            except (ValueError, OSError, AttributeError, UnicodeDecodeError, MemoryError, SystemError) as e:
+                self._debug_log(f"[stage2] ptr_to_str failed to read 0x{address:x}: {type(e).__name__}")
+                pass
+            except BaseException as e:
+                # Catch segfaults that somehow become Python exceptions
+                self._debug_log(f"[stage2] ptr_to_str CRITICAL error at 0x{address:x}: {type(e).__name__}")
+                pass
+
+            message = f"runtime string pointer 0x{address:x} not tracked and unreadable"
             self._debug_log(f"[stage2] {message}")
             error = RuntimeError(message)
             if _LAST_RUNTIME_ERROR.get() is None:
@@ -1912,8 +1996,25 @@ class Stage2Runner:
         # Helper to convert Python string to pointer integer
         def _str_to_ptr(s: str) -> int:
             encoded = s.encode("utf-8")
+
+            # Validate buffer size before creation
+            size = len(encoded) + 1  # +1 for null terminator
+            if size > 200_000_000:  # 200MB limit
+                self._debug_log(f"[stage2] _str_to_ptr: REJECTED string size={size} bytes ({size // 1024} KB)")
+                return 0  # Return NULL instead of creating huge buffer
+            if size > 10_000_000:  # 10MB warning
+                self._debug_log(f"[stage2] _str_to_ptr: LARGE string size={size} bytes ({size // 1024} KB)")
+
+            # Use ctypes buffers to keep strings alive
             buf = ctypes.create_string_buffer(encoded + b"\0")
-            self._adapter_string_buffers.append(buf)  # Keep buffer alive
+
+            # CRITICAL: Add to permanent string pool - strings never freed until runner destroyed
+            # This solves the LLVM memory lifecycle issue where returned pointers become invalid
+            self._string_pool.append(buf)
+            self._adapter_string_buffers.append(buf)  # Keep for compatibility
+
+            if size > 50_000:  # Log large strings
+                self._debug_log(f"[stage2] _str_to_ptr: POOL added large string size={size} bytes (pool_size={len(self._string_pool)})")
 
             data_address = ctypes.cast(buf, ctypes.c_void_p).value
             data_int = 0 if data_address is None else int(data_address)
@@ -2256,7 +2357,15 @@ class Stage2Runner:
                     _require_effects()
                     first = _ptr_to_str(first_ptr)
                     second = _ptr_to_str(second_ptr)
-                    return _str_to_ptr(first + second)
+
+                    # Validate string lengths before concatenating
+                    if len(first) > 100_000_000 or len(second) > 100_000_000:
+                        self._debug_log(f"[stage2] string_concat: LARGE strings detected first={len(first)} second={len(second)}")
+                    result = first + second
+                    if len(result) > 100_000_000:
+                        self._debug_log(f"[stage2] string_concat: LARGE result={len(result)} bytes")
+
+                    return _str_to_ptr(result)
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:
                         _LAST_RUNTIME_ERROR.set(exc)
@@ -2900,6 +3009,47 @@ class Stage2Runner:
         engine.run_static_constructors()
         self._debug_log("[stage2] finalize succeeded")
 
+        # CRITICAL: Register LLVM string literals to prevent segfaults
+        # After finalization, enumerate all global string constants and register
+        # their addresses so _ptr_to_str() can safely dereference them
+        registered_count = 0
+        for module in modules:
+            for global_var in module.global_variables:
+                try:
+                    # Check if this is a string constant (array of i8)
+                    var_type_str = str(global_var.type)
+                    if not var_type_str.startswith('[') or ' x i8]' not in var_type_str:
+                        continue  # Not a string constant
+
+                    # Get the address of this global variable
+                    global_name = global_var.name
+                    try:
+                        address = engine.get_global_value_address(global_name)
+                    except Exception:
+                        continue  # Can't get address, skip
+
+                    if address == 0:
+                        continue  # Invalid address
+
+                    # Read the string content and register it
+                    try:
+                        c_str_ptr = ctypes.cast(address, ctypes.c_char_p)
+                        raw_bytes = c_str_ptr.value
+                        if raw_bytes is not None:
+                            text = raw_bytes.decode("utf-8", errors="ignore")
+                            self._tracked_string_addresses[address] = (
+                                "llvm_global", text, len(raw_bytes))
+                            registered_count += 1
+                    except Exception:
+                        pass  # Failed to read, skip
+
+                except Exception:
+                    continue  # Error processing this global, skip
+
+        self._debug_log(
+            f"[stage2] registered {registered_count} LLVM string literal(s)"
+        )
+
         if skipped:
             preview = ", ".join(
                 f"{name} ({reason})" for name, reason in skipped[:5])
@@ -3009,6 +3159,7 @@ class Stage2Runner:
                         f"address=0x{address:x} sret=0x{aggregate_address:x}"
                     )
                     use_aggregate = True
+
         if not use_aggregate:
             cfunc_type = ctypes.CFUNCTYPE(
                 restype, *argtypes) if restype is not None else ctypes.CFUNCTYPE(None, *argtypes)
@@ -3052,4 +3203,5 @@ class Stage2Runner:
             if restype is None:
                 return aggregate_address
             return self._extract_sret_result(aggregate_address, aggregate_size, restype)
+
         return result

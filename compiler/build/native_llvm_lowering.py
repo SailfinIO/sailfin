@@ -5078,6 +5078,8 @@ def lower_return_instruction(function, instruction, llvm_return, bindings, local
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
         return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=[], string_constants=string_constants)
     coerced_operand = coerced.operand
+    if coerced_operand.llvm_type == "i8*":
+        current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + coerced_operand.value + ")")
     current_lines = append_string(current_lines, "  ret " + coerced_operand.llvm_type + " " + coerced_operand.value)
     if consumption != None:
         if consumption.kind == "local":
@@ -7882,10 +7884,12 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
             return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
     if target_type == "i64":
         if operand.llvm_type == "double":
-            temp_name = format_temp_name(temp_index)
-            current_lines = append_string(current_lines, "  " + temp_name + " = fptosi double " + operand.value + " to i64")
-            coerced = LLVMOperand(llvm_type="i64", value=temp_name)
-            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+            round_temp = format_temp_name(temp_index)
+            convert_temp = format_temp_name(temp_index + 1)
+            current_lines = append_string(current_lines, "  " + round_temp + " = call double @llvm.round.f64(double " + operand.value + ")")
+            current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i64")
+            coerced = LLVMOperand(llvm_type="i64", value=convert_temp)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 2, operand=coerced, diagnostics=diagnostics)
         if operand.llvm_type == "i1":
             temp_name = format_temp_name(temp_index)
             current_lines = append_string(current_lines, "  " + temp_name + " = zext i1 " + operand.value + " to i64")
