@@ -44,7 +44,11 @@
       "Bash(make bootstrap-stage2:*)",
       "Bash(tail:*)",
       "Bash(/Users/mcereal/miniconda3/bin/conda run -n sailfin make:*)",
-      "Bash(/Users/mcereal/miniconda3/bin/conda run -n sailfin pytest:*)"
+      "Bash(/Users/mcereal/miniconda3/bin/conda run -n sailfin pytest:*)",
+      "Bash(SAILFIN_STAGE2_DEBUG_LOG=/tmp/stage2_debug.log /Users/mcereal/miniconda3/bin/conda run -n sailfin pytest:*)",
+      "Bash(PYTEST_STAGE2_DEBUG=1 pytest:*)",
+      "Bash(PYTEST_STAGE2_DEBUG=1 /Users/mcereal/miniconda3/bin/conda run -n sailfin pytest:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

@@ -163,6 +163,10 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
 
         logger = debug_log
 
+        # Track total allocated memory to prevent runaway allocations
+        total_allocated = [0]  # Use list to allow modification in nested function
+        max_total_memory = 2 * 1024 * 1024 * 1024  # 2GB limit
+
         def _malloc_wrapper(size: int) -> int:
             try:
                 request = int(size)
@@ -172,14 +176,24 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
                 request = 1
 
             # Safety: check for unreasonably large allocations (> 1GB)
-            if request > 1024 * 1024 * 1024:
+            # Also check for negative or suspiciously large values that might be garbage
+            if request > 1024 * 1024 * 1024 or request < 0:
                 if logger:
                     logger(
-                        f"[stage2] malloc REJECTED: request size={request} bytes ({request // (1024*1024)} MB) exceeds limit"
+                        f"[stage2] malloc REJECTED: request size={request} bytes (out of bounds)"
                     )
                 return 0  # Return null instead of aborting
 
+            # Check if we're approaching memory limits
+            if total_allocated[0] + request > max_total_memory:
+                if logger:
+                    logger(
+                        f"[stage2] malloc REJECTED: would exceed memory limit (current={total_allocated[0] // (1024*1024)} MB, request={request // 1024} KB)"
+                    )
+                return 0
+
             result = libc_malloc(request)
+            total_allocated[0] += request
             pointer = 0 if result is None else int(result)
             if pointer != 0:
                 _LIBC_ALLOCATIONS[pointer] = request
@@ -390,13 +404,16 @@ class Stage2Runner:
         Args:
             ptr: String pointer address to keep alive
         """
-        if ptr and ptr not in [addr for addr, _ in self._string_pool]:
-            # Add to string pool to prevent GC - extract buffer from tracked addresses
-            if ptr in self._tracked_string_addresses:
-                buf_info = self._tracked_string_addresses[ptr]
-                if len(buf_info) >= 2:
-                    buf = buf_info[1]  # Buffer is second element in tuple
-                    self._string_pool.append((ptr, buf))
+        if ptr == 0:
+            return
+
+        # The string should already be tracked and in the pool from _str_to_ptr
+        # This function is mainly a no-op since strings are already kept alive
+        # But we log for debugging
+        if ptr in self._tracked_string_addresses:
+            self._debug_log(f"[stage2] mark_persistent: ptr 0x{ptr:x} already tracked")
+        else:
+            self._debug_log(f"[stage2] mark_persistent: WARNING ptr 0x{ptr:x} NOT tracked")
 
     @staticmethod
     def _detect_string_abi(lowered_modules: Sequence) -> str:
@@ -1861,6 +1878,10 @@ class Stage2Runner:
         # Helper to convert c_void_p to Python string
         def _ptr_to_str(ptr: ctypes.c_void_p | int | None) -> str:
             address = _normalise_ptr(ptr)
+            self._debug_log(
+                f"[stage2] ptr_to_str ENTER 0x{address:x} tracked={address in self._tracked_string_addresses} "
+                f"in_allocs={address in _LIBC_ALLOCATIONS}"
+            )
             if address == 0:
                 return ""
 
@@ -1949,10 +1970,71 @@ class Stage2Runner:
                     _LAST_RUNTIME_ERROR.set(error)
                 return ""
 
+            # Check if address looks like it could be a valid heap pointer
+            # On most systems, heap addresses are > 0x10000 and < 0x7fffffffffff (48-bit)
+            if address > 0x7fffffffffff:
+                message = f"runtime string pointer 0x{address:x} is suspiciously high (possible stack/garbage)"
+                self._debug_log(f"[stage2] {message}")
+                error = RuntimeError(message)
+                if _LAST_RUNTIME_ERROR.get() is None:
+                    _LAST_RUNTIME_ERROR.set(error)
+                return ""
+
+            # Check if this address might be in our known string pools
+            is_likely_valid = False
+            for buf in self._string_pool:
+                buf_addr = ctypes.cast(buf, ctypes.c_void_p).value or 0
+                if buf_addr == address:
+                    is_likely_valid = True
+                    break
+
+            if not is_likely_valid:
+                self._debug_log(
+                    f"[stage2] ptr_to_str WARNING: untracked address 0x{address:x} not in string pool or allocations"
+                )
+
+            self._debug_log(
+                f"[stage2] ptr_to_str attempting read for untracked 0x{address:x} (likely_valid={is_likely_valid})"
+            )
             # For other untracked addresses, attempt careful byte-by-byte read with size limit.
             # This is safer than c_char_p.value for very large strings or invalid pointers.
             try:
-                # Read byte-by-byte up to 10MB max to avoid ctypes size limits
+                # Try using ctypes.string_at first which is safer
+                try:
+                    # Try to read up to 1KB first to test if it's valid
+                    test_bytes = ctypes.string_at(address, 1024)
+                    # Find null terminator
+                    null_pos = test_bytes.find(b'\x00')
+                    if null_pos >= 0:
+                        raw_bytes = test_bytes[:null_pos]
+                    else:
+                        # No null terminator in first 1KB, read more
+                        max_size = 10 * 1024 * 1024
+                        full_bytes = ctypes.string_at(address, max_size)
+                        null_pos = full_bytes.find(b'\x00')
+                        if null_pos >= 0:
+                            raw_bytes = full_bytes[:null_pos]
+                        else:
+                            raw_bytes = full_bytes[:1024]  # Give up, use first 1KB
+
+                    text = raw_bytes.decode("utf-8", errors="ignore")
+                    self._tracked_string_addresses[address] = ("llvm_literal", text, len(raw_bytes))
+                    self._debug_log(
+                        f"[stage2] ptr_to_str llvm_literal 0x{address:x} size={len(raw_bytes)}"
+                    )
+                    return text
+                except (ValueError, OSError) as e:
+                    # string_at failed, this means the pointer is truly invalid
+                    self._debug_log(
+                        f"[stage2] ptr_to_str FAILED to read 0x{address:x}: {e}"
+                    )
+                    message = f"runtime string pointer 0x{address:x} is invalid (read failed: {e})"
+                    error = RuntimeError(message)
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(error)
+                    return ""
+
+                # Old byte-by-byte code (keeping as fallback, but shouldn't reach here)
                 max_size = 10 * 1024 * 1024
                 byte_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_char))
                 bytes_list = []
@@ -2369,7 +2451,8 @@ class Stage2Runner:
                 except Exception as exc:
                     if _LAST_RUNTIME_ERROR.get() is None:
                         _LAST_RUNTIME_ERROR.set(exc)
-                    return 0
+                    # Return valid empty string pointer instead of NULL to prevent cascading failures
+                    return _str_to_ptr("")
 
             return cfunc_type(_string_concat)
 
@@ -2819,6 +2902,21 @@ class Stage2Runner:
                 self._debug_log(f"[stage2] debug_marker code={int(code)}")
 
             return cfunc_type(_debug_marker)
+
+        elif symbol == "sailfin_runtime_mark_persistent":
+            cfunc_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+
+            def _mark_persistent_wrapper(ptr: ctypes.c_void_p) -> None:
+                try:
+                    address = _normalise_ptr(ptr)
+                    if address != 0:
+                        self._debug_log(f"[stage2] mark_persistent ptr=0x{address:x}")
+                        self.mark_persistent(address)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+
+            return cfunc_type(_mark_persistent_wrapper)
 
         return _build_fallback()
 
