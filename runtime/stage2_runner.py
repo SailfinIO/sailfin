@@ -138,6 +138,7 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
     "sailfin_adapter_channel_send": ("channel", (ctypes.c_void_p, ctypes.c_void_p), None),
     "sailfin_adapter_channel_receive": ("channel", (ctypes.c_void_p,), ctypes.c_void_p),
     "stage2_debug_marker": (None, (ctypes.c_longlong,), None),
+    "stage2_debug_unknown_lexeme": (None, (ctypes.c_void_p, ctypes.c_longlong), None),
 }
 
 _ACTIVE_GRANT: contextvars.ContextVar[runtime.CapabilityGrant | None] = contextvars.ContextVar(
@@ -1310,6 +1311,14 @@ class Stage2Runner:
             else:
                 ir_text = ir_text[:declare_index] + \
                     declaration + ir_text[declare_index:]
+        if "declare void @stage2_debug_unknown_lexeme(i8*, i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_unknown_lexeme(i8*, i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = ir_text[:declare_index] + \
+                    declaration + ir_text[declare_index:]
 
         start = ir_text.find("define %StatementParseResult @parse_unknown(")
         if start == -1:
@@ -1337,7 +1346,7 @@ class Stage2Runner:
             )
             body = body.replace(loop_label, loop_instrument, 1)
 
-        token_store_pattern = r"(  store %Token %t\\d+, %Token\\* %l7\\n)"
+        token_store_pattern = "(  store %Token %t\\d+, %Token\\* %l7\\n)"
         token_store_replacement = (
             r"\1"
             "  %stage2_unknown_token = load %Token, %Token* %l7\n"
@@ -1350,6 +1359,9 @@ class Stage2Runner:
             "  %stage2_unknown_depth_i64 = fptosi double %stage2_unknown_depth_value to i64\n"
             "  %stage2_unknown_depth_marker = add i64 %stage2_unknown_depth_i64, 13000\n"
             "  call void @stage2_debug_marker(i64 %stage2_unknown_depth_marker)\n"
+            "  %stage2_unknown_lexeme_ptr = extractvalue %Token %stage2_unknown_token, 1\n"
+            "  %stage2_unknown_lexeme_len = call i64 @sailfin_runtime_string_length(i8* %stage2_unknown_lexeme_ptr)\n"
+            "  call void @stage2_debug_unknown_lexeme(i8* %stage2_unknown_lexeme_ptr, i64 %stage2_unknown_lexeme_len)\n"
         )
         body, _ = re.subn(token_store_pattern,
                           token_store_replacement, body, count=1)
@@ -3142,6 +3154,37 @@ class Stage2Runner:
                 self._debug_log(f"[stage2] debug_marker code={marker_value}")
 
             return cfunc_type(_debug_marker)
+
+        elif symbol == "stage2_debug_unknown_lexeme":
+            cfunc_type = ctypes.CFUNCTYPE(
+                None, ctypes.c_void_p, ctypes.c_longlong)
+
+            def _debug_unknown_lexeme(ptr: ctypes.c_void_p, length: ctypes.c_longlong) -> None:
+                try:
+                    address = _normalise_ptr(ptr)
+                    raw_length = max(0, int(length))
+                    preview_length = min(raw_length, 256)
+                    preview_bytes = b""
+                    if address != 0 and preview_length > 0:
+                        try:
+                            preview_bytes = ctypes.string_at(
+                                address, preview_length)
+                        except (ValueError, OSError):
+                            preview_bytes = b""
+                    preview_text = preview_bytes.decode(
+                        "utf-8", errors="replace") if preview_bytes else ""
+                    safe_preview = preview_text.encode(
+                        "unicode_escape").decode("ascii", errors="ignore")
+                    truncated = raw_length > preview_length
+                    trunc_note = " [truncated]" if truncated else ""
+                    self._debug_log(
+                        f"[stage2] unknown lexeme ptr=0x{address:x} len={raw_length} preview_limit={preview_length} text=\"{safe_preview}\"{trunc_note}"
+                    )
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+
+            return cfunc_type(_debug_unknown_lexeme)
 
         elif symbol == "sailfin_runtime_mark_persistent":
             cfunc_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
