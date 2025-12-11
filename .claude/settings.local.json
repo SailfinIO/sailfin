@@ -42,7 +42,9 @@
       "Bash(timeout 180 python:*)",
       "Bash(PYTEST_STAGE1_DEBUG=1 make:*)",
       "Bash(make bootstrap-stage2:*)",
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "Bash(/Users/mcereal/miniconda3/bin/conda run -n sailfin make:*)",
+      "Bash(/Users/mcereal/miniconda3/bin/conda run -n sailfin pytest:*)"
     ],
     "deny": [],
     "ask": []

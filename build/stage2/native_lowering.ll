@@ -1,6 +1,10 @@
 ; ModuleID = 'sailfin'
 source_filename = "sailfin"
 
+%SourceSpan = type opaque
+%TypeAnnotation = type opaque
+%Expression = type opaque
+%Statement = type opaque
 %LoweredPythonResult = type { i8*, { i8**, i64 }* }
 %MatchContext = type { i8*, double, i1 }
 %LoweredCaseCondition = type { i8*, i1, i1 }
@@ -80,6 +84,175 @@ declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
+declare %LayoutContext @build_layout_context(i8*)
+declare %EmitNativeResult @emit_native(i8*)
+declare %NativeState @emit_statement(%NativeState, i8*)
+declare i8* @render_native_specifiers({ i8**, i64 }*)
+declare i8* @render_export_specifiers({ i8**, i64 }*)
+declare i8* @format_native_specifier(i8*, i8*)
+declare %NativeState @emit_span_if_present(%NativeState, %SourceSpan*)
+declare %NativeState @emit_initializer_span_if_present(%NativeState, %SourceSpan*)
+declare i8* @append_optional_type_annotation(i8*, %TypeAnnotation*)
+declare i8* @append_optional_initializer(i8*, %Expression*)
+declare i8* @format_span(i8*)
+declare %NativeState @emit_variable(%NativeState, i8*)
+declare %NativeState @emit_function(%NativeState, i8*, i8*, { i8**, i64 }*)
+declare %NativeState @emit_pipeline(%NativeState, i8*)
+declare %NativeState @emit_tool(%NativeState, i8*)
+declare %NativeState @emit_test(%NativeState, i8*)
+declare %NativeState @emit_model(%NativeState, i8*)
+declare %NativeState @emit_type_alias(%NativeState, i8*)
+declare %NativeState @emit_interface(%NativeState, i8*)
+declare %NativeState @emit_enum(%NativeState, i8*)
+declare %NativeState @emit_struct(%NativeState, i8*)
+declare %NativeState @emit_method(%NativeState, i8*)
+declare %NativeState @emit_prompt(%NativeState, i8*)
+declare %NativeState @emit_with(%NativeState, i8*)
+declare %NativeState @emit_for(%NativeState, i8*)
+declare %NativeState @emit_loop(%NativeState, i8*)
+declare %NativeState @emit_match(%NativeState, i8*)
+declare %NativeState @emit_match_case(%NativeState, i8*)
+declare %Statement* @select_inline_match_case_statement(i8*)
+declare %NativeState @emit_inline_match_case(%NativeState, i8*, i8*)
+declare i8* @format_match_case_head(i8*)
+declare i8* @format_inline_case_body(i8*)
+declare %NativeState @emit_if(%NativeState, i8*)
+declare %NativeState @emit_else_branch(%NativeState, i8*)
+declare %NativeState @emit_return(%NativeState, i8*)
+declare %NativeState @emit_expression_statement(%NativeState, i8*)
+declare %NativeState @emit_block(%NativeState, i8*)
+declare %NativeState @emit_decorators(%NativeState, { i8**, i64 }*)
+declare %NativeState @emit_signature_metadata(%NativeState, i8*)
+declare %NativeState @emit_parameter_metadata(%NativeState, { i8**, i64 }*)
+declare i8* @format_decorator(i8*)
+declare i8* @format_function_signature(i8*)
+declare i8* @format_parameters({ i8**, i64 }*)
+declare i8* @format_type_parameters({ i8**, i64 }*)
+declare i8* @format_field(i8*)
+declare i8* @format_enum_variant(i8*)
+declare %LayoutEmitResult @compute_struct_layout_lines(%LayoutContext, i8*, { i8**, i64 }*)
+declare %LayoutEmitResult @compute_enum_layout_lines(%LayoutContext, i8*)
+declare %EnumAggregateLayout @infer_enum_aggregate_layout(%LayoutContext, i8*, { %LayoutEnumVariantDefinition*, i64 }*, { i8**, i64 }*)
+declare %RecordLayoutResult @calculate_record_layout(%LayoutContext, { %LayoutFieldInput*, i64 }*, i8*, i8*, { i8**, i64 }*)
+declare %TypeLayoutInfo @analyze_type_layout(%LayoutContext, { i8**, i64 }*, i8*, i8*, i8*, i8*)
+declare { %LayoutFieldInput*, i64 }* @convert_struct_fields({ i8**, i64 }*)
+declare { %LayoutFieldInput*, i64 }* @convert_variant_fields(i8*)
+declare { %StructFieldLayoutDescriptor*, i64 }* @append_struct_field_layout({ %StructFieldLayoutDescriptor*, i64 }*, %StructFieldLayoutDescriptor)
+declare { %EnumVariantLayoutDescriptor*, i64 }* @append_enum_variant_layout({ %EnumVariantLayoutDescriptor*, i64 }*, %EnumVariantLayoutDescriptor)
+declare { %LayoutFieldInput*, i64 }* @append_layout_field_input({ %LayoutFieldInput*, i64 }*, %LayoutFieldInput)
+declare { %LayoutStructDefinition*, i64 }* @append_layout_struct_definition({ %LayoutStructDefinition*, i64 }*, %LayoutStructDefinition)
+declare { %LayoutEnumDefinition*, i64 }* @append_layout_enum_definition({ %LayoutEnumDefinition*, i64 }*, %LayoutEnumDefinition)
+declare { %LayoutEnumVariantDefinition*, i64 }* @append_layout_enum_variant_definition({ %LayoutEnumVariantDefinition*, i64 }*, %LayoutEnumVariantDefinition)
+declare { %CanonicalTypeLayout*, i64 }* @append_canonical_type_layout({ %CanonicalTypeLayout*, i64 }*, %CanonicalTypeLayout)
+declare %LayoutStructDefinition* @find_layout_struct_definition(%LayoutContext, i8*)
+declare %LayoutEnumDefinition* @find_layout_enum_definition(%LayoutContext, i8*)
+declare { %CanonicalTypeLayout*, i64 }* @canonical_type_layouts()
+declare %CanonicalTypeLayout* @lookup_canonical_type_layout(i8*)
+declare double @align_to(double, double)
+declare i1 @is_array_type(i8*)
+declare i1 @is_optional_annotation(i8*)
+declare i8* @strip_optional_suffix(i8*)
+declare i8* @format_expression(i8*)
+declare i8* @format_array_expression({ i8**, i64 }*)
+declare i8* @infer_array_element_type({ i8**, i64 }*)
+declare i8* @infer_expression_type(i8*)
+declare i8* @quote_string(i8*)
+declare i8* @escape_string_char(i8*)
+declare i1 @is_trim_char(i8*)
+declare { i8**, i64 }* @collect_entry_points(i8*)
+declare double @count_exported_symbols(i8*)
+declare { i8**, i64 }* @append_unique({ i8**, i64 }*, i8*)
+declare i1 @contains_string({ i8**, i64 }*, i8*)
+declare %NativeState @state_new(%LayoutContext)
+declare %NativeState @state_emit_line(%NativeState, i8*)
+declare %NativeState @state_emit_blank(%NativeState)
+declare %NativeState @state_push_indent(%NativeState)
+declare %NativeState @state_pop_indent(%NativeState)
+declare %NativeState @state_add_diagnostic(%NativeState, i8*)
+declare %NativeState @state_merge_diagnostics(%NativeState, { i8**, i64 }*)
+declare %NativeArtifact @generate_layout_manifest(i8*, %LayoutContext)
+declare %NativeState @emit_layout_lines(%NativeState, { i8**, i64 }*)
+declare %TextBuilder @builder_emit_line(%TextBuilder, i8*)
+declare i8* @trim_right(i8*)
+declare i8* @join_type_annotations({ i8**, i64 }*)
+declare %NativeArtifact* @select_text_artifact({ %NativeArtifact*, i64 }*)
+declare %NativeArtifact* @select_layout_manifest_artifact({ %NativeArtifact*, i64 }*)
+declare %ParseNativeResult @parse_native_artifact(i8*)
+declare %NativeSourceSpan* @parse_source_span(i8*)
+declare { %NativeFunction*, i64 }* @append_function({ %NativeFunction*, i64 }*, %NativeFunction)
+declare { %NativeBinding*, i64 }* @append_binding({ %NativeBinding*, i64 }*, %NativeBinding)
+declare { %NativeImport*, i64 }* @append_import({ %NativeImport*, i64 }*, %NativeImport)
+declare { %NativeStruct*, i64 }* @append_struct({ %NativeStruct*, i64 }*, %NativeStruct)
+declare { %NativeInterface*, i64 }* @append_interface({ %NativeInterface*, i64 }*, %NativeInterface)
+declare { %NativeEnum*, i64 }* @append_enum({ %NativeEnum*, i64 }*, %NativeEnum)
+declare { %NativeEnumVariant*, i64 }* @append_enum_variant({ %NativeEnumVariant*, i64 }*, %NativeEnumVariant)
+declare { %NativeEnumVariantField*, i64 }* @append_enum_variant_field({ %NativeEnumVariantField*, i64 }*, %NativeEnumVariantField)
+declare { %NativeStructField*, i64 }* @append_struct_field({ %NativeStructField*, i64 }*, %NativeStructField)
+declare { %NativeStructLayoutField*, i64 }* @append_struct_layout_field({ %NativeStructLayoutField*, i64 }*, %NativeStructLayoutField)
+declare double @find_enum_variant_layout({ %NativeEnumVariantLayout*, i64 }*, i8*)
+declare { %NativeEnumVariantLayout*, i64 }* @update_enum_variant_fields({ %NativeEnumVariantLayout*, i64 }*, double, %NativeStructLayoutField)
+declare %NativeFunction @append_parameter(%NativeFunction, %NativeParameter)
+declare %NativeFunction @append_instruction(%NativeFunction, %NativeInstruction)
+declare %NativeBinding @binding_from_instruction(%NativeInstruction)
+declare %NativeFunction @apply_meta(%NativeFunction, i8*)
+declare %NativeFunction @update_function_meta(%NativeFunction, i8*, { i8**, i64 }*)
+declare %InstructionGatherResult @gather_instruction({ i8**, i64 }*, double)
+declare i1 @instruction_supports_multiline(i8*)
+declare i1 @instruction_requires_continuation(%InstructionDepthState)
+declare %InstructionDepthState @initial_instruction_depth_state()
+declare %InstructionDepthState @update_instruction_depth_state(%InstructionDepthState, i8*)
+declare %InstructionParseResult @parse_instruction(i8*, %NativeSourceSpan*, %NativeSourceSpan*)
+declare %NativeInstruction @parse_case_instruction(i8*)
+declare { %NativeInstruction*, i64 }* @parse_inline_case_instruction(i8*)
+declare %NativeInstruction @parse_inline_case_body_instruction(i8*)
+declare %CaseComponents @split_case_components(i8*)
+declare %NativeImport* @parse_import_entry(i8*, i8*)
+declare { %NativeImportSpecifier*, i64 }* @parse_import_specifiers(i8*)
+declare %NativeImportSpecifier @parse_single_specifier(i8*)
+declare %StructParseResult @parse_struct_definition({ i8**, i64 }*, double)
+declare %InterfaceParseResult @parse_interface_definition({ i8**, i64 }*, double)
+declare %StructHeaderParse @parse_struct_header(i8*)
+declare %InterfaceHeaderParse @parse_interface_header(i8*)
+declare %InterfaceSignatureParse @parse_interface_signature(i8*, i8*)
+declare %HeaderNameParse @parse_header_name_and_remainder(i8*)
+declare { i8**, i64 }* @parse_type_parameter_entries(i8*)
+declare { i8**, i64 }* @parse_implements_list(i8*)
+declare { i8**, i64 }* @split_top_level_commas(i8*)
+declare double @find_matching_angle(i8*, double)
+declare double @find_matching_paren(i8*, double)
+declare %EnumParseResult @parse_enum_definition({ i8**, i64 }*, double)
+declare %NativeEnumVariant* @parse_enum_variant_line(i8*)
+declare { i8**, i64 }* @split_enum_field_entries(i8*)
+declare %NativeEnumVariantField* @parse_enum_variant_field(i8*)
+declare i8* @text_char_at(i8*, double)
+declare i8* @maybe_trim_trailing(i8*)
+declare %NativeStructField* @parse_struct_field_line(i8*)
+declare %StructLayoutHeaderParse @parse_struct_layout_header(i8*)
+declare %StructLayoutFieldParse @parse_struct_layout_field(i8*, i8*)
+declare %EnumLayoutHeaderParse @parse_enum_layout_header(i8*)
+declare %EnumLayoutVariantParse @parse_enum_variant_layout(i8*, i8*)
+declare %EnumLayoutPayloadParse @parse_enum_payload_layout(i8*, i8*)
+declare %NativeInstruction @parse_let_instruction(i8*, %NativeSourceSpan*, %NativeSourceSpan*)
+declare %BindingComponents @parse_binding_components(i8*)
+declare i8* @parse_function_name(i8*)
+declare %NativeParameter* @parse_parameter_entry(i8*, %NativeSourceSpan*)
+declare i1 @line_looks_like_parameter_entry(i8*)
+declare { i8**, i64 }* @split_parameter_entries(i8*)
+declare { i8**, i64 }* @parse_effect_list(i8*)
+declare { i8**, i64 }* @split_whitespace(i8*)
+declare %NumberParseResult @parse_decimal_number(i8*)
+declare { i8**, i64 }* @split_lines(i8*)
+declare { i8**, i64 }* @split_comma_separated(i8*)
+declare i8* @strip_generics(i8*)
+declare %LayoutManifest @parse_layout_manifest(i8*)
+declare i8* @strip_prefix(i8*, i8*)
+declare double @last_index_of(i8*, i8*)
+declare i8* @strip_quotes(i8*)
+declare { i8**, i64 }* @split_text(i8*, i8*)
+declare { %NativeParameter*, i64 }* @append_parameter_array({ %NativeParameter*, i64 }*, %NativeParameter)
+declare i1 @is_symbol_char(i8*)
+declare i8* @sanitize_symbol(i8*)
+
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
@@ -124,6 +297,8 @@ declare noalias i8* @malloc(i64)
 @.str.len4.h174361445 = private unnamed_addr constant [5 x i8] c" == \00"
 @.str.len10.h626550212 = private unnamed_addr constant [11 x i8] c"0123456789\00"
 @.str.len11.h2001621394 = private unnamed_addr constant [12 x i8] c"[lowering] \00"
+
+declare void @sailfin_runtime_mark_persistent(i8*)
 
 define %LoweredPythonResult @lower_to_python(%NativeModule %native_module) {
 block.entry:
@@ -14978,118 +15153,118 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len3.h2087924125 = private unnamed_addr constant [4 x i8] c"', \00"
-@.str.len2.h193428644 = private unnamed_addr constant [3 x i8] c"./\00"
-@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len29.h610920064 = private unnamed_addr constant [30 x i8] c"if index >= len(self.fields):\00"
-@.str.len42.h9444846 = private unnamed_addr constant [43 x i8] c"unsupported instruction emitted as comment\00"
-@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
-@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
-@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
-@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
-@.str.len26.h1984174475 = private unnamed_addr constant [27 x i8] c"raise AttributeError(item)\00"
-@.str.len4.h176216012 = private unnamed_addr constant [5 x i8] c" or \00"
 @.str.len11.h1898426375 = private unnamed_addr constant [12 x i8] c"while True:\00"
+@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
+@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
+@.str.len4.h265982546 = private unnamed_addr constant [5 x i8] c"len(\00"
+@.str.len5.h1958778164 = private unnamed_addr constant [6 x i8] c"break\00"
+@.str.len39.h2079567388 = private unnamed_addr constant [40 x i8] c"match case without active match context\00"
+@.str.len24.h2028465620 = private unnamed_addr constant [25 x i8] c"else without matching if\00"
 @.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
-@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
-@.str.len4.h270590402 = private unnamed_addr constant [5 x i8] c"pass\00"
-@.str.len4.h268720028 = private unnamed_addr constant [5 x i8] c"not \00"
-@.str.len6.h42978514 = private unnamed_addr constant [7 x i8] c"export\00"
-@.str.len32.h1370567591 = private unnamed_addr constant [33 x i8] c"endfor without matching for loop\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len11.h1779553665 = private unnamed_addr constant [12 x i8] c"# effects: \00"
-@.str.len12.h300877395 = private unnamed_addr constant [13 x i8] c"EnumInstance\00"
-@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
-@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
-@.str.len15.h1983072220 = private unnamed_addr constant [16 x i8] c"# unsupported: \00"
-@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
-@.str.len5.h2069215535 = private unnamed_addr constant [6 x i8] c"elif \00"
-@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len7.h1543377657 = private unnamed_addr constant [8 x i8] c") and (\00"
-@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
-@.str.len5.h1776141546 = private unnamed_addr constant [6 x i8] c") + (\00"
-@.str.len31.h1736570074 = private unnamed_addr constant [32 x i8] c"unterminated control-flow block\00"
-@.str.len29.h1122035900 = private unnamed_addr constant [30 x i8] c"endloop without matching loop\00"
-@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
-@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
-@.str.len20.h728584192 = private unnamed_addr constant [21 x i8] c"runtime.enum_field('\00"
-@.str.len5.h461434216 = private unnamed_addr constant [6 x i8] c"self.\00"
-@.str.len37.h314404344 = private unnamed_addr constant [38 x i8] c"endmatch without active match context\00"
-@.enum.NativeInstruction.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
-@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
+@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
+@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
 @.str.len10.h1629914700 = private unnamed_addr constant [11 x i8] c"Expression\00"
-@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
-@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
-@.str.len6.h653919037 = private unnamed_addr constant [7 x i8] c"', [])\00"
-@.str.len18.h1387621460 = private unnamed_addr constant [19 x i8] c"generated_function\00"
-@.str.len3.h2088090973 = private unnamed_addr constant [4 x i8] c", '\00"
-@.str.len4.h237997259 = private unnamed_addr constant [5 x i8] c"True\00"
-@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
-@.str.len2.h193517249 = private unnamed_addr constant [3 x i8] c"}}\00"
-@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
-@.str.len18.h1456282769 = private unnamed_addr constant [19 x i8] c"return field.value\00"
-@.str.len29.h1409903806 = private unnamed_addr constant [30 x i8] c"unterminated match expression\00"
-@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
 @.str.len4.h230767751 = private unnamed_addr constant [5 x i8] c"Noop\00"
 @.str.len8.h757831264 = private unnamed_addr constant [9 x i8] c".concat(\00"
-@.str.len41.h1804821690 = private unnamed_addr constant [42 x i8] c"# unsupported: match case without context\00"
-@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
-@.str.len22.h983476432 = private unnamed_addr constant [23 x i8] c"if field.name == item:\00"
-@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
-@.str.len2.h193515005 = private unnamed_addr constant [3 x i8] c"{{\00"
-@.str.len5.h843097466 = private unnamed_addr constant [6 x i8] c"False\00"
-@.str.len5.h468448796 = private unnamed_addr constant [6 x i8] c"=None\00"
-@.str.len5.h2069574674 = private unnamed_addr constant [6 x i8] c"else:\00"
-@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.str.len4.h259230482 = private unnamed_addr constant [5 x i8] c"for \00"
-@.str.len8.h104511138 = private unnamed_addr constant [9 x i8] c"', self.\00"
-@.str.len39.h198700275 = private unnamed_addr constant [40 x i8] c"# unsupported: endmatch without context\00"
-@.enum.NativeInstruction.Expression.variant = private unnamed_addr constant [11 x i8] c"Expression\00"
-@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len7.h919609845 = private unnamed_addr constant [8 x i8] c"import \00"
-@.str.len4.h230766299 = private unnamed_addr constant [5 x i8] c"None\00"
-@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
-@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
-@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
-@.str.len2.h193478474 = private unnamed_addr constant [3 x i8] c"\5C'\00"
-@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
-@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
-@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.str.len3.h2087691079 = private unnamed_addr constant [4 x i8] c" = \00"
-@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
-@.str.len15.h1309566598 = private unnamed_addr constant [16 x i8] c"compiler.build.\00"
-@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
-@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
-@.str.len28.h430828782 = private unnamed_addr constant [29 x i8] c"def __getattr__(self, item):\00"
-@.str.len4.h219990644 = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len22.h1038501153 = private unnamed_addr constant [23 x i8] c"runtime.struct_field('\00"
-@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
-@.str.len31.h568140000 = private unnamed_addr constant [32 x i8] c" = runtime.enum_define_variant(\00"
-@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
-@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
-@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.str.len25.h458257002 = private unnamed_addr constant [26 x i8] c"endif without matching if\00"
-@.str.len5.h1503489441 = private unnamed_addr constant [6 x i8] c" and \00"
+@.str.len7.h1543377657 = private unnamed_addr constant [8 x i8] c") and (\00"
 @.str.len25.h117462910 = private unnamed_addr constant [26 x i8] c"runtime.enum_instantiate(\00"
-@.str.len4.h265982546 = private unnamed_addr constant [5 x i8] c"len(\00"
-@.str.len24.h2028465620 = private unnamed_addr constant [25 x i8] c"else without matching if\00"
-@.str.len11.h1460619898 = private unnamed_addr constant [12 x i8] c" (pattern: \00"
-@.str.len10.h1977847647 = private unnamed_addr constant [11 x i8] c"index += 1\00"
-@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
-@.str.len4.h175996034 = private unnamed_addr constant [5 x i8] c" in \00"
-@.str.len39.h2079567388 = private unnamed_addr constant [40 x i8] c"match case without active match context\00"
-@.str.len9.h320851598 = private unnamed_addr constant [10 x i8] c"index = 0\00"
-@.enum.NativeInstruction.Loop.variant = private unnamed_addr constant [5 x i8] c"Loop\00"
-@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
-@.str.len8.h2085806463 = private unnamed_addr constant [9 x i8] c"runtime/\00"
-@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
-@.str.len26.h1088202076 = private unnamed_addr constant [27 x i8] c"field = self.fields[index]\00"
-@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
-@.str.len5.h1958778164 = private unnamed_addr constant [6 x i8] c"break\00"
-@.str.len3.h2090359129 = private unnamed_addr constant [4 x i8] c"if \00"
+@.str.len3.h2087924125 = private unnamed_addr constant [4 x i8] c"', \00"
+@.str.len29.h610920064 = private unnamed_addr constant [30 x i8] c"if index >= len(self.fields):\00"
 @.str.len6.h536277508 = private unnamed_addr constant [7 x i8] c"Return\00"
+@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
+@.str.len25.h458257002 = private unnamed_addr constant [26 x i8] c"endif without matching if\00"
+@.str.len2.h193428644 = private unnamed_addr constant [3 x i8] c"./\00"
+@.enum.NativeInstruction.Expression.variant = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
+@.str.len20.h728584192 = private unnamed_addr constant [21 x i8] c"runtime.enum_field('\00"
+@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
+@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
+@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len4.h176216012 = private unnamed_addr constant [5 x i8] c" or \00"
+@.str.len29.h1409903806 = private unnamed_addr constant [30 x i8] c"unterminated match expression\00"
+@.str.len3.h2088090973 = private unnamed_addr constant [4 x i8] c", '\00"
+@.str.len8.h2085806463 = private unnamed_addr constant [9 x i8] c"runtime/\00"
+@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
+@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
+@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len11.h1779553665 = private unnamed_addr constant [12 x i8] c"# effects: \00"
+@.str.len4.h268720028 = private unnamed_addr constant [5 x i8] c"not \00"
+@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
+@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
+@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
+@.str.len31.h1736570074 = private unnamed_addr constant [32 x i8] c"unterminated control-flow block\00"
+@.str.len2.h193517249 = private unnamed_addr constant [3 x i8] c"}}\00"
+@.str.len5.h1776141546 = private unnamed_addr constant [6 x i8] c") + (\00"
+@.str.len12.h300877395 = private unnamed_addr constant [13 x i8] c"EnumInstance\00"
+@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
+@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
+@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
+@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
+@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.str.len2.h193478474 = private unnamed_addr constant [3 x i8] c"\5C'\00"
+@.enum.NativeInstruction.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len42.h9444846 = private unnamed_addr constant [43 x i8] c"unsupported instruction emitted as comment\00"
+@.str.len5.h2069215535 = private unnamed_addr constant [6 x i8] c"elif \00"
+@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
+@.str.len9.h320851598 = private unnamed_addr constant [10 x i8] c"index = 0\00"
+@.str.len2.h193515005 = private unnamed_addr constant [3 x i8] c"{{\00"
+@.str.len10.h1977847647 = private unnamed_addr constant [11 x i8] c"index += 1\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
+@.str.len26.h1088202076 = private unnamed_addr constant [27 x i8] c"field = self.fields[index]\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
+@.str.len7.h919609845 = private unnamed_addr constant [8 x i8] c"import \00"
+@.str.len31.h568140000 = private unnamed_addr constant [32 x i8] c" = runtime.enum_define_variant(\00"
+@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
+@.str.len41.h1804821690 = private unnamed_addr constant [42 x i8] c"# unsupported: match case without context\00"
+@.str.len15.h1309566598 = private unnamed_addr constant [16 x i8] c"compiler.build.\00"
+@.str.len4.h230766299 = private unnamed_addr constant [5 x i8] c"None\00"
+@.str.len3.h2087691079 = private unnamed_addr constant [4 x i8] c" = \00"
+@.str.len28.h430828782 = private unnamed_addr constant [29 x i8] c"def __getattr__(self, item):\00"
+@.enum.NativeInstruction.Loop.variant = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.str.len5.h2069574674 = private unnamed_addr constant [6 x i8] c"else:\00"
+@.str.len3.h2090359129 = private unnamed_addr constant [4 x i8] c"if \00"
+@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
+@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
+@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
+@.str.len6.h653919037 = private unnamed_addr constant [7 x i8] c"', [])\00"
+@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len4.h219990644 = private unnamed_addr constant [5 x i8] c"Else\00"
+@.str.len29.h1122035900 = private unnamed_addr constant [30 x i8] c"endloop without matching loop\00"
+@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
+@.str.len5.h461434216 = private unnamed_addr constant [6 x i8] c"self.\00"
+@.str.len18.h1387621460 = private unnamed_addr constant [19 x i8] c"generated_function\00"
+@.str.len4.h175996034 = private unnamed_addr constant [5 x i8] c" in \00"
+@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
+@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
+@.str.len4.h237997259 = private unnamed_addr constant [5 x i8] c"True\00"
+@.str.len5.h1503489441 = private unnamed_addr constant [6 x i8] c" and \00"
+@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len5.h468448796 = private unnamed_addr constant [6 x i8] c"=None\00"
+@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
+@.str.len26.h1984174475 = private unnamed_addr constant [27 x i8] c"raise AttributeError(item)\00"
+@.str.len32.h1370567591 = private unnamed_addr constant [33 x i8] c"endfor without matching for loop\00"
+@.str.len4.h270590402 = private unnamed_addr constant [5 x i8] c"pass\00"
+@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.str.len11.h1460619898 = private unnamed_addr constant [12 x i8] c" (pattern: \00"
+@.str.len37.h314404344 = private unnamed_addr constant [38 x i8] c"endmatch without active match context\00"
+@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
+@.str.len6.h42978514 = private unnamed_addr constant [7 x i8] c"export\00"
+@.str.len5.h843097466 = private unnamed_addr constant [6 x i8] c"False\00"
+@.str.len15.h1983072220 = private unnamed_addr constant [16 x i8] c"# unsupported: \00"
+@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.str.len39.h198700275 = private unnamed_addr constant [40 x i8] c"# unsupported: endmatch without context\00"
+@.str.len22.h983476432 = private unnamed_addr constant [23 x i8] c"if field.name == item:\00"
+@.str.len22.h1038501153 = private unnamed_addr constant [23 x i8] c"runtime.struct_field('\00"
+@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.str.len8.h104511138 = private unnamed_addr constant [9 x i8] c"', self.\00"
+@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
+@.str.len4.h259230482 = private unnamed_addr constant [5 x i8] c"for \00"
+@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
+@.str.len18.h1456282769 = private unnamed_addr constant [19 x i8] c"return field.value\00"

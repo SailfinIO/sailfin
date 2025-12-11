@@ -36,6 +36,8 @@ declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare i1 @strings_equal(i8*, i8*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
+declare %Token @eof_token(double, double)
+
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**

@@ -1,6 +1,8 @@
 ; ModuleID = 'sailfin'
 source_filename = "sailfin"
 
+%LoweredLLVMResult = type opaque
+%NativeModule = type opaque
 %SelfHostCheckResult = type { i1, double, double, { %ModuleDiagnostics**, i64 }*, { i8**, i64 }* }
 %CompiledModule = type { i8*, i8* }
 %ModuleDiagnostics = type { i8*, { i8**, i64 }*, i1 }
@@ -14,6 +16,37 @@ declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare i1 @strings_equal(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
+
+declare i8* @compile_to_sailfin(i8*)
+declare i8* @compile_to_native(i8*)
+declare i8* @compile_to_native_python(i8*)
+declare i8* @compile_to_native_llvm(i8*)
+declare %LLVMCompilationResult @compile_to_native_llvm_full(i8*)
+declare i8* @compile_to_native_llvm_with_context(i8*, { i8**, i64 }*, { i8**, i64 }*)
+declare i8* @compile_to_native_llvm_with_manifests(i8*, { i8**, i64 }*)
+declare void @main()
+declare %ProjectCompilation @compile_project({ i8**, i64 }*)
+declare %ModuleCompilationResult @compile_source_at_path(i8*)
+declare { i8**, i64 }* @format_typecheck_diagnostics({ i8**, i64 }*, i8*)
+declare void @report_typecheck_errors({ i8**, i64 }*, i8*)
+declare i8* @format_typecheck_diagnostic(i8*, { i8**, i64 }*, double)
+declare { i8**, i64 }* @split_source_lines(i8*)
+declare i8* @build_pointer_line(double, i8*, i8*)
+declare i8* @join_lines({ i8**, i64 }*)
+declare { i8**, i64 }* @append_string({ i8**, i64 }*, i8*)
+declare i8* @number_to_string(double)
+declare i8* @empty_native_module()
+declare i1 @has_prefix(i8*, i8*)
+declare i1 @needs_python_fallback(i8*)
+declare i1 @string_contains(i8*, i8*)
+declare i8* @strip_needs_python_fallback_literals(i8*)
+declare i8* @strip_python_string_literals(i8*)
+declare double @python_quote_length(i8*, double, i8*)
+declare double @skip_python_string_literal(i8*, double, i8*, double)
+declare i8* @repeat_character(i8*, double)
+declare double @find_substring(i8*, i8*)
+declare double @find_substring_from(i8*, i8*, double)
+declare double @advance_to_line_end(i8*, double)
 
 declare noalias i8* @malloc(i64)
 

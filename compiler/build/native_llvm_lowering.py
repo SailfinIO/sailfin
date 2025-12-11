@@ -986,7 +986,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if len(trait_lines) > 0:
         lines = (lines) + (trait_lines)
         lines = append_string(lines, "")
-    struct_type_lines = render_struct_type_definitions(type_context)
+    struct_type_lines = render_struct_type_definitions(type_context, context_functions)
     if len(struct_type_lines) > 0:
         lines = (lines) + (struct_type_lines)
         lines = append_string(lines, "")
@@ -1006,9 +1006,13 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if len(vtable_const_lines) > 0:
         lines = (lines) + (vtable_const_lines)
         lines = append_string(lines, "")
-    helper_declarations = render_runtime_helper_declarations(runtime_helpers)
+    helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions)
     if len(helper_declarations) > 0:
         lines = (lines) + (helper_declarations)
+        lines = append_string(lines, "")
+    imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context)
+    if len(imported_declarations) > 0:
+        lines = (lines) + (imported_declarations)
         lines = append_string(lines, "")
     lines = append_string(lines, "declare noalias i8* @malloc(i64)")
     lines = append_string(lines, "")
@@ -1124,9 +1128,16 @@ def render_trait_metadata_comments(metadata):
     lines = append_string(lines, "; -----------------------------------------------")
     return lines
 
-def render_runtime_helper_declarations(used_targets):
+def render_runtime_helper_declarations(used_targets, local_functions):
     if len(used_targets) == 0:
         return []
+    local_symbols = []
+    local_index = 0
+    while True:
+        if local_index >= len(local_functions):
+            break
+        local_symbols = append_string(local_symbols, sanitize_symbol(local_functions[local_index].name))
+        local_index += 1
     lines = []
     descriptors = runtime_helper_descriptors()
     index = 0
@@ -1135,6 +1146,9 @@ def render_runtime_helper_declarations(used_targets):
             break
         descriptor = descriptors[index]
         if string_array_contains(used_targets, descriptor.target):
+            if string_array_contains(local_symbols, descriptor.symbol):
+                index += 1
+                continue
             if len(descriptor.effects) > 0:
                 effects_text = join_with_separator(descriptor.effects, ", ")
                 lines = append_string(lines, "; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]")
@@ -1143,6 +1157,47 @@ def render_runtime_helper_declarations(used_targets):
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ")
             line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")"
             lines = append_string(lines, line)
+        index += 1
+    return lines
+
+def render_imported_function_declarations(imported_functions, local_functions, context):
+    if len(imported_functions) == 0:
+        return []
+    helper_descriptors = runtime_helper_descriptors()
+    helper_symbols = []
+    helper_index = 0
+    while True:
+        if helper_index >= len(helper_descriptors):
+            break
+        helper_symbols = append_string(helper_symbols, helper_descriptors[helper_index].symbol)
+        helper_index += 1
+    local_symbols = []
+    local_index = 0
+    while True:
+        if local_index >= len(local_functions):
+            break
+        local_symbols = append_string(local_symbols, sanitize_symbol(local_functions[local_index].name))
+        local_index += 1
+    lines = []
+    emitted_declarations = []
+    index = 0
+    while True:
+        if index >= len(imported_functions):
+            break
+        function = imported_functions[index]
+        sanitized_name = sanitize_symbol(function.name)
+        if string_array_contains(helper_symbols, sanitized_name)  or  string_array_contains(local_symbols, sanitized_name):
+            index += 1
+            continue
+        if string_array_contains(emitted_declarations, sanitized_name):
+            index += 1
+            continue
+        emitted_declarations = append_string(emitted_declarations, sanitized_name)
+        return_type = map_return_type(context, function.return_type)
+        param_types = collect_parameter_types(context, function.parameters)
+        param_text = join_with_separator(param_types, ", ")
+        line = "declare " + return_type + " @" + sanitized_name + "(" + param_text + ")"
+        lines = append_string(lines, line)
         index += 1
     return lines
 
@@ -1353,13 +1408,125 @@ def flatten_struct_methods(structs):
         index += 1
     return result
 
-def render_struct_type_definitions(context):
-    lines = []
+def extract_struct_type_from_llvm(llvm_type):
+    if len(llvm_type) == 0:
+        return ""
+    result = ""
     index = 0
+    while True:
+        if index >= len(llvm_type):
+            break
+        ch = substring(llvm_type, index, index + 1)
+        if ch == "%":
+            end_index = index + 1
+            while True:
+                if end_index >= len(llvm_type):
+                    break
+                end_ch = substring(llvm_type, end_index, end_index + 1)
+                if end_ch == " "  or  end_ch == ","  or  end_ch == "*"  or  end_ch == "}"  or  end_ch == ">":
+                    break
+                end_index += 1
+            if end_index > index + 1:
+                result = substring(llvm_type, index, end_index)
+                break
+        index += 1
+    return result
+
+def render_struct_type_definitions(context, functions):
+    lines = []
+    referenced_types = []
+    struct_index = 0
+    while True:
+        if struct_index >= len(context.structs):
+            break
+        info = context.structs[struct_index]
+        field_index = 0
+        while True:
+            if field_index >= len(info.fields):
+                break
+            field_type = info.fields[field_index].llvm_type
+            extracted = extract_struct_type_from_llvm(field_type)
+            if len(extracted) > 0  and  not string_array_contains(referenced_types, extracted):
+                referenced_types = append_string(referenced_types, extracted)
+            field_index += 1
+        struct_index += 1
+    enum_index = 0
+    while True:
+        if enum_index >= len(context.enums):
+            break
+        enum_info = context.enums[enum_index]
+        variant_index = 0
+        while True:
+            if variant_index >= len(enum_info.variants):
+                break
+            variant = enum_info.variants[variant_index]
+            variant_field_index = 0
+            while True:
+                if variant_field_index >= len(variant.fields):
+                    break
+                field_type = variant.fields[variant_field_index].llvm_type
+                extracted = extract_struct_type_from_llvm(field_type)
+                if len(extracted) > 0  and  not string_array_contains(referenced_types, extracted):
+                    referenced_types = append_string(referenced_types, extracted)
+                variant_field_index += 1
+            variant_index += 1
+        enum_index += 1
+    func_index = 0
+    while True:
+        if func_index >= len(functions):
+            break
+        func = functions[func_index]
+        return_llvm_type = map_return_type(context, func.return_type)
+        extracted_return = extract_struct_type_from_llvm(return_llvm_type)
+        if len(extracted_return) > 0  and  not string_array_contains(referenced_types, extracted_return):
+            referenced_types = append_string(referenced_types, extracted_return)
+        param_index = 0
+        while True:
+            if param_index >= len(func.parameters):
+                break
+            param_llvm_type = map_parameter_type(context, func.parameters[param_index].type_annotation)
+            extracted_param = extract_struct_type_from_llvm(param_llvm_type)
+            if len(extracted_param) > 0  and  not string_array_contains(referenced_types, extracted_param):
+                referenced_types = append_string(referenced_types, extracted_param)
+            param_index += 1
+        func_index += 1
+    ref_index = 0
+    while True:
+        if ref_index >= len(referenced_types):
+            break
+        ref_type = referenced_types[ref_index]
+        is_defined = False
+        check_index = 0
+        while True:
+            if check_index >= len(context.structs):
+                break
+            if context.structs[check_index].llvm_name == ref_type:
+                is_defined = True
+                break
+            check_index += 1
+        if not is_defined:
+            check_index = 0
+            while True:
+                if check_index >= len(context.enums):
+                    break
+                enum_llvm_name = "%" + sanitize_symbol(context.enums[check_index].name)
+                if enum_llvm_name == ref_type:
+                    is_defined = True
+                    break
+                check_index += 1
+        if not is_defined:
+            lines = append_string(lines, ref_type + " = type opaque")
+        ref_index += 1
+    index = 0
+    emitted_types = []
     while True:
         if index >= len(context.structs):
             break
         info = context.structs[index]
+        if string_array_contains(emitted_types, info.llvm_name):
+            index += 1
+            continue
+        emitted_types = append_string(emitted_types, info.llvm_name)
         field_types = []
         field_index = 0
         while True:
@@ -1378,11 +1545,17 @@ def render_struct_type_definitions(context):
 
 def render_enum_type_definitions(context):
     lines = []
+    emitted_types = []
     index = 0
     while True:
         if index >= len(context.enums):
             break
         enum_info = context.enums[index]
+        enum_llvm_name = "%" + sanitize_symbol(enum_info.name)
+        if string_array_contains(emitted_types, enum_llvm_name):
+            index += 1
+            continue
+        emitted_types = append_string(emitted_types, enum_llvm_name)
         llvm_tag_type = "i32"
         if enum_info.tag_type == "i8":
             llvm_tag_type = "i8"
@@ -2369,6 +2542,7 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="append_string", symbol="sailfin_runtime_append_string", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="concat", symbol="sailfin_runtime_concat", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "{ i8**, i64 }*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="get_field", symbol="sailfin_runtime_get_field", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="mark_persistent", symbol="sailfin_runtime_mark_persistent", return_type="void", parameter_types=["i8*"], effects=[]))
     return descriptors
 
 def append_runtime_helper(values, value):
@@ -7827,6 +8001,15 @@ def comparison_predicate_for_symbol(symbol, llvm_type):
             return "icmp eq"
         if symbol == "!=":
             return "icmp ne"
+        if llvm_type == "i8*":
+            if symbol == "<":
+                return "icmp ult"
+            if symbol == "<=":
+                return "icmp ule"
+            if symbol == ">":
+                return "icmp ugt"
+            if symbol == ">=":
+                return "icmp uge"
         return ""
     return ""
 

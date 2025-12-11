@@ -15,6 +15,11 @@ declare double @char_code(i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
 
+declare %Token @eof_token(double, double)
+declare i8* @char_at(i8*, double)
+declare i1 @is_symbol_char(i8*)
+declare i8* @sanitize_symbol(i8*)
+
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
@@ -28,6 +33,8 @@ declare noalias i8* @malloc(i64)
 @.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
 @.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
 @.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
+
+declare void @sailfin_runtime_mark_persistent(i8*)
 
 define { %Token*, i64 }* @lex(i8* %source) {
 block.entry:
@@ -2159,6 +2166,6 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
+@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
 @.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
-@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
