@@ -16256,223 +16256,223 @@
     eval let mut current_lines -> string[] = lines
     .span 11338 5 11338 49
     eval let mut current_temp -> number = temp_index
-    .span 11340 5 11340 77
+    .span 11339 5 11339 90
+    eval let mut collected_string_constants -> StringConstant[] = empty_string_constant_set()
+    .span 11341 5 11341 77
     eval let enum_info = resolve_enum_info_for_literal(context, parse.enum_name)
     .if enum_info == null
         .if parse.enum_name.length > 0
-            .span 11343 13 11343 135
+            .span 11344 13 11344 135
             eval diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum `" + parse.enum_name + "`")
         .else
-            .span 11345 13 11345 109
+            .span 11346 13 11346 109
             eval diagnostics = append_string(diagnostics, "llvm lowering: enum literal references unknown enum")
         .endif
-        .span 11347 5 11347 167
+        .span 11348 5 11348 167
         ret ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants }
     .endif
-    .span 11350 5 11350 81
+    .span 11351 5 11351 81
     eval let variant_info = resolve_enum_variant_info(enum_info, parse.variant_name)
     .if variant_info == null
-        .span 11352 9 11352 143
+        .span 11353 9 11353 143
         eval diagnostics = append_string(diagnostics, "llvm lowering: enum `" + parse.enum_name + "` has no variant `" + parse.variant_name + "`")
-        .span 11353 5 11353 167
+        .span 11354 5 11354 167
         ret ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants }
     .endif
-    .span 11357 5 11357 45
+    .span 11358 5 11358 45
     eval let mut tag_llvm_type -> string = "i32"
     .if enum_info.tag_type == "i8"
-        .span 11359 9 11359 30
+        .span 11360 9 11360 30
         eval tag_llvm_type = "i8"
     .endif
     .if enum_info.tag_type == "i16"
-        .span 11362 9 11362 31
+        .span 11363 9 11363 31
         eval tag_llvm_type = "i16"
     .endif
     .if enum_info.tag_type == "i32"
-        .span 11365 9 11365 31
+        .span 11366 9 11366 31
         eval tag_llvm_type = "i32"
     .endif
     .if enum_info.tag_type == "i64"
-        .span 11368 9 11368 31
+        .span 11369 9 11369 31
         eval tag_llvm_type = "i64"
     .endif
-    .span 11373 5 11373 44
+    .span 11374 5 11374 44
     eval let mut enum_value -> string = "undef"
-    .span 11374 5 11374 43
+    .span 11375 5 11375 43
     eval let mut enum_alloca -> string? = null
     .if variant_info.fields.length > 0
-        .span 11378 9 11378 58
+        .span 11379 9 11379 58
         eval let alloca_temp = format_temp_name(current_temp)
-        .span 11379 9 11379 27
+        .span 11380 9 11380 27
         eval current_temp += 1
-        .span 11380 9 11380 111
+        .span 11381 9 11381 111
         eval current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + enum_info.llvm_name)
-        .span 11381 9 11381 35
+        .span 11382 9 11382 35
         eval enum_alloca = alloca_temp
-        .span 11384 9 11384 59
+        .span 11385 9 11385 59
         eval let tag_ptr_temp = format_temp_name(current_temp)
-        .span 11385 9 11385 27
+        .span 11386 9 11386 27
         eval current_temp += 1
-        .span 11386 9 11386 197
+        .span 11387 9 11387 197
         eval current_lines = append_string(current_lines, "  " + tag_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_temp + ", i32 0, i32 0")
-        .span 11387 9 11387 170
+        .span 11388 9 11388 170
         eval current_lines = append_string(current_lines, "  store " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", " + tag_llvm_type + "* " + tag_ptr_temp)
     .else
-        .span 11390 9 11390 55
+        .span 11391 9 11391 55
         eval let tag_temp = format_temp_name(current_temp)
-        .span 11391 9 11391 206
+        .span 11392 9 11392 206
         eval current_lines = append_string(current_lines, "  " + tag_temp + " = insertvalue " + enum_info.llvm_name + " " + enum_value + ", " + tag_llvm_type + " " + number_to_string(variant_info.tag) + ", 0")
-        .span 11392 9 11392 27
+        .span 11393 9 11393 27
         eval current_temp += 1
-        .span 11393 9 11393 31
+        .span 11394 9 11394 31
         eval enum_value = tag_temp
     .endif
     .if variant_info.fields.length > 0
-        .span 11399 9 11399 38
+        .span 11400 9 11400 38
         eval let alloca_ptr = enum_alloca
-        .span 11400 9 11400 45
+        .span 11401 9 11401 45
         eval let mut used_names -> string[] = []
-        .span 11401 9 11401 43
+        .span 11402 9 11402 43
         eval let mut field_index -> number = 0
         .loop
             .if field_index >= variant_info.fields.length
                 break
             .endif
-            .span 11406 13 11406 61
+            .span 11407 13 11407 61
             eval let expected = variant_info.fields[field_index]
-            .span 11407 13 11407 50
+            .span 11408 13 11408 50
             eval let mut literal_index -> number = -1
-            .span 11408 13 11408 56
+            .span 11409 13 11409 56
             eval let mut literal_lookup_index -> number = 0
             .loop
                 .if literal_lookup_index >= parse.fields.length
                     break
                 .endif
                 .if parse.fields[literal_lookup_index].name == expected.name
-                    .span 11414 21 11414 58
+                    .span 11415 21 11415 58
                     eval literal_index = literal_lookup_index
                     break
                 .endif
-                .span 11417 17 11417 43
+                .span 11418 17 11418 43
                 eval literal_lookup_index += 1
             .endloop
             .if literal_index >= 0
-                .span 11421 17 11421 65
+                .span 11422 17 11422 65
                 eval let literal_field = parse.fields[literal_index]
-                .span 11422 17 11422 156
+                .span 11423 17 11423 156
                 eval let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type)
-                .span 11423 17 11423 71
+                .span 11424 17 11424 71
                 eval diagnostics = diagnostics.concat(lowered.diagnostics)
-                .span 11424 17 11424 47
+                .span 11425 17 11425 47
                 eval current_lines = lowered.lines
-                .span 11425 17 11425 51
+                .span 11426 17 11426 51
                 eval current_temp = lowered.temp_index
                 .if lowered.operand != null
-                    .span 11427 21 11427 61
+                    .span 11428 21 11428 61
                     eval let mut field_operand = lowered.operand
                     .if ends_with_pointer_suffix(expected.llvm_type) && !ends_with_pointer_suffix(field_operand.llvm_type)
-                        .span 11429 25 11429 132
+                        .span 11430 25 11430 132
                         eval let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context)
-                        .span 11430 25 11430 77
+                        .span 11431 25 11431 77
                         eval diagnostics = diagnostics.concat(boxed.diagnostics)
-                        .span 11431 25 11431 53
+                        .span 11432 25 11432 53
                         eval current_lines = boxed.lines
-                        .span 11432 25 11432 57
+                        .span 11433 25 11433 57
                         eval current_temp = boxed.temp_index
                         .if boxed.operand != null
-                            .span 11434 29 11434 59
+                            .span 11435 29 11435 59
                             eval field_operand = boxed.operand
                         .endif
                     .endif
-                    .span 11437 21 11437 122
+                    .span 11438 21 11438 122
                     eval let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines)
-                    .span 11438 21 11438 75
+                    .span 11439 21 11439 75
                     eval diagnostics = diagnostics.concat(coerced.diagnostics)
-                    .span 11439 21 11439 51
+                    .span 11440 21 11440 51
                     eval current_lines = coerced.lines
-                    .span 11440 21 11440 55
+                    .span 11441 21 11441 55
                     eval current_temp = coerced.temp_index
                     .if coerced.operand != null && alloca_ptr != null
-                        .span 11443 25 11443 79
+                        .span 11444 25 11444 79
                         eval let payload_ptr_temp = format_temp_name(current_temp)
-                        .span 11444 25 11444 43
+                        .span 11445 25 11445 43
                         eval current_temp += 1
-                        .span 11445 25 11445 216
+                        .span 11446 25 11446 216
                         eval current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 1")
-                        .span 11448 25 11448 82
+                        .span 11449 25 11449 82
                         eval let byte_array_ptr_temp = format_temp_name(current_temp)
-                        .span 11449 25 11449 43
+                        .span 11450 25 11450 43
                         eval current_temp += 1
-                        .span 11450 25 11450 197
+                        .span 11451 25 11451 197
                         eval current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*")
-                        .span 11454 25 11454 93
+                        .span 11455 25 11455 93
                         eval let field_absolute_offset = variant_info.fields[field_index].offset
-                        .span 11455 25 11455 99
+                        .span 11456 25 11456 99
                         eval let field_offset_in_payload = field_absolute_offset - variant_info.offset
-                        .span 11456 25 11456 85
+                        .span 11457 25 11457 85
                         eval let mut field_byte_ptr_temp -> string = byte_array_ptr_temp
                         .if field_offset_in_payload > 0
-                            .span 11458 29 11458 82
+                            .span 11459 29 11459 82
                             eval let offset_ptr_temp = format_temp_name(current_temp)
-                            .span 11459 29 11459 47
+                            .span 11460 29 11460 47
                             eval current_temp += 1
-                            .span 11460 29 11460 214
+                            .span 11461 29 11461 214
                             eval current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
-                            .span 11461 29 11461 67
+                            .span 11462 29 11462 67
                             eval field_byte_ptr_temp = offset_ptr_temp
                         .endif
-                        .span 11465 25 11465 77
+                        .span 11466 25 11466 77
                         eval let field_ptr_temp = format_temp_name(current_temp)
-                        .span 11466 25 11466 43
+                        .span 11467 25 11467 43
                         eval current_temp += 1
-                        .span 11467 25 11467 171
+                        .span 11468 25 11468 171
                         eval current_lines = append_string(current_lines, "  " + field_ptr_temp + " = bitcast i8* " + field_byte_ptr_temp + " to " + expected.llvm_type + "*")
-                        .span 11470 25 11470 185
+                        .span 11471 25 11471 185
                         eval current_lines = append_string(current_lines, "  store " + expected.llvm_type + " " + coerced.operand.value + ", " + expected.llvm_type + "* " + field_ptr_temp)
                     .endif
                 .endif
                 .if !string_array_contains(used_names, expected.name)
-                    .span 11474 21 11474 75
+                    .span 11475 21 11475 75
                     eval used_names = append_string(used_names, expected.name)
                 .endif
             .else
-                .span 11477 17 11477 184
+                .span 11478 17 11478 184
                 eval diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` missing field `" + expected.name + "`")
             .endif
-            .span 11480 13 11480 30
+            .span 11481 13 11481 30
             eval field_index += 1
         .endloop
-        .span 11483 9 11483 43
+        .span 11484 9 11484 43
         eval let mut extra_index -> number = 0
         .loop
             .if extra_index >= parse.fields.length
                 break
             .endif
-            .span 11488 13 11488 59
+            .span 11489 13 11489 59
             eval let literal_field = parse.fields[extra_index]
             .if !string_array_contains(used_names, literal_field.name)
-                .span 11490 17 11490 198
+                .span 11491 17 11491 198
                 eval diagnostics = append_string(diagnostics, "llvm lowering: enum literal for `" + parse.enum_name + "." + parse.variant_name + "` provides unknown field `" + literal_field.name + "`")
             .endif
-            .span 11492 13 11492 30
+            .span 11493 13 11493 30
             eval extra_index += 1
         .endloop
         .if alloca_ptr != null
-            .span 11497 13 11497 60
+            .span 11498 13 11498 60
             eval let load_temp = format_temp_name(current_temp)
-            .span 11498 13 11498 31
+            .span 11499 13 11499 31
             eval current_temp += 1
-            .span 11499 13 11499 160
+            .span 11500 13 11500 160
             eval current_lines = append_string(current_lines, "  " + load_temp + " = load " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr)
-            .span 11500 13 11500 36
+            .span 11501 13 11501 36
             eval enum_value = load_temp
         .endif
     .endif
-    .span 11504 5 11504 85
+    .span 11505 5 11505 85
     eval let operand = LLVMOperand { llvm_type: enum_info.llvm_name, value: enum_value }
-    .span 11505 5 11505 55
-    eval let empty_constants = empty_string_constant_set()
-    .span 11506 5 11506 159
-    ret ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: empty_constants }
+    .span 11506 5 11506 170
+    ret ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants }
 .endfn
 
 .fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission

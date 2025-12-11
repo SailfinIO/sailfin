@@ -11336,6 +11336,7 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
     let mut diagnostics -> string[] = parse.diagnostics;
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     let enum_info = resolve_enum_info_for_literal(context, parse.enum_name);
     if enum_info == null {
@@ -11502,8 +11503,7 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
     }
 
     let operand = LLVMOperand { llvm_type: enum_info.llvm_name, value: enum_value };
-    let empty_constants = empty_string_constant_set();
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
 fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission {

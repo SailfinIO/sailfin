@@ -7791,6 +7791,7 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
     diagnostics = parse.diagnostics
     current_lines = lines
     current_temp = temp_index
+    collected_string_constants = empty_string_constant_set()
     enum_info = resolve_enum_info_for_literal(context, parse.enum_name)
     if enum_info == None:
         if len(parse.enum_name) > 0:
@@ -7901,8 +7902,7 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
             current_lines = append_string(current_lines, "  " + load_temp + " = load " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr)
             enum_value = load_temp
     operand = LLVMOperand(llvm_type=enum_info.llvm_name, value=enum_value)
-    empty_constants = empty_string_constant_set()
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
 
 def emit_comparison_instruction(symbol, left_operand, right_operand, temp_index, lines):
     diagnostics = []
