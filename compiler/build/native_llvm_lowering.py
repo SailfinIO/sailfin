@@ -5533,6 +5533,28 @@ def lower_struct_array_concat(lhs, rhs, element_type, lines, temp_index):
     result_operand = LLVMOperand(llvm_type=lhs.llvm_type, value=new_struct_ptr)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=result_operand, diagnostics=diagnostics, string_constants=[])
 
+def find_top_level_comma_in_llvm_type(text):
+    brace_depth = 0
+    index = 0
+    while True:
+        if index >= len(text):
+            break
+        ch = text[index]
+        if ch == "{":
+            brace_depth += 1
+            index += 1
+            continue
+        if ch == "}":
+            if brace_depth > 0:
+                brace_depth -= 1
+            index += 1
+            continue
+        if ch == ",":
+            if brace_depth == 0:
+                return index
+        index += 1
+    return -1
+
 def array_pointer_element_type(llvm_type):
     trimmed = trim_text(llvm_type)
     if len(trimmed) == 0:
@@ -5549,7 +5571,7 @@ def array_pointer_element_type(llvm_type):
     inner = trim_text(substring(without_pointer, 1, len(without_pointer) - 1))
     if len(inner) == 0:
         return ""
-    comma_index = index_of(inner, ",")
+    comma_index = find_top_level_comma_in_llvm_type(inner)
     if comma_index < 0:
         return ""
     first_segment = trim_text(substring(inner, 0, comma_index))

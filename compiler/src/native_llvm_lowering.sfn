@@ -8166,6 +8166,39 @@ fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_typ
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
 }
 
+// Find the top-level comma in an LLVM type string, respecting nested braces.
+// This is needed for parsing array struct types like { { %T*, i64 }*, i64 }
+// where the element type itself contains commas.
+fn find_top_level_comma_in_llvm_type(text -> string) -> number {
+    let mut brace_depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "," {
+            if brace_depth == 0 {
+                return index;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
 fn array_pointer_element_type(llvm_type -> string) -> string {
     let trimmed = trim_text(llvm_type);
     if trimmed.length == 0 {
@@ -8188,7 +8221,7 @@ fn array_pointer_element_type(llvm_type -> string) -> string {
     if inner.length == 0 {
         return "";
     }
-    let comma_index = index_of(inner, ",");
+    let comma_index = find_top_level_comma_in_llvm_type(inner);
     if comma_index < 0 {
         return "";
     }
