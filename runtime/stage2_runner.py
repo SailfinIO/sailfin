@@ -139,6 +139,7 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
     "sailfin_adapter_channel_receive": ("channel", (ctypes.c_void_p,), ctypes.c_void_p),
     "stage2_debug_marker": (None, (ctypes.c_longlong,), None),
     "stage2_debug_unknown_lexeme": (None, (ctypes.c_void_p, ctypes.c_longlong), None),
+    "stage2_debug_token": (None, (ctypes.c_longlong, ctypes.c_longlong, ctypes.c_void_p), None),
 }
 
 _ACTIVE_GRANT: contextvars.ContextVar[runtime.CapabilityGrant | None] = contextvars.ContextVar(
@@ -1048,6 +1049,128 @@ class Stage2Runner:
             body = body.replace(token_pattern, token_replacement, 1)
 
         self._write_instrumented_ir("instrumented_parse_tokens.ll", body)
+
+        return ir_text[:start] + body + ir_text[end:]
+
+    def _instrument_tokens_to_text_ir(self, ir_text: str) -> str:
+        if "define i8* @tokens_to_text(" not in ir_text:
+            return ir_text
+        if "declare void @stage2_debug_marker(i64)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_marker(i64)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = (
+                    ir_text[:declare_index]
+                    + declaration
+                    + ir_text[declare_index:]
+                )
+        if "declare void @stage2_debug_token(i64, i64, i8*)" not in ir_text:
+            declare_index = ir_text.find("declare")
+            declaration = "declare void @stage2_debug_token(i64, i64, i8*)\n"
+            if declare_index == -1:
+                ir_text = ir_text + "\n" + declaration
+            else:
+                ir_text = (
+                    ir_text[:declare_index]
+                    + declaration
+                    + ir_text[declare_index:]
+                )
+
+        start = ir_text.find("define i8* @tokens_to_text(")
+        if start == -1:
+            return ir_text
+        end = ir_text.find("\n}\n", start)
+        if end == -1:
+            return ir_text
+        end += 3
+        body = ir_text[start:end]
+
+        entry_pattern = "block.entry:\n  %l0 = alloca i8*\n"
+        if entry_pattern in body:
+            entry_replacement = (
+                "block.entry:\n"
+                "  call void @stage2_debug_marker(i64 61000)\n"
+                "  %l0 = alloca i8*\n"
+            )
+            body = body.replace(entry_pattern, entry_replacement, 1)
+
+        index_pattern = "  %t30 = fptosi double %t29 to i64\n"
+        if index_pattern in body:
+            index_replacement = (
+                "  %t30 = fptosi double %t29 to i64\n"
+                "  %stage2_tokens_text_index = add i64 %t30, 61100\n"
+                "  call void @stage2_debug_marker(i64 %stage2_tokens_text_index)\n"
+            )
+            body = body.replace(index_pattern, index_replacement, 1)
+
+        token_load_pattern = (
+            "  %t36 = load %Token, %Token* %t35\n"
+            "  %t37 = extractvalue %Token %t36, 1\n"
+        )
+        if token_load_pattern in body:
+            token_load_replacement = (
+                "  %t36 = load %Token, %Token* %t35\n"
+                "  %stage2_tokens_text_kind = extractvalue %Token %t36, 0\n"
+                "  %stage2_tokens_text_variant = extractvalue %TokenKind %stage2_tokens_text_kind, 0\n"
+                "  %stage2_tokens_text_variant_i64 = sext i32 %stage2_tokens_text_variant to i64\n"
+                "  %t37 = extractvalue %Token %t36, 1\n"
+                "  call void @stage2_debug_token(i64 %t30, i64 %stage2_tokens_text_variant_i64, i8* %t37)\n"
+            )
+            body = body.replace(token_load_pattern, token_load_replacement, 1)
+
+        max_tokens_pattern = "then6:\n  store i1 1, i1* %l4\n"
+        if max_tokens_pattern in body:
+            max_tokens_replacement = (
+                "then6:\n"
+                "  call void @stage2_debug_marker(i64 61200)\n"
+                "  store i1 1, i1* %l4\n"
+            )
+            body = body.replace(max_tokens_pattern,
+                                max_tokens_replacement, 1)
+
+        limit_pattern = "then8:\n  %t52 = load i8*, i8** %l0\n"
+        if limit_pattern in body:
+            limit_replacement = (
+                "then8:\n"
+                "  call void @stage2_debug_marker(i64 61210)\n"
+                "  %t52 = load i8*, i8** %l0\n"
+            )
+            body = body.replace(limit_pattern, limit_replacement, 1)
+
+        tail_trim_pattern = "then10:\n  %t79 = load i8*, i8** %l0\n"
+        if tail_trim_pattern in body:
+            tail_trim_replacement = (
+                "then10:\n"
+                "  call void @stage2_debug_marker(i64 61220)\n"
+                "  %t79 = load i8*, i8** %l0\n"
+            )
+            body = body.replace(tail_trim_pattern,
+                                tail_trim_replacement, 1)
+
+        suffix_pattern = "then12:\n  %t92 = load i8*, i8** %l0\n"
+        if suffix_pattern in body:
+            suffix_replacement = (
+                "then12:\n"
+                "  call void @stage2_debug_marker(i64 61230)\n"
+                "  %t92 = load i8*, i8** %l0\n"
+            )
+            body = body.replace(suffix_pattern, suffix_replacement, 1)
+
+        ret_pattern = (
+            "  call void @sailfin_runtime_mark_persistent(i8* %t97)\n"
+            "  ret i8* %t97\n"
+        )
+        if ret_pattern in body:
+            ret_replacement = (
+                "  call void @sailfin_runtime_mark_persistent(i8* %t97)\n"
+                "  call void @stage2_debug_marker(i64 61290)\n"
+                "  ret i8* %t97\n"
+            )
+            body = body.replace(ret_pattern, ret_replacement, 1)
+
+        self._write_instrumented_ir("instrumented_tokens_to_text.ll", body)
 
         return ir_text[:start] + body + ir_text[end:]
 
@@ -2121,6 +2244,16 @@ class Stage2Runner:
         # Helper to convert c_void_p to Python string
         def _ptr_to_str(ptr: ctypes.c_void_p | int | None) -> str:
             address = _normalise_ptr(ptr)
+
+            def _marker_suffix() -> str:
+                try:
+                    markers = self._recent_debug_markers()
+                    if not markers:
+                        return " recent_markers=[]"
+                    return f" recent_markers={list(markers)}"
+                except Exception:
+                    return " recent_markers=[]"
+
             self._debug_log(
                 f"[stage2] ptr_to_str ENTER 0x{address:x} tracked={address in self._tracked_string_addresses} "
                 f"in_allocs={address in _LIBC_ALLOCATIONS}"
@@ -2207,7 +2340,7 @@ class Stage2Runner:
             # Reject NULL and very low addresses (definitely invalid).
             if address == 0 or address < 0x1000:
                 message = f"runtime string pointer 0x{address:x} is NULL or invalid"
-                self._debug_log(f"[stage2] {message}")
+                self._debug_log(f"[stage2] {message}{_marker_suffix()}")
                 error = RuntimeError(message)
                 if _LAST_RUNTIME_ERROR.get() is None:
                     _LAST_RUNTIME_ERROR.set(error)
@@ -2217,7 +2350,7 @@ class Stage2Runner:
             # On most systems, heap addresses are > 0x10000 and < 0x7fffffffffff (48-bit)
             if address > 0x7fffffffffff:
                 message = f"runtime string pointer 0x{address:x} is suspiciously high (possible stack/garbage)"
-                self._debug_log(f"[stage2] {message}")
+                self._debug_log(f"[stage2] {message}{_marker_suffix()}")
                 error = RuntimeError(message)
                 if _LAST_RUNTIME_ERROR.get() is None:
                     _LAST_RUNTIME_ERROR.set(error)
@@ -2233,7 +2366,7 @@ class Stage2Runner:
 
             if not is_likely_valid:
                 self._debug_log(
-                    f"[stage2] ptr_to_str WARNING: untracked address 0x{address:x} not in string pool or allocations"
+                    f"[stage2] ptr_to_str WARNING: untracked address 0x{address:x} not in string pool or allocations{_marker_suffix()}"
                 )
 
             self._debug_log(
@@ -2271,7 +2404,7 @@ class Stage2Runner:
                 except (ValueError, OSError) as e:
                     # string_at failed, this means the pointer is truly invalid
                     self._debug_log(
-                        f"[stage2] ptr_to_str FAILED to read 0x{address:x}: {e}"
+                        f"[stage2] ptr_to_str FAILED to read 0x{address:x}: {e}{_marker_suffix()}"
                     )
                     message = f"runtime string pointer 0x{address:x} is invalid (read failed: {e})"
                     error = RuntimeError(message)
@@ -2307,15 +2440,18 @@ class Stage2Runner:
                     return text
             except (ValueError, OSError, AttributeError, UnicodeDecodeError, MemoryError, SystemError) as e:
                 self._debug_log(
-                    f"[stage2] ptr_to_str failed to read 0x{address:x}: {type(e).__name__}")
+                    f"[stage2] ptr_to_str failed to read 0x{address:x}: {type(e).__name__}{_marker_suffix()}")
                 pass
             except BaseException as e:
                 # Catch segfaults that somehow become Python exceptions
                 self._debug_log(
-                    f"[stage2] ptr_to_str CRITICAL error at 0x{address:x}: {type(e).__name__}")
+                    f"[stage2] ptr_to_str CRITICAL error at 0x{address:x}: {type(e).__name__}{_marker_suffix()}")
                 pass
 
-            message = f"runtime string pointer 0x{address:x} not tracked and unreadable"
+            message = (
+                f"runtime string pointer 0x{address:x} not tracked and unreadable"
+                f"{_marker_suffix()}"
+            )
             self._debug_log(f"[stage2] {message}")
             error = RuntimeError(message)
             if _LAST_RUNTIME_ERROR.get() is None:
@@ -3155,6 +3291,38 @@ class Stage2Runner:
 
             return cfunc_type(_debug_marker)
 
+        elif symbol == "stage2_debug_token":
+            cfunc_type = ctypes.CFUNCTYPE(
+                None, ctypes.c_longlong, ctypes.c_longlong, ctypes.c_void_p)
+
+            def _debug_token(index: ctypes.c_longlong, kind: ctypes.c_longlong, lexeme_ptr: ctypes.c_void_p) -> None:
+                try:
+                    token_index = int(index)
+                except Exception:
+                    token_index = 0
+                try:
+                    token_kind = int(kind)
+                except Exception:
+                    token_kind = -1
+                address = _normalise_ptr(lexeme_ptr)
+                status = "tracked" if address in self._tracked_string_addresses else (
+                    "alloc" if address in _LIBC_ALLOCATIONS else "unknown"
+                )
+                preview = ""
+                note = ""
+                tracked = status == "tracked" or address in _LIBC_ALLOCATIONS
+                if address and tracked and address >= 0x1000:
+                    try:
+                        raw = ctypes.string_at(address, 64)
+                        preview = raw.decode("utf-8", errors="replace")
+                    except (ValueError, OSError) as exc:
+                        note = f" read_error={exc}"
+                self._debug_log(
+                    f"[stage2] debug_token index={token_index} kind={token_kind} ptr=0x{address:x} status={status} preview={preview!r}{note}"
+                )
+
+            return cfunc_type(_debug_token)
+
         elif symbol == "stage2_debug_unknown_lexeme":
             cfunc_type = ctypes.CFUNCTYPE(
                 None, ctypes.c_void_p, ctypes.c_longlong)
@@ -3238,6 +3406,7 @@ class Stage2Runner:
             rewritten_ir = self._instrument_lex_ir(rewritten_ir)
             rewritten_ir = self._instrument_compile_pipeline_ir(rewritten_ir)
             rewritten_ir = self._instrument_parse_tokens_ir(rewritten_ir)
+            rewritten_ir = self._instrument_tokens_to_text_ir(rewritten_ir)
             rewritten_ir = self._instrument_skip_trivia_ir(rewritten_ir)
             rewritten_ir = self._instrument_is_trivia_token_ir(rewritten_ir)
             rewritten_ir = self._instrument_parse_block_ir(rewritten_ir)

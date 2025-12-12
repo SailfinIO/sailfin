@@ -35,6 +35,7 @@ declare noalias i8* @malloc(i64)
 @.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
 
 declare void @sailfin_runtime_mark_persistent(i8*)
+declare void @sailfin_runtime_copy_bytes(i8*, i8*, i64)
 
 define { %Token*, i64 }* @lex(i8* %source) {
 block.entry:
@@ -1925,9 +1926,39 @@ block.entry:
   %t14 = getelementptr { i8**, i64 }, { i8**, i64 }* %t12, i32 0, i32 1
   store i64 1, i64* %t14
   %t15 = bitcast { %Token*, i64 }* %tokens to { i8**, i64 }*
-  %t16 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t15, { i8**, i64 }* %t12)
-  %t17 = bitcast { i8**, i64 }* %t16 to { %Token*, i64 }*
-  ret { %Token*, i64 }* %t17
+  %t16 = getelementptr { %Token*, i64 }, { i8**, i64 }* %t15, i32 0, i32 0
+  %t17 = load %Token*, %Token** %t16
+  %t18 = getelementptr { %Token*, i64 }, { i8**, i64 }* %t15, i32 0, i32 1
+  %t19 = load i64, i64* %t18
+  %t20 = getelementptr { %Token*, i64 }, { i8**, i64 }* %t12, i32 0, i32 0
+  %t21 = load %Token*, %Token** %t20
+  %t22 = getelementptr { %Token*, i64 }, { i8**, i64 }* %t12, i32 0, i32 1
+  %t23 = load i64, i64* %t22
+  %t24 = getelementptr [1 x %Token], [1 x %Token]* null, i32 0, i32 1
+  %t25 = ptrtoint %Token* %t24 to i64
+  %t26 = add i64 %t19, %t23
+  %t27 = mul i64 %t25, %t26
+  %t28 = call noalias i8* @malloc(i64 %t27)
+  %t29 = bitcast i8* %t28 to %Token*
+  %t30 = bitcast %Token* %t29 to i8*
+  %t31 = mul i64 %t25, %t19
+  %t32 = bitcast %Token* %t17 to i8*
+  call void @sailfin_runtime_copy_bytes(i8* %t30, i8* %t32, i64 %t31)
+  %t33 = mul i64 %t25, %t23
+  %t34 = bitcast %Token* %t21 to i8*
+  %t35 = getelementptr %Token, %Token* %t29, i64 %t19
+  %t36 = bitcast %Token* %t35 to i8*
+  call void @sailfin_runtime_copy_bytes(i8* %t36, i8* %t34, i64 %t33)
+  %t37 = getelementptr { %Token*, i64 }, { %Token*, i64 }* null, i32 1
+  %t38 = ptrtoint { %Token*, i64 }* %t37 to i64
+  %t39 = call i8* @malloc(i64 %t38)
+  %t40 = bitcast i8* %t39 to { %Token*, i64 }*
+  %t41 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t40, i32 0, i32 0
+  store %Token* %t29, %Token** %t41
+  %t42 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t40, i32 0, i32 1
+  store i64 %t26, i64* %t42
+  %t43 = bitcast { i8**, i64 }* %t40 to { %Token*, i64 }*
+  ret { %Token*, i64 }* %t43
 }
 
 define i8* @peek_next_char(%LexerState %state) {
@@ -2166,6 +2197,6 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
 @.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"

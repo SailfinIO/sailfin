@@ -338,6 +338,19 @@ SailfinArray *sailfin_runtime_concat(SailfinArray *lhs, SailfinArray *rhs)
     return result;
 }
 
+void sailfin_runtime_copy_bytes(void *destination, void *source, int64_t size)
+{
+    if (size <= 0)
+    {
+        return;
+    }
+    if (!destination || !source)
+    {
+        return;
+    }
+    memcpy(destination, source, (size_t)size);
+}
+
 SailfinArray *sailfin_runtime_array_map(SailfinArray *array, void *callback)
 {
     (void)array;

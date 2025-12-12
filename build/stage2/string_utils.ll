@@ -3,10 +3,10 @@ source_filename = "sailfin"
 
 %EnumField = type { i8*, i8* }
 %EnumVariantDefinition = type { i8*, { i8**, i64 }* }
-%EnumType = type { i8*, { %EnumVariantDefinition**, i64 }* }
-%EnumInstance = type { %EnumType, i8*, { %EnumField**, i64 }* }
+%EnumType = type { i8*, { %EnumVariantDefinition*, i64 }* }
+%EnumInstance = type { %EnumType, i8*, { %EnumField*, i64 }* }
 %StructField = type { i8*, i8* }
-%TypeDescriptor = type { i8*, i8*, { %TypeDescriptor**, i64 }* }
+%TypeDescriptor = type { i8*, i8*, { %TypeDescriptor*, i64 }* }
 
 declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)

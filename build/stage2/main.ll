@@ -4,83 +4,83 @@ source_filename = "sailfin"
 %EffectRequirement = type opaque
 %CompiledModule = type { i8*, i8* }
 %ModuleDiagnostics = type { i8*, { i8**, i64 }*, i1 }
-%ModuleCompilationResult = type { %CompiledModule*, { %ModuleDiagnostics**, i64 }* }
-%ProjectCompilation = type { { %CompiledModule**, i64 }*, { %ModuleDiagnostics**, i64 }* }
+%ModuleCompilationResult = type { %CompiledModule*, { %ModuleDiagnostics*, i64 }* }
+%ProjectCompilation = type { { %CompiledModule*, i64 }*, { %ModuleDiagnostics*, i64 }* }
 %LLVMCompilationResult = type { %LoweredLLVMResult, %NativeModule }
-%Parser = type { { %Token**, i64 }*, double }
+%Parser = type { { %Token*, i64 }*, double }
 %StatementParseResult = type { %Parser, %Statement }
 %ParameterParseResult = type { %Parser, %Parameter }
-%ParameterListParseResult = type { %Parser, { %Parameter**, i64 }* }
+%ParameterListParseResult = type { %Parser, { %Parameter*, i64 }* }
 %StructFieldParseResult = type { %Parser, %FieldDeclaration*, i1 }
 %ModelPropertyParseResult = type { %Parser, %ModelProperty*, i1 }
 %MethodParseResult = type { %Parser, %MethodDeclaration*, i1 }
 %InterfaceMemberParseResult = type { %Parser, %FunctionSignature*, i1 }
-%SpecifierListParseResult = type { %Parser, { %NamedSpecifier**, i64 }* }
+%SpecifierListParseResult = type { %Parser, { %NamedSpecifier*, i64 }* }
 %NamedSpecifier = type { i8*, i8* }
 %EnumVariantParseResult = type { %Parser, %EnumVariant*, i1 }
-%TypeParameterParseResult = type { %Parser, { %TypeParameter**, i64 }* }
-%ImplementsParseResult = type { %Parser, { %TypeAnnotation**, i64 }*, i1 }
-%DecoratorParseResult = type { %Parser, { %Decorator**, i64 }* }
+%TypeParameterParseResult = type { %Parser, { %TypeParameter*, i64 }* }
+%ImplementsParseResult = type { %Parser, { %TypeAnnotation*, i64 }*, i1 }
+%DecoratorParseResult = type { %Parser, { %Decorator*, i64 }* }
 %BlockStatementParseResult = type { %Parser, %Statement*, i1 }
-%ParenthesizedParseResult = type { %Parser, { %Token**, i64 }*, i1 }
-%MatchCasesParseResult = type { %Parser, { %MatchCase**, i64 }*, i1 }
+%ParenthesizedParseResult = type { %Parser, { %Token*, i64 }*, i1 }
+%MatchCasesParseResult = type { %Parser, { %MatchCase*, i64 }*, i1 }
 %MatchCaseParseResult = type { %Parser, %MatchCase*, i1 }
-%MatchCaseTokenSplit = type { { %Token**, i64 }*, { %Token**, i64 }*, i1 }
-%ExpressionTokens = type { { %Token**, i64 }*, double }
+%MatchCaseTokenSplit = type { { %Token*, i64 }*, { %Token*, i64 }*, i1 }
+%ExpressionTokens = type { { %Token*, i64 }*, double }
 %ExpressionParseResult = type { %ExpressionTokens, %Expression, i1 }
 %LambdaParameterParseResult = type { %ExpressionTokens, %Parameter, i1 }
-%LambdaParameterListParseResult = type { %ExpressionTokens, { %Parameter**, i64 }*, i1 }
-%ExpressionCollectResult = type { %ExpressionTokens, { %Token**, i64 }*, i1 }
-%ExpressionBlockParseResult = type { %ExpressionTokens, { %Token**, i64 }*, i1 }
-%CallArgumentsParseResult = type { %ExpressionTokens, { %Expression**, i64 }*, i1 }
-%ArrayLiteralParseResult = type { %ExpressionTokens, { %Expression**, i64 }*, i1 }
-%ObjectLiteralParseResult = type { %ExpressionTokens, { %ObjectField**, i64 }*, i1 }
+%LambdaParameterListParseResult = type { %ExpressionTokens, { %Parameter*, i64 }*, i1 }
+%ExpressionCollectResult = type { %ExpressionTokens, { %Token*, i64 }*, i1 }
+%ExpressionBlockParseResult = type { %ExpressionTokens, { %Token*, i64 }*, i1 }
+%CallArgumentsParseResult = type { %ExpressionTokens, { %Expression*, i64 }*, i1 }
+%ArrayLiteralParseResult = type { %ExpressionTokens, { %Expression*, i64 }*, i1 }
+%ObjectLiteralParseResult = type { %ExpressionTokens, { %ObjectField*, i64 }*, i1 }
 %StructTypeNameResult = type { { i8**, i64 }*, i1 }
-%CaptureResult = type { %Parser, { %Token**, i64 }* }
+%CaptureResult = type { %Parser, { %Token*, i64 }* }
 %EffectParseResult = type { %Parser, { i8**, i64 }* }
 %BlockParseResult = type { %Parser, %Block }
-%PatternCaptureResult = type { %Parser, { %Token**, i64 }*, i1 }
-%Program = type { { %Statement**, i64 }* }
+%PatternCaptureResult = type { %Parser, { %Token*, i64 }*, i1 }
+%Program = type { { %Statement*, i64 }* }
 %TypeAnnotation = type { i8* }
 %TypeParameter = type { i8*, %TypeAnnotation*, %SourceSpan* }
-%Block = type { { %Token**, i64 }*, i8*, { %Statement**, i64 }* }
+%Block = type { { %Token*, i64 }*, i8*, { %Statement*, i64 }* }
 %SourceSpan = type { double, double, double, double }
 %Parameter = type { i8*, %TypeAnnotation*, %Expression*, i1, %SourceSpan* }
 %WithClause = type { %Expression }
 %ObjectField = type { i8*, %Expression }
 %ElseBranch = type { %Statement*, %Block* }
-%ForClause = type { %Expression, %Expression, { %Token**, i64 }* }
+%ForClause = type { %Expression, %Expression, { %Token*, i64 }* }
 %MatchCase = type { %Expression, %Expression*, %Block }
 %ModelProperty = type { i8*, %Expression, %SourceSpan* }
 %FieldDeclaration = type { i8*, %TypeAnnotation, i1, %SourceSpan* }
-%MethodDeclaration = type { %FunctionSignature, %Block, { %Decorator**, i64 }* }
-%EnumVariant = type { i8*, { %FieldDeclaration**, i64 }*, %SourceSpan* }
-%FunctionSignature = type { i8*, i1, { %Parameter**, i64 }*, %TypeAnnotation*, { i8**, i64 }*, { %TypeParameter**, i64 }*, %SourceSpan* }
-%PipelineDeclaration = type { %FunctionSignature, %Block, { %Decorator**, i64 }* }
-%ToolDeclaration = type { %FunctionSignature, %Block, { %Decorator**, i64 }* }
-%TestDeclaration = type { i8*, %Block, { i8**, i64 }*, { %Decorator**, i64 }* }
-%ModelDeclaration = type { i8*, %TypeAnnotation, { %ModelProperty**, i64 }*, { i8**, i64 }*, { %Decorator**, i64 }* }
-%Decorator = type { i8*, { %DecoratorArgument**, i64 }* }
+%MethodDeclaration = type { %FunctionSignature, %Block, { %Decorator*, i64 }* }
+%EnumVariant = type { i8*, { %FieldDeclaration*, i64 }*, %SourceSpan* }
+%FunctionSignature = type { i8*, i1, { %Parameter*, i64 }*, %TypeAnnotation*, { i8**, i64 }*, { %TypeParameter*, i64 }*, %SourceSpan* }
+%PipelineDeclaration = type { %FunctionSignature, %Block, { %Decorator*, i64 }* }
+%ToolDeclaration = type { %FunctionSignature, %Block, { %Decorator*, i64 }* }
+%TestDeclaration = type { i8*, %Block, { i8**, i64 }*, { %Decorator*, i64 }* }
+%ModelDeclaration = type { i8*, %TypeAnnotation, { %ModelProperty*, i64 }*, { i8**, i64 }*, { %Decorator*, i64 }* }
+%Decorator = type { i8*, { %DecoratorArgument*, i64 }* }
 %DecoratorArgument = type { i8*, %Expression }
 %ImportSpecifier = type { i8*, i8* }
 %ExportSpecifier = type { i8*, i8* }
 %TextBuilder = type { { i8**, i64 }*, double }
 %NativeArtifact = type { i8*, i8*, i8* }
-%NativeModule = type { { %NativeArtifact**, i64 }*, { i8**, i64 }*, double }
+%NativeModule = type { { %NativeArtifact*, i64 }*, { i8**, i64 }*, double }
 %EmitNativeResult = type { %NativeModule, { i8**, i64 }* }
 %NativeState = type { %TextBuilder, { i8**, i64 }*, %LayoutContext }
 %LayoutEmitResult = type { { i8**, i64 }*, { i8**, i64 }* }
 %StructFieldLayoutDescriptor = type { i8*, i8*, double, double, double }
-%RecordLayoutResult = type { double, double, { %StructFieldLayoutDescriptor**, i64 }*, { i8**, i64 }* }
-%EnumVariantLayoutDescriptor = type { i8*, double, double, double, double, { %StructFieldLayoutDescriptor**, i64 }* }
-%EnumAggregateLayout = type { double, double, double, double, { %EnumVariantLayoutDescriptor**, i64 }*, { i8**, i64 }* }
+%RecordLayoutResult = type { double, double, { %StructFieldLayoutDescriptor*, i64 }*, { i8**, i64 }* }
+%EnumVariantLayoutDescriptor = type { i8*, double, double, double, double, { %StructFieldLayoutDescriptor*, i64 }* }
+%EnumAggregateLayout = type { double, double, double, double, { %EnumVariantLayoutDescriptor*, i64 }*, { i8**, i64 }* }
 %TypeLayoutInfo = type { double, double, { i8**, i64 }* }
 %LayoutFieldInput = type { i8*, i8* }
-%LayoutStructDefinition = type { i8*, { %LayoutFieldInput**, i64 }* }
-%LayoutEnumVariantDefinition = type { i8*, { %LayoutFieldInput**, i64 }* }
-%LayoutEnumDefinition = type { i8*, { %LayoutEnumVariantDefinition**, i64 }* }
+%LayoutStructDefinition = type { i8*, { %LayoutFieldInput*, i64 }* }
+%LayoutEnumVariantDefinition = type { i8*, { %LayoutFieldInput*, i64 }* }
+%LayoutEnumDefinition = type { i8*, { %LayoutEnumVariantDefinition*, i64 }* }
 %CanonicalTypeLayout = type { i8*, double, double }
-%LayoutContext = type { { %LayoutStructDefinition**, i64 }*, { %LayoutEnumDefinition**, i64 }* }
+%LayoutContext = type { { %LayoutStructDefinition*, i64 }*, { %LayoutEnumDefinition*, i64 }* }
 %LoweredPythonResult = type { i8*, { i8**, i64 }* }
 %MatchContext = type { i8*, double, i1 }
 %LoweredCaseCondition = type { i8*, i1, i1 }
@@ -93,24 +93,24 @@ source_filename = "sailfin"
 %ExtractedSpan = type { i8*, double, double, i1 }
 %PythonBuilder = type { { i8**, i64 }*, double }
 %TraitImplementationDescriptor = type { i8*, { i8**, i64 }* }
-%TraitDescriptor = type { i8*, { i8**, i64 }*, { %NativeInterfaceSignature**, i64 }* }
-%TraitMetadata = type { { %TraitDescriptor**, i64 }*, { %TraitImplementationDescriptor**, i64 }* }
+%TraitDescriptor = type { i8*, { i8**, i64 }*, { %NativeInterfaceSignature*, i64 }* }
+%TraitMetadata = type { { %TraitDescriptor*, i64 }*, { %TraitImplementationDescriptor*, i64 }* }
 %FunctionEffectEntry = type { i8*, { i8**, i64 }* }
 %CapabilityManifestEntry = type { i8*, { i8**, i64 }* }
-%CapabilityManifest = type { { %CapabilityManifestEntry**, i64 }* }
+%CapabilityManifest = type { { %CapabilityManifestEntry*, i64 }* }
 %RuntimeHelperDescriptor = type { i8*, i8*, i8*, { i8**, i64 }*, { i8**, i64 }* }
 %FunctionCallEntry = type { i8*, { i8**, i64 }* }
 %StringConstant = type { i8*, i8*, double }
 %StringPointerResult = type { { i8**, i64 }*, double, i8* }
-%LoweredLLVMResult = type { i8*, { i8**, i64 }*, %TraitMetadata, { %FunctionEffectEntry**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, %CapabilityManifest, { %StringConstant**, i64 }* }
-%LayoutManifestApplication = type { { %NativeStruct**, i64 }*, { %NativeEnum**, i64 }*, { i8**, i64 }* }
-%ImportedModuleContext = type { { %LayoutManifest**, i64 }*, { i8**, i64 }*, { i8**, i64 }* }
-%LoweredLLVMFunction = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, { %StringConstant**, i64 }* }
-%BodyResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, { %StringConstant**, i64 }* }
+%LoweredLLVMResult = type { i8*, { i8**, i64 }*, %TraitMetadata, { %FunctionEffectEntry*, i64 }*, { %LifetimeRegionMetadata*, i64 }*, %CapabilityManifest, { %StringConstant*, i64 }* }
+%LayoutManifestApplication = type { { %NativeStruct*, i64 }*, { %NativeEnum*, i64 }*, { i8**, i64 }* }
+%ImportedModuleContext = type { { %LayoutManifest*, i64 }*, { i8**, i64 }*, { i8**, i64 }* }
+%LoweredLLVMFunction = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata*, i64 }*, { %StringConstant*, i64 }* }
+%BodyResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata*, i64 }*, { %StringConstant*, i64 }* }
 %ParameterBinding = type { i8*, i8*, i8*, i8*, i1, %NativeSourceSpan* }
-%ParameterPreparation = type { { i8**, i64 }*, { %ParameterBinding**, i64 }*, { i8**, i64 }* }
+%ParameterPreparation = type { { i8**, i64 }*, { %ParameterBinding*, i64 }*, { i8**, i64 }* }
 %LLVMOperand = type { i8*, i8* }
-%ExpressionResult = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, { %StringConstant**, i64 }* }
+%ExpressionResult = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, { %StringConstant*, i64 }* }
 %ArrayLiteralMetadata = type { i8*, double }
 %OwnershipInfo = type { i8*, i8*, i1, %NativeSourceSpan*, double }
 %OwnershipConsumption = type { i8*, i8* }
@@ -118,19 +118,19 @@ source_filename = "sailfin"
 %LifetimeReleaseEvent = type { double, i8*, double }
 %ScopeMetadata = type { i8*, double }
 %StructFieldInfo = type { i8*, i8*, double, double }
-%StructTypeInfo = type { i8*, i8*, { %StructFieldInfo**, i64 }*, double, double }
-%EnumVariantInfo = type { i8*, double, double, double, double, { %StructFieldInfo**, i64 }* }
-%EnumTypeInfo = type { i8*, i8*, i8*, double, double, double, double, { %EnumVariantInfo**, i64 }* }
+%StructTypeInfo = type { i8*, i8*, { %StructFieldInfo*, i64 }*, double, double }
+%EnumVariantInfo = type { i8*, double, double, double, double, { %StructFieldInfo*, i64 }* }
+%EnumTypeInfo = type { i8*, i8*, i8*, double, double, double, double, { %EnumVariantInfo*, i64 }* }
 %VTableEntry = type { i8*, i8*, i8* }
-%VTableInfo = type { i8*, i8*, i8*, i8*, { %VTableEntry**, i64 }* }
-%InterfaceTypeInfo = type { i8*, i8*, { i8**, i64 }*, { %NativeInterfaceSignature**, i64 }* }
-%TypeContext = type { { %StructTypeInfo**, i64 }*, { %EnumTypeInfo**, i64 }*, { %InterfaceTypeInfo**, i64 }*, { %VTableInfo**, i64 }* }
+%VTableInfo = type { i8*, i8*, i8*, i8*, { %VTableEntry*, i64 }* }
+%InterfaceTypeInfo = type { i8*, i8*, { i8**, i64 }*, { %NativeInterfaceSignature*, i64 }* }
+%TypeContext = type { { %StructTypeInfo*, i64 }*, { %EnumTypeInfo*, i64 }*, { %InterfaceTypeInfo*, i64 }*, { %VTableInfo*, i64 }* }
 %TypeContextBuild = type { %TypeContext, { i8**, i64 }* }
 %TypeAllocationInfo = type { i8*, double, double }
 %HeapBoxResult = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }* }
 %StructLiteralField = type { i8*, i8* }
-%StructLiteralParse = type { i1, i1, i8*, { %StructLiteralField**, i64 }*, { i8**, i64 }* }
-%EnumLiteralParse = type { i1, i1, i8*, i8*, { %StructLiteralField**, i64 }*, { i8**, i64 }* }
+%StructLiteralParse = type { i1, i1, i8*, { %StructLiteralField*, i64 }*, { i8**, i64 }* }
+%EnumLiteralParse = type { i1, i1, i8*, i8*, { %StructLiteralField*, i64 }*, { i8**, i64 }* }
 %MemberAccessParse = type { i1, i8*, i8* }
 %IndexExpressionParse = type { i1, i8*, i8* }
 %LocalBinding = type { i8*, i8*, i8*, i8*, %OwnershipInfo*, i1, i8*, double }
@@ -141,8 +141,8 @@ source_filename = "sailfin"
 %BorrowParseResult = type { i1, i1, i8*, i1, { i8**, i64 }* }
 %BorrowArgumentParse = type { i1, i8*, { i8**, i64 }* }
 %TernaryParseResult = type { i1, i8*, i8*, i8*, { i8**, i64 }* }
-%ExpressionStatementResult = type { { i8**, i64 }*, double, { %LocalBinding**, i64 }*, { %ParameterBinding**, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata**, i64 }*, { %LifetimeReleaseEvent**, i64 }*, double, { %LocalMutation**, i64 }*, { %StringConstant**, i64 }* }
-%LetLoweringResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LocalBinding**, i64 }*, { %ParameterBinding**, i64 }*, double, { i8**, i64 }*, double, { %LifetimeRegionMetadata**, i64 }*, double, { %LocalMutation**, i64 }*, { %StringConstant**, i64 }* }
+%ExpressionStatementResult = type { { i8**, i64 }*, double, { %LocalBinding*, i64 }*, { %ParameterBinding*, i64 }*, { i8**, i64 }*, { %LifetimeRegionMetadata*, i64 }*, { %LifetimeReleaseEvent*, i64 }*, double, { %LocalMutation*, i64 }*, { %StringConstant*, i64 }* }
+%LetLoweringResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LocalBinding*, i64 }*, { %ParameterBinding*, i64 }*, double, { i8**, i64 }*, double, { %LifetimeRegionMetadata*, i64 }*, double, { %LocalMutation*, i64 }*, { %StringConstant*, i64 }* }
 %InlineLetParseResult = type { i1, i8*, i1, i8*, i8*, { i8**, i64 }* }
 %BlockLabelResult = type { i8*, double }
 %IfStructure = type { double, double, double, double, i1, double, { i8**, i64 }* }
@@ -150,40 +150,40 @@ source_filename = "sailfin"
 %LoopStructure = type { double, double, double, { i8**, i64 }* }
 %RangeIterableParse = type { i1, i8*, i8*, i8*, { i8**, i64 }* }
 %MatchCaseStructure = type { i8*, i8*, double, double, i1 }
-%MatchStructure = type { { %MatchCaseStructure**, i64 }*, double, { i8**, i64 }* }
+%MatchStructure = type { { %MatchCaseStructure*, i64 }*, double, { i8**, i64 }* }
 %MatchFieldBinding = type { i8*, i8*, double }
-%MatchCaseCondition = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, i1, { %MatchFieldBinding**, i64 }*, %EnumTypeInfo*, %EnumVariantInfo*, { %StringConstant**, i64 }* }
-%ConditionConversion = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, { %StringConstant**, i64 }* }
+%MatchCaseCondition = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, i1, { %MatchFieldBinding*, i64 }*, %EnumTypeInfo*, %EnumVariantInfo*, { %StringConstant*, i64 }* }
+%ConditionConversion = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }*, { %StringConstant*, i64 }* }
 %ComparisonEmission = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }* }
 %CoercionResult = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }* }
 %BinaryAlignmentResult = type { { i8**, i64 }*, double, %LLVMOperand*, %LLVMOperand*, { i8**, i64 }*, i8* }
-%BlockLoweringResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LocalBinding**, i64 }*, { %ParameterBinding**, i64 }*, double, double, { i8**, i64 }*, i1, double, { %LifetimeRegionMetadata**, i64 }*, double, double, { %LocalMutation**, i64 }*, { %StringConstant**, i64 }* }
+%BlockLoweringResult = type { { i8**, i64 }*, { i8**, i64 }*, { %LocalBinding*, i64 }*, { %ParameterBinding*, i64 }*, double, double, { i8**, i64 }*, i1, double, { %LifetimeRegionMetadata*, i64 }*, double, double, { %LocalMutation*, i64 }*, { %StringConstant*, i64 }* }
 %PhiMergeResult = type { { i8**, i64 }*, double }
 %PhiInputEntry = type { i8*, i8* }
-%MutationMaterializationResult = type { { %LocalMutation**, i64 }*, { i8**, i64 }*, double }
+%MutationMaterializationResult = type { { %LocalMutation*, i64 }*, { i8**, i64 }*, double }
 %PhiStoreEntry = type { i8*, i8* }
-%MatchArmMutations = type { { %LocalMutation**, i64 }*, i8*, i1 }
+%MatchArmMutations = type { { %LocalMutation*, i64 }*, i8*, i1 }
 %LoadLocalResult = type { { i8**, i64 }*, double, %LLVMOperand*, { i8**, i64 }* }
 %NativeSourceSpan = type { double, double, double, double }
 %NativeParameter = type { i8*, i8*, i1, i8*, %NativeSourceSpan* }
-%NativeFunction = type { i8*, { %NativeParameter**, i64 }*, i8*, { i8**, i64 }*, { %NativeInstruction**, i64 }* }
+%NativeFunction = type { i8*, { %NativeParameter*, i64 }*, i8*, { i8**, i64 }*, { %NativeInstruction*, i64 }* }
 %NativeImportSpecifier = type { i8*, i8* }
-%NativeImport = type { i8*, i8*, { %NativeImportSpecifier**, i64 }* }
+%NativeImport = type { i8*, i8*, { %NativeImportSpecifier*, i64 }* }
 %NativeStructField = type { i8*, i8*, i1 }
 %NativeStructLayoutField = type { i8*, i8*, double, double, double }
-%NativeStructLayout = type { double, double, { %NativeStructLayoutField**, i64 }* }
-%NativeStruct = type { i8*, { %NativeStructField**, i64 }*, { %NativeFunction**, i64 }*, { i8**, i64 }*, %NativeStructLayout* }
-%NativeInterfaceSignature = type { i8*, i1, { i8**, i64 }*, { %NativeParameter**, i64 }*, i8*, { i8**, i64 }* }
-%NativeInterface = type { i8*, { i8**, i64 }*, { %NativeInterfaceSignature**, i64 }* }
+%NativeStructLayout = type { double, double, { %NativeStructLayoutField*, i64 }* }
+%NativeStruct = type { i8*, { %NativeStructField*, i64 }*, { %NativeFunction*, i64 }*, { i8**, i64 }*, %NativeStructLayout* }
+%NativeInterfaceSignature = type { i8*, i1, { i8**, i64 }*, { %NativeParameter*, i64 }*, i8*, { i8**, i64 }* }
+%NativeInterface = type { i8*, { i8**, i64 }*, { %NativeInterfaceSignature*, i64 }* }
 %NativeEnumVariantField = type { i8*, i8*, i1 }
-%NativeEnumVariant = type { i8*, { %NativeEnumVariantField**, i64 }* }
-%NativeEnumVariantLayout = type { i8*, double, double, double, double, { %NativeStructLayoutField**, i64 }* }
-%NativeEnumLayout = type { double, double, i8*, double, double, { %NativeEnumVariantLayout**, i64 }* }
-%NativeEnum = type { i8*, { %NativeEnumVariant**, i64 }*, %NativeEnumLayout* }
+%NativeEnumVariant = type { i8*, { %NativeEnumVariantField*, i64 }* }
+%NativeEnumVariantLayout = type { i8*, double, double, double, double, { %NativeStructLayoutField*, i64 }* }
+%NativeEnumLayout = type { double, double, i8*, double, double, { %NativeEnumVariantLayout*, i64 }* }
+%NativeEnum = type { i8*, { %NativeEnumVariant*, i64 }*, %NativeEnumLayout* }
 %NativeBinding = type { i8*, i1, i8*, i8* }
 %EnumParseResult = type { %NativeEnum*, double, { i8**, i64 }* }
 %CaseComponents = type { i8*, i8* }
-%InstructionParseResult = type { { %NativeInstruction**, i64 }*, i1, i1 }
+%InstructionParseResult = type { { %NativeInstruction*, i64 }*, i1, i1 }
 %InstructionGatherResult = type { i8*, double }
 %InstructionDepthState = type { double, double, double, i1, i1 }
 %StructParseResult = type { %NativeStruct*, double, { i8**, i64 }* }
@@ -194,19 +194,19 @@ source_filename = "sailfin"
 %HeaderNameParse = type { i8*, { i8**, i64 }*, i8*, { i8**, i64 }* }
 %StructLayoutHeaderParse = type { i1, i8*, double, double, { i8**, i64 }* }
 %StructLayoutFieldParse = type { i1, %NativeStructLayoutField, { i8**, i64 }* }
-%ParseNativeResult = type { { %NativeFunction**, i64 }*, { %NativeImport**, i64 }*, { %NativeStruct**, i64 }*, { %NativeInterface**, i64 }*, { %NativeEnum**, i64 }*, { %NativeBinding**, i64 }*, { i8**, i64 }* }
+%ParseNativeResult = type { { %NativeFunction*, i64 }*, { %NativeImport*, i64 }*, { %NativeStruct*, i64 }*, { %NativeInterface*, i64 }*, { %NativeEnum*, i64 }*, { %NativeBinding*, i64 }*, { i8**, i64 }* }
 %EnumLayoutHeaderParse = type { i1, i8*, double, double, i8*, double, double, { i8**, i64 }* }
 %EnumLayoutVariantParse = type { i1, %NativeEnumVariantLayout, { i8**, i64 }* }
 %EnumLayoutPayloadParse = type { i1, i8*, %NativeStructLayoutField, { i8**, i64 }* }
 %NumberParseResult = type { i1, double }
-%LayoutManifest = type { { %NativeStruct**, i64 }*, { %NativeEnum**, i64 }*, { i8**, i64 }* }
+%LayoutManifest = type { { %NativeStruct*, i64 }*, { %NativeEnum*, i64 }*, { i8**, i64 }* }
 %BindingComponents = type { i8*, i8*, i8* }
 %Token = type { %TokenKind, i8*, double, double }
 %Diagnostic = type { i8*, i8*, %Token* }
 %SymbolEntry = type { i8*, i8*, %SourceSpan* }
-%TypecheckResult = type { { %Diagnostic**, i64 }*, { %SymbolEntry**, i64 }* }
-%SymbolCollectionResult = type { { %SymbolEntry**, i64 }*, { %Diagnostic**, i64 }* }
-%ScopeResult = type { { %SymbolEntry**, i64 }*, { %Diagnostic**, i64 }* }
+%TypecheckResult = type { { %Diagnostic*, i64 }*, { %SymbolEntry*, i64 }* }
+%SymbolCollectionResult = type { { %SymbolEntry*, i64 }*, { %Diagnostic*, i64 }* }
+%ScopeResult = type { { %SymbolEntry*, i64 }*, { %Diagnostic*, i64 }* }
 
 %Expression = type { i32, [40 x i8] }
 %Statement = type { i32, [136 x i8] }
@@ -334,7 +334,7 @@ declare %Parser @skip_enum_variant_entry(%Parser)
 declare i8* @strip_surrounding_quotes(i8*)
 declare i8* @normalize_test_name(i8*)
 declare { i8**, i64 }* @split_tokens_by_comma({ %Token*, i64 }*)
-declare { i8**, i64 }* @split_token_slices_by_comma({ %Token*, i64 }*)
+declare { { %Token*, i64 }**, i64 }* @split_token_slices_by_comma({ %Token*, i64 }*)
 declare double @find_top_level_symbol({ %Token*, i64 }*, i8*)
 declare double @find_top_level_identifier({ %Token*, i64 }*, i8*)
 declare { %Statement*, i64 }* @append_statement({ %Statement*, i64 }*, %Statement)
@@ -353,7 +353,7 @@ declare { %MatchCase*, i64 }* @append_match_case({ %MatchCase*, i64 }*, %MatchCa
 declare { %Expression*, i64 }* @append_expression({ %Expression*, i64 }*, %Expression)
 declare { %ObjectField*, i64 }* @append_object_field({ %ObjectField*, i64 }*, %ObjectField)
 declare { %Token*, i64 }* @append_token({ %Token*, i64 }*, %Token)
-declare { i8**, i64 }* @append_token_array({ i8**, i64 }*, { %Token*, i64 }*)
+declare { { %Token*, i64 }**, i64 }* @append_token_array({ { %Token*, i64 }**, i64 }*, { %Token*, i64 }*)
 declare i8* @emit_program(%Program)
 declare %TextBuilder @emit_statement(%TextBuilder, %Statement)
 declare %TextBuilder @emit_import(%TextBuilder, { %ImportSpecifier*, i64 }*, i8*)
@@ -601,6 +601,7 @@ declare i8* @map_type_annotation(i8*)
 declare i8* @map_struct_field_annotation(i8*)
 declare i1 @layout_annotation_requires_pointer(i8*)
 declare i8* @layout_annotation_base_type(i8*)
+declare i1 @annotation_is_array(i8*)
 declare i1 @layout_annotation_represents_user_value(i8*)
 declare %StructTypeInfo* @find_struct_info_by_name(%TypeContext, i8*)
 declare %InterfaceTypeInfo* @find_interface_info_by_name(%TypeContext, i8*)
@@ -697,6 +698,7 @@ declare i8* @map_reference_inner_type(%TypeContext, i8*)
 declare i8* @map_reference_type(%TypeContext, i8*)
 declare i8* @map_array_pointer_type(%TypeContext, i8*)
 declare i8* @array_struct_type_for_element(i8*)
+declare %ExpressionResult @lower_struct_array_concat(%LLVMOperand, %LLVMOperand, i8*, { i8**, i64 }*, double)
 declare i8* @array_pointer_element_type(i8*)
 declare i8* @unwrap_move_wrapper(i8*)
 declare i1 @contains_keyword_outside_strings(i8*, i8*)
@@ -935,7 +937,7 @@ declare { %Diagnostic*, i64 }* @check_model_properties({ %ModelProperty*, i64 }*
 declare { %Diagnostic*, i64 }* @check_function_signature(%FunctionSignature)
 declare { %Diagnostic*, i64 }* @check_type_parameters({ %TypeParameter*, i64 }*)
 declare { %Diagnostic*, i64 }* @build_effect_diagnostics(%Program)
-declare %EffectRequirement* @select_requirement_for_effect({ i8**, i64 }*, i8*)
+declare %EffectRequirement* @select_requirement_for_effect({ %EffectRequirement*, i64 }*, i8*)
 declare %Token* @requirement_primary_token(%EffectRequirement*)
 declare i8* @format_effect_message(i8*, i8*, %EffectRequirement*)
 declare %ScopeResult @register_local_symbol({ %SymbolEntry*, i64 }*, i8*, i8*, %SourceSpan*)
@@ -979,8 +981,8 @@ block.entry:
   store %TypecheckResult %t2, %TypecheckResult* %l1
   %t3 = load %TypecheckResult, %TypecheckResult* %l1
   %t4 = extractvalue %TypecheckResult %t3, 0
-  %t5 = load { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t4
-  %t6 = extractvalue { %Diagnostic**, i64 } %t5, 1
+  %t5 = load { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t4
+  %t6 = extractvalue { %Diagnostic*, i64 } %t5, 1
   %t7 = icmp sgt i64 %t6, 0
   %t8 = load %Program, %Program* %l0
   %t9 = load %TypecheckResult, %TypecheckResult* %l1
@@ -988,16 +990,15 @@ block.entry:
 then0:
   %t10 = load %TypecheckResult, %TypecheckResult* %l1
   %t11 = extractvalue %TypecheckResult %t10, 0
-  %t12 = bitcast { %Diagnostic**, i64 }* %t11 to { %Diagnostic*, i64 }*
-  call void @report_typecheck_errors({ %Diagnostic*, i64 }* %t12, i8* %source)
-  %s13 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  call void @sailfin_runtime_mark_persistent(i8* %s13)
-  ret i8* %s13
+  call void @report_typecheck_errors({ %Diagnostic*, i64 }* %t11, i8* %source)
+  %s12 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
+  call void @sailfin_runtime_mark_persistent(i8* %s12)
+  ret i8* %s12
 merge1:
-  %t14 = load %Program, %Program* %l0
-  %t15 = call i8* @emit_program(%Program %t14)
-  call void @sailfin_runtime_mark_persistent(i8* %t15)
-  ret i8* %t15
+  %t13 = load %Program, %Program* %l0
+  %t14 = call i8* @emit_program(%Program %t13)
+  call void @sailfin_runtime_mark_persistent(i8* %t14)
+  ret i8* %t14
 }
 
 ; fn compile_to_native effects: ![io]
@@ -1012,8 +1013,8 @@ block.entry:
   store %TypecheckResult %t2, %TypecheckResult* %l1
   %t3 = load %TypecheckResult, %TypecheckResult* %l1
   %t4 = extractvalue %TypecheckResult %t3, 0
-  %t5 = load { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t4
-  %t6 = extractvalue { %Diagnostic**, i64 } %t5, 1
+  %t5 = load { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t4
+  %t6 = extractvalue { %Diagnostic*, i64 } %t5, 1
   %t7 = icmp sgt i64 %t6, 0
   %t8 = load %Program, %Program* %l0
   %t9 = load %TypecheckResult, %TypecheckResult* %l1
@@ -1021,20 +1022,18 @@ block.entry:
 then0:
   %t10 = load %TypecheckResult, %TypecheckResult* %l1
   %t11 = extractvalue %TypecheckResult %t10, 0
-  %t12 = bitcast { %Diagnostic**, i64 }* %t11 to { %Diagnostic*, i64 }*
-  call void @report_typecheck_errors({ %Diagnostic*, i64 }* %t12, i8* %source)
-  %t13 = call %NativeModule @empty_native_module()
-  %t14 = insertvalue %EmitNativeResult undef, %NativeModule %t13, 0
-  %t15 = load %TypecheckResult, %TypecheckResult* %l1
-  %t16 = extractvalue %TypecheckResult %t15, 0
-  %t17 = bitcast { %Diagnostic**, i64 }* %t16 to { %Diagnostic*, i64 }*
-  %t18 = call { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %t17, i8* %source)
-  %t19 = insertvalue %EmitNativeResult %t14, { i8**, i64 }* %t18, 1
-  ret %EmitNativeResult %t19
+  call void @report_typecheck_errors({ %Diagnostic*, i64 }* %t11, i8* %source)
+  %t12 = call %NativeModule @empty_native_module()
+  %t13 = insertvalue %EmitNativeResult undef, %NativeModule %t12, 0
+  %t14 = load %TypecheckResult, %TypecheckResult* %l1
+  %t15 = extractvalue %TypecheckResult %t14, 0
+  %t16 = call { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %t15, i8* %source)
+  %t17 = insertvalue %EmitNativeResult %t13, { i8**, i64 }* %t16, 1
+  ret %EmitNativeResult %t17
 merge1:
-  %t20 = load %Program, %Program* %l0
-  %t21 = call %EmitNativeResult @emit_native(%Program %t20)
-  ret %EmitNativeResult %t21
+  %t18 = load %Program, %Program* %l0
+  %t19 = call %EmitNativeResult @emit_native(%Program %t18)
+  ret %EmitNativeResult %t19
 }
 
 ; fn compile_to_native_python effects: ![io]
@@ -1255,16 +1254,16 @@ merge1:
   %t71 = insertvalue %LoweredLLVMResult %t68, %TraitMetadata %t70, 2
   %t72 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t73 = extractvalue %LoweredLLVMResult %t72, 3
-  %t74 = insertvalue %LoweredLLVMResult %t71, { %FunctionEffectEntry**, i64 }* %t73, 3
+  %t74 = insertvalue %LoweredLLVMResult %t71, { %FunctionEffectEntry*, i64 }* %t73, 3
   %t75 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t76 = extractvalue %LoweredLLVMResult %t75, 4
-  %t77 = insertvalue %LoweredLLVMResult %t74, { %LifetimeRegionMetadata**, i64 }* %t76, 4
+  %t77 = insertvalue %LoweredLLVMResult %t74, { %LifetimeRegionMetadata*, i64 }* %t76, 4
   %t78 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t79 = extractvalue %LoweredLLVMResult %t78, 5
   %t80 = insertvalue %LoweredLLVMResult %t77, %CapabilityManifest %t79, 5
   %t81 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t82 = extractvalue %LoweredLLVMResult %t81, 6
-  %t83 = insertvalue %LoweredLLVMResult %t80, { %StringConstant**, i64 }* %t82, 6
+  %t83 = insertvalue %LoweredLLVMResult %t80, { %StringConstant*, i64 }* %t82, 6
   ret %LoweredLLVMResult %t83
 }
 
@@ -1378,16 +1377,16 @@ merge1:
   %t71 = insertvalue %LoweredLLVMResult %t68, %TraitMetadata %t70, 2
   %t72 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t73 = extractvalue %LoweredLLVMResult %t72, 3
-  %t74 = insertvalue %LoweredLLVMResult %t71, { %FunctionEffectEntry**, i64 }* %t73, 3
+  %t74 = insertvalue %LoweredLLVMResult %t71, { %FunctionEffectEntry*, i64 }* %t73, 3
   %t75 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t76 = extractvalue %LoweredLLVMResult %t75, 4
-  %t77 = insertvalue %LoweredLLVMResult %t74, { %LifetimeRegionMetadata**, i64 }* %t76, 4
+  %t77 = insertvalue %LoweredLLVMResult %t74, { %LifetimeRegionMetadata*, i64 }* %t76, 4
   %t78 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t79 = extractvalue %LoweredLLVMResult %t78, 5
   %t80 = insertvalue %LoweredLLVMResult %t77, %CapabilityManifest %t79, 5
   %t81 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t82 = extractvalue %LoweredLLVMResult %t81, 6
-  %t83 = insertvalue %LoweredLLVMResult %t80, { %StringConstant**, i64 }* %t82, 6
+  %t83 = insertvalue %LoweredLLVMResult %t80, { %StringConstant*, i64 }* %t82, 6
   %t84 = insertvalue %LLVMCompilationResult undef, %LoweredLLVMResult %t83, 0
   %t85 = load %EmitNativeResult, %EmitNativeResult* %l0
   %t86 = extractvalue %EmitNativeResult %t85, 0
@@ -1470,36 +1469,36 @@ merge5:
   br i1 %t36, label %then6, label %else7
 then6:
   %t41 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
-  %t42 = getelementptr [0 x %NativeStruct*], [0 x %NativeStruct*]* null, i32 1
-  %t43 = ptrtoint [0 x %NativeStruct*]* %t42 to i64
+  %t42 = getelementptr [0 x %NativeStruct], [0 x %NativeStruct]* null, i32 1
+  %t43 = ptrtoint [0 x %NativeStruct]* %t42 to i64
   %t44 = icmp eq i64 %t43, 0
   %t45 = select i1 %t44, i64 1, i64 %t43
   %t46 = call i8* @malloc(i64 %t45)
-  %t47 = bitcast i8* %t46 to %NativeStruct**
-  %t48 = getelementptr { %NativeStruct**, i64 }, { %NativeStruct**, i64 }* null, i32 1
-  %t49 = ptrtoint { %NativeStruct**, i64 }* %t48 to i64
+  %t47 = bitcast i8* %t46 to %NativeStruct*
+  %t48 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* null, i32 1
+  %t49 = ptrtoint { %NativeStruct*, i64 }* %t48 to i64
   %t50 = call i8* @malloc(i64 %t49)
-  %t51 = bitcast i8* %t50 to { %NativeStruct**, i64 }*
-  %t52 = getelementptr { %NativeStruct**, i64 }, { %NativeStruct**, i64 }* %t51, i32 0, i32 0
-  store %NativeStruct** %t47, %NativeStruct*** %t52
-  %t53 = getelementptr { %NativeStruct**, i64 }, { %NativeStruct**, i64 }* %t51, i32 0, i32 1
+  %t51 = bitcast i8* %t50 to { %NativeStruct*, i64 }*
+  %t52 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t51, i32 0, i32 0
+  store %NativeStruct* %t47, %NativeStruct** %t52
+  %t53 = getelementptr { %NativeStruct*, i64 }, { %NativeStruct*, i64 }* %t51, i32 0, i32 1
   store i64 0, i64* %t53
-  %t54 = insertvalue %LayoutManifest undef, { %NativeStruct**, i64 }* %t51, 0
-  %t55 = getelementptr [0 x %NativeEnum*], [0 x %NativeEnum*]* null, i32 1
-  %t56 = ptrtoint [0 x %NativeEnum*]* %t55 to i64
+  %t54 = insertvalue %LayoutManifest undef, { %NativeStruct*, i64 }* %t51, 0
+  %t55 = getelementptr [0 x %NativeEnum], [0 x %NativeEnum]* null, i32 1
+  %t56 = ptrtoint [0 x %NativeEnum]* %t55 to i64
   %t57 = icmp eq i64 %t56, 0
   %t58 = select i1 %t57, i64 1, i64 %t56
   %t59 = call i8* @malloc(i64 %t58)
-  %t60 = bitcast i8* %t59 to %NativeEnum**
-  %t61 = getelementptr { %NativeEnum**, i64 }, { %NativeEnum**, i64 }* null, i32 1
-  %t62 = ptrtoint { %NativeEnum**, i64 }* %t61 to i64
+  %t60 = bitcast i8* %t59 to %NativeEnum*
+  %t61 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* null, i32 1
+  %t62 = ptrtoint { %NativeEnum*, i64 }* %t61 to i64
   %t63 = call i8* @malloc(i64 %t62)
-  %t64 = bitcast i8* %t63 to { %NativeEnum**, i64 }*
-  %t65 = getelementptr { %NativeEnum**, i64 }, { %NativeEnum**, i64 }* %t64, i32 0, i32 0
-  store %NativeEnum** %t60, %NativeEnum*** %t65
-  %t66 = getelementptr { %NativeEnum**, i64 }, { %NativeEnum**, i64 }* %t64, i32 0, i32 1
+  %t64 = bitcast i8* %t63 to { %NativeEnum*, i64 }*
+  %t65 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t64, i32 0, i32 0
+  store %NativeEnum* %t60, %NativeEnum** %t65
+  %t66 = getelementptr { %NativeEnum*, i64 }, { %NativeEnum*, i64 }* %t64, i32 0, i32 1
   store i64 0, i64* %t66
-  %t67 = insertvalue %LayoutManifest %t54, { %NativeEnum**, i64 }* %t64, 1
+  %t67 = insertvalue %LayoutManifest %t54, { %NativeEnum*, i64 }* %t64, 1
   %t68 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t69 = ptrtoint [0 x i8*]* %t68 to i64
   %t70 = icmp eq i64 %t69, 0
@@ -1547,10 +1546,10 @@ else7:
   %t102 = load { %LayoutManifest*, i64 }*, { %LayoutManifest*, i64 }** %l1
   %t103 = load %LayoutManifest, %LayoutManifest* %l4
   %t104 = extractvalue %LayoutManifest %t103, 0
-  %t105 = insertvalue %LayoutManifest undef, { %NativeStruct**, i64 }* %t104, 0
+  %t105 = insertvalue %LayoutManifest undef, { %NativeStruct*, i64 }* %t104, 0
   %t106 = load %LayoutManifest, %LayoutManifest* %l4
   %t107 = extractvalue %LayoutManifest %t106, 1
-  %t108 = insertvalue %LayoutManifest %t105, { %NativeEnum**, i64 }* %t107, 1
+  %t108 = insertvalue %LayoutManifest %t105, { %NativeEnum*, i64 }* %t107, 1
   %t109 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t110 = ptrtoint [0 x i8*]* %t109 to i64
   %t111 = icmp eq i64 %t110, 0
@@ -1728,16 +1727,16 @@ merge10:
   %t240 = insertvalue %LoweredLLVMResult %t237, %TraitMetadata %t239, 2
   %t241 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
   %t242 = extractvalue %LoweredLLVMResult %t241, 3
-  %t243 = insertvalue %LoweredLLVMResult %t240, { %FunctionEffectEntry**, i64 }* %t242, 3
+  %t243 = insertvalue %LoweredLLVMResult %t240, { %FunctionEffectEntry*, i64 }* %t242, 3
   %t244 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
   %t245 = extractvalue %LoweredLLVMResult %t244, 4
-  %t246 = insertvalue %LoweredLLVMResult %t243, { %LifetimeRegionMetadata**, i64 }* %t245, 4
+  %t246 = insertvalue %LoweredLLVMResult %t243, { %LifetimeRegionMetadata*, i64 }* %t245, 4
   %t247 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
   %t248 = extractvalue %LoweredLLVMResult %t247, 5
   %t249 = insertvalue %LoweredLLVMResult %t246, %CapabilityManifest %t248, 5
   %t250 = load %LoweredLLVMResult, %LoweredLLVMResult* %l5
   %t251 = extractvalue %LoweredLLVMResult %t250, 6
-  %t252 = insertvalue %LoweredLLVMResult %t249, { %StringConstant**, i64 }* %t251, 6
+  %t252 = insertvalue %LoweredLLVMResult %t249, { %StringConstant*, i64 }* %t251, 6
   ret %LoweredLLVMResult %t252
 }
 
@@ -1867,8 +1866,8 @@ merge5:
   store { %CompiledModule*, i64 }* %t63, { %CompiledModule*, i64 }** %l0
   %t64 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
   %t65 = extractvalue %ModuleCompilationResult %t64, 1
-  %t66 = load { %ModuleDiagnostics**, i64 }, { %ModuleDiagnostics**, i64 }* %t65
-  %t67 = extractvalue { %ModuleDiagnostics**, i64 } %t66, 1
+  %t66 = load { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t65
+  %t67 = extractvalue { %ModuleDiagnostics*, i64 } %t66, 1
   %t68 = icmp sgt i64 %t67, 0
   %t69 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
   %t70 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
@@ -1880,7 +1879,7 @@ then6:
   %t74 = load %ModuleCompilationResult, %ModuleCompilationResult* %l4
   %t75 = extractvalue %ModuleCompilationResult %t74, 1
   %t76 = bitcast { %ModuleDiagnostics*, i64 }* %t73 to { i8**, i64 }*
-  %t77 = bitcast { %ModuleDiagnostics**, i64 }* %t75 to { i8**, i64 }*
+  %t77 = bitcast { %ModuleDiagnostics*, i64 }* %t75 to { i8**, i64 }*
   %t78 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t76, { i8**, i64 }* %t77)
   %t79 = bitcast { i8**, i64 }* %t78 to { %ModuleDiagnostics*, i64 }*
   store { %ModuleDiagnostics*, i64 }* %t79, { %ModuleDiagnostics*, i64 }** %l1
@@ -1899,12 +1898,10 @@ afterfor3:
   %t84 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
   %t85 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
   %t86 = load { %CompiledModule*, i64 }*, { %CompiledModule*, i64 }** %l0
-  %t87 = bitcast { %CompiledModule*, i64 }* %t86 to { %CompiledModule**, i64 }*
-  %t88 = insertvalue %ProjectCompilation undef, { %CompiledModule**, i64 }* %t87, 0
-  %t89 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
-  %t90 = bitcast { %ModuleDiagnostics*, i64 }* %t89 to { %ModuleDiagnostics**, i64 }*
-  %t91 = insertvalue %ProjectCompilation %t88, { %ModuleDiagnostics**, i64 }* %t90, 1
-  ret %ProjectCompilation %t91
+  %t87 = insertvalue %ProjectCompilation undef, { %CompiledModule*, i64 }* %t86, 0
+  %t88 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l1
+  %t89 = insertvalue %ProjectCompilation %t87, { %ModuleDiagnostics*, i64 }* %t88, 1
+  ret %ProjectCompilation %t89
 }
 
 ; fn compile_source_at_path effects: ![io]
@@ -1929,8 +1926,8 @@ block.entry:
   store %TypecheckResult %t4, %TypecheckResult* %l2
   %t5 = load %TypecheckResult, %TypecheckResult* %l2
   %t6 = extractvalue %TypecheckResult %t5, 0
-  %t7 = load { %Diagnostic**, i64 }, { %Diagnostic**, i64 }* %t6
-  %t8 = extractvalue { %Diagnostic**, i64 } %t7, 1
+  %t7 = load { %Diagnostic*, i64 }, { %Diagnostic*, i64 }* %t6
+  %t8 = extractvalue { %Diagnostic*, i64 } %t7, 1
   %t9 = icmp sgt i64 %t8, 0
   %t10 = load i8*, i8** %l0
   %t11 = load %Program, %Program* %l1
@@ -1943,172 +1940,168 @@ then0:
   %t16 = load %TypecheckResult, %TypecheckResult* %l2
   %t17 = extractvalue %TypecheckResult %t16, 0
   %t18 = load i8*, i8** %l0
-  %t19 = bitcast { %Diagnostic**, i64 }* %t17 to { %Diagnostic*, i64 }*
-  %t20 = call { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %t19, i8* %t18)
-  %t21 = insertvalue %ModuleDiagnostics %t15, { i8**, i64 }* %t20, 1
-  %t22 = insertvalue %ModuleDiagnostics %t21, i1 1, 2
-  %t23 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* null, i32 1
-  %t24 = ptrtoint [1 x %ModuleDiagnostics]* %t23 to i64
-  %t25 = icmp eq i64 %t24, 0
-  %t26 = select i1 %t25, i64 1, i64 %t24
-  %t27 = call i8* @malloc(i64 %t26)
-  %t28 = bitcast i8* %t27 to %ModuleDiagnostics*
-  %t29 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t28, i64 0
-  store %ModuleDiagnostics %t22, %ModuleDiagnostics* %t29
-  %t30 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
-  %t31 = ptrtoint { %ModuleDiagnostics*, i64 }* %t30 to i64
-  %t32 = call i8* @malloc(i64 %t31)
-  %t33 = bitcast i8* %t32 to { %ModuleDiagnostics*, i64 }*
-  %t34 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t33, i32 0, i32 0
-  store %ModuleDiagnostics* %t28, %ModuleDiagnostics** %t34
-  %t35 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t33, i32 0, i32 1
-  store i64 1, i64* %t35
-  %t36 = bitcast { %ModuleDiagnostics*, i64 }* %t33 to { %ModuleDiagnostics**, i64 }*
-  %t37 = insertvalue %ModuleCompilationResult %t14, { %ModuleDiagnostics**, i64 }* %t36, 1
-  ret %ModuleCompilationResult %t37
+  %t19 = call { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %t17, i8* %t18)
+  %t20 = insertvalue %ModuleDiagnostics %t15, { i8**, i64 }* %t19, 1
+  %t21 = insertvalue %ModuleDiagnostics %t20, i1 1, 2
+  %t22 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* null, i32 1
+  %t23 = ptrtoint [1 x %ModuleDiagnostics]* %t22 to i64
+  %t24 = icmp eq i64 %t23, 0
+  %t25 = select i1 %t24, i64 1, i64 %t23
+  %t26 = call i8* @malloc(i64 %t25)
+  %t27 = bitcast i8* %t26 to %ModuleDiagnostics*
+  %t28 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t27, i64 0
+  store %ModuleDiagnostics %t21, %ModuleDiagnostics* %t28
+  %t29 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
+  %t30 = ptrtoint { %ModuleDiagnostics*, i64 }* %t29 to i64
+  %t31 = call i8* @malloc(i64 %t30)
+  %t32 = bitcast i8* %t31 to { %ModuleDiagnostics*, i64 }*
+  %t33 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t32, i32 0, i32 0
+  store %ModuleDiagnostics* %t27, %ModuleDiagnostics** %t33
+  %t34 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t32, i32 0, i32 1
+  store i64 1, i64* %t34
+  %t35 = insertvalue %ModuleCompilationResult %t14, { %ModuleDiagnostics*, i64 }* %t32, 1
+  ret %ModuleCompilationResult %t35
 merge1:
-  %t38 = load %Program, %Program* %l1
-  %t39 = call %EmitNativeResult @emit_native(%Program %t38)
-  store %EmitNativeResult %t39, %EmitNativeResult* %l3
-  %t40 = load %EmitNativeResult, %EmitNativeResult* %l3
-  %t41 = extractvalue %EmitNativeResult %t40, 0
-  %t42 = call %LoweredPythonResult @lower_to_python(%NativeModule %t41)
-  store %LoweredPythonResult %t42, %LoweredPythonResult* %l4
-  %t43 = load %EmitNativeResult, %EmitNativeResult* %l3
-  %t44 = extractvalue %EmitNativeResult %t43, 1
-  %t45 = load %LoweredPythonResult, %LoweredPythonResult* %l4
-  %t46 = extractvalue %LoweredPythonResult %t45, 1
-  %t47 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t44, { i8**, i64 }* %t46)
-  store { i8**, i64 }* %t47, { i8**, i64 }** %l5
-  %t48 = load %LoweredPythonResult, %LoweredPythonResult* %l4
-  %t49 = extractvalue %LoweredPythonResult %t48, 0
-  store i8* %t49, i8** %l6
-  %t50 = load i8*, i8** %l6
-  %t51 = call i1 @needs_python_fallback(i8* %t50)
-  store i1 %t51, i1* %l7
-  %t52 = load i1, i1* %l7
-  %t53 = load i8*, i8** %l0
-  %t54 = load %Program, %Program* %l1
-  %t55 = load %TypecheckResult, %TypecheckResult* %l2
-  %t56 = load %EmitNativeResult, %EmitNativeResult* %l3
-  %t57 = load %LoweredPythonResult, %LoweredPythonResult* %l4
-  %t58 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t59 = load i8*, i8** %l6
-  %t60 = load i1, i1* %l7
-  br i1 %t52, label %then2, label %merge3
+  %t36 = load %Program, %Program* %l1
+  %t37 = call %EmitNativeResult @emit_native(%Program %t36)
+  store %EmitNativeResult %t37, %EmitNativeResult* %l3
+  %t38 = load %EmitNativeResult, %EmitNativeResult* %l3
+  %t39 = extractvalue %EmitNativeResult %t38, 0
+  %t40 = call %LoweredPythonResult @lower_to_python(%NativeModule %t39)
+  store %LoweredPythonResult %t40, %LoweredPythonResult* %l4
+  %t41 = load %EmitNativeResult, %EmitNativeResult* %l3
+  %t42 = extractvalue %EmitNativeResult %t41, 1
+  %t43 = load %LoweredPythonResult, %LoweredPythonResult* %l4
+  %t44 = extractvalue %LoweredPythonResult %t43, 1
+  %t45 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t42, { i8**, i64 }* %t44)
+  store { i8**, i64 }* %t45, { i8**, i64 }** %l5
+  %t46 = load %LoweredPythonResult, %LoweredPythonResult* %l4
+  %t47 = extractvalue %LoweredPythonResult %t46, 0
+  store i8* %t47, i8** %l6
+  %t48 = load i8*, i8** %l6
+  %t49 = call i1 @needs_python_fallback(i8* %t48)
+  store i1 %t49, i1* %l7
+  %t50 = load i1, i1* %l7
+  %t51 = load i8*, i8** %l0
+  %t52 = load %Program, %Program* %l1
+  %t53 = load %TypecheckResult, %TypecheckResult* %l2
+  %t54 = load %EmitNativeResult, %EmitNativeResult* %l3
+  %t55 = load %LoweredPythonResult, %LoweredPythonResult* %l4
+  %t56 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t57 = load i8*, i8** %l6
+  %t58 = load i1, i1* %l7
+  br i1 %t50, label %then2, label %merge3
 then2:
-  %t61 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %s62 = getelementptr inbounds [86 x i8], [86 x i8]* @.str.len85.h1706301526, i32 0, i32 0
-  %t63 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
-  %t64 = ptrtoint [1 x i8*]* %t63 to i64
-  %t65 = icmp eq i64 %t64, 0
-  %t66 = select i1 %t65, i64 1, i64 %t64
-  %t67 = call i8* @malloc(i64 %t66)
-  %t68 = bitcast i8* %t67 to i8**
-  %t69 = getelementptr i8*, i8** %t68, i64 0
-  store i8* %s62, i8** %t69
-  %t70 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t71 = ptrtoint { i8**, i64 }* %t70 to i64
-  %t72 = call i8* @malloc(i64 %t71)
-  %t73 = bitcast i8* %t72 to { i8**, i64 }*
-  %t74 = getelementptr { i8**, i64 }, { i8**, i64 }* %t73, i32 0, i32 0
-  store i8** %t68, i8*** %t74
-  %t75 = getelementptr { i8**, i64 }, { i8**, i64 }* %t73, i32 0, i32 1
-  store i64 1, i64* %t75
-  %t76 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t61, { i8**, i64 }* %t73)
-  store { i8**, i64 }* %t76, { i8**, i64 }** %l5
-  %t77 = bitcast i8* null to %CompiledModule*
-  %t78 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t77, 0
-  %t79 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
-  %t80 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t81 = insertvalue %ModuleDiagnostics %t79, { i8**, i64 }* %t80, 1
-  %t82 = insertvalue %ModuleDiagnostics %t81, i1 1, 2
-  %t83 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* null, i32 1
-  %t84 = ptrtoint [1 x %ModuleDiagnostics]* %t83 to i64
-  %t85 = icmp eq i64 %t84, 0
-  %t86 = select i1 %t85, i64 1, i64 %t84
-  %t87 = call i8* @malloc(i64 %t86)
-  %t88 = bitcast i8* %t87 to %ModuleDiagnostics*
-  %t89 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t88, i64 0
-  store %ModuleDiagnostics %t82, %ModuleDiagnostics* %t89
-  %t90 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
-  %t91 = ptrtoint { %ModuleDiagnostics*, i64 }* %t90 to i64
-  %t92 = call i8* @malloc(i64 %t91)
-  %t93 = bitcast i8* %t92 to { %ModuleDiagnostics*, i64 }*
-  %t94 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t93, i32 0, i32 0
-  store %ModuleDiagnostics* %t88, %ModuleDiagnostics** %t94
-  %t95 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t93, i32 0, i32 1
-  store i64 1, i64* %t95
-  %t96 = bitcast { %ModuleDiagnostics*, i64 }* %t93 to { %ModuleDiagnostics**, i64 }*
-  %t97 = insertvalue %ModuleCompilationResult %t78, { %ModuleDiagnostics**, i64 }* %t96, 1
-  ret %ModuleCompilationResult %t97
+  %t59 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %s60 = getelementptr inbounds [86 x i8], [86 x i8]* @.str.len85.h1706301526, i32 0, i32 0
+  %t61 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
+  %t62 = ptrtoint [1 x i8*]* %t61 to i64
+  %t63 = icmp eq i64 %t62, 0
+  %t64 = select i1 %t63, i64 1, i64 %t62
+  %t65 = call i8* @malloc(i64 %t64)
+  %t66 = bitcast i8* %t65 to i8**
+  %t67 = getelementptr i8*, i8** %t66, i64 0
+  store i8* %s60, i8** %t67
+  %t68 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t69 = ptrtoint { i8**, i64 }* %t68 to i64
+  %t70 = call i8* @malloc(i64 %t69)
+  %t71 = bitcast i8* %t70 to { i8**, i64 }*
+  %t72 = getelementptr { i8**, i64 }, { i8**, i64 }* %t71, i32 0, i32 0
+  store i8** %t66, i8*** %t72
+  %t73 = getelementptr { i8**, i64 }, { i8**, i64 }* %t71, i32 0, i32 1
+  store i64 1, i64* %t73
+  %t74 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t59, { i8**, i64 }* %t71)
+  store { i8**, i64 }* %t74, { i8**, i64 }** %l5
+  %t75 = bitcast i8* null to %CompiledModule*
+  %t76 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t75, 0
+  %t77 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
+  %t78 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t79 = insertvalue %ModuleDiagnostics %t77, { i8**, i64 }* %t78, 1
+  %t80 = insertvalue %ModuleDiagnostics %t79, i1 1, 2
+  %t81 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* null, i32 1
+  %t82 = ptrtoint [1 x %ModuleDiagnostics]* %t81 to i64
+  %t83 = icmp eq i64 %t82, 0
+  %t84 = select i1 %t83, i64 1, i64 %t82
+  %t85 = call i8* @malloc(i64 %t84)
+  %t86 = bitcast i8* %t85 to %ModuleDiagnostics*
+  %t87 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t86, i64 0
+  store %ModuleDiagnostics %t80, %ModuleDiagnostics* %t87
+  %t88 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
+  %t89 = ptrtoint { %ModuleDiagnostics*, i64 }* %t88 to i64
+  %t90 = call i8* @malloc(i64 %t89)
+  %t91 = bitcast i8* %t90 to { %ModuleDiagnostics*, i64 }*
+  %t92 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t91, i32 0, i32 0
+  store %ModuleDiagnostics* %t86, %ModuleDiagnostics** %t92
+  %t93 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t91, i32 0, i32 1
+  store i64 1, i64* %t93
+  %t94 = insertvalue %ModuleCompilationResult %t76, { %ModuleDiagnostics*, i64 }* %t91, 1
+  ret %ModuleCompilationResult %t94
 merge3:
-  %t98 = getelementptr [0 x %ModuleDiagnostics], [0 x %ModuleDiagnostics]* null, i32 1
-  %t99 = ptrtoint [0 x %ModuleDiagnostics]* %t98 to i64
-  %t100 = icmp eq i64 %t99, 0
-  %t101 = select i1 %t100, i64 1, i64 %t99
-  %t102 = call i8* @malloc(i64 %t101)
-  %t103 = bitcast i8* %t102 to %ModuleDiagnostics*
-  %t104 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
-  %t105 = ptrtoint { %ModuleDiagnostics*, i64 }* %t104 to i64
-  %t106 = call i8* @malloc(i64 %t105)
-  %t107 = bitcast i8* %t106 to { %ModuleDiagnostics*, i64 }*
-  %t108 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t107, i32 0, i32 0
-  store %ModuleDiagnostics* %t103, %ModuleDiagnostics** %t108
-  %t109 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t107, i32 0, i32 1
-  store i64 0, i64* %t109
-  store { %ModuleDiagnostics*, i64 }* %t107, { %ModuleDiagnostics*, i64 }** %l8
-  %t110 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t111 = load { i8**, i64 }, { i8**, i64 }* %t110
-  %t112 = extractvalue { i8**, i64 } %t111, 1
-  %t113 = icmp sgt i64 %t112, 0
-  %t114 = load i8*, i8** %l0
-  %t115 = load %Program, %Program* %l1
-  %t116 = load %TypecheckResult, %TypecheckResult* %l2
-  %t117 = load %EmitNativeResult, %EmitNativeResult* %l3
-  %t118 = load %LoweredPythonResult, %LoweredPythonResult* %l4
-  %t119 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t120 = load i8*, i8** %l6
-  %t121 = load i1, i1* %l7
-  %t122 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
-  br i1 %t113, label %then4, label %merge5
+  %t95 = getelementptr [0 x %ModuleDiagnostics], [0 x %ModuleDiagnostics]* null, i32 1
+  %t96 = ptrtoint [0 x %ModuleDiagnostics]* %t95 to i64
+  %t97 = icmp eq i64 %t96, 0
+  %t98 = select i1 %t97, i64 1, i64 %t96
+  %t99 = call i8* @malloc(i64 %t98)
+  %t100 = bitcast i8* %t99 to %ModuleDiagnostics*
+  %t101 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
+  %t102 = ptrtoint { %ModuleDiagnostics*, i64 }* %t101 to i64
+  %t103 = call i8* @malloc(i64 %t102)
+  %t104 = bitcast i8* %t103 to { %ModuleDiagnostics*, i64 }*
+  %t105 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t104, i32 0, i32 0
+  store %ModuleDiagnostics* %t100, %ModuleDiagnostics** %t105
+  %t106 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t104, i32 0, i32 1
+  store i64 0, i64* %t106
+  store { %ModuleDiagnostics*, i64 }* %t104, { %ModuleDiagnostics*, i64 }** %l8
+  %t107 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t108 = load { i8**, i64 }, { i8**, i64 }* %t107
+  %t109 = extractvalue { i8**, i64 } %t108, 1
+  %t110 = icmp sgt i64 %t109, 0
+  %t111 = load i8*, i8** %l0
+  %t112 = load %Program, %Program* %l1
+  %t113 = load %TypecheckResult, %TypecheckResult* %l2
+  %t114 = load %EmitNativeResult, %EmitNativeResult* %l3
+  %t115 = load %LoweredPythonResult, %LoweredPythonResult* %l4
+  %t116 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t117 = load i8*, i8** %l6
+  %t118 = load i1, i1* %l7
+  %t119 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
+  br i1 %t110, label %then4, label %merge5
 then4:
-  %t123 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
-  %t124 = load { i8**, i64 }*, { i8**, i64 }** %l5
-  %t125 = insertvalue %ModuleDiagnostics %t123, { i8**, i64 }* %t124, 1
-  %t126 = insertvalue %ModuleDiagnostics %t125, i1 0, 2
-  %t127 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* null, i32 1
-  %t128 = ptrtoint [1 x %ModuleDiagnostics]* %t127 to i64
-  %t129 = icmp eq i64 %t128, 0
-  %t130 = select i1 %t129, i64 1, i64 %t128
-  %t131 = call i8* @malloc(i64 %t130)
-  %t132 = bitcast i8* %t131 to %ModuleDiagnostics*
-  %t133 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t132, i64 0
-  store %ModuleDiagnostics %t126, %ModuleDiagnostics* %t133
-  %t134 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
-  %t135 = ptrtoint { %ModuleDiagnostics*, i64 }* %t134 to i64
-  %t136 = call i8* @malloc(i64 %t135)
-  %t137 = bitcast i8* %t136 to { %ModuleDiagnostics*, i64 }*
-  %t138 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t137, i32 0, i32 0
-  store %ModuleDiagnostics* %t132, %ModuleDiagnostics** %t138
-  %t139 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t137, i32 0, i32 1
-  store i64 1, i64* %t139
-  store { %ModuleDiagnostics*, i64 }* %t137, { %ModuleDiagnostics*, i64 }** %l8
-  %t140 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
+  %t120 = insertvalue %ModuleDiagnostics undef, i8* %source_path, 0
+  %t121 = load { i8**, i64 }*, { i8**, i64 }** %l5
+  %t122 = insertvalue %ModuleDiagnostics %t120, { i8**, i64 }* %t121, 1
+  %t123 = insertvalue %ModuleDiagnostics %t122, i1 0, 2
+  %t124 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* null, i32 1
+  %t125 = ptrtoint [1 x %ModuleDiagnostics]* %t124 to i64
+  %t126 = icmp eq i64 %t125, 0
+  %t127 = select i1 %t126, i64 1, i64 %t125
+  %t128 = call i8* @malloc(i64 %t127)
+  %t129 = bitcast i8* %t128 to %ModuleDiagnostics*
+  %t130 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t129, i64 0
+  store %ModuleDiagnostics %t123, %ModuleDiagnostics* %t130
+  %t131 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
+  %t132 = ptrtoint { %ModuleDiagnostics*, i64 }* %t131 to i64
+  %t133 = call i8* @malloc(i64 %t132)
+  %t134 = bitcast i8* %t133 to { %ModuleDiagnostics*, i64 }*
+  %t135 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t134, i32 0, i32 0
+  store %ModuleDiagnostics* %t129, %ModuleDiagnostics** %t135
+  %t136 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t134, i32 0, i32 1
+  store i64 1, i64* %t136
+  store { %ModuleDiagnostics*, i64 }* %t134, { %ModuleDiagnostics*, i64 }** %l8
+  %t137 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
   br label %merge5
 merge5:
-  %t141 = phi { %ModuleDiagnostics*, i64 }* [ %t140, %then4 ], [ %t122, %merge3 ]
-  store { %ModuleDiagnostics*, i64 }* %t141, { %ModuleDiagnostics*, i64 }** %l8
-  %t142 = insertvalue %CompiledModule undef, i8* %source_path, 0
-  %t143 = load i8*, i8** %l6
-  %t144 = insertvalue %CompiledModule %t142, i8* %t143, 1
-  %t145 = alloca %CompiledModule
-  store %CompiledModule %t144, %CompiledModule* %t145
-  %t146 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t145, 0
-  %t147 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
-  %t148 = bitcast { %ModuleDiagnostics*, i64 }* %t147 to { %ModuleDiagnostics**, i64 }*
-  %t149 = insertvalue %ModuleCompilationResult %t146, { %ModuleDiagnostics**, i64 }* %t148, 1
-  ret %ModuleCompilationResult %t149
+  %t138 = phi { %ModuleDiagnostics*, i64 }* [ %t137, %then4 ], [ %t119, %merge3 ]
+  store { %ModuleDiagnostics*, i64 }* %t138, { %ModuleDiagnostics*, i64 }** %l8
+  %t139 = insertvalue %CompiledModule undef, i8* %source_path, 0
+  %t140 = load i8*, i8** %l6
+  %t141 = insertvalue %CompiledModule %t139, i8* %t140, 1
+  %t142 = alloca %CompiledModule
+  store %CompiledModule %t141, %CompiledModule* %t142
+  %t143 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t142, 0
+  %t144 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
+  %t145 = insertvalue %ModuleCompilationResult %t143, { %ModuleDiagnostics*, i64 }* %t144, 1
+  ret %ModuleCompilationResult %t145
 }
 
 define { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %entries, i8* %source) {
@@ -3377,21 +3370,21 @@ merge17:
 
 define %NativeModule @empty_native_module() {
 block.entry:
-  %t0 = getelementptr [0 x %NativeArtifact*], [0 x %NativeArtifact*]* null, i32 1
-  %t1 = ptrtoint [0 x %NativeArtifact*]* %t0 to i64
+  %t0 = getelementptr [0 x %NativeArtifact], [0 x %NativeArtifact]* null, i32 1
+  %t1 = ptrtoint [0 x %NativeArtifact]* %t0 to i64
   %t2 = icmp eq i64 %t1, 0
   %t3 = select i1 %t2, i64 1, i64 %t1
   %t4 = call i8* @malloc(i64 %t3)
-  %t5 = bitcast i8* %t4 to %NativeArtifact**
-  %t6 = getelementptr { %NativeArtifact**, i64 }, { %NativeArtifact**, i64 }* null, i32 1
-  %t7 = ptrtoint { %NativeArtifact**, i64 }* %t6 to i64
+  %t5 = bitcast i8* %t4 to %NativeArtifact*
+  %t6 = getelementptr { %NativeArtifact*, i64 }, { %NativeArtifact*, i64 }* null, i32 1
+  %t7 = ptrtoint { %NativeArtifact*, i64 }* %t6 to i64
   %t8 = call i8* @malloc(i64 %t7)
-  %t9 = bitcast i8* %t8 to { %NativeArtifact**, i64 }*
-  %t10 = getelementptr { %NativeArtifact**, i64 }, { %NativeArtifact**, i64 }* %t9, i32 0, i32 0
-  store %NativeArtifact** %t5, %NativeArtifact*** %t10
-  %t11 = getelementptr { %NativeArtifact**, i64 }, { %NativeArtifact**, i64 }* %t9, i32 0, i32 1
+  %t9 = bitcast i8* %t8 to { %NativeArtifact*, i64 }*
+  %t10 = getelementptr { %NativeArtifact*, i64 }, { %NativeArtifact*, i64 }* %t9, i32 0, i32 0
+  store %NativeArtifact* %t5, %NativeArtifact** %t10
+  %t11 = getelementptr { %NativeArtifact*, i64 }, { %NativeArtifact*, i64 }* %t9, i32 0, i32 1
   store i64 0, i64* %t11
-  %t12 = insertvalue %NativeModule undef, { %NativeArtifact**, i64 }* %t9, 0
+  %t12 = insertvalue %NativeModule undef, { %NativeArtifact*, i64 }* %t9, 0
   %t13 = getelementptr [0 x i8*], [0 x i8*]* null, i32 1
   %t14 = ptrtoint [0 x i8*]* %t13 to i64
   %t15 = icmp eq i64 %t14, 0
@@ -4594,18 +4587,18 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
+@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
 @.str.len5.h655249917 = private unnamed_addr constant [6 x i8] c"\0Alet \00"
-@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
+@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
+@.str.len85.h1706301526 = private unnamed_addr constant [86 x i8] c"native backend: lowering produced unsupported python output; stage0 fallback disabled\00"
+@.str.len14.h129277126 = private unnamed_addr constant [15 x i8] c"ExpressionRaw(\00"
 @.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
+@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
+@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
+@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
 @.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
 @.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
-@.str.len85.h1706301526 = private unnamed_addr constant [86 x i8] c"native backend: lowering produced unsupported python output; stage0 fallback disabled\00"
-@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
-@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
-@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
 @.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
-@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
+@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
+@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
 @.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
-@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
-@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
-@.str.len14.h129277126 = private unnamed_addr constant [15 x i8] c"ExpressionRaw(\00"

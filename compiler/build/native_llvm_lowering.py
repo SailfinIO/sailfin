@@ -1704,6 +1704,10 @@ def map_type_annotation(annotation):
             element_type = map_type_annotation(element_annotation)
             if len(element_type) == 0:
                 return "i8*"
+            if not annotation_is_array(element_annotation)  and  layout_annotation_represents_user_value(element_annotation)  and  ends_with_pointer_suffix(element_type):
+                stripped_element = strip_pointer_suffix(element_type)
+                if len(stripped_element) > 0:
+                    element_type = stripped_element
             aggregate = array_struct_type_for_element(element_type)
             return aggregate + "*"
     if looks_like_user_type(normalized):
@@ -1769,6 +1773,13 @@ def layout_annotation_base_type(annotation):
             element = trim_text(substring(normalized, 0, len(normalized) - 2))
             return layout_annotation_base_type(element)
     return normalized
+
+def annotation_is_array(annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) < 3:
+        return False
+    suffix = substring(trimmed, len(trimmed) - 2, len(trimmed))
+    return suffix == "[]"
 
 def layout_annotation_represents_user_value(annotation):
     if layout_annotation_requires_pointer(annotation):
@@ -2541,6 +2552,7 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="is_alpha_char", symbol="sailfin_runtime_is_alpha_char", return_type="i1", parameter_types=["i8"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="append_string", symbol="sailfin_runtime_append_string", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="concat", symbol="sailfin_runtime_concat", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "{ i8**, i64 }*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="copy_bytes", symbol="sailfin_runtime_copy_bytes", return_type="void", parameter_types=["i8*", "i8*", "i64"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="get_field", symbol="sailfin_runtime_get_field", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="mark_persistent", symbol="sailfin_runtime_mark_persistent", return_type="void", parameter_types=["i8*"], effects=[]))
     return descriptors
@@ -5408,11 +5420,118 @@ def map_array_pointer_type(context, annotation):
     element_annotation = trim_text(substring(trimmed, 0, len(trimmed) - 2))
     element_type = map_primitive_type(context, element_annotation)
     if len(element_type) == 0:
+        element_type = map_type_annotation(element_annotation)
+    if len(element_type) == 0:
         element_type = "i8*"
+    if not annotation_is_array(element_annotation)  and  layout_annotation_represents_user_value(element_annotation)  and  ends_with_pointer_suffix(element_type):
+        stripped_element = strip_pointer_suffix(element_type)
+        if len(stripped_element) > 0:
+            element_type = stripped_element
     return "{ " + element_type + "*, i64 }*"
 
 def array_struct_type_for_element(element_type):
     return "{ " + element_type + "*, i64 }"
+
+def lower_struct_array_concat(lhs, rhs, element_type, lines, temp_index):
+    current_lines = lines
+    current_temp = temp_index
+    diagnostics = []
+    if len(element_type) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: concat requires a concrete element type")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=[])
+    array_struct_type = array_struct_type_for_element(element_type)
+    if len(array_struct_type) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: unsupported concat element type `" + element_type + "`")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=[])
+    data_pointer_type = element_type + "*"
+    data_pointer_pointer_type = data_pointer_type + "*"
+    lhs_data_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + lhs_data_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 0")
+    lhs_data_value = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + lhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + lhs_data_ptr)
+    lhs_len_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + lhs_len_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 1")
+    lhs_len_value = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + lhs_len_value + " = load i64, i64* " + lhs_len_ptr)
+    rhs_data_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + rhs_data_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 0")
+    rhs_data_value = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + rhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + rhs_data_ptr)
+    rhs_len_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + rhs_len_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 1")
+    rhs_len_value = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + rhs_len_value + " = load i64, i64* " + rhs_len_ptr)
+    element_size_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1")
+    element_size_value = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64")
+    total_length = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + lhs_len_value + ", " + rhs_len_value)
+    total_bytes = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length)
+    new_raw_buffer = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")")
+    new_data_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type)
+    new_data_i8 = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*")
+    lhs_bytes = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + lhs_bytes + " = mul i64 " + element_size_value + ", " + lhs_len_value)
+    lhs_src_i8 = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + lhs_src_i8 + " = bitcast " + data_pointer_type + " " + lhs_data_value + " to i8*")
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + lhs_src_i8 + ", i64 " + lhs_bytes + ")")
+    rhs_bytes = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + rhs_bytes + " = mul i64 " + element_size_value + ", " + rhs_len_value)
+    rhs_src_i8 = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + rhs_src_i8 + " = bitcast " + data_pointer_type + " " + rhs_data_value + " to i8*")
+    rhs_dest_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + rhs_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + lhs_len_value)
+    rhs_dest_i8 = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + rhs_dest_i8 + " = bitcast " + data_pointer_type + " " + rhs_dest_ptr + " to i8*")
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + rhs_dest_i8 + ", i8* " + rhs_src_i8 + ", i64 " + rhs_bytes + ")")
+    struct_size_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + struct_size_ptr + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* null, i32 1")
+    struct_size_value = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + struct_size_value + " = ptrtoint " + array_struct_type + "* " + struct_size_ptr + " to i64")
+    new_struct_raw = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_struct_raw + " = call i8* @malloc(i64 " + struct_size_value + ")")
+    new_struct_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_struct_ptr + " = bitcast i8* " + new_struct_raw + " to " + array_struct_type + "*")
+    new_data_field = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_data_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 0")
+    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + new_data_field)
+    new_len_field = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_len_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 1")
+    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + new_len_field)
+    result_operand = LLVMOperand(llvm_type=lhs.llvm_type, value=new_struct_ptr)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=result_operand, diagnostics=diagnostics, string_constants=[])
 
 def array_pointer_element_type(llvm_type):
     trimmed = trim_text(llvm_type)
@@ -6461,6 +6580,8 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     injected_argument_count = 0
     method_operand = None
     helper_descriptor = None
+    array_concat_element_type = ""
+    is_array_concat = False
     method_parse = parse_member_access(trimmed_target)
     if method_parse.success:
         method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context)
@@ -6509,6 +6630,8 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                             method_operand = base_operand
                             trimmed_target = "concat"
                             injected_argument_count = 1
+                            array_concat_element_type = array_element_type
+                            is_array_concat = True
                     else:
                         diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
                         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
@@ -6634,6 +6757,18 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                     coerced_operands = append_llvm_operand(coerced_operands, coerced.operand)
         index += 1
     operands = coerced_operands
+    if is_array_concat  and  array_concat_element_type == "%Token":
+        if len(operands) >= 2:
+            concat_result = lower_struct_array_concat(operands[0], operands[1], array_concat_element_type, current_lines, current_temp)
+            diagnostics = (diagnostics) + (concat_result.diagnostics)
+            current_lines = concat_result.lines
+            current_temp = concat_result.temp_index
+            if concat_result.operand == None:
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=concat_result.operand, diagnostics=diagnostics, string_constants=collected_string_constants)
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: concat requires two operands")
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     if function_entry != None  or  helper_descriptor != None:
         if len(expected_params) != len(operands):
             diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(len(expected_params)) + " arguments but received " + number_to_string(len(operands)))
@@ -7077,13 +7212,47 @@ def lower_index_expression(parse, bindings, locals, temp_index, lines, functions
             if starts_with(inner_type, "{")  and  len(inner_type) > 0  and  inner_type[len(inner_type) - 1] == "}":
                 struct_inner = trim_text(substring(inner_type, 1, len(inner_type) - 1))
                 comma_pos = -1
+                brace_depth = 0
+                bracket_depth = 0
+                paren_depth = 0
+                angle_depth = 0
                 i = 0
                 while True:
                     if i >= len(struct_inner):
                         break
-                    if struct_inner[i] == ",":
-                        comma_pos = i
-                        break
+                    ch = struct_inner[i]
+                    if ch == "{":
+                        brace_depth += 1
+                    else:
+                        if ch == "}":
+                            if brace_depth > 0:
+                                brace_depth -= 1
+                        else:
+                            if ch == "[":
+                                bracket_depth += 1
+                            else:
+                                if ch == "]":
+                                    if bracket_depth > 0:
+                                        bracket_depth -= 1
+                                else:
+                                    if ch == "(":
+                                        paren_depth += 1
+                                    else:
+                                        if ch == ")":
+                                            if paren_depth > 0:
+                                                paren_depth -= 1
+                                        else:
+                                            if ch == "<":
+                                                angle_depth += 1
+                                            else:
+                                                if ch == ">":
+                                                    if angle_depth > 0:
+                                                        angle_depth -= 1
+                                                else:
+                                                    if ch == ",":
+                                                        if brace_depth == 0  and  bracket_depth == 0  and  paren_depth == 0  and  angle_depth == 0:
+                                                            comma_pos = i
+                                                            break
                     i += 1
                 if comma_pos >= 0:
                     first_field = trim_text(substring(struct_inner, 0, comma_pos))
@@ -8132,6 +8301,22 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
             current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + target_type + " " + alloca_temp)
             coerced = LLVMOperand(llvm_type=target_type, value=alloca_temp)
             return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+    if not ends_with_pointer_suffix(operand.llvm_type)  and  ends_with_pointer_suffix(target_type):
+        operand_array_element = array_pointer_element_type(operand.llvm_type + "*")
+        if len(operand_array_element) > 0:
+            alloca_temp = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + operand.llvm_type)
+            current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + alloca_temp)
+            next_index = temp_index + 1
+            pointer_value = alloca_temp
+            operand_pointer_type = operand.llvm_type + "*"
+            if operand_pointer_type != target_type:
+                bitcast_temp = format_temp_name(next_index)
+                current_lines = append_string(current_lines, "  " + bitcast_temp + " = bitcast " + operand_pointer_type + " " + alloca_temp + " to " + target_type)
+                pointer_value = bitcast_temp
+                next_index += 1
+            coerced = LLVMOperand(llvm_type=target_type, value=pointer_value)
+            return CoercionResult(lines=current_lines, temp_index=next_index, operand=coerced, diagnostics=diagnostics)
     if ends_with_pointer_suffix(operand.llvm_type)  and  ends_with_pointer_suffix(target_type):
         source_element = array_pointer_element_type(operand.llvm_type)
         target_element = array_pointer_element_type(target_type)

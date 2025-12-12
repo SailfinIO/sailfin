@@ -1873,6 +1873,12 @@ fn map_type_annotation(annotation -> string) -> string {
             if element_type.length == 0 {
                 return "i8*";
             }
+            if !annotation_is_array(element_annotation) && layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
+                let stripped_element = strip_pointer_suffix(element_type);
+                if stripped_element.length > 0 {
+                    element_type = stripped_element;
+                }
+            }
             let aggregate = array_struct_type_for_element(element_type);
             return aggregate + "*";
         }
@@ -1965,6 +1971,15 @@ fn layout_annotation_base_type(annotation -> string) -> string {
         }
     }
     return normalized;
+}
+
+fn annotation_is_array(annotation -> string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if trimmed.length < 3 {
+        return false;
+    }
+    let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
+    return suffix == "[]";
 }
 
 fn layout_annotation_represents_user_value(annotation -> string) -> boolean {
@@ -3444,6 +3459,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         symbol: "sailfin_runtime_concat",
         return_type: "{ i8**, i64 }*",
         parameter_types: ["{ i8**, i64 }*", "{ i8**, i64 }*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "copy_bytes",
+        symbol: "sailfin_runtime_copy_bytes",
+        return_type: "void",
+        parameter_types: ["i8*", "i8*", "i64"],
         effects: [],
     });
     
@@ -8009,14 +8031,139 @@ fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> strin
     let element_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
     let element_type = map_primitive_type(context, element_annotation);
     if element_type.length == 0 {
+        element_type = map_type_annotation(element_annotation);
+    }
+    if element_type.length == 0 {
         // Fallback to generic pointer for unresolved types (e.g., imported structs not in type context)
         element_type = "i8*";
+    }
+    if !annotation_is_array(element_annotation) && layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
+        let stripped_element = strip_pointer_suffix(element_type);
+        if stripped_element.length > 0 {
+            element_type = stripped_element;
+        }
     }
     return "{ " + element_type + "*, i64 }*";
 }
 
 fn array_struct_type_for_element(element_type -> string) -> string {
     return "{ " + element_type + "*, i64 }";
+}
+
+fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_type -> string, lines -> string[], temp_index -> number) -> ExpressionResult {
+    let mut current_lines = lines;
+    let mut current_temp = temp_index;
+    let mut diagnostics -> string[] = [];
+    if element_type.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: concat requires a concrete element type");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
+    }
+
+    let array_struct_type = array_struct_type_for_element(element_type);
+    if array_struct_type.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: unsupported concat element type `" + element_type + "`");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
+    }
+
+    let data_pointer_type = element_type + "*";
+    let data_pointer_pointer_type = data_pointer_type + "*";
+
+    let lhs_data_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + lhs_data_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 0");
+    let lhs_data_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + lhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + lhs_data_ptr);
+    let lhs_len_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + lhs_len_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 1");
+    let lhs_len_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + lhs_len_value + " = load i64, i64* " + lhs_len_ptr);
+
+    let rhs_data_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + rhs_data_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 0");
+    let rhs_data_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + rhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + rhs_data_ptr);
+    let rhs_len_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + rhs_len_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 1");
+    let rhs_len_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + rhs_len_value + " = load i64, i64* " + rhs_len_ptr);
+
+    let element_size_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1");
+    let element_size_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64");
+
+    let total_length = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + lhs_len_value + ", " + rhs_len_value);
+    let total_bytes = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length);
+
+    let new_raw_buffer = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")");
+    let new_data_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type);
+    let new_data_i8 = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*");
+
+    let lhs_bytes = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + lhs_bytes + " = mul i64 " + element_size_value + ", " + lhs_len_value);
+    let lhs_src_i8 = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + lhs_src_i8 + " = bitcast " + data_pointer_type + " " + lhs_data_value + " to i8*");
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + lhs_src_i8 + ", i64 " + lhs_bytes + ")");
+
+    let rhs_bytes = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + rhs_bytes + " = mul i64 " + element_size_value + ", " + rhs_len_value);
+    let rhs_src_i8 = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + rhs_src_i8 + " = bitcast " + data_pointer_type + " " + rhs_data_value + " to i8*");
+    let rhs_dest_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + rhs_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + lhs_len_value);
+    let rhs_dest_i8 = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + rhs_dest_i8 + " = bitcast " + data_pointer_type + " " + rhs_dest_ptr + " to i8*");
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + rhs_dest_i8 + ", i8* " + rhs_src_i8 + ", i64 " + rhs_bytes + ")");
+
+    let struct_size_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + struct_size_ptr + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* null, i32 1");
+    let struct_size_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + struct_size_value + " = ptrtoint " + array_struct_type + "* " + struct_size_ptr + " to i64");
+
+    let new_struct_raw = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_struct_raw + " = call i8* @malloc(i64 " + struct_size_value + ")");
+    let new_struct_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_struct_ptr + " = bitcast i8* " + new_struct_raw + " to " + array_struct_type + "*");
+    let new_data_field = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_data_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 0");
+    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + new_data_field);
+    let new_len_field = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_len_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 1");
+    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + new_len_field);
+
+    let result_operand = LLVMOperand { llvm_type: lhs.llvm_type, value: new_struct_ptr };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
 }
 
 fn array_pointer_element_type(llvm_type -> string) -> string {
@@ -9555,6 +9702,8 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let mut injected_argument_count -> number = 0;
     let mut method_operand -> LLVMOperand? = null;
     let mut helper_descriptor -> RuntimeHelperDescriptor? = null;
+    let mut array_concat_element_type -> string = "";
+    let mut is_array_concat -> boolean = false;
 
     let method_parse = parse_member_access(trimmed_target);
     if method_parse.success {
@@ -9607,6 +9756,8 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                         method_operand = base_operand;
                         trimmed_target = "concat";
                         injected_argument_count = 1;
+                        array_concat_element_type = array_element_type;
+                        is_array_concat = true;
                     }
                 } else {
                     diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
@@ -9775,6 +9926,22 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         index += 1;
     }
     operands = coerced_operands;
+
+    if is_array_concat && array_concat_element_type == "%Token" {
+        if operands.length >= 2 {
+            let concat_result = lower_struct_array_concat(operands[0], operands[1], array_concat_element_type, current_lines, current_temp);
+            diagnostics = diagnostics.concat(concat_result.diagnostics);
+            current_lines = concat_result.lines;
+            current_temp = concat_result.temp_index;
+            if concat_result.operand == null {
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: concat_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: concat requires two operands");
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+    }
 
     if function_entry != null || helper_descriptor != null {
         if expected_params.length != operands.length {
@@ -10408,14 +10575,45 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
             
             // Find comma position
             let mut comma_pos -> number = -1;
+            let mut brace_depth -> number = 0;
+            let mut bracket_depth -> number = 0;
+            let mut paren_depth -> number = 0;
+            let mut angle_depth -> number = 0;
             let mut i -> number = 0;
             loop {
                 if i >= struct_inner.length {
                     break;
                 }
-                if struct_inner[i] == "," {
-                    comma_pos = i;
-                    break;
+                let ch = struct_inner[i];
+                if ch == "{" {
+                    brace_depth += 1;
+                } else if ch == "}" {
+                    if brace_depth > 0 {
+                        brace_depth -= 1;
+                    }
+                } else if ch == "[" {
+                    bracket_depth += 1;
+                } else if ch == "]" {
+                    if bracket_depth > 0 {
+                        bracket_depth -= 1;
+                    }
+                } else if ch == "(" {
+                    paren_depth += 1;
+                } else if ch == ")" {
+                    if paren_depth > 0 {
+                        paren_depth -= 1;
+                    }
+                } else if ch == "<" {
+                    angle_depth += 1;
+                } else if ch == ">" {
+                    if angle_depth > 0 {
+                        angle_depth -= 1;
+                    }
+                } else if ch == "," {
+                    if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 && angle_depth == 0 {
+                        comma_pos = i;
+                        break;
+                    }
                 }
                 i += 1;
             }
@@ -11831,6 +12029,31 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + target_type + " " + alloca_temp);
             let coerced = LLVMOperand { llvm_type: target_type, value: alloca_temp };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+    }
+    // Special case: array struct literal value passed where a pointer is expected.
+    // Some parser helpers build { T*, i64 } structs inline and immediately pass them
+    // through slice APIs expecting { T*, i64 }*. When the callee uses a named layout
+    // (e.g. %Array$TokenSlice*), the names differ even though the layout matches.
+    if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) {
+        let operand_array_element = array_pointer_element_type(operand.llvm_type + "*");
+        if operand_array_element.length > 0 {
+            // Spill the literal struct to the stack, then bitcast the pointer to the
+            // requested target type so downstream code sees a consistent pointer value.
+            let alloca_temp = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + operand.llvm_type);
+            current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + alloca_temp);
+            let mut next_index -> number = temp_index + 1;
+            let mut pointer_value -> string = alloca_temp;
+            let operand_pointer_type = operand.llvm_type + "*";
+            if operand_pointer_type != target_type {
+                let bitcast_temp = format_temp_name(next_index);
+                current_lines = append_string(current_lines, "  " + bitcast_temp + " = bitcast " + operand_pointer_type + " " + alloca_temp + " to " + target_type);
+                pointer_value = bitcast_temp;
+                next_index += 1;
+            }
+            let coerced = LLVMOperand { llvm_type: target_type, value: pointer_value };
+            return CoercionResult { lines: current_lines, temp_index: next_index, operand: coerced, diagnostics: diagnostics };
         }
     }
     // Handle array struct pointer variance: allow bitcast between pointers whose layouts match
