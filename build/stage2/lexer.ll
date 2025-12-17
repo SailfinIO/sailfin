@@ -34,8 +34,8 @@ declare noalias i8* @malloc(i64)
 @.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
 @.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
 
-declare void @sailfin_runtime_mark_persistent(i8*)
 declare void @sailfin_runtime_copy_bytes(i8*, i8*, i64)
+declare void @sailfin_runtime_mark_persistent(i8*)
 
 define { %Token*, i64 }* @lex(i8* %source) {
 block.entry:

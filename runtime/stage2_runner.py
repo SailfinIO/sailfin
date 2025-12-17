@@ -101,6 +101,10 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
     "sailfin_runtime_is_whitespace_char": (None, (ctypes.c_byte,), ctypes.c_bool),
     "strings_equal": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_bool),
     "char_code": (None, (ctypes.c_void_p,), ctypes.c_double),
+    # String character helpers used by lexer/parser
+    "char_at": (None, (ctypes.c_void_p, ctypes.c_double), ctypes.c_void_p),
+    "is_symbol_char": (None, (ctypes.c_void_p,), ctypes.c_bool),
+    "sanitize_symbol": (None, (ctypes.c_void_p,), ctypes.c_void_p),
     "sailfin_runtime_bounds_check": (None, (ctypes.c_longlong, ctypes.c_longlong), None),
     "sailfin_runtime_mark_persistent": (None, (ctypes.c_void_p,), None),
     "abort": (None, (), None),
@@ -496,6 +500,16 @@ class Stage2Runner:
         dump_setting = os.environ.get("SAILFIN_STAGE2_DUMP_INSTRUMENTED_IR")
         self._instrument_dump_dir: pathlib.Path | None = None
         selected_dump_dir: pathlib.Path | None = None
+        disable_instrument_env = os.environ.get(
+            "SAILFIN_STAGE2_DISABLE_MARKERS", ""
+        ).strip().lower()
+        self._disable_instrumentation = disable_instrument_env in {
+            "1",
+            "true",
+            "yes",
+            "on",
+            "disable",
+        }
         if dump_dir_override:
             selected_dump_dir = pathlib.Path(dump_dir_override)
         elif dump_setting:
@@ -870,6 +884,15 @@ class Stage2Runner:
             return ir_text
         lex_end += 3
         lex_body = ir_text[lex_start:lex_end]
+
+        # Insert an entry marker to confirm lex() is entered before any crash.
+        entry_pattern = "block.entry:\n"
+        if entry_pattern in lex_body:
+            lex_body = lex_body.replace(
+                entry_pattern,
+                "block.entry:\n  call void @stage2_debug_marker(i64 1000)\n",
+                1,
+            )
         markers: list[tuple[str, str, int]] = [
             ("block.entry", "  %l0 = alloca %LexerState", 1000),
             ("merge5", "  %t30 = load %LexerState", 1001),
@@ -937,11 +960,33 @@ class Stage2Runner:
         end += 3
         body = ir_text[start:end]
 
+        # Confirm we reach the function entry before any work is done.
+        entry_pattern = "block.entry:\n  %l0 = alloca %Program\n"
+        if entry_pattern in body:
+            entry_replacement = (
+                "block.entry:\n"
+                "  call void @stage2_debug_marker(i64 1990)\n"
+                "  %l0 = alloca %Program\n"
+            )
+            body = body.replace(entry_pattern, entry_replacement, 1)
+
+        # Emit a marker before the dispatch to parse_statement so we can
+        # distinguish crashes occurring inside statement parsing from earlier phases.
+        parse_stmt_call = "  %t56 = call %StatementParseResult @parse_statement(%Parser %t55)\n"
+        if parse_stmt_call in body:
+            body = body.replace(
+                parse_stmt_call,
+                "  call void @stage2_debug_marker(i64 12000)\n" +
+                parse_stmt_call,
+                1,
+            )
+
         parse_call = "  %t0 = call %Program @parse_program(i8* %source)\n"
         if parse_call in body:
             body = body.replace(
                 parse_call,
-                parse_call + "  call void @stage2_debug_marker(i64 2000)\n",
+                "  call void @stage2_debug_marker(i64 1991)\n" + parse_call +
+                "  call void @stage2_debug_marker(i64 2000)\n",
                 1,
             )
 
@@ -2130,6 +2175,24 @@ class Stage2Runner:
         else:  # pragma: no cover - diagnostics only
             self._debug_log("[stage2] libc free unavailable")
 
+        # Provide backing storage for the external @runtime global expected by stage2 IR.
+        # We map it to a 1-element void* array so loads are well-defined even if the
+        # value is unused. The buffer is kept on the instance to avoid GC.
+        self._runtime_global_storage = (ctypes.c_void_p * 1)()
+        # Keep a non-null placeholder buffer alive in case stage2 code dereferences the global.
+        self._runtime_placeholder = ctypes.create_string_buffer(1)
+        placeholder_addr = ctypes.cast(
+            self._runtime_placeholder, ctypes.c_void_p
+        ).value or 0
+        self._runtime_global_storage[0] = placeholder_addr
+        runtime_addr = ctypes.addressof(self._runtime_global_storage)
+        runtime_value = int(
+            self._runtime_global_storage[0]) if self._runtime_global_storage[0] is not None else 0
+        llvm.add_symbol("runtime", runtime_addr)
+        self._debug_log(
+            f"[stage2] register global runtime: addr=0x{int(runtime_addr):x} value=0x{runtime_value:x} placeholder=0x{int(placeholder_addr):x}"
+        )
+
     def _make_helper(
         self,
         symbol: str,
@@ -2846,6 +2909,108 @@ class Stage2Runner:
 
             return cfunc_type(_string_concat)
 
+        elif symbol == "char_at":
+            cfunc_type = ctypes.CFUNCTYPE(
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double)
+
+            def _char_at(text_ptr: ctypes.c_void_p, index: ctypes.c_double) -> int:
+                try:
+                    _require_effects()
+                    text = _ptr_to_str(text_ptr)
+                    idx = int(index)
+                    if not isinstance(text, str) or idx < 0 or idx >= len(text):
+                        return _str_to_ptr("")
+                    return _str_to_ptr(text[idx: idx + 1])
+                except Exception as exc:
+                    _record_adapter_exception("runtime char_at", exc)
+                    return _str_to_ptr("")
+
+            return cfunc_type(_char_at)
+
+        elif symbol == "is_symbol_char":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p)
+
+            def _is_symbol_char(ch_ptr: ctypes.c_void_p) -> bool:
+                try:
+                    _require_effects()
+                    ch = _ptr_to_str(ch_ptr)
+                    if not ch:
+                        return False
+                    if ch == "_":
+                        return True
+                    code = runtime.char_code(ch)
+                    lower_a = runtime.char_code("a")
+                    lower_z = runtime.char_code("z")
+                    if lower_a <= code <= lower_z:
+                        return True
+                    upper_a = runtime.char_code("A")
+                    upper_z = runtime.char_code("Z")
+                    if upper_a <= code <= upper_z:
+                        return True
+                    zero = runtime.char_code("0")
+                    nine = runtime.char_code("9")
+                    if zero <= code <= nine:
+                        return True
+                    return False
+                except Exception as exc:
+                    _record_adapter_exception("runtime is_symbol_char", exc)
+                    return False
+
+            return cfunc_type(_is_symbol_char)
+
+        elif symbol == "sanitize_symbol":
+            cfunc_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
+
+            def _sanitize_symbol(name_ptr: ctypes.c_void_p) -> int:
+                try:
+                    _require_effects()
+                    name = _ptr_to_str(name_ptr)
+                    if not isinstance(name, str):
+                        return _str_to_ptr("_")
+                    if len(name) == 0:
+                        return _str_to_ptr("_")
+
+                    def _is_sym(ch: str) -> bool:
+                        if not ch:
+                            return False
+                        if ch == "_":
+                            return True
+                        code = runtime.char_code(ch)
+                        lower_a = runtime.char_code("a")
+                        lower_z = runtime.char_code("z")
+                        if lower_a <= code <= lower_z:
+                            return True
+                        upper_a = runtime.char_code("A")
+                        upper_z = runtime.char_code("Z")
+                        if upper_a <= code <= upper_z:
+                            return True
+                        zero = runtime.char_code("0")
+                        nine = runtime.char_code("9")
+                        if zero <= code <= nine:
+                            return True
+                        return False
+
+                    result_chars: list[str] = []
+                    for ch in name:
+                        if _is_sym(ch):
+                            result_chars.append(ch)
+                    result = "".join(result_chars)
+                    if len(result) == 0:
+                        result = "_"
+                    else:
+                        first = result[0]
+                        code = runtime.char_code(first)
+                        zero = runtime.char_code("0")
+                        nine = runtime.char_code("9")
+                        if zero <= code <= nine:
+                            result = "_" + result
+                    return _str_to_ptr(result)
+                except Exception as exc:
+                    _record_adapter_exception("runtime sanitize_symbol", exc)
+                    return _str_to_ptr("_")
+
+            return cfunc_type(_sanitize_symbol)
+
         elif symbol == "sailfin_runtime_concat":
             cfunc_type = ctypes.CFUNCTYPE(
                 ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
@@ -3403,16 +3568,20 @@ class Stage2Runner:
                 rewritten_ir, type_definitions)
             rewritten_ir = self._inject_missing_function_declarations(
                 rewritten_ir, function_signatures)
-            rewritten_ir = self._instrument_lex_ir(rewritten_ir)
-            rewritten_ir = self._instrument_compile_pipeline_ir(rewritten_ir)
-            rewritten_ir = self._instrument_parse_tokens_ir(rewritten_ir)
-            rewritten_ir = self._instrument_tokens_to_text_ir(rewritten_ir)
-            rewritten_ir = self._instrument_skip_trivia_ir(rewritten_ir)
-            rewritten_ir = self._instrument_is_trivia_token_ir(rewritten_ir)
-            rewritten_ir = self._instrument_parse_block_ir(rewritten_ir)
-            rewritten_ir = self._instrument_parse_unknown_ir(rewritten_ir)
-            rewritten_ir = self._instrument_parse_program_ir(rewritten_ir)
-            rewritten_ir = self._instrument_parse_statement_ir(rewritten_ir)
+            if not self._disable_instrumentation:
+                rewritten_ir = self._instrument_lex_ir(rewritten_ir)
+                rewritten_ir = self._instrument_compile_pipeline_ir(
+                    rewritten_ir)
+                rewritten_ir = self._instrument_parse_tokens_ir(rewritten_ir)
+                rewritten_ir = self._instrument_tokens_to_text_ir(rewritten_ir)
+                rewritten_ir = self._instrument_skip_trivia_ir(rewritten_ir)
+                rewritten_ir = self._instrument_is_trivia_token_ir(
+                    rewritten_ir)
+                rewritten_ir = self._instrument_parse_block_ir(rewritten_ir)
+                rewritten_ir = self._instrument_parse_unknown_ir(rewritten_ir)
+                rewritten_ir = self._instrument_parse_program_ir(rewritten_ir)
+                rewritten_ir = self._instrument_parse_statement_ir(
+                    rewritten_ir)
             self._register_type_definitions(rewritten_ir, type_definitions)
             if duplicates:
                 duplicate_registry[str(
@@ -3665,6 +3834,7 @@ class Stage2Runner:
     ):
         if self._engine is None:
             raise RuntimeError("execution engine was not initialised")
+
         address = self._engine.get_function_address(entry_point)
         if address == 0:
             raise ValueError(
@@ -3731,6 +3901,27 @@ class Stage2Runner:
         try:
             self._debug_log(
                 f"[stage2] invoke {entry_point}: aggregate={use_aggregate}"
+            )
+            marker_addr = 0
+            parse_addr = 0
+            lex_addr = 0
+            try:
+                marker_addr = int(llvm.address_of_symbol(
+                    "stage2_debug_marker") or 0)
+            except Exception:
+                marker_addr = -1
+            try:
+                parse_addr = int(
+                    self._engine.get_function_address("parse_program") or 0
+                )
+            except Exception:
+                parse_addr = -1
+            try:
+                lex_addr = int(self._engine.get_function_address("lex") or 0)
+            except Exception:
+                lex_addr = -1
+            self._debug_log(
+                f"[stage2] symbol addrs marker=0x{marker_addr:x} parse_program=0x{parse_addr:x} lex=0x{lex_addr:x}"
             )
             if use_aggregate:
                 function(*invoke_args)
