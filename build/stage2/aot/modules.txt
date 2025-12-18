@@ -1,0 +1,16 @@
+ast
+decorator_semantics
+effect_checker
+emit_native
+emitter_sailfin
+lexer
+main
+native_ir
+native_llvm_lowering
+native_lowering
+parser
+prelude
+self_host_checks
+string_utils
+token
+typecheck

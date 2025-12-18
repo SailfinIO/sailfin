@@ -18,34 +18,43 @@ source_filename = "sailfin"
 
 declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare i1 @strings_equal(i8*, i8*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
+declare void @sailfin_runtime_mark_persistent(i8*)
 
 declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
 define { %Person*, i64 }* @make_people() {
-entry:
+block.entry:
   %t0 = sitofp i64 36 to double
   %t1 = insertvalue %Person undef, double %t0, 0
   %t2 = sitofp i64 42 to double
   %t3 = insertvalue %Person undef, double %t2, 0
-  %t4 = alloca [2 x %Person]
-  %t5 = getelementptr [2 x %Person], [2 x %Person]* %t4, i32 0, i32 0
-  %t6 = getelementptr %Person, %Person* %t5, i64 0
-  store %Person %t1, %Person* %t6
-  %t7 = getelementptr %Person, %Person* %t5, i64 1
-  store %Person %t3, %Person* %t7
-  %t8 = alloca { %Person*, i64 }
-  %t9 = getelementptr { %Person*, i64 }, { %Person*, i64 }* %t8, i32 0, i32 0
-  store %Person* %t5, %Person** %t9
-  %t10 = getelementptr { %Person*, i64 }, { %Person*, i64 }* %t8, i32 0, i32 1
-  store i64 2, i64* %t10
-  ret { %Person*, i64 }* %t8
+  %t4 = getelementptr [2 x %Person], [2 x %Person]* null, i32 1
+  %t5 = ptrtoint [2 x %Person]* %t4 to i64
+  %t6 = icmp eq i64 %t5, 0
+  %t7 = select i1 %t6, i64 1, i64 %t5
+  %t8 = call i8* @malloc(i64 %t7)
+  %t9 = bitcast i8* %t8 to %Person*
+  %t10 = getelementptr %Person, %Person* %t9, i64 0
+  store %Person %t1, %Person* %t10
+  %t11 = getelementptr %Person, %Person* %t9, i64 1
+  store %Person %t3, %Person* %t11
+  %t12 = getelementptr { %Person*, i64 }, { %Person*, i64 }* null, i32 1
+  %t13 = ptrtoint { %Person*, i64 }* %t12 to i64
+  %t14 = call i8* @malloc(i64 %t13)
+  %t15 = bitcast i8* %t14 to { %Person*, i64 }*
+  %t16 = getelementptr { %Person*, i64 }, { %Person*, i64 }* %t15, i32 0, i32 0
+  store %Person* %t9, %Person** %t16
+  %t17 = getelementptr { %Person*, i64 }, { %Person*, i64 }* %t15, i32 0, i32 1
+  store i64 2, i64* %t17
+  ret { %Person*, i64 }* %t15
 }
 
 define double @total_years({ %Person*, i64 }* %values) {
-entry:
+block.entry:
   %l0 = alloca double
   %l1 = alloca i64
   %l2 = alloca %Person
@@ -80,11 +89,12 @@ forinc2:
   br label %for0
 afterfor3:
   %t16 = load double, double* %l0
-  ret double %t16
+  %t17 = load double, double* %l0
+  ret double %t17
 }
 
 define double @main() {
-entry:
+block.entry:
   %l0 = alloca { %Person*, i64 }*
   %t0 = call { %Person*, i64 }* @make_people()
   store { %Person*, i64 }* %t0, { %Person*, i64 }** %l0
@@ -94,7 +104,7 @@ entry:
 }
 
 define double @Persontotal(%Person %self) {
-entry:
+block.entry:
   %t0 = extractvalue %Person %self, 0
   ret double %t0
 }

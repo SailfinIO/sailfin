@@ -1,6 +1,6 @@
 # Sailfin project automation
 
-.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2
+.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-sanity
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -25,6 +25,11 @@ help:
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
 	@echo "  make clean-stage1 # Remove compiler/build (requires installed stage1 to rebuild)"
 	@echo "  make bootstrap-stage2 # Bootstrap Stage2 self-hosted compiler (compile to LLVM)"
+	@echo "  make native-stage2 # Build a native Stage2 driver from rewritten LLVM IR (WIP)"
+	@echo "  make native-stage2-debug # Same, but with -O0/-g for lldb"
+	@echo "  make native-stage2-asan # Same, but with AddressSanitizer for memory bugs"
+	@echo "  make stage2-native-sanity # Bootstrap + build native stage2 + compile hello-world"
+	@echo "  make stage2-native-roundtrip # Bootstrap + build native stage2 + run it on compiler/src/main.sfn"
 
 install:
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
@@ -53,5 +58,55 @@ compile:
 package:
 	$(CONDA) run -n $(CONDA_ENV) python tools/package_stage1.py
 
-bootstrap-stage2:
+
+# Stage2 bootstrap requires the latest stage1-generated Python modules.
+bootstrap-stage2: compile
 	$(CONDA) run -n $(CONDA_ENV) python scripts/bootstrap_stage2.py --no-validate
+
+native-stage2: bootstrap-stage2
+	@mkdir -p build/stage2/aot build/native/obj
+	@rm -f build/native/obj/*.o
+	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
+	clang -O2 -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.o
+	clang -O2 -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.o
+	clang -O2 -c runtime/native/ir/runtime_globals.ll -o build/native/obj/runtime_globals.o
+	@while IFS= read -r m ; do \
+	  [ -z "$$m" ] && continue; \
+	  clang -O2 -fPIC -c build/stage2/aot/$$m.ll -o build/native/obj/$$m.o; \
+	done < build/stage2/aot/modules.txt
+	clang -O2 -o build/native/sailfin-stage2 build/native/obj/sailfin_runtime.o build/native/obj/stage2_driver.o build/native/obj/runtime_globals.o $(addprefix build/native/obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
+
+native-stage2-debug: bootstrap-stage2
+	@mkdir -p build/stage2/aot build/native/debug-obj
+	@rm -f build/native/debug-obj/*.o
+	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
+	clang -O0 -g -fno-omit-frame-pointer -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/debug-obj/sailfin_runtime.o
+	clang -O0 -g -fno-omit-frame-pointer -c runtime/native/src/stage2_driver.c -o build/native/debug-obj/stage2_driver.o
+	clang -O0 -g -fno-omit-frame-pointer -c runtime/native/ir/runtime_globals.ll -o build/native/debug-obj/runtime_globals.o
+	@while IFS= read -r m ; do \
+	  [ -z "$$m" ] && continue; \
+	  clang -O0 -g -fno-omit-frame-pointer -fPIC -c build/stage2/aot/$$m.ll -o build/native/debug-obj/$$m.o; \
+	done < build/stage2/aot/modules.txt
+	clang -O0 -g -fno-omit-frame-pointer -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/stage2_driver.o build/native/debug-obj/runtime_globals.o $(addprefix build/native/debug-obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
+
+native-stage2-asan: bootstrap-stage2
+	@mkdir -p build/stage2/aot build/native/asan-obj
+	@rm -f build/native/asan-obj/*.o
+	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/asan-obj/sailfin_runtime.o
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -c runtime/native/src/stage2_driver.c -o build/native/asan-obj/stage2_driver.o
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -c runtime/native/ir/runtime_globals.ll -o build/native/asan-obj/runtime_globals.o
+	@while IFS= read -r m ; do \
+	  [ -z "$$m" ] && continue; \
+	  clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -fPIC -c build/stage2/aot/$$m.ll -o build/native/asan-obj/$$m.o; \
+	done < build/stage2/aot/modules.txt
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/stage2_driver.o build/native/asan-obj/runtime_globals.o $(addprefix build/native/asan-obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
+
+stage2-native-sanity: native-stage2
+	build/native/sailfin-stage2 examples/basics/hello-world.sfn > /dev/null
+	@echo "[stage2-native] sanity ok"
+
+stage2-native-roundtrip: native-stage2
+	@mkdir -p build/stage3
+	build/native/sailfin-stage2 compiler/src/main.sfn > build/stage3/compiler-from-stage2.sfn
+	@echo "[stage2-native] wrote build/stage3/compiler-from-stage2.sfn"

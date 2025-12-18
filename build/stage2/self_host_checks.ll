@@ -17,6 +17,7 @@ declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare i1 @strings_equal(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
+declare void @sailfin_runtime_mark_persistent(i8*)
 
 declare i8* @compile_to_sailfin(i8*)
 declare i8* @compile_to_native(i8*)
@@ -54,6 +55,8 @@ declare noalias i8* @malloc(i64)
 @runtime = external global i8**
 
 ; fn run_self_host_check effects: ![io]
+declare void @sailfin_runtime_copy_bytes(i8*, i8*, i64)
+
 define %SelfHostCheckResult @run_self_host_check({ i8**, i64 }* %sources) {
 block.entry:
   %l0 = alloca %ProjectCompilation
@@ -166,10 +169,10 @@ block.entry:
   %t14 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t63 = phi { %ModuleDiagnostics*, i64 }* [ %t13, %block.entry ], [ %t61, %loop.latch2 ]
-  %t64 = phi double [ %t14, %block.entry ], [ %t62, %loop.latch2 ]
-  store { %ModuleDiagnostics*, i64 }* %t63, { %ModuleDiagnostics*, i64 }** %l0
-  store double %t64, double* %l1
+  %t85 = phi { %ModuleDiagnostics*, i64 }* [ %t13, %block.entry ], [ %t83, %loop.latch2 ]
+  %t86 = phi double [ %t14, %block.entry ], [ %t84, %loop.latch2 ]
+  store { %ModuleDiagnostics*, i64 }* %t85, { %ModuleDiagnostics*, i64 }** %l0
+  store double %t86, double* %l1
   br label %loop.body1
 loop.body1:
   %t15 = load double, double* %l1
@@ -204,48 +207,73 @@ merge5:
 then6:
   %t36 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
   %t37 = load %ModuleDiagnostics, %ModuleDiagnostics* %l2
-  %t38 = call noalias i8* @malloc(i64 24)
-  %t39 = bitcast i8* %t38 to %ModuleDiagnostics*
-  store %ModuleDiagnostics %t37, %ModuleDiagnostics* %t39
-  %t40 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
-  %t41 = ptrtoint [1 x i8*]* %t40 to i64
-  %t42 = icmp eq i64 %t41, 0
-  %t43 = select i1 %t42, i64 1, i64 %t41
-  %t44 = call i8* @malloc(i64 %t43)
-  %t45 = bitcast i8* %t44 to i8**
-  %t46 = getelementptr i8*, i8** %t45, i64 0
-  store i8* %t38, i8** %t46
-  %t47 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t48 = ptrtoint { i8**, i64 }* %t47 to i64
-  %t49 = call i8* @malloc(i64 %t48)
-  %t50 = bitcast i8* %t49 to { i8**, i64 }*
-  %t51 = getelementptr { i8**, i64 }, { i8**, i64 }* %t50, i32 0, i32 0
-  store i8** %t45, i8*** %t51
-  %t52 = getelementptr { i8**, i64 }, { i8**, i64 }* %t50, i32 0, i32 1
-  store i64 1, i64* %t52
-  %t53 = bitcast { %ModuleDiagnostics*, i64 }* %t36 to { i8**, i64 }*
-  %t54 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t53, { i8**, i64 }* %t50)
-  %t55 = bitcast { i8**, i64 }* %t54 to { %ModuleDiagnostics*, i64 }*
-  store { %ModuleDiagnostics*, i64 }* %t55, { %ModuleDiagnostics*, i64 }** %l0
-  %t56 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  %t38 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* null, i32 1
+  %t39 = ptrtoint [1 x %ModuleDiagnostics]* %t38 to i64
+  %t40 = icmp eq i64 %t39, 0
+  %t41 = select i1 %t40, i64 1, i64 %t39
+  %t42 = call i8* @malloc(i64 %t41)
+  %t43 = bitcast i8* %t42 to %ModuleDiagnostics*
+  %t44 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t43, i64 0
+  store %ModuleDiagnostics %t37, %ModuleDiagnostics* %t44
+  %t45 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
+  %t46 = ptrtoint { %ModuleDiagnostics*, i64 }* %t45 to i64
+  %t47 = call i8* @malloc(i64 %t46)
+  %t48 = bitcast i8* %t47 to { %ModuleDiagnostics*, i64 }*
+  %t49 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t48, i32 0, i32 0
+  store %ModuleDiagnostics* %t43, %ModuleDiagnostics** %t49
+  %t50 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t48, i32 0, i32 1
+  store i64 1, i64* %t50
+  %t51 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t36, i32 0, i32 0
+  %t52 = load %ModuleDiagnostics*, %ModuleDiagnostics** %t51
+  %t53 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t36, i32 0, i32 1
+  %t54 = load i64, i64* %t53
+  %t55 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t48, i32 0, i32 0
+  %t56 = load %ModuleDiagnostics*, %ModuleDiagnostics** %t55
+  %t57 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t48, i32 0, i32 1
+  %t58 = load i64, i64* %t57
+  %t59 = getelementptr [1 x %ModuleDiagnostics], [1 x %ModuleDiagnostics]* null, i32 0, i32 1
+  %t60 = ptrtoint %ModuleDiagnostics* %t59 to i64
+  %t61 = add i64 %t54, %t58
+  %t62 = mul i64 %t60, %t61
+  %t63 = call noalias i8* @malloc(i64 %t62)
+  %t64 = bitcast i8* %t63 to %ModuleDiagnostics*
+  %t65 = bitcast %ModuleDiagnostics* %t64 to i8*
+  %t66 = mul i64 %t60, %t54
+  %t67 = bitcast %ModuleDiagnostics* %t52 to i8*
+  call void @sailfin_runtime_copy_bytes(i8* %t65, i8* %t67, i64 %t66)
+  %t68 = mul i64 %t60, %t58
+  %t69 = bitcast %ModuleDiagnostics* %t56 to i8*
+  %t70 = getelementptr %ModuleDiagnostics, %ModuleDiagnostics* %t64, i64 %t54
+  %t71 = bitcast %ModuleDiagnostics* %t70 to i8*
+  call void @sailfin_runtime_copy_bytes(i8* %t71, i8* %t69, i64 %t68)
+  %t72 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* null, i32 1
+  %t73 = ptrtoint { %ModuleDiagnostics*, i64 }* %t72 to i64
+  %t74 = call i8* @malloc(i64 %t73)
+  %t75 = bitcast i8* %t74 to { %ModuleDiagnostics*, i64 }*
+  %t76 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t75, i32 0, i32 0
+  store %ModuleDiagnostics* %t64, %ModuleDiagnostics** %t76
+  %t77 = getelementptr { %ModuleDiagnostics*, i64 }, { %ModuleDiagnostics*, i64 }* %t75, i32 0, i32 1
+  store i64 %t61, i64* %t77
+  store { %ModuleDiagnostics*, i64 }* %t75, { %ModuleDiagnostics*, i64 }** %l0
+  %t78 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
   br label %merge7
 merge7:
-  %t57 = phi { %ModuleDiagnostics*, i64 }* [ %t56, %then6 ], [ %t33, %merge5 ]
-  store { %ModuleDiagnostics*, i64 }* %t57, { %ModuleDiagnostics*, i64 }** %l0
-  %t58 = load double, double* %l1
-  %t59 = sitofp i64 1 to double
-  %t60 = fadd double %t58, %t59
-  store double %t60, double* %l1
+  %t79 = phi { %ModuleDiagnostics*, i64 }* [ %t78, %then6 ], [ %t33, %merge5 ]
+  store { %ModuleDiagnostics*, i64 }* %t79, { %ModuleDiagnostics*, i64 }** %l0
+  %t80 = load double, double* %l1
+  %t81 = sitofp i64 1 to double
+  %t82 = fadd double %t80, %t81
+  store double %t82, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t61 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
-  %t62 = load double, double* %l1
+  %t83 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  %t84 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t65 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
-  %t66 = load double, double* %l1
-  %t67 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
-  ret { %ModuleDiagnostics*, i64 }* %t67
+  %t87 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  %t88 = load double, double* %l1
+  %t89 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l0
+  ret { %ModuleDiagnostics*, i64 }* %t89
 }
 
 define { i8**, i64 }* @collect_missing_sources({ i8**, i64 }* %sources, %ProjectCompilation %compilation) {

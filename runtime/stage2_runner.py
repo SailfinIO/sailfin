@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextvars
 import ctypes
 import os
+import platform
 import pathlib
 import re
 import sys
@@ -92,6 +93,7 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
     "sailfin_runtime_substring": (None, (ctypes.c_void_p, ctypes.c_longlong, ctypes.c_longlong), ctypes.c_void_p),
     "sailfin_runtime_string_length": (None, (ctypes.c_void_p,), ctypes.c_longlong),
     "sailfin_runtime_string_concat": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
+    "sailfin_runtime_copy_bytes": (None, (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_longlong), None),
     "sailfin_runtime_concat": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
     "sailfin_runtime_append_string": (None, (ctypes.c_void_p, ctypes.c_void_p), ctypes.c_void_p),
     "sailfin_runtime_char_code": (None, (ctypes.c_void_p,), ctypes.c_double),
@@ -464,6 +466,9 @@ class Stage2Runner:
         *,
         runtime_hooks: Stage2RuntimeHooks | Mapping[str,
                                                     Callable[..., None]] | None = None,
+        initialise_runtime: bool = True,
+        compile_ir: bool = True,
+        disable_instrumentation: bool | None = None,
     ) -> None:
         raw_log_setting = os.environ.get(
             "SAILFIN_STAGE2_DEBUG_LOG", "").strip()
@@ -500,16 +505,27 @@ class Stage2Runner:
         dump_setting = os.environ.get("SAILFIN_STAGE2_DUMP_INSTRUMENTED_IR")
         self._instrument_dump_dir: pathlib.Path | None = None
         selected_dump_dir: pathlib.Path | None = None
-        disable_instrument_env = os.environ.get(
-            "SAILFIN_STAGE2_DISABLE_MARKERS", ""
-        ).strip().lower()
-        self._disable_instrumentation = disable_instrument_env in {
-            "1",
-            "true",
-            "yes",
-            "on",
-            "disable",
-        }
+        if disable_instrumentation is None:
+            disable_instrument_env = os.environ.get(
+                "SAILFIN_STAGE2_DISABLE_MARKERS", ""
+            ).strip().lower()
+            self._disable_instrumentation = disable_instrument_env in {
+                "1",
+                "true",
+                "yes",
+                "on",
+                "disable",
+            }
+            if not self._disable_instrumentation:
+                machine = platform.machine().lower()
+                if machine in {"arm64", "aarch64"}:
+                    # On macOS/arm64, calling into Python `ctypes` callbacks from
+                    # JITed code is fragile and can segfault. The marker
+                    # instrumentation introduces extra callback edges, so keep it
+                    # off by default on this platform.
+                    self._disable_instrumentation = True
+        else:
+            self._disable_instrumentation = bool(disable_instrumentation)
         if dump_dir_override:
             selected_dump_dir = pathlib.Path(dump_dir_override)
         elif dump_setting:
@@ -562,8 +578,20 @@ class Stage2Runner:
         self._last_debug_marker: int | None = None
         self._debug_marker_history: list[int] = []
         self._debug_marker_history_limit = 64
-        self._initialise_runtime_helpers()
-        self._compile_ir()
+        if initialise_runtime:
+            self._initialise_runtime_helpers()
+        if compile_ir:
+            self._compile_ir()
+
+    def rewritten_modules(self) -> list[tuple[str, str]]:
+        """Return rewritten LLVM IR modules suitable for AOT compilation.
+
+        This performs the same de-duplication and IR patching as the JIT path but
+        does not invoke llvmlite or register runtime helpers.
+        """
+
+        candidates, _duplicate_registry = self._rewrite_lowered_ir_modules()
+        return [(label, ir_text) for label, ir_text, _source_hint in candidates]
 
     @staticmethod
     def _normalise_lowered(lowered) -> list:
@@ -832,7 +860,15 @@ class Stage2Runner:
                 name = stripped.split("=", 1)[0].strip()[1:]
                 if not name:
                     continue
-                definitions.setdefault(name, stripped)
+                existing = definitions.get(name)
+                if existing is None:
+                    definitions[name] = stripped
+                    continue
+                # Prefer concrete definitions over opaque placeholders.
+                existing_opaque = "type opaque" in existing
+                new_opaque = "type opaque" in stripped
+                if existing_opaque and not new_opaque:
+                    definitions[name] = stripped
         return definitions
 
     @staticmethod
@@ -940,7 +976,9 @@ class Stage2Runner:
         return ir_text[:lex_start] + lex_body + ir_text[lex_end:]
 
     def _instrument_compile_pipeline_ir(self, ir_text: str) -> str:
-        if "define i8* @compile_to_sailfin(" not in ir_text:
+        has_sailfin = "define i8* @compile_to_sailfin(" in ir_text
+        has_native = "@compile_to_native(" in ir_text
+        if not has_sailfin and not has_native:
             return ir_text
         if "declare void @stage2_debug_marker(i64)" not in ir_text:
             declare_index = ir_text.find("declare")
@@ -951,81 +989,133 @@ class Stage2Runner:
                 ir_text = ir_text[:declare_index] + \
                     declaration + ir_text[declare_index:]
 
+        # --- compile_to_sailfin instrumentation ---
         start = ir_text.find("define i8* @compile_to_sailfin(")
-        if start == -1:
-            return ir_text
-        end = ir_text.find("\n}\n", start)
-        if end == -1:
-            return ir_text
-        end += 3
-        body = ir_text[start:end]
+        if start != -1:
+            end = ir_text.find("\n}\n", start)
+            if end != -1:
+                end += 3
+                body = ir_text[start:end]
 
-        # Confirm we reach the function entry before any work is done.
-        entry_pattern = "block.entry:\n  %l0 = alloca %Program\n"
-        if entry_pattern in body:
-            entry_replacement = (
-                "block.entry:\n"
-                "  call void @stage2_debug_marker(i64 1990)\n"
-                "  %l0 = alloca %Program\n"
-            )
-            body = body.replace(entry_pattern, entry_replacement, 1)
+                # Confirm we reach the function entry before any work is done.
+                entry_pattern = "block.entry:\n  %l0 = alloca %Program\n"
+                if entry_pattern in body:
+                    entry_replacement = (
+                        "block.entry:\n"
+                        "  call void @stage2_debug_marker(i64 1990)\n"
+                        "  %l0 = alloca %Program\n"
+                    )
+                    body = body.replace(entry_pattern, entry_replacement, 1)
 
-        # Emit a marker before the dispatch to parse_statement so we can
-        # distinguish crashes occurring inside statement parsing from earlier phases.
-        parse_stmt_call = "  %t56 = call %StatementParseResult @parse_statement(%Parser %t55)\n"
-        if parse_stmt_call in body:
-            body = body.replace(
-                parse_stmt_call,
-                "  call void @stage2_debug_marker(i64 12000)\n" +
-                parse_stmt_call,
-                1,
-            )
+                # Emit a marker before the dispatch to parse_statement so we can
+                # distinguish crashes occurring inside statement parsing from earlier phases.
+                parse_stmt_call = "  %t56 = call %StatementParseResult @parse_statement(%Parser %t55)\n"
+                if parse_stmt_call in body:
+                    body = body.replace(
+                        parse_stmt_call,
+                        "  call void @stage2_debug_marker(i64 12000)\n" +
+                        parse_stmt_call,
+                        1,
+                    )
 
-        parse_call = "  %t0 = call %Program @parse_program(i8* %source)\n"
-        if parse_call in body:
-            body = body.replace(
-                parse_call,
-                "  call void @stage2_debug_marker(i64 1991)\n" + parse_call +
-                "  call void @stage2_debug_marker(i64 2000)\n",
-                1,
-            )
+                parse_call = "  %t0 = call %Program @parse_program(i8* %source)\n"
+                if parse_call in body:
+                    body = body.replace(
+                        parse_call,
+                        "  call void @stage2_debug_marker(i64 1991)\n" + parse_call +
+                        "  call void @stage2_debug_marker(i64 2000)\n",
+                        1,
+                    )
 
-        typecheck_call = "  %t2 = call %TypecheckResult @typecheck_program(%Program %t1)\n"
-        if typecheck_call in body:
-            body = body.replace(
-                typecheck_call,
-                typecheck_call +
-                "  call void @stage2_debug_marker(i64 2001)\n",
-                1,
-            )
+                typecheck_call = "  %t2 = call %TypecheckResult @typecheck_program(%Program %t1)\n"
+                if typecheck_call in body:
+                    body = body.replace(
+                        typecheck_call,
+                        typecheck_call +
+                        "  call void @stage2_debug_marker(i64 2001)\n",
+                        1,
+                    )
 
-        then_label = "then0:\n"
-        if then_label in body:
-            body = body.replace(
-                then_label,
-                "then0:\n  call void @stage2_debug_marker(i64 2002)\n",
-                1,
-            )
+                then_label = "then0:\n"
+                if then_label in body:
+                    body = body.replace(
+                        then_label,
+                        "then0:\n  call void @stage2_debug_marker(i64 2002)\n",
+                        1,
+                    )
 
-        merge_label = "merge1:\n"
-        if merge_label in body:
-            body = body.replace(
-                merge_label,
-                "merge1:\n  call void @stage2_debug_marker(i64 2003)\n",
-                1,
-            )
+                merge_label = "merge1:\n"
+                if merge_label in body:
+                    body = body.replace(
+                        merge_label,
+                        "merge1:\n  call void @stage2_debug_marker(i64 2003)\n",
+                        1,
+                    )
 
-        emit_call = "  %t15 = call i8* @emit_program(%Program %t14)\n"
-        if emit_call in body:
-            body = body.replace(
-                emit_call,
-                "  %t15 = call i8* @emit_program(%Program %t14)\n  call void @stage2_debug_marker(i64 2004)\n",
-                1,
-            )
+                emit_call = "  %t15 = call i8* @emit_program(%Program %t14)\n"
+                if emit_call in body:
+                    body = body.replace(
+                        emit_call,
+                        "  %t15 = call i8* @emit_program(%Program %t14)\n  call void @stage2_debug_marker(i64 2004)\n",
+                        1,
+                    )
 
-        self._write_instrumented_ir("instrumented_compile.ll", body)
+                self._write_instrumented_ir("instrumented_compile.ll", body)
 
-        return ir_text[:start] + body + ir_text[end:]
+                ir_text = ir_text[:start] + body + ir_text[end:]
+
+        # --- compile_to_native instrumentation ---
+        if has_native:
+            native_at = ir_text.find("@compile_to_native(")
+            native_start = ir_text.rfind(
+                "define ", 0, native_at) if native_at != -1 else -1
+            if native_start != -1:
+                native_end = ir_text.find("\n}\n", native_start)
+                if native_end != -1:
+                    native_end += 3
+                    native_body = ir_text[native_start:native_end]
+
+                    native_entry = "block.entry:\n  %l0 = alloca %Program\n"
+                    if native_entry in native_body:
+                        native_body = native_body.replace(
+                            native_entry,
+                            "block.entry:\n  call void @stage2_debug_marker(i64 2990)\n  %l0 = alloca %Program\n",
+                            1,
+                        )
+
+                    native_parse = "  %t0 = call %Program @parse_program(i8* %source)\n"
+                    if native_parse in native_body:
+                        native_body = native_body.replace(
+                            native_parse,
+                            "  call void @stage2_debug_marker(i64 2991)\n" + native_parse +
+                            "  call void @stage2_debug_marker(i64 2992)\n",
+                            1,
+                        )
+
+                    emit_native_sig = "call %EmitNativeResult"
+                    emit_native_at = native_body.find("@emit_native(")
+                    if emit_native_at != -1:
+                        line_start = native_body.rfind(
+                            "\n", 0, emit_native_at) + 1
+                        line_end = native_body.find("\n", emit_native_at)
+                        if 0 <= line_start < line_end:
+                            call_line = native_body[line_start:line_end] + "\n"
+                            if emit_native_sig in call_line:
+                                native_body = native_body.replace(
+                                    call_line,
+                                    "  call void @stage2_debug_marker(i64 2994)\n" +
+                                    call_line,
+                                    1,
+                                )
+
+                    self._write_instrumented_ir(
+                        "instrumented_compile_to_native.ll", native_body
+                    )
+
+                    ir_text = ir_text[:native_start] + \
+                        native_body + ir_text[native_end:]
+
+        return ir_text
 
     def _instrument_parse_tokens_ir(self, ir_text: str) -> str:
         if "define %Program @parse_tokens(" not in ir_text:
@@ -1757,17 +1847,38 @@ class Stage2Runner:
             return ir_text
         lines = ir_text.splitlines()
         defined: set[str] = set()
-        for line in lines:
+        type_line_index: dict[str, int] = {}
+        type_is_opaque: dict[str, bool] = {}
+
+        for index, line in enumerate(lines):
             stripped = line.strip()
             if not stripped.startswith("%") or " = type" not in stripped:
                 continue
             name = stripped.split("=", 1)[0].strip()[1:]
-            if name:
-                defined.add(name)
-        missing = [definition for name,
-                   definition in known_types.items() if name not in defined]
+            if not name:
+                continue
+            defined.add(name)
+            type_line_index.setdefault(name, index)
+            type_is_opaque.setdefault(name, "type opaque" in stripped)
+
+        # Upgrade opaque placeholders to concrete definitions when available.
+        upgraded = False
+        for name, definition in known_types.items():
+            if name not in type_line_index:
+                continue
+            if not type_is_opaque.get(name, False):
+                continue
+            if "type opaque" in definition:
+                continue
+            lines[type_line_index[name]] = definition
+            type_is_opaque[name] = False
+            upgraded = True
+
+        missing = [
+            definition for name, definition in known_types.items() if name not in defined
+        ]
         if not missing:
-            return ir_text
+            return "\n".join(lines) if upgraded else ir_text
         insert_index = Stage2Runner._find_type_insertion_index(lines)
         new_lines = lines[:insert_index] + missing + lines[insert_index:]
         return "\n".join(new_lines)
@@ -2909,6 +3020,26 @@ class Stage2Runner:
 
             return cfunc_type(_string_concat)
 
+        elif symbol == "sailfin_runtime_copy_bytes":
+            cfunc_type = ctypes.CFUNCTYPE(
+                None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_longlong
+            )
+
+            def _copy_bytes(dest_ptr: ctypes.c_void_p, src_ptr: ctypes.c_void_p, length: ctypes.c_longlong) -> None:
+                try:
+                    _require_effects()
+                    dest = _normalise_ptr(dest_ptr)
+                    src = _normalise_ptr(src_ptr)
+                    count = int(length)
+                    if dest == 0 or src == 0 or count <= 0:
+                        return
+                    ctypes.memmove(dest, src, count)
+                except Exception as exc:
+                    if _LAST_RUNTIME_ERROR.get() is None:
+                        _LAST_RUNTIME_ERROR.set(exc)
+
+            return cfunc_type(_copy_bytes)
+
         elif symbol == "char_at":
             cfunc_type = ctypes.CFUNCTYPE(
                 ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double)
@@ -3537,37 +3668,62 @@ class Stage2Runner:
 
         return _build_fallback()
 
-    def _compile_ir(self) -> None:
+    def _rewrite_lowered_ir_modules(self) -> tuple[list[tuple[str, str, object | None]], Dict[str, list[str]]]:
+        """Rewrite lowered IR modules for safe linking.
+
+        Returns (candidates, duplicate_registry) where candidates include optional
+        source hints for diagnostics.
+        """
+
         constant_definitions = self._collect_global_constant_definitions(
-            self._lowered_modules)
+            self._lowered_modules
+        )
         function_signatures: "OrderedDict[str, str]" = self._collect_function_signatures(
-            self._lowered_modules)
+            self._lowered_modules
+        )
         type_definitions: "OrderedDict[str, str]" = self._collect_type_definitions(
-            self._lowered_modules)
+            self._lowered_modules
+        )
 
         self._debug_log(
             f"[stage2] lowered modules: {len(self._lowered_modules)}")
 
-        candidates: list[tuple[str, str]] = []
+        candidates: list[tuple[str, str, object | None]] = []
         defined_symbols: set[str] = set()
         duplicate_registry: Dict[str, list[str]] = {}
         defined_globals: set[str] = set()
+
         for index, lowered in enumerate(self._lowered_modules):
             module_ir = getattr(lowered, "ir", "")
             if not module_ir:
                 continue
+
             module_defined = self._extract_defined_globals(module_ir)
             defined_globals.update(module_defined)
             module_ir = self._deduplicate_type_definitions(module_ir)
             patched_ir, injected = self._inject_missing_constant_definitions(
-                module_ir, definitions=constant_definitions, already_defined=defined_globals)
+                module_ir,
+                definitions=constant_definitions,
+                already_defined=defined_globals,
+            )
             defined_globals.update(injected)
+
             rewritten_ir, duplicates = self._rewrite_function_linkage(
-                patched_ir, defined_symbols, function_signatures)
+                patched_ir, defined_symbols, function_signatures
+            )
             rewritten_ir = self._inject_missing_type_definitions(
-                rewritten_ir, type_definitions)
+                rewritten_ir, type_definitions
+            )
             rewritten_ir = self._inject_missing_function_declarations(
-                rewritten_ir, function_signatures)
+                rewritten_ir, function_signatures
+            )
+
+            # On arm64, calling stage2 functions that return aggregates directly via
+            # ctypes can segfault before the function body executes (ABI mismatch).
+            # Inject lightweight wrappers that return a plain pointer to a heap-
+            # allocated copy of the aggregate so Python can safely rehydrate it.
+            rewritten_ir = self._inject_aggregate_return_wrappers(rewritten_ir)
+
             if not self._disable_instrumentation:
                 rewritten_ir = self._instrument_lex_ir(rewritten_ir)
                 rewritten_ir = self._instrument_compile_pipeline_ir(
@@ -3582,30 +3738,39 @@ class Stage2Runner:
                 rewritten_ir = self._instrument_parse_program_ir(rewritten_ir)
                 rewritten_ir = self._instrument_parse_statement_ir(
                     rewritten_ir)
+
             self._register_type_definitions(rewritten_ir, type_definitions)
-            if duplicates:
-                duplicate_registry[str(
-                    getattr(lowered, "module_name", None)
-                    or getattr(lowered, "module", None)
-                    or getattr(lowered, "name", None)
-                    or f"module_{index}"
-                )] = duplicates
+
             label = (
                 getattr(lowered, "module_name", None)
                 or getattr(lowered, "module", None)
                 or getattr(lowered, "name", None)
                 or f"module_{index}"
             )
-            candidates.append((str(label), rewritten_ir))
+
+            # Optional: dump the final rewritten module for debugging.
+            # This is intentionally best-effort and only active when
+            # SAILFIN_STAGE2_DUMP_INSTRUMENTED_IR (or SAILFIN_STAGE2_INSTRUMENT_DIR)
+            # configured a dump directory.
+            dump_suffix = self._sanitize_symbol_suffix(str(label))
+            self._write_instrumented_ir(
+                f"rewritten_{index:02d}_{dump_suffix}.ll", rewritten_ir
+            )
+
+            if duplicates:
+                duplicate_registry[str(label)] = duplicates
+
             source_hint = getattr(lowered, "source_path", None)
             if source_hint is None:
                 source_hint = getattr(lowered, "path", None)
             if source_hint is None:
                 source_hint = getattr(lowered, "source", None)
+
+            candidates.append((str(label), rewritten_ir, source_hint))
+
             if source_hint is not None:
                 self._debug_log(
-                    f"[stage2] candidate {label} from {source_hint}"
-                )
+                    f"[stage2] candidate {label} from {source_hint}")
             else:
                 self._debug_log(f"[stage2] candidate {label}")
             if duplicates:
@@ -3613,10 +3778,119 @@ class Stage2Runner:
                     f"[stage2] rewrote {len(duplicates)} duplicate function(s) in {label}"
                 )
 
+        return candidates, duplicate_registry
+
+    def _inject_aggregate_return_wrappers(self, ir_text: str) -> str:
+        machine = platform.machine().lower()
+        if machine not in {"arm64", "aarch64"}:
+            return ir_text
+
+        # Only inject wrappers for the stage2 entrypoints that our Python tests
+        # call and that return aggregates.
+        targets = (
+            "compile_to_native",
+            "compile_to_native_llvm",
+            "compile_to_native_python",
+        )
+        updated = ir_text
+        for symbol in targets:
+            updated = self._inject_aggregate_return_wrapper(updated, symbol)
+        return updated
+
+    @staticmethod
+    def _inject_aggregate_return_wrapper(ir_text: str, symbol: str) -> str:
+        wrapper_name = f"__stage2_wrapper_{symbol}"
+        if f"@{wrapper_name}(" in ir_text:
+            return ir_text
+
+        at = ir_text.find(f"@{symbol}(")
+        if at == -1:
+            return ir_text
+
+        define_start = ir_text.rfind("define ", 0, at)
+        if define_start == -1:
+            return ir_text
+
+        signature_end = ir_text.find("{", define_start)
+        if signature_end == -1:
+            return ir_text
+        signature_line = ir_text[define_start:signature_end].strip()
+        if f"@{symbol}(" not in signature_line:
+            return ir_text
+
+        after_define = signature_line[len("define "):]
+        at_index = after_define.find("@")
+        if at_index == -1:
+            return ir_text
+        ret_segment = after_define[:at_index].strip()
+        if "{" in ret_segment:
+            ret_type = ret_segment[ret_segment.find("{"):].strip()
+        else:
+            tokens = ret_segment.split()
+            if not tokens:
+                return ir_text
+            ret_type = tokens[-1]
+
+        # If the function doesn't return an aggregate, do nothing.
+        if ret_type in {"void", "i1", "i8", "i16", "i32", "i64", "double", "float", "i8*", "ptr"}:
+            return ir_text
+
+        # Parse parameter types from the definition line.
+        open_paren = signature_line.find("(", at_index)
+        close_paren = signature_line.rfind(")")
+        if open_paren == -1 or close_paren == -1 or close_paren < open_paren:
+            return ir_text
+        params_raw = signature_line[open_paren + 1: close_paren].strip()
+        param_types: list[str] = []
+        if params_raw:
+            for part in params_raw.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                # Strip any parameter name (e.g. "i8* %source" -> "i8*").
+                param_types.append(part.split()[0])
+
+        wrapper_params = ", ".join(
+            f"{ty} %arg{i}" for i, ty in enumerate(param_types))
+        call_args = ", ".join(f"{ty} %arg{i}" for i,
+                              ty in enumerate(param_types))
+
+        # Ensure malloc is declared (stage2 IR generally has it, but be defensive).
+        # Be careful: stage2 often declares malloc with attributes (e.g. `declare noalias i8* @malloc(i64)`),
+        # so a naive substring check can accidentally insert a duplicate declaration and break parsing.
+        has_malloc_decl = re.search(
+            r"^\s*(declare|define)\b.*@malloc\s*\(", ir_text, flags=re.MULTILINE)
+        if not has_malloc_decl:
+            ir_text = ir_text.rstrip() + "\n\ndeclare i8* @malloc(i64)\n"
+
+        wrapper_ir = (
+            f"\n; stage2 wrapper for arm64 aggregate return\n"
+            f"define i8* @{wrapper_name}({wrapper_params}) {{\n"
+            f"block.entry:\n"
+            f"  %t0 = call {ret_type} @{symbol}({call_args})\n"
+            f"  %t1 = getelementptr {ret_type}, {ret_type}* null, i32 1\n"
+            f"  %t2 = ptrtoint {ret_type}* %t1 to i64\n"
+            f"  %t3 = call i8* @malloc(i64 %t2)\n"
+            f"  %t4 = bitcast i8* %t3 to {ret_type}*\n"
+            f"  store {ret_type} %t0, {ret_type}* %t4\n"
+            f"  ret i8* %t3\n"
+            f"}}\n"
+        )
+
+        # Append wrapper after the defining function to keep IR locality.
+        insertion_point = ir_text.find("\n}\n", define_start)
+        if insertion_point == -1:
+            return ir_text.rstrip() + wrapper_ir
+        insertion_point += 3
+        return ir_text[:insertion_point] + wrapper_ir + ir_text[insertion_point:]
+
+    def _compile_ir(self) -> None:
+        candidates_with_sources, duplicate_registry = self._rewrite_lowered_ir_modules()
+
         valid_candidates: list[tuple[str, str]] = []
         skipped: list[tuple[str, str]] = []
 
-        for label, ir_text in candidates:
+        for label, ir_text, _source_hint in candidates_with_sources:
             try:
                 module = llvm.parse_assembly(ir_text)
             except RuntimeError:
@@ -3847,6 +4121,7 @@ class Stage2Runner:
         argtypes = tuple(argtypes)
         invoke_args: tuple = args
         call_argtypes = argtypes
+        call_restype: type[ctypes._SimpleCData] | None = restype
         function = None
         function_info = self._lookup_function_return(entry_point)
         aggregate_module = None
@@ -3855,41 +4130,71 @@ class Stage2Runner:
         aggregate_buffer: ctypes.Array | None = None
         aggregate_size = 0
         use_aggregate = False
+        use_wrapper = False
         if function_info is not None:
             aggregate_module, aggregate_return_type = function_info
             if self._is_aggregate_return_type(aggregate_return_type):
-                type_ref = self._resolve_struct_type(
-                    aggregate_module, aggregate_return_type)
-                abi_size, _ = self._compute_type_layout(type_ref)
-                pointer_size = ctypes.sizeof(ctypes.c_void_p)
-                if abi_size and abi_size <= pointer_size:
-                    self._debug_log(
-                        f"[stage2] aggregate skip {entry_point}: abi_size={abi_size} pointer_size={pointer_size}"
+                machine = platform.machine().lower()
+                is_arm64 = machine in {"arm64", "aarch64"}
+                if is_arm64:
+                    wrapper_name = f"__stage2_wrapper_{entry_point}"
+                    wrapper_address = self._engine.get_function_address(
+                        wrapper_name
                     )
-                else:
-                    aggregate_address, aggregate_buffer, aggregate_size = self._allocate_sret_buffer(
-                        aggregate_module, aggregate_return_type)
-                    aggregate_size = max(1, aggregate_size)
-                    aggregate_pointer_type = ctypes.c_void_p
-                    call_argtypes = (aggregate_pointer_type, *argtypes)
-                    cfunc_type = ctypes.CFUNCTYPE(None, *call_argtypes)
-                    function = cfunc_type(address)
-                    invoke_args = (ctypes.c_void_p(aggregate_address), *args)
-                    self._debug_log(
-                        f"[stage2] aggregate entry {entry_point}: declared={aggregate_return_type} size={aggregate_size} "
-                        f"address=0x{address:x} sret=0x{aggregate_address:x}"
-                    )
-                    use_aggregate = True
+                    if wrapper_address:
+                        type_ref = self._resolve_struct_type(
+                            aggregate_module, aggregate_return_type
+                        )
+                        abi_size, _ = self._compute_type_layout(type_ref)
+                        aggregate_size = int(abi_size or 0)
+                        if aggregate_size <= 0:
+                            if restype is not None and isinstance(restype, type) and issubclass(restype, ctypes.Structure):
+                                aggregate_size = ctypes.sizeof(restype)
+                            else:
+                                aggregate_size = ctypes.sizeof(
+                                    ctypes.c_void_p) * 4
 
-        if not use_aggregate:
+                        address = wrapper_address
+                        call_restype = ctypes.c_void_p
+                        use_wrapper = True
+                        self._debug_log(
+                            f"[stage2] aggregate entry {entry_point}: using wrapper {wrapper_name} addr=0x{address:x} declared={aggregate_return_type} size={aggregate_size}"
+                        )
+
+                if not use_wrapper:
+                    type_ref = self._resolve_struct_type(
+                        aggregate_module, aggregate_return_type)
+                    abi_size, _ = self._compute_type_layout(type_ref)
+                    pointer_size = ctypes.sizeof(ctypes.c_void_p)
+                    if abi_size and abi_size <= pointer_size:
+                        self._debug_log(
+                            f"[stage2] aggregate skip {entry_point}: abi_size={abi_size} pointer_size={pointer_size}"
+                        )
+                    else:
+                        aggregate_address, aggregate_buffer, aggregate_size = self._allocate_sret_buffer(
+                            aggregate_module, aggregate_return_type)
+                        aggregate_size = max(1, aggregate_size)
+                        aggregate_pointer_type = ctypes.c_void_p
+                        call_argtypes = (aggregate_pointer_type, *argtypes)
+                        cfunc_type = ctypes.CFUNCTYPE(None, *call_argtypes)
+                        function = cfunc_type(address)
+                        invoke_args = (ctypes.c_void_p(
+                            aggregate_address), *args)
+                        self._debug_log(
+                            f"[stage2] aggregate entry {entry_point}: declared={aggregate_return_type} size={aggregate_size} "
+                            f"address=0x{address:x} sret=0x{aggregate_address:x}"
+                        )
+                        use_aggregate = True
+
+        if not use_aggregate and function is None:
             cfunc_type = ctypes.CFUNCTYPE(
-                restype, *argtypes) if restype is not None else ctypes.CFUNCTYPE(None, *argtypes)
+                call_restype, *argtypes) if call_restype is not None else ctypes.CFUNCTYPE(None, *argtypes)
             function = cfunc_type(address)
         if function is None:
             raise RuntimeError(
                 f"could not materialise callable for {entry_point}")
         self._debug_log(
-            f"[stage2] prepare call {entry_point}: func=0x{address:x} aggregate={use_aggregate} args={args} invoke_args={invoke_args}"
+            f"[stage2] prepare call {entry_point}: func=0x{address:x} aggregate={use_aggregate} wrapper={use_wrapper} args={args} invoke_args={invoke_args}"
         )
         effects = self._manifest.get(entry_point, ())
         grant = runtime.create_capability_grant(effects)
@@ -3900,7 +4205,7 @@ class Stage2Runner:
         runtime_error = None
         try:
             self._debug_log(
-                f"[stage2] invoke {entry_point}: aggregate={use_aggregate}"
+                f"[stage2] invoke {entry_point}: aggregate={use_aggregate} wrapper={use_wrapper}"
             )
             marker_addr = 0
             parse_addr = 0
@@ -3949,6 +4254,22 @@ class Stage2Runner:
                 return aggregate_address
             extracted = self._extract_sret_result(
                 aggregate_address, aggregate_size, restype)
+            self._validate_structure_result(entry_point, extracted)
+            return extracted
+
+        if use_wrapper:
+            if isinstance(result, ctypes.c_void_p):
+                address_value = int(result.value or 0)
+            else:
+                address_value = int(result or 0)
+            if address_value == 0:
+                raise RuntimeError(
+                    f"wrapper invocation for {entry_point} returned null pointer"
+                )
+            if restype is None:
+                return address_value
+            extracted = self._extract_sret_result(
+                address_value, aggregate_size, restype)
             self._validate_structure_result(entry_point, extracted)
             return extracted
 

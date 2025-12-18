@@ -797,6 +797,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
     runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
+    runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent");
     let direct_effects = collect_direct_function_effects(context_functions);
     let call_graph = collect_function_call_graph(context_functions);
     let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
@@ -3954,7 +3955,7 @@ fn lower_instruction_range(
     context -> TypeContext,
     scope_id -> string,
     scope_depth -> number,
-    initial_label -> string
+    current_label -> string
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
@@ -3971,7 +3972,7 @@ fn lower_instruction_range(
     let mut collected_lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut current_mutations -> LocalMutation[] = [];
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
-    let mut current_label -> string = initial_label;
+    let mut active_label -> string = current_label;
 
     loop {
         if index >= end {
@@ -3980,7 +3981,7 @@ fn lower_instruction_range(
 
         let instruction = function.instructions[index];
         if instruction.variant == "Let" {
-            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, current_label);
+            let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
             current_lines = lowered.lines;
@@ -3993,7 +3994,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             let temp_constants = collected_string_constants;
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            current_label = find_last_label(current_lines, current_label);
+            active_label = find_last_label(current_lines, active_label);
         } else if instruction.variant == "Expression" {
             let trimmed_expression = trim_text(instruction.expression);
             let mut handled_inline_let -> boolean = false;
@@ -4011,7 +4012,7 @@ fn lower_instruction_range(
                             span: instruction.span,
                             value_span: instruction.span,
                         };
-                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, current_label);
+                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
                         diagnostics = diagnostics.concat(lowered.diagnostics);
                         collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
                         current_lines = lowered.lines;
@@ -4029,7 +4030,7 @@ fn lower_instruction_range(
                 }
             }
             if !handled_inline_let {
-                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, current_label);
+                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
                 diagnostics = diagnostics.concat(lowered.diagnostics);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
@@ -4042,7 +4043,7 @@ fn lower_instruction_range(
                 let temp_constants = collected_string_constants;
                 collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             }
-            current_label = find_last_label(current_lines, current_label);
+            active_label = find_last_label(current_lines, active_label);
         } else if instruction.variant == "Return" {
             let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
             diagnostics = diagnostics.concat(lowered.diagnostics);
@@ -4081,7 +4082,7 @@ fn lower_instruction_range(
                 context,
                 scope_id,
                 scope_depth,
-                current_label
+                active_label
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
@@ -4096,7 +4097,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
-            current_label = find_last_label(current_lines, current_label);
+            active_label = find_last_label(current_lines, active_label);
             if terminated {
                 break;
             }
@@ -4120,7 +4121,7 @@ fn lower_instruction_range(
                 context,
                 scope_id,
                 scope_depth,
-                current_label
+                active_label
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
@@ -4135,7 +4136,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
-            current_label = find_last_label(current_lines, current_label);
+            active_label = find_last_label(current_lines, active_label);
             if terminated {
                 break;
             }
@@ -4159,7 +4160,7 @@ fn lower_instruction_range(
                 context,
                 scope_id,
                 scope_depth,
-                current_label
+                active_label
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
@@ -4174,7 +4175,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
-            current_label = find_last_label(current_lines, current_label);
+            active_label = find_last_label(current_lines, active_label);
             if terminated {
                 break;
             }
@@ -4228,7 +4229,7 @@ fn lower_instruction_range(
                 context,
                 scope_id,
                 scope_depth,
-                current_label
+                active_label
             );
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
@@ -4243,7 +4244,7 @@ fn lower_instruction_range(
             current_mutations = current_mutations.concat(lowered.mutations);
             terminated = lowered.terminated;
             index = lowered.next_index;
-            current_label = find_last_label(current_lines, current_label);
+            active_label = find_last_label(current_lines, active_label);
             if terminated {
                 break;
             }
@@ -4750,7 +4751,38 @@ fn lower_loop_instruction(
         }
         name_idx += 1;
     }
-    collected_mutations = exit_mutations;
+
+    // Preserve mutations for locals introduced inside the loop body.
+    // These locals do not exist in `base_locals`, so they do not participate in phi merging,
+    // but callers still expect the loop lowering to report that the body introduced/mutated them.
+    let mut body_scoped_mutations -> LocalMutation[] = [];
+    let mut body_mut_idx -> number = 0;
+    loop {
+        if body_mut_idx >= body_result.mutations.length {
+            break;
+        }
+        let mutation = body_result.mutations[body_mut_idx];
+        if find_local_binding(base_locals, mutation.name) == null {
+            let mut already_added -> boolean = false;
+            let mut seen_idx -> number = 0;
+            loop {
+                if seen_idx >= body_scoped_mutations.length {
+                    break;
+                }
+                if body_scoped_mutations[seen_idx].name == mutation.name {
+                    already_added = true;
+                    break;
+                }
+                seen_idx += 1;
+            }
+            if !already_added {
+                body_scoped_mutations = body_scoped_mutations.concat([mutation]);
+            }
+        }
+        body_mut_idx += 1;
+    }
+
+    collected_mutations = body_scoped_mutations.concat(exit_mutations);
 
     return BlockLoweringResult {
         lines: current_lines,
@@ -9791,6 +9823,20 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                         injected_argument_count = 1;
                         array_concat_element_type = array_element_type;
                         is_array_concat = true;
+
+                        // For non-pointer element arrays (e.g. `%Token`), the generic runtime concat helper
+                        // `{ i8**, i64 }* -> { i8**, i64 }*` is not applicable. We inline the concat in
+                        // `lower_struct_array_concat`, but we must also keep the typed array signatures
+                        // so argument lowering/coercion doesn't bitcast the operands to `{ i8**, i64 }*`.
+                        if !ends_with_pointer_suffix(array_element_type) {
+                            helper_descriptor = RuntimeHelperDescriptor {
+                                target: "concat",
+                                symbol: "",
+                                return_type: base_operand.llvm_type,
+                                parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
+                                effects: [],
+                            };
+                        }
                     }
                 } else {
                     diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
@@ -9839,17 +9885,23 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         helper_descriptor = find_runtime_helper(trimmed_target);
     }
     if !is_trait_dispatch {
-        if function_entry != null {
+        // Runtime helpers (intrinsics) must win over local function names.
+        // Some modules intentionally define convenience wrappers with the same name
+        // (e.g. `substring` in the prelude). If we use the local function signature
+        // for coercion but then later route the call to the runtime symbol, the
+        // call ABI becomes inconsistent on arm64 (float vs integer registers).
+        if helper_descriptor != null {
+            let descriptor = helper_descriptor;
+            llvm_return = descriptor.return_type;
+            expected_params = descriptor.parameter_types;
+            function_entry = null;
+        } else if function_entry != null {
             llvm_return = map_return_type(context, function_entry.return_type);
             if llvm_return.length == 0 {
                 diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
                 llvm_return = "double";
             }
             expected_params = collect_parameter_types(context, function_entry.parameters);
-        } else if helper_descriptor != null {
-            let descriptor = helper_descriptor;
-            llvm_return = descriptor.return_type;
-            expected_params = descriptor.parameter_types;
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
         }
@@ -9960,7 +10012,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     }
     operands = coerced_operands;
 
-    if is_array_concat && array_concat_element_type == "%Token" {
+    if is_array_concat && array_concat_element_type.length > 0 && !ends_with_pointer_suffix(array_concat_element_type) {
         if operands.length >= 2 {
             let concat_result = lower_struct_array_concat(operands[0], operands[1], array_concat_element_type, current_lines, current_temp);
             diagnostics = diagnostics.concat(concat_result.diagnostics);
@@ -10801,7 +10853,11 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
         }
         let operand = operands[index];
         let mut prepared_operand = operand;
-        if ends_with_pointer_suffix(element_type) && !ends_with_pointer_suffix(operand.llvm_type) {
+        // Only box aggregate values into heap pointers.
+        // IMPORTANT: `i8*` is a string pointer in our runtime ABI (null-terminated).
+        // Boxing an `i8` into an `i8*` via `malloc(1)` produces a non-terminated string
+        // and crashes native execution when `string_length` calls `strlen`.
+        if ends_with_pointer_suffix(element_type) && !ends_with_pointer_suffix(operand.llvm_type) && !is_string_pointer_type(element_type) {
             let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
             diagnostics = diagnostics.concat(boxed.diagnostics);
             current_lines = boxed.lines;
@@ -11657,7 +11713,11 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                 current_temp = lowered.temp_index;
                 if lowered.operand != null {
                     let mut field_operand = lowered.operand;
-                    if ends_with_pointer_suffix(expected.llvm_type) && !ends_with_pointer_suffix(field_operand.llvm_type) {
+                    // Only box aggregate values into heap pointers.
+                    // IMPORTANT: `i8*` is a string pointer in our runtime ABI (null-terminated).
+                    // Boxing an `i8` into an `i8*` via `malloc(1)` produces a non-terminated string
+                    // and crashes native execution when `string_length` calls `strlen`.
+                    if ends_with_pointer_suffix(expected.llvm_type) && !ends_with_pointer_suffix(field_operand.llvm_type) && !is_string_pointer_type(expected.llvm_type) {
                         let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
                         diagnostics = diagnostics.concat(boxed.diagnostics);
                         current_lines = boxed.lines;
@@ -12018,22 +12078,22 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     // Special case: i8 character to i8* string conversion (create single-char string)
     // This handles passing character literals to functions expecting strings
     if target_type == "i8*" && operand.llvm_type == "i8" {
-        // Allocate a 2-byte buffer (char + null terminator) on the stack
-        let alloca_temp = format_temp_name(temp_index);
-        let char_ptr = format_temp_name(temp_index + 1);
+        // Allocate a 2-byte buffer (char + null terminator) on the heap.
+        // IMPORTANT: returning a pointer into stack memory (alloca) is invalid once the
+        // function returns and breaks string helpers like `char_code`.
+        let size_temp = format_temp_name(temp_index);
+        let malloc_temp = format_temp_name(temp_index + 1);
         let null_ptr = format_temp_name(temp_index + 2);
-        let result_ptr = format_temp_name(temp_index + 3);
-        current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca [2 x i8], align 1");
-        // Store the character at index 0
-        current_lines = append_string(current_lines, "  " + char_ptr + " = getelementptr [2 x i8], [2 x i8]* " + alloca_temp + ", i32 0, i32 0");
-        current_lines = append_string(current_lines, "  store i8 " + operand.value + ", i8* " + char_ptr);
-        // Store null terminator at index 1
-        current_lines = append_string(current_lines, "  " + null_ptr + " = getelementptr [2 x i8], [2 x i8]* " + alloca_temp + ", i32 0, i32 1");
+
+        current_lines = append_string(current_lines, "  " + size_temp + " = add i64 0, 2");
+        current_lines = append_string(current_lines, "  " + malloc_temp + " = call i8* @malloc(i64 " + size_temp + ")");
+        current_lines = append_string(current_lines, "  store i8 " + operand.value + ", i8* " + malloc_temp);
+        current_lines = append_string(current_lines, "  " + null_ptr + " = getelementptr i8, i8* " + malloc_temp + ", i64 1");
         current_lines = append_string(current_lines, "  store i8 0, i8* " + null_ptr);
-        // Get pointer to the start for returning
-        current_lines = append_string(current_lines, "  " + result_ptr + " = getelementptr [2 x i8], [2 x i8]* " + alloca_temp + ", i32 0, i32 0");
-        let coerced = LLVMOperand { llvm_type: "i8*", value: result_ptr };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: coerced, diagnostics: diagnostics };
+        current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+
+        let coerced = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 3, operand: coerced, diagnostics: diagnostics };
     }
     // Generic pointer coercion: allow bitcast between i8* and typed struct pointers
     // This handles imported types that couldn't be resolved due to missing layout manifests

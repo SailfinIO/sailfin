@@ -44,6 +44,7 @@ declare i1 @sailfin_runtime_is_decimal_digit(i8)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
+declare void @sailfin_runtime_mark_persistent(i8*)
 
 declare %Token @eof_token(double, double)
 declare i8* @char_at(i8*, double)
@@ -56,7 +57,7 @@ declare noalias i8* @malloc(i64)
 
 @.str.len2.h193495007 = private unnamed_addr constant [3 x i8] c"io\00"
 
-declare void @sailfin_runtime_mark_persistent(i8*)
+declare void @sailfin_runtime_copy_bytes(i8*, i8*, i64)
 
 define { i8**, i64 }* @infer_effects({ i8**, i64 }* %existing, { %DecoratorInfo*, i64 }* %decorators) {
 block.entry:
@@ -1266,7 +1267,7 @@ merge5:
   %t15 = sext i8 %t14 to i64
   store i64 %t15, i64* %l2
   %t16 = load i64, i64* %l2
-  %t17 = call i1 @sailfin_runtime_is_whitespace_char(i64 %t16)
+  %t17 = call i1 @sailfin_runtime_is_whitespace_char(i8* null)
   %t18 = load double, double* %l0
   %t19 = load double, double* %l1
   %t20 = load i64, i64* %l2
@@ -1313,7 +1314,7 @@ merge13:
   %t42 = sext i8 %t41 to i64
   store i64 %t42, i64* %l4
   %t43 = load i64, i64* %l4
-  %t44 = call i1 @sailfin_runtime_is_whitespace_char(i64 %t43)
+  %t44 = call i1 @sailfin_runtime_is_whitespace_char(i8* null)
   %t45 = load double, double* %l0
   %t46 = load double, double* %l1
   %t47 = load double, double* %l3
@@ -1477,7 +1478,7 @@ merge15:
   br label %loop.latch8
 merge13:
   %t49 = load i64, i64* %l3
-  %t50 = call i1 @sailfin_runtime_is_decimal_digit(i64 %t49)
+  %t50 = call i1 @sailfin_runtime_is_decimal_digit(i8* null)
   %t51 = xor i1 %t50, 1
   %t52 = load i1, i1* %l0
   %t53 = load double, double* %l1
@@ -1524,56 +1525,106 @@ logical_and_merge_0:
 
 define { %DecoratorInfo*, i64 }* @append_decorator_info({ %DecoratorInfo*, i64 }* %collection, %DecoratorInfo %item) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 16)
-  %t1 = bitcast i8* %t0 to %DecoratorInfo*
-  store %DecoratorInfo %item, %DecoratorInfo* %t1
-  %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
-  %t3 = ptrtoint [1 x i8*]* %t2 to i64
-  %t4 = icmp eq i64 %t3, 0
-  %t5 = select i1 %t4, i64 1, i64 %t3
-  %t6 = call i8* @malloc(i64 %t5)
-  %t7 = bitcast i8* %t6 to i8**
-  %t8 = getelementptr i8*, i8** %t7, i64 0
-  store i8* %t0, i8** %t8
-  %t9 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t10 = ptrtoint { i8**, i64 }* %t9 to i64
-  %t11 = call i8* @malloc(i64 %t10)
-  %t12 = bitcast i8* %t11 to { i8**, i64 }*
-  %t13 = getelementptr { i8**, i64 }, { i8**, i64 }* %t12, i32 0, i32 0
-  store i8** %t7, i8*** %t13
-  %t14 = getelementptr { i8**, i64 }, { i8**, i64 }* %t12, i32 0, i32 1
-  store i64 1, i64* %t14
-  %t15 = bitcast { %DecoratorInfo*, i64 }* %collection to { i8**, i64 }*
-  %t16 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t15, { i8**, i64 }* %t12)
-  %t17 = bitcast { i8**, i64 }* %t16 to { %DecoratorInfo*, i64 }*
-  ret { %DecoratorInfo*, i64 }* %t17
+  %t0 = getelementptr [1 x %DecoratorInfo], [1 x %DecoratorInfo]* null, i32 1
+  %t1 = ptrtoint [1 x %DecoratorInfo]* %t0 to i64
+  %t2 = icmp eq i64 %t1, 0
+  %t3 = select i1 %t2, i64 1, i64 %t1
+  %t4 = call i8* @malloc(i64 %t3)
+  %t5 = bitcast i8* %t4 to %DecoratorInfo*
+  %t6 = getelementptr %DecoratorInfo, %DecoratorInfo* %t5, i64 0
+  store %DecoratorInfo %item, %DecoratorInfo* %t6
+  %t7 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* null, i32 1
+  %t8 = ptrtoint { %DecoratorInfo*, i64 }* %t7 to i64
+  %t9 = call i8* @malloc(i64 %t8)
+  %t10 = bitcast i8* %t9 to { %DecoratorInfo*, i64 }*
+  %t11 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t10, i32 0, i32 0
+  store %DecoratorInfo* %t5, %DecoratorInfo** %t11
+  %t12 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t10, i32 0, i32 1
+  store i64 1, i64* %t12
+  %t13 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %collection, i32 0, i32 0
+  %t14 = load %DecoratorInfo*, %DecoratorInfo** %t13
+  %t15 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %collection, i32 0, i32 1
+  %t16 = load i64, i64* %t15
+  %t17 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t10, i32 0, i32 0
+  %t18 = load %DecoratorInfo*, %DecoratorInfo** %t17
+  %t19 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t10, i32 0, i32 1
+  %t20 = load i64, i64* %t19
+  %t21 = getelementptr [1 x %DecoratorInfo], [1 x %DecoratorInfo]* null, i32 0, i32 1
+  %t22 = ptrtoint %DecoratorInfo* %t21 to i64
+  %t23 = add i64 %t16, %t20
+  %t24 = mul i64 %t22, %t23
+  %t25 = call noalias i8* @malloc(i64 %t24)
+  %t26 = bitcast i8* %t25 to %DecoratorInfo*
+  %t27 = bitcast %DecoratorInfo* %t26 to i8*
+  %t28 = mul i64 %t22, %t16
+  %t29 = bitcast %DecoratorInfo* %t14 to i8*
+  call void @sailfin_runtime_copy_bytes(i8* %t27, i8* %t29, i64 %t28)
+  %t30 = mul i64 %t22, %t20
+  %t31 = bitcast %DecoratorInfo* %t18 to i8*
+  %t32 = getelementptr %DecoratorInfo, %DecoratorInfo* %t26, i64 %t16
+  %t33 = bitcast %DecoratorInfo* %t32 to i8*
+  call void @sailfin_runtime_copy_bytes(i8* %t33, i8* %t31, i64 %t30)
+  %t34 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* null, i32 1
+  %t35 = ptrtoint { %DecoratorInfo*, i64 }* %t34 to i64
+  %t36 = call i8* @malloc(i64 %t35)
+  %t37 = bitcast i8* %t36 to { %DecoratorInfo*, i64 }*
+  %t38 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t37, i32 0, i32 0
+  store %DecoratorInfo* %t26, %DecoratorInfo** %t38
+  %t39 = getelementptr { %DecoratorInfo*, i64 }, { %DecoratorInfo*, i64 }* %t37, i32 0, i32 1
+  store i64 %t23, i64* %t39
+  ret { %DecoratorInfo*, i64 }* %t37
 }
 
 define { %DecoratorArgumentInfo*, i64 }* @append_argument_info({ %DecoratorArgumentInfo*, i64 }* %collection, %DecoratorArgumentInfo %item) {
 block.entry:
-  %t0 = call noalias i8* @malloc(i64 24)
-  %t1 = bitcast i8* %t0 to %DecoratorArgumentInfo*
-  store %DecoratorArgumentInfo %item, %DecoratorArgumentInfo* %t1
-  %t2 = getelementptr [1 x i8*], [1 x i8*]* null, i32 1
-  %t3 = ptrtoint [1 x i8*]* %t2 to i64
-  %t4 = icmp eq i64 %t3, 0
-  %t5 = select i1 %t4, i64 1, i64 %t3
-  %t6 = call i8* @malloc(i64 %t5)
-  %t7 = bitcast i8* %t6 to i8**
-  %t8 = getelementptr i8*, i8** %t7, i64 0
-  store i8* %t0, i8** %t8
-  %t9 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t10 = ptrtoint { i8**, i64 }* %t9 to i64
-  %t11 = call i8* @malloc(i64 %t10)
-  %t12 = bitcast i8* %t11 to { i8**, i64 }*
-  %t13 = getelementptr { i8**, i64 }, { i8**, i64 }* %t12, i32 0, i32 0
-  store i8** %t7, i8*** %t13
-  %t14 = getelementptr { i8**, i64 }, { i8**, i64 }* %t12, i32 0, i32 1
-  store i64 1, i64* %t14
-  %t15 = bitcast { %DecoratorArgumentInfo*, i64 }* %collection to { i8**, i64 }*
-  %t16 = call { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }* %t15, { i8**, i64 }* %t12)
-  %t17 = bitcast { i8**, i64 }* %t16 to { %DecoratorArgumentInfo*, i64 }*
-  ret { %DecoratorArgumentInfo*, i64 }* %t17
+  %t0 = getelementptr [1 x %DecoratorArgumentInfo], [1 x %DecoratorArgumentInfo]* null, i32 1
+  %t1 = ptrtoint [1 x %DecoratorArgumentInfo]* %t0 to i64
+  %t2 = icmp eq i64 %t1, 0
+  %t3 = select i1 %t2, i64 1, i64 %t1
+  %t4 = call i8* @malloc(i64 %t3)
+  %t5 = bitcast i8* %t4 to %DecoratorArgumentInfo*
+  %t6 = getelementptr %DecoratorArgumentInfo, %DecoratorArgumentInfo* %t5, i64 0
+  store %DecoratorArgumentInfo %item, %DecoratorArgumentInfo* %t6
+  %t7 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* null, i32 1
+  %t8 = ptrtoint { %DecoratorArgumentInfo*, i64 }* %t7 to i64
+  %t9 = call i8* @malloc(i64 %t8)
+  %t10 = bitcast i8* %t9 to { %DecoratorArgumentInfo*, i64 }*
+  %t11 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t10, i32 0, i32 0
+  store %DecoratorArgumentInfo* %t5, %DecoratorArgumentInfo** %t11
+  %t12 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t10, i32 0, i32 1
+  store i64 1, i64* %t12
+  %t13 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %collection, i32 0, i32 0
+  %t14 = load %DecoratorArgumentInfo*, %DecoratorArgumentInfo** %t13
+  %t15 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %collection, i32 0, i32 1
+  %t16 = load i64, i64* %t15
+  %t17 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t10, i32 0, i32 0
+  %t18 = load %DecoratorArgumentInfo*, %DecoratorArgumentInfo** %t17
+  %t19 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t10, i32 0, i32 1
+  %t20 = load i64, i64* %t19
+  %t21 = getelementptr [1 x %DecoratorArgumentInfo], [1 x %DecoratorArgumentInfo]* null, i32 0, i32 1
+  %t22 = ptrtoint %DecoratorArgumentInfo* %t21 to i64
+  %t23 = add i64 %t16, %t20
+  %t24 = mul i64 %t22, %t23
+  %t25 = call noalias i8* @malloc(i64 %t24)
+  %t26 = bitcast i8* %t25 to %DecoratorArgumentInfo*
+  %t27 = bitcast %DecoratorArgumentInfo* %t26 to i8*
+  %t28 = mul i64 %t22, %t16
+  %t29 = bitcast %DecoratorArgumentInfo* %t14 to i8*
+  call void @sailfin_runtime_copy_bytes(i8* %t27, i8* %t29, i64 %t28)
+  %t30 = mul i64 %t22, %t20
+  %t31 = bitcast %DecoratorArgumentInfo* %t18 to i8*
+  %t32 = getelementptr %DecoratorArgumentInfo, %DecoratorArgumentInfo* %t26, i64 %t16
+  %t33 = bitcast %DecoratorArgumentInfo* %t32 to i8*
+  call void @sailfin_runtime_copy_bytes(i8* %t33, i8* %t31, i64 %t30)
+  %t34 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* null, i32 1
+  %t35 = ptrtoint { %DecoratorArgumentInfo*, i64 }* %t34 to i64
+  %t36 = call i8* @malloc(i64 %t35)
+  %t37 = bitcast i8* %t36 to { %DecoratorArgumentInfo*, i64 }*
+  %t38 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t37, i32 0, i32 0
+  store %DecoratorArgumentInfo* %t26, %DecoratorArgumentInfo** %t38
+  %t39 = getelementptr { %DecoratorArgumentInfo*, i64 }, { %DecoratorArgumentInfo*, i64 }* %t37, i32 0, i32 1
+  store i64 %t23, i64* %t39
+  ret { %DecoratorArgumentInfo*, i64 }* %t37
 }
 
 define { i8**, i64 }* @append_string({ i8**, i64 }* %collection, i8* %item) {
@@ -1804,56 +1855,56 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.str.len12.h1170311443 = private unnamed_addr constant [13 x i8] c"logexecution\00"
-@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
-@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
 @.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
-@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
-@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
 @.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
-@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
-@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len12.h1147459442 = private unnamed_addr constant [13 x i8] c"logExecution\00"
-@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.str.len12.h1170311443 = private unnamed_addr constant [13 x i8] c"logexecution\00"
 @.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
-@.str.len5.h515589823 = private unnamed_addr constant [6 x i8] c"trace\00"
-@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
-@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
+@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
 @.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
-@.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
 @.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
+@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.str.len5.h515589823 = private unnamed_addr constant [6 x i8] c"trace\00"
+@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
 @.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
+@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.str.len12.h1147459442 = private unnamed_addr constant [13 x i8] c"logExecution\00"
+@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"

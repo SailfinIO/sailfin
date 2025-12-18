@@ -9,6 +9,7 @@ declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare i1 @strings_equal(i8*, i8*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
+declare void @sailfin_runtime_mark_persistent(i8*)
 
 declare noalias i8* @malloc(i64)
 

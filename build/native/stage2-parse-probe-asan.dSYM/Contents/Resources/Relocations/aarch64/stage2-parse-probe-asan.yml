@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     'build/native/stage2-parse-probe-asan'
+relocations:     []
+...
