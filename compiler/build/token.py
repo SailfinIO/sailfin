@@ -18,11 +18,11 @@ globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
 TokenKind = runtime.enum_type('TokenKind')
-TokenKind = runtime.enum_define_variant(TokenKind, 'Identifier', ['value'])
-TokenKind = runtime.enum_define_variant(TokenKind, 'NumberLiteral', ['value'])
-TokenKind = runtime.enum_define_variant(TokenKind, 'StringLiteral', ['value'])
-TokenKind = runtime.enum_define_variant(TokenKind, 'BooleanLiteral', ['value'])
-TokenKind = runtime.enum_define_variant(TokenKind, 'Symbol', ['value'])
+TokenKind = runtime.enum_define_variant(TokenKind, 'Identifier', [])
+TokenKind = runtime.enum_define_variant(TokenKind, 'NumberLiteral', [])
+TokenKind = runtime.enum_define_variant(TokenKind, 'StringLiteral', [])
+TokenKind = runtime.enum_define_variant(TokenKind, 'BooleanLiteral', [])
+TokenKind = runtime.enum_define_variant(TokenKind, 'Symbol', [])
 TokenKind = runtime.enum_define_variant(TokenKind, 'Whitespace', [])
 TokenKind = runtime.enum_define_variant(TokenKind, 'Comment', [])
 TokenKind = runtime.enum_define_variant(TokenKind, 'EndOfFile', [])

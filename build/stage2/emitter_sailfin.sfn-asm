@@ -5,7 +5,7 @@
 
 .import "./token" { Token }
 
-.import "./string_utils" { substring, char_code }
+.import "./string_utils" { substring, char_code, char_at }
 
 .struct TextBuilder
     .layout struct name=TextBuilder size=16 align=8
@@ -1545,8 +1545,8 @@
         .if index >= value.length
             break
         .endif
-        .span 914 9 914 60
-        eval result = result + escape_string_char(value[index])
+        .span 914 9 914 69
+        eval result = result + escape_string_char(char_at(value, index))
         .span 915 9 915 20
         eval index += 1
     .endloop
@@ -1603,8 +1603,8 @@
         .span 946 9 946 22
         ret false
     .endif
-    .span 948 5 948 26
-    eval let first = value[0]
+    .span 948 5 948 35
+    eval let first = char_at(value, 0)
     .if !is_identifier_start(first)
         .span 950 9 950 22
         ret false
@@ -1615,7 +1615,7 @@
         .if index >= value.length
             break
         .endif
-        .if !is_identifier_part(value[index])
+        .if !is_identifier_part(char_at(value, index))
             .span 958 13 958 26
             ret false
         .endif
@@ -1667,7 +1667,7 @@
         .span 985 9 985 24
         ret trimmed
     .endif
-    .if trimmed[0] == "{" && trimmed[trimmed.length - 1] == "}"
+    .if char_at(trimmed, 0) == "{" && char_at(trimmed, trimmed.length - 1) == "}"
         .span 988 9 988 69
         ret trim_text(substring(trimmed, 1, trimmed.length - 1))
     .endif
@@ -1690,8 +1690,8 @@
         .if index >= value.length
             break
         .endif
-        .span 1001 9 1001 31
-        eval let ch = value[index]
+        .span 1001 9 1001 40
+        eval let ch = char_at(value, index)
         .span 1002 9 1002 76
         eval let is_space = ch == " " || ch == "\n" || ch == "\r" || ch == "\t"
         .if is_space
@@ -1836,8 +1836,8 @@
         .if end <= 0
             break
         .endif
-        .span 1083 9 1083 33
-        eval let ch = value[end - 1]
+        .span 1083 9 1083 42
+        eval let ch = char_at(value, end - 1)
         .if ch == " " || ch == "\t"
             .span 1085 13 1085 22
             eval end -= 1
@@ -1905,8 +1905,8 @@
         .if start >= end
             break
         .endif
-        .span 1123 9 1123 31
-        eval let ch = value[start]
+        .span 1123 9 1123 40
+        eval let ch = char_at(value, start)
         .if is_trim_char(ch)
             .span 1125 13 1125 24
             eval start += 1
@@ -1918,8 +1918,8 @@
         .if end <= start
             break
         .endif
-        .span 1134 9 1134 33
-        eval let ch = value[end - 1]
+        .span 1134 9 1134 42
+        eval let ch = char_at(value, end - 1)
         .if is_trim_char(ch)
             .span 1136 13 1136 22
             eval end -= 1

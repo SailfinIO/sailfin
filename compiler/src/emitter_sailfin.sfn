@@ -29,7 +29,7 @@ import {
     ElseBranch,
 } from "./ast";
 import { Token } from "./token";
-import { substring, char_code } from "./string_utils";
+import { substring, char_code, char_at } from "./string_utils";
 
 struct TextBuilder {
     lines -> string[];
@@ -911,7 +911,7 @@ fn quote_string(value -> string) -> string {
         if index >= value.length {
             break;
         }
-        result = result + escape_string_char(value[index]);
+        result = result + escape_string_char(char_at(value, index));
         index += 1;
     }
     result = result + "\"";
@@ -945,7 +945,7 @@ fn is_identifier(value -> string) -> boolean {
     if value.length == 0 {
         return false;
     }
-    let first = value[0];
+    let first = char_at(value, 0);
     if !is_identifier_start(first) {
         return false;
     }
@@ -954,7 +954,7 @@ fn is_identifier(value -> string) -> boolean {
         if index >= value.length {
             break;
         }
-        if !is_identifier_part(value[index]) {
+        if !is_identifier_part(char_at(value, index)) {
             return false;
         }
         index += 1;
@@ -984,7 +984,7 @@ fn trim_block_body(text -> string) -> string {
     if trimmed.length == 0 {
         return trimmed;
     }
-    if trimmed[0] == "{" && trimmed[trimmed.length - 1] == "}" {
+    if char_at(trimmed, 0) == "{" && char_at(trimmed, trimmed.length - 1) == "}" {
         return trim_text(substring(trimmed, 1, trimmed.length - 1));
     }
     return trimmed;
@@ -998,7 +998,7 @@ fn collapse_whitespace(value -> string) -> string {
         if index >= value.length {
             break;
         }
-        let ch = value[index];
+        let ch = char_at(value, index);
         let is_space = ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
         if is_space {
             if !last_space {
@@ -1080,7 +1080,7 @@ fn trim_right(value -> string) -> string {
         if end <= 0 {
             break;
         }
-        let ch = value[end - 1];
+        let ch = char_at(value, end - 1);
         if ch == " " || ch == "\t" {
             end -= 1;
             continue;
@@ -1120,7 +1120,7 @@ fn trim_text(value -> string) -> string {
         if start >= end {
             break;
         }
-        let ch = value[start];
+        let ch = char_at(value, start);
         if is_trim_char(ch) {
             start += 1;
             continue;
@@ -1131,7 +1131,7 @@ fn trim_text(value -> string) -> string {
         if end <= start {
             break;
         }
-        let ch = value[end - 1];
+        let ch = char_at(value, end - 1);
         if is_trim_char(ch) {
             end -= 1;
             continue;

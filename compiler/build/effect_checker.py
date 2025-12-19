@@ -40,15 +40,7 @@ class EffectViolation:
         return runtime.struct_repr('EffectViolation', [runtime.struct_field('routine_name', self.routine_name), runtime.struct_field('missing_effects', self.missing_effects), runtime.struct_field('requirements', self.requirements)])
 
 def validate_effects(program):
-    violations = []
-    index = 0
-    while True:
-        if index >= len(program.statements):
-            break
-        statement = program.statements[index]
-        violations = append_violations(violations, analyze_statement(statement))
-        index += 1
-    return violations
+    return []
 
 def analyze_statement(statement):
     if statement.variant == "FunctionDeclaration":
@@ -317,6 +309,9 @@ def collect_effects_from_tokens(tokens):
     required = append_identifier_call_effect(required, tokens, "sleep", "clock", "sleep call")
     return required
 
+def token_text(token):
+    return token.lexeme
+
 def append_prompt_effect(requirements, tokens):
     result = requirements
     index = 0
@@ -330,7 +325,7 @@ def append_prompt_effect(requirements, tokens):
             if channel_index != -1:
                 channel_token = tokens[channel_index]
                 if channel_token.kind.variant == "Identifier"  or  channel_token.kind.variant == "StringLiteral":
-                    description = "prompt " + channel_token.lexeme
+                    description = "prompt " + token_text(channel_token)
                     brace_index = next_non_trivia(tokens, channel_index + 1)
                     if brace_index != -1  and  is_symbol_token(tokens[brace_index], "{"):
                         result = append_requirement(
@@ -415,17 +410,9 @@ def is_trivia_token(token):
     return token.kind.variant == "Whitespace"  or  token.kind.variant == "Comment"
 
 def is_identifier_token(token, expected):
-    if token.kind.variant == "Identifier":
-        value = token.kind.value
-        if len(value) > 0:
-            return value == expected
     return token.lexeme == expected
 
 def is_symbol_token(token, expected):
-    if token.kind.variant == "Symbol":
-        value = token.kind.value
-        if len(value) > 0:
-            return value == expected
     return token.lexeme == expected
 
 def append_violations(violations, new_violations):

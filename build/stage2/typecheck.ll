@@ -36,7 +36,7 @@ source_filename = "sailfin"
 
 %Expression = type { i32, [40 x i8] }
 %Statement = type { i32, [136 x i8] }
-%TokenKind = type { i32, [8 x i8] }
+%TokenKind = type { i32 }
 
 declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
@@ -59,6 +59,7 @@ declare { %EffectRequirement*, i64 }* @collect_effects_from_else_branch(%ElseBra
 declare { %EffectRequirement*, i64 }* @collect_effects_from_match_case(%MatchCase)
 declare { %EffectRequirement*, i64 }* @collect_effects_from_expression(%Expression*)
 declare { %EffectRequirement*, i64 }* @collect_effects_from_tokens({ %Token*, i64 }*)
+declare i8* @token_text(%Token)
 declare { %EffectRequirement*, i64 }* @append_prompt_effect({ %EffectRequirement*, i64 }*, { %Token*, i64 }*)
 declare { %EffectRequirement*, i64 }* @append_identifier_dot_effect({ %EffectRequirement*, i64 }*, { %Token*, i64 }*, i8*, i8*, i8*)
 declare { %EffectRequirement*, i64 }* @append_identifier_call_effect({ %EffectRequirement*, i64 }*, { %Token*, i64 }*, i8*, i8*, i8*)
@@ -9827,25 +9828,18 @@ then0:
   %t1 = bitcast i8* null to %Token*
   ret %Token* %t1
 merge1:
-  %t2 = alloca %TokenKind
-  %t3 = getelementptr inbounds %TokenKind, %TokenKind* %t2, i32 0, i32 0
-  store i32 0, i32* %t3
-  %t4 = getelementptr inbounds %TokenKind, %TokenKind* %t2, i32 0, i32 1
-  %t5 = bitcast [8 x i8]* %t4 to i8*
-  %t6 = bitcast i8* %t5 to i8**
-  store i8* %name, i8** %t6
-  %t7 = load %TokenKind, %TokenKind* %t2
-  %t8 = insertvalue %Token undef, %TokenKind %t7, 0
-  %t9 = insertvalue %Token %t8, i8* %name, 1
-  %t10 = getelementptr %SourceSpan, %SourceSpan* %span, i32 0, i32 0
-  %t11 = load double, double* %t10
-  %t12 = insertvalue %Token %t9, double %t11, 2
-  %t13 = getelementptr %SourceSpan, %SourceSpan* %span, i32 0, i32 1
-  %t14 = load double, double* %t13
-  %t15 = insertvalue %Token %t12, double %t14, 3
-  %t16 = alloca %Token
-  store %Token %t15, %Token* %t16
-  ret %Token* %t16
+  %t2 = insertvalue %TokenKind undef, i32 0, 0
+  %t3 = insertvalue %Token undef, %TokenKind %t2, 0
+  %t4 = insertvalue %Token %t3, i8* %name, 1
+  %t5 = getelementptr %SourceSpan, %SourceSpan* %span, i32 0, i32 0
+  %t6 = load double, double* %t5
+  %t7 = insertvalue %Token %t4, double %t6, 2
+  %t8 = getelementptr %SourceSpan, %SourceSpan* %span, i32 0, i32 1
+  %t9 = load double, double* %t8
+  %t10 = insertvalue %Token %t7, double %t9, 3
+  %t11 = alloca %Token
+  store %Token %t10, %Token* %t11
+  ret %Token* %t11
 }
 
 define %Diagnostic @make_duplicate_symbol_diagnostic(i8* %name, i8* %kind, %Token* %token) {
@@ -9951,61 +9945,61 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len4.h276192845 = private unnamed_addr constant [5 x i8] c"type\00"
-@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.str.len5.h238194529 = private unnamed_addr constant [6 x i8] c"model\00"
-@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len4.h258014432 = private unnamed_addr constant [5 x i8] c"enum\00"
-@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
-@.str.len4.h275477867 = private unnamed_addr constant [5 x i8] c"test\00"
-@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
 @.str.len14.h513489323 = private unnamed_addr constant [15 x i8] c"type parameter\00"
-@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len16.h994638848 = private unnamed_addr constant [17 x i8] c"interface member\00"
-@.str.len9.h1747065903 = private unnamed_addr constant [10 x i8] c"parameter\00"
-@.str.len4.h275832617 = private unnamed_addr constant [5 x i8] c"tool\00"
-@.str.len14.h812083909 = private unnamed_addr constant [15 x i8] c"model property\00"
-@.str.len15.h902271367 = private unnamed_addr constant [16 x i8] c"effects.missing\00"
-@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
-@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.str.len8.h1603982015 = private unnamed_addr constant [9 x i8] c"function\00"
-@.str.len14.h980936743 = private unnamed_addr constant [15 x i8] c"; required by \00"
-@.str.len12.h766506979 = private unnamed_addr constant [13 x i8] c"struct field\00"
-@.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.str.len8.h2003786807 = private unnamed_addr constant [9 x i8] c"pipeline\00"
-@.str.len9.h1313193687 = private unnamed_addr constant [10 x i8] c"interface\00"
 @.str.len8.h1925814595 = private unnamed_addr constant [9 x i8] c"variable\00"
-@.str.len12.h328844387 = private unnamed_addr constant [13 x i8] c"enum variant\00"
-@.str.len6.h1045703541 = private unnamed_addr constant [7 x i8] c"method\00"
-@.str.len6.h789690461 = private unnamed_addr constant [7 x i8] c"struct\00"
-@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.str.len15.h571715647 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
-@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.str.len8.h1603982015 = private unnamed_addr constant [9 x i8] c"function\00"
+@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
 @.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.str.len14.h980936743 = private unnamed_addr constant [15 x i8] c"; required by \00"
+@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.str.len15.h902271367 = private unnamed_addr constant [16 x i8] c"effects.missing\00"
+@.str.len4.h275832617 = private unnamed_addr constant [5 x i8] c"tool\00"
+@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len12.h766506979 = private unnamed_addr constant [13 x i8] c"struct field\00"
+@.str.len5.h238194529 = private unnamed_addr constant [6 x i8] c"model\00"
+@.str.len8.h2003786807 = private unnamed_addr constant [9 x i8] c"pipeline\00"
+@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
 @.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.str.len6.h1045703541 = private unnamed_addr constant [7 x i8] c"method\00"
+@.str.len16.h994638848 = private unnamed_addr constant [17 x i8] c"interface member\00"
+@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
+@.str.len9.h1747065903 = private unnamed_addr constant [10 x i8] c"parameter\00"
+@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.str.len4.h275477867 = private unnamed_addr constant [5 x i8] c"test\00"
+@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.str.len6.h789690461 = private unnamed_addr constant [7 x i8] c"struct\00"
+@.str.len9.h1313193687 = private unnamed_addr constant [10 x i8] c"interface\00"
+@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.str.len4.h276192845 = private unnamed_addr constant [5 x i8] c"type\00"
+@.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
+@.str.len14.h812083909 = private unnamed_addr constant [15 x i8] c"model property\00"
+@.str.len15.h571715647 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.str.len12.h328844387 = private unnamed_addr constant [13 x i8] c"enum variant\00"
+@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.str.len4.h258014432 = private unnamed_addr constant [5 x i8] c"enum\00"
+@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
 @.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"

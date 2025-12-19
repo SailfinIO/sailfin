@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.token import Token, TokenKind, eof_token
-from compiler.build.string_utils import substring, char_code
+from compiler.build.string_utils import substring, char_code, char_at
 
 print = runtime.console
 sleep = runtime.sleep
@@ -36,7 +36,7 @@ def lex(source):
     while True:
         if state.index >= len(state.source):
             break
-        ch = state.source[state.index]
+        ch = char_at(state.source, state.index)
         if is_whitespace(ch):
             start_index = state.index
             start_line = state.line
@@ -44,9 +44,9 @@ def lex(source):
             while True:
                 if state.index >= len(state.source):
                     break
-                if not is_whitespace(state.source[state.index]):
+                if not is_whitespace(char_at(state.source, state.index)):
                     break
-                if state.source[state.index] == "\n":
+                if char_at(state.source, state.index) == "\n":
                     state.index += 1
                     state.line += 1
                     state.column = 1
@@ -69,7 +69,7 @@ def lex(source):
                 while True:
                     if scan_index >= len(state.source):
                         break
-                    scan_character = state.source[scan_index]
+                    scan_character = char_at(state.source, scan_index)
                     if scan_character == "\n"  or  scan_character == "\r":
                         comment_end = scan_index
                         break
@@ -89,11 +89,11 @@ def lex(source):
                 while True:
                     if state.index >= len(state.source):
                         break
-                    if state.source[state.index] == "*"  and  peek_next_char(state) == "/":
+                    if char_at(state.source, state.index) == "*"  and  peek_next_char(state) == "/":
                         state.index += 2
                         state.column += 2
                         break
-                    if state.source[state.index] == "\n":
+                    if char_at(state.source, state.index) == "\n":
                         state.index += 1
                         state.line += 1
                         state.column = 1
@@ -114,7 +114,7 @@ def lex(source):
             while True:
                 if state.index >= len(state.source):
                     break
-                current = state.source[state.index]
+                current = char_at(state.source, state.index)
                 if not escaped  and  is_double_quote(current):
                     state.index += 1
                     state.column += 1
@@ -137,7 +137,7 @@ def lex(source):
                     state.index += 1
                     state.column += 1
             lexeme = slice(state.source, start_index, state.index)
-            tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'StringLiteral', [runtime.enum_field('value', literal)]), lexeme=lexeme, line=start_line, column=start_column))
+            tokens = append(tokens, Token(kind=TokenKind.StringLiteral(), lexeme=lexeme, line=start_line, column=start_column))
             continue
         if is_digit(ch):
             start_index = state.index
@@ -148,24 +148,24 @@ def lex(source):
             while True:
                 if state.index >= len(state.source):
                     break
-                if not is_digit(state.source[state.index]):
+                if not is_digit(char_at(state.source, state.index)):
                     break
                 state.index += 1
                 state.column += 1
-            if state.index < len(state.source)  and  state.source[state.index] == ".":
-                next_is_digit = state.index + 1 < len(state.source)  and  is_digit(state.source[state.index + 1])
+            if state.index < len(state.source)  and  char_at(state.source, state.index) == ".":
+                next_is_digit = state.index + 1 < len(state.source)  and  is_digit(char_at(state.source, state.index + 1))
                 if next_is_digit:
                     state.index += 1
                     state.column += 1
                     while True:
                         if state.index >= len(state.source):
                             break
-                        if not is_digit(state.source[state.index]):
+                        if not is_digit(char_at(state.source, state.index)):
                             break
                         state.index += 1
                         state.column += 1
             lexeme = slice(state.source, start_index, state.index)
-            tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'NumberLiteral', [runtime.enum_field('value', lexeme)]), lexeme=lexeme, line=start_line, column=start_column))
+            tokens = append(tokens, Token(kind=TokenKind.NumberLiteral(), lexeme=lexeme, line=start_line, column=start_column))
             continue
         if is_identifier_start(ch):
             start = state.index
@@ -176,15 +176,15 @@ def lex(source):
             while True:
                 if state.index >= len(state.source):
                     break
-                if not is_identifier_part(state.source[state.index]):
+                if not is_identifier_part(char_at(state.source, state.index)):
                     break
                 state.index += 1
                 state.column += 1
             value = slice(state.source, start, state.index)
             if value == "true"  or  value == "false":
-                tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'BooleanLiteral', [runtime.enum_field('value', value)]), lexeme=value, line=start_line, column=start_column))
+                tokens = append(tokens, Token(kind=TokenKind.BooleanLiteral(), lexeme=value, line=start_line, column=start_column))
             else:
-                tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Identifier', [runtime.enum_field('value', value)]), lexeme=value, line=start_line, column=start_column))
+                tokens = append(tokens, Token(kind=TokenKind.Identifier(), lexeme=value, line=start_line, column=start_column))
             continue
         start_line = state.line
         start_column = state.column
@@ -196,7 +196,7 @@ def lex(source):
                 lexeme = pair
                 state.index += 2
                 state.column += 2
-                tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Symbol', [runtime.enum_field('value', lexeme)]), lexeme=lexeme, line=start_line, column=start_column))
+                tokens = append(tokens, Token(kind=TokenKind.Symbol(), lexeme=lexeme, line=start_line, column=start_column))
                 continue
         state.index += 1
         if ch == "\n":
@@ -204,7 +204,7 @@ def lex(source):
             state.column = 1
         else:
             state.column += 1
-        tokens = append(tokens, Token(kind=runtime.enum_instantiate(TokenKind, 'Symbol', [runtime.enum_field('value', lexeme)]), lexeme=lexeme, line=start_line, column=start_column))
+        tokens = append(tokens, Token(kind=TokenKind.Symbol(), lexeme=lexeme, line=start_line, column=start_column))
     tokens = append(tokens, eof_token(state.line, state.column))
     return tokens
 
@@ -241,7 +241,7 @@ def peek_next_char(state):
     next_index = state.index + 1
     if next_index >= len(state.source):
         return ""
-    return state.source[next_index]
+    return char_at(state.source, next_index)
 
 def interpret_escape(ch):
     if ch == "n":

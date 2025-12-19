@@ -39,6 +39,8 @@ source_filename = "sailfin"
 %CaptureResult = type { %Parser, { %Token*, i64 }* }
 %EffectParseResult = type { %Parser, { i8**, i64 }* }
 %BlockParseResult = type { %Parser, %Block }
+%ExpressionTypeSeparatorParseResult = type { %ExpressionTokens, i8*, i1 }
+%TypeSeparatorParseResult = type { %Parser, i1 }
 %PatternCaptureResult = type { %Parser, { %Token*, i64 }*, i1 }
 %Program = type { { %Statement*, i64 }* }
 %TypeAnnotation = type { i8* }
@@ -211,7 +213,7 @@ source_filename = "sailfin"
 %Expression = type { i32, [40 x i8] }
 %Statement = type { i32, [136 x i8] }
 %NativeInstruction = type { i32, [48 x i8] }
-%TokenKind = type { i32, [8 x i8] }
+%TokenKind = type { i32 }
 
 ; intrinsic sailfin_runtime_print_info requires capabilities: ![io]
 declare void @sailfin_runtime_print_info(i8*)
@@ -233,6 +235,7 @@ declare void @sailfin_runtime_mark_persistent(i8*)
 
 declare %Program @parse_program(i8*)
 declare %Program @parse_tokens({ %Token*, i64 }*)
+declare i1 @is_end_of_file(%Parser, %Token)
 declare %StatementParseResult @parse_statement(%Parser)
 declare %StatementParseResult @parse_import(%Parser)
 declare %StatementParseResult @parse_export(%Parser)
@@ -247,6 +250,7 @@ declare %StatementParseResult @parse_enum(%Parser, { %Decorator*, i64 }*)
 declare %InterfaceMemberParseResult @parse_interface_member(%Parser, { %Decorator*, i64 }*)
 declare %EnumVariantParseResult @parse_enum_variant(%Parser)
 declare %StructFieldParseResult @parse_enum_variant_field(%Parser)
+declare %ExpressionTypeSeparatorParseResult @expression_tokens_consume_type_separator(%ExpressionTokens, i1, i1)
 declare %Parser @skip_trailing_comma(%Parser)
 declare %StatementParseResult @parse_model(%Parser, { %Decorator*, i64 }*)
 declare %StatementParseResult @parse_pipeline(%Parser, { %Decorator*, i64 }*)
@@ -255,6 +259,7 @@ declare %StatementParseResult @parse_test(%Parser, { %Decorator*, i64 }*)
 declare %StatementParseResult @parse_function(%Parser, i1, { %Decorator*, i64 }*)
 declare %ParameterListParseResult @parse_parameter_list(%Parser)
 declare %StructFieldParseResult @parse_struct_field(%Parser)
+declare %TypeSeparatorParseResult @consume_type_separator(%Parser)
 declare %ModelPropertyParseResult @parse_model_property(%Parser)
 declare %MethodParseResult @parse_struct_method(%Parser, { %Decorator*, i64 }*)
 declare %DecoratorParseResult @parse_decorators(%Parser)
@@ -279,6 +284,8 @@ declare %BlockStatementParseResult @parse_expression_statement(%Parser, { %Decor
 declare %StatementParseResult @parse_unknown(%Parser)
 declare i1 @identifier_matches(%Token, i8*)
 declare i1 @symbol_matches(%Token, i8*)
+declare i8* @decode_string_literal_escapes(i8*)
+declare i8* @strip_loose_quotes(i8*)
 declare i8* @identifier_text(%Token)
 declare i8* @string_literal_value(%Token)
 declare %Parser @skip_trivia(%Parser)
@@ -4694,18 +4701,18 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
+@.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
+@.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
+@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
+@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
+@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
+@.str.len5.h655249917 = private unnamed_addr constant [6 x i8] c"\0Alet \00"
+@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
+@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
+@.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
+@.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
+@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
+@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
 @.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
 @.str.len14.h129277126 = private unnamed_addr constant [15 x i8] c"ExpressionRaw(\00"
-@.str.len5.h655249917 = private unnamed_addr constant [6 x i8] c"\0Alet \00"
-@.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
-@.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
-@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
-@.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
-@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
-@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
-@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
-@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
-@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
 @.str.len85.h1706301526 = private unnamed_addr constant [86 x i8] c"native backend: lowering produced unsupported python output; stage0 fallback disabled\00"
-@.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
-@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"

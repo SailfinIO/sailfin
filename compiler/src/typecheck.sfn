@@ -827,7 +827,7 @@ fn token_from_name(name -> string, span -> SourceSpan?) -> Token? {
         return null;
     }
     return Token {
-        kind: TokenKind.Identifier { value: name },
+        kind: TokenKind.Identifier(),
         lexeme: name,
         line: span.start_line,
         column: span.start_column,

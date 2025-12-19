@@ -3,7 +3,7 @@ from runtime import runtime_support as runtime
 
 from compiler.build.ast import Block, Decorator, DecoratorArgument, EnumVariant, Expression, FieldDeclaration, ForClause, FunctionSignature, MatchCase, MethodDeclaration, ModelProperty, Parameter, Program, Statement, ImportSpecifier, ExportSpecifier, TypeAnnotation, TypeParameter, WithClause, ElseBranch
 from compiler.build.token import Token
-from compiler.build.string_utils import substring, char_code
+from compiler.build.string_utils import substring, char_code, char_at
 
 print = runtime.console
 sleep = runtime.sleep
@@ -695,7 +695,7 @@ def quote_string(value):
     while True:
         if index >= len(value):
             break
-        result = result + escape_string_char(value[index])
+        result = result + escape_string_char(char_at(value, index))
         index += 1
     result = result + "\""
     return result
@@ -719,14 +719,14 @@ def format_test_name(name):
 def is_identifier(value):
     if len(value) == 0:
         return False
-    first = value[0]
+    first = char_at(value, 0)
     if not is_identifier_start(first):
         return False
     index = 1
     while True:
         if index >= len(value):
             break
-        if not is_identifier_part(value[index]):
+        if not is_identifier_part(char_at(value, index)):
             return False
         index += 1
     return True
@@ -747,7 +747,7 @@ def trim_block_body(text):
     trimmed = trim_text(text)
     if len(trimmed) == 0:
         return trimmed
-    if trimmed[0] == "{"  and  trimmed[len(trimmed) - 1] == "}":
+    if char_at(trimmed, 0) == "{"  and  char_at(trimmed, len(trimmed) - 1) == "}":
         return trim_text(substring(trimmed, 1, len(trimmed) - 1))
     return trimmed
 
@@ -758,7 +758,7 @@ def collapse_whitespace(value):
     while True:
         if index >= len(value):
             break
-        ch = value[index]
+        ch = char_at(value, index)
         is_space = ch == " "  or  ch == "\n"  or  ch == "\r"  or  ch == "\t"
         if is_space:
             if not last_space:
@@ -821,7 +821,7 @@ def trim_right(value):
     while True:
         if end <= 0:
             break
-        ch = value[end - 1]
+        ch = char_at(value, end - 1)
         if ch == " "  or  ch == "\t":
             end -= 1
             continue
@@ -851,7 +851,7 @@ def trim_text(value):
     while True:
         if start >= end:
             break
-        ch = value[start]
+        ch = char_at(value, start)
         if is_trim_char(ch):
             start += 1
             continue
@@ -859,7 +859,7 @@ def trim_text(value):
     while True:
         if end <= start:
             break
-        ch = value[end - 1]
+        ch = char_at(value, end - 1)
         if is_trim_char(ch):
             end -= 1
             continue

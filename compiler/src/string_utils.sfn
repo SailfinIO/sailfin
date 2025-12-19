@@ -54,7 +54,7 @@ fn sanitize_symbol(name -> string) -> string {
 		if index >= name.length {
 			break;
 		}
-		let ch = name[index];
+		let ch = char_at(name, index);
 		if is_symbol_char(ch) {
 			result = result + ch;
 		}
@@ -63,7 +63,7 @@ fn sanitize_symbol(name -> string) -> string {
 	if result.length == 0 {
 		return "_";
 	}
-	let first = result[0];
+	let first = char_at(result, 0);
 	let first_code = char_code(first);
 	let zero = char_code("0");
 	let nine = char_code("9");

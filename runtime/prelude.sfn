@@ -126,7 +126,7 @@ fn char_at(value -> string, index -> number) -> string {
     if index >= value.length {
         return "";
     }
-    return value[index];
+    return runtime_grapheme_at_fn(value, index);
 }
 
 fn enum_type(name -> string) -> EnumType {
@@ -674,7 +674,7 @@ fn substring(text -> string, start -> number, end -> number) -> string {
         if index >= normalized_end {
             break;
         }
-        result = result + text[index];
+        result = result + char_at(text, index);
         index = index + 1;
     }
     return result;

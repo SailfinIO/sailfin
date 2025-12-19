@@ -4,14 +4,101 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <unistd.h>
+
+#if defined(__APPLE__)
+#include <execinfo.h>
+#endif
+
+#if defined(__clang__)
+#define SAILFIN_NOINLINE __attribute__((noinline))
+#define SAILFIN_OPTNONE __attribute__((optnone))
+#else
+#define SAILFIN_NOINLINE
+#define SAILFIN_OPTNONE
+#endif
+
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
+#define SAILFIN_WITH_ASAN 1
+#endif
+#endif
+
+#if !defined(SAILFIN_WITH_ASAN) && defined(__SANITIZE_ADDRESS__)
+#define SAILFIN_WITH_ASAN 1
+#endif
 
 // These helpers are implemented inside the stage2-compiled IR objects (e.g.
 // prelude.o, native_lowering.o). The native runtime calls into them but must
 // not provide its own definitions, or the final link will fail with duplicate
 // symbols.
 extern bool strings_equal(char *a, char *b);
-extern char *char_at(char *text, double index);
+// NOTE: Do not declare/resolve a `char_at` symbol here.
+// The stage2 build links in a Sailfin-level `char_at` helper with that name;
+// calling it from here would recurse back into `sailfin_runtime_grapheme_at`.
+
+static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codepoint)
+{
+    if (!text)
+    {
+        return false;
+    }
+
+    uintptr_t raw = (uintptr_t)text;
+
+    // Heuristic: sometimes a "string" leaks as an integer codepoint shifted
+    // into the upper 32 bits (e.g., 0x0000003c00000000). Treat that as a
+    // single-codepoint UTF-8 string.
+    if ((raw & 0xffffffffu) != 0)
+    {
+        return false;
+    }
+
+    uint32_t codepoint = (uint32_t)(raw >> 32);
+    if (codepoint == 0 || codepoint > 0x10ffffu)
+    {
+        return false;
+    }
+
+    if (out_codepoint)
+    {
+        *out_codepoint = codepoint;
+    }
+    return true;
+}
+
+static size_t _utf8_encode(uint32_t codepoint, unsigned char out[5])
+{
+    if (codepoint <= 0x7fu)
+    {
+        out[0] = (unsigned char)codepoint;
+        out[1] = 0;
+        return 1;
+    }
+    if (codepoint <= 0x7ffu)
+    {
+        out[0] = (unsigned char)(0xc0u | (codepoint >> 6));
+        out[1] = (unsigned char)(0x80u | (codepoint & 0x3fu));
+        out[2] = 0;
+        return 2;
+    }
+    if (codepoint <= 0xffffu)
+    {
+        out[0] = (unsigned char)(0xe0u | (codepoint >> 12));
+        out[1] = (unsigned char)(0x80u | ((codepoint >> 6) & 0x3fu));
+        out[2] = (unsigned char)(0x80u | (codepoint & 0x3fu));
+        out[3] = 0;
+        return 3;
+    }
+
+    out[0] = (unsigned char)(0xf0u | (codepoint >> 18));
+    out[1] = (unsigned char)(0x80u | ((codepoint >> 12) & 0x3fu));
+    out[2] = (unsigned char)(0x80u | ((codepoint >> 6) & 0x3fu));
+    out[3] = (unsigned char)(0x80u | (codepoint & 0x3fu));
+    out[4] = 0;
+    return 4;
+}
 
 static void _print_line(const char *prefix, const char *msg)
 {
@@ -27,6 +114,172 @@ static void _print_line(const char *prefix, const char *msg)
     fputc('\n', stderr);
     fflush(stderr);
 }
+
+static bool _env_enabled(const char *name)
+{
+    const char *value = getenv(name);
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
+static int _env_int(const char *name, int fallback)
+{
+    const char *value = getenv(name);
+    if (!value || value[0] == '\0')
+    {
+        return fallback;
+    }
+    char *end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if (end == value)
+    {
+        return fallback;
+    }
+    if (parsed < 0)
+    {
+        return 0;
+    }
+    if (parsed > 1000)
+    {
+        return 1000;
+    }
+    return (int)parsed;
+}
+
+static void _maybe_print_string_backtrace(
+    const char *context,
+    const char *a,
+    bool a_immediate,
+    bool a_poisoned,
+    bool a_truncated,
+    const char *b,
+    bool b_immediate,
+    bool b_poisoned,
+    bool b_truncated)
+{
+    if (!_env_enabled("SAILFIN_TRACE_STRING_BACKTRACE"))
+    {
+        return;
+    }
+
+    static int remaining = -1;
+    if (remaining < 0)
+    {
+        remaining = _env_int("SAILFIN_TRACE_STRING_BACKTRACE_BUDGET", 3);
+    }
+    if (remaining <= 0)
+    {
+        return;
+    }
+    remaining--;
+
+    fprintf(
+        stderr,
+        "[stage2-native] backtrace (%s): a=%p%s%s%s b=%p%s%s%s\n",
+        context ? context : "?",
+        (void *)a,
+        a_immediate ? " immediate" : "",
+        a_poisoned ? " poisoned" : "",
+        a_truncated ? " truncated" : "",
+        (void *)b,
+        b_immediate ? " immediate" : "",
+        b_poisoned ? " poisoned" : "",
+        b_truncated ? " truncated" : "");
+    fflush(stderr);
+
+#if defined(__APPLE__)
+    void *frames[64];
+    int count = backtrace(frames, (int)(sizeof(frames) / sizeof(frames[0])));
+    if (count > 0)
+    {
+        backtrace_symbols_fd(frames, count, fileno(stderr));
+    }
+#endif
+}
+
+static SAILFIN_NOINLINE bool _asan_poisoned(const void *addr);
+
+static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *text, bool *out_truncated)
+{
+    if (out_truncated)
+    {
+        *out_truncated = false;
+    }
+    if (!text)
+    {
+        return 0;
+    }
+
+    // Guard against obviously invalid/near-null pointers (common symptom of
+    // mis-tagged values being treated as `char *`).
+    if ((uintptr_t)text < 4096u)
+    {
+        if (out_truncated)
+        {
+            *out_truncated = true;
+        }
+        return 0;
+    }
+
+    // Defensive cap: most stage2 compiler strings are tiny, but avoid scanning
+    // unbounded memory if we get a wildly unterminated pointer.
+    const size_t max_scan = 1u << 20; // 1 MiB
+
+    for (size_t i = 0; i < max_scan; i++)
+    {
+        const char *p = text + i;
+
+        // Avoid consulting ASAN shadow or reading memory for near-null pointers.
+        if ((uintptr_t)p < 4096u)
+        {
+            if (out_truncated)
+            {
+                *out_truncated = true;
+            }
+            return i;
+        }
+
+        if (_asan_poisoned(p))
+        {
+            if (out_truncated)
+            {
+                *out_truncated = true;
+            }
+            return i;
+        }
+
+        // Volatile read to prevent the optimizer from hoisting the load above
+        // the poison check under ASAN builds.
+        unsigned char byte = *(const volatile unsigned char *)p;
+        if (byte == '\0')
+        {
+            return i;
+        }
+    }
+
+    if (out_truncated)
+    {
+        *out_truncated = true;
+    }
+    return max_scan;
+}
+
+#if defined(SAILFIN_WITH_ASAN)
+extern int __asan_address_is_poisoned(const volatile void *addr);
+static SAILFIN_NOINLINE bool _asan_poisoned(const void *addr)
+{
+    if (!addr)
+    {
+        return false;
+    }
+    return __asan_address_is_poisoned((const volatile void *)addr) != 0;
+}
+#else
+static SAILFIN_NOINLINE bool _asan_poisoned(const void *addr)
+{
+    (void)addr;
+    return false;
+}
+#endif
 
 void sailfin_runtime_mark_persistent(char *ptr)
 {
@@ -58,7 +311,22 @@ int64_t sailfin_runtime_string_length(char *text)
         return 0;
     }
 
-    int64_t length = (int64_t)strlen(text);
+    uint32_t codepoint = 0;
+    if (_is_immediate_codepoint_string(text, &codepoint))
+    {
+        unsigned char buf[5] = {0};
+        size_t len = _utf8_encode(codepoint, buf);
+        return (int64_t)len;
+    }
+
+    bool truncated = false;
+    int64_t length = (int64_t)_safe_strlen_asan(text, &truncated);
+
+    if (truncated)
+    {
+        fprintf(stderr, "[stage2-native] string_length: unterminated string at %p; treating length=%lld\n", (void *)text, (long long)length);
+        fflush(stderr);
+    }
 
     const char *trace = getenv("SAILFIN_TRACE_STRING_LENGTH");
     if (trace && trace[0] != '\0')
@@ -105,7 +373,49 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
         return out;
     }
 
-    int64_t n = (int64_t)strlen(text);
+    uint32_t codepoint = 0;
+    if (_is_immediate_codepoint_string(text, &codepoint))
+    {
+        unsigned char buf[5] = {0};
+        int64_t n = (int64_t)_utf8_encode(codepoint, buf);
+        if (start < 0)
+        {
+            start = 0;
+        }
+        if (start > n)
+        {
+            start = n;
+        }
+        if (end < start)
+        {
+            end = start;
+        }
+        if (end > n)
+        {
+            end = n;
+        }
+
+        int64_t length = end - start;
+        char *out = (char *)malloc((size_t)length + 1);
+        if (!out)
+        {
+            return NULL;
+        }
+        if (length > 0)
+        {
+            memcpy(out, buf + start, (size_t)length);
+        }
+        out[length] = '\0';
+        return out;
+    }
+
+    bool truncated = false;
+    int64_t n = (int64_t)_safe_strlen_asan(text, &truncated);
+    if (truncated)
+    {
+        fprintf(stderr, "[stage2-native] substring: unterminated string at %p; treating length=%lld\n", (void *)text, (long long)n);
+        fflush(stderr);
+    }
     if (start < 0)
     {
         start = 0;
@@ -148,16 +458,115 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     {
         b = "";
     }
-    size_t alen = strlen(a);
-    size_t blen = strlen(b);
-    char *out = (char *)malloc(alen + blen + 1);
+
+    uint32_t a_codepoint = 0;
+    uint32_t b_codepoint = 0;
+    bool a_immediate = _is_immediate_codepoint_string(a, &a_codepoint);
+    bool b_immediate = _is_immediate_codepoint_string(b, &b_codepoint);
+
+    bool a_poisoned = (!a_immediate && _asan_poisoned(a));
+    bool b_poisoned = (!b_immediate && _asan_poisoned(b));
+    if (a_poisoned || b_poisoned)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] string_concat got poisoned arg(s): a=%p%s%s b=%p%s%s\n",
+            (void *)a,
+            a_immediate ? " immediate" : "",
+            a_poisoned ? " poisoned" : "",
+            (void *)b,
+            b_immediate ? " immediate" : "",
+            b_poisoned ? " poisoned" : "");
+        fflush(stderr);
+    }
+
+    const char *trace = getenv("SAILFIN_TRACE_STRING_CONCAT");
+    if (trace && trace[0] != '\0')
+    {
+        static int trace_budget = 64;
+        if (trace_budget > 0)
+        {
+            trace_budget--;
+            fprintf(
+                stderr,
+                "[stage2-native] string_concat(a=%p%s%s, b=%p%s%s)\n",
+                (void *)a,
+                a_immediate ? " immediate" : "",
+                a_poisoned ? " poisoned" : "",
+                (void *)b,
+                b_immediate ? " immediate" : "",
+                b_poisoned ? " poisoned" : "");
+            fflush(stderr);
+        }
+    }
+
+    unsigned char a_buf[5] = {0};
+    unsigned char b_buf[5] = {0};
+    bool a_truncated = false;
+    bool b_truncated = false;
+    size_t alen = a_immediate ? _utf8_encode(a_codepoint, a_buf) : _safe_strlen_asan(a, &a_truncated);
+    size_t blen = b_immediate ? _utf8_encode(b_codepoint, b_buf) : _safe_strlen_asan(b, &b_truncated);
+
+    if (a_poisoned || b_poisoned || (uintptr_t)a < 4096 || (uintptr_t)b < 4096)
+    {
+        _maybe_print_string_backtrace(
+            "string_concat suspicious",
+            a,
+            a_immediate,
+            a_poisoned,
+            a_truncated,
+            b,
+            b_immediate,
+            b_poisoned,
+            b_truncated);
+    }
+
+    if (a_truncated || b_truncated)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] string_concat: unterminated input(s) a=%p%s b=%p%s (using alen=%zu blen=%zu)\n",
+            (void *)a,
+            a_truncated ? " (truncated)" : "",
+            (void *)b,
+            b_truncated ? " (truncated)" : "",
+            alen,
+            blen);
+        fflush(stderr);
+    }
+
+    // Allocate a padding region beyond the primary terminator.
+    // During bootstrap we still have a few codegen/runtime mismatches that can
+    // clobber 1–N bytes just past the logical end of a string (typically via
+    // off-by-one writes when treating strings as arrays). Providing a NUL pad
+    // prevents `strlen`/friends from running off the end of the heap object
+    // while we iterate on correctness.
+    const size_t pad = 64;
+    char *out = (char *)malloc(alen + blen + 1 + pad);
     if (!out)
     {
         return NULL;
     }
-    memcpy(out, a, alen);
-    memcpy(out + alen, b, blen);
-    out[alen + blen] = '\0';
+
+    if (a_immediate)
+    {
+        memcpy(out, a_buf, alen);
+    }
+    else
+    {
+        memcpy(out, a, alen);
+    }
+
+    if (b_immediate)
+    {
+        memcpy(out + alen, b_buf, blen);
+    }
+    else
+    {
+        memcpy(out + alen, b, blen);
+    }
+
+    memset(out + alen + blen, 0, 1 + pad);
     return out;
 }
 
@@ -336,7 +745,38 @@ double sailfin_runtime_grapheme_count(char *text)
 
 char *sailfin_runtime_grapheme_at(char *text, double index)
 {
-    return char_at(text, index);
+    if (!text)
+    {
+        return "";
+    }
+
+    int64_t len = sailfin_runtime_string_length(text);
+    if (len <= 0)
+    {
+        return "";
+    }
+
+    int64_t idx = (int64_t)index;
+    if ((double)idx != index)
+    {
+        // Non-integer indexes aren't meaningful here.
+        return "";
+    }
+    if (idx < 0 || idx >= len)
+    {
+        return "";
+    }
+
+    // Bootstrap implementation: treat each UTF-8 byte as a grapheme.
+    // This is sufficient for ASCII-heavy compiler sources while we iterate.
+    char *out = (char *)malloc(2);
+    if (!out)
+    {
+        return NULL;
+    }
+    out[0] = text[idx];
+    out[1] = '\0';
+    return out;
 }
 
 bool sailfin_runtime_is_string(char *value)

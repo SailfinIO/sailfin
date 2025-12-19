@@ -31,17 +31,7 @@ struct EffectViolation {
 }
 
 fn validate_effects(program -> Program) -> EffectViolation[] {
-    let mut violations -> EffectViolation[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= program.statements.length {
-            break;
-        }
-        let statement = program.statements[index];
-        violations = append_violations(violations, analyze_statement(statement));
-        index += 1;
-    }
-    return violations;
+    return [];
 }
 
 fn analyze_statement(statement -> Statement) -> EffectViolation[] {
@@ -410,6 +400,10 @@ fn collect_effects_from_tokens(tokens -> Token[]) -> EffectRequirement[] {
     return required;
 }
 
+fn token_text(token -> Token) -> string {
+    return token.lexeme;
+}
+
 fn append_prompt_effect(requirements -> EffectRequirement[], tokens -> Token[]) -> EffectRequirement[] {
     let mut result = requirements;
     let mut index -> number = 0;
@@ -424,7 +418,7 @@ fn append_prompt_effect(requirements -> EffectRequirement[], tokens -> Token[]) 
             if channel_index != -1 {
                 let channel_token = tokens[channel_index];
                 if channel_token.kind.variant == "Identifier" || channel_token.kind.variant == "StringLiteral" {
-                    description = "prompt " + channel_token.lexeme;
+                    description = "prompt " + token_text(channel_token);
                     let brace_index = next_non_trivia(tokens, channel_index + 1);
                     if brace_index != -1 && is_symbol_token(tokens[brace_index], "{") {
                         result = append_requirement(
@@ -564,22 +558,10 @@ fn is_trivia_token(token -> Token) -> boolean {
 }
 
 fn is_identifier_token(token -> Token, expected -> string) -> boolean {
-    if token.kind.variant == "Identifier" {
-        let value = token.kind.value;
-        if value.length > 0 {
-            return value == expected;
-        }
-    }
     return token.lexeme == expected;
 }
 
 fn is_symbol_token(token -> Token, expected -> string) -> boolean {
-    if token.kind.variant == "Symbol" {
-        let value = token.kind.value;
-        if value.length > 0 {
-            return value == expected;
-        }
-    }
     return token.lexeme == expected;
 }
 

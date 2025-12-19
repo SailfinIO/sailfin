@@ -148,6 +148,15 @@
 .layout field parser type=Parser offset=0 size=16 align=8
 .layout field block type=Block offset=16 size=8 align=8
 
+.layout struct name=ExpressionTypeSeparatorParseResult size=32 align=8
+.layout field state type=ExpressionTokens offset=0 size=16 align=8
+.layout field used_separator type=string offset=16 size=8 align=8
+.layout field found type=boolean offset=24 size=1 align=1
+
+.layout struct name=TypeSeparatorParseResult size=24 align=8
+.layout field parser type=Parser offset=0 size=16 align=8
+.layout field found type=boolean offset=16 size=1 align=1
+
 .layout struct name=PatternCaptureResult size=32 align=8
 .layout field parser type=Parser offset=0 size=16 align=8
 .layout field tokens type=Token[] offset=16 size=8 align=8

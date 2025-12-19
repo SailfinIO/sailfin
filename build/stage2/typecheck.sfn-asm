@@ -1226,7 +1226,7 @@
         ret null
     .endif
     .span 829 5 834 7
-    ret Token { kind: TokenKind.Identifier { value: name }, lexeme: name, line: span.start_line, column: span.start_column }
+    ret Token { kind: TokenKind.Identifier(), lexeme: name, line: span.start_line, column: span.start_column }
 .endfn
 
 .fn make_duplicate_symbol_diagnostic(name -> string, kind -> string, token -> Token?) -> Diagnostic

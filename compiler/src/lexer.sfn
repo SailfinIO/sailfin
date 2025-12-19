@@ -6,7 +6,7 @@
 // parser can decide what to ignore.
 
 import { Token, TokenKind, eof_token } from "./token";
-import { substring, char_code } from "./string_utils";
+import { substring, char_code, char_at } from "./string_utils";
 
 struct LexerState {
     source -> string;
@@ -30,7 +30,7 @@ fn lex(source -> string) -> Token[] {
             break;
         }
 
-        let ch = state.source[state.index];
+        let ch = char_at(state.source, state.index);
 
         if is_whitespace(ch) {
             let start_index = state.index;
@@ -40,10 +40,10 @@ fn lex(source -> string) -> Token[] {
                 if state.index >= state.source.length {
                     break;
                 }
-                if !is_whitespace(state.source[state.index]) {
+                if !is_whitespace(char_at(state.source, state.index)) {
                     break;
                 }
-                if state.source[state.index] == "\n" {
+                if char_at(state.source, state.index) == "\n" {
                     state.index += 1;
                     state.line += 1;
                     state.column = 1;
@@ -78,7 +78,7 @@ fn lex(source -> string) -> Token[] {
                     if scan_index >= state.source.length {
                         break;
                     }
-                    let scan_character = state.source[scan_index];
+                    let scan_character = char_at(state.source, scan_index);
                     if scan_character == "\n" || scan_character == "\r" {
                         comment_end = scan_index;
                         break;
@@ -110,12 +110,12 @@ fn lex(source -> string) -> Token[] {
                     if state.index >= state.source.length {
                         break;
                     }
-                    if state.source[state.index] == "*" && peek_next_char(state) == "/" {
+                    if char_at(state.source, state.index) == "*" && peek_next_char(state) == "/" {
                         state.index += 2;
                         state.column += 2;
                         break;
                     }
-                    if state.source[state.index] == "\n" {
+                    if char_at(state.source, state.index) == "\n" {
                         state.index += 1;
                         state.line += 1;
                         state.column = 1;
@@ -151,7 +151,7 @@ fn lex(source -> string) -> Token[] {
                 if state.index >= state.source.length {
                     break;
                 }
-                let current = state.source[state.index];
+                let current = char_at(state.source, state.index);
                 if !escaped && is_double_quote(current) {
                     state.index += 1;
                     state.column += 1;
@@ -181,8 +181,8 @@ fn lex(source -> string) -> Token[] {
             }
 
             let lexeme = slice(state.source, start_index, state.index);
-            tokens = append(tokens, Token {
-                kind: TokenKind.StringLiteral { value: literal },
+                tokens = append(tokens, Token {
+                    kind: TokenKind.StringLiteral(),
                 lexeme: lexeme,
                 line: start_line,
                 column: start_column,
@@ -202,15 +202,15 @@ fn lex(source -> string) -> Token[] {
                 if state.index >= state.source.length {
                     break;
                 }
-                if !is_digit(state.source[state.index]) {
+                if !is_digit(char_at(state.source, state.index)) {
                     break;
                 }
                 state.index += 1;
                 state.column += 1;
             }
 
-            if state.index < state.source.length && state.source[state.index] == "." {
-                let next_is_digit = state.index + 1 < state.source.length && is_digit(state.source[state.index + 1]);
+            if state.index < state.source.length && char_at(state.source, state.index) == "." {
+                let next_is_digit = state.index + 1 < state.source.length && is_digit(char_at(state.source, state.index + 1));
                 if next_is_digit {
                     state.index += 1;
                     state.column += 1;
@@ -218,7 +218,7 @@ fn lex(source -> string) -> Token[] {
                         if state.index >= state.source.length {
                             break;
                         }
-                        if !is_digit(state.source[state.index]) {
+                        if !is_digit(char_at(state.source, state.index)) {
                             break;
                         }
                         state.index += 1;
@@ -229,7 +229,7 @@ fn lex(source -> string) -> Token[] {
 
             let lexeme = slice(state.source, start_index, state.index);
             tokens = append(tokens, Token {
-                kind: TokenKind.NumberLiteral { value: lexeme },
+                kind: TokenKind.NumberLiteral(),
                 lexeme: lexeme,
                 line: start_line,
                 column: start_column,
@@ -247,7 +247,7 @@ fn lex(source -> string) -> Token[] {
                 if state.index >= state.source.length {
                     break;
                 }
-                if !is_identifier_part(state.source[state.index]) {
+                if !is_identifier_part(char_at(state.source, state.index)) {
                     break;
                 }
                 state.index += 1;
@@ -256,14 +256,14 @@ fn lex(source -> string) -> Token[] {
             let value = slice(state.source, start, state.index);
             if value == "true" || value == "false" {
                 tokens = append(tokens, Token {
-                    kind: TokenKind.BooleanLiteral { value: value },
+                    kind: TokenKind.BooleanLiteral(),
                     lexeme: value,
                     line: start_line,
                     column: start_column,
                 });
             } else {
                 tokens = append(tokens, Token {
-                    kind: TokenKind.Identifier { value: value },
+                    kind: TokenKind.Identifier(),
                     lexeme: value,
                     line: start_line,
                     column: start_column,
@@ -283,7 +283,7 @@ fn lex(source -> string) -> Token[] {
                 state.index += 2;
                 state.column += 2;
                 tokens = append(tokens, Token {
-                    kind: TokenKind.Symbol { value: lexeme },
+                    kind: TokenKind.Symbol(),
                     lexeme: lexeme,
                     line: start_line,
                     column: start_column,
@@ -301,7 +301,7 @@ fn lex(source -> string) -> Token[] {
         }
 
         tokens = append(tokens, Token {
-            kind: TokenKind.Symbol { value: lexeme },
+            kind: TokenKind.Symbol(),
             lexeme: lexeme,
             line: start_line,
             column: start_column,
@@ -356,7 +356,7 @@ fn peek_next_char(state -> LexerState) -> string {
     if next_index >= state.source.length {
         return "";
     }
-    return state.source[next_index];
+    return char_at(state.source, next_index);
 }
 
 fn interpret_escape(ch -> string) -> string {

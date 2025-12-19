@@ -555,7 +555,7 @@ def make_interface_no_type_arguments_diagnostic(struct_name, annotation_text, in
 def token_from_name(name, span):
     if span == None:
         return None
-    return Token(kind=runtime.enum_instantiate(TokenKind, 'Identifier', [runtime.enum_field('value', name)]), lexeme=name, line=span.start_line, column=span.start_column)
+    return Token(kind=TokenKind.Identifier(), lexeme=name, line=span.start_line, column=span.start_column)
 
 def make_duplicate_symbol_diagnostic(name, kind, token):
     return Diagnostic(code="E0001", message="duplicate " + kind + " `" + name + "` declared", primary=token)

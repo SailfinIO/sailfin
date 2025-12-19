@@ -188,18 +188,9 @@ then4:
   call void @sailfin_runtime_mark_persistent(i8* %s9)
   ret i8* %s9
 merge5:
-  %t10 = call double @llvm.round.f64(double %index)
-  %t11 = fptosi double %t10 to i64
-  %t12 = getelementptr i8, i8* %value, i64 %t11
-  %t13 = load i8, i8* %t12
-  %t14 = add i64 0, 2
-  %t15 = call i8* @malloc(i64 %t14)
-  store i8 %t13, i8* %t15
-  %t16 = getelementptr i8, i8* %t15, i64 1
-  store i8 0, i8* %t16
-  call void @sailfin_runtime_mark_persistent(i8* %t15)
-  call void @sailfin_runtime_mark_persistent(i8* %t15)
-  ret i8* %t15
+  %t10 = call i8* @sailfin_runtime_grapheme_at(i8* %value, double %index)
+  call void @sailfin_runtime_mark_persistent(i8* %t10)
+  ret i8* %t10
 }
 
 define %EnumType @enum_type(i8* %name) {
@@ -3162,10 +3153,10 @@ merge3:
   %t26 = load i8*, i8** %l4
   br label %loop.header4
 loop.header4:
-  %t50 = phi i8* [ %t26, %merge3 ], [ %t48, %loop.latch6 ]
-  %t51 = phi double [ %t25, %merge3 ], [ %t49, %loop.latch6 ]
-  store i8* %t50, i8** %l4
-  store double %t51, double* %l3
+  %t44 = phi i8* [ %t26, %merge3 ], [ %t42, %loop.latch6 ]
+  %t45 = phi double [ %t25, %merge3 ], [ %t43, %loop.latch6 ]
+  store i8* %t44, i8** %l4
+  store double %t45, double* %l3
   br label %loop.body5
 loop.body5:
   %t27 = load double, double* %l3
@@ -3182,33 +3173,24 @@ then8:
 merge9:
   %t35 = load i8*, i8** %l4
   %t36 = load double, double* %l3
-  %t37 = call double @llvm.round.f64(double %t36)
-  %t38 = fptosi double %t37 to i64
-  %t39 = getelementptr i8, i8* %text, i64 %t38
-  %t40 = load i8, i8* %t39
-  %t41 = add i64 0, 2
-  %t42 = call i8* @malloc(i64 %t41)
-  store i8 %t40, i8* %t42
-  %t43 = getelementptr i8, i8* %t42, i64 1
-  store i8 0, i8* %t43
-  call void @sailfin_runtime_mark_persistent(i8* %t42)
-  %t44 = call i8* @sailfin_runtime_string_concat(i8* %t35, i8* %t42)
-  store i8* %t44, i8** %l4
-  %t45 = load double, double* %l3
-  %t46 = sitofp i64 1 to double
-  %t47 = fadd double %t45, %t46
-  store double %t47, double* %l3
+  %t37 = call i8* @char_at(i8* %text, double %t36)
+  %t38 = call i8* @sailfin_runtime_string_concat(i8* %t35, i8* %t37)
+  store i8* %t38, i8** %l4
+  %t39 = load double, double* %l3
+  %t40 = sitofp i64 1 to double
+  %t41 = fadd double %t39, %t40
+  store double %t41, double* %l3
   br label %loop.latch6
 loop.latch6:
-  %t48 = load i8*, i8** %l4
-  %t49 = load double, double* %l3
+  %t42 = load i8*, i8** %l4
+  %t43 = load double, double* %l3
   br label %loop.header4
 afterloop7:
-  %t52 = load i8*, i8** %l4
-  %t53 = load double, double* %l3
-  %t54 = load i8*, i8** %l4
-  call void @sailfin_runtime_mark_persistent(i8* %t54)
-  ret i8* %t54
+  %t46 = load i8*, i8** %l4
+  %t47 = load double, double* %l3
+  %t48 = load i8*, i8** %l4
+  call void @sailfin_runtime_mark_persistent(i8* %t48)
+  ret i8* %t48
 }
 
 define i1 @strings_equal(i8* %left, i8* %right) {
@@ -3700,11 +3682,11 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
-@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
 @.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
 @.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
+@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
+@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
+@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"

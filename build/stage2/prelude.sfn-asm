@@ -311,8 +311,8 @@
         .span 127 9 127 19
         ret ""
     .endif
-    .span 129 5 129 25
-    ret value[index]
+    .span 129 5 129 49
+    ret runtime_grapheme_at_fn(value, index)
 .endfn
 
 .fn enum_type(name -> string) -> EnumType
@@ -1271,8 +1271,8 @@
         .if index >= normalized_end
             break
         .endif
-        .span 677 9 677 39
-        eval result = result + text[index]
+        .span 677 9 677 48
+        eval result = result + char_at(text, index)
         .span 678 9 678 27
         eval index = index + 1
     .endloop

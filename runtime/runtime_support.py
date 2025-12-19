@@ -12,10 +12,11 @@ import asyncio
 import atexit
 import builtins
 import dataclasses
+import functools
 import pathlib
 import re
 import time
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -718,16 +719,33 @@ def _iter_grapheme_clusters(text: str) -> List[str]:
 
 
 def grapheme_count(text: str) -> int:
-    return len(_iter_grapheme_clusters(text))
+    if not text:
+        return 0
+    # Fast path: compiler inputs are overwhelmingly ASCII.
+    # Treat each codepoint as a grapheme cluster.
+    if text.isascii():
+        return len(text)
+    return len(_grapheme_clusters_cached(text))
 
 
 def grapheme_at(text: str, index: int) -> str:
-    if index < 0:
+    if not text or index < 0:
         return ""
-    clusters = _iter_grapheme_clusters(text)
+    # Fast path: compiler inputs are overwhelmingly ASCII.
+    if text.isascii():
+        if index >= len(text):
+            return ""
+        return text[index]
+
+    clusters = _grapheme_clusters_cached(text)
     if index >= len(clusters):
         return ""
     return clusters[index]
+
+
+@functools.lru_cache(maxsize=128)
+def _grapheme_clusters_cached(text: str) -> Tuple[str, ...]:
+    return tuple(_iter_grapheme_clusters(text))
 
 
 def format_string(template: str, local_scope: Dict[str, Any], global_scope: Dict[str, Any]) -> str:

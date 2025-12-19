@@ -3,7 +3,7 @@
 
 .import "./token" { Token, TokenKind, eof_token }
 
-.import "./string_utils" { substring, char_code }
+.import "./string_utils" { substring, char_code, char_at }
 
 .struct LexerState
     .layout struct name=LexerState size=32 align=8
@@ -35,8 +35,8 @@
         .if state.index >= state.source.length
             break
         .endif
-        .span 33 9 33 44
-        eval let ch = state.source[state.index]
+        .span 33 9 33 53
+        eval let ch = char_at(state.source, state.index)
         .if is_whitespace(ch)
             .span 36 13 36 43
             eval let start_index = state.index
@@ -48,10 +48,10 @@
                 .if state.index >= state.source.length
                     break
                 .endif
-                .if !is_whitespace(state.source[state.index])
+                .if !is_whitespace(char_at(state.source, state.index))
                     break
                 .endif
-                .if state.source[state.index] == "\n"
+                .if char_at(state.source, state.index) == "\n"
                     .span 47 21 47 38
                     eval state.index += 1
                     .span 48 21 48 37
@@ -98,8 +98,8 @@
                     .if scan_index >= state.source.length
                         break
                     .endif
-                    .span 81 21 81 67
-                    eval let scan_character = state.source[scan_index]
+                    .span 81 21 81 76
+                    eval let scan_character = char_at(state.source, scan_index)
                     .if scan_character == "\n" || scan_character == "\r"
                         .span 83 25 83 50
                         eval comment_end = scan_index
@@ -140,14 +140,14 @@
                     .if state.index >= state.source.length
                         break
                     .endif
-                    .if state.source[state.index] == "*" && peek_next_char(state) == "/"
+                    .if char_at(state.source, state.index) == "*" && peek_next_char(state) == "/"
                         .span 114 25 114 42
                         eval state.index += 2
                         .span 115 25 115 43
                         eval state.column += 2
                         break
                     .endif
-                    .if state.source[state.index] == "\n"
+                    .if char_at(state.source, state.index) == "\n"
                         .span 119 25 119 42
                         eval state.index += 1
                         .span 120 25 120 41
@@ -192,8 +192,8 @@
                 .if state.index >= state.source.length
                     break
                 .endif
-                .span 154 17 154 57
-                eval let current = state.source[state.index]
+                .span 154 17 154 66
+                eval let current = char_at(state.source, state.index)
                 .if !escaped && is_double_quote(current)
                     .span 156 21 156 38
                     eval state.index += 1
@@ -235,9 +235,9 @@
             .endloop
             .span 183 13 183 72
             eval let lexeme = slice(state.source, start_index, state.index)
-            .span 184 13 189 16
+            .span 184 17 189 16
             eval tokens = append(tokens, Token {
-                kind: TokenKind.StringLiteral { value: literal },
+                    kind: TokenKind.StringLiteral(),
                 lexeme: lexeme,
                 line: start_line,
                 column: start_column,
@@ -259,7 +259,7 @@
                 .if state.index >= state.source.length
                     break
                 .endif
-                .if !is_digit(state.source[state.index])
+                .if !is_digit(char_at(state.source, state.index))
                     break
                 .endif
                 .span 208 17 208 34
@@ -267,9 +267,9 @@
                 .span 209 17 209 35
                 eval state.column += 1
             .endloop
-            .if state.index < state.source.length && state.source[state.index] == "."
-                .span 213 17 213 118
-                eval let next_is_digit = state.index + 1 < state.source.length && is_digit(state.source[state.index + 1])
+            .if state.index < state.source.length && char_at(state.source, state.index) == "."
+                .span 213 17 213 127
+                eval let next_is_digit = state.index + 1 < state.source.length && is_digit(char_at(state.source, state.index + 1))
                 .if next_is_digit
                     .span 215 21 215 38
                     eval state.index += 1
@@ -279,7 +279,7 @@
                         .if state.index >= state.source.length
                             break
                         .endif
-                        .if !is_digit(state.source[state.index])
+                        .if !is_digit(char_at(state.source, state.index))
                             break
                         .endif
                         .span 224 25 224 42
@@ -293,7 +293,7 @@
             eval let lexeme = slice(state.source, start_index, state.index)
             .span 231 13 236 16
             eval tokens = append(tokens, Token {
-                kind: TokenKind.NumberLiteral { value: lexeme },
+                kind: TokenKind.NumberLiteral(),
                 lexeme: lexeme,
                 line: start_line,
                 column: start_column,
@@ -315,7 +315,7 @@
                 .if state.index >= state.source.length
                     break
                 .endif
-                .if !is_identifier_part(state.source[state.index])
+                .if !is_identifier_part(char_at(state.source, state.index))
                     break
                 .endif
                 .span 253 17 253 34
@@ -328,7 +328,7 @@
             .if value == "true" || value == "false"
                 .span 258 17 263 20
                 eval tokens = append(tokens, Token {
-                    kind: TokenKind.BooleanLiteral { value: value },
+                    kind: TokenKind.BooleanLiteral(),
                     lexeme: value,
                     line: start_line,
                     column: start_column,
@@ -336,7 +336,7 @@
             .else
                 .span 265 17 270 20
                 eval tokens = append(tokens, Token {
-                    kind: TokenKind.Identifier { value: value },
+                    kind: TokenKind.Identifier(),
                     lexeme: value,
                     line: start_line,
                     column: start_column,
@@ -364,7 +364,7 @@
                 eval state.column += 2
                 .span 285 17 290 20
                 eval tokens = append(tokens, Token {
-                    kind: TokenKind.Symbol { value: lexeme },
+                    kind: TokenKind.Symbol(),
                     lexeme: lexeme,
                     line: start_line,
                     column: start_column,
@@ -385,7 +385,7 @@
         .endif
         .span 303 9 308 12
         eval tokens = append(tokens, Token {
-            kind: TokenKind.Symbol { value: lexeme },
+            kind: TokenKind.Symbol(),
             lexeme: lexeme,
             line: start_line,
             column: start_column,
@@ -499,8 +499,8 @@
         .span 357 9 357 19
         ret ""
     .endif
-    .span 359 5 359 37
-    ret state.source[next_index]
+    .span 359 5 359 46
+    ret char_at(state.source, next_index)
 .endfn
 
 .fn interpret_escape(ch -> string) -> string

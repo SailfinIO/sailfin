@@ -56,13 +56,13 @@ def sanitize_symbol(name):
     while True:
         if index >= len(name):
             break
-        ch = name[index]
+        ch = char_at(name, index)
         if is_symbol_char(ch):
             result = result + ch
         index += 1
     if len(result) == 0:
         return "_"
-    first = result[0]
+    first = char_at(result, 0)
     first_code = char_code(first)
     zero = char_code("0")
     nine = char_code("9")

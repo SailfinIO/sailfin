@@ -86,8 +86,8 @@
         .if index >= name.length
             break
         .endif
-        .span 57 3 57 24
-        eval let ch = name[index]
+        .span 57 3 57 33
+        eval let ch = char_at(name, index)
         .if is_symbol_char(ch)
             .span 59 4 59 25
             eval result = result + ch
@@ -99,8 +99,8 @@
         .span 64 3 64 14
         ret "_"
     .endif
-    .span 66 2 66 24
-    eval let first = result[0]
+    .span 66 2 66 33
+    eval let first = char_at(result, 0)
     .span 67 2 67 36
     eval let first_code = char_code(first)
     .span 68 2 68 28

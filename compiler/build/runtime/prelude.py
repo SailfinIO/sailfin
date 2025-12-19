@@ -157,7 +157,7 @@ def char_at(value, index):
         return ""
     if index >= len(value):
         return ""
-    return value[index]
+    return runtime_grapheme_at_fn(value, index)
 
 def enum_type(name):
     return EnumType(name=name, variants=[])
@@ -581,7 +581,7 @@ def substring(text, start, end):
     while True:
         if index >= normalized_end:
             break
-        result = result + text[index]
+        result = result + char_at(text, index)
         index = index + 1
     return result
 
