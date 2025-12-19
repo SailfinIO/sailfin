@@ -2210,12 +2210,16 @@ merge5:
   %t139 = insertvalue %CompiledModule undef, i8* %source_path, 0
   %t140 = load i8*, i8** %l6
   %t141 = insertvalue %CompiledModule %t139, i8* %t140, 1
-  %t142 = alloca %CompiledModule
-  store %CompiledModule %t141, %CompiledModule* %t142
-  %t143 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t142, 0
-  %t144 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
-  %t145 = insertvalue %ModuleCompilationResult %t143, { %ModuleDiagnostics*, i64 }* %t144, 1
-  ret %ModuleCompilationResult %t145
+  %t142 = getelementptr %CompiledModule, %CompiledModule* null, i32 1
+  %t143 = ptrtoint %CompiledModule* %t142 to i64
+  %t144 = call noalias i8* @malloc(i64 %t143)
+  %t145 = bitcast i8* %t144 to %CompiledModule*
+  store %CompiledModule %t141, %CompiledModule* %t145
+  call void @sailfin_runtime_mark_persistent(i8* %t144)
+  %t146 = insertvalue %ModuleCompilationResult undef, %CompiledModule* %t145, 0
+  %t147 = load { %ModuleDiagnostics*, i64 }*, { %ModuleDiagnostics*, i64 }** %l8
+  %t148 = insertvalue %ModuleCompilationResult %t146, { %ModuleDiagnostics*, i64 }* %t147, 1
+  ret %ModuleCompilationResult %t148
 }
 
 define { i8**, i64 }* @format_typecheck_diagnostics({ %Diagnostic*, i64 }* %entries, i8* %source) {
@@ -4701,18 +4705,18 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
-@.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
-@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
-@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
-@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
 @.str.len5.h655249917 = private unnamed_addr constant [6 x i8] c"\0Alet \00"
 @.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
-@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
-@.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
 @.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
-@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
-@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
-@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
+@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
+@.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
+@.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
 @.str.len14.h129277126 = private unnamed_addr constant [15 x i8] c"ExpressionRaw(\00"
+@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
+@.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
+@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
+@.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
+@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
 @.str.len85.h1706301526 = private unnamed_addr constant [86 x i8] c"native backend: lowering produced unsupported python output; stage0 fallback disabled\00"
+@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
+@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"

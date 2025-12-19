@@ -8713,18 +8713,6 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
     }
 
-    // Check for unary prefix operators (!, -, +)
-    if stripped.length > 0 {
-        let first_ch = stripped[0];
-        if first_ch == "!" {
-            let operand_text = trim_text(substring(stripped, 1, stripped.length));
-            if operand_text.length > 0 {
-                let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
-                return lower_logical_not_result(lowered_operand, diagnostics);
-            }
-        }
-    }
-
     let logical = find_logical_operator(stripped);
     if logical.success {
         if logical.symbol == "&&" {
@@ -8748,6 +8736,20 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     let multiplicative = find_top_level_operator(stripped, "*/%");
     if multiplicative.success {
         return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // Unary prefix operators have higher precedence than binary operators.
+    // We therefore handle them only after attempting to split on lower-precedence
+    // operators like &&, ||, comparisons, +, -, *, /, %.
+    if stripped.length > 0 {
+        let first_ch = stripped[0];
+        if first_ch == "!" {
+            let operand_text = trim_text(substring(stripped, 1, stripped.length));
+            if operand_text.length > 0 {
+                let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
+                return lower_logical_not_result(lowered_operand, diagnostics);
+            }
+        }
     }
 
     let call_index = find_call_site(stripped);
@@ -12116,12 +12118,35 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) {
         let expected_value_type = strip_pointer_suffix(target_type);
         if expected_value_type == operand.llvm_type {
-            // Allocate space for the struct, store the value, return the pointer
-            let alloca_temp = format_temp_name(temp_index);
-            current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + operand.llvm_type);
-            current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + target_type + " " + alloca_temp);
-            let coerced = LLVMOperand { llvm_type: target_type, value: alloca_temp };
-            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+            // IMPORTANT: returning a pointer to stack storage (alloca) is invalid once the
+            // function returns. This shows up as corrupted AST fields (e.g. TypeAnnotation.text
+            // becoming 0x1/0x2) during native stage2 execution.
+            //
+            // Allocate heap storage for the struct, store the value, and return the pointer.
+            let size_ptr_temp = format_temp_name(temp_index);
+            let size_temp = format_temp_name(temp_index + 1);
+            let malloc_temp = format_temp_name(temp_index + 2);
+            let typed_ptr_temp = format_temp_name(temp_index + 3);
+
+            current_lines = append_string(current_lines, "  " + size_ptr_temp + " = getelementptr " + operand.llvm_type + ", " + operand.llvm_type + "* null, i32 1");
+            current_lines = append_string(current_lines, "  " + size_temp + " = ptrtoint " + operand.llvm_type + "* " + size_ptr_temp + " to i64");
+            current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+            current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*");
+            current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp);
+            current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+
+            let mut pointer_value -> string = typed_ptr_temp;
+            let mut next_index -> number = temp_index + 4;
+            let typed_pointer_type = operand.llvm_type + "*";
+            if typed_pointer_type != target_type {
+                let cast_temp = format_temp_name(next_index);
+                current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast " + typed_pointer_type + " " + typed_ptr_temp + " to " + target_type);
+                pointer_value = cast_temp;
+                next_index += 1;
+            }
+
+            let coerced = LLVMOperand { llvm_type: target_type, value: pointer_value };
+            return CoercionResult { lines: current_lines, temp_index: next_index, operand: coerced, diagnostics: diagnostics };
         }
     }
     // Special case: array struct literal value passed where a pointer is expected.

@@ -708,22 +708,22 @@ merge51:
   %t447 = call i8* @char_at(i8* %t444, double %t446)
   store i8* %t447, i8** %l25
   %t449 = load i1, i1* %l24
+  %t450 = xor i1 %t449, 1
   br label %logical_and_entry_448
 
 logical_and_entry_448:
-  br i1 %t449, label %logical_and_right_448, label %logical_and_merge_448
+  br i1 %t450, label %logical_and_right_448, label %logical_and_merge_448
 
 logical_and_right_448:
-  %t450 = load i8*, i8** %l25
-  %t451 = call i1 @is_double_quote(i8* %t450)
+  %t451 = load i8*, i8** %l25
+  %t452 = call i1 @is_double_quote(i8* %t451)
   br label %logical_and_right_end_448
 
 logical_and_right_end_448:
   br label %logical_and_merge_448
 
 logical_and_merge_448:
-  %t452 = phi i1 [ false, %logical_and_entry_448 ], [ %t451, %logical_and_right_end_448 ]
-  %t453 = xor i1 %t452, 1
+  %t453 = phi i1 [ false, %logical_and_entry_448 ], [ %t452, %logical_and_right_end_448 ]
   %t454 = load %LexerState, %LexerState* %l0
   %t455 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   %t456 = load i8*, i8** %l2
@@ -752,22 +752,22 @@ then52:
   br label %afterloop49
 merge53:
   %t476 = load i1, i1* %l24
+  %t477 = xor i1 %t476, 1
   br label %logical_and_entry_475
 
 logical_and_entry_475:
-  br i1 %t476, label %logical_and_right_475, label %logical_and_merge_475
+  br i1 %t477, label %logical_and_right_475, label %logical_and_merge_475
 
 logical_and_right_475:
-  %t477 = load i8*, i8** %l25
-  %t478 = call i1 @is_backslash(i8* %t477)
+  %t478 = load i8*, i8** %l25
+  %t479 = call i1 @is_backslash(i8* %t478)
   br label %logical_and_right_end_475
 
 logical_and_right_end_475:
   br label %logical_and_merge_475
 
 logical_and_merge_475:
-  %t479 = phi i1 [ false, %logical_and_entry_475 ], [ %t478, %logical_and_right_end_475 ]
-  %t480 = xor i1 %t479, 1
+  %t480 = phi i1 [ false, %logical_and_entry_475 ], [ %t479, %logical_and_right_end_475 ]
   %t481 = load %LexerState, %LexerState* %l0
   %t482 = load { %Token*, i64 }*, { %Token*, i64 }** %l1
   %t483 = load i8*, i8** %l2
@@ -2006,5 +2006,5 @@ entry:
   ret double %t0
 }
 @.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
 @.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"

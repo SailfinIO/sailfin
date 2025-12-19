@@ -5909,13 +5909,6 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     borrow_parse = parse_borrow_expression(stripped)
     if borrow_parse.recognized:
         return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines)
-    if len(stripped) > 0:
-        first_ch = stripped[0]
-        if first_ch == "!":
-            operand_text = trim_text(substring(stripped, 1, len(stripped)))
-            if len(operand_text) > 0:
-                lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "")
-                return lower_logical_not_result(lowered_operand, diagnostics)
     logical = find_logical_operator(stripped)
     if logical.success:
         if logical.symbol == "&&":
@@ -5931,6 +5924,13 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     multiplicative = find_top_level_operator(stripped, "*/%")
     if multiplicative.success:
         return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions, context)
+    if len(stripped) > 0:
+        first_ch = stripped[0]
+        if first_ch == "!":
+            operand_text = trim_text(substring(stripped, 1, len(stripped)))
+            if len(operand_text) > 0:
+                lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "")
+                return lower_logical_not_result(lowered_operand, diagnostics)
     call_index = find_call_site(stripped)
     if call_index >= 0  and  stripped[len(stripped) - 1] == ")":
         target = trim_text(substring(stripped, 0, call_index))
@@ -8340,11 +8340,26 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
     if not ends_with_pointer_suffix(operand.llvm_type)  and  ends_with_pointer_suffix(target_type):
         expected_value_type = strip_pointer_suffix(target_type)
         if expected_value_type == operand.llvm_type:
-            alloca_temp = format_temp_name(temp_index)
-            current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + operand.llvm_type)
-            current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + target_type + " " + alloca_temp)
-            coerced = LLVMOperand(llvm_type=target_type, value=alloca_temp)
-            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+            size_ptr_temp = format_temp_name(temp_index)
+            size_temp = format_temp_name(temp_index + 1)
+            malloc_temp = format_temp_name(temp_index + 2)
+            typed_ptr_temp = format_temp_name(temp_index + 3)
+            current_lines = append_string(current_lines, "  " + size_ptr_temp + " = getelementptr " + operand.llvm_type + ", " + operand.llvm_type + "* null, i32 1")
+            current_lines = append_string(current_lines, "  " + size_temp + " = ptrtoint " + operand.llvm_type + "* " + size_ptr_temp + " to i64")
+            current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")")
+            current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*")
+            current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp)
+            current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")")
+            pointer_value = typed_ptr_temp
+            next_index = temp_index + 4
+            typed_pointer_type = operand.llvm_type + "*"
+            if typed_pointer_type != target_type:
+                cast_temp = format_temp_name(next_index)
+                current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast " + typed_pointer_type + " " + typed_ptr_temp + " to " + target_type)
+                pointer_value = cast_temp
+                next_index += 1
+            coerced = LLVMOperand(llvm_type=target_type, value=pointer_value)
+            return CoercionResult(lines=current_lines, temp_index=next_index, operand=coerced, diagnostics=diagnostics)
     if not ends_with_pointer_suffix(operand.llvm_type)  and  ends_with_pointer_suffix(target_type):
         operand_array_element = array_pointer_element_type(operand.llvm_type + "*")
         if len(operand_array_element) > 0:

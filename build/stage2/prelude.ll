@@ -293,8 +293,8 @@ block.entry:
   %t0 = load i64, i64* %l0
   br label %loop.header0
 loop.header0:
-  %t23 = phi i64 [ %t0, %block.entry ], [ %t22, %loop.latch2 ]
-  store i64 %t23, i64* %l0
+  %t26 = phi i64 [ %t0, %block.entry ], [ %t25, %loop.latch2 ]
+  store i64 %t26, i64* %l0
   br label %loop.body1
 loop.body1:
   %t1 = load i64, i64* %l0
@@ -324,21 +324,25 @@ merge5:
   br i1 %t15, label %then6, label %merge7
 then6:
   %t18 = load %EnumField, %EnumField* %l1
-  %t19 = alloca %EnumField
-  store %EnumField %t18, %EnumField* %t19
-  ret %EnumField* %t19
+  %t19 = getelementptr %EnumField, %EnumField* null, i32 1
+  %t20 = ptrtoint %EnumField* %t19 to i64
+  %t21 = call noalias i8* @malloc(i64 %t20)
+  %t22 = bitcast i8* %t21 to %EnumField*
+  store %EnumField %t18, %EnumField* %t22
+  call void @sailfin_runtime_mark_persistent(i8* %t21)
+  ret %EnumField* %t22
 merge7:
-  %t20 = load i64, i64* %l0
-  %t21 = add i64 %t20, 1
-  store i64 %t21, i64* %l0
+  %t23 = load i64, i64* %l0
+  %t24 = add i64 %t23, 1
+  store i64 %t24, i64* %l0
   br label %loop.latch2
 loop.latch2:
-  %t22 = load i64, i64* %l0
+  %t25 = load i64, i64* %l0
   br label %loop.header0
 afterloop3:
-  %t24 = load i64, i64* %l0
-  %t25 = bitcast i8* null to %EnumField*
-  ret %EnumField* %t25
+  %t27 = load i64, i64* %l0
+  %t28 = bitcast i8* null to %EnumField*
+  ret %EnumField* %t28
 }
 
 define %EnumVariantDefinition* @enum_find_variant(%EnumType %enum_type, i8* %variant_name) {
@@ -349,8 +353,8 @@ block.entry:
   %t0 = load i64, i64* %l0
   br label %loop.header0
 loop.header0:
-  %t25 = phi i64 [ %t0, %block.entry ], [ %t24, %loop.latch2 ]
-  store i64 %t25, i64* %l0
+  %t28 = phi i64 [ %t0, %block.entry ], [ %t27, %loop.latch2 ]
+  store i64 %t28, i64* %l0
   br label %loop.body1
 loop.body1:
   %t1 = load i64, i64* %l0
@@ -382,21 +386,25 @@ merge5:
   br i1 %t17, label %then6, label %merge7
 then6:
   %t20 = load %EnumVariantDefinition, %EnumVariantDefinition* %l1
-  %t21 = alloca %EnumVariantDefinition
-  store %EnumVariantDefinition %t20, %EnumVariantDefinition* %t21
-  ret %EnumVariantDefinition* %t21
+  %t21 = getelementptr %EnumVariantDefinition, %EnumVariantDefinition* null, i32 1
+  %t22 = ptrtoint %EnumVariantDefinition* %t21 to i64
+  %t23 = call noalias i8* @malloc(i64 %t22)
+  %t24 = bitcast i8* %t23 to %EnumVariantDefinition*
+  store %EnumVariantDefinition %t20, %EnumVariantDefinition* %t24
+  call void @sailfin_runtime_mark_persistent(i8* %t23)
+  ret %EnumVariantDefinition* %t24
 merge7:
-  %t22 = load i64, i64* %l0
-  %t23 = add i64 %t22, 1
-  store i64 %t23, i64* %l0
+  %t25 = load i64, i64* %l0
+  %t26 = add i64 %t25, 1
+  store i64 %t26, i64* %l0
   br label %loop.latch2
 loop.latch2:
-  %t24 = load i64, i64* %l0
+  %t27 = load i64, i64* %l0
   br label %loop.header0
 afterloop3:
-  %t26 = load i64, i64* %l0
-  %t27 = bitcast i8* null to %EnumVariantDefinition*
-  ret %EnumVariantDefinition* %t27
+  %t29 = load i64, i64* %l0
+  %t30 = bitcast i8* null to %EnumVariantDefinition*
+  ret %EnumVariantDefinition* %t30
 }
 
 define { %EnumField*, i64 }* @enum_normalize_fields(%EnumVariantDefinition* %definition, { %EnumField*, i64 }* %provided) {
@@ -1841,22 +1849,22 @@ afterloop13:
   %t102 = load i1, i1* %l3
   %t103 = load i64, i64* %l2
   %t105 = load i1, i1* %l3
+  %t106 = xor i1 %t105, 1
   br label %logical_or_entry_104
 
 logical_or_entry_104:
-  br i1 %t105, label %logical_or_merge_104, label %logical_or_right_104
+  br i1 %t106, label %logical_or_merge_104, label %logical_or_right_104
 
 logical_or_right_104:
-  %t106 = load i64, i64* %l1
-  %t107 = icmp ne i64 %t106, 0
+  %t107 = load i64, i64* %l1
+  %t108 = icmp ne i64 %t107, 0
   br label %logical_or_right_end_104
 
 logical_or_right_end_104:
   br label %logical_or_merge_104
 
 logical_or_merge_104:
-  %t108 = phi i1 [ true, %logical_or_entry_104 ], [ %t107, %logical_or_right_end_104 ]
-  %t109 = xor i1 %t108, 1
+  %t109 = phi i1 [ true, %logical_or_entry_104 ], [ %t108, %logical_or_right_end_104 ]
   %t110 = load i8*, i8** %l0
   %t111 = load i64, i64* %l1
   %t112 = load i64, i64* %l2
@@ -3682,11 +3690,11 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
-@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
 @.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
 @.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
+@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
 @.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"

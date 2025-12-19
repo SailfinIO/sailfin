@@ -7567,23 +7567,23 @@ afterloop5:
   %t310 = load double, double* %l2
   %t311 = load double, double* %l3
   %t313 = load i1, i1* %l7
+  %t314 = xor i1 %t313, 1
   br label %logical_or_entry_312
 
 logical_or_entry_312:
-  br i1 %t313, label %logical_or_merge_312, label %logical_or_right_312
+  br i1 %t314, label %logical_or_merge_312, label %logical_or_right_312
 
 logical_or_right_312:
-  %t314 = load double, double* %l6
-  %t315 = sitofp i64 0 to double
-  %t316 = fcmp oeq double %t314, %t315
+  %t315 = load double, double* %l6
+  %t316 = sitofp i64 0 to double
+  %t317 = fcmp oeq double %t315, %t316
   br label %logical_or_right_end_312
 
 logical_or_right_end_312:
   br label %logical_or_merge_312
 
 logical_or_merge_312:
-  %t317 = phi i1 [ true, %logical_or_entry_312 ], [ %t316, %logical_or_right_end_312 ]
-  %t318 = xor i1 %t317, 1
+  %t318 = phi i1 [ true, %logical_or_entry_312 ], [ %t317, %logical_or_right_end_312 ]
   %t319 = load i8*, i8** %l0
   %t320 = load double, double* %l1
   %t321 = load double, double* %l2
@@ -9389,23 +9389,23 @@ merge5:
   br i1 %t14, label %then6, label %merge7
 then6:
   %t20 = load i1, i1* %l2
+  %t21 = xor i1 %t20, 1
   br label %logical_and_entry_19
 
 logical_and_entry_19:
-  br i1 %t20, label %logical_and_right_19, label %logical_and_merge_19
+  br i1 %t21, label %logical_and_right_19, label %logical_and_merge_19
 
 logical_and_right_19:
-  %t21 = load double, double* %l0
-  %t22 = call i1 @is_escaped_quote(i8* %text, double %t21)
-  %t23 = xor i1 %t22, 1
+  %t22 = load double, double* %l0
+  %t23 = call i1 @is_escaped_quote(i8* %text, double %t22)
+  %t24 = xor i1 %t23, 1
   br label %logical_and_right_end_19
 
 logical_and_right_end_19:
   br label %logical_and_merge_19
 
 logical_and_merge_19:
-  %t24 = phi i1 [ false, %logical_and_entry_19 ], [ %t23, %logical_and_right_end_19 ]
-  %t25 = xor i1 %t24, 1
+  %t25 = phi i1 [ false, %logical_and_entry_19 ], [ %t24, %logical_and_right_end_19 ]
   %t26 = load double, double* %l0
   %t27 = load i1, i1* %l1
   %t28 = load i1, i1* %l2
@@ -9436,23 +9436,23 @@ merge7:
   br i1 %t39, label %then10, label %merge11
 then10:
   %t45 = load i1, i1* %l1
+  %t46 = xor i1 %t45, 1
   br label %logical_and_entry_44
 
 logical_and_entry_44:
-  br i1 %t45, label %logical_and_right_44, label %logical_and_merge_44
+  br i1 %t46, label %logical_and_right_44, label %logical_and_merge_44
 
 logical_and_right_44:
-  %t46 = load double, double* %l0
-  %t47 = call i1 @is_escaped_quote(i8* %text, double %t46)
-  %t48 = xor i1 %t47, 1
+  %t47 = load double, double* %l0
+  %t48 = call i1 @is_escaped_quote(i8* %text, double %t47)
+  %t49 = xor i1 %t48, 1
   br label %logical_and_right_end_44
 
 logical_and_right_end_44:
   br label %logical_and_merge_44
 
 logical_and_merge_44:
-  %t49 = phi i1 [ false, %logical_and_entry_44 ], [ %t48, %logical_and_right_end_44 ]
-  %t50 = xor i1 %t49, 1
+  %t50 = phi i1 [ false, %logical_and_entry_44 ], [ %t49, %logical_and_right_end_44 ]
   %t51 = load double, double* %l0
   %t52 = load i1, i1* %l1
   %t53 = load i1, i1* %l2
@@ -9474,22 +9474,22 @@ merge13:
   br label %loop.latch2
 merge11:
   %t63 = load i1, i1* %l1
+  %t64 = xor i1 %t63, 1
   br label %logical_and_entry_62
 
 logical_and_entry_62:
-  br i1 %t63, label %logical_and_right_62, label %logical_and_merge_62
+  br i1 %t64, label %logical_and_right_62, label %logical_and_merge_62
 
 logical_and_right_62:
-  %t64 = load i1, i1* %l2
-  %t65 = xor i1 %t64, 1
+  %t65 = load i1, i1* %l2
+  %t66 = xor i1 %t65, 1
   br label %logical_and_right_end_62
 
 logical_and_right_end_62:
   br label %logical_and_merge_62
 
 logical_and_merge_62:
-  %t66 = phi i1 [ false, %logical_and_entry_62 ], [ %t65, %logical_and_right_end_62 ]
-  %t67 = xor i1 %t66, 1
+  %t67 = phi i1 [ false, %logical_and_entry_62 ], [ %t66, %logical_and_right_end_62 ]
   %t68 = load double, double* %l0
   %t69 = load i1, i1* %l1
   %t70 = load i1, i1* %l2
@@ -9596,23 +9596,23 @@ merge5:
   br i1 %t19, label %then6, label %merge7
 then6:
   %t26 = load i1, i1* %l3
+  %t27 = xor i1 %t26, 1
   br label %logical_and_entry_25
 
 logical_and_entry_25:
-  br i1 %t26, label %logical_and_right_25, label %logical_and_merge_25
+  br i1 %t27, label %logical_and_right_25, label %logical_and_merge_25
 
 logical_and_right_25:
-  %t27 = load double, double* %l1
-  %t28 = call i1 @is_escaped_quote(i8* %text, double %t27)
-  %t29 = xor i1 %t28, 1
+  %t28 = load double, double* %l1
+  %t29 = call i1 @is_escaped_quote(i8* %text, double %t28)
+  %t30 = xor i1 %t29, 1
   br label %logical_and_right_end_25
 
 logical_and_right_end_25:
   br label %logical_and_merge_25
 
 logical_and_merge_25:
-  %t30 = phi i1 [ false, %logical_and_entry_25 ], [ %t29, %logical_and_right_end_25 ]
-  %t31 = xor i1 %t30, 1
+  %t31 = phi i1 [ false, %logical_and_entry_25 ], [ %t30, %logical_and_right_end_25 ]
   %t32 = load double, double* %l0
   %t33 = load double, double* %l1
   %t34 = load i1, i1* %l2
@@ -9644,23 +9644,23 @@ merge7:
   br i1 %t45, label %then10, label %merge11
 then10:
   %t52 = load i1, i1* %l2
+  %t53 = xor i1 %t52, 1
   br label %logical_and_entry_51
 
 logical_and_entry_51:
-  br i1 %t52, label %logical_and_right_51, label %logical_and_merge_51
+  br i1 %t53, label %logical_and_right_51, label %logical_and_merge_51
 
 logical_and_right_51:
-  %t53 = load double, double* %l1
-  %t54 = call i1 @is_escaped_quote(i8* %text, double %t53)
-  %t55 = xor i1 %t54, 1
+  %t54 = load double, double* %l1
+  %t55 = call i1 @is_escaped_quote(i8* %text, double %t54)
+  %t56 = xor i1 %t55, 1
   br label %logical_and_right_end_51
 
 logical_and_right_end_51:
   br label %logical_and_merge_51
 
 logical_and_merge_51:
-  %t56 = phi i1 [ false, %logical_and_entry_51 ], [ %t55, %logical_and_right_end_51 ]
-  %t57 = xor i1 %t56, 1
+  %t57 = phi i1 [ false, %logical_and_entry_51 ], [ %t56, %logical_and_right_end_51 ]
   %t58 = load double, double* %l0
   %t59 = load double, double* %l1
   %t60 = load i1, i1* %l2
@@ -9683,22 +9683,22 @@ merge13:
   br label %loop.latch2
 merge11:
   %t71 = load i1, i1* %l2
+  %t72 = xor i1 %t71, 1
   br label %logical_and_entry_70
 
 logical_and_entry_70:
-  br i1 %t71, label %logical_and_right_70, label %logical_and_merge_70
+  br i1 %t72, label %logical_and_right_70, label %logical_and_merge_70
 
 logical_and_right_70:
-  %t72 = load i1, i1* %l3
-  %t73 = xor i1 %t72, 1
+  %t73 = load i1, i1* %l3
+  %t74 = xor i1 %t73, 1
   br label %logical_and_right_end_70
 
 logical_and_right_end_70:
   br label %logical_and_merge_70
 
 logical_and_merge_70:
-  %t74 = phi i1 [ false, %logical_and_entry_70 ], [ %t73, %logical_and_right_end_70 ]
-  %t75 = xor i1 %t74, 1
+  %t75 = phi i1 [ false, %logical_and_entry_70 ], [ %t74, %logical_and_right_end_70 ]
   %t76 = load double, double* %l0
   %t77 = load double, double* %l1
   %t78 = load i1, i1* %l2
@@ -15163,118 +15163,118 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
-@.str.len15.h1983072220 = private unnamed_addr constant [16 x i8] c"# unsupported: \00"
-@.enum.NativeInstruction.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len5.h1503489441 = private unnamed_addr constant [6 x i8] c" and \00"
-@.str.len3.h2087691079 = private unnamed_addr constant [4 x i8] c" = \00"
+@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
+@.str.len9.h320851598 = private unnamed_addr constant [10 x i8] c"index = 0\00"
+@.str.len25.h458257002 = private unnamed_addr constant [26 x i8] c"endif without matching if\00"
+@.str.len5.h468448796 = private unnamed_addr constant [6 x i8] c"=None\00"
+@.str.len5.h2069215535 = private unnamed_addr constant [6 x i8] c"elif \00"
+@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
+@.str.len4.h270590402 = private unnamed_addr constant [5 x i8] c"pass\00"
+@.str.len10.h1629914700 = private unnamed_addr constant [11 x i8] c"Expression\00"
+@.str.len5.h843097466 = private unnamed_addr constant [6 x i8] c"False\00"
+@.str.len32.h1370567591 = private unnamed_addr constant [33 x i8] c"endfor without matching for loop\00"
+@.str.len31.h568140000 = private unnamed_addr constant [32 x i8] c" = runtime.enum_define_variant(\00"
+@.str.len8.h757831264 = private unnamed_addr constant [9 x i8] c".concat(\00"
+@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
+@.str.len5.h2069574674 = private unnamed_addr constant [6 x i8] c"else:\00"
+@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
+@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len4.h268720028 = private unnamed_addr constant [5 x i8] c"not \00"
 @.str.len2.h193517249 = private unnamed_addr constant [3 x i8] c"}}\00"
-@.str.len7.h1543377657 = private unnamed_addr constant [8 x i8] c") and (\00"
-@.str.len3.h2090359129 = private unnamed_addr constant [4 x i8] c"if \00"
-@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
+@.str.len4.h259230482 = private unnamed_addr constant [5 x i8] c"for \00"
+@.str.len2.h193428644 = private unnamed_addr constant [3 x i8] c"./\00"
+@.str.len6.h653919037 = private unnamed_addr constant [7 x i8] c"', [])\00"
+@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.str.len15.h1983072220 = private unnamed_addr constant [16 x i8] c"# unsupported: \00"
+@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len25.h117462910 = private unnamed_addr constant [26 x i8] c"runtime.enum_instantiate(\00"
+@.str.len11.h1460619898 = private unnamed_addr constant [12 x i8] c" (pattern: \00"
+@.str.len6.h42978514 = private unnamed_addr constant [7 x i8] c"export\00"
+@.str.len29.h610920064 = private unnamed_addr constant [30 x i8] c"if index >= len(self.fields):\00"
+@.enum.NativeInstruction.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len20.h728584192 = private unnamed_addr constant [21 x i8] c"runtime.enum_field('\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
 @.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
+@.str.len4.h175996034 = private unnamed_addr constant [5 x i8] c" in \00"
+@.enum.NativeInstruction.If.variant = private unnamed_addr constant [3 x i8] c"If\00"
+@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
+@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
+@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
+@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
+@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
+@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
+@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
+@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
+@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
+@.str.len11.h1779553665 = private unnamed_addr constant [12 x i8] c"# effects: \00"
 @.enum.NativeInstruction.Loop.variant = private unnamed_addr constant [5 x i8] c"Loop\00"
+@.str.len39.h2079567388 = private unnamed_addr constant [40 x i8] c"match case without active match context\00"
+@.str.len2.h193478474 = private unnamed_addr constant [3 x i8] c"\5C'\00"
+@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
+@.str.len11.h1898426375 = private unnamed_addr constant [12 x i8] c"while True:\00"
+@.str.len12.h300877395 = private unnamed_addr constant [13 x i8] c"EnumInstance\00"
+@.str.len10.h1977847647 = private unnamed_addr constant [11 x i8] c"index += 1\00"
+@.str.len26.h1088202076 = private unnamed_addr constant [27 x i8] c"field = self.fields[index]\00"
+@.str.len42.h9444846 = private unnamed_addr constant [43 x i8] c"unsupported instruction emitted as comment\00"
+@.str.len3.h2090359129 = private unnamed_addr constant [4 x i8] c"if \00"
+@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
+@.enum.NativeInstruction.EndIf.variant = private unnamed_addr constant [6 x i8] c"EndIf\00"
+@.str.len29.h1122035900 = private unnamed_addr constant [30 x i8] c"endloop without matching loop\00"
+@.str.len39.h198700275 = private unnamed_addr constant [40 x i8] c"# unsupported: endmatch without context\00"
+@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
+@.str.len37.h314404344 = private unnamed_addr constant [38 x i8] c"endmatch without active match context\00"
+@.str.len4.h230766299 = private unnamed_addr constant [5 x i8] c"None\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
+@.str.len8.h2085806463 = private unnamed_addr constant [9 x i8] c"runtime/\00"
+@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
+@.str.len22.h1038501153 = private unnamed_addr constant [23 x i8] c"runtime.struct_field('\00"
+@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
+@.str.len2.h193515005 = private unnamed_addr constant [3 x i8] c"{{\00"
+@.str.len15.h1309566598 = private unnamed_addr constant [16 x i8] c"compiler.build.\00"
+@.str.len4.h219990644 = private unnamed_addr constant [5 x i8] c"Else\00"
+@.str.len29.h1409903806 = private unnamed_addr constant [30 x i8] c"unterminated match expression\00"
+@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
+@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
+@.str.len3.h2088090973 = private unnamed_addr constant [4 x i8] c", '\00"
+@.str.len7.h1543377657 = private unnamed_addr constant [8 x i8] c") and (\00"
+@.str.len4.h265982546 = private unnamed_addr constant [5 x i8] c"len(\00"
+@.str.len24.h2028465620 = private unnamed_addr constant [25 x i8] c"else without matching if\00"
+@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
+@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
+@.str.len26.h1984174475 = private unnamed_addr constant [27 x i8] c"raise AttributeError(item)\00"
+@.str.len8.h104511138 = private unnamed_addr constant [9 x i8] c"', self.\00"
+@.str.len18.h1387621460 = private unnamed_addr constant [19 x i8] c"generated_function\00"
+@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
+@.str.len4.h176216012 = private unnamed_addr constant [5 x i8] c" or \00"
+@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
+@.str.len18.h1456282769 = private unnamed_addr constant [19 x i8] c"return field.value\00"
+@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
+@.str.len7.h919609845 = private unnamed_addr constant [8 x i8] c"import \00"
+@.str.len5.h1503489441 = private unnamed_addr constant [6 x i8] c" and \00"
+@.str.len4.h230767751 = private unnamed_addr constant [5 x i8] c"Noop\00"
+@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
+@.str.len28.h430828782 = private unnamed_addr constant [29 x i8] c"def __getattr__(self, item):\00"
+@.str.len22.h983476432 = private unnamed_addr constant [23 x i8] c"if field.name == item:\00"
 @.str.len3.h2087924125 = private unnamed_addr constant [4 x i8] c"', \00"
 @.str.len5.h1776141546 = private unnamed_addr constant [6 x i8] c") + (\00"
-@.str.len39.h1262256381 = private unnamed_addr constant [40 x i8] c"no sailfin-native-text artifact present\00"
-@.str.len2.h193478474 = private unnamed_addr constant [3 x i8] c"\5C'\00"
-@.enum.NativeInstruction.Break.variant = private unnamed_addr constant [6 x i8] c"Break\00"
-@.str.len25.h458257002 = private unnamed_addr constant [26 x i8] c"endif without matching if\00"
-@.str.len8.h104511138 = private unnamed_addr constant [9 x i8] c"', self.\00"
-@.str.len11.h1779553665 = private unnamed_addr constant [12 x i8] c"# effects: \00"
-@.str.len7.h739212033 = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
-@.str.len5.h461434216 = private unnamed_addr constant [6 x i8] c"self.\00"
-@.str.len5.h706445588 = private unnamed_addr constant [6 x i8] c"Break\00"
-@.str.len2.h193428644 = private unnamed_addr constant [3 x i8] c"./\00"
-@.str.len37.h314404344 = private unnamed_addr constant [38 x i8] c"endmatch without active match context\00"
-@.str.len8.h794378208 = private unnamed_addr constant [9 x i8] c"EndMatch\00"
-@.str.len11.h1460619898 = private unnamed_addr constant [12 x i8] c" (pattern: \00"
-@.str.len7.h919609845 = private unnamed_addr constant [8 x i8] c"import \00"
-@.str.len4.h259230482 = private unnamed_addr constant [5 x i8] c"for \00"
-@.str.len32.h1370567591 = private unnamed_addr constant [33 x i8] c"endfor without matching for loop\00"
-@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
-@.str.len9.h320851598 = private unnamed_addr constant [10 x i8] c"index = 0\00"
-@.str.len2.h193459862 = private unnamed_addr constant [3 x i8] c"If\00"
-@.str.len26.h1984174475 = private unnamed_addr constant [27 x i8] c"raise AttributeError(item)\00"
-@.str.len8.h757831264 = private unnamed_addr constant [9 x i8] c".concat(\00"
-@.str.len6.h536277508 = private unnamed_addr constant [7 x i8] c"Return\00"
-@.str.len29.h1409903806 = private unnamed_addr constant [30 x i8] c"unterminated match expression\00"
-@.str.len4.h265982546 = private unnamed_addr constant [5 x i8] c"len(\00"
-@.enum.NativeInstruction.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.enum.NativeInstruction.EndLoop.variant = private unnamed_addr constant [8 x i8] c"EndLoop\00"
-@.str.len42.h9444846 = private unnamed_addr constant [43 x i8] c"unsupported instruction emitted as comment\00"
-@.str.len6.h1258614714 = private unnamed_addr constant [7 x i8] c"EndFor\00"
-@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
-@.enum.NativeInstruction.EndMatch.variant = private unnamed_addr constant [9 x i8] c"EndMatch\00"
-@.str.len4.h230766299 = private unnamed_addr constant [5 x i8] c"None\00"
-@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
-@.str.len22.h983476432 = private unnamed_addr constant [23 x i8] c"if field.name == item:\00"
-@.enum.NativeInstruction.For.variant = private unnamed_addr constant [4 x i8] c"For\00"
-@.str.len29.h610920064 = private unnamed_addr constant [30 x i8] c"if index >= len(self.fields):\00"
-@.str.len3.h2089113841 = private unnamed_addr constant [4 x i8] c"For\00"
-@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.str.len15.h1309566598 = private unnamed_addr constant [16 x i8] c"compiler.build.\00"
-@.str.len39.h198700275 = private unnamed_addr constant [40 x i8] c"# unsupported: endmatch without context\00"
-@.str.len6.h653919037 = private unnamed_addr constant [7 x i8] c"', [])\00"
-@.str.len39.h2079567388 = private unnamed_addr constant [40 x i8] c"match case without active match context\00"
-@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
-@.enum.NativeInstruction.Else.variant = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len26.h1088202076 = private unnamed_addr constant [27 x i8] c"field = self.fields[index]\00"
-@.str.len4.h237997259 = private unnamed_addr constant [5 x i8] c"True\00"
-@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
 @.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
-@.str.len8.h2085806463 = private unnamed_addr constant [9 x i8] c"runtime/\00"
-@.str.len4.h175996034 = private unnamed_addr constant [5 x i8] c" in \00"
-@.str.len6.h42978514 = private unnamed_addr constant [7 x i8] c"export\00"
-@.str.len11.h1898426375 = private unnamed_addr constant [12 x i8] c"while True:\00"
-@.str.len4.h268720028 = private unnamed_addr constant [5 x i8] c"not \00"
-@.str.len31.h1736570074 = private unnamed_addr constant [32 x i8] c"unterminated control-flow block\00"
-@.str.len18.h1456282769 = private unnamed_addr constant [19 x i8] c"return field.value\00"
-@.str.len5.h468448796 = private unnamed_addr constant [6 x i8] c"=None\00"
-@.str.len2.h193515005 = private unnamed_addr constant [3 x i8] c"{{\00"
-@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.str.len9.h757580446 = private unnamed_addr constant [10 x i8] c"#element:\00"
-@.str.len5.h819045845 = private unnamed_addr constant [6 x i8] c"EndIf\00"
-@.str.len31.h568140000 = private unnamed_addr constant [32 x i8] c" = runtime.enum_define_variant(\00"
-@.str.len5.h1117315388 = private unnamed_addr constant [6 x i8] c"Match\00"
-@.str.len4.h230767751 = private unnamed_addr constant [5 x i8] c"Noop\00"
-@.str.len12.h300877395 = private unnamed_addr constant [13 x i8] c"EnumInstance\00"
-@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
-@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
-@.str.len5.h2069574674 = private unnamed_addr constant [6 x i8] c"else:\00"
-@.str.len3.h2088090973 = private unnamed_addr constant [4 x i8] c", '\00"
-@.str.len10.h1629914700 = private unnamed_addr constant [11 x i8] c"Expression\00"
-@.str.len5.h2069215535 = private unnamed_addr constant [6 x i8] c"elif \00"
+@.str.len4.h237997259 = private unnamed_addr constant [5 x i8] c"True\00"
 @.str.len5.h1958778164 = private unnamed_addr constant [6 x i8] c"break\00"
+@.str.len6.h536277508 = private unnamed_addr constant [7 x i8] c"Return\00"
 @.enum.NativeInstruction.Expression.variant = private unnamed_addr constant [11 x i8] c"Expression\00"
-@.str.len5.h843097466 = private unnamed_addr constant [6 x i8] c"False\00"
-@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
-@.str.len18.h1387621460 = private unnamed_addr constant [19 x i8] c"generated_function\00"
-@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
-@.enum.NativeInstruction.Noop.variant = private unnamed_addr constant [5 x i8] c"Noop\00"
-@.enum.NativeInstruction.Return.variant = private unnamed_addr constant [7 x i8] c"Return\00"
-@.str.len28.h430828782 = private unnamed_addr constant [29 x i8] c"def __getattr__(self, item):\00"
-@.str.len10.h1977847647 = private unnamed_addr constant [11 x i8] c"index += 1\00"
-@.str.len4.h219990644 = private unnamed_addr constant [5 x i8] c"Else\00"
-@.str.len20.h728584192 = private unnamed_addr constant [21 x i8] c"runtime.enum_field('\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len4.h176216012 = private unnamed_addr constant [5 x i8] c" or \00"
-@.str.len4.h217223495 = private unnamed_addr constant [5 x i8] c"Case\00"
-@.enum.NativeInstruction.EndFor.variant = private unnamed_addr constant [7 x i8] c"EndFor\00"
-@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len29.h1122035900 = private unnamed_addr constant [30 x i8] c"endloop without matching loop\00"
-@.str.len4.h270590402 = private unnamed_addr constant [5 x i8] c"pass\00"
-@.str.len24.h2028465620 = private unnamed_addr constant [25 x i8] c"else without matching if\00"
-@.enum.NativeInstruction.Continue.variant = private unnamed_addr constant [9 x i8] c"Continue\00"
-@.str.len25.h117462910 = private unnamed_addr constant [26 x i8] c"runtime.enum_instantiate(\00"
-@.str.len4.h228395909 = private unnamed_addr constant [5 x i8] c"Loop\00"
-@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
+@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
+@.enum.NativeInstruction.Match.variant = private unnamed_addr constant [6 x i8] c"Match\00"
+@.str.len31.h1736570074 = private unnamed_addr constant [32 x i8] c"unterminated control-flow block\00"
+@.str.len3.h2087691079 = private unnamed_addr constant [4 x i8] c" = \00"
+@.str.len5.h461434216 = private unnamed_addr constant [6 x i8] c"self.\00"
+@.str.len8.h267355070 = private unnamed_addr constant [9 x i8] c"Continue\00"
 @.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
 @.str.len41.h1804821690 = private unnamed_addr constant [42 x i8] c"# unsupported: match case without context\00"
-@.str.len22.h1038501153 = private unnamed_addr constant [23 x i8] c"runtime.struct_field('\00"
-@.enum.NativeInstruction.Case.variant = private unnamed_addr constant [5 x i8] c"Case\00"
-@.str.len7.h1558772342 = private unnamed_addr constant [8 x i8] c".length\00"
-@.enum.NativeInstruction.Let.variant = private unnamed_addr constant [4 x i8] c"Let\00"
+@.str.len3.h2089318639 = private unnamed_addr constant [4 x i8] c"Let\00"
