@@ -1394,81 +1394,27 @@
         .span 749 9 749 19
         ret -1
     .endif
-    .span 752 5 752 36
-    eval let ch = char_at(character, 0)
-    .span 754 5 754 31
-    eval let digits = "0123456789"
-    .span 755 5 755 48
-    eval let digit_index = find_char(digits, ch, 0)
-    .if digit_index >= 0
-        .span 758 9 758 33
-        ret 48 + digit_index
-    .endif
-    .span 761 5 761 50
-    eval let lowercase = "abcdefghijklmnopqrstuvwxyz"
-    .span 762 5 762 55
-    eval let lowercase_index = find_char(lowercase, ch, 0)
-    .if lowercase_index >= 0
-        .span 765 9 765 37
-        ret 97 + lowercase_index
-    .endif
-    .span 768 5 768 50
-    eval let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    .span 769 5 769 55
-    eval let uppercase_index = find_char(uppercase, ch, 0)
-    .if uppercase_index >= 0
-        .span 772 9 772 37
-        ret 65 + uppercase_index
-    .endif
-    .if ch == " "
-        .span 776 9 776 19
-        ret 32
-    .endif
-    .if ch == "\n"
-        .span 780 9 780 19
-        ret 10
-    .endif
-    .if ch == "\r"
-        .span 784 9 784 19
-        ret 13
-    .endif
-    .if ch == "\t"
-        .span 788 9 788 18
-        ret 9
-    .endif
-    .if ch == "\""
-        .span 792 9 792 19
-        ret 34
-    .endif
-    .if ch == "\\"
-        .span 796 9 796 19
-        ret 92
-    .endif
-    .if ch == "_"
-        .span 800 9 800 19
-        ret 95
-    .endif
-    .span 802 5 802 37
-    ret runtime_char_code_fn(ch)
+    .span 756 5 756 56
+    ret runtime_char_code_fn(char_at(character, 0))
 .endfn
 
 .fn grapheme_count(text -> string) -> number
 .meta return number
 .meta effects none
-    .span 806 19 806 33
+    .span 760 19 760 33
     .param text -> string
-    .span 807 5 807 44
+    .span 761 5 761 44
     ret runtime_grapheme_count_fn(text)
 .endfn
 
 .fn grapheme_at(text -> string, index -> number) -> string
 .meta return string
 .meta effects none
-    .span 810 16 810 30
+    .span 764 16 764 30
     .param text -> string
-    .span 810 32 810 47
+    .span 764 32 764 47
     .param index -> number
-    .span 811 5 811 48
+    .span 765 5 765 48
     ret runtime_grapheme_at_fn(text, index)
 .endfn
 

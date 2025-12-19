@@ -39,8 +39,7 @@ declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
 declare i1 @strings_equal(i8*, i8*)
-declare i1 @sailfin_runtime_is_whitespace_char(i8)
-declare i1 @sailfin_runtime_is_decimal_digit(i8)
+declare double @char_code(i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 declare i8* @sailfin_runtime_get_field(i8*, i8*)
@@ -1234,9 +1233,9 @@ define i8* @trim_whitespace(i8* %value) {
 block.entry:
   %l0 = alloca double
   %l1 = alloca double
-  %l2 = alloca i64
+  %l2 = alloca double
   %l3 = alloca double
-  %l4 = alloca i64
+  %l4 = alloca double
   %t0 = sitofp i64 0 to double
   store double %t0, double* %l0
   %t1 = call i64 @sailfin_runtime_string_length(i8* %value)
@@ -1246,8 +1245,8 @@ block.entry:
   %t4 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t25 = phi double [ %t3, %block.entry ], [ %t24, %loop.latch2 ]
-  store double %t25, double* %l0
+  %t22 = phi double [ %t3, %block.entry ], [ %t21, %loop.latch2 ]
+  store double %t22, double* %l0
   br label %loop.body1
 loop.body1:
   %t5 = load double, double* %l0
@@ -1260,122 +1259,118 @@ then4:
   br label %afterloop3
 merge5:
   %t10 = load double, double* %l0
-  %t11 = call double @llvm.round.f64(double %t10)
-  %t12 = fptosi double %t11 to i64
-  %t13 = getelementptr i8, i8* %value, i64 %t12
-  %t14 = load i8, i8* %t13
-  %t15 = sext i8 %t14 to i64
-  store i64 %t15, i64* %l2
-  %t16 = load i64, i64* %l2
-  %t17 = call i1 @sailfin_runtime_is_whitespace_char(i8* null)
-  %t18 = load double, double* %l0
-  %t19 = load double, double* %l1
-  %t20 = load i64, i64* %l2
-  br i1 %t17, label %then6, label %merge7
+  %t11 = call i8* @char_at(i8* %value, double %t10)
+  %t12 = call double @char_code(i8* %t11)
+  store double %t12, double* %l2
+  %t13 = load double, double* %l2
+  %t14 = call i1 @is_whitespace_codepoint(double %t13)
+  %t15 = load double, double* %l0
+  %t16 = load double, double* %l1
+  %t17 = load double, double* %l2
+  br i1 %t14, label %then6, label %merge7
 then6:
-  %t21 = load double, double* %l0
-  %t22 = sitofp i64 1 to double
-  %t23 = fadd double %t21, %t22
-  store double %t23, double* %l0
+  %t18 = load double, double* %l0
+  %t19 = sitofp i64 1 to double
+  %t20 = fadd double %t18, %t19
+  store double %t20, double* %l0
   br label %loop.latch2
 merge7:
   br label %afterloop3
 loop.latch2:
-  %t24 = load double, double* %l0
+  %t21 = load double, double* %l0
   br label %loop.header0
 afterloop3:
-  %t26 = load double, double* %l0
-  %t27 = load double, double* %l0
-  %t28 = load double, double* %l1
+  %t23 = load double, double* %l0
+  %t24 = load double, double* %l0
+  %t25 = load double, double* %l1
   br label %loop.header8
 loop.header8:
-  %t53 = phi double [ %t28, %afterloop3 ], [ %t52, %loop.latch10 ]
-  store double %t53, double* %l1
+  %t47 = phi double [ %t25, %afterloop3 ], [ %t46, %loop.latch10 ]
+  store double %t47, double* %l1
   br label %loop.body9
 loop.body9:
-  %t29 = load double, double* %l1
-  %t30 = load double, double* %l0
-  %t31 = fcmp ole double %t29, %t30
-  %t32 = load double, double* %l0
-  %t33 = load double, double* %l1
-  br i1 %t31, label %then12, label %merge13
+  %t26 = load double, double* %l1
+  %t27 = load double, double* %l0
+  %t28 = fcmp ole double %t26, %t27
+  %t29 = load double, double* %l0
+  %t30 = load double, double* %l1
+  br i1 %t28, label %then12, label %merge13
 then12:
   br label %afterloop11
 merge13:
-  %t34 = load double, double* %l1
-  %t35 = sitofp i64 1 to double
-  %t36 = fsub double %t34, %t35
-  store double %t36, double* %l3
-  %t37 = load double, double* %l3
-  %t38 = call double @llvm.round.f64(double %t37)
-  %t39 = fptosi double %t38 to i64
-  %t40 = getelementptr i8, i8* %value, i64 %t39
-  %t41 = load i8, i8* %t40
-  %t42 = sext i8 %t41 to i64
-  store i64 %t42, i64* %l4
-  %t43 = load i64, i64* %l4
-  %t44 = call i1 @sailfin_runtime_is_whitespace_char(i8* null)
-  %t45 = load double, double* %l0
-  %t46 = load double, double* %l1
-  %t47 = load double, double* %l3
-  %t48 = load i64, i64* %l4
-  br i1 %t44, label %then14, label %merge15
+  %t31 = load double, double* %l1
+  %t32 = sitofp i64 1 to double
+  %t33 = fsub double %t31, %t32
+  store double %t33, double* %l3
+  %t34 = load double, double* %l3
+  %t35 = call i8* @char_at(i8* %value, double %t34)
+  %t36 = call double @char_code(i8* %t35)
+  store double %t36, double* %l4
+  %t37 = load double, double* %l4
+  %t38 = call i1 @is_whitespace_codepoint(double %t37)
+  %t39 = load double, double* %l0
+  %t40 = load double, double* %l1
+  %t41 = load double, double* %l3
+  %t42 = load double, double* %l4
+  br i1 %t38, label %then14, label %merge15
 then14:
-  %t49 = load double, double* %l1
-  %t50 = sitofp i64 1 to double
-  %t51 = fsub double %t49, %t50
-  store double %t51, double* %l1
+  %t43 = load double, double* %l1
+  %t44 = sitofp i64 1 to double
+  %t45 = fsub double %t43, %t44
+  store double %t45, double* %l1
   br label %loop.latch10
 merge15:
   br label %afterloop11
 loop.latch10:
-  %t52 = load double, double* %l1
+  %t46 = load double, double* %l1
   br label %loop.header8
 afterloop11:
-  %t54 = load double, double* %l1
-  %t55 = load double, double* %l0
-  %t56 = load double, double* %l1
-  %t57 = call i8* @slice_text(i8* %value, double %t55, double %t56)
-  call void @sailfin_runtime_mark_persistent(i8* %t57)
-  ret i8* %t57
+  %t48 = load double, double* %l1
+  %t49 = load double, double* %l0
+  %t50 = load double, double* %l1
+  %t51 = call i8* @slice_text(i8* %value, double %t49, double %t50)
+  call void @sailfin_runtime_mark_persistent(i8* %t51)
+  ret i8* %t51
 }
 
 define i1 @looks_like_quoted_string(i8* %text) {
 block.entry:
-  %l0 = alloca i64
+  %l0 = alloca double
   %l1 = alloca i64
-  %l2 = alloca i64
+  %l2 = alloca double
   %t0 = call i64 @sailfin_runtime_string_length(i8* %text)
   %t1 = icmp slt i64 %t0, 2
   br i1 %t1, label %then0, label %merge1
 then0:
   ret i1 0
 merge1:
-  %t2 = getelementptr i8, i8* %text, i64 0
-  %t3 = load i8, i8* %t2
-  %t4 = sext i8 %t3 to i64
-  store i64 %t4, i64* %l0
-  %t5 = load i64, i64* %l0
-  %t6 = icmp ne i64 %t5, 34
-  %t7 = load i64, i64* %l0
-  br i1 %t6, label %then2, label %merge3
+  %t2 = sitofp i64 0 to double
+  %t3 = call i8* @char_at(i8* %text, double %t2)
+  %t4 = call double @char_code(i8* %t3)
+  store double %t4, double* %l0
+  %t5 = load double, double* %l0
+  %t6 = sitofp i64 34 to double
+  %t7 = fcmp une double %t5, %t6
+  %t8 = load double, double* %l0
+  br i1 %t7, label %then2, label %merge3
 then2:
   ret i1 0
 merge3:
-  %t8 = call i64 @sailfin_runtime_string_length(i8* %text)
-  %t9 = sub i64 %t8, 1
-  store i64 %t9, i64* %l1
-  %t10 = load i64, i64* %l1
-  %t11 = getelementptr i8, i8* %text, i64 %t10
-  %t12 = load i8, i8* %t11
-  %t13 = sext i8 %t12 to i64
-  store i64 %t13, i64* %l2
-  %t14 = load i64, i64* %l2
-  %t15 = icmp ne i64 %t14, 34
-  %t16 = load i64, i64* %l0
-  %t17 = load i64, i64* %l1
-  %t18 = load i64, i64* %l2
-  br i1 %t15, label %then4, label %merge5
+  %t9 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t10 = sub i64 %t9, 1
+  store i64 %t10, i64* %l1
+  %t11 = load i64, i64* %l1
+  %t12 = sitofp i64 %t11 to double
+  %t13 = call i8* @char_at(i8* %text, double %t12)
+  %t14 = call double @char_code(i8* %t13)
+  store double %t14, double* %l2
+  %t15 = load double, double* %l2
+  %t16 = sitofp i64 34 to double
+  %t17 = fcmp une double %t15, %t16
+  %t18 = load double, double* %l0
+  %t19 = load i64, i64* %l1
+  %t20 = load double, double* %l2
+  br i1 %t17, label %then4, label %merge5
 then4:
   ret i1 0
 merge5:
@@ -1386,8 +1381,8 @@ define i1 @looks_like_number(i8* %text) {
 block.entry:
   %l0 = alloca i1
   %l1 = alloca double
-  %l2 = alloca i64
-  %l3 = alloca i64
+  %l2 = alloca double
+  %l3 = alloca double
   %t0 = call i64 @sailfin_runtime_string_length(i8* %text)
   %t1 = icmp eq i64 %t0, 0
   br i1 %t1, label %then0, label %merge1
@@ -1397,130 +1392,131 @@ merge1:
   store i1 0, i1* %l0
   %t2 = sitofp i64 0 to double
   store double %t2, double* %l1
-  %t3 = getelementptr i8, i8* %text, i64 0
-  %t4 = load i8, i8* %t3
-  %t5 = sext i8 %t4 to i64
-  store i64 %t5, i64* %l2
-  %t6 = load i64, i64* %l2
-  %t7 = icmp eq i64 %t6, 45
-  %t8 = load i1, i1* %l0
-  %t9 = load double, double* %l1
-  %t10 = load i64, i64* %l2
-  br i1 %t7, label %then2, label %merge3
+  %t3 = sitofp i64 0 to double
+  %t4 = call i8* @char_at(i8* %text, double %t3)
+  %t5 = call double @char_code(i8* %t4)
+  store double %t5, double* %l2
+  %t6 = load double, double* %l2
+  %t7 = sitofp i64 45 to double
+  %t8 = fcmp oeq double %t6, %t7
+  %t9 = load i1, i1* %l0
+  %t10 = load double, double* %l1
+  %t11 = load double, double* %l2
+  br i1 %t8, label %then2, label %merge3
 then2:
-  %t11 = call i64 @sailfin_runtime_string_length(i8* %text)
-  %t12 = icmp eq i64 %t11, 1
-  %t13 = load i1, i1* %l0
-  %t14 = load double, double* %l1
-  %t15 = load i64, i64* %l2
-  br i1 %t12, label %then4, label %merge5
+  %t12 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t13 = icmp eq i64 %t12, 1
+  %t14 = load i1, i1* %l0
+  %t15 = load double, double* %l1
+  %t16 = load double, double* %l2
+  br i1 %t13, label %then4, label %merge5
 then4:
   ret i1 0
 merge5:
-  %t16 = sitofp i64 1 to double
-  store double %t16, double* %l1
-  %t17 = load double, double* %l1
+  %t17 = sitofp i64 1 to double
+  store double %t17, double* %l1
+  %t18 = load double, double* %l1
   br label %merge3
 merge3:
-  %t18 = phi double [ %t17, %merge5 ], [ %t9, %merge1 ]
-  store double %t18, double* %l1
-  %t19 = load i1, i1* %l0
-  %t20 = load double, double* %l1
-  %t21 = load i64, i64* %l2
+  %t19 = phi double [ %t18, %merge5 ], [ %t10, %merge1 ]
+  store double %t19, double* %l1
+  %t20 = load i1, i1* %l0
+  %t21 = load double, double* %l1
+  %t22 = load double, double* %l2
   br label %loop.header6
 loop.header6:
-  %t61 = phi i1 [ %t19, %merge3 ], [ %t59, %loop.latch8 ]
-  %t62 = phi double [ %t20, %merge3 ], [ %t60, %loop.latch8 ]
-  store i1 %t61, i1* %l0
-  store double %t62, double* %l1
+  %t60 = phi i1 [ %t20, %merge3 ], [ %t58, %loop.latch8 ]
+  %t61 = phi double [ %t21, %merge3 ], [ %t59, %loop.latch8 ]
+  store i1 %t60, i1* %l0
+  store double %t61, double* %l1
   br label %loop.body7
 loop.body7:
-  %t22 = load double, double* %l1
-  %t23 = call i64 @sailfin_runtime_string_length(i8* %text)
-  %t24 = sitofp i64 %t23 to double
-  %t25 = fcmp oge double %t22, %t24
-  %t26 = load i1, i1* %l0
-  %t27 = load double, double* %l1
-  %t28 = load i64, i64* %l2
-  br i1 %t25, label %then10, label %merge11
+  %t23 = load double, double* %l1
+  %t24 = call i64 @sailfin_runtime_string_length(i8* %text)
+  %t25 = sitofp i64 %t24 to double
+  %t26 = fcmp oge double %t23, %t25
+  %t27 = load i1, i1* %l0
+  %t28 = load double, double* %l1
+  %t29 = load double, double* %l2
+  br i1 %t26, label %then10, label %merge11
 then10:
   br label %afterloop9
 merge11:
-  %t29 = load double, double* %l1
-  %t30 = call double @llvm.round.f64(double %t29)
-  %t31 = fptosi double %t30 to i64
-  %t32 = getelementptr i8, i8* %text, i64 %t31
-  %t33 = load i8, i8* %t32
-  %t34 = sext i8 %t33 to i64
-  store i64 %t34, i64* %l3
-  %t35 = load i64, i64* %l3
-  %t36 = icmp eq i64 %t35, 46
-  %t37 = load i1, i1* %l0
-  %t38 = load double, double* %l1
-  %t39 = load i64, i64* %l2
-  %t40 = load i64, i64* %l3
-  br i1 %t36, label %then12, label %merge13
+  %t30 = load double, double* %l1
+  %t31 = call i8* @char_at(i8* %text, double %t30)
+  %t32 = call double @char_code(i8* %t31)
+  store double %t32, double* %l3
+  %t33 = load double, double* %l3
+  %t34 = sitofp i64 46 to double
+  %t35 = fcmp oeq double %t33, %t34
+  %t36 = load i1, i1* %l0
+  %t37 = load double, double* %l1
+  %t38 = load double, double* %l2
+  %t39 = load double, double* %l3
+  br i1 %t35, label %then12, label %merge13
 then12:
+  %t40 = load i1, i1* %l0
   %t41 = load i1, i1* %l0
-  %t42 = load i1, i1* %l0
-  %t43 = load double, double* %l1
-  %t44 = load i64, i64* %l2
-  %t45 = load i64, i64* %l3
-  br i1 %t41, label %then14, label %merge15
+  %t42 = load double, double* %l1
+  %t43 = load double, double* %l2
+  %t44 = load double, double* %l3
+  br i1 %t40, label %then14, label %merge15
 then14:
   ret i1 0
 merge15:
   store i1 1, i1* %l0
-  %t46 = load double, double* %l1
-  %t47 = sitofp i64 1 to double
-  %t48 = fadd double %t46, %t47
-  store double %t48, double* %l1
+  %t45 = load double, double* %l1
+  %t46 = sitofp i64 1 to double
+  %t47 = fadd double %t45, %t46
+  store double %t47, double* %l1
   br label %loop.latch8
 merge13:
-  %t49 = load i64, i64* %l3
-  %t50 = call i1 @sailfin_runtime_is_decimal_digit(i8* null)
-  %t51 = xor i1 %t50, 1
-  %t52 = load i1, i1* %l0
-  %t53 = load double, double* %l1
-  %t54 = load i64, i64* %l2
-  %t55 = load i64, i64* %l3
-  br i1 %t51, label %then16, label %merge17
+  %t48 = load double, double* %l3
+  %t49 = call i1 @is_decimal_digit_codepoint(double %t48)
+  %t50 = xor i1 %t49, 1
+  %t51 = load i1, i1* %l0
+  %t52 = load double, double* %l1
+  %t53 = load double, double* %l2
+  %t54 = load double, double* %l3
+  br i1 %t50, label %then16, label %merge17
 then16:
   ret i1 0
 merge17:
-  %t56 = load double, double* %l1
-  %t57 = sitofp i64 1 to double
-  %t58 = fadd double %t56, %t57
-  store double %t58, double* %l1
+  %t55 = load double, double* %l1
+  %t56 = sitofp i64 1 to double
+  %t57 = fadd double %t55, %t56
+  store double %t57, double* %l1
   br label %loop.latch8
 loop.latch8:
-  %t59 = load i1, i1* %l0
-  %t60 = load double, double* %l1
+  %t58 = load i1, i1* %l0
+  %t59 = load double, double* %l1
   br label %loop.header6
 afterloop9:
-  %t63 = load i1, i1* %l0
-  %t64 = load double, double* %l1
+  %t62 = load i1, i1* %l0
+  %t63 = load double, double* %l1
   ret i1 1
 }
 
-define i1 @is_decimal_digit(i64 %ch) {
+define i1 @is_decimal_digit_codepoint(double %ch) {
 block.entry:
-  %t1 = icmp sge i64 %ch, 48
+  %t1 = sitofp i64 48 to double
+  %t2 = fcmp oge double %ch, %t1
   br label %logical_and_entry_0
 
 logical_and_entry_0:
-  br i1 %t1, label %logical_and_right_0, label %logical_and_merge_0
+  br i1 %t2, label %logical_and_right_0, label %logical_and_merge_0
 
 logical_and_right_0:
-  %t2 = icmp sle i64 %ch, 57
+  %t3 = sitofp i64 57 to double
+  %t4 = fcmp ole double %ch, %t3
   br label %logical_and_right_end_0
 
 logical_and_right_end_0:
   br label %logical_and_merge_0
 
 logical_and_merge_0:
-  %t3 = phi i1 [ false, %logical_and_entry_0 ], [ %t2, %logical_and_right_end_0 ]
-  ret i1 %t3
+  %t5 = phi i1 [ false, %logical_and_entry_0 ], [ %t4, %logical_and_right_end_0 ]
+  ret i1 %t5
 }
 
 define { %DecoratorInfo*, i64 }* @append_decorator_info({ %DecoratorInfo*, i64 }* %collection, %DecoratorInfo %item) {
@@ -1773,52 +1769,56 @@ afterloop3:
   ret i1 0
 }
 
-define i1 @is_whitespace_char(i64 %ch) {
+define i1 @is_whitespace_codepoint(double %ch) {
 block.entry:
-  %t1 = icmp eq i64 %ch, 32
+  %t1 = sitofp i64 32 to double
+  %t2 = fcmp oeq double %ch, %t1
   br label %logical_or_entry_0
 
 logical_or_entry_0:
-  br i1 %t1, label %logical_or_merge_0, label %logical_or_right_0
+  br i1 %t2, label %logical_or_merge_0, label %logical_or_right_0
 
 logical_or_right_0:
-  %t3 = icmp eq i64 %ch, 9
-  br label %logical_or_entry_2
+  %t4 = sitofp i64 9 to double
+  %t5 = fcmp oeq double %ch, %t4
+  br label %logical_or_entry_3
 
-logical_or_entry_2:
-  br i1 %t3, label %logical_or_merge_2, label %logical_or_right_2
+logical_or_entry_3:
+  br i1 %t5, label %logical_or_merge_3, label %logical_or_right_3
 
-logical_or_right_2:
-  %t5 = icmp eq i64 %ch, 10
-  br label %logical_or_entry_4
+logical_or_right_3:
+  %t7 = sitofp i64 10 to double
+  %t8 = fcmp oeq double %ch, %t7
+  br label %logical_or_entry_6
 
-logical_or_entry_4:
-  br i1 %t5, label %logical_or_merge_4, label %logical_or_right_4
+logical_or_entry_6:
+  br i1 %t8, label %logical_or_merge_6, label %logical_or_right_6
 
-logical_or_right_4:
-  %t6 = icmp eq i64 %ch, 13
-  br label %logical_or_right_end_4
+logical_or_right_6:
+  %t9 = sitofp i64 13 to double
+  %t10 = fcmp oeq double %ch, %t9
+  br label %logical_or_right_end_6
 
-logical_or_right_end_4:
-  br label %logical_or_merge_4
+logical_or_right_end_6:
+  br label %logical_or_merge_6
 
-logical_or_merge_4:
-  %t7 = phi i1 [ true, %logical_or_entry_4 ], [ %t6, %logical_or_right_end_4 ]
-  br label %logical_or_right_end_2
+logical_or_merge_6:
+  %t11 = phi i1 [ true, %logical_or_entry_6 ], [ %t10, %logical_or_right_end_6 ]
+  br label %logical_or_right_end_3
 
-logical_or_right_end_2:
-  br label %logical_or_merge_2
+logical_or_right_end_3:
+  br label %logical_or_merge_3
 
-logical_or_merge_2:
-  %t8 = phi i1 [ true, %logical_or_entry_2 ], [ %t7, %logical_or_right_end_2 ]
+logical_or_merge_3:
+  %t12 = phi i1 [ true, %logical_or_entry_3 ], [ %t11, %logical_or_right_end_3 ]
   br label %logical_or_right_end_0
 
 logical_or_right_end_0:
   br label %logical_or_merge_0
 
 logical_or_merge_0:
-  %t9 = phi i1 [ true, %logical_or_entry_0 ], [ %t8, %logical_or_right_end_0 ]
-  ret i1 %t9
+  %t13 = phi i1 [ true, %logical_or_entry_0 ], [ %t12, %logical_or_right_end_0 ]
+  ret i1 %t13
 }
 
 define i8* @slice_text(i8* %text, double %start, double %end) {
@@ -1855,56 +1855,56 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
-@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
+@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
 @.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
+@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
+@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
+@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
+@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
+@.str.len12.h1147459442 = private unnamed_addr constant [13 x i8] c"logExecution\00"
+@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len5.h515589823 = private unnamed_addr constant [6 x i8] c"trace\00"
+@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
 @.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
 @.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
-@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
-@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
-@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
-@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
 @.str.len12.h1170311443 = private unnamed_addr constant [13 x i8] c"logexecution\00"
-@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
-@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
-@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
-@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len12.h1147459442 = private unnamed_addr constant [13 x i8] c"logExecution\00"
-@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
-@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.str.len5.h515589823 = private unnamed_addr constant [6 x i8] c"trace\00"
-@.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"

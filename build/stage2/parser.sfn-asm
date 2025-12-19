@@ -3453,149 +3453,154 @@
             .if trimmed_expression_tokens.length > 0
                 .span 2399 13 2399 83
                 eval return_expression = expression_from_tokens(trimmed_expression_tokens)
+            .else
+                .if capture.tokens.length > 0
+                    .span 2401 13 2401 72
+                    eval return_expression = expression_from_tokens(capture.tokens)
+                .endif
             .endif
-            .span 2402 9 2402 47
+            .span 2404 9 2404 47
             eval current = skip_trivia(capture.parser)
-            .span 2403 9 2403 51
+            .span 2405 9 2405 51
             eval let terminator = parser_peek_raw(current)
             .if symbol_matches(terminator, ";")
-                .span 2405 13 2405 67
+                .span 2407 13 2407 67
                 eval block_tokens = append_token(block_tokens, terminator)
-                .span 2406 13 2406 51
+                .span 2408 13 2408 51
                 eval current = parser_advance_raw(current)
             .endif
-            .span 2409 5 2409 51
+            .span 2411 5 2411 51
             eval block_tokens = trim_token_edges(block_tokens)
-            .span 2411 5 2411 64
+            .span 2413 5 2413 64
             eval let statement_span = source_span_from_tokens(block_tokens)
-            .span 2413 5 2413 44
+            .span 2415 5 2415 44
             eval let mut statements -> Statement[] = []
-            .span 2414 5 2414 130
+            .span 2416 5 2416 130
             eval statements = append_statement(statements, Statement.ReturnStatement { expression: return_expression, span: statement_span })
-            .span 2415 9 2415 60
+            .span 2417 9 2417 60
             eval let text = trim_text(tokens_to_text(block_tokens))
-            .span 2416 9 2416 83
+            .span 2418 9 2418 83
             eval body = Block { tokens: block_tokens, text: text, statements: statements }
         .else
-            .span 2418 9 2418 58
+            .span 2420 9 2420 58
             eval let capture = collect_until(current, [";", "}"])
-            .span 2419 9 2419 74
+            .span 2421 9 2421 74
             eval let trimmed_expression_tokens = trim_token_edges(capture.tokens)
             .if trimmed_expression_tokens.length == 0
-                .span 2421 13 2421 90
+                .span 2423 13 2423 90
                 ret MatchCaseParseResult { parser: original, case: null, success: false }
             .endif
-            .span 2424 9 2424 76
+            .span 2426 9 2426 76
             eval let expression = expression_from_tokens(trimmed_expression_tokens)
-            .span 2426 9 2426 46
+            .span 2428 9 2428 46
             eval let mut block_tokens -> Token[] = []
-            .span 2427 9 2427 37
+            .span 2429 9 2429 37
             eval let mut index -> number = 0
             .loop
                 .if index >= capture.tokens.length
                     break
                 .endif
-                .span 2432 13 2432 78
+                .span 2434 13 2434 78
                 eval block_tokens = append_token(block_tokens, capture.tokens[index])
-                .span 2433 13 2433 24
+                .span 2435 13 2435 24
                 eval index += 1
             .endloop
-            .span 2436 9 2436 47
+            .span 2438 9 2438 47
             eval current = skip_trivia(capture.parser)
-            .span 2437 9 2437 51
+            .span 2439 9 2439 51
             eval let terminator = parser_peek_raw(current)
             .if symbol_matches(terminator, ";")
-                .span 2439 13 2439 67
+                .span 2441 13 2441 67
                 eval block_tokens = append_token(block_tokens, terminator)
-                .span 2440 13 2440 51
+                .span 2442 13 2442 51
                 eval current = parser_advance_raw(current)
             .endif
-            .span 2443 5 2443 51
+            .span 2445 5 2445 51
             eval block_tokens = trim_token_edges(block_tokens)
-            .span 2445 5 2445 64
+            .span 2447 5 2447 64
             eval let statement_span = source_span_from_tokens(block_tokens)
-            .span 2447 5 2447 44
+            .span 2449 5 2449 44
             eval let mut statements -> Statement[] = []
-            .span 2448 5 2448 127
+            .span 2450 5 2450 127
             eval statements = append_statement(statements, Statement.ExpressionStatement { expression: expression, span: statement_span })
-            .span 2449 9 2449 60
+            .span 2451 9 2451 60
             eval let text = trim_text(tokens_to_text(block_tokens))
-            .span 2450 9 2450 83
+            .span 2452 9 2452 83
             eval body = Block { tokens: block_tokens, text: text, statements: statements }
         .endif
     .endif
     .if body == null
-        .span 2454 9 2454 86
+        .span 2456 9 2456 86
         ret MatchCaseParseResult { parser: original, case: null, success: false }
     .endif
-    .span 2457 5 2461 7
+    .span 2459 5 2463 7
     eval let case = MatchCase {
         pattern: pattern_expression,
         guard: guard_expression,
         body: body,
     }
-    .span 2463 5 2463 80
+    .span 2465 5 2465 80
     ret MatchCaseParseResult { parser: current, case: case, success: true }
 .endfn
 
 .fn parse_prompt_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult
 .meta return BlockStatementParseResult
 .meta effects none
-    .span 2466 27 2466 43
+    .span 2468 27 2468 43
     .param parser -> Parser
-    .span 2466 45 2466 70
+    .span 2468 45 2468 70
     .param decorators -> Decorator[]
-    .span 2467 5 2467 27
+    .span 2469 5 2469 27
     eval let original = parser
-    .span 2468 5 2468 43
+    .span 2470 5 2470 43
     eval let mut current = skip_trivia(parser)
-    .span 2469 5 2469 49
+    .span 2471 5 2471 49
     eval let prompt_token = parser_peek_raw(current)
     .if !identifier_matches(prompt_token, "prompt")
-        .span 2471 9 2471 96
+        .span 2473 9 2473 96
         ret BlockStatementParseResult { parser: original, statement: null, success: false }
     .endif
-    .span 2473 5 2473 50
+    .span 2475 5 2475 50
     eval current = consume_keyword(current, "prompt")
-    .span 2475 5 2475 36
-    eval current = skip_trivia(current)
-    .span 2476 5 2476 50
-    eval let channel_token = parser_peek_raw(current)
     .span 2477 5 2477 36
+    eval current = skip_trivia(current)
+    .span 2478 5 2478 50
+    eval let channel_token = parser_peek_raw(current)
+    .span 2479 5 2479 36
     eval let mut channel -> string = ""
     .if channel_token.kind.variant == "Identifier"
-        .span 2479 9 2479 50
+        .span 2481 9 2481 50
         eval channel = identifier_text(channel_token)
-        .span 2480 9 2480 47
+        .span 2482 9 2482 47
         eval current = parser_advance_raw(current)
     .else
         .if channel_token.kind.variant == "StringLiteral"
-            .span 2482 9 2482 55
+            .span 2484 9 2484 55
             eval channel = string_literal_value(channel_token)
-            .span 2483 9 2483 47
+            .span 2485 9 2485 47
             eval current = parser_advance_raw(current)
         .else
-            .span 2485 9 2485 96
+            .span 2487 9 2487 96
             ret BlockStatementParseResult { parser: original, statement: null, success: false }
         .endif
     .endif
-    .span 2488 5 2488 45
+    .span 2490 5 2490 45
     eval let block_result = parse_block(current)
     .if block_result.block.tokens.length == 0
-        .span 2490 9 2490 96
+        .span 2492 9 2492 96
         ret BlockStatementParseResult { parser: original, statement: null, success: false }
     .endif
-    .span 2492 5 2492 35
+    .span 2494 5 2494 35
     eval current = block_result.parser
-    .span 2493 5 2493 35
+    .span 2495 5 2495 35
     eval let body = block_result.block
-    .span 2495 5 2495 36
+    .span 2497 5 2497 36
     eval current = skip_trivia(current)
     .if symbol_matches(parser_peek_raw(current), ";")
-        .span 2497 9 2497 47
+        .span 2499 9 2499 47
         eval current = parser_advance_raw(current)
     .endif
-    .span 2500 5 2506 7
+    .span 2502 5 2508 7
     eval let statement = Statement.PromptStatement {
         channel: channel,
         keyword_token: prompt_token,
@@ -3603,411 +3608,416 @@
         body: body,
         decorators: decorators,
     }
-    .span 2507 5 2511 7
+    .span 2509 5 2513 7
     ret BlockStatementParseResult { parser: current, statement: statement, success: true }
 .endfn
 
 .fn parse_with_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult
 .meta return BlockStatementParseResult
 .meta effects none
-    .span 2514 25 2514 41
+    .span 2516 25 2516 41
     .param parser -> Parser
-    .span 2514 43 2514 68
+    .span 2516 43 2516 68
     .param decorators -> Decorator[]
-    .span 2515 5 2515 27
+    .span 2517 5 2517 27
     eval let original = parser
-    .span 2516 5 2516 43
+    .span 2518 5 2518 43
     eval let mut current = skip_trivia(parser)
     .if !identifier_matches(parser_peek_raw(current), "with")
-        .span 2518 9 2518 96
+        .span 2520 9 2520 96
         ret BlockStatementParseResult { parser: original, statement: null, success: false }
     .endif
-    .span 2520 5 2520 48
+    .span 2522 5 2522 48
     eval current = consume_keyword(current, "with")
-    .span 2522 5 2522 70
+    .span 2524 5 2524 70
     eval let clauses_capture = collect_until(skip_trivia(current), ["{"])
-    .span 2523 5 2523 38
+    .span 2525 5 2525 38
     eval current = clauses_capture.parser
-    .span 2524 5 2524 77
+    .span 2526 5 2526 77
     eval let clause_slices = split_token_slices_by_comma(clauses_capture.tokens)
-    .span 2525 5 2525 42
+    .span 2527 5 2527 42
     eval let mut clauses -> WithClause[] = []
-    .span 2526 5 2526 33
+    .span 2528 5 2528 33
     eval let mut index -> number = 0
     .loop
         .if index >= clause_slices.length
             break
         .endif
-        .span 2531 9 2531 67
+        .span 2533 9 2533 67
         eval let slice_tokens = trim_token_edges(clause_slices[index])
         .if slice_tokens.length > 0
-            .span 2533 13 2533 67
+            .span 2535 13 2535 67
             eval let expression = expression_from_tokens(slice_tokens)
-            .span 2534 13 2534 90
+            .span 2536 13 2536 90
             eval clauses = append_with_clause(clauses, WithClause { expression: expression })
         .endif
-        .span 2536 9 2536 20
+        .span 2538 9 2538 20
         eval index += 1
     .endloop
-    .span 2539 5 2539 45
+    .span 2541 5 2541 45
     eval let block_result = parse_block(current)
     .if block_result.block.tokens.length == 0
-        .span 2541 9 2541 96
+        .span 2543 9 2543 96
         ret BlockStatementParseResult { parser: original, statement: null, success: false }
     .endif
-    .span 2543 5 2543 35
+    .span 2545 5 2545 35
     eval current = block_result.parser
-    .span 2544 5 2544 35
+    .span 2546 5 2546 35
     eval let body = block_result.block
-    .span 2546 5 2546 36
+    .span 2548 5 2548 36
     eval current = skip_trivia(current)
     .if symbol_matches(parser_peek_raw(current), ";")
-        .span 2548 9 2548 47
+        .span 2550 9 2550 47
         eval current = parser_advance_raw(current)
     .endif
-    .span 2551 5 2555 7
+    .span 2553 5 2557 7
     eval let statement = Statement.WithStatement {
         clauses: clauses,
         body: body,
         decorators: decorators,
     }
-    .span 2557 5 2561 7
+    .span 2559 5 2563 7
     ret BlockStatementParseResult { parser: current, statement: statement, success: true }
 .endfn
 
 .fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult
 .meta return BlockStatementParseResult
 .meta effects none
-    .span 2564 27 2564 43
+    .span 2566 27 2566 43
     .param parser -> Parser
-    .span 2565 5 2565 27
+    .span 2567 5 2567 27
     eval let original = parser
-    .span 2566 5 2566 43
+    .span 2568 5 2568 43
     eval let mut current = skip_trivia(parser)
     .if !identifier_matches(parser_peek_raw(current), "return")
-        .span 2568 9 2568 96
+        .span 2570 9 2570 96
         ret BlockStatementParseResult { parser: original, statement: null, success: false }
     .endif
-    .span 2570 5 2570 46
+    .span 2572 5 2572 46
     eval let mut statement_tokens -> Token[] = []
-    .span 2571 5 2571 81
+    .span 2573 5 2573 81
     eval statement_tokens = append_token(statement_tokens, parser_peek_raw(current))
-    .span 2572 5 2572 50
+    .span 2574 5 2574 50
     eval current = consume_keyword(current, "return")
-    .span 2574 5 2574 67
+    .span 2576 5 2576 67
     eval let capture = collect_until(skip_trivia(current), [";", "}"])
-    .span 2575 5 2575 30
+    .span 2577 5 2577 30
     eval current = capture.parser
-    .span 2576 5 2576 52
+    .span 2578 5 2578 52
     eval let trimmed = trim_token_edges(capture.tokens)
-    .span 2578 5 2578 46
+    .span 2580 5 2580 46
     eval let mut expression -> Expression? = null
     .if trimmed.length > 0
-        .span 2580 9 2580 54
+        .span 2582 9 2582 54
         eval expression = expression_from_tokens(trimmed)
+    .else
+        .if capture.tokens.length > 0
+            .span 2584 9 2584 61
+            eval expression = expression_from_tokens(capture.tokens)
+        .endif
     .endif
-    .span 2583 5 2583 33
+    .span 2587 5 2587 33
     eval let mut index -> number = 0
     .loop
         .if index >= capture.tokens.length
             break
         .endif
-        .span 2588 9 2588 82
+        .span 2592 9 2592 82
         eval statement_tokens = append_token(statement_tokens, capture.tokens[index])
-        .span 2589 9 2589 20
+        .span 2593 9 2593 20
         eval index += 1
     .endloop
-    .span 2592 5 2592 36
+    .span 2596 5 2596 36
     eval current = skip_trivia(current)
-    .span 2593 5 2593 47
+    .span 2597 5 2597 47
     eval let terminator = parser_peek_raw(current)
     .if symbol_matches(terminator, ";")
-        .span 2595 9 2595 71
+        .span 2599 9 2599 71
         eval statement_tokens = append_token(statement_tokens, terminator)
-        .span 2596 9 2596 47
+        .span 2600 9 2600 47
         eval current = parser_advance_raw(current)
     .endif
-    .span 2599 5 2599 58
+    .span 2603 5 2603 58
     eval let span = source_span_from_tokens(statement_tokens)
-    .span 2601 5 2601 86
+    .span 2605 5 2605 86
     eval let statement = Statement.ReturnStatement { expression: expression, span: span }
-    .span 2602 5 2606 7
+    .span 2606 5 2610 7
     ret BlockStatementParseResult { parser: current, statement: statement, success: true }
 .endfn
 
 .fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult
 .meta return BlockStatementParseResult
 .meta effects none
-    .span 2609 31 2609 47
+    .span 2613 31 2613 47
     .param parser -> Parser
-    .span 2609 49 2609 74
+    .span 2613 49 2613 74
     .param decorators -> Decorator[]
     .if decorators.length > 0
-        .span 2611 9 2611 94
+        .span 2615 9 2615 94
         ret BlockStatementParseResult { parser: parser, statement: null, success: false }
     .endif
-    .span 2614 5 2614 43
+    .span 2618 5 2618 43
     eval let mut current = skip_trivia(parser)
-    .span 2615 5 2615 42
+    .span 2619 5 2619 42
     eval let start = parser_peek_raw(current)
     .if start.kind.variant == "EndOfFile"
-        .span 2617 9 2617 94
+        .span 2621 9 2621 94
         ret BlockStatementParseResult { parser: parser, statement: null, success: false }
     .endif
     .if start.kind.variant == "Symbol"
-        .span 2620 9 2620 32
+        .span 2624 9 2624 32
         eval let sym = start.lexeme
         .if strings_equal(sym, "}") || strings_equal(sym, "{")
-            .span 2622 13 2622 98
+            .span 2626 13 2626 98
             ret BlockStatementParseResult { parser: parser, statement: null, success: false }
         .endif
     .endif
-    .span 2626 5 2626 49
+    .span 2630 5 2630 49
     eval let capture = collect_until(current, [";"])
     .if capture.tokens.length == 0
-        .span 2628 9 2628 94
+        .span 2632 9 2632 94
         ret BlockStatementParseResult { parser: parser, statement: null, success: false }
     .endif
-    .span 2631 5 2631 46
+    .span 2635 5 2635 46
     eval let mut statement_tokens -> Token[] = []
-    .span 2632 5 2632 39
+    .span 2636 5 2636 39
     eval let mut token_index -> number = 0
     .loop
         .if token_index >= capture.tokens.length
             break
         .endif
-        .span 2637 9 2637 88
+        .span 2641 9 2641 88
         eval statement_tokens = append_token(statement_tokens, capture.tokens[token_index])
-        .span 2638 9 2638 26
+        .span 2642 9 2642 26
         eval token_index += 1
     .endloop
-    .span 2641 5 2641 52
+    .span 2645 5 2645 52
     eval let trimmed = trim_token_edges(capture.tokens)
     .if trimmed.length == 0
-        .span 2643 9 2643 94
+        .span 2647 9 2647 94
         ret BlockStatementParseResult { parser: parser, statement: null, success: false }
     .endif
-    .span 2646 5 2646 30
+    .span 2650 5 2650 30
     eval current = capture.parser
-    .span 2647 5 2647 36
+    .span 2651 5 2651 36
     eval current = skip_trivia(current)
-    .span 2648 5 2648 47
+    .span 2652 5 2652 47
     eval let terminator = parser_peek_raw(current)
     .if !symbol_matches(terminator, ";")
-        .span 2650 9 2650 94
+        .span 2654 9 2654 94
         ret BlockStatementParseResult { parser: parser, statement: null, success: false }
     .endif
-    .span 2652 5 2652 67
+    .span 2656 5 2656 67
     eval statement_tokens = append_token(statement_tokens, terminator)
-    .span 2653 5 2653 43
+    .span 2657 5 2657 43
     eval current = parser_advance_raw(current)
-    .span 2655 5 2655 54
+    .span 2659 5 2659 54
     eval let expression = expression_from_tokens(trimmed)
-    .span 2656 5 2656 58
+    .span 2660 5 2660 58
     eval let span = source_span_from_tokens(statement_tokens)
-    .span 2657 5 2657 90
+    .span 2661 5 2661 90
     eval let statement = Statement.ExpressionStatement { expression: expression, span: span }
-    .span 2658 5 2662 7
+    .span 2662 5 2666 7
     ret BlockStatementParseResult { parser: current, statement: statement, success: true }
 .endfn
 
 .fn parse_unknown(initial_parser -> Parser) -> StatementParseResult
 .meta return StatementParseResult
 .meta effects none
-    .span 2665 18 2665 42
+    .span 2669 18 2669 42
     .param initial_parser -> Parser
-    .span 2666 5 2666 47
+    .span 2670 5 2670 47
     eval let mut parser -> Parser = initial_parser
-    .span 2667 5 2667 34
+    .span 2671 5 2671 34
     eval parser = skip_trivia(parser)
-    .span 2668 5 2668 36
+    .span 2672 5 2672 36
     eval let mut tokens -> Token[] = []
-    .span 2669 5 2669 30
+    .span 2673 5 2673 30
     eval let mut current = parser
-    .span 2670 5 2670 33
+    .span 2674 5 2674 33
     eval let mut depth -> number = 0
-    .span 2671 5 2671 43
+    .span 2675 5 2675 43
     eval let iteration_limit -> number = 16384
-    .span 2672 5 2672 43
+    .span 2676 5 2676 43
     eval let mut iteration_count -> number = 0
-    .span 2673 5 2673 42
+    .span 2677 5 2677 42
     eval let mut truncated -> boolean = false
     .loop
         .if iteration_count >= iteration_limit
-            .span 2677 13 2677 30
+            .span 2681 13 2681 30
             eval truncated = true
-            .span 2678 13 2678 51
+            .span 2682 13 2682 51
             eval current = parser_advance_raw(current)
             break
         .endif
-        .span 2681 9 2681 30
+        .span 2685 9 2685 30
         eval iteration_count += 1
-        .span 2682 9 2682 44
+        .span 2686 9 2686 44
         eval let tok = parser_peek_raw(current)
-        .span 2683 9 2683 44
+        .span 2687 9 2687 44
         eval tokens = append_token(tokens, tok)
         .if symbol_matches(tok, "{")
-            .span 2686 13 2686 24
+            .span 2690 13 2690 24
             eval depth += 1
         .else
             .if symbol_matches(tok, "}")
                 .if depth > 0
-                    .span 2689 17 2689 28
+                    .span 2693 17 2693 28
                     eval depth -= 1
                 .endif
                 .if depth == 0
-                    .span 2692 17 2692 55
+                    .span 2696 17 2696 55
                     eval current = parser_advance_raw(current)
                     break
                 .endif
             .else
                 .if depth == 0 && symbol_matches(tok, ";")
-                    .span 2696 13 2696 51
+                    .span 2700 13 2700 51
                     eval current = parser_advance_raw(current)
                     break
                 .endif
             .endif
         .endif
         .if is_end_of_file(current, tok)
-            .span 2701 13 2701 51
+            .span 2705 13 2705 51
             eval current = parser_advance_raw(current)
             break
         .endif
-        .span 2705 9 2705 47
+        .span 2709 9 2709 47
         eval current = parser_advance_raw(current)
     .endloop
-    .span 2708 5 2708 53
+    .span 2712 5 2712 53
     eval let mut text -> string = tokens_to_text(tokens)
     .if truncated
-        .span 2710 9 2710 56
+        .span 2714 9 2714 56
         eval text = text + " /* parse_unknown truncated */"
     .endif
-    .span 2712 5 2712 66
+    .span 2716 5 2716 66
     eval let block = Statement.Unknown { tokens: tokens, text: text }
-    .span 2713 5 2713 35
+    .span 2717 5 2717 35
     eval parser = skip_trivia(current)
-    .span 2714 5 2714 70
+    .span 2718 5 2718 70
     ret StatementParseResult { parser: parser, statement: block }
 .endfn
 
 .fn identifier_matches(token -> Token, expected -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 2717 23 2717 37
+    .span 2721 23 2721 37
     .param token -> Token
-    .span 2717 39 2717 57
+    .span 2721 39 2721 57
     .param expected -> string
-    .span 2718 5 2718 31
+    .span 2722 5 2722 31
     eval let lexeme = token.lexeme
-    .span 2719 5 2719 65
+    .span 2723 5 2723 65
     ret lexeme.length > 0 && strings_equal(lexeme, expected)
 .endfn
 
 .fn symbol_matches(token -> Token, expected -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 2722 19 2722 33
+    .span 2726 19 2726 33
     .param token -> Token
-    .span 2722 35 2722 53
+    .span 2726 35 2726 53
     .param expected -> string
-    .span 2723 5 2723 31
+    .span 2727 5 2727 31
     eval let lexeme = token.lexeme
-    .span 2724 5 2724 65
+    .span 2728 5 2728 65
     ret lexeme.length > 0 && strings_equal(lexeme, expected)
 .endfn
 
 .fn decode_string_literal_escapes(text -> string) -> string
 .meta return string
 .meta effects none
-    .span 2727 34 2727 48
+    .span 2731 34 2731 48
     .param text -> string
     .if text.length == 0
-        .span 2729 9 2729 19
+        .span 2733 9 2733 19
         ret ""
     .endif
-    .span 2731 5 2731 36
+    .span 2735 5 2735 36
     eval let mut decoded -> string = ""
-    .span 2732 5 2732 33
+    .span 2736 5 2736 33
     eval let mut index -> number = 0
     .loop
         .if index >= text.length
             break
         .endif
-        .span 2737 9 2737 39
+        .span 2741 9 2741 39
         eval let ch = char_at(text, index)
         .if ch == "\\"
-            .span 2739 13 2739 40
+            .span 2743 13 2743 40
             eval let next_index = index + 1
             .if next_index >= text.length
-                .span 2741 17 2741 40
+                .span 2745 17 2745 40
                 eval decoded = decoded + ch
-                .span 2742 17 2742 28
+                .span 2746 17 2746 28
                 eval index += 1
                 continue
             .endif
-            .span 2745 13 2745 53
+            .span 2749 13 2749 53
             eval let escaped = char_at(text, next_index)
             .if escaped == "n"
-                .span 2747 17 2747 42
+                .span 2751 17 2751 42
                 eval decoded = decoded + "\n"
             .else
                 .if escaped == "t"
-                    .span 2749 17 2749 42
+                    .span 2753 17 2753 42
                     eval decoded = decoded + "\t"
                 .else
                     .if escaped == "r"
-                        .span 2751 17 2751 42
+                        .span 2755 17 2755 42
                         eval decoded = decoded + "\r"
                     .else
                         .if escaped == "\""
-                            .span 2753 17 2753 42
+                            .span 2757 17 2757 42
                             eval decoded = decoded + "\""
                         .else
                             .if escaped == "\\"
-                                .span 2755 17 2755 42
+                                .span 2759 17 2759 42
                                 eval decoded = decoded + "\\"
                             .else
-                                .span 2757 17 2757 45
+                                .span 2761 17 2761 45
                                 eval decoded = decoded + escaped
                             .endif
                         .endif
                     .endif
                 .endif
             .endif
-            .span 2759 13 2759 24
+            .span 2763 13 2763 24
             eval index += 2
             continue
         .endif
-        .span 2762 9 2762 32
+        .span 2766 9 2766 32
         eval decoded = decoded + ch
-        .span 2763 9 2763 20
+        .span 2767 9 2767 20
         eval index += 1
     .endloop
-    .span 2765 5 2765 20
+    .span 2769 5 2769 20
     ret decoded
 .endfn
 
 .fn strip_loose_quotes(text -> string) -> string
 .meta return string
 .meta effects none
-    .span 2768 23 2768 37
+    .span 2772 23 2772 37
     .param text -> string
     .if text.length == 0
-        .span 2770 9 2770 21
+        .span 2774 9 2774 21
         ret text
     .endif
-    .span 2772 5 2772 33
+    .span 2776 5 2776 33
     eval let mut start -> number = 0
-    .span 2773 5 2773 41
+    .span 2777 5 2777 41
     eval let mut end -> number = text.length
     .loop
         .if start >= end
             break
         .endif
-        .span 2778 9 2778 53
+        .span 2782 9 2782 53
         eval let first = char_code(char_at(text, start))
         .if first == 34
-            .span 2780 13 2780 24
+            .span 2784 13 2784 24
             eval start += 1
             continue
         .endif
@@ -4017,200 +4027,200 @@
         .if end <= start
             break
         .endif
-        .span 2789 9 2789 54
+        .span 2793 9 2793 54
         eval let last = char_code(char_at(text, end - 1))
         .if last == 34
-            .span 2791 13 2791 22
+            .span 2795 13 2795 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
     .if start == 0 && end == text.length
-        .span 2797 9 2797 21
+        .span 2801 9 2801 21
         ret text
     .endif
-    .span 2799 5 2799 40
+    .span 2803 5 2803 40
     ret substring(text, start, end)
 .endfn
 
 .fn identifier_text(token -> Token) -> string
 .meta return string
 .meta effects none
-    .span 2802 20 2802 34
+    .span 2806 20 2806 34
     .param token -> Token
-    .span 2803 5 2803 25
+    .span 2807 5 2807 25
     ret token.lexeme
 .endfn
 
 .fn string_literal_value(token -> Token) -> string
 .meta return string
 .meta effects none
-    .span 2806 25 2806 39
+    .span 2810 25 2810 39
     .param token -> Token
-    .span 2807 5 2807 31
+    .span 2811 5 2811 31
     eval let lexeme = token.lexeme
-    .span 2808 5 2808 53
+    .span 2812 5 2812 53
     eval let stripped = strip_surrounding_quotes(lexeme)
-    .span 2809 5 2809 52
+    .span 2813 5 2813 52
     ret decode_string_literal_escapes(stripped)
 .endfn
 
 .fn skip_trivia(parser -> Parser) -> Parser
 .meta return Parser
 .meta effects none
-    .span 2812 16 2812 32
+    .span 2816 16 2816 32
     .param parser -> Parser
-    .span 2813 5 2813 30
+    .span 2817 5 2817 30
     eval let mut current = parser
     .loop
         .if current.index >= current.tokens.length
             break
         .endif
-        .span 2818 9 2818 51
+        .span 2822 9 2822 51
         eval let token = current.tokens[current.index]
         .if is_trivia_token(token)
-            .span 2820 13 2820 51
+            .span 2824 13 2824 51
             eval current = parser_advance_raw(current)
             continue
         .endif
         break
     .endloop
-    .span 2825 5 2825 20
+    .span 2829 5 2829 20
     ret current
 .endfn
 
 .fn parser_peek_raw(parser -> Parser) -> Token
 .meta return Token
 .meta effects none
-    .span 2828 20 2828 36
+    .span 2832 20 2832 36
     .param parser -> Parser
     .if parser.index >= parser.tokens.length
-        .span 2830 9 2830 56
+        .span 2834 9 2834 56
         ret parser.tokens[parser.tokens.length - 1]
     .endif
-    .span 2832 5 2832 40
+    .span 2836 5 2836 40
     ret parser.tokens[parser.index]
 .endfn
 
 .fn parser_advance_raw(parser -> Parser) -> Parser
 .meta return Parser
 .meta effects none
-    .span 2835 23 2835 39
+    .span 2839 23 2839 39
     .param parser -> Parser
     .if parser.index + 1 > parser.tokens.length
-        .span 2837 9 2837 23
+        .span 2841 9 2841 23
         ret parser
     .endif
-    .span 2839 5 2842 7
+    .span 2843 5 2846 7
     ret Parser { tokens: parser.tokens, index: parser.index + 1 }
 .endfn
 
 .fn consume_keyword(initial_parser -> Parser, keyword -> string) -> Parser
 .meta return Parser
 .meta effects none
-    .span 2845 20 2845 44
+    .span 2849 20 2849 44
     .param initial_parser -> Parser
-    .span 2845 46 2845 63
+    .span 2849 46 2849 63
     .param keyword -> string
-    .span 2846 5 2846 47
+    .span 2850 5 2850 47
     eval let mut parser -> Parser = initial_parser
-    .span 2847 5 2847 34
+    .span 2851 5 2851 34
     eval parser = skip_trivia(parser)
-    .span 2848 5 2848 41
+    .span 2852 5 2852 41
     eval let token = parser_peek_raw(parser)
     .if identifier_matches(token, keyword)
-        .span 2850 9 2850 43
+        .span 2854 9 2854 43
         ret parser_advance_raw(parser)
     .endif
-    .span 2852 5 2852 19
+    .span 2856 5 2856 19
     ret parser
 .endfn
 
 .fn consume_symbol(initial_parser -> Parser, symbol -> string) -> Parser
 .meta return Parser
 .meta effects none
-    .span 2855 19 2855 43
+    .span 2859 19 2859 43
     .param initial_parser -> Parser
-    .span 2855 45 2855 61
+    .span 2859 45 2859 61
     .param symbol -> string
-    .span 2856 5 2856 47
+    .span 2860 5 2860 47
     eval let mut parser -> Parser = initial_parser
-    .span 2857 5 2857 34
+    .span 2861 5 2861 34
     eval parser = skip_trivia(parser)
-    .span 2858 5 2858 41
+    .span 2862 5 2862 41
     eval let token = parser_peek_raw(parser)
     .if symbol_matches(token, symbol)
-        .span 2860 9 2860 43
+        .span 2864 9 2864 43
         ret parser_advance_raw(parser)
     .endif
-    .span 2862 5 2862 19
+    .span 2866 5 2866 19
     ret parser
 .endfn
 
 .fn collect_until(parser -> Parser, terminators -> string[]) -> CaptureResult
 .meta return CaptureResult
 .meta effects none
-    .span 2865 18 2865 34
+    .span 2869 18 2869 34
     .param parser -> Parser
-    .span 2865 36 2865 59
+    .span 2869 36 2869 59
     .param terminators -> string[]
-    .span 2866 5 2866 30
+    .span 2870 5 2870 30
     eval let mut current = parser
-    .span 2867 5 2867 38
+    .span 2871 5 2871 38
     eval let mut captured -> Token[] = []
-    .span 2868 5 2868 39
+    .span 2872 5 2872 39
     eval let mut paren_depth -> number = 0
-    .span 2869 5 2869 39
+    .span 2873 5 2873 39
     eval let mut brace_depth -> number = 0
-    .span 2870 5 2870 41
+    .span 2874 5 2874 41
     eval let mut bracket_depth -> number = 0
     .loop
-        .span 2873 9 2873 46
+        .span 2877 9 2877 46
         eval let token = parser_peek_raw(current)
         .if token.kind.variant == "EndOfFile"
             break
         .endif
-        .span 2878 9 2878 86
+        .span 2882 9 2882 86
         eval let is_balanced = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0
-        .span 2879 9 2879 56
+        .span 2883 9 2883 56
         eval let is_symbol = token.kind.variant == "Symbol"
-        .span 2880 9 2880 37
+        .span 2884 9 2884 37
         eval let mut should_stop = false
         .if is_balanced && is_symbol
-            .span 2882 13 2882 76
+            .span 2886 13 2886 76
             eval should_stop = string_array_contains(terminators, token.lexeme)
         .endif
         .if should_stop
             break
         .endif
-        .span 2888 9 2888 50
+        .span 2892 9 2892 50
         eval captured = append_token(captured, token)
         .if token.kind.variant == "Symbol"
-            .span 2891 13 2891 36
+            .span 2895 13 2895 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "(")
-                .span 2893 17 2893 34
+                .span 2897 17 2897 34
                 eval paren_depth += 1
             .else
                 .if strings_equal(sym, ")") && paren_depth > 0
-                    .span 2895 17 2895 34
+                    .span 2899 17 2899 34
                     eval paren_depth -= 1
                 .else
                     .if strings_equal(sym, "{")
-                        .span 2897 17 2897 34
+                        .span 2901 17 2901 34
                         eval brace_depth += 1
                     .else
                         .if strings_equal(sym, "}") && brace_depth > 0
-                            .span 2899 17 2899 34
+                            .span 2903 17 2903 34
                             eval brace_depth -= 1
                         .else
                             .if strings_equal(sym, "[")
-                                .span 2901 17 2901 36
+                                .span 2905 17 2905 36
                                 eval bracket_depth += 1
                             .else
                                 .if strings_equal(sym, "]") && bracket_depth > 0
-                                    .span 2903 17 2903 36
+                                    .span 2907 17 2907 36
                                     eval bracket_depth -= 1
                                 .endif
                             .endif
@@ -4219,68 +4229,68 @@
                 .endif
             .endif
         .endif
-        .span 2907 9 2907 52
+        .span 2911 9 2911 52
         eval let advanced = parser_advance_raw(current)
         .if advanced.index == current.index
             break
         .endif
-        .span 2911 9 2911 28
+        .span 2915 9 2915 28
         eval current = advanced
     .endloop
-    .span 2914 5 2914 64
+    .span 2918 5 2918 64
     ret CaptureResult { parser: current, tokens: captured }
 .endfn
 
 .fn collect_parenthesized(parser -> Parser) -> ParenthesizedParseResult
 .meta return ParenthesizedParseResult
 .meta effects none
-    .span 2917 26 2917 42
+    .span 2921 26 2921 42
     .param parser -> Parser
-    .span 2918 5 2918 43
+    .span 2922 5 2922 43
     eval let mut current = skip_trivia(parser)
-    .span 2919 5 2919 42
+    .span 2923 5 2923 42
     eval let start = parser_peek_raw(current)
     .if !symbol_matches(start, "(")
-        .span 2921 9 2921 88
+        .span 2925 9 2925 88
         ret ParenthesizedParseResult { parser: parser, tokens: [], success: false }
     .endif
-    .span 2924 5 2924 43
+    .span 2928 5 2928 43
     eval current = parser_advance_raw(current)
-    .span 2925 5 2925 36
+    .span 2929 5 2929 36
     eval let mut tokens -> Token[] = []
-    .span 2926 5 2926 33
+    .span 2930 5 2930 33
     eval let mut depth -> number = 1
     .loop
-        .span 2929 9 2929 46
+        .span 2933 9 2933 46
         eval let token = parser_peek_raw(current)
         .if token.kind.variant == "EndOfFile"
-            .span 2931 13 2931 92
+            .span 2935 13 2935 92
             ret ParenthesizedParseResult { parser: parser, tokens: [], success: false }
         .endif
         .if token.kind.variant == "Symbol"
-            .span 2935 13 2935 36
+            .span 2939 13 2939 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "(")
-                .span 2937 17 2937 28
+                .span 2941 17 2941 28
                 eval depth += 1
             .else
                 .if strings_equal(sym, ")")
-                    .span 2939 17 2939 28
+                    .span 2943 17 2943 28
                     eval depth -= 1
                     .if depth == 0
-                        .span 2941 21 2941 59
+                        .span 2945 21 2945 59
                         eval current = parser_advance_raw(current)
                         break
                     .endif
                 .endif
             .endif
         .endif
-        .span 2947 9 2947 46
+        .span 2951 9 2951 46
         eval tokens = append_token(tokens, token)
-        .span 2948 9 2948 47
+        .span 2952 9 2952 47
         eval current = parser_advance_raw(current)
     .endloop
-    .span 2951 5 2951 88
+    .span 2955 5 2955 88
     ret ParenthesizedParseResult { parser: current, tokens: tokens, success: true }
 .endfn
 
@@ -4297,262 +4307,262 @@
 .fn collect_pattern_until_arrow(parser -> Parser) -> PatternCaptureResult
 .meta return PatternCaptureResult
 .meta effects none
-    .span 2960 32 2960 48
+    .span 2964 32 2964 48
     .param parser -> Parser
-    .span 2961 5 2961 43
+    .span 2965 5 2965 43
     eval let mut current = skip_trivia(parser)
-    .span 2962 5 2962 36
+    .span 2966 5 2966 36
     eval let mut tokens -> Token[] = []
     .loop
-        .span 2965 9 2965 46
+        .span 2969 9 2969 46
         eval let token = parser_peek_raw(current)
         .if token.kind.variant == "EndOfFile"
-            .span 2967 13 2967 88
+            .span 2971 13 2971 88
             ret PatternCaptureResult { parser: parser, tokens: [], success: false }
         .endif
         .if token.kind.variant == "Symbol"
-            .span 2970 13 2970 36
+            .span 2974 13 2974 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "=>") || strings_equal(sym, "->")
-                .span 2972 17 2972 55
+                .span 2976 17 2976 55
                 eval current = parser_advance_raw(current)
                 break
             .endif
         .endif
-        .span 2976 9 2976 46
+        .span 2980 9 2980 46
         eval tokens = append_token(tokens, token)
-        .span 2977 9 2977 52
+        .span 2981 9 2981 52
         eval let advanced = parser_advance_raw(current)
         .if advanced.index == current.index
-            .span 2979 13 2979 88
+            .span 2983 13 2983 88
             ret PatternCaptureResult { parser: parser, tokens: [], success: false }
         .endif
-        .span 2981 9 2981 28
+        .span 2985 9 2985 28
         eval current = advanced
     .endloop
-    .span 2984 5 2984 84
+    .span 2988 5 2988 84
     ret PatternCaptureResult { parser: current, tokens: tokens, success: true }
 .endfn
 
 .fn split_match_case_tokens(tokens -> Token[]) -> MatchCaseTokenSplit
 .meta return MatchCaseTokenSplit
 .meta effects none
-    .span 2987 28 2987 45
+    .span 2991 28 2991 45
     .param tokens -> Token[]
-    .span 2988 5 2988 44
+    .span 2992 5 2992 44
     eval let trimmed = trim_token_edges(tokens)
     .if trimmed.length == 0
-        .span 2990 9 2994 11
+        .span 2994 9 2998 11
         ret MatchCaseTokenSplit { pattern_tokens: [], guard_tokens: [], has_guard: false }
     .endif
-    .span 2997 5 2997 64
+    .span 3001 5 3001 64
     eval let guard_index = find_top_level_identifier(trimmed, "if")
     .if guard_index == -1
-        .span 2999 9 3003 11
+        .span 3003 9 3007 11
         ret MatchCaseTokenSplit { pattern_tokens: trimmed, guard_tokens: [], has_guard: false }
     .endif
-    .span 3006 5 3006 81
+    .span 3010 5 3010 81
     eval let pattern_tokens = trim_token_edges(token_slice(trimmed, 0, guard_index))
-    .span 3007 5 3007 96
+    .span 3011 5 3011 96
     eval let guard_tokens = trim_token_edges(token_slice(trimmed, guard_index + 1, trimmed.length))
-    .span 3009 5 3013 7
+    .span 3013 5 3017 7
     ret MatchCaseTokenSplit { pattern_tokens: pattern_tokens, guard_tokens: guard_tokens, has_guard: true }
 .endfn
 
 .fn parse_decorator_argument(tokens -> Token[]) -> DecoratorArgument?
 .meta return DecoratorArgument?
 .meta effects none
-    .span 3016 29 3016 46
+    .span 3020 29 3020 46
     .param tokens -> Token[]
     .if tokens.length == 0
-        .span 3018 9 3018 21
+        .span 3022 9 3022 21
         ret null
     .endif
-    .span 3021 5 3021 52
+    .span 3025 5 3025 52
     eval let colon_index = find_top_level_colon(tokens)
     .if colon_index == -1
-        .span 3023 9 3023 55
+        .span 3027 9 3027 55
         eval let trimmed_tokens = trim_token_edges(tokens)
         .if trimmed_tokens.length == 0
-            .span 3025 13 3025 25
+            .span 3029 13 3029 25
             ret null
         .endif
-        .span 3027 9 3027 97
+        .span 3031 9 3031 97
         eval let expr = normalize_expression(trimmed_tokens, expression_from_tokens(trimmed_tokens))
-        .span 3028 9 3028 67
+        .span 3032 9 3032 67
         ret DecoratorArgument { name: null, expression: expr }
     .endif
-    .span 3031 5 3031 77
+    .span 3035 5 3035 77
     eval let name_tokens = trim_token_edges(token_slice(tokens, 0, colon_index))
-    .span 3032 5 3032 94
+    .span 3036 5 3036 94
     eval let value_tokens = trim_token_edges(token_slice(tokens, colon_index + 1, tokens.length))
     .if value_tokens.length == 0
-        .span 3035 9 3035 21
+        .span 3039 9 3039 21
         ret null
     .endif
-    .span 3038 5 3038 60
+    .span 3042 5 3042 60
     eval let name_text = trim_text(tokens_to_text(name_tokens))
     .if name_text.length == 0
-        .span 3040 9 3040 21
+        .span 3044 9 3044 21
         ret null
     .endif
-    .span 3043 5 3043 93
+    .span 3047 5 3047 93
     eval let mut expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens))
     .if expr.variant == "Raw"
-        .span 3045 9 3045 64
+        .span 3049 9 3049 64
         eval let raw_text = trim_text(tokens_to_text(value_tokens))
         .if raw_text.length >= 2 && char_at(raw_text, 0) == "\"" && char_at(raw_text, raw_text.length - 1) == "\""
-            .span 3047 13 3047 62
+            .span 3051 13 3051 62
             eval let literal = strip_surrounding_quotes(raw_text)
-            .span 3048 13 3048 64
+            .span 3052 13 3052 64
             eval expr = Expression.StringLiteral { value: literal }
         .else
             .if raw_text == "true"
-                .span 3050 13 3050 64
+                .span 3054 13 3054 64
                 eval expr = Expression.BooleanLiteral { value: "true" }
             .else
                 .if raw_text == "false"
-                    .span 3052 13 3052 65
+                    .span 3056 13 3056 65
                     eval expr = Expression.BooleanLiteral { value: "false" }
                 .else
                     .if looks_like_number(raw_text)
-                        .span 3054 13 3054 65
+                        .span 3058 13 3058 65
                         eval expr = Expression.NumberLiteral { value: raw_text }
                     .endif
                 .endif
             .endif
         .endif
     .endif
-    .span 3057 5 3057 68
+    .span 3061 5 3061 68
     ret DecoratorArgument { name: name_text, expression: expr }
 .endfn
 
 .fn normalize_expression(tokens -> Token[], expr -> Expression) -> Expression
 .meta return Expression
 .meta effects none
-    .span 3060 25 3060 42
+    .span 3064 25 3064 42
     .param tokens -> Token[]
-    .span 3060 44 3060 62
+    .span 3064 44 3064 62
     .param expr -> Expression
     .if expr.variant == "Raw"
-        .span 3062 9 3062 46
+        .span 3066 9 3066 46
         eval let filtered = filter_trivia(tokens)
         .if filtered.length == 1
-            .span 3064 13 3064 37
+            .span 3068 13 3068 37
             eval let token = filtered[0]
             .if token.kind.variant == "StringLiteral"
-                .span 3066 17 3066 88
+                .span 3070 17 3070 88
                 ret Expression.StringLiteral { value: string_literal_value(token) }
             .endif
             .if token.kind.variant == "BooleanLiteral"
-                .span 3069 17 3069 74
+                .span 3073 17 3073 74
                 ret Expression.BooleanLiteral { value: token.lexeme }
             .endif
             .if token.kind.variant == "NumberLiteral"
-                .span 3072 17 3072 73
+                .span 3076 17 3076 73
                 ret Expression.NumberLiteral { value: token.lexeme }
             .endif
         .endif
-        .span 3075 9 3075 45
+        .span 3079 9 3079 45
         eval let raw_text = trim_text(expr.text)
         .if raw_text.length >= 2 && char_at(raw_text, 0) == "\"" && char_at(raw_text, raw_text.length - 1) == "\""
-            .span 3077 13 3077 62
+            .span 3081 13 3081 62
             eval let literal = strip_surrounding_quotes(raw_text)
-            .span 3078 13 3078 64
+            .span 3082 13 3082 64
             ret Expression.StringLiteral { value: literal }
         .endif
         .if raw_text == "true"
-            .span 3081 13 3081 64
+            .span 3085 13 3085 64
             ret Expression.BooleanLiteral { value: "true" }
         .endif
         .if raw_text == "false"
-            .span 3084 13 3084 65
+            .span 3088 13 3088 65
             ret Expression.BooleanLiteral { value: "false" }
         .endif
         .if looks_like_number(raw_text)
-            .span 3087 13 3087 65
+            .span 3091 13 3091 65
             ret Expression.NumberLiteral { value: raw_text }
         .endif
     .endif
-    .span 3090 5 3090 17
+    .span 3094 5 3094 17
     ret expr
 .endfn
 
 .fn looks_like_number(text -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 3093 22 3093 36
+    .span 3097 22 3097 36
     .param text -> string
     .if text.length == 0
-        .span 3095 9 3095 22
+        .span 3099 9 3099 22
         ret false
     .endif
-    .span 3097 5 3097 44
+    .span 3101 5 3101 44
     eval let mut has_decimal -> boolean = false
-    .span 3098 5 3098 33
+    .span 3102 5 3102 33
     eval let mut index -> number = 0
     .if char_at(text, 0) == "-"
         .if text.length == 1
-            .span 3101 13 3101 26
+            .span 3105 13 3105 26
             ret false
         .endif
-        .span 3103 9 3103 19
+        .span 3107 9 3107 19
         eval index = 1
     .endif
     .loop
         .if index >= text.length
             break
         .endif
-        .span 3109 9 3109 39
+        .span 3113 9 3113 39
         eval let ch = char_at(text, index)
         .if ch == "."
             .if has_decimal
-                .span 3112 17 3112 30
+                .span 3116 17 3116 30
                 ret false
             .endif
-            .span 3114 13 3114 32
+            .span 3118 13 3118 32
             eval has_decimal = true
-            .span 3115 13 3115 24
+            .span 3119 13 3119 24
             eval index += 1
             continue
         .endif
         .if !is_decimal_digit(ch)
-            .span 3119 13 3119 26
+            .span 3123 13 3123 26
             ret false
         .endif
-        .span 3121 9 3121 20
+        .span 3125 9 3125 20
         eval index += 1
     .endloop
-    .span 3123 5 3123 17
+    .span 3127 5 3127 17
     ret true
 .endfn
 
 .fn is_decimal_digit(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 3126 21 3126 33
+    .span 3130 21 3130 33
     .param ch -> string
-    .span 3127 5 3136 22
+    .span 3131 5 3140 22
     ret ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9"
 .endfn
 
 .fn trim_token_edges(tokens -> Token[]) -> Token[]
 .meta return Token[]
 .meta effects none
-    .span 3139 21 3139 38
+    .span 3143 21 3143 38
     .param tokens -> Token[]
-    .span 3140 5 3140 33
+    .span 3144 5 3144 33
     eval let mut start -> number = 0
-    .span 3141 5 3141 43
+    .span 3145 5 3145 43
     eval let mut end -> number = tokens.length
     .loop
         .if start >= end
             break
         .endif
-        .span 3147 9 3147 35
+        .span 3151 9 3151 35
         eval let token = tokens[start]
         .if is_trivia_token(token)
-            .span 3149 13 3149 24
+            .span 3153 13 3153 24
             eval start += 1
             continue
         .endif
@@ -4562,195 +4572,195 @@
         .if end <= start
             break
         .endif
-        .span 3159 9 3159 37
+        .span 3163 9 3163 37
         eval let token = tokens[end - 1]
         .if is_trivia_token(token)
-            .span 3161 13 3161 22
+            .span 3165 13 3165 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
-    .span 3167 5 3167 44
+    .span 3171 5 3171 44
     ret token_slice(tokens, start, end)
 .endfn
 
 .fn token_slice(tokens -> Token[], start -> number, end -> number) -> Token[]
 .meta return Token[]
 .meta effects none
-    .span 3170 16 3170 33
+    .span 3174 16 3174 33
     .param tokens -> Token[]
-    .span 3170 35 3170 50
+    .span 3174 35 3174 50
     .param start -> number
-    .span 3170 52 3170 65
+    .span 3174 52 3174 65
     .param end -> number
-    .span 3171 5 3171 36
+    .span 3175 5 3175 36
     eval let mut result -> Token[] = []
-    .span 3172 5 3172 37
+    .span 3176 5 3176 37
     eval let mut index -> number = start
     .loop
         .if index >= end
             break
         .endif
-        .span 3177 9 3177 54
+        .span 3181 9 3181 54
         eval result = append_token(result, tokens[index])
-        .span 3178 9 3178 20
+        .span 3182 9 3182 20
         eval index += 1
     .endloop
-    .span 3180 5 3180 19
+    .span 3184 5 3184 19
     ret result
 .endfn
 
 .fn source_span_from_tokens(tokens -> Token[]) -> SourceSpan?
 .meta return SourceSpan?
 .meta effects none
-    .span 3183 28 3183 45
+    .span 3187 28 3187 45
     .param tokens -> Token[]
-    .span 3184 5 3184 44
+    .span 3188 5 3188 44
     eval let trimmed = trim_token_edges(tokens)
     .if trimmed.length == 0
-        .span 3186 9 3186 21
+        .span 3190 9 3190 21
         ret null
     .endif
-    .span 3189 5 3189 28
+    .span 3193 5 3193 28
     eval let start = trimmed[0]
-    .span 3190 5 3190 44
+    .span 3194 5 3194 44
     eval let last = trimmed[trimmed.length - 1]
-    .span 3191 5 3191 34
+    .span 3195 5 3195 34
     eval let mut end_line = last.line
-    .span 3192 5 3192 38
+    .span 3196 5 3196 38
     eval let mut end_column = last.column
-    .span 3194 5 3194 30
+    .span 3198 5 3198 30
     eval let lexeme = last.lexeme
-    .span 3195 5 3195 33
+    .span 3199 5 3199 33
     eval let mut index -> number = 0
     .loop
         .if index >= lexeme.length
             break
         .endif
-        .span 3200 9 3200 41
+        .span 3204 9 3204 41
         eval let ch = char_at(lexeme, index)
         .if ch == "\n"
-            .span 3202 13 3202 27
+            .span 3206 13 3206 27
             eval end_line += 1
-            .span 3203 13 3203 28
+            .span 3207 13 3207 28
             eval end_column = 1
         .else
-            .span 3205 13 3205 29
+            .span 3209 13 3209 29
             eval end_column += 1
         .endif
-        .span 3207 9 3207 20
+        .span 3211 9 3211 20
         eval index += 1
     .endloop
-    .span 3210 5 3215 7
+    .span 3214 5 3219 7
     ret SourceSpan { start_line: start.line, start_column: start.column, end_line: end_line, end_column: end_column }
 .endfn
 
 .fn trim_block_tokens(tokens -> Token[]) -> Token[]
 .meta return Token[]
 .meta effects none
-    .span 3218 22 3218 39
+    .span 3222 22 3222 39
     .param tokens -> Token[]
-    .span 3219 5 3219 33
+    .span 3223 5 3223 33
     eval let mut depth -> number = 0
-    .span 3220 5 3220 33
+    .span 3224 5 3224 33
     eval let mut index -> number = 0
-    .span 3221 5 3221 43
+    .span 3225 5 3225 43
     eval let mut end -> number = tokens.length
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 3226 9 3226 35
+        .span 3230 9 3230 35
         eval let token = tokens[index]
         .if token.kind.variant == "Symbol"
-            .span 3228 13 3228 36
+            .span 3232 13 3232 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "{")
-                .span 3230 17 3230 28
+                .span 3234 17 3234 28
                 eval depth += 1
             .else
                 .if strings_equal(sym, "}")
                     .if depth > 0
-                        .span 3233 21 3233 32
+                        .span 3237 21 3237 32
                         eval depth -= 1
                     .endif
                     .if depth == 0
-                        .span 3236 21 3236 37
+                        .span 3240 21 3240 37
                         eval end = index + 1
                         break
                     .endif
                 .endif
             .endif
         .endif
-        .span 3241 9 3241 20
+        .span 3245 9 3245 20
         eval index += 1
     .endloop
-    .span 3243 5 3243 40
+    .span 3247 5 3247 40
     ret token_slice(tokens, 0, end)
 .endfn
 
 .fn find_top_level_colon(tokens -> Token[]) -> number
 .meta return number
 .meta effects none
-    .span 3246 25 3246 42
+    .span 3250 25 3250 42
     .param tokens -> Token[]
-    .span 3247 5 3247 33
+    .span 3251 5 3251 33
     eval let mut angle -> number = 0
-    .span 3248 5 3248 33
-    eval let mut paren -> number = 0
-    .span 3249 5 3249 33
-    eval let mut brace -> number = 0
-    .span 3250 5 3250 35
-    eval let mut bracket -> number = 0
     .span 3252 5 3252 33
+    eval let mut paren -> number = 0
+    .span 3253 5 3253 33
+    eval let mut brace -> number = 0
+    .span 3254 5 3254 35
+    eval let mut bracket -> number = 0
+    .span 3256 5 3256 33
     eval let mut index -> number = 0
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 3257 9 3257 35
+        .span 3261 9 3261 35
         eval let token = tokens[index]
         .if token.kind.variant == "Symbol"
-            .span 3259 13 3259 36
+            .span 3263 13 3263 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "<")
-                .span 3261 17 3261 28
+                .span 3265 17 3265 28
                 eval angle += 1
             .else
                 .if strings_equal(sym, ">") && angle > 0
-                    .span 3263 17 3263 28
+                    .span 3267 17 3267 28
                     eval angle -= 1
                 .else
                     .if strings_equal(sym, "(")
-                        .span 3265 17 3265 28
+                        .span 3269 17 3269 28
                         eval paren += 1
                     .else
                         .if strings_equal(sym, ")") && paren > 0
-                            .span 3267 17 3267 28
+                            .span 3271 17 3271 28
                             eval paren -= 1
                         .else
                             .if strings_equal(sym, "{")
-                                .span 3269 17 3269 28
+                                .span 3273 17 3273 28
                                 eval brace += 1
                             .else
                                 .if strings_equal(sym, "}") && brace > 0
-                                    .span 3271 17 3271 28
+                                    .span 3275 17 3275 28
                                     eval brace -= 1
                                 .else
                                     .if strings_equal(sym, "[")
-                                        .span 3273 17 3273 30
+                                        .span 3277 17 3277 30
                                         eval bracket += 1
                                     .else
                                         .if strings_equal(sym, "]") && bracket > 0
-                                            .span 3275 17 3275 30
+                                            .span 3279 17 3279 30
                                             eval bracket -= 1
                                         .else
                                             .if strings_equal(sym, ":")
-                                                .span 3277 17 3277 85
+                                                .span 3281 17 3281 85
                                                 eval let at_top = angle == 0 && paren == 0 && brace == 0 && bracket == 0
                                                 .if at_top
-                                                    .span 3279 21 3279 34
+                                                    .span 3283 21 3283 34
                                                     ret index
                                                 .endif
                                             .endif
@@ -4763,158 +4773,158 @@
                 .endif
             .endif
         .endif
-        .span 3283 9 3283 20
+        .span 3287 9 3287 20
         eval index += 1
     .endloop
-    .span 3285 5 3285 15
+    .span 3289 5 3289 15
     ret -1
 .endfn
 
 .fn expression_from_tokens(tokens -> Token[]) -> Expression
 .meta return Expression
 .meta effects none
-    .span 3288 27 3288 44
+    .span 3292 27 3292 44
     .param tokens -> Token[]
-    .span 3289 5 3289 42
+    .span 3293 5 3293 42
     eval let filtered = filter_trivia(tokens)
     .if filtered.length == 0
-        .span 3291 9 3291 44
+        .span 3295 9 3295 44
         ret Expression.Raw { text: "" }
     .endif
     .if filtered.length == 1
-        .span 3295 9 3295 64
+        .span 3299 9 3299 64
         eval let single = expression_from_single_token(filtered[0])
         .if single != null
-            .span 3297 13 3297 27
+            .span 3301 13 3301 27
             ret single
         .endif
     .endif
-    .span 3301 5 3301 65
+    .span 3305 5 3305 65
     eval let state = ExpressionTokens { tokens: filtered, index: 0 }
-    .span 3302 5 3302 48
+    .span 3306 5 3306 48
     eval let result = parse_expression_bp(state, 0)
     .if !result.success
-        .span 3304 9 3304 75
-        ret Expression.Raw { text: trim_text(tokens_to_text(tokens)) }
-    .endif
-    .if result.state.index != result.state.tokens.length
         .span 3308 9 3308 75
         ret Expression.Raw { text: trim_text(tokens_to_text(tokens)) }
     .endif
-    .span 3311 5 3311 30
+    .if result.state.index != result.state.tokens.length
+        .span 3312 9 3312 75
+        ret Expression.Raw { text: trim_text(tokens_to_text(tokens)) }
+    .endif
+    .span 3315 5 3315 30
     ret result.expression
 .endfn
 
 .fn expression_from_single_token(token -> Token) -> Expression?
 .meta return Expression?
 .meta effects none
-    .span 3314 33 3314 47
+    .span 3318 33 3318 47
     .param token -> Token
     .if token.kind.variant == "NumberLiteral"
-        .span 3316 9 3316 65
+        .span 3320 9 3320 65
         ret Expression.NumberLiteral { value: token.lexeme }
     .endif
     .if token.kind.variant == "BooleanLiteral"
-        .span 3319 9 3319 66
+        .span 3323 9 3323 66
         ret Expression.BooleanLiteral { value: token.lexeme }
     .endif
     .if token.kind.variant == "StringLiteral"
-        .span 3322 9 3322 80
+        .span 3326 9 3326 80
         ret Expression.StringLiteral { value: string_literal_value(token) }
     .endif
     .if token.kind.variant == "Identifier"
-        .span 3325 9 3325 44
+        .span 3329 9 3329 44
         eval let value = identifier_text(token)
         .if strings_equal(value, "true")
-            .span 3327 13 3327 64
+            .span 3331 13 3331 64
             ret Expression.BooleanLiteral { value: "true" }
         .endif
         .if strings_equal(value, "false")
-            .span 3330 13 3330 65
+            .span 3334 13 3334 65
             ret Expression.BooleanLiteral { value: "false" }
         .endif
         .if strings_equal(value, "null")
-            .span 3333 13 3333 45
+            .span 3337 13 3337 45
             ret Expression.NullLiteral()
         .endif
-        .span 3335 9 3335 54
+        .span 3339 9 3339 54
         ret Expression.Identifier { name: value }
     .endif
-    .span 3337 5 3337 17
+    .span 3341 5 3341 17
     ret null
 .endfn
 
 .fn expression_tokens_collect_until(state -> ExpressionTokens, terminators -> string[]) -> ExpressionCollectResult
 .meta return ExpressionCollectResult
 .meta effects none
-    .span 3340 36 3340 61
+    .span 3344 36 3344 61
     .param state -> ExpressionTokens
-    .span 3340 63 3340 86
+    .span 3344 63 3344 86
     .param terminators -> string[]
-    .span 3341 5 3341 29
+    .span 3345 5 3345 29
     eval let mut current = state
-    .span 3342 5 3342 39
+    .span 3346 5 3346 39
     eval let mut collected -> Token[] = []
-    .span 3343 5 3343 33
+    .span 3347 5 3347 33
     eval let mut angle -> number = 0
-    .span 3344 5 3344 33
+    .span 3348 5 3348 33
     eval let mut paren -> number = 0
-    .span 3345 5 3345 33
+    .span 3349 5 3349 33
     eval let mut brace -> number = 0
-    .span 3346 5 3346 35
+    .span 3350 5 3350 35
     eval let mut bracket -> number = 0
     .loop
         .if expression_tokens_is_at_end(current)
-            .span 3350 13 3350 98
+            .span 3354 13 3354 98
             ret ExpressionCollectResult { state: current, tokens: collected, success: false }
         .endif
-        .span 3352 9 3352 53
+        .span 3356 9 3356 53
         eval let token = expression_tokens_peek(current)
-        .span 3353 9 3353 77
+        .span 3357 9 3357 77
         eval let at_top = angle == 0 && paren == 0 && brace == 0 && bracket == 0
         .if at_top && token.kind.variant == "Symbol" && string_array_contains(terminators, token.lexeme)
             break
         .endif
         .if token.kind.variant == "Symbol"
-            .span 3358 13 3358 36
+            .span 3362 13 3362 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "<")
-                .span 3360 17 3360 28
+                .span 3364 17 3364 28
                 eval angle += 1
             .else
                 .if strings_equal(sym, ">")
                     .if angle > 0
-                        .span 3363 21 3363 32
+                        .span 3367 21 3367 32
                         eval angle -= 1
                     .endif
                 .else
                     .if strings_equal(sym, "(")
-                        .span 3366 17 3366 28
+                        .span 3370 17 3370 28
                         eval paren += 1
                     .else
                         .if strings_equal(sym, ")")
                             .if paren > 0
-                                .span 3369 21 3369 32
+                                .span 3373 21 3373 32
                                 eval paren -= 1
                             .endif
                         .else
                             .if strings_equal(sym, "{")
-                                .span 3372 17 3372 28
+                                .span 3376 17 3376 28
                                 eval brace += 1
                             .else
                                 .if strings_equal(sym, "}")
                                     .if brace > 0
-                                        .span 3375 21 3375 32
+                                        .span 3379 21 3379 32
                                         eval brace -= 1
                                     .endif
                                 .else
                                     .if strings_equal(sym, "[")
-                                        .span 3378 17 3378 30
+                                        .span 3382 17 3382 30
                                         eval bracket += 1
                                     .else
                                         .if strings_equal(sym, "]")
                                             .if bracket > 0
-                                                .span 3381 21 3381 34
+                                                .span 3385 21 3385 34
                                                 eval bracket -= 1
                                             .endif
                                         .endif
@@ -4926,156 +4936,156 @@
                 .endif
             .endif
         .endif
-        .span 3385 9 3385 52
+        .span 3389 9 3389 52
         eval collected = append_token(collected, token)
-        .span 3386 9 3386 54
+        .span 3390 9 3390 54
         eval current = expression_tokens_advance(current)
     .endloop
-    .span 3389 5 3389 89
+    .span 3393 5 3393 89
     ret ExpressionCollectResult { state: current, tokens: collected, success: true }
 .endfn
 
 .fn collect_expression_block(state -> ExpressionTokens) -> ExpressionBlockParseResult
 .meta return ExpressionBlockParseResult
 .meta effects none
-    .span 3392 29 3392 54
+    .span 3396 29 3396 54
     .param state -> ExpressionTokens
-    .span 3393 5 3393 29
+    .span 3397 5 3397 29
     eval let mut current = state
     .if expression_tokens_is_at_end(current)
-        .span 3395 9 3395 90
-        ret ExpressionBlockParseResult { state: current, tokens: [], success: false }
-    .endif
-    .span 3397 5 3397 49
-    eval let first = expression_tokens_peek(current)
-    .if !symbol_matches(first, "{")
         .span 3399 9 3399 90
         ret ExpressionBlockParseResult { state: current, tokens: [], success: false }
     .endif
-    .span 3402 5 3402 36
+    .span 3401 5 3401 49
+    eval let first = expression_tokens_peek(current)
+    .if !symbol_matches(first, "{")
+        .span 3403 9 3403 90
+        ret ExpressionBlockParseResult { state: current, tokens: [], success: false }
+    .endif
+    .span 3406 5 3406 36
     eval let mut tokens -> Token[] = []
-    .span 3403 5 3403 33
+    .span 3407 5 3407 33
     eval let mut depth -> number = 0
     .loop
         .if expression_tokens_is_at_end(current)
-            .span 3407 13 3407 98
+            .span 3411 13 3411 98
             ret ExpressionBlockParseResult { state: current, tokens: tokens, success: false }
         .endif
-        .span 3409 9 3409 53
+        .span 3413 9 3413 53
         eval let token = expression_tokens_peek(current)
-        .span 3410 9 3410 46
+        .span 3414 9 3414 46
         eval tokens = append_token(tokens, token)
         .if token.kind.variant == "Symbol"
-            .span 3412 13 3412 36
+            .span 3416 13 3416 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "{")
-                .span 3414 17 3414 28
+                .span 3418 17 3418 28
                 eval depth += 1
             .else
                 .if strings_equal(sym, "}")
-                    .span 3416 17 3416 28
+                    .span 3420 17 3420 28
                     eval depth -= 1
                     .if depth == 0
-                        .span 3418 21 3418 66
+                        .span 3422 21 3422 66
                         eval current = expression_tokens_advance(current)
                         break
                     .endif
                 .endif
             .endif
         .endif
-        .span 3423 9 3423 54
+        .span 3427 9 3427 54
         eval current = expression_tokens_advance(current)
     .endloop
-    .span 3426 5 3426 89
+    .span 3430 5 3430 89
     ret ExpressionBlockParseResult { state: current, tokens: tokens, success: true }
 .endfn
 
 .fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResult
 .meta return LambdaParameterParseResult
 .meta effects none
-    .span 3429 27 3429 52
+    .span 3433 27 3433 52
     .param state -> ExpressionTokens
-    .span 3430 5 3430 29
+    .span 3434 5 3434 29
     eval let mut current = state
     .if expression_tokens_is_at_end(current)
-        .span 3432 9 3432 185
+        .span 3436 9 3436 185
         ret LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false, span: null }, success: false }
     .endif
-    .span 3435 5 3435 37
+    .span 3439 5 3439 37
     eval let start_index = current.index
-    .span 3436 5 3436 32
+    .span 3440 5 3440 32
     eval let mut is_mutable = false
-    .span 3437 5 3437 49
+    .span 3441 5 3441 49
     eval let token = expression_tokens_peek(current)
     .if token.kind.variant == "Identifier" && identifier_matches(token, "mut")
-        .span 3439 9 3439 27
+        .span 3443 9 3443 27
         eval is_mutable = true
-        .span 3440 9 3440 54
+        .span 3444 9 3444 54
         eval current = expression_tokens_advance(current)
         .if expression_tokens_is_at_end(current)
-            .span 3442 13 3442 189
+            .span 3446 13 3446 189
             ret LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false, span: null }, success: false }
         .endif
     .endif
-    .span 3446 5 3446 54
+    .span 3450 5 3450 54
     eval let name_token = expression_tokens_peek(current)
     .if name_token.kind.variant != "Identifier"
-        .span 3448 9 3448 185
+        .span 3452 9 3452 185
         ret LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false, span: null }, success: false }
     .endif
-    .span 3450 5 3450 44
+    .span 3454 5 3454 44
     eval let name = identifier_text(name_token)
-    .span 3451 5 3451 50
+    .span 3455 5 3455 50
     eval current = expression_tokens_advance(current)
-    .span 3453 5 3453 55
+    .span 3457 5 3457 55
     eval let mut type_annotation -> TypeAnnotation? = null
     .if !expression_tokens_is_at_end(current)
-        .span 3455 9 3455 88
+        .span 3459 9 3459 88
         eval let sep_result = expression_tokens_consume_type_separator(current, true, true)
         .if sep_result.found
-            .span 3457 13 3457 40
+            .span 3461 13 3461 40
             eval current = sep_result.state
-            .span 3458 13 3458 85
+            .span 3462 13 3462 85
             eval let capture = expression_tokens_collect_until(current, ["=", ",", ")"])
             .if !capture.success
-                .span 3460 17 3460 200
+                .span 3464 17 3464 200
                 ret LambdaParameterParseResult { state: current, parameter: Parameter { name: name, type_annotation: null, default_value: null, mutable: is_mutable, span: null }, success: false }
             .endif
-            .span 3462 13 3462 71
+            .span 3466 13 3466 71
             eval let type_text = trim_text(tokens_to_text(capture.tokens))
             .if type_text.length > 0
-                .span 3464 17 3464 70
+                .span 3468 17 3468 70
                 eval type_annotation = TypeAnnotation { text: type_text }
             .endif
-            .span 3466 13 3466 37
+            .span 3470 13 3470 37
             eval current = capture.state
         .endif
     .endif
-    .span 3470 5 3470 49
+    .span 3474 5 3474 49
     eval let mut default_value -> Expression? = null
     .if !expression_tokens_is_at_end(current)
-        .span 3472 9 3472 54
+        .span 3476 9 3476 54
         eval let assign = expression_tokens_peek(current)
         .if symbol_matches(assign, "=")
-            .span 3474 13 3474 58
+            .span 3478 13 3478 58
             eval current = expression_tokens_advance(current)
-            .span 3475 13 3475 80
+            .span 3479 13 3479 80
             eval let capture = expression_tokens_collect_until(current, [",", ")"])
             .if !capture.success
-                .span 3477 17 3477 211
+                .span 3481 17 3481 211
                 ret LambdaParameterParseResult { state: current, parameter: Parameter { name: name, type_annotation: type_annotation, default_value: null, mutable: is_mutable, span: null }, success: false }
             .endif
-            .span 3479 13 3479 68
+            .span 3483 13 3483 68
             eval default_value = expression_from_tokens(capture.tokens)
-            .span 3480 13 3480 37
+            .span 3484 13 3484 37
             eval current = capture.state
         .endif
     .endif
-    .span 3484 5 3484 82
+    .span 3488 5 3488 82
     eval let parameter_tokens = token_slice(state.tokens, start_index, current.index)
-    .span 3485 5 3485 58
+    .span 3489 5 3489 58
     eval let span = source_span_from_tokens(parameter_tokens)
-    .span 3487 5 3493 7
+    .span 3491 5 3497 7
     eval let parameter = Parameter {
         name: name,
         type_annotation: type_annotation,
@@ -5083,192 +5093,192 @@
         mutable: is_mutable,
         span: span,
     }
-    .span 3495 5 3495 95
+    .span 3499 5 3499 95
     ret LambdaParameterParseResult { state: current, parameter: parameter, success: true }
 .endfn
 
 .fn parse_lambda_parameter_list(state -> ExpressionTokens) -> LambdaParameterListParseResult
 .meta return LambdaParameterListParseResult
 .meta effects none
-    .span 3498 32 3498 57
+    .span 3502 32 3502 57
     .param state -> ExpressionTokens
-    .span 3499 5 3499 29
+    .span 3503 5 3503 29
     eval let mut current = state
-    .span 3500 5 3500 44
+    .span 3504 5 3504 44
     eval let mut parameters -> Parameter[] = []
     .if expression_tokens_is_at_end(current)
-        .span 3503 9 3503 106
+        .span 3507 9 3507 106
         ret LambdaParameterListParseResult { state: current, parameters: parameters, success: false }
     .endif
-    .span 3506 5 3506 51
+    .span 3510 5 3510 51
     eval let closing = expression_tokens_peek(current)
     .if symbol_matches(closing, ")")
-        .span 3508 9 3508 54
+        .span 3512 9 3512 54
         eval current = expression_tokens_advance(current)
-        .span 3509 9 3509 105
+        .span 3513 9 3513 105
         ret LambdaParameterListParseResult { state: current, parameters: parameters, success: true }
     .endif
     .loop
-        .span 3513 9 3513 60
+        .span 3517 9 3517 60
         eval let param_result = parse_lambda_parameter(current)
         .if !param_result.success
-            .span 3515 13 3515 110
+            .span 3519 13 3519 110
             ret LambdaParameterListParseResult { state: current, parameters: parameters, success: false }
         .endif
-        .span 3517 9 3517 75
+        .span 3521 9 3521 75
         eval parameters = append_parameter(parameters, param_result.parameter)
-        .span 3518 9 3518 38
+        .span 3522 9 3522 38
         eval current = param_result.state
         .if expression_tokens_is_at_end(current)
-            .span 3520 13 3520 110
+            .span 3524 13 3524 110
             ret LambdaParameterListParseResult { state: current, parameters: parameters, success: false }
         .endif
-        .span 3522 9 3522 57
+        .span 3526 9 3526 57
         eval let separator = expression_tokens_peek(current)
         .if separator.kind.variant == "Symbol"
             .if symbol_matches(separator, ",")
-                .span 3525 17 3525 62
+                .span 3529 17 3529 62
                 eval current = expression_tokens_advance(current)
                 continue
             .endif
             .if symbol_matches(separator, ")")
-                .span 3529 17 3529 62
+                .span 3533 17 3533 62
                 eval current = expression_tokens_advance(current)
                 break
             .endif
         .endif
-        .span 3533 9 3533 106
+        .span 3537 9 3537 106
         ret LambdaParameterListParseResult { state: current, parameters: parameters, success: false }
     .endloop
-    .span 3536 5 3536 101
+    .span 3540 5 3540 101
     ret LambdaParameterListParseResult { state: current, parameters: parameters, success: true }
 .endfn
 
 .fn parse_lambda_expression(state -> ExpressionTokens) -> ExpressionParseResult
 .meta return ExpressionParseResult
 .meta effects none
-    .span 3539 28 3539 53
+    .span 3543 28 3543 53
     .param state -> ExpressionTokens
-    .span 3540 5 3540 29
+    .span 3544 5 3544 29
     eval let mut current = state
     .if expression_tokens_is_at_end(current)
-        .span 3542 9 3542 48
-        ret expression_parse_failure(state)
-    .endif
-    .span 3544 5 3544 49
-    eval let token = expression_tokens_peek(current)
-    .if token.kind.variant != "Identifier" || !identifier_matches(token, "fn")
         .span 3546 9 3546 48
         ret expression_parse_failure(state)
     .endif
-    .span 3549 5 3549 50
-    eval current = expression_tokens_advance(current)
-    .if expression_tokens_is_at_end(current)
-        .span 3551 9 3551 48
+    .span 3548 5 3548 49
+    eval let token = expression_tokens_peek(current)
+    .if token.kind.variant != "Identifier" || !identifier_matches(token, "fn")
+        .span 3550 9 3550 48
         ret expression_parse_failure(state)
     .endif
-    .span 3553 5 3553 54
-    eval let open_paren = expression_tokens_peek(current)
-    .if !symbol_matches(open_paren, "(")
+    .span 3553 5 3553 50
+    eval current = expression_tokens_advance(current)
+    .if expression_tokens_is_at_end(current)
         .span 3555 9 3555 48
         ret expression_parse_failure(state)
     .endif
-    .span 3558 5 3558 50
-    eval current = expression_tokens_advance(current)
-    .span 3559 5 3559 62
-    eval let params_result = parse_lambda_parameter_list(current)
-    .if !params_result.success
-        .span 3561 9 3561 48
+    .span 3557 5 3557 54
+    eval let open_paren = expression_tokens_peek(current)
+    .if !symbol_matches(open_paren, "(")
+        .span 3559 9 3559 48
         ret expression_parse_failure(state)
     .endif
-    .span 3563 5 3563 35
+    .span 3562 5 3562 50
+    eval current = expression_tokens_advance(current)
+    .span 3563 5 3563 62
+    eval let params_result = parse_lambda_parameter_list(current)
+    .if !params_result.success
+        .span 3565 9 3565 48
+        ret expression_parse_failure(state)
+    .endif
+    .span 3567 5 3567 35
     eval current = params_result.state
-    .span 3564 5 3564 47
+    .span 3568 5 3568 47
     eval let parameters = params_result.parameters
-    .span 3566 5 3566 51
+    .span 3570 5 3570 51
     eval let mut return_type -> TypeAnnotation? = null
     .if !expression_tokens_is_at_end(current)
-        .span 3568 9 3568 88
+        .span 3572 9 3572 88
         eval let sep_result = expression_tokens_consume_type_separator(current, true, true)
         .if sep_result.found
-            .span 3570 13 3570 40
+            .span 3574 13 3574 40
             eval current = sep_result.state
-            .span 3571 13 3571 75
+            .span 3575 13 3575 75
             eval let capture = expression_tokens_collect_until(current, ["{"])
             .if !capture.success
-                .span 3573 17 3573 56
+                .span 3577 17 3577 56
                 ret expression_parse_failure(state)
             .endif
-            .span 3575 13 3575 71
+            .span 3579 13 3579 71
             eval let type_text = trim_text(tokens_to_text(capture.tokens))
             .if type_text.length > 0
-                .span 3577 17 3577 66
+                .span 3581 17 3581 66
                 eval return_type = TypeAnnotation { text: type_text }
             .endif
-            .span 3579 13 3579 37
+            .span 3583 13 3583 37
             eval current = capture.state
         .endif
     .endif
     .if expression_tokens_is_at_end(current)
-        .span 3584 9 3584 48
+        .span 3588 9 3588 48
         ret expression_parse_failure(state)
     .endif
-    .span 3587 5 3587 58
+    .span 3591 5 3591 58
     eval let block_result = collect_expression_block(current)
     .if !block_result.success
-        .span 3589 9 3589 48
+        .span 3593 9 3593 48
         ret expression_parse_failure(state)
     .endif
-    .span 3591 5 3591 34
+    .span 3595 5 3595 34
     eval current = block_result.state
-    .span 3593 5 3593 48
+    .span 3597 5 3597 48
     eval let mut block_tokens = block_result.tokens
-    .span 3594 5 3599 8
+    .span 3598 5 3603 8
     eval block_tokens = append_token(block_tokens, Token {
         kind: TokenKind.EndOfFile(),
         lexeme: "",
         line: 0,
         column: 0,
     })
-    .span 3600 5 3600 66
+    .span 3604 5 3604 66
     eval let block_parser = Parser { tokens: block_tokens, index: 0 }
-    .span 3601 5 3601 50
+    .span 3605 5 3605 50
     eval let parsed_block = parse_block(block_parser)
-    .span 3602 5 3602 35
+    .span 3606 5 3606 35
     eval let body = parsed_block.block
-    .span 3604 5 3612 7
+    .span 3608 5 3616 7
     ret ExpressionParseResult { state: current, expression: Expression.Lambda { parameters: parameters, body: body, return_type: return_type }, success: true }
 .endfn
 
 .fn parse_expression_bp(state -> ExpressionTokens, min_precedence -> number) -> ExpressionParseResult
 .meta return ExpressionParseResult
 .meta effects none
-    .span 3615 24 3615 49
+    .span 3619 24 3619 49
     .param state -> ExpressionTokens
-    .span 3615 51 3615 75
+    .span 3619 51 3619 75
     .param min_precedence -> number
-    .span 3616 5 3616 56
+    .span 3620 5 3620 56
     eval let prefix_result = parse_prefix_expression(state)
     .if !prefix_result.success
-        .span 3618 9 3618 30
+        .span 3622 9 3622 30
         ret prefix_result
     .endif
-    .span 3621 5 3621 49
+    .span 3625 5 3625 49
     eval let mut current_state = prefix_result.state
-    .span 3622 5 3622 56
+    .span 3626 5 3626 56
     eval let mut left_expression = prefix_result.expression
     .loop
         .if expression_tokens_is_at_end(current_state)
             break
         .endif
-        .span 3628 9 3628 59
+        .span 3632 9 3632 59
         eval let token = expression_tokens_peek(current_state)
         .if token.kind.variant != "Symbol"
             break
         .endif
-        .span 3633 9 3633 31
+        .span 3637 9 3637 31
         eval let op = token.lexeme
-        .span 3634 9 3634 48
+        .span 3638 9 3638 48
         eval let precedence = binary_precedence(op)
         .if precedence == -1
             break
@@ -5276,24 +5286,24 @@
         .if precedence < min_precedence
             break
         .endif
-        .span 3642 9 3642 66
+        .span 3646 9 3646 66
         eval current_state = expression_tokens_advance(current_state)
-        .span 3643 9 3643 77
+        .span 3647 9 3647 77
         eval let rhs_result = parse_expression_bp(current_state, precedence + 1)
         .if !rhs_result.success
-            .span 3645 13 3645 52
+            .span 3649 13 3649 52
             ret expression_parse_failure(state)
         .endif
-        .span 3647 9 3647 42
+        .span 3651 9 3651 42
         eval current_state = rhs_result.state
         .if op == ".."
-            .span 3649 13 3652 15
+            .span 3653 13 3656 15
             eval left_expression = Expression.Range {
                 start: left_expression,
                 end: rhs_result.expression,
             }
         .else
-            .span 3654 13 3658 15
+            .span 3658 13 3662 15
             eval left_expression = Expression.Binary {
                 operator: op,
                 left: left_expression,
@@ -5301,182 +5311,182 @@
             }
         .endif
     .endloop
-    .span 3662 5 3666 7
+    .span 3666 5 3670 7
     ret ExpressionParseResult { state: current_state, expression: left_expression, success: true }
 .endfn
 
 .fn parse_prefix_expression(state -> ExpressionTokens) -> ExpressionParseResult
 .meta return ExpressionParseResult
 .meta effects none
-    .span 3669 28 3669 53
+    .span 3673 28 3673 53
     .param state -> ExpressionTokens
     .if expression_tokens_is_at_end(state)
-        .span 3671 9 3671 48
+        .span 3675 9 3675 48
         ret expression_parse_failure(state)
     .endif
-    .span 3674 5 3674 47
+    .span 3678 5 3678 47
     eval let token = expression_tokens_peek(state)
     .if token.kind.variant == "Symbol"
-        .span 3676 9 3676 32
+        .span 3680 9 3680 32
         eval let sym = token.lexeme
         .if strings_equal(sym, "-") || strings_equal(sym, "!")
-            .span 3678 13 3678 61
+            .span 3682 13 3682 61
             eval let advanced = expression_tokens_advance(state)
-            .span 3679 13 3679 84
+            .span 3683 13 3683 84
             eval let operand_result = parse_expression_bp(advanced, unary_precedence())
             .if !operand_result.success
-                .span 3681 17 3681 39
+                .span 3685 17 3685 39
                 ret operand_result
             .endif
-            .span 3683 13 3690 15
+            .span 3687 13 3694 15
             ret ExpressionParseResult { state: operand_result.state, expression: Expression.Unary { operator: sym, operand: operand_result.expression }, success: true }
         .endif
     .endif
     .if token.kind.variant == "Identifier" && identifier_matches(token, "fn")
-        .span 3695 9 3695 60
+        .span 3699 9 3699 60
         eval let lambda_result = parse_lambda_expression(state)
         .if lambda_result.success
-            .span 3697 13 3697 34
+            .span 3701 13 3701 34
             ret lambda_result
         .endif
     .endif
-    .span 3701 5 3701 58
+    .span 3705 5 3705 58
     eval let primary_result = parse_primary_expression(state)
     .if !primary_result.success
-        .span 3703 9 3703 31
+        .span 3707 9 3707 31
         ret primary_result
     .endif
-    .span 3705 5 3705 81
+    .span 3709 5 3709 81
     ret parse_postfix_chain(primary_result.state, primary_result.expression)
 .endfn
 
 .fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult
 .meta return ExpressionParseResult
 .meta effects none
-    .span 3708 29 3708 54
+    .span 3712 29 3712 54
     .param state -> ExpressionTokens
     .if expression_tokens_is_at_end(state)
-        .span 3710 9 3710 48
+        .span 3714 9 3714 48
         ret expression_parse_failure(state)
     .endif
-    .span 3713 5 3713 47
+    .span 3717 5 3717 47
     eval let token = expression_tokens_peek(state)
     .if token.kind.variant == "NumberLiteral"
-        .span 3715 9 3719 11
+        .span 3719 9 3723 11
         ret ExpressionParseResult { state: expression_tokens_advance(state), expression: Expression.NumberLiteral { value: token.lexeme }, success: true }
     .endif
     .if token.kind.variant == "BooleanLiteral"
-        .span 3722 9 3726 11
+        .span 3726 9 3730 11
         ret ExpressionParseResult { state: expression_tokens_advance(state), expression: Expression.BooleanLiteral { value: token.lexeme }, success: true }
     .endif
     .if token.kind.variant == "StringLiteral"
-        .span 3729 9 3733 11
+        .span 3733 9 3737 11
         ret ExpressionParseResult { state: expression_tokens_advance(state), expression: Expression.StringLiteral { value: string_literal_value(token) }, success: true }
     .endif
     .if token.kind.variant == "Identifier"
-        .span 3736 9 3736 43
+        .span 3740 9 3740 43
         eval let name = identifier_text(token)
         .if strings_equal(name, "true")
-            .span 3738 13 3742 15
+            .span 3742 13 3746 15
             ret ExpressionParseResult { state: expression_tokens_advance(state), expression: Expression.BooleanLiteral { value: "true" }, success: true }
         .endif
         .if strings_equal(name, "false")
-            .span 3745 13 3749 15
+            .span 3749 13 3753 15
             ret ExpressionParseResult { state: expression_tokens_advance(state), expression: Expression.BooleanLiteral { value: "false" }, success: true }
         .endif
         .if strings_equal(name, "null")
-            .span 3752 13 3756 15
+            .span 3756 13 3760 15
             ret ExpressionParseResult { state: expression_tokens_advance(state), expression: Expression.NullLiteral(), success: true }
         .endif
-        .span 3758 9 3762 11
+        .span 3762 9 3766 11
         ret ExpressionParseResult { state: expression_tokens_advance(state), expression: Expression.Identifier { name: name }, success: true }
     .endif
     .if symbol_matches(token, "(")
-        .span 3765 9 3765 60
+        .span 3769 9 3769 60
         eval let inner_state = expression_tokens_advance(state)
-        .span 3766 9 3766 64
+        .span 3770 9 3770 64
         eval let inner_result = parse_expression_bp(inner_state, 0)
         .if !inner_result.success
-            .span 3768 13 3768 33
+            .span 3772 13 3772 33
             ret inner_result
         .endif
-        .span 3770 9 3770 46
+        .span 3774 9 3774 46
         eval let after_inner = inner_result.state
         .if expression_tokens_is_at_end(after_inner)
-            .span 3772 13 3772 52
-            ret expression_parse_failure(state)
-        .endif
-        .span 3774 9 3774 59
-        eval let closing = expression_tokens_peek(after_inner)
-        .if !symbol_matches(closing, ")")
             .span 3776 13 3776 52
             ret expression_parse_failure(state)
         .endif
-        .span 3778 9 3782 11
+        .span 3778 9 3778 59
+        eval let closing = expression_tokens_peek(after_inner)
+        .if !symbol_matches(closing, ")")
+            .span 3780 13 3780 52
+            ret expression_parse_failure(state)
+        .endif
+        .span 3782 9 3786 11
         ret ExpressionParseResult { state: expression_tokens_advance(after_inner), expression: inner_result.expression, success: true }
     .endif
     .if symbol_matches(token, "[")
-        .span 3786 9 3786 82
+        .span 3790 9 3790 82
         eval let array_result = parse_array_literal(expression_tokens_advance(state))
         .if !array_result.success
-            .span 3788 13 3788 52
+            .span 3792 13 3792 52
             ret expression_parse_failure(state)
         .endif
-        .span 3790 9 3794 11
+        .span 3794 9 3798 11
         ret ExpressionParseResult { state: array_result.state, expression: Expression.Array { elements: array_result.elements }, success: true }
     .endif
     .if symbol_matches(token, "{")
-        .span 3798 9 3798 84
+        .span 3802 9 3802 84
         eval let object_result = parse_object_literal(expression_tokens_advance(state))
         .if !object_result.success
-            .span 3800 13 3800 52
+            .span 3804 13 3804 52
             ret expression_parse_failure(state)
         .endif
-        .span 3802 9 3806 11
+        .span 3806 9 3810 11
         ret ExpressionParseResult { state: object_result.state, expression: Expression.Object { fields: object_result.fields }, success: true }
     .endif
-    .span 3809 5 3809 44
+    .span 3813 5 3813 44
     ret expression_parse_failure(state)
 .endfn
 
 .fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> ExpressionParseResult
 .meta return ExpressionParseResult
 .meta effects none
-    .span 3812 24 3812 49
+    .span 3816 24 3816 49
     .param state -> ExpressionTokens
-    .span 3812 51 3812 75
+    .span 3816 51 3816 75
     .param expression -> Expression
-    .span 3813 5 3813 35
+    .span 3817 5 3817 35
     eval let mut current_state = state
-    .span 3814 5 3814 45
+    .span 3818 5 3818 45
     eval let mut current_expression = expression
     .loop
         .if expression_tokens_is_at_end(current_state)
             break
         .endif
-        .span 3820 9 3820 59
+        .span 3824 9 3824 59
         eval let token = expression_tokens_peek(current_state)
         .if token.kind.variant != "Symbol"
             break
         .endif
-        .span 3825 9 3825 32
+        .span 3829 9 3829 32
         eval let sym = token.lexeme
         .if strings_equal(sym, ".")
-            .span 3827 13 3827 70
+            .span 3831 13 3831 70
             eval let after_dot = expression_tokens_advance(current_state)
             .if expression_tokens_is_at_end(after_dot)
-                .span 3829 17 3829 56
-                ret expression_parse_failure(state)
-            .endif
-            .span 3831 13 3831 66
-            eval let member_token = expression_tokens_peek(after_dot)
-            .if member_token.kind.variant != "Identifier"
                 .span 3833 17 3833 56
                 ret expression_parse_failure(state)
             .endif
             .span 3835 13 3835 66
+            eval let member_token = expression_tokens_peek(after_dot)
+            .if member_token.kind.variant != "Identifier"
+                .span 3837 17 3837 56
+                ret expression_parse_failure(state)
+            .endif
+            .span 3839 13 3839 66
             eval current_state = expression_tokens_advance(after_dot)
-            .span 3836 13 3839 15
+            .span 3840 13 3843 15
             eval current_expression = Expression.Member {
                 object: current_expression,
                 member: identifier_text(member_token),
@@ -5484,15 +5494,15 @@
             continue
         .endif
         .if strings_equal(sym, "(")
-            .span 3843 13 3843 67
+            .span 3847 13 3847 67
             eval let call_result = parse_call_arguments(current_state)
             .if !call_result.success
-                .span 3845 17 3845 56
+                .span 3849 17 3849 56
                 ret expression_parse_failure(state)
             .endif
-            .span 3847 13 3847 47
+            .span 3851 13 3851 47
             eval current_state = call_result.state
-            .span 3848 13 3851 15
+            .span 3852 13 3855 15
             eval current_expression = Expression.Call {
                 callee: current_expression,
                 arguments: call_result.arguments,
@@ -5500,29 +5510,29 @@
             continue
         .endif
         .if strings_equal(sym, "[")
-            .span 3855 13 3855 72
+            .span 3859 13 3859 72
             eval let index_state = expression_tokens_advance(current_state)
-            .span 3856 13 3856 68
+            .span 3860 13 3860 68
             eval let index_result = parse_expression_bp(index_state, 0)
             .if !index_result.success
-                .span 3858 17 3858 56
-                ret expression_parse_failure(state)
-            .endif
-            .span 3860 13 3860 50
-            eval let after_index = index_result.state
-            .if expression_tokens_is_at_end(after_index)
                 .span 3862 17 3862 56
                 ret expression_parse_failure(state)
             .endif
-            .span 3864 13 3864 63
-            eval let closing = expression_tokens_peek(after_index)
-            .if !symbol_matches(closing, "]")
+            .span 3864 13 3864 50
+            eval let after_index = index_result.state
+            .if expression_tokens_is_at_end(after_index)
                 .span 3866 17 3866 56
                 ret expression_parse_failure(state)
             .endif
-            .span 3868 13 3868 68
+            .span 3868 13 3868 63
+            eval let closing = expression_tokens_peek(after_index)
+            .if !symbol_matches(closing, "]")
+                .span 3870 17 3870 56
+                ret expression_parse_failure(state)
+            .endif
+            .span 3872 13 3872 68
             eval current_state = expression_tokens_advance(after_index)
-            .span 3869 13 3872 15
+            .span 3873 13 3876 15
             eval current_expression = Expression.Index {
                 sequence: current_expression,
                 index: index_result.expression,
@@ -5533,475 +5543,475 @@
             .if !expression_is_struct_target(current_expression)
                 break
             .endif
-            .span 3879 13 3879 116
+            .span 3883 13 3883 116
             eval let struct_result = parse_struct_literal(expression_tokens_advance(current_state), current_expression)
             .if !struct_result.success
-                .span 3881 17 3881 56
+                .span 3885 17 3885 56
                 ret expression_parse_failure(state)
             .endif
-            .span 3883 13 3883 49
+            .span 3887 13 3887 49
             eval current_state = struct_result.state
-            .span 3884 13 3884 59
+            .span 3888 13 3888 59
             eval current_expression = struct_result.expression
             continue
         .endif
         break
     .endloop
-    .span 3890 5 3894 7
+    .span 3894 5 3898 7
     ret ExpressionParseResult { state: current_state, expression: current_expression, success: true }
 .endfn
 
 .fn parse_call_arguments(state -> ExpressionTokens) -> CallArgumentsParseResult
 .meta return CallArgumentsParseResult
 .meta effects none
-    .span 3897 25 3897 50
+    .span 3901 25 3901 50
     .param state -> ExpressionTokens
-    .span 3898 5 3898 56
+    .span 3902 5 3902 56
     eval let mut current = expression_tokens_advance(state)
-    .span 3899 5 3899 44
+    .span 3903 5 3903 44
     eval let mut arguments -> Expression[] = []
     .if expression_tokens_is_at_end(current)
-        .span 3902 9 3902 89
+        .span 3906 9 3906 89
         ret CallArgumentsParseResult { state: state, arguments: [], success: false }
     .endif
-    .span 3905 5 3905 57
+    .span 3909 5 3909 57
     eval let closing_token = expression_tokens_peek(current)
     .if closing_token.kind.variant == "Symbol" && symbol_matches(closing_token, ")")
-        .span 3908 9 3908 54
+        .span 3912 9 3912 54
         eval current = expression_tokens_advance(current)
-        .span 3909 9 3909 97
+        .span 3913 9 3913 97
         ret CallArgumentsParseResult { state: current, arguments: arguments, success: true }
     .endif
     .loop
-        .span 3913 9 3913 63
+        .span 3917 9 3917 63
         eval let argument_result = parse_expression_bp(current, 0)
         .if !argument_result.success
-            .span 3915 13 3915 93
+            .span 3919 13 3919 93
             ret CallArgumentsParseResult { state: state, arguments: [], success: false }
         .endif
-        .span 3917 9 3917 78
+        .span 3921 9 3921 78
         eval arguments = append_expression(arguments, argument_result.expression)
-        .span 3918 9 3918 41
+        .span 3922 9 3922 41
         eval current = argument_result.state
         .if expression_tokens_is_at_end(current)
-            .span 3920 13 3920 93
+            .span 3924 13 3924 93
             ret CallArgumentsParseResult { state: state, arguments: [], success: false }
         .endif
-        .span 3922 9 3922 57
+        .span 3926 9 3926 57
         eval let separator = expression_tokens_peek(current)
         .if symbol_matches(separator, ",")
-            .span 3924 13 3924 58
+            .span 3928 13 3928 58
             eval current = expression_tokens_advance(current)
             continue
         .endif
         .if symbol_matches(separator, ")")
-            .span 3928 13 3928 58
+            .span 3932 13 3932 58
             eval current = expression_tokens_advance(current)
             break
         .endif
-        .span 3931 9 3931 89
+        .span 3935 9 3935 89
         ret CallArgumentsParseResult { state: state, arguments: [], success: false }
     .endloop
-    .span 3934 5 3934 93
+    .span 3938 5 3938 93
     ret CallArgumentsParseResult { state: current, arguments: arguments, success: true }
 .endfn
 
 .fn parse_array_literal(state -> ExpressionTokens) -> ArrayLiteralParseResult
 .meta return ArrayLiteralParseResult
 .meta effects none
-    .span 3937 24 3937 49
+    .span 3941 24 3941 49
     .param state -> ExpressionTokens
-    .span 3938 5 3938 29
+    .span 3942 5 3942 29
     eval let mut current = state
-    .span 3939 5 3939 43
+    .span 3943 5 3943 43
     eval let mut elements -> Expression[] = []
     .if expression_tokens_is_at_end(current)
-        .span 3942 9 3942 87
+        .span 3946 9 3946 87
         ret ArrayLiteralParseResult { state: state, elements: [], success: false }
     .endif
-    .span 3945 5 3945 59
+    .span 3949 5 3949 59
     eval let closing_bracket = expression_tokens_peek(current)
     .if closing_bracket.kind.variant == "Symbol" && symbol_matches(closing_bracket, "]")
-        .span 3948 9 3948 54
+        .span 3952 9 3952 54
         eval current = expression_tokens_advance(current)
-        .span 3949 9 3949 94
+        .span 3953 9 3953 94
         ret ArrayLiteralParseResult { state: current, elements: elements, success: true }
     .endif
     .loop
-        .span 3953 9 3953 62
+        .span 3957 9 3957 62
         eval let element_result = parse_expression_bp(current, 0)
         .if !element_result.success
-            .span 3955 13 3955 91
+            .span 3959 13 3959 91
             ret ArrayLiteralParseResult { state: state, elements: [], success: false }
         .endif
-        .span 3957 9 3957 75
+        .span 3961 9 3961 75
         eval elements = append_expression(elements, element_result.expression)
-        .span 3958 9 3958 40
+        .span 3962 9 3962 40
         eval current = element_result.state
         .if expression_tokens_is_at_end(current)
-            .span 3961 13 3961 91
+            .span 3965 13 3965 91
             ret ArrayLiteralParseResult { state: state, elements: [], success: false }
         .endif
-        .span 3964 9 3964 57
+        .span 3968 9 3968 57
         eval let separator = expression_tokens_peek(current)
         .if symbol_matches(separator, ",")
-            .span 3966 13 3966 58
+            .span 3970 13 3970 58
             eval current = expression_tokens_advance(current)
             .if expression_tokens_is_at_end(current)
-                .span 3968 17 3968 95
+                .span 3972 17 3972 95
                 ret ArrayLiteralParseResult { state: state, elements: [], success: false }
             .endif
-            .span 3970 13 3970 61
+            .span 3974 13 3974 61
             eval let maybe_end = expression_tokens_peek(current)
             .if symbol_matches(maybe_end, "]")
-                .span 3972 17 3972 62
+                .span 3976 17 3976 62
                 eval current = expression_tokens_advance(current)
                 break
             .endif
             continue
         .endif
         .if symbol_matches(separator, "]")
-            .span 3978 13 3978 58
+            .span 3982 13 3982 58
             eval current = expression_tokens_advance(current)
             break
         .endif
-        .span 3981 9 3981 87
+        .span 3985 9 3985 87
         ret ArrayLiteralParseResult { state: state, elements: [], success: false }
     .endloop
-    .span 3984 5 3984 90
+    .span 3988 5 3988 90
     ret ArrayLiteralParseResult { state: current, elements: elements, success: true }
 .endfn
 
 .fn parse_object_literal(state -> ExpressionTokens) -> ObjectLiteralParseResult
 .meta return ObjectLiteralParseResult
 .meta effects none
-    .span 3987 25 3987 50
+    .span 3991 25 3991 50
     .param state -> ExpressionTokens
-    .span 3988 5 3988 29
+    .span 3992 5 3992 29
     eval let mut current = state
-    .span 3989 5 3989 42
+    .span 3993 5 3993 42
     eval let mut fields -> ObjectField[] = []
     .if expression_tokens_is_at_end(current)
-        .span 3992 9 3992 86
+        .span 3996 9 3996 86
         ret ObjectLiteralParseResult { state: state, fields: [], success: false }
     .endif
-    .span 3995 5 3995 57
+    .span 3999 5 3999 57
     eval let closing_brace = expression_tokens_peek(current)
     .if closing_brace.kind.variant == "Symbol" && symbol_matches(closing_brace, "}")
-        .span 3998 9 3998 54
+        .span 4002 9 4002 54
         eval current = expression_tokens_advance(current)
-        .span 3999 9 3999 91
+        .span 4003 9 4003 91
         ret ObjectLiteralParseResult { state: current, fields: fields, success: true }
     .endif
     .loop
         .if expression_tokens_is_at_end(current)
-            .span 4004 13 4004 90
-            ret ObjectLiteralParseResult { state: state, fields: [], success: false }
-        .endif
-        .span 4006 9 4006 58
-        eval let name_token = expression_tokens_peek(current)
-        .if name_token.kind.variant != "Identifier"
             .span 4008 13 4008 90
             ret ObjectLiteralParseResult { state: state, fields: [], success: false }
         .endif
-        .span 4010 9 4010 54
-        eval let field_name = identifier_text(name_token)
-        .span 4011 9 4011 54
-        eval current = expression_tokens_advance(current)
-        .if expression_tokens_is_at_end(current)
-            .span 4014 13 4014 90
+        .span 4010 9 4010 58
+        eval let name_token = expression_tokens_peek(current)
+        .if name_token.kind.variant != "Identifier"
+            .span 4012 13 4012 90
             ret ObjectLiteralParseResult { state: state, fields: [], success: false }
         .endif
-        .span 4016 9 4016 53
-        eval let colon = expression_tokens_peek(current)
-        .if !symbol_matches(colon, ":")
+        .span 4014 9 4014 54
+        eval let field_name = identifier_text(name_token)
+        .span 4015 9 4015 54
+        eval current = expression_tokens_advance(current)
+        .if expression_tokens_is_at_end(current)
             .span 4018 13 4018 90
             ret ObjectLiteralParseResult { state: state, fields: [], success: false }
         .endif
-        .span 4020 9 4020 54
+        .span 4020 9 4020 53
+        eval let colon = expression_tokens_peek(current)
+        .if !symbol_matches(colon, ":")
+            .span 4022 13 4022 90
+            ret ObjectLiteralParseResult { state: state, fields: [], success: false }
+        .endif
+        .span 4024 9 4024 54
         eval current = expression_tokens_advance(current)
-        .span 4022 9 4022 60
+        .span 4026 9 4026 60
         eval let value_result = parse_expression_bp(current, 0)
         .if !value_result.success
-            .span 4024 13 4024 90
+            .span 4028 13 4028 90
             ret ObjectLiteralParseResult { state: state, fields: [], success: false }
         .endif
-        .span 4026 9 4026 38
+        .span 4030 9 4030 38
         eval current = value_result.state
-        .span 4027 9 4027 112
+        .span 4031 9 4031 112
         eval fields = append_object_field(fields, ObjectField { name: field_name, value: value_result.expression })
         .if expression_tokens_is_at_end(current)
-            .span 4030 13 4030 90
+            .span 4034 13 4034 90
             ret ObjectLiteralParseResult { state: state, fields: [], success: false }
         .endif
-        .span 4032 9 4032 57
+        .span 4036 9 4036 57
         eval let separator = expression_tokens_peek(current)
         .if symbol_matches(separator, ",")
-            .span 4034 13 4034 58
+            .span 4038 13 4038 58
             eval current = expression_tokens_advance(current)
             .if expression_tokens_is_at_end(current)
-                .span 4036 17 4036 94
+                .span 4040 17 4040 94
                 ret ObjectLiteralParseResult { state: state, fields: [], success: false }
             .endif
-            .span 4038 13 4038 61
+            .span 4042 13 4042 61
             eval let maybe_end = expression_tokens_peek(current)
             .if symbol_matches(maybe_end, "}")
-                .span 4040 17 4040 62
+                .span 4044 17 4044 62
                 eval current = expression_tokens_advance(current)
                 break
             .endif
             continue
         .endif
         .if symbol_matches(separator, "}")
-            .span 4046 13 4046 58
+            .span 4050 13 4050 58
             eval current = expression_tokens_advance(current)
             break
         .endif
-        .span 4049 9 4049 86
+        .span 4053 9 4053 86
         ret ObjectLiteralParseResult { state: state, fields: [], success: false }
     .endloop
-    .span 4052 5 4052 87
+    .span 4056 5 4056 87
     ret ObjectLiteralParseResult { state: current, fields: fields, success: true }
 .endfn
 
 .fn parse_struct_literal(state -> ExpressionTokens, target -> Expression) -> ExpressionParseResult
 .meta return ExpressionParseResult
 .meta effects none
-    .span 4055 25 4055 50
+    .span 4059 25 4059 50
     .param state -> ExpressionTokens
-    .span 4055 52 4055 72
+    .span 4059 52 4059 72
     .param target -> Expression
-    .span 4056 5 4056 56
+    .span 4060 5 4060 56
     eval let type_result = collect_struct_type_name(target)
     .if !type_result.success
-        .span 4058 9 4058 48
+        .span 4062 9 4062 48
         ret expression_parse_failure(state)
     .endif
-    .span 4061 5 4061 53
+    .span 4065 5 4065 53
     eval let fields_result = parse_object_literal(state)
     .if !fields_result.success
-        .span 4063 9 4063 48
+        .span 4067 9 4067 48
         ret expression_parse_failure(state)
     .endif
-    .span 4066 5 4073 7
+    .span 4070 5 4077 7
     ret ExpressionParseResult { state: fields_result.state, expression: Expression.Struct { type_name: type_result.parts, fields: fields_result.fields }, success: true }
 .endfn
 
 .fn expression_parse_failure(state -> ExpressionTokens) -> ExpressionParseResult
 .meta return ExpressionParseResult
 .meta effects none
-    .span 4076 29 4076 54
+    .span 4080 29 4080 54
     .param state -> ExpressionTokens
-    .span 4077 5 4081 7
+    .span 4081 5 4085 7
     ret ExpressionParseResult { state: state, expression: Expression.Raw { text: "" }, success: false }
 .endfn
 
 .fn expression_tokens_is_at_end(state -> ExpressionTokens) -> boolean
 .meta return boolean
 .meta effects none
-    .span 4084 32 4084 57
+    .span 4088 32 4088 57
     .param state -> ExpressionTokens
-    .span 4085 5 4085 47
+    .span 4089 5 4089 47
     ret state.index >= state.tokens.length
 .endfn
 
 .fn expression_tokens_peek(state -> ExpressionTokens) -> Token
 .meta return Token
 .meta effects none
-    .span 4088 27 4088 52
+    .span 4092 27 4092 52
     .param state -> ExpressionTokens
-    .span 4089 5 4089 38
+    .span 4093 5 4093 38
     ret state.tokens[state.index]
 .endfn
 
 .fn expression_tokens_advance(state -> ExpressionTokens) -> ExpressionTokens
 .meta return ExpressionTokens
 .meta effects none
-    .span 4092 30 4092 55
+    .span 4096 30 4096 55
     .param state -> ExpressionTokens
     .if state.index >= state.tokens.length
-        .span 4094 9 4094 22
+        .span 4098 9 4098 22
         ret state
     .endif
-    .span 4096 5 4096 78
+    .span 4100 5 4100 78
     ret ExpressionTokens { tokens: state.tokens, index: state.index + 1 }
 .endfn
 
 .fn expression_is_struct_target(expression -> Expression) -> boolean
 .meta return boolean
 .meta effects none
-    .span 4099 32 4099 56
+    .span 4103 32 4103 56
     .param expression -> Expression
     .if expression.variant == "Identifier"
-        .span 4101 9 4101 21
+        .span 4105 9 4105 21
         ret true
     .endif
     .if expression.variant == "Member"
-        .span 4104 9 4104 63
+        .span 4108 9 4108 63
         ret expression_is_struct_target(expression.object)
     .endif
-    .span 4106 5 4106 18
+    .span 4110 5 4110 18
     ret false
 .endfn
 
 .fn collect_struct_type_name(expression -> Expression) -> StructTypeNameResult
 .meta return StructTypeNameResult
 .meta effects none
-    .span 4109 29 4109 53
+    .span 4113 29 4113 53
     .param expression -> Expression
     .if expression.variant == "Identifier"
-        .span 4111 9 4111 81
+        .span 4115 9 4115 81
         ret StructTypeNameResult { parts: [#element:expression, expression.name], success: true }
     .endif
     .if expression.variant == "Member"
-        .span 4114 9 4114 65
+        .span 4118 9 4118 65
         eval let inner = collect_struct_type_name(expression.object)
         .if !inner.success
-            .span 4116 13 4116 71
+            .span 4120 13 4120 71
             ret StructTypeNameResult { parts: [], success: false }
         .endif
-        .span 4118 9 4121 11
+        .span 4122 9 4125 11
         ret StructTypeNameResult { parts: append_string(inner.parts, expression.member), success: true }
     .endif
-    .span 4123 5 4123 63
+    .span 4127 5 4127 63
     ret StructTypeNameResult { parts: [], success: false }
 .endfn
 
 .fn binary_precedence(op -> string) -> number
 .meta return number
 .meta effects none
-    .span 4126 22 4126 34
+    .span 4130 22 4130 34
     .param op -> string
     .if op == ".."
-        .span 4128 9 4128 18
+        .span 4132 9 4132 18
         ret 0
     .endif
     .if op == "||"
-        .span 4131 9 4131 18
+        .span 4135 9 4135 18
         ret 1
     .endif
     .if op == "&&"
-        .span 4134 9 4134 18
+        .span 4138 9 4138 18
         ret 2
     .endif
     .if op == "==" || op == "!="
-        .span 4137 9 4137 18
+        .span 4141 9 4141 18
         ret 3
     .endif
     .if op == "<" || op == "<=" || op == ">" || op == ">="
-        .span 4140 9 4140 18
+        .span 4144 9 4144 18
         ret 4
     .endif
     .if op == "+" || op == "-"
-        .span 4143 9 4143 18
+        .span 4147 9 4147 18
         ret 5
     .endif
     .if op == "*" || op == "/" || op == "%"
-        .span 4146 9 4146 18
+        .span 4150 9 4150 18
         ret 6
     .endif
-    .span 4148 5 4148 15
+    .span 4152 5 4152 15
     ret -1
 .endfn
 
 .fn unary_precedence() -> number
 .meta return number
 .meta effects none
-    .span 4152 5 4152 14
+    .span 4156 5 4156 14
     ret 7
 .endfn
 
 .fn filter_trivia(tokens -> Token[]) -> Token[]
 .meta return Token[]
 .meta effects none
-    .span 4155 18 4155 35
+    .span 4159 18 4159 35
     .param tokens -> Token[]
-    .span 4156 5 4156 33
+    .span 4160 5 4160 33
     eval let mut index -> number = 0
-    .span 4157 5 4157 38
+    .span 4161 5 4161 38
     eval let mut filtered -> Token[] = []
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 4163 9 4163 35
+        .span 4167 9 4167 35
         eval let token = tokens[index]
         .if token.kind.variant != "Whitespace" && token.kind.variant != "Comment" && token.kind.variant != "EndOfFile"
-            .span 4167 13 4167 54
+            .span 4171 13 4171 54
             eval filtered = append_token(filtered, token)
         .endif
-        .span 4169 9 4169 20
+        .span 4173 9 4173 20
         eval index += 1
     .endloop
-    .span 4172 5 4172 21
+    .span 4176 5 4176 21
     ret filtered
 .endfn
 
 .fn tokens_to_text(tokens -> Token[]) -> string
 .meta return string
 .meta effects none
-    .span 4175 19 4175 36
+    .span 4179 19 4179 36
     .param tokens -> Token[]
-    .span 4176 5 4176 33
+    .span 4180 5 4180 33
     eval let mut text -> string = ""
-    .span 4177 5 4177 33
+    .span 4181 5 4181 33
     eval let mut index -> number = 0
-    .span 4178 5 4178 32
+    .span 4182 5 4182 32
     eval let limit -> number = 8192
-    .span 4179 5 4179 36
+    .span 4183 5 4183 36
     eval let max_tokens -> number = 512
-    .span 4180 5 4180 42
+    .span 4184 5 4184 42
     eval let mut truncated -> boolean = false
     .loop
         .if index >= tokens.length
             break
         .endif
         .if index >= max_tokens
-            .span 4186 13 4186 30
+            .span 4190 13 4190 30
             eval truncated = true
             break
         .endif
-        .span 4189 9 4189 44
+        .span 4193 9 4193 44
         eval text = text + tokens[index].lexeme
-        .span 4190 9 4190 20
+        .span 4194 9 4194 20
         eval index += 1
         .if text.length > limit
-            .span 4192 13 4192 46
+            .span 4196 13 4196 46
             eval text = substring(text, 0, limit)
-            .span 4193 13 4193 30
+            .span 4197 13 4197 30
             eval truncated = true
             break
         .endif
     .endloop
     .if truncated && text.length > limit
-        .span 4198 9 4198 42
+        .span 4202 9 4202 42
         eval text = substring(text, 0, limit)
     .endif
     .if truncated
-        .span 4201 9 4201 41
+        .span 4205 9 4205 41
         eval text = text + "... (truncated)"
     .endif
-    .span 4203 5 4203 17
+    .span 4207 5 4207 17
     ret text
 .endfn
 
 .fn trim_text(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 4206 14 4206 29
+    .span 4210 14 4210 29
     .param value -> string
-    .span 4207 5 4207 33
+    .span 4211 5 4211 33
     eval let mut start -> number = 0
-    .span 4208 5 4208 42
+    .span 4212 5 4212 42
     eval let mut end -> number = value.length
     .loop
         .if start >= end
             break
         .endif
-        .span 4214 9 4214 40
+        .span 4218 9 4218 40
         eval let ch = char_at(value, start)
         .if is_trim_whitespace(ch)
-            .span 4216 13 4216 24
+            .span 4220 13 4220 24
             eval start += 1
             continue
         .endif
@@ -6011,330 +6021,330 @@
         .if end <= start
             break
         .endif
-        .span 4226 9 4226 42
+        .span 4230 9 4230 42
         eval let ch = char_at(value, end - 1)
         .if is_trim_whitespace(ch)
-            .span 4228 13 4228 22
+            .span 4232 13 4232 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
-    .span 4234 5 4234 41
+    .span 4238 5 4238 41
     ret substring(value, start, end)
 .endfn
 
 .fn is_trim_whitespace(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 4237 23 4237 35
+    .span 4241 23 4241 35
     .param ch -> string
-    .span 4238 5 4238 30
+    .span 4242 5 4242 30
     eval let code = char_code(ch)
-    .span 4239 5 4242 23
+    .span 4243 5 4246 23
     ret code == 32 || code == 10 || code == 9 || code == 13
 .endfn
 
 .fn string_array_contains(values -> string[], target -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 4245 26 4245 44
+    .span 4249 26 4249 44
     .param values -> string[]
-    .span 4245 46 4245 62
+    .span 4249 46 4249 62
     .param target -> string
-    .span 4246 5 4246 33
+    .span 4250 5 4250 33
     eval let mut index -> number = 0
     .loop
         .if index >= values.length
             break
         .endif
         .if strings_equal(values[index], target)
-            .span 4252 13 4252 25
+            .span 4256 13 4256 25
             ret true
         .endif
-        .span 4254 9 4254 20
+        .span 4258 9 4258 20
         eval index += 1
     .endloop
-    .span 4256 5 4256 18
+    .span 4260 5 4260 18
     ret false
 .endfn
 
 .fn is_trivia_token(token -> Token) -> boolean
 .meta return boolean
 .meta effects none
-    .span 4259 20 4259 34
+    .span 4263 20 4263 34
     .param token -> Token
     .if token.kind.variant == "Whitespace" || token.kind.variant == "Comment"
-        .span 4261 9 4261 21
+        .span 4265 9 4265 21
         ret true
     .endif
-    .span 4263 5 4263 29
+    .span 4267 5 4267 29
     eval let text = token.lexeme
     .if text.length == 0
-        .span 4265 9 4265 22
+        .span 4269 9 4269 22
         ret false
     .endif
     .if is_whitespace_lexeme(text)
-        .span 4268 9 4268 21
+        .span 4272 9 4272 21
         ret true
     .endif
     .if text.length >= 2
-        .span 4271 9 4271 44
+        .span 4275 9 4275 44
         eval let prefix = substring(text, 0, 2)
         .if strings_equal(prefix, "//") || strings_equal(prefix, "/*")
-            .span 4273 13 4273 25
+            .span 4277 13 4277 25
             ret true
         .endif
     .endif
-    .span 4276 5 4276 18
+    .span 4280 5 4280 18
     ret false
 .endfn
 
 .fn is_whitespace_lexeme(text -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 4279 25 4279 39
+    .span 4283 25 4283 39
     .param text -> string
     .if text.length == 0
-        .span 4281 9 4281 22
+        .span 4285 9 4285 22
         ret false
     .endif
-    .span 4283 5 4283 33
+    .span 4287 5 4287 33
     eval let mut index -> number = 0
     .loop
         .if index >= text.length
             break
         .endif
-        .span 4288 9 4288 39
+        .span 4292 9 4292 39
         eval let ch = char_at(text, index)
         .if !is_trim_whitespace(ch)
-            .span 4290 13 4290 26
+            .span 4294 13 4294 26
             ret false
         .endif
-        .span 4292 9 4292 20
+        .span 4296 9 4296 20
         eval index += 1
     .endloop
-    .span 4294 5 4294 17
+    .span 4298 5 4298 17
     ret true
 .endfn
 
 .fn advance_to_symbol(parser -> Parser, symbol -> string) -> Parser
 .meta return Parser
 .meta effects none
-    .span 4297 22 4297 38
+    .span 4301 22 4301 38
     .param parser -> Parser
-    .span 4297 40 4297 56
+    .span 4301 40 4301 56
     .param symbol -> string
-    .span 4298 5 4298 30
+    .span 4302 5 4302 30
     eval let mut current = parser
     .loop
-        .span 4300 9 4300 40
+        .span 4304 9 4304 40
         eval current = skip_trivia(current)
-        .span 4301 9 4301 46
+        .span 4305 9 4305 46
         eval let token = parser_peek_raw(current)
         .if symbol_matches(token, symbol)
-            .span 4303 13 4303 28
+            .span 4307 13 4307 28
             ret current
         .endif
         .if token.kind.variant == "EndOfFile"
-            .span 4306 13 4306 28
-            ret current
-        .endif
-        .span 4308 9 4308 48
-        eval let next = parser_advance_raw(current)
-        .if next.index == current.index
             .span 4310 13 4310 28
             ret current
         .endif
-        .span 4312 9 4312 24
+        .span 4312 9 4312 48
+        eval let next = parser_advance_raw(current)
+        .if next.index == current.index
+            .span 4314 13 4314 28
+            ret current
+        .endif
+        .span 4316 9 4316 24
         eval current = next
     .endloop
-    .span 4314 5 4314 20
+    .span 4318 5 4318 20
     ret current
 .endfn
 
 .fn skip_struct_member(parser -> Parser) -> Parser
 .meta return Parser
 .meta effects none
-    .span 4317 23 4317 39
+    .span 4321 23 4321 39
     .param parser -> Parser
-    .span 4318 5 4318 30
+    .span 4322 5 4322 30
     eval let mut current = parser
     .loop
-        .span 4320 9 4320 48
+        .span 4324 9 4324 48
         eval let next = parser_advance_raw(current)
         .if next.index == current.index
-            .span 4322 13 4322 28
+            .span 4326 13 4326 28
             ret current
         .endif
-        .span 4324 9 4324 24
+        .span 4328 9 4328 24
         eval current = next
-        .span 4325 9 4325 46
+        .span 4329 9 4329 46
         eval let token = parser_peek_raw(current)
         .if token.kind.variant == "EndOfFile"
-            .span 4327 13 4327 28
+            .span 4331 13 4331 28
             ret current
         .endif
         .if token.kind.variant == "Symbol"
-            .span 4330 13 4330 36
+            .span 4334 13 4334 36
             eval let sym = token.lexeme
             .if strings_equal(sym, ";")
-                .span 4332 17 4332 55
+                .span 4336 17 4336 55
                 eval current = parser_advance_raw(current)
-                .span 4333 17 4333 32
+                .span 4337 17 4337 32
                 ret current
             .endif
             .if strings_equal(sym, "}")
-                .span 4336 17 4336 32
+                .span 4340 17 4340 32
                 ret current
             .endif
         .endif
     .endloop
-    .span 4340 5 4340 20
+    .span 4344 5 4344 20
     ret current
 .endfn
 
 .fn skip_enum_variant_entry(parser -> Parser) -> Parser
 .meta return Parser
 .meta effects none
-    .span 4343 28 4343 44
+    .span 4347 28 4347 44
     .param parser -> Parser
-    .span 4344 5 4344 30
+    .span 4348 5 4348 30
     eval let mut current = parser
     .loop
-        .span 4346 9 4346 48
+        .span 4350 9 4350 48
         eval let next = parser_advance_raw(current)
         .if next.index == current.index
-            .span 4348 13 4348 28
+            .span 4352 13 4352 28
             ret current
         .endif
-        .span 4350 9 4350 24
+        .span 4354 9 4354 24
         eval current = next
-        .span 4351 9 4351 46
+        .span 4355 9 4355 46
         eval let token = parser_peek_raw(current)
         .if token.kind.variant == "EndOfFile"
-            .span 4353 13 4353 28
+            .span 4357 13 4357 28
             ret current
         .endif
         .if token.kind.variant == "Symbol"
-            .span 4356 13 4356 36
+            .span 4360 13 4360 36
             eval let sym = token.lexeme
             .if strings_equal(sym, ",")
-                .span 4358 17 4358 55
+                .span 4362 17 4362 55
                 eval current = parser_advance_raw(current)
-                .span 4359 17 4359 32
+                .span 4363 17 4363 32
                 ret current
             .endif
             .if strings_equal(sym, "}")
-                .span 4362 17 4362 32
+                .span 4366 17 4366 32
                 ret current
             .endif
         .endif
     .endloop
-    .span 4366 5 4366 20
+    .span 4370 5 4370 20
     ret current
 .endfn
 
 .fn strip_surrounding_quotes(text -> string) -> string
 .meta return string
 .meta effects none
-    .span 4369 29 4369 43
+    .span 4373 29 4373 43
     .param text -> string
     .if text.length < 2
-        .span 4371 9 4371 21
+        .span 4375 9 4375 21
         ret text
     .endif
-    .span 4373 5 4373 45
+    .span 4377 5 4377 45
     eval let first = char_code(char_at(text, 0))
-    .span 4374 5 4374 58
+    .span 4378 5 4378 58
     eval let last = char_code(char_at(text, text.length - 1))
     .if first == 34 && last == 34
-        .span 4376 9 4376 52
+        .span 4380 9 4380 52
         ret substring(text, 1, text.length - 1)
     .endif
-    .span 4378 5 4378 17
+    .span 4382 5 4382 17
     ret text
 .endfn
 
 .fn normalize_test_name(text -> string) -> string
 .meta return string
 .meta effects none
-    .span 4381 24 4381 38
+    .span 4385 24 4385 38
     .param text -> string
-    .span 4382 5 4382 35
+    .span 4386 5 4386 35
     eval let trimmed = trim_text(text)
     .if trimmed.length >= 2
-        .span 4384 9 4384 52
+        .span 4388 9 4388 52
         eval let first = char_code(char_at(trimmed, 0))
-        .span 4385 9 4385 68
+        .span 4389 9 4389 68
         eval let last = char_code(char_at(trimmed, trimmed.length - 1))
         .if first == 34 && last == 34
-            .span 4387 13 4387 54
+            .span 4391 13 4391 54
             ret strip_surrounding_quotes(trimmed)
         .endif
     .endif
-    .span 4390 5 4390 20
+    .span 4394 5 4394 20
     ret trimmed
 .endfn
 
 .fn split_tokens_by_comma(tokens -> Token[]) -> string[]
 .meta return string[]
 .meta effects none
-    .span 4393 26 4393 43
+    .span 4397 26 4397 43
     .param tokens -> Token[]
-    .span 4394 5 4394 36
+    .span 4398 5 4398 36
     eval let mut parts -> string[] = []
-    .span 4395 5 4395 36
+    .span 4399 5 4399 36
     eval let mut segment -> string = ""
-    .span 4396 5 4396 33
+    .span 4400 5 4400 33
     eval let mut angle -> number = 0
-    .span 4397 5 4397 33
-    eval let mut paren -> number = 0
-    .span 4398 5 4398 33
-    eval let mut brace -> number = 0
-    .span 4399 5 4399 35
-    eval let mut bracket -> number = 0
     .span 4401 5 4401 33
+    eval let mut paren -> number = 0
+    .span 4402 5 4402 33
+    eval let mut brace -> number = 0
+    .span 4403 5 4403 35
+    eval let mut bracket -> number = 0
+    .span 4405 5 4405 33
     eval let mut index -> number = 0
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 4406 9 4406 35
+        .span 4410 9 4410 35
         eval let token = tokens[index]
         .if token.kind.variant == "Symbol"
-            .span 4408 13 4408 36
+            .span 4412 13 4412 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "<")
-                .span 4410 17 4410 28
+                .span 4414 17 4414 28
                 eval angle += 1
             .else
                 .if strings_equal(sym, ">") && angle > 0
-                    .span 4412 17 4412 28
+                    .span 4416 17 4416 28
                     eval angle -= 1
                 .else
                     .if strings_equal(sym, "(")
-                        .span 4414 17 4414 28
+                        .span 4418 17 4418 28
                         eval paren += 1
                     .else
                         .if strings_equal(sym, ")") && paren > 0
-                            .span 4416 17 4416 28
+                            .span 4420 17 4420 28
                             eval paren -= 1
                         .else
                             .if strings_equal(sym, "{")
-                                .span 4418 17 4418 28
+                                .span 4422 17 4422 28
                                 eval brace += 1
                             .else
                                 .if strings_equal(sym, "}") && brace > 0
-                                    .span 4420 17 4420 28
+                                    .span 4424 17 4424 28
                                     eval brace -= 1
                                 .else
                                     .if strings_equal(sym, "[")
-                                        .span 4422 17 4422 30
+                                        .span 4426 17 4426 30
                                         eval bracket += 1
                                     .else
                                         .if strings_equal(sym, "]") && bracket > 0
-                                            .span 4424 17 4424 30
+                                            .span 4428 17 4428 30
                                             eval bracket -= 1
                                         .endif
                                     .endif
@@ -6345,92 +6355,92 @@
                 .endif
             .endif
             .if strings_equal(sym, ",") && angle == 0 && paren == 0 && brace == 0 && bracket == 0
-                .span 4428 17 4428 47
+                .span 4432 17 4432 47
                 eval let text = trim_text(segment)
                 .if text.length > 0
-                    .span 4430 21 4430 56
+                    .span 4434 21 4434 56
                     eval parts = append_string(parts, text)
                 .endif
-                .span 4432 17 4432 30
+                .span 4436 17 4436 30
                 eval segment = ""
-                .span 4433 17 4433 28
+                .span 4437 17 4437 28
                 eval index += 1
                 continue
             .endif
         .endif
-        .span 4437 9 4437 42
+        .span 4441 9 4441 42
         eval segment = segment + token.lexeme
-        .span 4438 9 4438 20
+        .span 4442 9 4442 20
         eval index += 1
     .endloop
-    .span 4441 5 4441 35
+    .span 4445 5 4445 35
     eval let tail = trim_text(segment)
     .if tail.length > 0
-        .span 4443 9 4443 44
+        .span 4447 9 4447 44
         eval parts = append_string(parts, tail)
     .endif
-    .span 4445 5 4445 18
+    .span 4449 5 4449 18
     ret parts
 .endfn
 
 .fn split_token_slices_by_comma(tokens -> Token[]) -> Token[][]
 .meta return Token[][]
 .meta effects none
-    .span 4448 32 4448 49
+    .span 4452 32 4452 49
     .param tokens -> Token[]
-    .span 4449 5 4449 37
+    .span 4453 5 4453 37
     eval let mut parts -> Token[][] = []
-    .span 4450 5 4450 37
+    .span 4454 5 4454 37
     eval let mut segment -> Token[] = []
-    .span 4451 5 4451 33
+    .span 4455 5 4455 33
     eval let mut angle -> number = 0
-    .span 4452 5 4452 33
-    eval let mut paren -> number = 0
-    .span 4453 5 4453 33
-    eval let mut brace -> number = 0
-    .span 4454 5 4454 35
-    eval let mut bracket -> number = 0
     .span 4456 5 4456 33
+    eval let mut paren -> number = 0
+    .span 4457 5 4457 33
+    eval let mut brace -> number = 0
+    .span 4458 5 4458 35
+    eval let mut bracket -> number = 0
+    .span 4460 5 4460 33
     eval let mut index -> number = 0
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 4461 9 4461 35
+        .span 4465 9 4465 35
         eval let token = tokens[index]
         .if token.kind.variant == "Symbol"
-            .span 4463 13 4463 36
+            .span 4467 13 4467 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "<")
-                .span 4465 17 4465 28
+                .span 4469 17 4469 28
                 eval angle += 1
             .else
                 .if strings_equal(sym, ">") && angle > 0
-                    .span 4467 17 4467 28
+                    .span 4471 17 4471 28
                     eval angle -= 1
                 .else
                     .if strings_equal(sym, "(")
-                        .span 4469 17 4469 28
+                        .span 4473 17 4473 28
                         eval paren += 1
                     .else
                         .if strings_equal(sym, ")") && paren > 0
-                            .span 4471 17 4471 28
+                            .span 4475 17 4475 28
                             eval paren -= 1
                         .else
                             .if strings_equal(sym, "{")
-                                .span 4473 17 4473 28
+                                .span 4477 17 4477 28
                                 eval brace += 1
                             .else
                                 .if strings_equal(sym, "}") && brace > 0
-                                    .span 4475 17 4475 28
+                                    .span 4479 17 4479 28
                                     eval brace -= 1
                                 .else
                                     .if strings_equal(sym, "[")
-                                        .span 4477 17 4477 30
+                                        .span 4481 17 4481 30
                                         eval bracket += 1
                                     .else
                                         .if strings_equal(sym, "]") && bracket > 0
-                                            .span 4479 17 4479 30
+                                            .span 4483 17 4483 30
                                             eval bracket -= 1
                                         .endif
                                     .endif
@@ -6441,84 +6451,84 @@
                 .endif
             .endif
             .if strings_equal(sym, ",") && angle == 0 && paren == 0 && brace == 0 && bracket == 0
-                .span 4483 17 4483 60
+                .span 4487 17 4487 60
                 eval parts = append_token_array(parts, segment)
-                .span 4484 17 4484 30
+                .span 4488 17 4488 30
                 eval segment = []
-                .span 4485 17 4485 28
+                .span 4489 17 4489 28
                 eval index += 1
                 continue
             .endif
         .endif
-        .span 4489 9 4489 48
+        .span 4493 9 4493 48
         eval segment = append_token(segment, token)
-        .span 4490 9 4490 20
+        .span 4494 9 4494 20
         eval index += 1
     .endloop
     .if segment.length > 0
-        .span 4494 9 4494 52
+        .span 4498 9 4498 52
         eval parts = append_token_array(parts, segment)
     .endif
-    .span 4496 5 4496 18
+    .span 4500 5 4500 18
     ret parts
 .endfn
 
 .fn find_top_level_symbol(tokens -> Token[], symbol -> string) -> number
 .meta return number
 .meta effects none
-    .span 4499 26 4499 43
+    .span 4503 26 4503 43
     .param tokens -> Token[]
-    .span 4499 45 4499 61
+    .span 4503 45 4503 61
     .param symbol -> string
-    .span 4500 5 4500 33
+    .span 4504 5 4504 33
     eval let mut angle -> number = 0
-    .span 4501 5 4501 33
-    eval let mut paren -> number = 0
-    .span 4502 5 4502 33
-    eval let mut brace -> number = 0
-    .span 4503 5 4503 35
-    eval let mut bracket -> number = 0
     .span 4505 5 4505 33
+    eval let mut paren -> number = 0
+    .span 4506 5 4506 33
+    eval let mut brace -> number = 0
+    .span 4507 5 4507 35
+    eval let mut bracket -> number = 0
+    .span 4509 5 4509 33
     eval let mut index -> number = 0
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 4510 9 4510 35
+        .span 4514 9 4514 35
         eval let token = tokens[index]
         .if token.kind.variant == "Symbol"
-            .span 4512 13 4512 36
+            .span 4516 13 4516 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "<")
-                .span 4514 17 4514 28
+                .span 4518 17 4518 28
                 eval angle += 1
             .else
                 .if strings_equal(sym, ">") && angle > 0
-                    .span 4516 17 4516 28
+                    .span 4520 17 4520 28
                     eval angle -= 1
                 .else
                     .if strings_equal(sym, "(")
-                        .span 4518 17 4518 28
+                        .span 4522 17 4522 28
                         eval paren += 1
                     .else
                         .if strings_equal(sym, ")") && paren > 0
-                            .span 4520 17 4520 28
+                            .span 4524 17 4524 28
                             eval paren -= 1
                         .else
                             .if strings_equal(sym, "{")
-                                .span 4522 17 4522 28
+                                .span 4526 17 4526 28
                                 eval brace += 1
                             .else
                                 .if strings_equal(sym, "}") && brace > 0
-                                    .span 4524 17 4524 28
+                                    .span 4528 17 4528 28
                                     eval brace -= 1
                                 .else
                                     .if strings_equal(sym, "[")
-                                        .span 4526 17 4526 30
+                                        .span 4530 17 4530 30
                                         eval bracket += 1
                                     .else
                                         .if strings_equal(sym, "]") && bracket > 0
-                                            .span 4528 17 4528 30
+                                            .span 4532 17 4532 30
                                             eval bracket -= 1
                                         .endif
                                     .endif
@@ -6529,73 +6539,73 @@
                 .endif
             .endif
             .if strings_equal(sym, symbol) && angle == 0 && paren == 0 && brace == 0 && bracket == 0
-                .span 4532 17 4532 30
+                .span 4536 17 4536 30
                 ret index
             .endif
         .endif
-        .span 4535 9 4535 20
+        .span 4539 9 4539 20
         eval index += 1
     .endloop
-    .span 4537 5 4537 15
+    .span 4541 5 4541 15
     ret -1
 .endfn
 
 .fn find_top_level_identifier(tokens -> Token[], keyword -> string) -> number
 .meta return number
 .meta effects none
-    .span 4540 30 4540 47
+    .span 4544 30 4544 47
     .param tokens -> Token[]
-    .span 4540 49 4540 66
+    .span 4544 49 4544 66
     .param keyword -> string
-    .span 4541 5 4541 33
+    .span 4545 5 4545 33
     eval let mut angle -> number = 0
-    .span 4542 5 4542 33
-    eval let mut paren -> number = 0
-    .span 4543 5 4543 33
-    eval let mut brace -> number = 0
-    .span 4544 5 4544 35
-    eval let mut bracket -> number = 0
     .span 4546 5 4546 33
+    eval let mut paren -> number = 0
+    .span 4547 5 4547 33
+    eval let mut brace -> number = 0
+    .span 4548 5 4548 35
+    eval let mut bracket -> number = 0
+    .span 4550 5 4550 33
     eval let mut index -> number = 0
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 4551 9 4551 35
+        .span 4555 9 4555 35
         eval let token = tokens[index]
         .if token.kind.variant == "Symbol"
-            .span 4553 13 4553 36
+            .span 4557 13 4557 36
             eval let sym = token.lexeme
             .if strings_equal(sym, "<")
-                .span 4555 17 4555 28
+                .span 4559 17 4559 28
                 eval angle += 1
             .else
                 .if strings_equal(sym, ">") && angle > 0
-                    .span 4557 17 4557 28
+                    .span 4561 17 4561 28
                     eval angle -= 1
                 .else
                     .if strings_equal(sym, "(")
-                        .span 4559 17 4559 28
+                        .span 4563 17 4563 28
                         eval paren += 1
                     .else
                         .if strings_equal(sym, ")") && paren > 0
-                            .span 4561 17 4561 28
+                            .span 4565 17 4565 28
                             eval paren -= 1
                         .else
                             .if strings_equal(sym, "{")
-                                .span 4563 17 4563 28
+                                .span 4567 17 4567 28
                                 eval brace += 1
                             .else
                                 .if strings_equal(sym, "}") && brace > 0
-                                    .span 4565 17 4565 28
+                                    .span 4569 17 4569 28
                                     eval brace -= 1
                                 .else
                                     .if strings_equal(sym, "[")
-                                        .span 4567 17 4567 30
+                                        .span 4571 17 4571 30
                                         eval bracket += 1
                                     .else
                                         .if strings_equal(sym, "]") && bracket > 0
-                                            .span 4569 17 4569 30
+                                            .span 4573 17 4573 30
                                             eval bracket -= 1
                                         .endif
                                     .endif
@@ -6609,212 +6619,212 @@
         .if token.kind.variant == "Identifier"
             .if identifier_matches(token, keyword)
                 .if angle == 0 && paren == 0 && brace == 0 && bracket == 0
-                    .span 4576 21 4576 34
+                    .span 4580 21 4580 34
                     ret index
                 .endif
             .endif
         .endif
-        .span 4580 9 4580 20
+        .span 4584 9 4584 20
         eval index += 1
     .endloop
-    .span 4582 5 4582 15
+    .span 4586 5 4586 15
     ret -1
 .endfn
 
 .fn append_statement(statements -> Statement[], statement -> Statement) -> Statement[]
 .meta return Statement[]
 .meta effects none
-    .span 4585 21 4585 46
+    .span 4589 21 4589 46
     .param statements -> Statement[]
-    .span 4585 48 4585 70
+    .span 4589 48 4589 70
     .param statement -> Statement
-    .span 4586 5 4586 43
+    .span 4590 5 4590 43
     ret statements.concat([statement])
 .endfn
 
 .fn append_string(values -> string[], value -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 4589 18 4589 36
+    .span 4593 18 4593 36
     .param values -> string[]
-    .span 4589 38 4589 53
+    .span 4593 38 4593 53
     .param value -> string
-    .span 4590 5 4590 35
+    .span 4594 5 4594 35
     ret values.concat([value])
 .endfn
 
 .fn append_parameter(parameters -> Parameter[], parameter -> Parameter) -> Parameter[]
 .meta return Parameter[]
 .meta effects none
-    .span 4593 21 4593 46
+    .span 4597 21 4597 46
     .param parameters -> Parameter[]
-    .span 4593 48 4593 70
+    .span 4597 48 4597 70
     .param parameter -> Parameter
-    .span 4594 5 4594 43
+    .span 4598 5 4598 43
     ret parameters.concat([parameter])
 .endfn
 
 .fn append_model_property(properties -> ModelProperty[], property -> ModelProperty) -> ModelProperty[]
 .meta return ModelProperty[]
 .meta effects none
-    .span 4597 26 4597 55
+    .span 4601 26 4601 55
     .param properties -> ModelProperty[]
-    .span 4597 57 4597 82
+    .span 4601 57 4601 82
     .param property -> ModelProperty
-    .span 4598 5 4598 42
+    .span 4602 5 4602 42
     ret properties.concat([property])
 .endfn
 
 .fn append_field(fields -> FieldDeclaration[], field -> FieldDeclaration) -> FieldDeclaration[]
 .meta return FieldDeclaration[]
 .meta effects none
-    .span 4601 17 4601 45
+    .span 4605 17 4605 45
     .param fields -> FieldDeclaration[]
-    .span 4601 47 4601 72
+    .span 4605 47 4605 72
     .param field -> FieldDeclaration
-    .span 4602 5 4602 35
+    .span 4606 5 4606 35
     ret fields.concat([field])
 .endfn
 
 .fn append_method(methods -> MethodDeclaration[], method -> MethodDeclaration) -> MethodDeclaration[]
 .meta return MethodDeclaration[]
 .meta effects none
-    .span 4605 18 4605 48
+    .span 4609 18 4609 48
     .param methods -> MethodDeclaration[]
-    .span 4605 50 4605 77
+    .span 4609 50 4609 77
     .param method -> MethodDeclaration
-    .span 4606 5 4606 37
+    .span 4610 5 4610 37
     ret methods.concat([method])
 .endfn
 
 .fn append_signature(signatures -> FunctionSignature[], signature -> FunctionSignature) -> FunctionSignature[]
 .meta return FunctionSignature[]
 .meta effects none
-    .span 4609 21 4609 54
+    .span 4613 21 4613 54
     .param signatures -> FunctionSignature[]
-    .span 4609 56 4609 86
+    .span 4613 56 4613 86
     .param signature -> FunctionSignature
-    .span 4610 5 4610 43
+    .span 4614 5 4614 43
     ret signatures.concat([signature])
 .endfn
 
 .fn append_enum_variant(variants -> EnumVariant[], variant -> EnumVariant) -> EnumVariant[]
 .meta return EnumVariant[]
 .meta effects none
-    .span 4613 24 4613 49
+    .span 4617 24 4617 49
     .param variants -> EnumVariant[]
-    .span 4613 51 4613 73
+    .span 4617 51 4617 73
     .param variant -> EnumVariant
-    .span 4614 5 4614 39
+    .span 4618 5 4618 39
     ret variants.concat([variant])
 .endfn
 
 .fn append_type_annotation(types -> TypeAnnotation[], item -> TypeAnnotation) -> TypeAnnotation[]
 .meta return TypeAnnotation[]
 .meta effects none
-    .span 4617 27 4617 52
+    .span 4621 27 4621 52
     .param types -> TypeAnnotation[]
-    .span 4617 54 4617 76
+    .span 4621 54 4621 76
     .param item -> TypeAnnotation
-    .span 4618 5 4618 33
+    .span 4622 5 4622 33
     ret types.concat([item])
 .endfn
 
 .fn append_type_parameter(parameters -> TypeParameter[], parameter -> TypeParameter) -> TypeParameter[]
 .meta return TypeParameter[]
 .meta effects none
-    .span 4621 26 4621 55
+    .span 4625 26 4625 55
     .param parameters -> TypeParameter[]
-    .span 4621 57 4621 83
+    .span 4625 57 4625 83
     .param parameter -> TypeParameter
-    .span 4622 5 4622 43
+    .span 4626 5 4626 43
     ret parameters.concat([parameter])
 .endfn
 
 .fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[]
 .meta return Decorator[]
 .meta effects none
-    .span 4625 21 4625 46
+    .span 4629 21 4629 46
     .param decorators -> Decorator[]
-    .span 4625 48 4625 70
+    .span 4629 48 4629 70
     .param decorator -> Decorator
-    .span 4626 5 4626 43
+    .span 4630 5 4630 43
     ret decorators.concat([decorator])
 .endfn
 
 .fn append_decorator_argument(arguments -> DecoratorArgument[], argument -> DecoratorArgument) -> DecoratorArgument[]
 .meta return DecoratorArgument[]
 .meta effects none
-    .span 4629 30 4629 62
+    .span 4633 30 4633 62
     .param arguments -> DecoratorArgument[]
-    .span 4629 64 4629 93
+    .span 4633 64 4633 93
     .param argument -> DecoratorArgument
-    .span 4630 5 4630 41
+    .span 4634 5 4634 41
     ret arguments.concat([argument])
 .endfn
 
 .fn append_with_clause(clauses -> WithClause[], clause -> WithClause) -> WithClause[]
 .meta return WithClause[]
 .meta effects none
-    .span 4633 23 4633 46
+    .span 4637 23 4637 46
     .param clauses -> WithClause[]
-    .span 4633 48 4633 68
+    .span 4637 48 4637 68
     .param clause -> WithClause
-    .span 4634 5 4634 37
+    .span 4638 5 4638 37
     ret clauses.concat([clause])
 .endfn
 
 .fn append_match_case(cases -> MatchCase[], case -> MatchCase) -> MatchCase[]
 .meta return MatchCase[]
 .meta effects none
-    .span 4637 22 4637 42
+    .span 4641 22 4641 42
     .param cases -> MatchCase[]
-    .span 4637 44 4637 61
+    .span 4641 44 4641 61
     .param case -> MatchCase
-    .span 4638 5 4638 33
+    .span 4642 5 4642 33
     ret cases.concat([case])
 .endfn
 
 .fn append_expression(expressions -> Expression[], expression -> Expression) -> Expression[]
 .meta return Expression[]
 .meta effects none
-    .span 4641 22 4641 49
+    .span 4645 22 4645 49
     .param expressions -> Expression[]
-    .span 4641 51 4641 75
+    .span 4645 51 4645 75
     .param expression -> Expression
-    .span 4642 5 4642 45
+    .span 4646 5 4646 45
     ret expressions.concat([expression])
 .endfn
 
 .fn append_object_field(fields -> ObjectField[], field -> ObjectField) -> ObjectField[]
 .meta return ObjectField[]
 .meta effects none
-    .span 4645 24 4645 47
+    .span 4649 24 4649 47
     .param fields -> ObjectField[]
-    .span 4645 49 4645 69
+    .span 4649 49 4649 69
     .param field -> ObjectField
-    .span 4646 5 4646 35
+    .span 4650 5 4650 35
     ret fields.concat([field])
 .endfn
 
 .fn append_token(tokens -> Token[], token -> Token) -> Token[]
 .meta return Token[]
 .meta effects none
-    .span 4649 17 4649 34
+    .span 4653 17 4653 34
     .param tokens -> Token[]
-    .span 4649 36 4649 50
+    .span 4653 36 4653 50
     .param token -> Token
-    .span 4650 5 4650 35
+    .span 4654 5 4654 35
     ret tokens.concat([token])
 .endfn
 
 .fn append_token_array(collection -> Token[][], tokens -> Token[]) -> Token[][]
 .meta return Token[][]
 .meta effects none
-    .span 4653 23 4653 46
+    .span 4657 23 4657 46
     .param collection -> Token[][]
-    .span 4653 48 4653 65
+    .span 4657 48 4657 65
     .param tokens -> Token[]
-    .span 4654 5 4654 40
+    .span 4658 5 4658 40
     ret collection.concat([tokens])
 .endfn

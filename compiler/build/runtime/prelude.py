@@ -635,34 +635,7 @@ def match_exhaustive_failed(value):
 def char_code(character):
     if len(character) == 0:
         return -1
-    ch = char_at(character, 0)
-    digits = "0123456789"
-    digit_index = find_char(digits, ch, 0)
-    if digit_index >= 0:
-        return 48 + digit_index
-    lowercase = "abcdefghijklmnopqrstuvwxyz"
-    lowercase_index = find_char(lowercase, ch, 0)
-    if lowercase_index >= 0:
-        return 97 + lowercase_index
-    uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    uppercase_index = find_char(uppercase, ch, 0)
-    if uppercase_index >= 0:
-        return 65 + uppercase_index
-    if ch == " ":
-        return 32
-    if ch == "\n":
-        return 10
-    if ch == "\r":
-        return 13
-    if ch == "\t":
-        return 9
-    if ch == "\"":
-        return 34
-    if ch == "\\":
-        return 92
-    if ch == "_":
-        return 95
-    return runtime_char_code_fn(ch)
+    return runtime_char_code_fn(char_at(character, 0))
 
 def grapheme_count(text):
     return runtime_grapheme_count_fn(text)

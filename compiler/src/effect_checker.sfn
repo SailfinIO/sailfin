@@ -31,7 +31,16 @@ struct EffectViolation {
 }
 
 fn validate_effects(program -> Program) -> EffectViolation[] {
-    return [];
+    let mut violations -> EffectViolation[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= program.statements.length {
+            break;
+        }
+        violations = append_violations(violations, analyze_statement(program.statements[index]));
+        index += 1;
+    }
+    return violations;
 }
 
 fn analyze_statement(statement -> Statement) -> EffectViolation[] {

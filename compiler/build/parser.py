@@ -1761,6 +1761,9 @@ def parse_match_case(parser):
             return_expression = None
             if len(trimmed_expression_tokens) > 0:
                 return_expression = expression_from_tokens(trimmed_expression_tokens)
+            else:
+                if len(capture.tokens) > 0:
+                    return_expression = expression_from_tokens(capture.tokens)
             current = skip_trivia(capture.parser)
             terminator = parser_peek_raw(current)
             if symbol_matches(terminator, ";"):
@@ -1875,6 +1878,9 @@ def parse_return_statement(parser):
     expression = None
     if len(trimmed) > 0:
         expression = expression_from_tokens(trimmed)
+    else:
+        if len(capture.tokens) > 0:
+            expression = expression_from_tokens(capture.tokens)
     index = 0
     while True:
         if index >= len(capture.tokens):

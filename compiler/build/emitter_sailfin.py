@@ -264,9 +264,10 @@ def emit_block_body(builder, block):
 
 def emit_block_statement(builder, statement):
     if statement.variant == "ReturnStatement":
-        if statement.expression == None:
+        rendered = format_optional_expression(statement.expression)
+        if len(rendered) == 0:
             return builder_emit_line(builder, "return;")
-        return builder_emit_line(builder, "return " + format_expression(statement.expression) + ";")
+        return builder_emit_line(builder, "return " + rendered + ";")
     if statement.variant == "ExpressionStatement":
         return builder_emit_line(builder, format_expression(statement.expression) + ";")
     if statement.variant == "VariableDeclaration":
@@ -289,6 +290,11 @@ def emit_block_statement(builder, statement):
     if statement.variant == "MatchStatement":
         return emit_match(builder, statement)
     return builder_emit_line(builder, "// TODO: unsupported block statement: " + statement.variant)
+
+def format_optional_expression(expression):
+    if expression == None:
+        return ""
+    return format_expression(expression)
 
 def emit_prompt(builder, statement):
     current = emit_decorators(builder, statement.decorators)
@@ -655,9 +661,10 @@ def format_lambda_body(body):
 
 def format_lambda_statement(statement):
     if statement.variant == "ReturnStatement":
-        if statement.expression == None:
+        rendered = format_optional_expression(statement.expression)
+        if len(rendered) == 0:
             return "return;"
-        return "return " + format_expression(statement.expression) + ";"
+        return "return " + rendered + ";"
     if statement.variant == "ExpressionStatement":
         return format_expression(statement.expression) + ";"
     if statement.variant == "VariableDeclaration":

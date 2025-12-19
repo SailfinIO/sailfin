@@ -18,7 +18,7 @@ import {
     ElseBranch 
 } from "./ast";
 import { Token, TokenKind } from "./token";
-import { substring } from "./string_utils";
+import { substring, char_at, char_code } from "./string_utils";
 
 enum LiteralValue {
     String { value -> string },
@@ -151,8 +151,8 @@ fn trim_whitespace(value -> string) -> string {
         if start >= end {
             break;
         }
-        let ch -> int = value[start];
-        if is_whitespace_char(ch) {
+        let ch -> number = char_code(char_at(value, start));
+        if is_whitespace_codepoint(ch) {
             start += 1;
             continue;
         }
@@ -164,8 +164,8 @@ fn trim_whitespace(value -> string) -> string {
             break;
         }
         let look_index = end - 1;
-        let ch -> int = value[look_index];
-        if is_whitespace_char(ch) {
+        let ch -> number = char_code(char_at(value, look_index));
+        if is_whitespace_codepoint(ch) {
             end -= 1;
             continue;
         }
@@ -179,12 +179,12 @@ fn looks_like_quoted_string(text -> string) -> boolean {
     if text.length < 2 {
         return false;
     }
-    let first -> int = text[0];
+    let first -> number = char_code(char_at(text, 0));
     if first != 34 {
         return false;
     }
     let last_index = text.length - 1;
-    let last -> int = text[last_index];
+    let last -> number = char_code(char_at(text, last_index));
     if last != 34 {
         return false;
     }
@@ -197,7 +197,7 @@ fn looks_like_number(text -> string) -> boolean {
     }
     let mut has_decimal -> boolean = false;
     let mut index -> number = 0;
-    let first -> int = text[0];
+    let first -> number = char_code(char_at(text, 0));
     if first == 45 {
         if text.length == 1 {
             return false;
@@ -208,7 +208,7 @@ fn looks_like_number(text -> string) -> boolean {
         if index >= text.length {
             break;
         }
-    let ch -> int = text[index];
+        let ch -> number = char_code(char_at(text, index));
         if ch == 46 {
             if has_decimal {
                 return false;
@@ -217,7 +217,7 @@ fn looks_like_number(text -> string) -> boolean {
             index += 1;
             continue;
         }
-        if !is_decimal_digit(ch) {
+        if !is_decimal_digit_codepoint(ch) {
             return false;
         }
         index += 1;
@@ -225,7 +225,7 @@ fn looks_like_number(text -> string) -> boolean {
     return true;
 }
 
-fn is_decimal_digit(ch -> int) -> boolean {
+fn is_decimal_digit_codepoint(ch -> number) -> boolean {
     return ch >= 48 && ch <= 57;
 }
 
@@ -268,7 +268,7 @@ fn contains_effect(effects -> string[], effect -> string) -> boolean {
     return false;
 }
 
-fn is_whitespace_char(ch -> int) -> boolean {
+fn is_whitespace_codepoint(ch -> number) -> boolean {
     return ch == 32
         || ch == 9
         || ch == 10

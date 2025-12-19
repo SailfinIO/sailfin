@@ -749,57 +749,11 @@ fn char_code(character -> string) -> number {
         return -1;
     }
 
-    let ch = char_at(character, 0);
-
-    let digits = "0123456789";
-    let digit_index = find_char(digits, ch, 0);
-
-    if digit_index >= 0 {
-        return 48 + digit_index;
-    }
-
-    let lowercase = "abcdefghijklmnopqrstuvwxyz";
-    let lowercase_index = find_char(lowercase, ch, 0);
-
-    if lowercase_index >= 0 {
-        return 97 + lowercase_index;
-    }
-
-    let uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let uppercase_index = find_char(uppercase, ch, 0);
-
-    if uppercase_index >= 0 {
-        return 65 + uppercase_index;
-    }
-
-    if ch == " " {
-        return 32;
-    }
-
-    if ch == "\n" {
-        return 10;
-    }
-
-    if ch == "\r" {
-        return 13;
-    }
-
-    if ch == "\t" {
-        return 9;
-    }
-
-    if ch == "\"" {
-        return 34;
-    }
-
-    if ch == "\\" {
-        return 92;
-    }
-
-    if ch == "_" {
-        return 95;
-    }
-    return runtime_char_code_fn(ch);
+    // Performance note: this function sits on hot paths in the compiler.
+    // Prefer the runtime intrinsic instead of scanning through ASCII tables.
+    // `char_at` returns a single grapheme; `runtime_char_code_fn` returns the
+    // corresponding Unicode code point.
+    return runtime_char_code_fn(char_at(character, 0));
 }
 
 

@@ -3,7 +3,7 @@ from runtime import runtime_support as runtime
 
 from compiler.build.ast import Program, Statement, Decorator, Expression, Block, FunctionSignature, Parameter, TypeAnnotation, MatchCase, ElseBranch
 from compiler.build.token import Token, TokenKind
-from compiler.build.string_utils import substring
+from compiler.build.string_utils import substring, char_at, char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -120,8 +120,8 @@ def trim_whitespace(value):
     while True:
         if start >= end:
             break
-        ch = value[start]
-        if is_whitespace_char(ch):
+        ch = char_code(char_at(value, start))
+        if is_whitespace_codepoint(ch):
             start += 1
             continue
         break
@@ -129,8 +129,8 @@ def trim_whitespace(value):
         if end <= start:
             break
         look_index = end - 1
-        ch = value[look_index]
-        if is_whitespace_char(ch):
+        ch = char_code(char_at(value, look_index))
+        if is_whitespace_codepoint(ch):
             end -= 1
             continue
         break
@@ -139,11 +139,11 @@ def trim_whitespace(value):
 def looks_like_quoted_string(text):
     if len(text) < 2:
         return False
-    first = text[0]
+    first = char_code(char_at(text, 0))
     if first != 34:
         return False
     last_index = len(text) - 1
-    last = text[last_index]
+    last = char_code(char_at(text, last_index))
     if last != 34:
         return False
     return True
@@ -153,7 +153,7 @@ def looks_like_number(text):
         return False
     has_decimal = False
     index = 0
-    first = text[0]
+    first = char_code(char_at(text, 0))
     if first == 45:
         if len(text) == 1:
             return False
@@ -161,19 +161,19 @@ def looks_like_number(text):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_code(char_at(text, index))
         if ch == 46:
             if has_decimal:
                 return False
             has_decimal = True
             index += 1
             continue
-        if not is_decimal_digit(ch):
+        if not is_decimal_digit_codepoint(ch):
             return False
         index += 1
     return True
 
-def is_decimal_digit(ch):
+def is_decimal_digit_codepoint(ch):
     return ch >= 48  and  ch <= 57
 
 def append_decorator_info(collection, item):
@@ -205,7 +205,7 @@ def contains_effect(effects, effect):
         index += 1
     return False
 
-def is_whitespace_char(ch):
+def is_whitespace_codepoint(ch):
     return ch == 32  or  ch == 9  or  ch == 10  or  ch == 13
 
 def slice_text(text, start, end):

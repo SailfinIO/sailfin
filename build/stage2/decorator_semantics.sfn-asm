@@ -5,7 +5,7 @@
 
 .import "./token" { Token, TokenKind }
 
-.import "./string_utils" { substring }
+.import "./string_utils" { substring, char_at, char_code }
 
 .enum LiteralValue
     .layout enum name=LiteralValue size=16 align=8 tag_type=i32 tag_size=4 tag_align=4
@@ -213,9 +213,9 @@
         .if start >= end
             break
         .endif
-        .span 154 9 154 38
-        eval let ch -> int = value[start]
-        .if is_whitespace_char(ch)
+        .span 154 9 154 61
+        eval let ch -> number = char_code(char_at(value, start))
+        .if is_whitespace_codepoint(ch)
             .span 156 13 156 24
             eval start += 1
             continue
@@ -228,9 +228,9 @@
         .endif
         .span 166 9 166 34
         eval let look_index = end - 1
-        .span 167 9 167 43
-        eval let ch -> int = value[look_index]
-        .if is_whitespace_char(ch)
+        .span 167 9 167 66
+        eval let ch -> number = char_code(char_at(value, look_index))
+        .if is_whitespace_codepoint(ch)
             .span 169 13 169 22
             eval end -= 1
             continue
@@ -250,16 +250,16 @@
         .span 180 9 180 22
         ret false
     .endif
-    .span 182 5 182 32
-    eval let first -> int = text[0]
+    .span 182 5 182 55
+    eval let first -> number = char_code(char_at(text, 0))
     .if first != 34
         .span 184 9 184 22
         ret false
     .endif
     .span 186 5 186 38
     eval let last_index = text.length - 1
-    .span 187 5 187 40
-    eval let last -> int = text[last_index]
+    .span 187 5 187 63
+    eval let last -> number = char_code(char_at(text, last_index))
     .if last != 34
         .span 189 9 189 22
         ret false
@@ -281,8 +281,8 @@
     eval let mut has_decimal -> boolean = false
     .span 199 5 199 33
     eval let mut index -> number = 0
-    .span 200 5 200 32
-    eval let first -> int = text[0]
+    .span 200 5 200 55
+    eval let first -> number = char_code(char_at(text, 0))
     .if first == 45
         .if text.length == 1
             .span 203 13 203 26
@@ -295,8 +295,8 @@
         .if index >= text.length
             break
         .endif
-        .span 211 5 211 33
-        eval let ch -> int = text[index]
+        .span 211 9 211 60
+        eval let ch -> number = char_code(char_at(text, index))
         .if ch == 46
             .if has_decimal
                 .span 214 17 214 30
@@ -308,7 +308,7 @@
             eval index += 1
             continue
         .endif
-        .if !is_decimal_digit(ch)
+        .if !is_decimal_digit_codepoint(ch)
             .span 221 13 221 26
             ret false
         .endif
@@ -319,11 +319,11 @@
     ret true
 .endfn
 
-.fn is_decimal_digit(ch -> int) -> boolean
+.fn is_decimal_digit_codepoint(ch -> number) -> boolean
 .meta return boolean
 .meta effects none
-    .span 228 21 228 30
-    .param ch -> int
+    .span 228 31 228 43
+    .param ch -> number
     .span 229 5 229 33
     ret ch >= 48 && ch <= 57
 .endfn
@@ -407,11 +407,11 @@
     ret false
 .endfn
 
-.fn is_whitespace_char(ch -> int) -> boolean
+.fn is_whitespace_codepoint(ch -> number) -> boolean
 .meta return boolean
 .meta effects none
-    .span 271 23 271 32
-    .param ch -> int
+    .span 271 28 271 40
+    .param ch -> number
     .span 272 5 275 21
     ret ch == 32 || ch == 9 || ch == 10 || ch == 13
 .endfn

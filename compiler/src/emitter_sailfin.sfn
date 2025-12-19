@@ -42,7 +42,7 @@ fn emit_program(program -> Program) -> string {
     builder = builder_emit_blank(builder);
     builder = builder_emit_line(
         builder,
-        "import { sleep, channel, parallel, spawn, fs, serve, http, websocket, logExecution, array_map, array_filter, array_reduce } from \"sailfin/runtime\";"
+        "import() from \"sailfin/runtime\";"
     );
     builder = builder_emit_blank(builder);
 
@@ -107,13 +107,13 @@ fn emit_statement(builder -> TextBuilder, statement -> Statement) -> TextBuilder
 
 fn emit_import(builder -> TextBuilder, specifiers -> ImportSpecifier[], source -> string) -> TextBuilder {
     let list = format_import_specifiers(specifiers);
-    let line = "import { " + list + " } from \"" + source + "\";";
+    let line = "import() from \"" + source + "\";";
     return builder_emit_line(builder, line);
 }
 
 fn emit_export(builder -> TextBuilder, specifiers -> ExportSpecifier[], source -> string) -> TextBuilder {
     let list = format_export_specifiers(specifiers);
-    let line = "export { " + list + " } from \"" + source + "\";";
+    let line = "export() from \"" + source + "\";";
     return builder_emit_line(builder, line);
 }
 
@@ -349,10 +349,11 @@ fn emit_block_body(builder -> TextBuilder, block -> Block) -> TextBuilder {
 
 fn emit_block_statement(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     if statement.variant == "ReturnStatement" {
-        if statement.expression == null {
-            return builder_emit_line(builder, "return;");
-        }
-        return builder_emit_line(builder, "return " + format_expression(statement.expression) + ";");
+            let rendered = format_optional_expression(statement.expression);
+            if rendered.length == 0 {
+                return builder_emit_line(builder, "return;");
+            }
+            return builder_emit_line(builder, "return " + rendered + ";");
     }
     if statement.variant == "ExpressionStatement" {
         return builder_emit_line(builder, format_expression(statement.expression) + ";");
@@ -386,6 +387,13 @@ fn emit_block_statement(builder -> TextBuilder, statement -> Statement) -> TextB
         return emit_match(builder, statement);
     }
     return builder_emit_line(builder, "// TODO: unsupported block statement: " + statement.variant);
+}
+
+fn format_optional_expression(expression -> Expression?) -> string {
+    if expression == null {
+        return "";
+    }
+    return format_expression(expression);
 }
 
 fn emit_prompt(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
@@ -858,10 +866,11 @@ fn format_lambda_body(body -> Block) -> string {
 
 fn format_lambda_statement(statement -> Statement) -> string {
     if statement.variant == "ReturnStatement" {
-        if statement.expression == null {
+        let rendered = format_optional_expression(statement.expression);
+        if rendered.length == 0 {
             return "return;";
         }
-        return "return " + format_expression(statement.expression) + ";";
+        return "return " + rendered + ";";
     }
     if statement.variant == "ExpressionStatement" {
         return format_expression(statement.expression) + ";";

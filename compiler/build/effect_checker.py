@@ -40,7 +40,14 @@ class EffectViolation:
         return runtime.struct_repr('EffectViolation', [runtime.struct_field('routine_name', self.routine_name), runtime.struct_field('missing_effects', self.missing_effects), runtime.struct_field('requirements', self.requirements)])
 
 def validate_effects(program):
-    return []
+    violations = []
+    index = 0
+    while True:
+        if index >= len(program.statements):
+            break
+        violations = append_violations(violations, analyze_statement(program.statements[index]))
+        index += 1
+    return violations
 
 def analyze_statement(statement):
     if statement.variant == "FunctionDeclaration":

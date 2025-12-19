@@ -2397,6 +2397,8 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
         let mut return_expression -> Expression? = null;
         if trimmed_expression_tokens.length > 0 {
             return_expression = expression_from_tokens(trimmed_expression_tokens);
+        } else if capture.tokens.length > 0 {
+            return_expression = expression_from_tokens(capture.tokens);
         }
 
         current = skip_trivia(capture.parser);
@@ -2578,6 +2580,8 @@ fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult {
     let mut expression -> Expression? = null;
     if trimmed.length > 0 {
         expression = expression_from_tokens(trimmed);
+    } else if capture.tokens.length > 0 {
+        expression = expression_from_tokens(capture.tokens);
     }
 
     let mut index -> number = 0;

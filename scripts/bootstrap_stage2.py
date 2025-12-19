@@ -13,6 +13,7 @@ import pathlib
 import re
 import sys
 from collections import defaultdict
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -20,7 +21,17 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from compiler.build import native_llvm_lowering as stage1_lowering
+
+_STAGE1_LOWERING = None
+
+
+def _stage1_lowering_module():
+    global _STAGE1_LOWERING
+    if _STAGE1_LOWERING is None:
+        _STAGE1_LOWERING = importlib.import_module(
+            "compiler.build.native_llvm_lowering"
+        )
+    return _STAGE1_LOWERING
 
 
 class Stage2BootstrapError(RuntimeError):
@@ -309,8 +320,14 @@ def load_native_text_for_import(import_path: str, output_dir: pathlib.Path) -> s
     return ""
 
 
-def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
-                               quiet: bool = False, capture_results: bool = False) -> Tuple[List[pathlib.Path], DiagnosticAggregator] | Tuple[List[pathlib.Path], DiagnosticAggregator, Dict[pathlib.Path, Any]]:
+def compile_compiler_to_stage2(
+    output_dir: pathlib.Path,
+    *,
+    debug: bool = False,
+    quiet: bool = False,
+    capture_results: bool = False,
+    progress: bool = False,
+) -> Tuple[List[pathlib.Path], DiagnosticAggregator] | Tuple[List[pathlib.Path], DiagnosticAggregator, Dict[pathlib.Path, Any]]:
     """Compile all compiler sources to Stage2 LLVM artifacts.
 
     Args:
@@ -374,15 +391,22 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
     if debug:
         print("[stage2-bootstrap] first pass: collecting layout manifests...")
 
-    for source_path in all_sources:
+    first_pass_total = len(all_sources)
+    for index, source_path in enumerate(all_sources):
         try:
             source = source_path.read_text(encoding="utf-8")
             source_cache[source_path] = source
             imports = extract_import_paths(source)
             import_cache[source_path] = imports
 
-            if debug:
-                print(f"[stage2-bootstrap]   preparing {source_path.name}")
+            if debug or progress:
+                rel = source_path.relative_to(REPO_ROOT)
+                print(
+                    f"[stage2-bootstrap] pass1 {index + 1}/{first_pass_total}: {rel}",
+                    flush=True,
+                )
+
+            start = time.perf_counter() if progress else None
 
             if has_full:
                 full_result = stage1_main.compile_to_native_llvm_full(source)
@@ -416,6 +440,14 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
                 lowered = stage1_main.compile_to_native_llvm(source)
                 first_pass_results[source_path] = lowered
 
+            if start is not None:
+                elapsed = time.perf_counter() - start
+                if elapsed >= 2.0:
+                    print(
+                        f"[stage2-bootstrap] pass1 slow ({elapsed:.1f}s): {source_path.name}",
+                        flush=True,
+                    )
+
         except Exception as exc:
             raise Stage2BootstrapError(
                 f"failed to compile {source_path.name}: {exc}"
@@ -424,10 +456,20 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
     if debug:
         print("[stage2-bootstrap] second pass: lowering with manifests...")
 
-    for source_path in all_sources:
+    second_pass_total = len(all_sources)
+    for index, source_path in enumerate(all_sources):
         try:
             source = source_cache[source_path]
             import_paths = import_cache.get(source_path, [])
+
+            if debug or progress:
+                rel = source_path.relative_to(REPO_ROOT)
+                print(
+                    f"[stage2-bootstrap] pass2 {index + 1}/{second_pass_total}: {rel}",
+                    flush=True,
+                )
+
+            start = time.perf_counter() if progress else None
 
             import_contexts: List[Tuple[str, str]] = []
             if has_manifest:
@@ -447,10 +489,13 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
 
             cached_result = first_pass_results.get(source_path)
             if cached_result is None:
-                raise Stage2BootstrapError(f"first pass result missing for {source_path}")
+                raise Stage2BootstrapError(
+                    f"first pass result missing for {source_path}")
 
-            fallback_llvm = getattr(cached_result, "llvm", None) if has_full else None
-            fallback_native_module = getattr(cached_result, "native_module", None) if has_full else None
+            fallback_llvm = getattr(
+                cached_result, "llvm", None) if has_full else None
+            fallback_native_module = getattr(
+                cached_result, "native_module", None) if has_full else None
             native_module = None
 
             if has_context and import_contexts and (any(ctx[0] for ctx in import_contexts) or any(ctx[1] for ctx in import_contexts)):
@@ -533,6 +578,14 @@ def compile_compiler_to_stage2(output_dir: pathlib.Path, *, debug: bool = False,
                 rel_ir = output_path.relative_to(REPO_ROOT)
                 print(f"[stage2-bootstrap]   -> {rel_ir}")
 
+            if start is not None:
+                elapsed = time.perf_counter() - start
+                if elapsed >= 2.0:
+                    print(
+                        f"[stage2-bootstrap] pass2 slow ({elapsed:.1f}s): {source_path.name}",
+                        flush=True,
+                    )
+
         except Exception as exc:
             raise Stage2BootstrapError(
                 f"failed to compile {source_path.name}: {exc}"
@@ -610,7 +663,8 @@ def verify_string_constants(llvm_modules: List[pathlib.Path], *, debug: bool = F
 
         text = module_path.read_text(encoding="utf-8")
 
-        defined = {match.group(1) for match in _STRING_DEF_PATTERN.finditer(text)}
+        defined = {match.group(1)
+                   for match in _STRING_DEF_PATTERN.finditer(text)}
         referenced: Set[str] = set()
         for match in _STRING_REF_PATTERN.finditer(text):
             pos = match.start()
@@ -622,7 +676,8 @@ def verify_string_constants(llvm_modules: List[pathlib.Path], *, debug: bool = F
         if missing:
             missing_by_module[module_path.name] = missing
             if debug:
-                print(f"[stage2-bootstrap][error] {module_path.name} missing definitions for: {', '.join(missing)}")
+                print(
+                    f"[stage2-bootstrap][error] {module_path.name} missing definitions for: {', '.join(missing)}")
 
     if missing_by_module:
         message_lines = ["detected missing string constant definitions:"]
@@ -656,7 +711,7 @@ _ENUM_REF_RE = re.compile(r'@\.enum(?:\.[A-Za-z0-9_]+)+')
 _LITERAL_CACHE: Dict[pathlib.Path, Dict[str, Any]] = {}
 _HELPER_DECLARATIONS: Dict[str, str] = {
     descriptor.symbol: f"declare {descriptor.return_type} @{descriptor.symbol}({', '.join(descriptor.parameter_types)})"
-    for descriptor in stage1_lowering.runtime_helper_descriptors()
+    for descriptor in _stage1_lowering_module().runtime_helper_descriptors()
 }
 _HELPER_REF_RE = re.compile(r'@(sailfin_(?:runtime|adapter)_[A-Za-z0-9_]+)')
 
@@ -667,6 +722,7 @@ def _string_constants_from_source(source_path: pathlib.Path, source_text: str) -
     if cached is not None:
         return cached
     constants: Dict[str, Any] = {}
+    stage1_lowering = _stage1_lowering_module()
     for match in _STRING_LITERAL_RE.finditer(source_text):
         literal = match.group(0)
         content = stage1_lowering.unescape_string_literal(literal)
@@ -685,7 +741,8 @@ def _ensure_module_string_constants(source_path: pathlib.Path, source_text: str,
     if not ir_text:
         return
     referenced: Set[str] = set(_STRING_REF_RE.findall(ir_text))
-    referenced.update(match.group(0) for match in _ENUM_REF_RE.finditer(ir_text))
+    referenced.update(match.group(0)
+                      for match in _ENUM_REF_RE.finditer(ir_text))
     if not referenced:
         return
     literal_map = _string_constants_from_source(source_path, source_text)
@@ -735,6 +792,7 @@ def _synthesise_enum_string_constant(name: str):
     else:
         return None
     byte_count = len(content.encode("utf-8"))
+    stage1_lowering = _stage1_lowering_module()
     return stage1_lowering.StringConstant(
         name=name,
         content=content,
@@ -749,6 +807,7 @@ def _render_string_constant_definition(constant) -> str | None:
         return None
     if not name.startswith("@"):
         name = "@" + name
+    stage1_lowering = _stage1_lowering_module()
     escaped = stage1_lowering.escape_string_for_llvm(content)
     byte_count = getattr(constant, "byte_count", len(content.encode("utf-8")))
     length = byte_count + 1
@@ -779,8 +838,10 @@ def _ensure_runtime_helper_declarations(lowered) -> None:
             if len(parts) == 2:
                 symbol = parts[1].split("(", 1)[0]
                 declared_symbols.add(symbol)
-    referenced: Set[str] = set(match.group(1) for match in _HELPER_REF_RE.finditer(ir_text))
-    missing = [symbol for symbol in referenced if symbol in _HELPER_DECLARATIONS and symbol not in declared_symbols]
+    referenced: Set[str] = set(match.group(1)
+                               for match in _HELPER_REF_RE.finditer(ir_text))
+    missing = [
+        symbol for symbol in referenced if symbol in _HELPER_DECLARATIONS and symbol not in declared_symbols]
     if not missing:
         return
     lines = ir_text.splitlines()
@@ -788,7 +849,8 @@ def _ensure_runtime_helper_declarations(lowered) -> None:
     while insert_index < len(lines) and not lines[insert_index].startswith("define "):
         insert_index += 1
     declarations = [_HELPER_DECLARATIONS[symbol] for symbol in missing]
-    new_lines = lines[:insert_index] + declarations + [""] + lines[insert_index:]
+    new_lines = lines[:insert_index] + \
+        declarations + [""] + lines[insert_index:]
     setattr(lowered, "ir", "\n".join(new_lines))
 
 
@@ -812,6 +874,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--quiet",
         action="store_true",
         help="Suppress individual diagnostic output (only show summary)",
+    )
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="Print per-module progress and timing (helps diagnose hangs)",
     )
     parser.add_argument(
         "--summary",
@@ -859,7 +926,11 @@ def main(argv: list[str] | None = None) -> int:
 
         # Compile compiler sources to LLVM
         compilation_result = compile_compiler_to_stage2(
-            args.output, debug=args.debug, quiet=args.quiet)
+            args.output,
+            debug=args.debug,
+            quiet=args.quiet,
+            progress=args.progress,
+        )
         llvm_modules, aggregator = compilation_result[:2]
 
         print(

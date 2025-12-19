@@ -2190,7 +2190,7 @@ def extract_call_targets(expression, function_names):
     while True:
         if index >= len(expression):
             break
-        ch = expression[index]
+        ch = char_at(expression, index)
         if ch == "\"":
             index = skip_string_literal(expression, index + 1)
             continue
@@ -2200,7 +2200,7 @@ def extract_call_targets(expression, function_names):
             while True:
                 if index >= len(expression):
                     break
-                current = expression[index]
+                current = char_at(expression, index)
                 if is_identifier_part_char(current):
                     index += 1
                     continue
@@ -2219,7 +2219,7 @@ def extract_call_targets(expression, function_names):
                 while True:
                     if cursor >= len(expression):
                         break
-                    next = expression[cursor]
+                    next = char_at(expression, cursor)
                     if is_trim_char(next):
                         cursor += 1
                         continue
@@ -2239,7 +2239,7 @@ def extract_all_call_targets(expression):
     while True:
         if index >= len(expression):
             break
-        ch = expression[index]
+        ch = char_at(expression, index)
         if ch == "\"":
             index = skip_string_literal(expression, index + 1)
             continue
@@ -2249,7 +2249,7 @@ def extract_all_call_targets(expression):
             while True:
                 if index >= len(expression):
                     break
-                current = expression[index]
+                current = char_at(expression, index)
                 if is_identifier_part_char(current):
                     index += 1
                     continue
@@ -2263,7 +2263,7 @@ def extract_all_call_targets(expression):
                 while True:
                     if cursor >= len(expression):
                         break
-                    next = expression[cursor]
+                    next = char_at(expression, cursor)
                     if is_trim_char(next):
                         cursor += 1
                         continue
@@ -4287,7 +4287,11 @@ def lower_condition_to_i1(function_name, expression, bindings, locals, temp_inde
     current_temp = lowered.temp_index
     string_constants = lowered.string_constants
     if lowered.operand == None:
-        diagnostics = append_string(diagnostics, "llvm lowering: condition produced no value in `" + function_name + "`")
+        rendered_condition = trim_text(expression)
+        if len(rendered_condition) == 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: condition produced no value in `" + function_name + "`")
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: condition produced no value in `" + function_name + "` for `" + rendered_condition + "`")
         return ConditionConversion(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     operand = lowered.operand
     if operand.llvm_type == "i1":
@@ -4619,7 +4623,11 @@ context
     current_temp = condition.temp_index
     collected_string_constants = condition.string_constants
     if condition.operand == None:
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "`")
+        rendered_condition = trim_text(function.instructions[start_index].condition)
+        if len(rendered_condition) == 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "`")
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "` for `" + rendered_condition + "`")
         return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=[], string_constants=collected_string_constants)
     then_label_alloc = allocate_block_label("then", current_block_counter)
     then_label = then_label_alloc.label
@@ -5925,22 +5933,21 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     if multiplicative.success:
         return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions, context)
     if len(stripped) > 0:
-        first_ch = stripped[0]
-        if first_ch == "!":
+        if char_code_at_text(stripped, 0) == char_code("!"):
             operand_text = trim_text(substring(stripped, 1, len(stripped)))
             if len(operand_text) > 0:
                 lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "")
                 return lower_logical_not_result(lowered_operand, diagnostics)
     call_index = find_call_site(stripped)
-    if call_index >= 0  and  stripped[len(stripped) - 1] == ")":
+    if call_index >= 0  and  char_code_at_text(stripped, len(stripped) - 1) == char_code(")"):
         target = trim_text(substring(stripped, 0, call_index))
         arguments_text = substring(stripped, call_index + 1, len(stripped) - 1)
         argument_entries = split_call_arguments(arguments_text)
         return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions, context)
     if len(stripped) >= 2:
-        first = stripped[0]
-        last = stripped[len(stripped) - 1]
-        if first == "["  and  last == "]":
+        first_code = char_code_at_text(stripped, 0)
+        last_code = char_code_at_text(stripped, len(stripped) - 1)
+        if first_code == char_code("[")  and  last_code == char_code("]"):
             return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context, expected_type)
     enum_parse = parse_enum_literal(stripped)
     if enum_parse.recognized  and  enum_parse.success:
@@ -6015,6 +6022,10 @@ def parse_borrow_expression(text):
     if len(trimmed) == 0:
         return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
     if starts_with(trimmed, "borrow"):
+        if len(trimmed) > 6:
+            next = char_at(trimmed, 6)
+            if next != " "  and  next != "\t"  and  next != "(":
+                return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
         remainder = trim_text(substring(trimmed, 6, len(trimmed)))
         if len(remainder) == 0:
             issue = append_string(diagnostics, "llvm lowering: borrow expression missing target")
@@ -7924,15 +7935,6 @@ def lower_struct_literal(parse, bindings, locals, temp_index, lines, functions, 
         value_operand = None
         if literal_index >= 0:
             literal_field = parse.fields[literal_index]
-            if expected.name == "string_constants":
-                local_names = []
-                local_idx = 0
-                while True:
-                    if local_idx >= len(locals):
-                        break
-                    local_names = append_string(local_names, locals[local_idx].name)
-                    local_idx += 1
-                print.info("[sfn-debug] lower_struct_literal locals=" + join_strings(local_names, ", "))
             lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type)
             diagnostics = (diagnostics) + (lowered.diagnostics)
             current_lines = lowered.lines
@@ -8481,7 +8483,7 @@ def strip_enclosing_parentheses(expression):
     while True:
         if index >= len(trimmed):
             break
-        ch = trimmed[index]
+        ch = char_at(trimmed, index)
         if ch == "(":
             depth += 1
         else:
@@ -8509,7 +8511,7 @@ def find_top_level_operator(expression, operators):
     while True:
         if index >= len(expression):
             break
-        ch = expression[index]
+        ch = char_at(expression, index)
         if in_double:
             if escape_next:
                 escape_next = False
@@ -8722,11 +8724,14 @@ def find_logical_operator(expression):
     return OperatorMatch(index=-1, symbol="", success=False)
 
 def contains_char(set, ch):
+    if len(ch) == 0:
+        return False
+    target = char_code(ch)
     index = 0
     while True:
         if index >= len(set):
             break
-        if set[index] == ch:
+        if char_code(char_at(set, index)) == target:
             return True
         index += 1
     return False
@@ -8752,7 +8757,7 @@ def find_previous_non_space_char(value, index):
         if position <= 0:
             break
         position -= 1
-        ch = value[position]
+        ch = char_at(value, position)
         if not is_trim_char(ch):
             return ch
     return None
@@ -8762,7 +8767,7 @@ def find_next_non_space_char(value, index):
     while True:
         if position >= len(value):
             break
-        ch = value[position]
+        ch = char_at(value, position)
         if not is_trim_char(ch):
             return ch
         position += 1
@@ -8774,7 +8779,7 @@ def find_call_site(expression):
     while True:
         if index >= len(expression):
             break
-        ch = expression[index]
+        ch = char_at(expression, index)
         if ch == "(":
             if depth == 0:
                 return index
@@ -8802,7 +8807,7 @@ def split_call_arguments(text):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if in_double:
             current = current + ch
             if escape:
@@ -8889,7 +8894,7 @@ def split_array_elements(text):
     while True:
         if index >= len(text):
             break
-        ch = text[index]
+        ch = char_at(text, index)
         if in_double:
             current = current + ch
             if escape:
@@ -9221,7 +9226,7 @@ def find_member_access_separator(value):
     while True:
         if index >= len(value):
             break
-        ch = value[index]
+        ch = char_at(value, index)
         if in_single:
             if escape:
                 escape = False
@@ -9282,18 +9287,18 @@ def find_member_access_separator(value):
         if paren_depth == 0  and  bracket_depth == 0  and  brace_depth == 0:
             if ch == ".":
                 if index > 0:
-                    previous = value[index - 1]
+                    previous = char_at(value, index - 1)
                     if previous == ".":
                         index += 1
                         continue
                     if is_digit_char(previous):
                         if index + 1 < len(value):
-                            next_digit = value[index + 1]
+                            next_digit = char_at(value, index + 1)
                             if is_digit_char(next_digit):
                                 index += 1
                                 continue
                 if index + 1 < len(value):
-                    next_char = value[index + 1]
+                    next_char = char_at(value, index + 1)
                     if next_char == ".":
                         index += 1
                         continue
@@ -9323,14 +9328,14 @@ def parse_index_expression(expression):
     bracket_depth = 0
     index_position = -1
     i = len(trimmed) - 1
-    if trimmed[len(trimmed) - 1] != "]":
+    if char_code_at_text(trimmed, len(trimmed) - 1) != char_code("]"):
         return IndexExpressionParse(success=False, base="", index="")
     bracket_depth = 1
     i = len(trimmed) - 2
     while True:
         if i < 0:
             break
-        ch = trimmed[i]
+        ch = char_at(trimmed, i)
         if ch == "]":
             bracket_depth += 1
         if ch == "[":
@@ -9615,16 +9620,20 @@ def is_null_literal(text):
     return False
 
 def is_digit_char(ch):
-    if index_of("0123456789", ch) >= 0:
-        return True
-    return False
+    code = char_code(ch)
+    zero = char_code("0")
+    nine = char_code("9")
+    return code >= zero  and  code <= nine
+
+def char_code_at_text(text, index):
+    return char_code(char_at(text, index))
 
 def is_integer_literal(text):
     trimmed = trim_text(text)
     if len(trimmed) == 0:
         return False
     index = 0
-    if trimmed[0] == "-":
+    if char_code_at_text(trimmed, 0) == char_code("-"):
         if len(trimmed) == 1:
             return False
         index = 1
@@ -9632,8 +9641,8 @@ def is_integer_literal(text):
     while True:
         if index >= len(trimmed):
             break
-        ch = trimmed[index]
-        if ch >= "0"  and  ch <= "9":
+        code = char_code_at_text(trimmed, index)
+        if code >= char_code("0")  and  code <= char_code("9"):
             has_digit = True
             index += 1
             continue
@@ -9647,19 +9656,19 @@ def is_number_literal(text):
     trimmed = trim_text(text)
     if len(trimmed) == 0:
         return False
-    if trimmed[0] == "-":
+    if char_code_at_text(trimmed, 0) == char_code("-"):
         if len(trimmed) == 1:
             return False
         index = 1
     while True:
         if index >= len(trimmed):
             break
-        ch = trimmed[index]
-        if ch >= "0"  and  ch <= "9":
+        code = char_code_at_text(trimmed, index)
+        if code >= char_code("0")  and  code <= char_code("9"):
             has_digit = True
             index += 1
             continue
-        if ch == ".":
+        if code == char_code("."):
             if has_decimal:
                 return False
             has_decimal = True
@@ -9678,19 +9687,19 @@ def is_string_literal(text):
     trimmed = trim_text(text)
     if len(trimmed) < 2:
         return False
-    if trimmed[0] != "\"":
+    if char_code_at_text(trimmed, 0) != char_code("\""):
         return False
-    if trimmed[len(trimmed) - 1] != "\"":
+    if char_code_at_text(trimmed, len(trimmed) - 1) != char_code("\""):
         return False
     return True
 
 def is_character_literal(text):
     if len(text) < 2:
         return False
-    if text[0] != "\""  or  text[len(text) - 1] != "\"":
+    if char_code_at_text(text, 0) != char_code("\"")  or  char_code_at_text(text, len(text) - 1) != char_code("\""):
         return False
     inner = substring(text, 1, len(text) - 1)
-    if len(inner) == 2  and  inner[0] == "\\":
+    if len(inner) == 2  and  char_code_at_text(inner, 0) == char_code("\\"):
         return True
     return len(inner) == 1
 
@@ -9698,24 +9707,25 @@ def get_character_literal_value(text):
     inner = substring(text, 1, len(text) - 1)
     if len(inner) == 0:
         return 0
-    if len(inner) == 2  and  inner[0] == "\\":
-        escape = inner[1]
-        if escape == "n":
+    if len(inner) == 2  and  char_code_at_text(inner, 0) == char_code("\\"):
+        escape = char_at(inner, 1)
+        escape_code = char_code(escape)
+        if escape_code == char_code("n"):
             return char_code("\n")
         else:
-            if escape == "r":
+            if escape_code == char_code("r"):
                 return char_code("\r")
             else:
-                if escape == "t":
+                if escape_code == char_code("t"):
                     return char_code("\t")
                 else:
-                    if escape == "\"":
+                    if escape_code == char_code("\""):
                         return char_code("\"")
                     else:
-                        if escape == "\\":
+                        if escape_code == char_code("\\"):
                             return char_code("\\")
         return char_code(escape)
-    return char_code(inner[0])
+    return char_code(char_at(inner, 0))
 
 def make_string_constant_name(content):
     hash_value = compute_string_constant_hash(content)
@@ -9730,7 +9740,7 @@ def compute_string_constant_hash(content):
     while True:
         if index >= len(content):
             break
-        code = char_code(content[index])
+        code = char_code_at_text(content, index)
         hash = hash * 33 + code
         while True:
             if hash < modulus:
@@ -9767,33 +9777,37 @@ def unescape_string_literal(literal):
     while True:
         if index >= len(inner):
             break
-        ch = inner[index]
-        if ch == "\\"  and  index + 1 < len(inner):
-            next = inner[index + 1]
-            if next == "n":
+        ch = char_at(inner, index)
+        if char_code(ch) == char_code("\\")  and  index + 1 < len(inner):
+            next = char_at(inner, index + 1)
+            next_code = char_code(next)
+            if next_code == char_code("n"):
                 result = result + "\n"
                 index += 2
                 continue
             else:
-                if next == "r":
+                if next_code == char_code("r"):
                     result = result + "\r"
                     index += 2
                     continue
                 else:
-                    if next == "t":
+                    if next_code == char_code("t"):
                         result = result + "\t"
                         index += 2
                         continue
                     else:
-                        if next == "\"":
+                        if next_code == char_code("\""):
                             result = result + "\""
                             index += 2
                             continue
                         else:
-                            if next == "\\":
+                            if next_code == char_code("\\"):
                                 result = result + "\\"
                                 index += 2
                                 continue
+            result = result + next
+            index += 2
+            continue
         result = result + ch
         index += 1
     return result
@@ -9804,7 +9818,7 @@ def trim_text(value):
     while True:
         if start >= end:
             break
-        ch = value[start]
+        ch = char_at(value, start)
         if is_trim_char(ch):
             start += 1
             continue
@@ -9812,7 +9826,7 @@ def trim_text(value):
     while True:
         if end <= start:
             break
-        ch = value[end - 1]
+        ch = char_at(value, end - 1)
         if is_trim_char(ch):
             end -= 1
             continue
@@ -9822,7 +9836,8 @@ def trim_text(value):
     return substring(value, start, end)
 
 def is_trim_char(ch):
-    return ch == " "  or  ch == "\n"  or  ch == "\r"  or  ch == "\t"
+    code = char_code(ch)
+    return code == char_code(" ")  or  code == char_code("\n")  or  code == char_code("\r")  or  code == char_code("\t")
 
 def index_of(value, target):
     if len(target) == 0:
@@ -9836,7 +9851,7 @@ def index_of(value, target):
         while True:
             if match_index >= len(target):
                 break
-            if value[index + match_index] != target[match_index]:
+            if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index):
                 matches = False
                 break
             match_index += 1
@@ -9848,12 +9863,13 @@ def index_of(value, target):
 def find_last_index_of_char(value, target):
     if len(target) != 1:
         return -1
+    target_code = char_code_at_text(target, 0)
     index = len(value)
     while True:
         if index <= 0:
             break
         index -= 1
-        if value[index] == target:
+        if char_code_at_text(value, index) == target_code:
             return index
     return -1
 
