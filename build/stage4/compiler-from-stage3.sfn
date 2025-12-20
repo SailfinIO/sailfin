@@ -16,19 +16,23 @@ struct CompiledModule {
     source_path -> string;
     python_source -> string;
 }
+
 struct ModuleDiagnostics {
     source_path -> string;
     messages -> string[];
     fatal -> boolean;
 }
+
 struct ModuleCompilationResult {
     module -> CompiledModule?;
     diagnostics -> ModuleDiagnostics[];
 }
+
 struct ProjectCompilation {
     modules -> CompiledModule[];
     diagnostics -> ModuleDiagnostics[];
 }
+
 fn compile_to_sailfin(source -> string) -> string ![io] {
     let program -> Program = parse_program(source);
     let analysis_result = typecheck_program(program);
@@ -38,6 +42,7 @@ fn compile_to_sailfin(source -> string) -> string ![io] {
     }
     return emit_program(program);
 }
+
 fn compile_to_native(source -> string) -> EmitNativeResult ![io] {
     let program -> Program = parse_program(source);
     let analysis_result = typecheck_program(program);
@@ -47,6 +52,7 @@ fn compile_to_native(source -> string) -> EmitNativeResult ![io] {
     }
     return emit_native(program);
 }
+
 fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
     let native_result = compile_to_native(source);
     let lowered = lower_to_python(native_result.module);
@@ -65,10 +71,12 @@ fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
     }
     return LoweredPythonResult { source: lowered.source, diagnostics: combined };
 }
+
 struct LLVMCompilationResult {
     llvm -> any;
     native_module -> any;
 }
+
 fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
     let native_result = compile_to_native(source);
     let lowered = lower_to_llvm(native_result.module);
@@ -87,6 +95,7 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
     }
     return LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants };
 }
+
 fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] {
     let native_result = compile_to_native(source);
     let lowered = lower_to_llvm(native_result.module);
@@ -105,6 +114,7 @@ fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] 
     }
     return LLVMCompilationResult { llvm: LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants }, native_module: native_result.module };
 }
+
 fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> string[], native_artifacts -> string[]) -> LoweredLLVMResult ![io] {
     let native_result = compile_to_native(source);
     let mut manifests -> LayoutManifest[] = [];
@@ -143,12 +153,15 @@ fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> st
     }
     return LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants };
 }
+
 fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> string[]) -> LoweredLLVMResult ![io] {
     return compile_to_native_llvm_with_context(source, manifest_contents, []);
 }
+
 fn main() ![io] {
     print.info("Sailfin compiler");
 }
+
 fn compile_project(sources -> string[]) -> ProjectCompilation ![io] {
     let mut modules -> CompiledModule[] = [];
     let mut diagnostics -> ModuleDiagnostics[] = [];
@@ -163,6 +176,7 @@ fn compile_project(sources -> string[]) -> ProjectCompilation ![io] {
     }
     return ProjectCompilation { modules: modules, diagnostics: diagnostics };
 }
+
 fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io] {
     let source = fs.readFile(source_path);
     let program = parse_program(source);
@@ -189,6 +203,7 @@ fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io
     }
     return ModuleCompilationResult { module: CompiledModule { source_path: source_path, python_source: python_source }, diagnostics: entry_list };
 }
+
 fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> string[] {
     let lines = split_source_lines(source);
     let mut padding_width -> number = number_to_string(lines.length).length;
@@ -207,6 +222,7 @@ fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> st
     }
     return messages;
 }
+
 fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
     let formatted = format_typecheck_diagnostics(entries, source);
     let prefix = "[typecheck] ";
@@ -239,6 +255,7 @@ fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
         index += 1;
     }
 }
+
 fn format_typecheck_diagnostic(entry -> Diagnostic, source_lines -> string[], line_padding -> number) -> string {
     if entry.primary == null {
         return entry.message;
@@ -270,6 +287,7 @@ fn format_typecheck_diagnostic(entry -> Diagnostic, source_lines -> string[], li
     parts = append_string(parts, " " + gutter_spaces + " | " + pointer);
     return join_lines(parts);
 }
+
 fn split_source_lines(source -> string) -> string[] {
     let mut lines -> string[] = [];
     let mut current -> string = "";
@@ -304,6 +322,7 @@ fn split_source_lines(source -> string) -> string[] {
     lines = append_string(lines, current);
     return lines;
 }
+
 fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -> string {
     if line_text.length == 0 {
         return "^";
@@ -356,6 +375,7 @@ fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -
     }
     return pointer;
 }
+
 fn join_lines(lines -> string[]) -> string {
     if lines.length == 0 {
         return "";
@@ -371,9 +391,11 @@ fn join_lines(lines -> string[]) -> string {
     }
     return result;
 }
+
 fn append_string(values -> string[], value -> string) -> string[] {
     return values.concat([value]);
 }
+
 fn number_to_string(value -> number) -> string {
     if value == 0 {
         return "0";
@@ -409,9 +431,11 @@ fn number_to_string(value -> number) -> string {
     }
     return output;
 }
+
 fn empty_native_module() -> NativeModule {
     return NativeModule { artifacts: [], entry_points: [], symbol_count: 0 };
 }
+
 fn has_prefix(value -> string, prefix -> string) -> boolean {
     if prefix.length > value.length {
         return false;
@@ -428,6 +452,7 @@ fn has_prefix(value -> string, prefix -> string) -> boolean {
     }
     return true;
 }
+
 fn needs_python_fallback(source -> string) -> boolean {
     if source.length == 0 {
         return true;
@@ -480,6 +505,7 @@ fn needs_python_fallback(source -> string) -> boolean {
     }
     return false;
 }
+
 fn string_contains(value -> string, pattern -> string) -> boolean {
     if pattern.length == 0 {
         return true;
@@ -511,6 +537,7 @@ fn string_contains(value -> string, pattern -> string) -> boolean {
     }
     return false;
 }
+
 fn strip_needs_python_fallback_literals(source -> string) -> string {
     let marker = "def needs_python_fallback";
     let start = find_substring(source, marker);
@@ -528,6 +555,7 @@ fn strip_needs_python_fallback_literals(source -> string) -> string {
     let suffix = substring(source, tail_end, source.length);
     return prefix + suffix;
 }
+
 fn strip_python_string_literals(value -> string) -> string {
     let mut index -> number = 0;
     let mut result -> string = "";
@@ -557,6 +585,7 @@ fn strip_python_string_literals(value -> string) -> string {
     }
     return result;
 }
+
 fn python_quote_length(value -> string, start -> number, delimiter -> string) -> number {
     if start + 2 < value.length {
         if substring(value, start + 1, start + 2) == delimiter {
@@ -567,6 +596,7 @@ fn python_quote_length(value -> string, start -> number, delimiter -> string) ->
     }
     return 1;
 }
+
 fn skip_python_string_literal(value -> string, position -> number, delimiter -> string, quote_length -> number) -> number {
     if quote_length == 1 {
         let mut index -> number = position;
@@ -615,6 +645,7 @@ fn skip_python_string_literal(value -> string, position -> number, delimiter -> 
     }
     return value.length;
 }
+
 fn repeat_character(ch -> string, count -> number) -> string {
     if count <= 0 {
         return "";
@@ -630,6 +661,7 @@ fn repeat_character(ch -> string, count -> number) -> string {
     }
     return result;
 }
+
 fn find_substring(value -> string, pattern -> string) -> number {
     if pattern.length == 0 {
         return 0;
@@ -661,6 +693,7 @@ fn find_substring(value -> string, pattern -> string) -> number {
     }
     return -1;
 }
+
 fn find_substring_from(value -> string, pattern -> string, start -> number) -> number {
     if start < 0 {
         return find_substring(value, pattern);
@@ -692,6 +725,7 @@ fn find_substring_from(value -> string, pattern -> string, start -> number) -> n
     }
     return -1;
 }
+
 fn advance_to_line_end(value -> string, position -> number) -> number {
     let mut index -> number = position;
     loop {

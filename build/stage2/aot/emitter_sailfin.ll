@@ -273,6 +273,16 @@ merge3:
   ret i1 0
 }
 
+define %TextBuilder @maybe_emit_blank(%TextBuilder %builder, i1 %should_emit) {
+block.entry:
+  br i1 %should_emit, label %then0, label %merge1
+then0:
+  %t0 = call %TextBuilder @builder_emit_blank__emitter_sailfin(%TextBuilder %builder)
+  ret %TextBuilder %t0
+merge1:
+  ret %TextBuilder %builder
+}
+
 define i8* @emit_program(%Program %program) {
 block.entry:
   %l0 = alloca %TextBuilder
@@ -283,7 +293,7 @@ block.entry:
   %l5 = alloca double
   %l6 = alloca %Statement
   %l7 = alloca i1
-  %l8 = alloca %Statement
+  %l8 = alloca i1
   %l9 = alloca i1
   %t0 = call %TextBuilder @builder_new__emitter_sailfin()
   store %TextBuilder %t0, %TextBuilder* %l0
@@ -460,28 +470,26 @@ loop.latch2:
 afterloop3:
   %t139 = load i1, i1* %l1
   %t140 = load double, double* %l2
-  store i1 0, i1* %l4
   %t141 = load i1, i1* %l1
   %t142 = xor i1 %t141, 1
-  %t143 = load %TextBuilder, %TextBuilder* %l0
-  %t144 = load i1, i1* %l1
-  %t145 = load double, double* %l2
-  %t146 = load i1, i1* %l4
-  br i1 %t142, label %then10, label %merge11
+  store i1 %t142, i1* %l4
+  %t143 = load i1, i1* %l1
+  %t144 = xor i1 %t143, 1
+  %t145 = load %TextBuilder, %TextBuilder* %l0
+  %t146 = load i1, i1* %l1
+  %t147 = load double, double* %l2
+  %t148 = load i1, i1* %l4
+  br i1 %t144, label %then10, label %merge11
 then10:
-  %t147 = load %TextBuilder, %TextBuilder* %l0
-  %s148 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.len34.h160552901, i32 0, i32 0
-  %t149 = call %TextBuilder @builder_emit_line__emitter_sailfin(%TextBuilder %t147, i8* %s148)
-  store %TextBuilder %t149, %TextBuilder* %l0
-  store i1 1, i1* %l4
-  %t150 = load %TextBuilder, %TextBuilder* %l0
-  %t151 = load i1, i1* %l4
+  %t149 = load %TextBuilder, %TextBuilder* %l0
+  %s150 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.len34.h160552901, i32 0, i32 0
+  %t151 = call %TextBuilder @builder_emit_line__emitter_sailfin(%TextBuilder %t149, i8* %s150)
+  store %TextBuilder %t151, %TextBuilder* %l0
+  %t152 = load %TextBuilder, %TextBuilder* %l0
   br label %merge11
 merge11:
-  %t152 = phi %TextBuilder [ %t150, %then10 ], [ %t143, %afterloop3 ]
-  %t153 = phi i1 [ %t151, %then10 ], [ %t146, %afterloop3 ]
-  store %TextBuilder %t152, %TextBuilder* %l0
-  store i1 %t153, i1* %l4
+  %t153 = phi %TextBuilder [ %t152, %then10 ], [ %t145, %afterloop3 ]
+  store %TextBuilder %t153, %TextBuilder* %l0
   %t154 = sitofp i64 0 to double
   store double %t154, double* %l5
   %t155 = load %TextBuilder, %TextBuilder* %l0
@@ -491,12 +499,12 @@ merge11:
   %t159 = load double, double* %l5
   br label %loop.header12
 loop.header12:
-  %t258 = phi %TextBuilder [ %t155, %merge11 ], [ %t255, %loop.latch14 ]
-  %t259 = phi i1 [ %t158, %merge11 ], [ %t256, %loop.latch14 ]
-  %t260 = phi double [ %t159, %merge11 ], [ %t257, %loop.latch14 ]
-  store %TextBuilder %t258, %TextBuilder* %l0
-  store i1 %t259, i1* %l4
-  store double %t260, double* %l5
+  %t211 = phi %TextBuilder [ %t155, %merge11 ], [ %t208, %loop.latch14 ]
+  %t212 = phi i1 [ %t158, %merge11 ], [ %t209, %loop.latch14 ]
+  %t213 = phi double [ %t159, %merge11 ], [ %t210, %loop.latch14 ]
+  store %TextBuilder %t211, %TextBuilder* %l0
+  store i1 %t212, i1* %l4
+  store double %t213, double* %l5
   br label %loop.body13
 loop.body13:
   %t160 = load double, double* %l5
@@ -530,138 +538,84 @@ merge17:
   %t181 = load %Statement, %Statement* %l6
   %t182 = call i1 @is_import_like(%Statement %t181)
   store i1 %t182, i1* %l7
-  %t184 = load i1, i1* %l4
-  br label %logical_and_entry_183
+  %t184 = load i1, i1* %l1
+  %t185 = xor i1 %t184, 1
+  br label %logical_or_entry_183
 
-logical_and_entry_183:
-  br i1 %t184, label %logical_and_right_183, label %logical_and_merge_183
+logical_or_entry_183:
+  br i1 %t185, label %logical_or_merge_183, label %logical_or_right_183
 
-logical_and_right_183:
-  %t185 = load i1, i1* %l7
-  %t186 = xor i1 %t185, 1
-  br label %logical_and_right_end_183
+logical_or_right_183:
+  %t186 = load double, double* %l5
+  %t187 = sitofp i64 0 to double
+  %t188 = fcmp ogt double %t186, %t187
+  br label %logical_or_right_end_183
 
-logical_and_right_end_183:
-  br label %logical_and_merge_183
+logical_or_right_end_183:
+  br label %logical_or_merge_183
 
-logical_and_merge_183:
-  %t187 = phi i1 [ false, %logical_and_entry_183 ], [ %t186, %logical_and_right_end_183 ]
-  %t188 = load %TextBuilder, %TextBuilder* %l0
-  %t189 = load i1, i1* %l1
-  %t190 = load double, double* %l2
-  %t191 = load i1, i1* %l4
-  %t192 = load double, double* %l5
-  %t193 = load %Statement, %Statement* %l6
+logical_or_merge_183:
+  %t189 = phi i1 [ true, %logical_or_entry_183 ], [ %t188, %logical_or_right_end_183 ]
+  store i1 %t189, i1* %l8
+  %t191 = load i1, i1* %l8
+  br label %logical_and_entry_190
+
+logical_and_entry_190:
+  br i1 %t191, label %logical_and_right_190, label %logical_and_merge_190
+
+logical_and_right_190:
+  %t193 = load i1, i1* %l4
+  br label %logical_and_entry_192
+
+logical_and_entry_192:
+  br i1 %t193, label %logical_and_right_192, label %logical_and_merge_192
+
+logical_and_right_192:
   %t194 = load i1, i1* %l7
-  br i1 %t187, label %then18, label %merge19
-then18:
-  %t195 = load %TextBuilder, %TextBuilder* %l0
-  %t196 = call %TextBuilder @builder_emit_blank__emitter_sailfin(%TextBuilder %t195)
-  store %TextBuilder %t196, %TextBuilder* %l0
-  %t197 = load %TextBuilder, %TextBuilder* %l0
-  br label %merge19
-merge19:
-  %t198 = phi %TextBuilder [ %t197, %then18 ], [ %t188, %logical_and_merge_183 ]
-  store %TextBuilder %t198, %TextBuilder* %l0
-  %t199 = load %TextBuilder, %TextBuilder* %l0
-  %t200 = load %Statement, %Statement* %l6
-  %t201 = call %TextBuilder @emit_statement__emitter_sailfin(%TextBuilder %t199, %Statement %t200)
-  store %TextBuilder %t201, %TextBuilder* %l0
-  %t202 = load i1, i1* %l7
-  store i1 %t202, i1* %l4
-  %t203 = load double, double* %l5
-  %t204 = sitofp i64 1 to double
-  %t205 = fadd double %t203, %t204
-  %t206 = extractvalue %Program %program, 0
-  %t207 = load { %Statement*, i64 }, { %Statement*, i64 }* %t206
-  %t208 = extractvalue { %Statement*, i64 } %t207, 1
-  %t209 = sitofp i64 %t208 to double
-  %t210 = fcmp olt double %t205, %t209
-  %t211 = load %TextBuilder, %TextBuilder* %l0
-  %t212 = load i1, i1* %l1
-  %t213 = load double, double* %l2
-  %t214 = load i1, i1* %l4
-  %t215 = load double, double* %l5
-  %t216 = load %Statement, %Statement* %l6
-  %t217 = load i1, i1* %l7
-  br i1 %t210, label %then20, label %merge21
-then20:
-  %t218 = extractvalue %Program %program, 0
-  %t219 = load double, double* %l5
-  %t220 = sitofp i64 1 to double
-  %t221 = fadd double %t219, %t220
-  %t222 = call double @llvm.round.f64(double %t221)
-  %t223 = fptosi double %t222 to i64
-  %t224 = load { %Statement*, i64 }, { %Statement*, i64 }* %t218
-  %t225 = extractvalue { %Statement*, i64 } %t224, 0
-  %t226 = extractvalue { %Statement*, i64 } %t224, 1
-  %t227 = icmp uge i64 %t223, %t226
-  ; bounds check: %t227 (if true, out of bounds)
-  call void @sailfin_runtime_bounds_check(i64 %t223, i64 %t226)
-  %t228 = getelementptr %Statement, %Statement* %t225, i64 %t223
-  %t229 = load %Statement, %Statement* %t228
-  store %Statement %t229, %Statement* %l8
-  %t230 = load %Statement, %Statement* %l8
-  %t231 = call i1 @is_import_like(%Statement %t230)
-  store i1 %t231, i1* %l9
-  %t233 = load i1, i1* %l7
-  %t234 = xor i1 %t233, 1
-  br label %logical_and_entry_232
+  br label %logical_and_right_end_192
 
-logical_and_entry_232:
-  br i1 %t234, label %logical_and_right_232, label %logical_and_merge_232
+logical_and_right_end_192:
+  br label %logical_and_merge_192
 
-logical_and_right_232:
-  %t235 = load i1, i1* %l9
-  br label %logical_and_right_end_232
+logical_and_merge_192:
+  %t195 = phi i1 [ false, %logical_and_entry_192 ], [ %t194, %logical_and_right_end_192 ]
+  %t196 = xor i1 %t195, 1
+  br label %logical_and_right_end_190
 
-logical_and_right_end_232:
-  br label %logical_and_merge_232
+logical_and_right_end_190:
+  br label %logical_and_merge_190
 
-logical_and_merge_232:
-  %t236 = phi i1 [ false, %logical_and_entry_232 ], [ %t235, %logical_and_right_end_232 ]
-  %t237 = load %TextBuilder, %TextBuilder* %l0
-  %t238 = load i1, i1* %l1
-  %t239 = load double, double* %l2
-  %t240 = load i1, i1* %l4
-  %t241 = load double, double* %l5
-  %t242 = load %Statement, %Statement* %l6
-  %t243 = load i1, i1* %l7
-  %t244 = load %Statement, %Statement* %l8
-  %t245 = load i1, i1* %l9
-  br i1 %t236, label %then22, label %merge23
-then22:
-  %t246 = load %TextBuilder, %TextBuilder* %l0
-  %t247 = call %TextBuilder @builder_emit_blank__emitter_sailfin(%TextBuilder %t246)
-  store %TextBuilder %t247, %TextBuilder* %l0
-  %t248 = load %TextBuilder, %TextBuilder* %l0
-  br label %merge23
-merge23:
-  %t249 = phi %TextBuilder [ %t248, %then22 ], [ %t237, %logical_and_merge_232 ]
-  store %TextBuilder %t249, %TextBuilder* %l0
-  %t250 = load %TextBuilder, %TextBuilder* %l0
-  br label %merge21
-merge21:
-  %t251 = phi %TextBuilder [ %t250, %merge23 ], [ %t211, %merge19 ]
-  store %TextBuilder %t251, %TextBuilder* %l0
-  %t252 = load double, double* %l5
-  %t253 = sitofp i64 1 to double
-  %t254 = fadd double %t252, %t253
-  store double %t254, double* %l5
+logical_and_merge_190:
+  %t197 = phi i1 [ false, %logical_and_entry_190 ], [ %t196, %logical_and_right_end_190 ]
+  store i1 %t197, i1* %l9
+  %t198 = load %TextBuilder, %TextBuilder* %l0
+  %t199 = load i1, i1* %l9
+  %t200 = call %TextBuilder @maybe_emit_blank(%TextBuilder %t198, i1 %t199)
+  store %TextBuilder %t200, %TextBuilder* %l0
+  %t201 = load %TextBuilder, %TextBuilder* %l0
+  %t202 = load %Statement, %Statement* %l6
+  %t203 = call %TextBuilder @emit_statement__emitter_sailfin(%TextBuilder %t201, %Statement %t202)
+  store %TextBuilder %t203, %TextBuilder* %l0
+  %t204 = load i1, i1* %l7
+  store i1 %t204, i1* %l4
+  %t205 = load double, double* %l5
+  %t206 = sitofp i64 1 to double
+  %t207 = fadd double %t205, %t206
+  store double %t207, double* %l5
   br label %loop.latch14
 loop.latch14:
-  %t255 = load %TextBuilder, %TextBuilder* %l0
-  %t256 = load i1, i1* %l4
-  %t257 = load double, double* %l5
+  %t208 = load %TextBuilder, %TextBuilder* %l0
+  %t209 = load i1, i1* %l4
+  %t210 = load double, double* %l5
   br label %loop.header12
 afterloop15:
-  %t261 = load %TextBuilder, %TextBuilder* %l0
-  %t262 = load i1, i1* %l4
-  %t263 = load double, double* %l5
-  %t264 = load %TextBuilder, %TextBuilder* %l0
-  %t265 = call i8* @builder_to_string__emitter_sailfin(%TextBuilder %t264)
-  call void @sailfin_runtime_mark_persistent(i8* %t265)
-  ret i8* %t265
+  %t214 = load %TextBuilder, %TextBuilder* %l0
+  %t215 = load i1, i1* %l4
+  %t216 = load double, double* %l5
+  %t217 = load %TextBuilder, %TextBuilder* %l0
+  %t218 = call i8* @builder_to_string__emitter_sailfin(%TextBuilder %t217)
+  call void @sailfin_runtime_mark_persistent(i8* %t218)
+  ret i8* %t218
 }
 
 define %TextBuilder @emit_statement__emitter_sailfin(%TextBuilder %builder, %Statement %statement) {
@@ -12643,88 +12597,88 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len4.h275832617 = private unnamed_addr constant [5 x i8] c"tool\00"
-@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len7.h655349763 = private unnamed_addr constant [8 x i8] c"return;\00"
-@.str.len15.h306395716 = private unnamed_addr constant [16 x i8] c"// empty struct\00"
-@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
-@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
-@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
-@.str.len17.h1813262795 = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
-@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
-@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
-@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
-@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.str.len4.h266345381 = private unnamed_addr constant [5 x i8] c"loop\00"
-@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.str.len8.h476784883 = private unnamed_addr constant [9 x i8] c"else if \00"
-@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
-@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len19.h868168677 = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.str.len17.h1998778048 = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
-@.str.len8.h2003786807 = private unnamed_addr constant [9 x i8] c"pipeline\00"
-@.str.len17.h760387478 = private unnamed_addr constant [18 x i8] c"import { } from \22\00"
-@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
 @.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.str.len13.h1678412334 = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.str.len5.h1459000260 = private unnamed_addr constant [6 x i8] c" => {\00"
-@.str.len13.h1853304565 = private unnamed_addr constant [14 x i8] c"// empty body\00"
-@.str.len19.h965279776 = private unnamed_addr constant [20 x i8] c"// empty model body\00"
 @.str.len9.h255636415 = private unnamed_addr constant [10 x i8] c"continue;\00"
-@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len13.h1882501715 = private unnamed_addr constant [14 x i8] c"// original: \00"
-@.str.len14.h88846349 = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
-@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len34.h160552901 = private unnamed_addr constant [35 x i8] c"import { } from \22sailfin/runtime\22;\00"
-@.str.len15.h1316378935 = private unnamed_addr constant [16 x i8] c"sailfin/runtime\00"
+@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
+@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.str.len17.h760387478 = private unnamed_addr constant [18 x i8] c"import { } from \22\00"
+@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
 @.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
+@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
+@.str.len5.h1459000260 = private unnamed_addr constant [6 x i8] c" => {\00"
+@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.str.len13.h1882501715 = private unnamed_addr constant [14 x i8] c"// original: \00"
+@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
+@.str.len13.h1853304565 = private unnamed_addr constant [14 x i8] c"// empty body\00"
+@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
+@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len13.h1678412334 = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
+@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
+@.str.len4.h275832617 = private unnamed_addr constant [5 x i8] c"tool\00"
+@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
+@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
+@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.str.len6.h215171790 = private unnamed_addr constant [7 x i8] c"break;\00"
+@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.str.len14.h88846349 = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.str.len8.h2003786807 = private unnamed_addr constant [9 x i8] c"pipeline\00"
+@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
+@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
+@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.str.len19.h965279776 = private unnamed_addr constant [20 x i8] c"// empty model body\00"
+@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
+@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
+@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
 @.str.len17.h1884502850 = private unnamed_addr constant [18 x i8] c"export { } from \22\00"
 @.str.len15.h571715647 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
-@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
-@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
-@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.str.len2.h193478309 = private unnamed_addr constant [3 x i8] c"\5C\22\00"
-@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
-@.str.len4.h175987322 = private unnamed_addr constant [5 x i8] c" if \00"
-@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
-@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len6.h215171790 = private unnamed_addr constant [7 x i8] c"break;\00"
-@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
-@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.str.len17.h689147423 = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.str.len17.h1813262795 = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.str.len15.h1316378935 = private unnamed_addr constant [16 x i8] c"sailfin/runtime\00"
+@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
 @.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len17.h1998778048 = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.str.len7.h655349763 = private unnamed_addr constant [8 x i8] c"return;\00"
+@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.str.len17.h689147423 = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
 @.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
+@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.str.len19.h868168677 = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
+@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.str.len15.h306395716 = private unnamed_addr constant [16 x i8] c"// empty struct\00"
+@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len8.h476784883 = private unnamed_addr constant [9 x i8] c"else if \00"
+@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
 @.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
 @.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.str.len4.h175987322 = private unnamed_addr constant [5 x i8] c" if \00"
+@.str.len4.h266345381 = private unnamed_addr constant [5 x i8] c"loop\00"
+@.str.len2.h193478309 = private unnamed_addr constant [3 x i8] c"\5C\22\00"
+@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
+@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.str.len34.h160552901 = private unnamed_addr constant [35 x i8] c"import { } from \22sailfin/runtime\22;\00"
+@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
