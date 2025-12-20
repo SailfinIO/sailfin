@@ -31,7 +31,10 @@ def _extract_top_level_import_block(lines: list[str]) -> tuple[int, int]:
     start = index
     while index < len(lines):
         stripped = lines[index].lstrip()
-        if stripped.startswith("import ") or stripped.startswith("export "):
+        # Accept both modern brace imports (`import { ... } from`) and the
+        # historical paren imports (`import(...) from`) so this test focuses on
+        # spacing/structure rather than import-syntax evolution.
+        if stripped.startswith("import") or stripped.startswith("export"):
             index += 1
             continue
         break
