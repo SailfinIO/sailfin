@@ -79,8 +79,11 @@ fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
 }
 
 struct LLVMCompilationResult {
-    llvm -> LoweredLLVMResult;
-    native_module -> NativeModule;
+    // Note: this struct crosses tool boundaries (stage1 Python + stage2 native).
+    // Keep fields `any` so native layout emission doesn't require importing the
+    // full layouts for `LoweredLLVMResult` / `NativeModule`.
+    llvm -> any;
+    native_module -> any;
 }
 
 fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {

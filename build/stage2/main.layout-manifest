@@ -19,6 +19,6 @@
 .layout field diagnostics type=ModuleDiagnostics[] offset=8 size=8 align=8
 
 .layout struct name=LLVMCompilationResult size=16 align=8
-.layout field llvm type=LoweredLLVMResult offset=0 size=8 align=8
-.layout field native_module type=NativeModule offset=8 size=8 align=8
+.layout field llvm type=any offset=0 size=8 align=8
+.layout field native_module type=any offset=8 size=8 align=8
 

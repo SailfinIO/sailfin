@@ -1,15 +1,13 @@
 ; ModuleID = 'sailfin'
 source_filename = "sailfin"
 
-%LoweredLLVMResult = type opaque
-%NativeModule = type opaque
 %Diagnostic = type opaque
 %SelfHostCheckResult = type { i1, double, double, { %ModuleDiagnostics*, i64 }*, { i8**, i64 }* }
 %CompiledModule = type { i8*, i8* }
 %ModuleDiagnostics = type { i8*, { i8**, i64 }*, i1 }
 %ModuleCompilationResult = type { %CompiledModule*, { %ModuleDiagnostics*, i64 }* }
 %ProjectCompilation = type { { %CompiledModule*, i64 }*, { %ModuleDiagnostics*, i64 }* }
-%LLVMCompilationResult = type { %LoweredLLVMResult, %NativeModule }
+%LLVMCompilationResult = type { i8*, i8* }
 
 declare void @sailfin_runtime_bounds_check(i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)

@@ -6,7 +6,7 @@ source_filename = "sailfin"
 %ModuleDiagnostics = type { i8*, { i8**, i64 }*, i1 }
 %ModuleCompilationResult = type { %CompiledModule*, { %ModuleDiagnostics*, i64 }* }
 %ProjectCompilation = type { { %CompiledModule*, i64 }*, { %ModuleDiagnostics*, i64 }* }
-%LLVMCompilationResult = type { %LoweredLLVMResult, %NativeModule }
+%LLVMCompilationResult = type { i8*, i8* }
 %Parser = type { { %Token*, i64 }*, double }
 %StatementParseResult = type { %Parser, %Statement }
 %ParameterParseResult = type { %Parser, %Parameter }
@@ -1398,11 +1398,23 @@ merge1:
   %t81 = load %LoweredLLVMResult, %LoweredLLVMResult* %l1
   %t82 = extractvalue %LoweredLLVMResult %t81, 6
   %t83 = insertvalue %LoweredLLVMResult %t80, { %StringConstant*, i64 }* %t82, 6
-  %t84 = insertvalue %LLVMCompilationResult undef, %LoweredLLVMResult %t83, 0
-  %t85 = load %EmitNativeResult, %EmitNativeResult* %l0
-  %t86 = extractvalue %EmitNativeResult %t85, 0
-  %t87 = insertvalue %LLVMCompilationResult %t84, %NativeModule %t86, 1
-  ret %LLVMCompilationResult %t87
+  %t84 = getelementptr %LoweredLLVMResult, %LoweredLLVMResult* null, i32 1
+  %t85 = ptrtoint %LoweredLLVMResult* %t84 to i64
+  %t86 = call noalias i8* @malloc(i64 %t85)
+  %t87 = bitcast i8* %t86 to %LoweredLLVMResult*
+  store %LoweredLLVMResult %t83, %LoweredLLVMResult* %t87
+  call void @sailfin_runtime_mark_persistent(i8* %t86)
+  %t88 = insertvalue %LLVMCompilationResult undef, i8* %t86, 0
+  %t89 = load %EmitNativeResult, %EmitNativeResult* %l0
+  %t90 = extractvalue %EmitNativeResult %t89, 0
+  %t91 = getelementptr %NativeModule, %NativeModule* null, i32 1
+  %t92 = ptrtoint %NativeModule* %t91 to i64
+  %t93 = call noalias i8* @malloc(i64 %t92)
+  %t94 = bitcast i8* %t93 to %NativeModule*
+  store %NativeModule %t90, %NativeModule* %t94
+  call void @sailfin_runtime_mark_persistent(i8* %t93)
+  %t95 = insertvalue %LLVMCompilationResult %t88, i8* %t93, 1
+  ret %LLVMCompilationResult %t95
 }
 
 ; fn compile_to_native_llvm_with_context effects: ![io]
@@ -4707,18 +4719,18 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
 @.str.len21.h1300292754 = private unnamed_addr constant [22 x i8] c"ExpressionIdentifier(\00"
-@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"
-@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
-@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
-@.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
-@.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
-@.str.len14.h129277126 = private unnamed_addr constant [15 x i8] c"ExpressionRaw(\00"
-@.str.len85.h1706301526 = private unnamed_addr constant [86 x i8] c"native backend: lowering produced unsupported python output; stage0 fallback disabled\00"
-@.str.len5.h655249917 = private unnamed_addr constant [6 x i8] c"\0Alet \00"
-@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
-@.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
-@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
-@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
 @.str.len14.h2048158982 = private unnamed_addr constant [15 x i8] c"[native-llvm] \00"
+@.str.len39.h459555839 = private unnamed_addr constant [40 x i8] c"TokenKind.variant('BooleanLiteral', [])\00"
+@.str.len9.h2073631692 = private unnamed_addr constant [10 x i8] c"[native] \00"
+@.str.len85.h1706301526 = private unnamed_addr constant [86 x i8] c"native backend: lowering produced unsupported python output; stage0 fallback disabled\00"
+@.str.len35.h1158922578 = private unnamed_addr constant [36 x i8] c"TokenKind.variant('Identifier', [])\00"
+@.str.len38.h675779786 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('NumberLiteral', [])\00"
+@.str.len14.h129277126 = private unnamed_addr constant [15 x i8] c"ExpressionRaw(\00"
+@.str.len31.h76517386 = private unnamed_addr constant [32 x i8] c"TokenKind.variant('Symbol', [])\00"
+@.str.len23.h2110906862 = private unnamed_addr constant [24 x i8] c"Expression.Identifier()\00"
+@.str.len5.h1517989476 = private unnamed_addr constant [6 x i8] c" mut \00"
+@.str.len5.h1516228563 = private unnamed_addr constant [6 x i8] c" let \00"
+@.str.len5.h655249917 = private unnamed_addr constant [6 x i8] c"\0Alet \00"
+@.str.len16.h1337894058 = private unnamed_addr constant [17 x i8] c"Expression.Raw()\00"
+@.str.len38.h1073483005 = private unnamed_addr constant [39 x i8] c"TokenKind.variant('StringLiteral', [])\00"

@@ -8334,6 +8334,20 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
         current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to i8*")
         coerced = LLVMOperand(llvm_type="i8*", value=temp_name)
         return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+    if target_type == "i8*"  and  not ends_with_pointer_suffix(operand.llvm_type):
+        if starts_with(operand.llvm_type, "%")  or  starts_with(operand.llvm_type, "{"):
+            size_ptr_temp = format_temp_name(temp_index)
+            size_temp = format_temp_name(temp_index + 1)
+            malloc_temp = format_temp_name(temp_index + 2)
+            typed_ptr_temp = format_temp_name(temp_index + 3)
+            current_lines = append_string(current_lines, "  " + size_ptr_temp + " = getelementptr " + operand.llvm_type + ", " + operand.llvm_type + "* null, i32 1")
+            current_lines = append_string(current_lines, "  " + size_temp + " = ptrtoint " + operand.llvm_type + "* " + size_ptr_temp + " to i64")
+            current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")")
+            current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*")
+            current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp)
+            current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")")
+            coerced = LLVMOperand(llvm_type="i8*", value=malloc_temp)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 4, operand=coerced, diagnostics=diagnostics)
     if operand.llvm_type == "i8*"  and  ends_with_pointer_suffix(target_type):
         temp_name = format_temp_name(temp_index)
         current_lines = append_string(current_lines, "  " + temp_name + " = bitcast i8* " + operand.value + " to " + target_type)

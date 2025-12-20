@@ -88,8 +88,8 @@ fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io]
 
 struct LLVMCompilationResult
 {
-    llvm -> LoweredLLVMResult;
-    native_module -> NativeModule;
+    llvm -> any;
+    native_module -> any;
 }
 
 fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io]
