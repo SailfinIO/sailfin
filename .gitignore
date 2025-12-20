@@ -86,3 +86,6 @@ bootstrap/parsetab.py
 
 scratch/
 runtime/build/
+
+# Generated native example binaries (produced by stage2-native-run-examples)
+build/native/examples/

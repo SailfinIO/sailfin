@@ -17,7 +17,7 @@ fn snapshot(counter -> &mut Counter) ![mut, read] -> number {
     return read_counter(view);
 }
 
-fn main() -> number {
+fn main() ![io] {
     let mut counter = Counter { value: 0 };
 
     let initial -> number = read_counter(&counter);
@@ -32,5 +32,6 @@ fn main() -> number {
     let final_view -> &Counter = borrow(counter);
     let delta -> number = read_counter(final_view) - initial;
 
-    return after_increment + delta;
+    let result -> number = after_increment + delta;
+    print.info("Borrowing result: {{result}}");
 }

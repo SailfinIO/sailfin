@@ -133,7 +133,8 @@ stage2-native-run-examples: native-stage2
 	@for ex in \
 		examples/basics/hello-world.sfn \
 		examples/basics/conditionals.sfn \
-		examples/basics/native-if.sfn ; do \
+		examples/basics/native-if.sfn \
+		examples/basics/borrowing.sfn ; do \
 		name=$$(basename $$ex .sfn); \
 		out_ll=scratch/native-examples/$$name.ll; \
 		out_bin=build/native/examples/$$name; \
