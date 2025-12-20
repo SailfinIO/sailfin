@@ -1,0 +1,9 @@
+; Sailfin Native Prototype
+.module main
+
+.fn cli_emit_stub() -> number
+.meta return number
+.meta effects none
+    .span 7 5 7 14
+    ret 0
+.endfn

@@ -4,7 +4,7 @@
 # different target triple than the host.
 CLANG_WARN_SUPPRESS ?= -Wno-override-module
 
-.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-sanity
+.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-emit-llvm stage2-native-sanity
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -35,6 +35,7 @@ help:
 	@echo "  make stage2-native-sanity # Bootstrap + build native stage2 + compile hello-world"
 	@echo "  make stage2-native-roundtrip # Bootstrap + build native stage2 + run it on compiler/src/main.sfn"
 	@echo "  make stage2-native-fixed-point # Ensure Stage3→Stage4 is a stable fixed-point"
+	@echo "  make stage2-native-emit-llvm # Emit LLVM IR for compiler/src/main.sfn via stage2-native"
 
 install:
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
@@ -79,7 +80,7 @@ native-stage2: bootstrap-stage2
 	  [ -z "$$m" ] && continue; \
 	  clang -O2 $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	clang -O2 $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2 build/native/obj/sailfin_runtime.o build/native/obj/stage2_driver.o build/native/obj/runtime_globals.o $(addprefix build/native/obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
+	clang -O2 $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2 build/native/obj/sailfin_runtime.o build/native/obj/stage2_driver.o build/native/obj/runtime_globals.o $$(sed 's|^|build/native/obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ')
 
 native-stage2-debug: bootstrap-stage2
 	@mkdir -p build/stage2/aot build/native/debug-obj
@@ -92,7 +93,7 @@ native-stage2-debug: bootstrap-stage2
 	  [ -z "$$m" ] && continue; \
 	  clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/debug-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/stage2_driver.o build/native/debug-obj/runtime_globals.o $(addprefix build/native/debug-obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
+	clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/stage2_driver.o build/native/debug-obj/runtime_globals.o $$(sed 's|^|build/native/debug-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ')
 
 native-stage2-asan: bootstrap-stage2
 	@mkdir -p build/stage2/aot build/native/asan-obj
@@ -105,19 +106,24 @@ native-stage2-asan: bootstrap-stage2
 	  [ -z "$$m" ] && continue; \
 	  clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/asan-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/stage2_driver.o build/native/asan-obj/runtime_globals.o $(addprefix build/native/asan-obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/stage2_driver.o build/native/asan-obj/runtime_globals.o $$(sed 's|^|build/native/asan-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ')
 
 stage2-native-sanity: native-stage2
-	build/native/sailfin-stage2 examples/basics/hello-world.sfn > /dev/null
+	build/native/sailfin-stage2 --emit sailfin examples/basics/hello-world.sfn > /dev/null
 	@echo "[stage2-native] sanity ok"
 
 stage2-native-roundtrip: native-stage2
 	@mkdir -p build/stage3
-	build/native/sailfin-stage2 compiler/src/main.sfn > build/stage3/compiler-from-stage2.sfn
+	build/native/sailfin-stage2 --emit sailfin compiler/src/main.sfn > build/stage3/compiler-from-stage2.sfn
 	@echo "[stage2-native] wrote build/stage3/compiler-from-stage2.sfn"
 
 stage2-native-fixed-point: stage2-native-roundtrip
 	@mkdir -p build/stage4
-	build/native/sailfin-stage2 build/stage3/compiler-from-stage2.sfn > build/stage4/compiler-from-stage3.sfn
+	build/native/sailfin-stage2 --emit sailfin build/stage3/compiler-from-stage2.sfn > build/stage4/compiler-from-stage3.sfn
 	@diff -q build/stage3/compiler-from-stage2.sfn build/stage4/compiler-from-stage3.sfn > /dev/null
 	@echo "[stage2-native] fixed-point ok (Stage3 == Stage4)"
+
+stage2-native-emit-llvm: native-stage2
+	@mkdir -p build/stage3
+	build/native/sailfin-stage2 --emit llvm compiler/src/main.sfn > build/stage3/main-from-stage2.ll
+	@echo "[stage2-native] wrote build/stage3/main-from-stage2.ll"

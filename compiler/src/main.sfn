@@ -115,6 +115,14 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
     };
 }
 
+// C-friendly entrypoint for the native stage2 driver.
+// Keeps the public ABI as `char* -> char*` while reusing the structured
+// `LoweredLLVMResult` internally.
+fn compile_to_llvm(source -> string) -> string ![io] {
+    let lowered = compile_to_native_llvm(source);
+    return lowered.ir;
+}
+
 fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] {
     let native_result = compile_to_native(source);
     let lowered = lower_to_llvm(native_result.module);

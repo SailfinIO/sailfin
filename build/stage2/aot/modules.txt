@@ -1,4 +1,5 @@
 ast
+cli_emit
 decorator_semantics
 effect_checker
 emit_native

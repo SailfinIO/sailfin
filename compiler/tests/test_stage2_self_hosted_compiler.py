@@ -236,6 +236,23 @@ def test_stage2_compile_to_sailfin_roundtrip(native_stage2_binary) -> None:
     assert result_text == expected
 
 
+def test_stage2_cli_emit_llvm_produces_ir(native_stage2_binary) -> None:
+    repo_root = _repo_root()
+    example_path = repo_root / "examples" / "basics" / "hello-world.sfn"
+
+    proc = subprocess.run(
+        [str(native_stage2_binary), "--emit", "llvm", str(example_path)],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result_text = proc.stdout
+    assert result_text.strip(), "expected non-empty LLVM IR output"
+    # Basic smoke markers for LLVM IR.
+    assert "define" in result_text
+
+
 def test_stage2_emits_native_artifacts(stage2_bootstrap) -> None:
     if Stage2Runner is None:
         pytest.skip("stage2 JIT tests require llvmlite + Stage2Runner")

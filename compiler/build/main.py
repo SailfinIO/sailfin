@@ -119,6 +119,11 @@ def compile_to_native_llvm(source):
             index += 1
     return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
 
+def compile_to_llvm(source):
+    # effects: io
+    lowered = compile_to_native_llvm(source)
+    return lowered.ir
+
 def compile_to_native_llvm_full(source):
     # effects: io
     native_result = compile_to_native(source)

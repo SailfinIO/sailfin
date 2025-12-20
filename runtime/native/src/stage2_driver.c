@@ -4,6 +4,12 @@
 
 // Entry point exported by the stage2 compiler IR.
 extern char *compile_to_sailfin(char *source);
+extern char *compile_to_llvm(char *source);
+
+static void _print_usage(FILE *stream)
+{
+    fprintf(stream, "usage: sailfin-stage2 [--emit sailfin|llvm] <file.sfn>\n");
+}
 
 static char *_read_file(const char *path)
 {
@@ -43,23 +49,55 @@ static char *_read_file(const char *path)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2)
+    const char *emit = "sailfin";
+    const char *path = NULL;
+
+    if (argc == 2)
     {
-        fprintf(stderr, "usage: sailfin-stage2 <file.sfn>\n");
+        if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
+        {
+            _print_usage(stdout);
+            return 0;
+        }
+        path = argv[1];
+    }
+    else if (argc == 4 && strcmp(argv[1], "--emit") == 0)
+    {
+        emit = argv[2];
+        path = argv[3];
+    }
+    else
+    {
+        _print_usage(stderr);
         return 2;
     }
 
-    char *source = _read_file(argv[1]);
+    if (strcmp(emit, "sailfin") != 0 && strcmp(emit, "llvm") != 0)
+    {
+        fprintf(stderr, "unknown --emit mode: %s\n", emit);
+        _print_usage(stderr);
+        return 2;
+    }
+
+    char *source = _read_file(path);
     if (!source)
     {
-        fprintf(stderr, "failed to read: %s\n", argv[1]);
+        fprintf(stderr, "failed to read: %s\n", path);
         return 3;
     }
 
-    char *out = compile_to_sailfin(source);
+    char *out = NULL;
+    if (strcmp(emit, "llvm") == 0)
+    {
+        out = compile_to_llvm(source);
+    }
+    else
+    {
+        out = compile_to_sailfin(source);
+    }
     if (!out)
     {
-        fprintf(stderr, "compile_to_sailfin returned NULL\n");
+        fprintf(stderr, "compiler returned NULL\n");
         free(source);
         return 4;
     }
