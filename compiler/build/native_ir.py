@@ -1095,7 +1095,30 @@ def parse_struct_definition(lines, start_index):
                 index += 1
                 continue
             if starts_with(body, "field "):
-                field_result = parse_struct_layout_field(strip_prefix(body, "field "), struct_name)
+                tail = trim_text(strip_prefix(body, "field "))
+                is_struct_header = False
+                if starts_with(tail, "struct"):
+                    if len(tail) == 6:
+                        is_struct_header = True
+                    else:
+                        if len(tail) > 6:
+                            after = tail[6]
+                            if is_trim_char(after):
+                                is_struct_header = True
+                if is_struct_header:
+                    header_text = trim_text(strip_prefix(tail, "struct"))
+                    header_result = parse_struct_layout_header(header_text)
+                    diagnostics = (diagnostics) + (header_result.diagnostics)
+                    if header_result.success:
+                        if struct_layout_header_success:
+                            diagnostics = append_string(diagnostics, "duplicate struct layout header in " + struct_name)
+                        else:
+                            struct_layout_size = header_result.size
+                            struct_layout_align = header_result.align
+                            struct_layout_header_success = True
+                    index += 1
+                    continue
+                field_result = parse_struct_layout_field(tail, struct_name)
                 diagnostics = (diagnostics) + (field_result.diagnostics)
                 if field_result.success:
                     struct_layout_fields = append_struct_layout_field(struct_layout_fields, field_result.field)
@@ -2388,6 +2411,20 @@ def parse_layout_manifest(text):
         if starts_with(line, ".manifest "):
             index += 1
             continue
+        if starts_with(line, ".layout field "):
+            tail = trim_text(strip_prefix(line, ".layout field "))
+            is_struct_header = False
+            if starts_with(tail, "struct"):
+                if len(tail) == 6:
+                    is_struct_header = True
+                else:
+                    if len(tail) > 6:
+                        after = tail[6]
+                        if is_trim_char(after):
+                            is_struct_header = True
+            if is_struct_header:
+                header_text = trim_text(strip_prefix(tail, "struct"))
+                line = ".layout struct " + header_text
         if starts_with(line, ".layout struct "):
             body = strip_prefix(line, ".layout ")
             struct_header = strip_prefix(body, "struct ")
@@ -2402,19 +2439,31 @@ def parse_layout_manifest(text):
                         break
                     field_line = trim_text(lines[index])
                     if len(field_line) == 0:
+                        index += 1
+                        break
+                    if starts_with(field_line, ".layout struct ")  or  starts_with(field_line, ".layout enum "):
                         break
                     if not starts_with(field_line, ".layout field "):
                         break
-                    body = strip_prefix(field_line, ".layout ")
-                    field_text = strip_prefix(body, "field ")
-                    field_result = parse_struct_layout_field(field_text, struct_name)
+                    tail = trim_text(strip_prefix(field_line, ".layout field "))
+                    is_struct_header = False
+                    if starts_with(tail, "struct"):
+                        if len(tail) == 6:
+                            is_struct_header = True
+                        else:
+                            if len(tail) > 6:
+                                after = tail[6]
+                                if is_trim_char(after):
+                                    is_struct_header = True
+                    if is_struct_header:
+                        break
+                    field_result = parse_struct_layout_field(tail, struct_name)
                     diagnostics = (diagnostics) + (field_result.diagnostics)
                     if field_result.success:
                         fields = append_struct_layout_field(fields, field_result.field)
                     index += 1
                 struct_def = NativeStruct(name=struct_name, fields=[], methods=[], implements=[], layout=NativeStructLayout(size=header_result.size, align=header_result.align, fields=fields))
                 structs = append_struct(structs, struct_def)
-            index += 1
             continue
         if starts_with(line, ".layout enum "):
             body = strip_prefix(line, ".layout ")

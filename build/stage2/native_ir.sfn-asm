@@ -1961,59 +1961,102 @@
                 continue
             .endif
             .if starts_with(body, "field ")
-                .span 1277 17 1277 105
-                eval let field_result = parse_struct_layout_field(strip_prefix(body, "field "), struct_name)
-                .span 1278 17 1278 76
+                .span 1277 17 1277 68
+                eval let tail = trim_text(strip_prefix(body, "field "))
+                .span 1278 17 1278 61
+                eval let mut is_struct_header -> boolean = false
+                .if starts_with(tail, "struct")
+                    .if tail.length == 6
+                        .span 1281 25 1281 49
+                        eval is_struct_header = true
+                    .else
+                        .if tail.length > 6
+                            .span 1283 25 1283 45
+                            eval let after = tail[6]
+                            .if is_trim_char(after)
+                                .span 1285 29 1285 53
+                                eval is_struct_header = true
+                            .endif
+                        .endif
+                    .endif
+                .endif
+                .if is_struct_header
+                    .span 1290 21 1290 79
+                    eval let header_text = trim_text(strip_prefix(tail, "struct"))
+                    .span 1291 21 1291 81
+                    eval let header_result = parse_struct_layout_header(header_text)
+                    .span 1292 21 1292 81
+                    eval diagnostics = diagnostics.concat(header_result.diagnostics)
+                    .if header_result.success
+                        .if struct_layout_header_success
+                            .span 1295 29 1295 122
+                            eval diagnostics = append_string(diagnostics, "duplicate struct layout header in " + struct_name)
+                        .else
+                            .span 1297 29 1297 69
+                            eval struct_layout_size = header_result.size
+                            .span 1298 29 1298 71
+                            eval struct_layout_align = header_result.align
+                            .span 1299 29 1299 65
+                            eval struct_layout_header_success = true
+                        .endif
+                    .endif
+                    .span 1302 21 1302 32
+                    eval index += 1
+                    continue
+                .endif
+                .span 1306 17 1306 81
+                eval let field_result = parse_struct_layout_field(tail, struct_name)
+                .span 1307 17 1307 76
                 eval diagnostics = diagnostics.concat(field_result.diagnostics)
                 .if field_result.success
-                    .span 1280 21 1280 113
+                    .span 1309 21 1309 113
                     eval struct_layout_fields = append_struct_layout_field(struct_layout_fields, field_result.field)
                     .if !struct_layout_header_success
                         .if !struct_layout_reported_missing_header
-                            .span 1283 29 1283 146
+                            .span 1312 29 1312 146
                             eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field encountered before layout header")
-                            .span 1284 29 1284 74
+                            .span 1313 29 1313 74
                             eval struct_layout_reported_missing_header = true
                         .endif
                     .endif
                 .endif
-                .span 1288 17 1288 28
+                .span 1317 17 1317 28
                 eval index += 1
                 continue
             .endif
-            .span 1291 13 1291 106
+            .span 1320 13 1320 106
             eval diagnostics = append_string(diagnostics, "unsupported struct layout directive: " + raw_line)
-            .span 1292 13 1292 24
+            .span 1321 13 1321 24
             eval index += 1
             continue
         .endif
         .if raw_line == "noop"
-            .span 1296 13 1296 24
+            .span 1325 13 1325 24
             eval index += 1
             continue
         .endif
         .if starts_with(raw_line, ".field ")
-            .span 1300 13 1300 91
+            .span 1329 13 1329 91
             eval let parsed_field = parse_struct_field_line(strip_prefix(raw_line, ".field "))
             .if parsed_field == null
-                .span 1302 17 1302 103
+                .span 1331 17 1331 103
                 eval diagnostics = append_string(diagnostics, "unable to parse struct field: " + raw_line)
             .else
-                .span 1304 17 1304 68
+                .span 1333 17 1333 68
                 eval fields = append_struct_field(fields, parsed_field)
             .endif
-            .span 1306 13 1306 24
+            .span 1335 13 1335 24
             eval index += 1
             continue
         .endif
         .if starts_with(raw_line, ".method ")
             .if current_method != null
-                .span 1311 17 1311 112
+                .span 1340 17 1340 112
                 eval diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name)
             .endif
-            .span 1313 13 1313 87
+            .span 1342 13 1342 87
             eval let method_name = parse_function_name(strip_prefix(raw_line, ".method "))
-            .span 1314 13 1320 15
+            .span 1343 13 1349 15
             eval current_method = NativeFunction {
                 name: method_name,
                 parameters: [],
@@ -2021,162 +2064,162 @@
                 effects: [],
                 instructions: [],
             }
-            .span 1321 13 1321 40
+            .span 1350 13 1350 40
             eval method_pending_span = null
-            .span 1322 13 1322 46
+            .span 1351 13 1351 46
             eval method_pending_value_span = null
-            .span 1323 13 1323 24
+            .span 1352 13 1352 24
             eval index += 1
             continue
         .endif
-        .span 1326 9 1326 95
+        .span 1355 9 1355 95
         eval diagnostics = append_string(diagnostics, "unsupported struct directive: " + raw_line)
-        .span 1327 9 1327 20
+        .span 1356 9 1356 20
         eval index += 1
     .endloop
-    .span 1330 5 1330 63
+    .span 1359 5 1359 63
     eval let mut struct_layout_value -> NativeStructLayout? = null
     .if struct_layout_header_success
-        .span 1332 9 1332 137
+        .span 1361 9 1361 137
         eval struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields }
     .endif
-    .span 1335 5 1339 7
+    .span 1364 5 1368 7
     ret StructParseResult { definition: NativeStruct { name: struct_name, fields: fields, methods: methods, implements: implements, layout: struct_layout_value }, next_index: index, diagnostics: diagnostics }
 .endfn
 
 .fn parse_interface_definition(lines -> string[], start_index -> number) -> InterfaceParseResult
 .meta return InterfaceParseResult
 .meta effects none
-    .span 1342 31 1342 48
+    .span 1371 31 1371 48
     .param lines -> string[]
-    .span 1342 50 1342 71
+    .span 1371 50 1371 71
     .param start_index -> number
-    .span 1343 5 1343 42
+    .span 1372 5 1372 42
     eval let mut diagnostics -> string[] = []
-    .span 1344 5 1344 48
+    .span 1373 5 1373 48
     eval let header = trim_text(lines[start_index])
-    .span 1345 5 1345 68
+    .span 1374 5 1374 68
     eval let name_text = trim_text(strip_prefix(header, ".interface "))
-    .span 1346 5 1346 58
+    .span 1375 5 1375 58
     eval let header_parse = parse_interface_header(name_text)
-    .span 1347 5 1347 64
+    .span 1376 5 1376 64
     eval diagnostics = diagnostics.concat(header_parse.diagnostics)
-    .span 1348 5 1348 44
+    .span 1377 5 1377 44
     eval let interface_name = header_parse.name
     .if interface_name.length == 0
-        .span 1350 9 1350 97
+        .span 1379 9 1379 97
         eval diagnostics = append_string(diagnostics, "unable to parse interface header: " + header)
-        .span 1351 9 1351 113
+        .span 1380 9 1380 113
         ret InterfaceParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics }
     .endif
-    .span 1354 5 1354 59
+    .span 1383 5 1383 59
     eval let mut signatures -> NativeInterfaceSignature[] = []
-    .span 1355 5 1355 37
+    .span 1384 5 1384 37
     eval let mut index = start_index + 1
     .loop
         .if index >= lines.length
-            .span 1358 13 1358 98
+            .span 1387 13 1387 98
             eval diagnostics = append_string(diagnostics, "unterminated interface " + interface_name)
-            .span 1359 13 1363 15
+            .span 1388 13 1392 15
             ret InterfaceParseResult { definition: NativeInterface { name: interface_name, type_parameters: header_parse.type_parameters, signatures: signatures }, next_index: index, diagnostics: diagnostics }
         .endif
-        .span 1365 9 1365 48
+        .span 1394 9 1394 48
         eval let raw_line = trim_text(lines[index])
         .if raw_line.length == 0 || starts_with(raw_line, ";")
-            .span 1367 13 1367 24
+            .span 1396 13 1396 24
             eval index += 1
             continue
         .endif
         .if raw_line == ".endinterface"
-            .span 1371 13 1371 24
+            .span 1400 13 1400 24
             eval index += 1
             break
         .endif
         .if raw_line == "noop"
-            .span 1375 13 1375 24
+            .span 1404 13 1404 24
             eval index += 1
             continue
         .endif
         .if starts_with(raw_line, ".sig ")
-            .span 1379 13 1379 110
+            .span 1408 13 1408 110
             eval let signature_parse = parse_interface_signature(strip_prefix(raw_line, ".sig "), interface_name)
-            .span 1380 13 1380 75
+            .span 1409 13 1409 75
             eval diagnostics = diagnostics.concat(signature_parse.diagnostics)
             .if signature_parse.success
-                .span 1382 17 1382 77
+                .span 1411 17 1411 77
                 eval signatures = signatures.concat([signature_parse.signature])
             .endif
-            .span 1384 13 1384 24
+            .span 1413 13 1413 24
             eval index += 1
             continue
         .endif
-        .span 1387 9 1387 98
+        .span 1416 9 1416 98
         eval diagnostics = append_string(diagnostics, "unsupported interface directive: " + raw_line)
-        .span 1388 9 1388 20
+        .span 1417 9 1417 20
         eval index += 1
     .endloop
-    .span 1391 5 1395 7
+    .span 1420 5 1424 7
     ret InterfaceParseResult { definition: NativeInterface { name: interface_name, type_parameters: header_parse.type_parameters, signatures: signatures }, next_index: index, diagnostics: diagnostics }
 .endfn
 
 .fn parse_struct_header(text -> string) -> StructHeaderParse
 .meta return StructHeaderParse
 .meta effects none
-    .span 1398 24 1398 38
+    .span 1427 24 1427 38
     .param text -> string
-    .span 1399 5 1399 54
+    .span 1428 5 1428 54
     eval let base = parse_header_name_and_remainder(text)
-    .span 1400 5 1400 56
+    .span 1429 5 1429 56
     eval let mut diagnostics -> string[] = base.diagnostics
-    .span 1401 5 1401 41
+    .span 1430 5 1430 41
     eval let mut implements -> string[] = []
     .if base.remainder.length > 0
         .if starts_with(base.remainder, "implements ")
-            .span 1404 13 1404 84
+            .span 1433 13 1433 84
             eval let list_text = trim_text(strip_prefix(base.remainder, "implements "))
             .if list_text.length == 0
-                .span 1406 17 1406 117
+                .span 1435 17 1435 117
                 eval diagnostics = append_string(diagnostics, "struct " + base.name + " header missing implements list")
             .else
-                .span 1408 17 1408 63
+                .span 1437 17 1437 63
                 eval implements = parse_implements_list(list_text)
             .endif
         .else
-            .span 1411 13 1411 138
+            .span 1440 13 1440 138
             eval diagnostics = append_string(diagnostics, "struct " + base.name + " header has unsupported segment `" + base.remainder + "`")
         .endif
     .endif
-    .span 1414 5 1414 100
+    .span 1443 5 1443 100
     ret StructHeaderParse { name: base.name, implements: implements, diagnostics: diagnostics }
 .endfn
 
 .fn parse_interface_header(text -> string) -> InterfaceHeaderParse
 .meta return InterfaceHeaderParse
 .meta effects none
-    .span 1417 27 1417 41
+    .span 1446 27 1446 41
     .param text -> string
-    .span 1418 5 1418 54
+    .span 1447 5 1447 54
     eval let base = parse_header_name_and_remainder(text)
-    .span 1419 5 1419 56
+    .span 1448 5 1448 56
     eval let mut diagnostics -> string[] = base.diagnostics
     .if base.remainder.length > 0
-        .span 1421 9 1421 137
+        .span 1450 9 1450 137
         eval diagnostics = append_string(diagnostics, "interface " + base.name + " header has unsupported segment `" + base.remainder + "`")
     .endif
-    .span 1423 5 1423 118
+    .span 1452 5 1452 118
     ret InterfaceHeaderParse { name: base.name, type_parameters: base.type_parameters, diagnostics: diagnostics }
 .endfn
 
 .fn parse_interface_signature(text -> string, interface_name -> string) -> InterfaceSignatureParse
 .meta return InterfaceSignatureParse
 .meta effects none
-    .span 1426 30 1426 44
+    .span 1455 30 1455 44
     .param text -> string
-    .span 1426 46 1426 70
+    .span 1455 46 1455 70
     .param interface_name -> string
-    .span 1427 5 1427 42
+    .span 1456 5 1456 42
     eval let mut diagnostics -> string[] = []
-    .span 1428 5 1435 7
+    .span 1457 5 1464 7
     eval let default_signature = NativeInterfaceSignature {
         name: "",
         is_async: false,
@@ -2185,127 +2228,127 @@
         return_type: "void",
         effects: [],
     }
-    .span 1437 5 1437 61
+    .span 1466 5 1466 61
     eval let trimmed = trim_trailing_delimiters(trim_text(text))
     .if trimmed.length == 0
-        .span 1439 9 1439 112
+        .span 1468 9 1468 112
         eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature missing content")
-        .span 1440 9 1440 115
+        .span 1469 9 1469 115
         ret InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics }
     .endif
-    .span 1443 5 1443 43
+    .span 1472 5 1472 43
     eval let mut remainder -> string = trimmed
-    .span 1444 5 1444 41
+    .span 1473 5 1473 41
     eval let mut is_async -> boolean = false
     .if starts_with(remainder, "async ")
-        .span 1446 9 1446 25
+        .span 1475 9 1475 25
         eval is_async = true
-        .span 1447 9 1447 66
+        .span 1476 9 1476 66
         eval remainder = trim_text(strip_prefix(remainder, "async "))
     .endif
-    .span 1450 5 1450 48
+    .span 1479 5 1479 48
     eval let paren_index = index_of(remainder, "(")
     .if paren_index < 0
-        .span 1452 9 1452 131
+        .span 1481 9 1481 131
         eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature missing parameter list: " + trimmed)
-        .span 1453 9 1453 115
+        .span 1482 9 1482 115
         ret InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics }
     .endif
-    .span 1456 5 1456 67
+    .span 1485 5 1485 67
     eval let close_index = find_matching_paren(remainder, paren_index)
     .if close_index < 0
-        .span 1458 9 1458 140
+        .span 1487 9 1487 140
         eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature has unterminated parameter list: " + trimmed)
-        .span 1459 9 1459 115
+        .span 1488 9 1488 115
         ret InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics }
     .endif
-    .span 1462 5 1462 64
+    .span 1491 5 1491 64
     eval let head = trim_text(substring(remainder, 0, paren_index))
-    .span 1463 5 1463 60
+    .span 1492 5 1492 60
     eval let name_parse = parse_header_name_and_remainder(head)
-    .span 1464 5 1464 62
+    .span 1493 5 1493 62
     eval diagnostics = diagnostics.concat(name_parse.diagnostics)
     .if name_parse.remainder.length > 0
-        .span 1466 9 1466 169
+        .span 1495 9 1495 169
         eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + trimmed + "` has unsupported segment `" + name_parse.remainder + "`")
     .endif
-    .span 1468 5 1468 39
+    .span 1497 5 1497 39
     eval let method_name = name_parse.name
     .if method_name.length == 0
-        .span 1470 9 1470 127
+        .span 1499 9 1499 127
         eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + trimmed + "` missing name")
     .endif
-    .span 1473 5 1473 81
+    .span 1502 5 1502 81
     eval let parameters_section = substring(remainder, paren_index + 1, close_index)
-    .span 1474 5 1474 50
+    .span 1503 5 1503 50
     eval let mut parameters -> NativeParameter[] = []
-    .span 1475 5 1475 56
+    .span 1504 5 1504 56
     eval let parameter_text = trim_text(parameters_section)
     .if parameter_text.length > 0
-        .span 1477 9 1477 63
+        .span 1506 9 1506 63
         eval let entries = split_parameter_entries(parameter_text)
-        .span 1478 9 1478 43
+        .span 1507 9 1507 43
         eval let mut entry_index -> number = 0
         .loop
             .if entry_index >= entries.length
                 break
             .endif
-            .span 1483 13 1483 76
+            .span 1512 13 1512 76
             eval let parsed = parse_parameter_entry(entries[entry_index], null)
             .if parsed == null
-                .span 1485 17 1485 179
+                .span 1514 17 1514 179
                 eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid parameter `" + entries[entry_index] + "`")
             .else
-                .span 1487 17 1487 73
+                .span 1516 17 1516 73
                 eval parameters = append_parameter_array(parameters, parsed)
             .endif
-            .span 1489 13 1489 30
+            .span 1518 13 1518 30
             eval entry_index += 1
         .endloop
     .endif
-    .span 1493 5 1493 44
+    .span 1522 5 1522 44
     eval let mut return_type -> string = "void"
-    .span 1494 5 1494 38
+    .span 1523 5 1523 38
     eval let mut effects -> string[] = []
-    .span 1495 5 1495 89
+    .span 1524 5 1524 89
     eval let mut suffix = trim_text(substring(remainder, close_index + 1, remainder.length))
     .if suffix.length > 0
-        .span 1497 9 1497 51
+        .span 1526 9 1526 51
         eval let effect_index = index_of(suffix, "![")
-        .span 1498 9 1498 47
+        .span 1527 9 1527 47
         eval let mut effect_segment -> string = ""
         .if effect_index >= 0
-            .span 1500 13 1500 88
+            .span 1529 13 1529 88
             eval effect_segment = trim_text(substring(suffix, effect_index, suffix.length))
-            .span 1501 13 1501 68
+            .span 1530 13 1530 68
             eval suffix = trim_text(substring(suffix, 0, effect_index))
         .endif
         .if suffix.length > 0
             .if starts_with(suffix, "->")
-                .span 1505 17 1505 71
+                .span 1534 17 1534 71
                 eval let type_text = trim_text(strip_prefix(suffix, "->"))
                 .if type_text.length > 0
-                    .span 1507 21 1507 45
+                    .span 1536 21 1536 45
                     eval return_type = type_text
                 .endif
             .else
-                .span 1510 17 1510 166
+                .span 1539 17 1539 166
                 eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has unsupported suffix `" + suffix + "`")
             .endif
         .endif
         .if effect_segment.length > 0
             .if starts_with(effect_segment, "![") && effect_segment[effect_segment.length - 1] == "]"
-                .span 1515 17 1515 84
+                .span 1544 17 1544 84
                 eval let body = substring(effect_segment, 2, effect_segment.length - 1)
-                .span 1516 17 1516 51
+                .span 1545 17 1545 51
                 eval effects = parse_effect_list(body)
             .else
-                .span 1518 17 1518 182
+                .span 1547 17 1547 182
                 eval diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid effects annotation `" + effect_segment + "`")
             .endif
         .endif
     .endif
-    .span 1523 5 1530 7
+    .span 1552 5 1559 7
     eval let signature = NativeInterfaceSignature {
         name: method_name,
         is_async: is_async,
@@ -2314,430 +2357,430 @@
         return_type: return_type,
         effects: effects,
     }
-    .span 1531 5 1531 69
+    .span 1560 5 1560 69
     eval let success = method_name.length > 0 && diagnostics.length == 0
-    .span 1532 5 1532 105
+    .span 1561 5 1561 105
     ret InterfaceSignatureParse { success: success, signature: signature, diagnostics: diagnostics }
 .endfn
 
 .fn parse_header_name_and_remainder(text -> string) -> HeaderNameParse
 .meta return HeaderNameParse
 .meta effects none
-    .span 1535 36 1535 50
+    .span 1564 36 1564 50
     .param text -> string
-    .span 1536 5 1536 42
+    .span 1565 5 1565 42
     eval let mut diagnostics -> string[] = []
-    .span 1537 5 1537 35
+    .span 1566 5 1566 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 1539 9 1539 107
+        .span 1568 9 1568 107
         ret HeaderNameParse { name: "", type_parameters: [], remainder: "", diagnostics: diagnostics }
     .endif
-    .span 1541 5 1541 38
+    .span 1570 5 1570 38
     eval let mut name -> string = trimmed
-    .span 1542 5 1542 38
+    .span 1571 5 1571 38
     eval let mut remainder -> string = ""
-    .span 1543 5 1543 46
+    .span 1572 5 1572 46
     eval let mut type_parameters -> string[] = []
-    .span 1544 5 1544 49
+    .span 1573 5 1573 49
     eval let generics_index = index_of(trimmed, "<")
     .if generics_index >= 0
-        .span 1546 9 1546 72
+        .span 1575 9 1575 72
         eval let close_index = find_matching_angle(trimmed, generics_index)
         .if close_index < 0
-            .span 1548 13 1548 99
+            .span 1577 13 1577 99
             eval diagnostics = append_string(diagnostics, "header `" + text + "` missing closing `>`")
-            .span 1549 13 1549 44
+            .span 1578 13 1578 44
             eval name = strip_generics(trimmed)
-            .span 1550 13 1550 133
+            .span 1579 13 1579 133
             ret HeaderNameParse { name: name, type_parameters: type_parameters, remainder: remainder, diagnostics: diagnostics }
         .endif
-        .span 1552 9 1552 65
+        .span 1581 9 1581 65
         eval name = trim_text(substring(trimmed, 0, generics_index))
-        .span 1553 9 1553 81
+        .span 1582 9 1582 81
         eval let generics_text = substring(trimmed, generics_index + 1, close_index)
-        .span 1554 9 1554 71
+        .span 1583 9 1583 71
         eval type_parameters = parse_type_parameter_entries(generics_text)
-        .span 1555 9 1555 84
+        .span 1584 9 1584 84
         eval remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length))
     .else
-        .span 1557 9 1557 50
+        .span 1586 9 1586 50
         eval let space_index = index_of(trimmed, " ")
         .if space_index >= 0
-            .span 1559 13 1559 66
+            .span 1588 13 1588 66
             eval name = trim_text(substring(trimmed, 0, space_index))
-            .span 1560 13 1560 88
+            .span 1589 13 1589 88
             eval remainder = trim_text(substring(trimmed, space_index + 1, trimmed.length))
         .endif
     .endif
-    .span 1563 5 1563 33
+    .span 1592 5 1592 33
     eval name = strip_generics(name)
-    .span 1564 5 1564 125
+    .span 1593 5 1593 125
     ret HeaderNameParse { name: name, type_parameters: type_parameters, remainder: remainder, diagnostics: diagnostics }
 .endfn
 
 .fn parse_type_parameter_entries(text -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 1567 33 1567 47
+    .span 1596 33 1596 47
     .param text -> string
-    .span 1568 5 1568 35
+    .span 1597 5 1597 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 1570 9 1570 19
+        .span 1599 9 1599 19
         ret []
     .endif
-    .span 1572 5 1572 44
+    .span 1601 5 1601 44
     ret split_top_level_commas(trimmed)
 .endfn
 
 .fn parse_implements_list(text -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 1575 26 1575 40
+    .span 1604 26 1604 40
     .param text -> string
-    .span 1576 5 1576 35
+    .span 1605 5 1605 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 1578 9 1578 19
+        .span 1607 9 1607 19
         ret []
     .endif
-    .span 1580 5 1580 44
+    .span 1609 5 1609 44
     ret split_top_level_commas(trimmed)
 .endfn
 
 .fn split_top_level_commas(text -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 1583 27 1583 41
+    .span 1612 27 1612 41
     .param text -> string
-    .span 1584 5 1584 38
+    .span 1613 5 1613 38
     eval let mut entries -> string[] = []
-    .span 1585 5 1585 36
+    .span 1614 5 1614 36
     eval let mut current -> string = ""
-    .span 1586 5 1586 33
+    .span 1615 5 1615 33
     eval let mut index -> number = 0
-    .span 1587 5 1587 34
+    .span 1616 5 1616 34
     eval let mut quote -> string = ""
-    .span 1588 5 1588 39
+    .span 1617 5 1617 39
     eval let mut angle_depth -> number = 0
-    .span 1589 5 1589 39
+    .span 1618 5 1618 39
     eval let mut paren_depth -> number = 0
-    .span 1590 5 1590 41
+    .span 1619 5 1619 41
     eval let mut bracket_depth -> number = 0
-    .span 1591 5 1591 39
+    .span 1620 5 1620 39
     eval let mut brace_depth -> number = 0
     .loop
         .if index >= text.length
             break
         .endif
-        .span 1596 9 1596 30
+        .span 1625 9 1625 30
         eval let ch = text[index]
         .if quote.length > 0
-            .span 1598 13 1598 36
+            .span 1627 13 1627 36
             eval current = current + ch
             .if ch == "\\"
                 .if index + 1 < text.length
-                    .span 1601 21 1601 57
+                    .span 1630 21 1630 57
                     eval current = current + text[index + 1]
-                    .span 1602 21 1602 32
+                    .span 1631 21 1631 32
                     eval index += 2
                     continue
                 .endif
             .endif
             .if ch == quote
-                .span 1607 17 1607 28
+                .span 1636 17 1636 28
                 eval quote = ""
             .endif
-            .span 1609 13 1609 24
+            .span 1638 13 1638 24
             eval index += 1
             continue
         .endif
         .if ch == "\"" || ch == "'"
-            .span 1613 13 1613 24
+            .span 1642 13 1642 24
             eval quote = ch
-            .span 1614 13 1614 36
+            .span 1643 13 1643 36
             eval current = current + ch
-            .span 1615 13 1615 24
+            .span 1644 13 1644 24
             eval index += 1
             continue
         .endif
         .if ch == "<"
-            .span 1619 13 1619 30
+            .span 1648 13 1648 30
             eval angle_depth += 1
-            .span 1620 13 1620 36
+            .span 1649 13 1649 36
             eval current = current + ch
-            .span 1621 13 1621 24
+            .span 1650 13 1650 24
             eval index += 1
             continue
         .endif
         .if ch == ">"
             .if angle_depth > 0
-                .span 1626 17 1626 34
+                .span 1655 17 1655 34
                 eval angle_depth -= 1
             .endif
-            .span 1628 13 1628 36
+            .span 1657 13 1657 36
             eval current = current + ch
-            .span 1629 13 1629 24
+            .span 1658 13 1658 24
             eval index += 1
             continue
         .endif
         .if ch == "("
-            .span 1633 13 1633 30
+            .span 1662 13 1662 30
             eval paren_depth += 1
-            .span 1634 13 1634 36
+            .span 1663 13 1663 36
             eval current = current + ch
-            .span 1635 13 1635 24
+            .span 1664 13 1664 24
             eval index += 1
             continue
         .endif
         .if ch == ")"
             .if paren_depth > 0
-                .span 1640 17 1640 34
+                .span 1669 17 1669 34
                 eval paren_depth -= 1
             .endif
-            .span 1642 13 1642 36
+            .span 1671 13 1671 36
             eval current = current + ch
-            .span 1643 13 1643 24
+            .span 1672 13 1672 24
             eval index += 1
             continue
         .endif
         .if ch == "["
-            .span 1647 13 1647 32
+            .span 1676 13 1676 32
             eval bracket_depth += 1
-            .span 1648 13 1648 36
+            .span 1677 13 1677 36
             eval current = current + ch
-            .span 1649 13 1649 24
+            .span 1678 13 1678 24
             eval index += 1
             continue
         .endif
         .if ch == "]"
             .if bracket_depth > 0
-                .span 1654 17 1654 36
+                .span 1683 17 1683 36
                 eval bracket_depth -= 1
             .endif
-            .span 1656 13 1656 36
+            .span 1685 13 1685 36
             eval current = current + ch
-            .span 1657 13 1657 24
+            .span 1686 13 1686 24
             eval index += 1
             continue
         .endif
         .if ch == "{"
-            .span 1661 13 1661 30
+            .span 1690 13 1690 30
             eval brace_depth += 1
-            .span 1662 13 1662 36
+            .span 1691 13 1691 36
             eval current = current + ch
-            .span 1663 13 1663 24
+            .span 1692 13 1692 24
             eval index += 1
             continue
         .endif
         .if ch == "}"
             .if brace_depth > 0
-                .span 1668 17 1668 34
+                .span 1697 17 1697 34
                 eval brace_depth -= 1
             .endif
-            .span 1670 13 1670 36
+            .span 1699 13 1699 36
             eval current = current + ch
-            .span 1671 13 1671 24
+            .span 1700 13 1700 24
             eval index += 1
             continue
         .endif
         .if ch == ","
             .if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0
-                .span 1676 17 1676 50
+                .span 1705 17 1705 50
                 eval let segment = trim_text(current)
                 .if segment.length > 0
-                    .span 1678 21 1678 63
+                    .span 1707 21 1707 63
                     eval entries = append_string(entries, segment)
                 .endif
-                .span 1680 17 1680 30
+                .span 1709 17 1709 30
                 eval current = ""
-                .span 1681 17 1681 28
+                .span 1710 17 1710 28
                 eval index += 1
                 continue
             .endif
         .endif
-        .span 1685 9 1685 32
+        .span 1714 9 1714 32
         eval current = current + ch
-        .span 1686 9 1686 20
+        .span 1715 9 1715 20
         eval index += 1
     .endloop
-    .span 1688 5 1688 38
+    .span 1717 5 1717 38
     eval let segment = trim_text(current)
     .if segment.length > 0
-        .span 1690 9 1690 51
+        .span 1719 9 1719 51
         eval entries = append_string(entries, segment)
     .endif
-    .span 1692 5 1692 20
+    .span 1721 5 1721 20
     ret entries
 .endfn
 
 .fn find_matching_angle(text -> string, start_index -> number) -> number
 .meta return number
 .meta effects none
-    .span 1695 24 1695 38
+    .span 1724 24 1724 38
     .param text -> string
-    .span 1695 40 1695 61
+    .span 1724 40 1724 61
     .param start_index -> number
-    .span 1696 5 1696 33
+    .span 1725 5 1725 33
     eval let mut depth -> number = 0
-    .span 1697 5 1697 43
+    .span 1726 5 1726 43
     eval let mut index -> number = start_index
     .loop
         .if index >= text.length
             break
         .endif
-        .span 1702 9 1702 30
+        .span 1731 9 1731 30
         eval let ch = text[index]
         .if ch == "<"
-            .span 1704 13 1704 24
+            .span 1733 13 1733 24
             eval depth += 1
         .else
             .if ch == ">"
                 .if depth > 0
-                    .span 1707 17 1707 28
+                    .span 1736 17 1736 28
                     eval depth -= 1
                     .if depth == 0
-                        .span 1709 21 1709 34
+                        .span 1738 21 1738 34
                         ret index
                     .endif
                 .else
-                    .span 1712 17 1712 30
+                    .span 1741 17 1741 30
                     ret index
                 .endif
             .endif
         .endif
-        .span 1715 9 1715 20
+        .span 1744 9 1744 20
         eval index += 1
     .endloop
-    .span 1717 5 1717 15
+    .span 1746 5 1746 15
     ret -1
 .endfn
 
 .fn find_matching_paren(text -> string, start_index -> number) -> number
 .meta return number
 .meta effects none
-    .span 1720 24 1720 38
+    .span 1749 24 1749 38
     .param text -> string
-    .span 1720 40 1720 61
+    .span 1749 40 1749 61
     .param start_index -> number
-    .span 1721 5 1721 33
+    .span 1750 5 1750 33
     eval let mut depth -> number = 0
-    .span 1722 5 1722 43
+    .span 1751 5 1751 43
     eval let mut index -> number = start_index
     .loop
         .if index >= text.length
             break
         .endif
-        .span 1727 9 1727 30
+        .span 1756 9 1756 30
         eval let ch = text[index]
         .if ch == "\"" || ch == "'"
-            .span 1729 13 1729 43
+            .span 1758 13 1758 43
             eval let mut lookahead = index + 1
             .loop
                 .if lookahead >= text.length
-                    .span 1732 21 1732 31
+                    .span 1761 21 1761 31
                     ret -1
                 .endif
-                .span 1734 17 1734 47
+                .span 1763 17 1763 47
                 eval let current = text[lookahead]
                 .if current == "\\"
-                    .span 1736 21 1736 36
+                    .span 1765 21 1765 36
                     eval lookahead += 2
                     continue
                 .endif
                 .if current == ch
-                    .span 1740 21 1740 39
+                    .span 1769 21 1769 39
                     eval index = lookahead
                     break
                 .endif
-                .span 1743 17 1743 32
+                .span 1772 17 1772 32
                 eval lookahead += 1
             .endloop
         .else
             .if ch == "("
-                .span 1746 13 1746 24
+                .span 1775 13 1775 24
                 eval depth += 1
             .else
                 .if ch == ")"
                     .if depth > 0
-                        .span 1749 17 1749 28
+                        .span 1778 17 1778 28
                         eval depth -= 1
                         .if depth == 0
-                            .span 1751 21 1751 34
+                            .span 1780 21 1780 34
                             ret index
                         .endif
                     .else
-                        .span 1754 17 1754 27
+                        .span 1783 17 1783 27
                         ret -1
                     .endif
                 .endif
             .endif
         .endif
-        .span 1757 9 1757 20
+        .span 1786 9 1786 20
         eval index += 1
     .endloop
-    .span 1759 5 1759 15
+    .span 1788 5 1788 15
     ret -1
 .endfn
 
 .fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseResult
 .meta return EnumParseResult
 .meta effects none
-    .span 1762 26 1762 43
+    .span 1791 26 1791 43
     .param lines -> string[]
-    .span 1762 45 1762 66
+    .span 1791 45 1791 66
     .param start_index -> number
-    .span 1763 5 1763 42
+    .span 1792 5 1792 42
     eval let mut diagnostics -> string[] = []
-    .span 1764 5 1764 48
+    .span 1793 5 1793 48
     eval let header = trim_text(lines[start_index])
-    .span 1765 5 1765 63
+    .span 1794 5 1794 63
     eval let name_text = trim_text(strip_prefix(header, ".enum "))
-    .span 1766 5 1766 45
+    .span 1795 5 1795 45
     eval let mut enum_name -> string = name_text
-    .span 1767 5 1767 48
+    .span 1796 5 1796 48
     eval let space_index = index_of(enum_name, " ")
     .if space_index >= 0
-        .span 1769 5 1769 65
+        .span 1798 5 1798 65
         eval enum_name = trim_text(substring(enum_name, 0, space_index))
     .endif
-    .span 1771 5 1771 43
+    .span 1800 5 1800 43
     eval enum_name = strip_generics(enum_name)
     .if enum_name.length == 0
-        .span 1773 9 1773 92
+        .span 1802 9 1802 92
         eval diagnostics = append_string(diagnostics, "unable to parse enum header: " + header)
-        .span 1774 9 1774 108
+        .span 1803 9 1803 108
         ret EnumParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics }
     .endif
-    .span 1777 5 1777 50
+    .span 1806 5 1806 50
     eval let mut variants -> NativeEnumVariant[] = []
-    .span 1778 5 1778 68
+    .span 1807 5 1807 68
     eval let mut enum_layout_variants -> NativeEnumVariantLayout[] = []
-    .span 1779 5 1779 44
+    .span 1808 5 1808 44
     eval let mut enum_layout_size -> number = 0
-    .span 1780 5 1780 45
+    .span 1809 5 1809 45
     eval let mut enum_layout_align -> number = 0
-    .span 1781 5 1781 49
+    .span 1810 5 1810 49
     eval let mut enum_layout_tag_type -> string = ""
-    .span 1782 5 1782 48
+    .span 1811 5 1811 48
     eval let mut enum_layout_tag_size -> number = 0
-    .span 1783 5 1783 49
+    .span 1812 5 1812 49
     eval let mut enum_layout_tag_align -> number = 0
-    .span 1784 5 1784 59
+    .span 1813 5 1813 59
     eval let mut enum_layout_header_success -> boolean = false
-    .span 1785 5 1785 68
+    .span 1814 5 1814 68
     eval let mut enum_layout_reported_missing_header -> boolean = false
-    .span 1786 5 1786 37
+    .span 1815 5 1815 37
     eval let mut index = start_index + 1
     .loop
         .if index >= lines.length
-            .span 1789 13 1789 88
+            .span 1818 13 1818 88
             eval diagnostics = append_string(diagnostics, "unterminated enum " + enum_name)
-            .span 1790 13 1790 67
+            .span 1819 13 1819 67
             eval let mut enum_layout_value -> NativeEnumLayout? = null
             .if enum_layout_header_success
-                .span 1792 17 1799 19
+                .span 1821 17 1828 19
                 eval enum_layout_value = NativeEnumLayout {
                     size: enum_layout_size,
                     align: enum_layout_align,
@@ -2747,167 +2790,167 @@
                     variants: enum_layout_variants,
                 }
             .endif
-            .span 1801 13 1805 15
+            .span 1830 13 1834 15
             ret EnumParseResult { definition: NativeEnum { name: enum_name, variants: variants, layout: enum_layout_value }, next_index: index, diagnostics: diagnostics }
         .endif
-        .span 1807 9 1807 48
+        .span 1836 9 1836 48
         eval let raw_line = trim_text(lines[index])
         .if raw_line.length == 0 || starts_with(raw_line, ";")
-            .span 1809 13 1809 24
+            .span 1838 13 1838 24
             eval index += 1
             continue
         .endif
         .if raw_line == "noop"
-            .span 1813 13 1813 24
+            .span 1842 13 1842 24
             eval index += 1
             continue
         .endif
         .if starts_with(raw_line, ".layout ")
-            .span 1817 13 1817 59
+            .span 1846 13 1846 59
             eval let body = strip_prefix(raw_line, ".layout ")
             .if starts_with(body, "enum ")
-                .span 1819 17 1819 91
+                .span 1848 17 1848 91
                 eval let header_result = parse_enum_layout_header(strip_prefix(body, "enum "))
-                .span 1820 17 1820 77
+                .span 1849 17 1849 77
                 eval diagnostics = diagnostics.concat(header_result.diagnostics)
                 .if header_result.success
                     .if enum_layout_header_success
-                        .span 1823 25 1823 114
+                        .span 1852 25 1852 114
                         eval diagnostics = append_string(diagnostics, "duplicate enum layout header in " + enum_name)
                     .else
-                        .span 1825 25 1825 63
+                        .span 1854 25 1854 63
                         eval enum_layout_size = header_result.size
-                        .span 1826 25 1826 65
+                        .span 1855 25 1855 65
                         eval enum_layout_align = header_result.align
-                        .span 1827 25 1827 71
+                        .span 1856 25 1856 71
                         eval enum_layout_tag_type = header_result.tag_type
-                        .span 1828 25 1828 71
+                        .span 1857 25 1857 71
                         eval enum_layout_tag_size = header_result.tag_size
-                        .span 1829 25 1829 73
+                        .span 1858 25 1858 73
                         eval enum_layout_tag_align = header_result.tag_align
-                        .span 1830 25 1830 59
+                        .span 1859 25 1859 59
                         eval enum_layout_header_success = true
                     .endif
                 .endif
-                .span 1833 17 1833 28
+                .span 1862 17 1862 28
                 eval index += 1
                 continue
             .endif
             .if starts_with(body, "variant ")
-                .span 1837 17 1837 67
+                .span 1866 17 1866 67
                 eval let variant_text = strip_prefix(body, "variant ")
                 .if starts_with(variant_text, "enum ")
-                    .span 1841 21 1841 103
+                    .span 1870 21 1870 103
                     eval let header_result = parse_enum_layout_header(strip_prefix(variant_text, "enum "))
                     .if header_result.success
                         .if !enum_layout_header_success
-                            .span 1845 29 1845 67
+                            .span 1874 29 1874 67
                             eval enum_layout_size = header_result.size
-                            .span 1846 29 1846 69
+                            .span 1875 29 1875 69
                             eval enum_layout_align = header_result.align
-                            .span 1847 29 1847 75
+                            .span 1876 29 1876 75
                             eval enum_layout_tag_type = header_result.tag_type
-                            .span 1848 29 1848 75
+                            .span 1877 29 1877 75
                             eval enum_layout_tag_size = header_result.tag_size
-                            .span 1849 29 1849 77
+                            .span 1878 29 1878 77
                             eval enum_layout_tag_align = header_result.tag_align
-                            .span 1850 29 1850 63
+                            .span 1879 29 1879 63
                             eval enum_layout_header_success = true
                         .endif
-                        .span 1852 25 1852 36
+                        .span 1881 25 1881 36
                         eval index += 1
                         continue
                     .endif
                 .endif
-                .span 1857 17 1857 89
+                .span 1886 17 1886 89
                 eval let variant_result = parse_enum_variant_layout(variant_text, enum_name)
-                .span 1858 17 1858 78
+                .span 1887 17 1887 78
                 eval diagnostics = diagnostics.concat(variant_result.diagnostics)
                 .if variant_result.success
-                    .span 1860 21 1860 118
+                    .span 1889 21 1889 118
                     eval let existing_index = find_enum_variant_layout(enum_layout_variants, variant_result.variant.name)
                     .if existing_index >= 0
-                        .span 1862 25 1862 153
+                        .span 1891 25 1891 153
                         eval diagnostics = append_string(diagnostics, "duplicate enum layout variant `" + variant_result.variant.name + "` in " + enum_name)
                     .else
-                        .span 1864 25 1864 121
+                        .span 1893 25 1893 121
                         eval enum_layout_variants = append_enum_variant_layout(enum_layout_variants, variant_result.variant)
                     .endif
                     .if !enum_layout_header_success
                         .if !enum_layout_reported_missing_header
-                            .span 1868 29 1868 144
+                            .span 1897 29 1897 144
                             eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant encountered before layout header")
-                            .span 1869 29 1869 72
+                            .span 1898 29 1898 72
                             eval enum_layout_reported_missing_header = true
                         .endif
                     .endif
                 .endif
-                .span 1873 17 1873 28
+                .span 1902 17 1902 28
                 eval index += 1
                 continue
             .endif
             .if starts_with(body, "payload ")
-                .span 1877 17 1877 107
+                .span 1906 17 1906 107
                 eval let payload_result = parse_enum_payload_layout(strip_prefix(body, "payload "), enum_name)
-                .span 1878 17 1878 78
+                .span 1907 17 1907 78
                 eval diagnostics = diagnostics.concat(payload_result.diagnostics)
                 .if payload_result.success
-                    .span 1880 21 1880 116
+                    .span 1909 21 1909 116
                     eval let target_index = find_enum_variant_layout(enum_layout_variants, payload_result.variant_name)
                     .if target_index < 0
-                        .span 1882 25 1882 172
+                        .span 1911 25 1911 172
                         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload references unknown variant `" + payload_result.variant_name + "`")
                     .else
-                        .span 1884 25 1884 133
+                        .span 1913 25 1913 133
                         eval enum_layout_variants = update_enum_variant_fields(enum_layout_variants, target_index, payload_result.field)
                     .endif
                     .if !enum_layout_header_success
                         .if !enum_layout_reported_missing_header
-                            .span 1888 29 1888 144
+                            .span 1917 29 1917 144
                             eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload encountered before layout header")
-                            .span 1889 29 1889 72
+                            .span 1918 29 1918 72
                             eval enum_layout_reported_missing_header = true
                         .endif
                     .endif
                 .endif
-                .span 1893 17 1893 28
+                .span 1922 17 1922 28
                 eval index += 1
                 continue
             .endif
-            .span 1896 13 1896 104
+            .span 1925 13 1925 104
             eval diagnostics = append_string(diagnostics, "unsupported enum layout directive: " + raw_line)
-            .span 1897 13 1897 24
+            .span 1926 13 1926 24
             eval index += 1
             continue
         .endif
         .if raw_line == ".endenum"
-            .span 1901 13 1901 24
+            .span 1930 13 1930 24
             eval index += 1
             break
         .endif
         .if starts_with(raw_line, ".variant ")
-            .span 1905 13 1905 95
+            .span 1934 13 1934 95
             eval let parsed_variant = parse_enum_variant_line(strip_prefix(raw_line, ".variant "))
             .if parsed_variant == null
-                .span 1907 17 1907 103
+                .span 1936 17 1936 103
                 eval diagnostics = append_string(diagnostics, "unable to parse enum variant: " + raw_line)
             .else
-                .span 1909 17 1909 74
+                .span 1938 17 1938 74
                 eval variants = append_enum_variant(variants, parsed_variant)
             .endif
-            .span 1911 13 1911 24
+            .span 1940 13 1940 24
             eval index += 1
             continue
         .endif
-        .span 1914 9 1914 93
+        .span 1943 9 1943 93
         eval diagnostics = append_string(diagnostics, "unsupported enum directive: " + raw_line)
-        .span 1915 9 1915 20
+        .span 1944 9 1944 20
         eval index += 1
     .endloop
-    .span 1918 5 1918 59
+    .span 1947 5 1947 59
     eval let mut enum_layout_value -> NativeEnumLayout? = null
     .if enum_layout_header_success
-        .span 1920 9 1927 11
+        .span 1949 9 1956 11
         eval enum_layout_value = NativeEnumLayout {
             size: enum_layout_size,
             align: enum_layout_align,
@@ -2917,607 +2960,607 @@
             variants: enum_layout_variants,
         }
     .endif
-    .span 1930 5 1934 7
+    .span 1959 5 1963 7
     ret EnumParseResult { definition: NativeEnum { name: enum_name, variants: variants, layout: enum_layout_value }, next_index: index, diagnostics: diagnostics }
 .endfn
 
 .fn parse_enum_variant_line(text -> string) -> NativeEnumVariant?
 .meta return NativeEnumVariant?
 .meta effects none
-    .span 1937 28 1937 42
+    .span 1966 28 1966 42
     .param text -> string
-    .span 1938 5 1938 61
+    .span 1967 5 1967 61
     eval let trimmed = trim_trailing_delimiters(trim_text(text))
     .if trimmed.length == 0
-        .span 1940 9 1940 21
+        .span 1969 9 1969 21
         ret null
     .endif
-    .span 1942 5 1942 46
+    .span 1971 5 1971 46
     eval let brace_index = index_of(trimmed, "{")
     .if brace_index < 0
-        .span 1944 9 1944 80
+        .span 1973 9 1973 80
         ret NativeEnumVariant { name: strip_generics(trimmed), fields: [] }
     .endif
-    .span 1946 5 1946 51
+    .span 1975 5 1975 51
     eval let close_index = last_index_of(trimmed, "}")
     .if close_index < 0 || close_index <= brace_index
-        .span 1948 9 1948 21
+        .span 1977 9 1977 21
         ret null
     .endif
-    .span 1950 5 1950 83
+    .span 1979 5 1979 83
     eval let name_text = strip_generics(trim_text(substring(trimmed, 0, brace_index)))
     .if name_text.length == 0
-        .span 1952 9 1952 21
+        .span 1981 9 1981 21
         ret null
     .endif
-    .span 1954 5 1954 75
+    .span 1983 5 1983 75
     eval let fields_segment = substring(trimmed, brace_index + 1, close_index)
-    .span 1955 5 1955 60
+    .span 1984 5 1984 60
     eval let entries = split_enum_field_entries(fields_segment)
-    .span 1956 5 1956 53
+    .span 1985 5 1985 53
     eval let mut fields -> NativeEnumVariantField[] = []
-    .span 1957 5 1957 33
+    .span 1986 5 1986 33
     eval let mut index -> number = 0
     .loop
         .if index >= entries.length
             break
         .endif
-        .span 1962 9 1962 73
+        .span 1991 9 1991 73
         eval let entry = trim_trailing_delimiters(trim_text(entries[index]))
         .if entry.length == 0
-            .span 1964 13 1964 24
+            .span 1993 13 1993 24
             eval index += 1
             continue
         .endif
-        .span 1967 9 1967 60
+        .span 1996 9 1996 60
         eval let parsed_field = parse_enum_variant_field(entry)
         .if parsed_field == null
-            .span 1969 13 1969 25
+            .span 1998 13 1998 25
             ret null
         .endif
-        .span 1971 9 1971 66
+        .span 2000 9 2000 66
         eval fields = append_enum_variant_field(fields, parsed_field)
-        .span 1972 9 1972 20
+        .span 2001 9 2001 20
         eval index += 1
     .endloop
-    .span 1974 5 1974 66
+    .span 2003 5 2003 66
     ret NativeEnumVariant { name: name_text, fields: fields }
 .endfn
 
 .fn split_enum_field_entries(text -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 1977 29 1977 43
+    .span 2006 29 2006 43
     .param text -> string
-    .span 1978 5 1978 38
+    .span 2007 5 2007 38
     eval let mut entries -> string[] = []
-    .span 1979 5 1979 36
+    .span 2008 5 2008 36
     eval let mut current -> string = ""
-    .span 1980 5 1980 33
+    .span 2009 5 2009 33
     eval let mut depth -> number = 0
-    .span 1981 5 1981 33
+    .span 2010 5 2010 33
     eval let mut index -> number = 0
     .loop
         .if index >= text.length
             break
         .endif
-        .span 1986 9 1986 30
+        .span 2015 9 2015 30
         eval let ch = text[index]
         .if ch == "{" || ch == "[" || ch == "("
-            .span 1988 13 1988 24
+            .span 2017 13 2017 24
             eval depth += 1
         .else
             .if ch == "}" || ch == "]" || ch == ")"
                 .if depth > 0
-                    .span 1991 17 1991 28
+                    .span 2020 17 2020 28
                     eval depth -= 1
                 .endif
             .endif
         .endif
         .if ch == ";" && depth == 0
-            .span 1995 13 1995 55
+            .span 2024 13 2024 55
             eval entries = append_string(entries, current)
-            .span 1996 13 1996 26
+            .span 2025 13 2025 26
             eval current = ""
         .else
-            .span 1998 13 1998 36
+            .span 2027 13 2027 36
             eval current = current + ch
         .endif
-        .span 2000 9 2000 20
+        .span 2029 9 2029 20
         eval index += 1
     .endloop
     .if current.length > 0
-        .span 2003 9 2003 51
+        .span 2032 9 2032 51
         eval entries = append_string(entries, current)
     .endif
-    .span 2005 5 2005 20
+    .span 2034 5 2034 20
     ret entries
 .endfn
 
 .fn parse_enum_variant_field(text -> string) -> NativeEnumVariantField?
 .meta return NativeEnumVariantField?
 .meta effects none
-    .span 2008 29 2008 43
+    .span 2037 29 2037 43
     .param text -> string
-    .span 2009 5 2009 39
+    .span 2038 5 2038 39
     eval let mut trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 2011 9 2011 21
+        .span 2040 9 2040 21
         ret null
     .endif
-    .span 2013 5 2013 43
+    .span 2042 5 2042 43
     eval let mut is_mutable -> boolean = false
     .if starts_with(trimmed, "mut ")
-        .span 2015 9 2015 27
+        .span 2044 9 2044 27
         eval is_mutable = true
-        .span 2016 9 2016 60
+        .span 2045 9 2045 60
         eval trimmed = trim_text(strip_prefix(trimmed, "mut "))
     .endif
-    .span 2018 5 2018 47
+    .span 2047 5 2047 47
     eval let arrow_index = index_of(trimmed, "->")
     .if arrow_index < 0
-        .span 2020 9 2020 21
+        .span 2049 9 2049 21
         ret null
     .endif
-    .span 2022 5 2022 62
+    .span 2051 5 2051 62
     eval let name = trim_text(substring(trimmed, 0, arrow_index))
     .if name.length == 0
-        .span 2024 9 2024 21
+        .span 2053 9 2053 21
         ret null
     .endif
-    .span 2026 5 2026 84
+    .span 2055 5 2055 84
     eval let type_text = trim_text(substring(trimmed, arrow_index + 2, trimmed.length))
-    .span 2027 5 2027 99
+    .span 2056 5 2056 99
     ret NativeEnumVariantField { name: name, type_annotation: type_text, mutable: is_mutable }
 .endfn
 
 .fn text_char_at(value -> string, index -> number) -> string
 .meta return string
 .meta effects none
-    .span 2030 17 2030 32
+    .span 2059 17 2059 32
     .param value -> string
-    .span 2030 34 2030 49
+    .span 2059 34 2059 49
     .param index -> number
     .if index < 0
-        .span 2032 9 2032 19
+        .span 2061 9 2061 19
         ret ""
     .endif
     .if index >= value.length
-        .span 2035 9 2035 19
+        .span 2064 9 2064 19
         ret ""
     .endif
-    .span 2037 5 2037 47
+    .span 2066 5 2066 47
     ret substring(value, index, index + 1)
 .endfn
 
 .fn trim_trailing_delimiters(text -> string) -> string
 .meta return string
 .meta effects none
-    .span 2040 29 2040 43
+    .span 2069 29 2069 43
     .param text -> string
-    .span 2041 5 2041 41
+    .span 2070 5 2070 41
     eval let mut end -> number = text.length
     .loop
         .if end <= 0
             break
         .endif
-        .span 2046 9 2046 46
+        .span 2075 9 2075 46
         eval let ch = text_char_at(text, end - 1)
         .if ch == "," || ch == ";"
-            .span 2048 13 2048 22
+            .span 2077 13 2077 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
     .if end == text.length
-        .span 2054 9 2054 21
+        .span 2083 9 2083 21
         ret text
     .endif
-    .span 2056 5 2056 36
+    .span 2085 5 2085 36
     ret substring(text, 0, end)
 .endfn
 
 .fn maybe_trim_trailing(value -> string?) -> string?
 .meta return string?
 .meta effects none
-    .span 2059 24 2059 40
+    .span 2088 24 2088 40
     .param value -> string?
     .if value == null
-        .span 2061 9 2061 21
+        .span 2090 9 2090 21
         ret null
     .endif
-    .span 2063 5 2063 51
+    .span 2092 5 2092 51
     eval let trimmed = trim_trailing_delimiters(value)
-    .span 2064 5 2064 20
+    .span 2093 5 2093 20
     ret trimmed
 .endfn
 
 .fn parse_struct_field_line(text -> string) -> NativeStructField?
 .meta return NativeStructField?
 .meta effects none
-    .span 2067 28 2067 42
+    .span 2096 28 2096 42
     .param text -> string
-    .span 2068 5 2068 39
+    .span 2097 5 2097 39
     eval let mut trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 2070 9 2070 21
+        .span 2099 9 2099 21
         ret null
     .endif
-    .span 2072 5 2072 43
+    .span 2101 5 2101 43
     eval let mut is_mutable -> boolean = false
     .if starts_with(trimmed, "mut ")
-        .span 2074 9 2074 27
+        .span 2103 9 2103 27
         eval is_mutable = true
-        .span 2075 9 2075 60
+        .span 2104 9 2104 60
         eval trimmed = trim_text(strip_prefix(trimmed, "mut "))
     .endif
-    .span 2077 5 2077 47
+    .span 2106 5 2106 47
     eval let arrow_index = index_of(trimmed, "->")
     .if arrow_index < 0
-        .span 2079 9 2079 21
+        .span 2108 9 2108 21
         ret null
     .endif
-    .span 2081 5 2081 62
+    .span 2110 5 2110 62
     eval let name = trim_text(substring(trimmed, 0, arrow_index))
     .if name.length == 0
-        .span 2083 9 2083 21
+        .span 2112 9 2112 21
         ret null
     .endif
-    .span 2085 5 2085 84
+    .span 2114 5 2114 84
     eval let type_text = trim_text(substring(trimmed, arrow_index + 2, trimmed.length))
-    .span 2086 5 2086 94
+    .span 2115 5 2115 94
     ret NativeStructField { name: name, type_annotation: type_text, mutable: is_mutable }
 .endfn
 
 .fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse
 .meta return StructLayoutHeaderParse
 .meta effects none
-    .span 2089 31 2089 45
+    .span 2118 31 2118 45
     .param text -> string
-    .span 2090 5 2090 52
+    .span 2119 5 2119 52
     eval let tokens = split_whitespace(trim_text(text))
-    .span 2091 5 2091 42
+    .span 2120 5 2120 42
     eval let mut diagnostics -> string[] = []
     .if tokens.length == 0
-        .span 2093 9 2093 90
+        .span 2122 9 2122 90
         eval diagnostics = append_string(diagnostics, "struct layout header missing entries")
-        .span 2094 9 2094 114
+        .span 2123 9 2123 114
         ret StructLayoutHeaderParse { success: false, name: "", size: 0, align: 0, diagnostics: diagnostics }
     .endif
-    .span 2096 5 2096 43
+    .span 2125 5 2125 43
     eval let mut name_found -> boolean = false
-    .span 2097 5 2097 43
+    .span 2126 5 2126 43
     eval let mut size_found -> boolean = false
-    .span 2098 5 2098 44
+    .span 2127 5 2127 44
     eval let mut align_found -> boolean = false
-    .span 2099 5 2099 39
+    .span 2128 5 2128 39
     eval let mut name_value -> string = ""
-    .span 2100 5 2100 38
+    .span 2129 5 2129 38
     eval let mut size_value -> number = 0
-    .span 2101 5 2101 39
+    .span 2130 5 2130 39
     eval let mut align_value -> number = 0
-    .span 2102 5 2102 33
+    .span 2131 5 2131 33
     eval let mut index -> number = 0
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 2107 9 2107 35
+        .span 2136 9 2136 35
         eval let token = tokens[index]
         .if starts_with(token, "name=")
-            .span 2109 13 2109 60
+            .span 2138 13 2138 60
             eval name_value = substring(token, 5, token.length)
-            .span 2110 13 2110 31
+            .span 2139 13 2139 31
             eval name_found = true
         .else
             .if starts_with(token, "size=")
-                .span 2112 13 2112 64
+                .span 2141 13 2141 64
                 eval let value_text = substring(token, 5, token.length)
-                .span 2113 13 2113 59
+                .span 2142 13 2142 59
                 eval let parsed = parse_decimal_number(value_text)
                 .if parsed.success
-                    .span 2115 17 2115 35
+                    .span 2144 17 2144 35
                     eval size_found = true
-                    .span 2116 17 2116 43
+                    .span 2145 17 2145 43
                     eval size_value = parsed.value
                 .else
-                    .span 2118 17 2118 120
+                    .span 2147 17 2147 120
                     eval diagnostics = append_string(diagnostics, "struct layout header has invalid size `" + value_text + "`")
                 .endif
             .else
                 .if starts_with(token, "align=")
-                    .span 2121 13 2121 64
+                    .span 2150 13 2150 64
                     eval let value_text = substring(token, 6, token.length)
-                    .span 2122 13 2122 59
+                    .span 2151 13 2151 59
                     eval let parsed = parse_decimal_number(value_text)
                     .if parsed.success
-                        .span 2124 17 2124 36
+                        .span 2153 17 2153 36
                         eval align_found = true
-                        .span 2125 17 2125 44
+                        .span 2154 17 2154 44
                         eval align_value = parsed.value
                     .else
-                        .span 2127 17 2127 121
+                        .span 2156 17 2156 121
                         eval diagnostics = append_string(diagnostics, "struct layout header has invalid align `" + value_text + "`")
                     .endif
                 .else
-                    .span 2130 13 2130 113
+                    .span 2159 13 2159 113
                     eval diagnostics = append_string(diagnostics, "struct layout header unrecognized token `" + token + "`")
                 .endif
             .endif
         .endif
-        .span 2132 9 2132 20
+        .span 2161 9 2161 20
         eval index += 1
     .endloop
     .if !size_found
-        .span 2135 9 2135 93
+        .span 2164 9 2164 93
         eval diagnostics = append_string(diagnostics, "struct layout header missing size entry")
     .endif
     .if !align_found
-        .span 2138 9 2138 94
+        .span 2167 9 2167 94
         eval diagnostics = append_string(diagnostics, "struct layout header missing align entry")
     .endif
-    .span 2140 5 2140 72
+    .span 2169 5 2169 72
     eval let success = size_found && align_found && diagnostics.length == 0
-    .span 2141 5 2141 139
+    .span 2170 5 2170 139
     ret StructLayoutHeaderParse { success: success, name: name_value, size: size_value, align: align_value, diagnostics: diagnostics }
 .endfn
 
 .fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLayoutFieldParse
 .meta return StructLayoutFieldParse
 .meta effects none
-    .span 2144 30 2144 44
+    .span 2173 30 2173 44
     .param text -> string
-    .span 2144 46 2144 67
+    .span 2173 46 2173 67
     .param struct_name -> string
-    .span 2145 5 2145 35
+    .span 2174 5 2174 35
     eval let trimmed = trim_text(text)
-    .span 2146 5 2146 42
+    .span 2175 5 2175 42
     eval let mut diagnostics -> string[] = []
-    .span 2147 5 2147 113
+    .span 2176 5 2176 113
     eval let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 }
     .if trimmed.length == 0
-        .span 2149 9 2149 109
+        .span 2178 9 2178 109
         eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing content")
-        .span 2150 9 2150 106
+        .span 2179 9 2179 106
         ret StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics }
     .endif
-    .span 2152 5 2152 44
+    .span 2181 5 2181 44
     eval let tokens = split_whitespace(trimmed)
     .if tokens.length == 0
-        .span 2154 9 2154 109
+        .span 2183 9 2183 109
         eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing entries")
-        .span 2155 9 2155 106
+        .span 2184 9 2184 106
         ret StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics }
     .endif
-    .span 2157 5 2157 32
+    .span 2186 5 2186 32
     eval let field_name = tokens[0]
     .if field_name.length == 0
-        .span 2159 9 2159 106
+        .span 2188 9 2188 106
         eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing name")
-        .span 2160 9 2160 106
+        .span 2189 9 2189 106
         ret StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics }
     .endif
-    .span 2162 5 2162 38
+    .span 2191 5 2191 38
     eval let mut type_text -> string = ""
-    .span 2163 5 2163 45
+    .span 2192 5 2192 45
     eval let mut offset_found -> boolean = false
-    .span 2164 5 2164 43
+    .span 2193 5 2193 43
     eval let mut size_found -> boolean = false
-    .span 2165 5 2165 44
+    .span 2194 5 2194 44
     eval let mut align_found -> boolean = false
-    .span 2166 5 2166 40
+    .span 2195 5 2195 40
     eval let mut offset_value -> number = 0
-    .span 2167 5 2167 38
+    .span 2196 5 2196 38
     eval let mut size_value -> number = 0
-    .span 2168 5 2168 39
+    .span 2197 5 2197 39
     eval let mut align_value -> number = 0
-    .span 2169 5 2169 33
+    .span 2198 5 2198 33
     eval let mut index -> number = 1
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 2174 9 2174 35
+        .span 2203 9 2203 35
         eval let token = tokens[index]
         .if starts_with(token, "type=")
-            .span 2176 13 2176 59
+            .span 2205 13 2205 59
             eval type_text = substring(token, 5, token.length)
         .else
             .if starts_with(token, "offset=")
-                .span 2178 13 2178 64
+                .span 2207 13 2207 64
                 eval let value_text = substring(token, 7, token.length)
-                .span 2179 13 2179 59
+                .span 2208 13 2208 59
                 eval let parsed = parse_decimal_number(value_text)
                 .if parsed.success
-                    .span 2181 17 2181 37
+                    .span 2210 17 2210 37
                     eval offset_found = true
-                    .span 2182 17 2182 45
+                    .span 2211 17 2211 45
                     eval offset_value = parsed.value
                 .else
-                    .span 2184 17 2184 162
+                    .span 2213 17 2213 162
                     eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid offset `" + value_text + "`")
                 .endif
             .else
                 .if starts_with(token, "size=")
-                    .span 2187 13 2187 64
+                    .span 2216 13 2216 64
                     eval let value_text = substring(token, 5, token.length)
-                    .span 2188 13 2188 59
+                    .span 2217 13 2217 59
                     eval let parsed = parse_decimal_number(value_text)
                     .if parsed.success
-                        .span 2190 17 2190 35
+                        .span 2219 17 2219 35
                         eval size_found = true
-                        .span 2191 17 2191 43
+                        .span 2220 17 2220 43
                         eval size_value = parsed.value
                     .else
-                        .span 2193 17 2193 160
+                        .span 2222 17 2222 160
                         eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid size `" + value_text + "`")
                     .endif
                 .else
                     .if starts_with(token, "align=")
-                        .span 2196 13 2196 64
+                        .span 2225 13 2225 64
                         eval let value_text = substring(token, 6, token.length)
-                        .span 2197 13 2197 59
+                        .span 2226 13 2226 59
                         eval let parsed = parse_decimal_number(value_text)
                         .if parsed.success
-                            .span 2199 17 2199 36
+                            .span 2228 17 2228 36
                             eval align_found = true
-                            .span 2200 17 2200 44
+                            .span 2229 17 2229 44
                             eval align_value = parsed.value
                         .else
-                            .span 2202 17 2202 161
+                            .span 2231 17 2231 161
                             eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid align `" + value_text + "`")
                         .endif
                     .else
-                        .span 2205 13 2205 153
+                        .span 2234 13 2234 153
                         eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` unrecognized token `" + token + "`")
                     .endif
                 .endif
             .endif
         .endif
-        .span 2207 9 2207 20
+        .span 2236 9 2236 20
         eval index += 1
     .endloop
     .if type_text.length == 0
-        .span 2210 9 2210 133
+        .span 2239 9 2239 133
         eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing type entry")
     .endif
     .if !offset_found
-        .span 2213 9 2213 135
+        .span 2242 9 2242 135
         eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing offset entry")
     .endif
     .if !size_found
-        .span 2216 9 2216 133
+        .span 2245 9 2245 133
         eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing size entry")
     .endif
     .if !align_found
-        .span 2219 9 2219 134
+        .span 2248 9 2248 134
         eval diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing align entry")
     .endif
-    .span 2221 5 2221 112
+    .span 2250 5 2250 112
     eval let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0
-    .span 2222 5 2222 150
+    .span 2251 5 2251 150
     eval let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value }
-    .span 2223 5 2223 96
+    .span 2252 5 2252 96
     ret StructLayoutFieldParse { success: success, field: field, diagnostics: diagnostics }
 .endfn
 
 .fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse
 .meta return EnumLayoutHeaderParse
 .meta effects none
-    .span 2226 29 2226 43
+    .span 2255 29 2255 43
     .param text -> string
-    .span 2227 5 2227 52
+    .span 2256 5 2256 52
     eval let tokens = split_whitespace(trim_text(text))
-    .span 2228 5 2228 42
+    .span 2257 5 2257 42
     eval let mut diagnostics -> string[] = []
     .if tokens.length == 0
-        .span 2230 9 2230 88
+        .span 2259 9 2259 88
         eval diagnostics = append_string(diagnostics, "enum layout header missing entries")
-        .span 2231 9 2231 153
+        .span 2260 9 2260 153
         ret EnumLayoutHeaderParse { success: false, name: "", size: 0, align: 0, tag_type: "", tag_size: 0, tag_align: 0, diagnostics: diagnostics }
     .endif
-    .span 2233 5 2233 43
+    .span 2262 5 2262 43
     eval let mut name_found -> boolean = false
-    .span 2234 5 2234 43
+    .span 2263 5 2263 43
     eval let mut size_found -> boolean = false
-    .span 2235 5 2235 44
+    .span 2264 5 2264 44
     eval let mut align_found -> boolean = false
-    .span 2236 5 2236 39
+    .span 2265 5 2265 39
     eval let mut name_value -> string = ""
-    .span 2237 5 2237 37
+    .span 2266 5 2266 37
     eval let mut tag_type -> string = ""
-    .span 2238 5 2238 47
+    .span 2267 5 2267 47
     eval let mut tag_size_found -> boolean = false
-    .span 2239 5 2239 48
+    .span 2268 5 2268 48
     eval let mut tag_align_found -> boolean = false
-    .span 2240 5 2240 38
+    .span 2269 5 2269 38
     eval let mut size_value -> number = 0
-    .span 2241 5 2241 39
+    .span 2270 5 2270 39
     eval let mut align_value -> number = 0
-    .span 2242 5 2242 42
+    .span 2271 5 2271 42
     eval let mut tag_size_value -> number = 0
-    .span 2243 5 2243 43
+    .span 2272 5 2272 43
     eval let mut tag_align_value -> number = 0
-    .span 2244 5 2244 33
+    .span 2273 5 2273 33
     eval let mut index -> number = 0
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 2249 9 2249 35
+        .span 2278 9 2278 35
         eval let token = tokens[index]
         .if starts_with(token, "name=")
-            .span 2251 13 2251 60
+            .span 2280 13 2280 60
             eval name_value = substring(token, 5, token.length)
-            .span 2252 13 2252 31
+            .span 2281 13 2281 31
             eval name_found = true
         .else
             .if starts_with(token, "size=")
-                .span 2254 13 2254 64
+                .span 2283 13 2283 64
                 eval let value_text = substring(token, 5, token.length)
-                .span 2255 13 2255 59
+                .span 2284 13 2284 59
                 eval let parsed = parse_decimal_number(value_text)
                 .if parsed.success
-                    .span 2257 17 2257 35
+                    .span 2286 17 2286 35
                     eval size_found = true
-                    .span 2258 17 2258 43
+                    .span 2287 17 2287 43
                     eval size_value = parsed.value
                 .else
-                    .span 2260 17 2260 118
+                    .span 2289 17 2289 118
                     eval diagnostics = append_string(diagnostics, "enum layout header has invalid size `" + value_text + "`")
                 .endif
             .else
                 .if starts_with(token, "align=")
-                    .span 2263 13 2263 64
+                    .span 2292 13 2292 64
                     eval let value_text = substring(token, 6, token.length)
-                    .span 2264 13 2264 59
+                    .span 2293 13 2293 59
                     eval let parsed = parse_decimal_number(value_text)
                     .if parsed.success
-                        .span 2266 17 2266 36
+                        .span 2295 17 2295 36
                         eval align_found = true
-                        .span 2267 17 2267 44
+                        .span 2296 17 2296 44
                         eval align_value = parsed.value
                     .else
-                        .span 2269 17 2269 119
+                        .span 2298 17 2298 119
                         eval diagnostics = append_string(diagnostics, "enum layout header has invalid align `" + value_text + "`")
                     .endif
                 .else
                     .if starts_with(token, "tag_type=")
-                        .span 2272 13 2272 58
+                        .span 2301 13 2301 58
                         eval tag_type = substring(token, 9, token.length)
                     .else
                         .if starts_with(token, "tag_size=")
-                            .span 2274 13 2274 64
+                            .span 2303 13 2303 64
                             eval let value_text = substring(token, 9, token.length)
-                            .span 2275 13 2275 59
+                            .span 2304 13 2304 59
                             eval let parsed = parse_decimal_number(value_text)
                             .if parsed.success
-                                .span 2277 17 2277 39
+                                .span 2306 17 2306 39
                                 eval tag_size_found = true
-                                .span 2278 17 2278 47
+                                .span 2307 17 2307 47
                                 eval tag_size_value = parsed.value
                             .else
-                                .span 2280 17 2280 122
+                                .span 2309 17 2309 122
                                 eval diagnostics = append_string(diagnostics, "enum layout header has invalid tag_size `" + value_text + "`")
                             .endif
                         .else
                             .if starts_with(token, "tag_align=")
-                                .span 2283 13 2283 65
+                                .span 2312 13 2312 65
                                 eval let value_text = substring(token, 10, token.length)
-                                .span 2284 13 2284 59
+                                .span 2313 13 2313 59
                                 eval let parsed = parse_decimal_number(value_text)
                                 .if parsed.success
-                                    .span 2286 17 2286 40
+                                    .span 2315 17 2315 40
                                     eval tag_align_found = true
-                                    .span 2287 17 2287 48
+                                    .span 2316 17 2316 48
                                     eval tag_align_value = parsed.value
                                 .else
-                                    .span 2289 17 2289 123
+                                    .span 2318 17 2318 123
                                     eval diagnostics = append_string(diagnostics, "enum layout header has invalid tag_align `" + value_text + "`")
                                 .endif
                             .else
-                                .span 2292 13 2292 111
+                                .span 2321 13 2321 111
                                 eval diagnostics = append_string(diagnostics, "enum layout header unrecognized token `" + token + "`")
                             .endif
                         .endif
@@ -3525,356 +3568,356 @@
                 .endif
             .endif
         .endif
-        .span 2294 9 2294 20
+        .span 2323 9 2323 20
         eval index += 1
     .endloop
     .if !size_found
-        .span 2297 9 2297 91
+        .span 2326 9 2326 91
         eval diagnostics = append_string(diagnostics, "enum layout header missing size entry")
     .endif
     .if !align_found
-        .span 2300 9 2300 92
+        .span 2329 9 2329 92
         eval diagnostics = append_string(diagnostics, "enum layout header missing align entry")
     .endif
     .if tag_type.length == 0
-        .span 2303 9 2303 95
+        .span 2332 9 2332 95
         eval diagnostics = append_string(diagnostics, "enum layout header missing tag_type entry")
     .endif
     .if !tag_size_found
-        .span 2306 9 2306 95
+        .span 2335 9 2335 95
         eval diagnostics = append_string(diagnostics, "enum layout header missing tag_size entry")
     .endif
     .if !tag_align_found
-        .span 2309 9 2309 96
+        .span 2338 9 2338 96
         eval diagnostics = append_string(diagnostics, "enum layout header missing tag_align entry")
     .endif
-    .span 2311 5 2311 132
+    .span 2340 5 2340 132
     eval let success = size_found && align_found && tag_type.length > 0 && tag_size_found && tag_align_found && diagnostics.length == 0
-    .span 2312 5 2321 7
+    .span 2341 5 2350 7
     ret EnumLayoutHeaderParse { success: success, name: name_value, size: size_value, align: align_value, tag_type: tag_type, tag_size: tag_size_value, tag_align: tag_align_value, diagnostics: diagnostics }
 .endfn
 
 .fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutVariantParse
 .meta return EnumLayoutVariantParse
 .meta effects none
-    .span 2324 30 2324 44
+    .span 2353 30 2353 44
     .param text -> string
-    .span 2324 46 2324 65
+    .span 2353 46 2353 65
     .param enum_name -> string
-    .span 2325 5 2325 35
+    .span 2354 5 2354 35
     eval let trimmed = trim_text(text)
-    .span 2326 5 2326 42
+    .span 2355 5 2355 42
     eval let mut diagnostics -> string[] = []
-    .span 2327 5 2327 114
+    .span 2356 5 2356 114
     eval let default_variant = NativeEnumVariantLayout { name: "", tag: 0, offset: 0, size: 0, align: 0, fields: [] }
     .if trimmed.length == 0
-        .span 2329 9 2329 107
+        .span 2358 9 2358 107
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing content")
-        .span 2330 9 2330 110
+        .span 2359 9 2359 110
         ret EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics }
     .endif
-    .span 2332 5 2332 44
+    .span 2361 5 2361 44
     eval let tokens = split_whitespace(trimmed)
     .if tokens.length == 0
-        .span 2334 9 2334 107
+        .span 2363 9 2363 107
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing entries")
-        .span 2335 9 2335 110
+        .span 2364 9 2364 110
         ret EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics }
     .endif
-    .span 2337 5 2337 34
+    .span 2366 5 2366 34
     eval let variant_name = tokens[0]
     .if variant_name.length == 0
-        .span 2339 9 2339 104
+        .span 2368 9 2368 104
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing name")
-        .span 2340 9 2340 110
+        .span 2369 9 2369 110
         ret EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics }
     .endif
-    .span 2342 5 2342 42
+    .span 2371 5 2371 42
     eval let mut tag_found -> boolean = false
-    .span 2343 5 2343 45
+    .span 2372 5 2372 45
     eval let mut offset_found -> boolean = false
-    .span 2344 5 2344 43
+    .span 2373 5 2373 43
     eval let mut size_found -> boolean = false
-    .span 2345 5 2345 44
+    .span 2374 5 2374 44
     eval let mut align_found -> boolean = false
-    .span 2346 5 2346 37
+    .span 2375 5 2375 37
     eval let mut tag_value -> number = 0
-    .span 2347 5 2347 40
+    .span 2376 5 2376 40
     eval let mut offset_value -> number = 0
-    .span 2348 5 2348 38
+    .span 2377 5 2377 38
     eval let mut size_value -> number = 0
-    .span 2349 5 2349 39
+    .span 2378 5 2378 39
     eval let mut align_value -> number = 0
-    .span 2350 5 2350 33
+    .span 2379 5 2379 33
     eval let mut index -> number = 1
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 2355 9 2355 35
+        .span 2384 9 2384 35
         eval let token = tokens[index]
         .if starts_with(token, "tag=")
-            .span 2357 13 2357 64
+            .span 2386 13 2386 64
             eval let value_text = substring(token, 4, token.length)
-            .span 2358 13 2358 59
+            .span 2387 13 2387 59
             eval let parsed = parse_decimal_number(value_text)
             .if parsed.success
-                .span 2360 17 2360 34
+                .span 2389 17 2389 34
                 eval tag_found = true
-                .span 2361 17 2361 42
+                .span 2390 17 2390 42
                 eval tag_value = parsed.value
             .else
-                .span 2363 17 2363 159
+                .span 2392 17 2392 159
                 eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid tag `" + value_text + "`")
             .endif
         .else
             .if starts_with(token, "offset=")
-                .span 2366 13 2366 64
+                .span 2395 13 2395 64
                 eval let value_text = substring(token, 7, token.length)
-                .span 2367 13 2367 59
+                .span 2396 13 2396 59
                 eval let parsed = parse_decimal_number(value_text)
                 .if parsed.success
-                    .span 2369 17 2369 37
+                    .span 2398 17 2398 37
                     eval offset_found = true
-                    .span 2370 17 2370 45
+                    .span 2399 17 2399 45
                     eval offset_value = parsed.value
                 .else
-                    .span 2372 17 2372 162
+                    .span 2401 17 2401 162
                     eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid offset `" + value_text + "`")
                 .endif
             .else
                 .if starts_with(token, "size=")
-                    .span 2375 13 2375 64
+                    .span 2404 13 2404 64
                     eval let value_text = substring(token, 5, token.length)
-                    .span 2376 13 2376 59
+                    .span 2405 13 2405 59
                     eval let parsed = parse_decimal_number(value_text)
                     .if parsed.success
-                        .span 2378 17 2378 35
+                        .span 2407 17 2407 35
                         eval size_found = true
-                        .span 2379 17 2379 43
+                        .span 2408 17 2408 43
                         eval size_value = parsed.value
                     .else
-                        .span 2381 17 2381 160
+                        .span 2410 17 2410 160
                         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid size `" + value_text + "`")
                     .endif
                 .else
                     .if starts_with(token, "align=")
-                        .span 2384 13 2384 64
+                        .span 2413 13 2413 64
                         eval let value_text = substring(token, 6, token.length)
-                        .span 2385 13 2385 59
+                        .span 2414 13 2414 59
                         eval let parsed = parse_decimal_number(value_text)
                         .if parsed.success
-                            .span 2387 17 2387 36
+                            .span 2416 17 2416 36
                             eval align_found = true
-                            .span 2388 17 2388 44
+                            .span 2417 17 2417 44
                             eval align_value = parsed.value
                         .else
-                            .span 2390 17 2390 161
+                            .span 2419 17 2419 161
                             eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid align `" + value_text + "`")
                         .endif
                     .else
-                        .span 2393 13 2393 153
+                        .span 2422 13 2422 153
                         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` unrecognized token `" + token + "`")
                     .endif
                 .endif
             .endif
         .endif
-        .span 2395 9 2395 20
+        .span 2424 9 2424 20
         eval index += 1
     .endloop
     .if !tag_found
-        .span 2398 9 2398 132
+        .span 2427 9 2427 132
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing tag entry")
     .endif
     .if !offset_found
-        .span 2401 9 2401 135
+        .span 2430 9 2430 135
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing offset entry")
     .endif
     .if !size_found
-        .span 2404 9 2404 133
+        .span 2433 9 2433 133
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing size entry")
     .endif
     .if !align_found
-        .span 2407 9 2407 134
+        .span 2436 9 2436 134
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing align entry")
     .endif
-    .span 2409 5 2409 101
+    .span 2438 5 2438 101
     eval let success = tag_found && offset_found && size_found && align_found && diagnostics.length == 0
-    .span 2410 5 2410 154
+    .span 2439 5 2439 154
     eval let variant = NativeEnumVariantLayout { name: variant_name, tag: tag_value, offset: offset_value, size: size_value, align: align_value, fields: [] }
-    .span 2411 5 2411 100
+    .span 2440 5 2440 100
     ret EnumLayoutVariantParse { success: success, variant: variant, diagnostics: diagnostics }
 .endfn
 
 .fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutPayloadParse
 .meta return EnumLayoutPayloadParse
 .meta effects none
-    .span 2414 30 2414 44
+    .span 2443 30 2443 44
     .param text -> string
-    .span 2414 46 2414 65
+    .span 2443 46 2443 65
     .param enum_name -> string
-    .span 2415 5 2415 35
+    .span 2444 5 2444 35
     eval let trimmed = trim_text(text)
-    .span 2416 5 2416 42
+    .span 2445 5 2445 42
     eval let mut diagnostics -> string[] = []
-    .span 2417 5 2417 113
+    .span 2446 5 2446 113
     eval let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 }
     .if trimmed.length == 0
-        .span 2419 9 2419 107
+        .span 2448 9 2448 107
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload missing content")
-        .span 2420 9 2420 124
+        .span 2449 9 2449 124
         ret EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics }
     .endif
-    .span 2422 5 2422 44
+    .span 2451 5 2451 44
     eval let tokens = split_whitespace(trimmed)
     .if tokens.length == 0
-        .span 2424 9 2424 107
+        .span 2453 9 2453 107
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload missing entries")
-        .span 2425 9 2425 124
+        .span 2454 9 2454 124
         ret EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics }
     .endif
-    .span 2427 5 2427 32
+    .span 2456 5 2456 32
     eval let identifier = tokens[0]
-    .span 2428 5 2428 47
+    .span 2457 5 2457 47
     eval let dot_index = index_of(identifier, ".")
     .if dot_index <= 0 || dot_index + 1 >= identifier.length
-        .span 2430 9 2430 131
+        .span 2459 9 2459 131
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload identifier `" + identifier + "` invalid")
-        .span 2431 9 2431 124
+        .span 2460 9 2460 124
         ret EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics }
     .endif
-    .span 2433 5 2433 60
+    .span 2462 5 2462 60
     eval let variant_name = substring(identifier, 0, dot_index)
-    .span 2434 5 2434 78
+    .span 2463 5 2463 78
     eval let field_name = substring(identifier, dot_index + 1, identifier.length)
-    .span 2435 5 2435 38
+    .span 2464 5 2464 38
     eval let mut type_text -> string = ""
-    .span 2436 5 2436 45
+    .span 2465 5 2465 45
     eval let mut offset_found -> boolean = false
-    .span 2437 5 2437 43
+    .span 2466 5 2466 43
     eval let mut size_found -> boolean = false
-    .span 2438 5 2438 44
+    .span 2467 5 2467 44
     eval let mut align_found -> boolean = false
-    .span 2439 5 2439 40
+    .span 2468 5 2468 40
     eval let mut offset_value -> number = 0
-    .span 2440 5 2440 38
+    .span 2469 5 2469 38
     eval let mut size_value -> number = 0
-    .span 2441 5 2441 39
+    .span 2470 5 2470 39
     eval let mut align_value -> number = 0
-    .span 2442 5 2442 33
+    .span 2471 5 2471 33
     eval let mut index -> number = 1
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 2447 9 2447 35
+        .span 2476 9 2476 35
         eval let token = tokens[index]
         .if starts_with(token, "type=")
-            .span 2449 13 2449 59
+            .span 2478 13 2478 59
             eval type_text = substring(token, 5, token.length)
         .else
             .if starts_with(token, "offset=")
-                .span 2451 13 2451 64
+                .span 2480 13 2480 64
                 eval let value_text = substring(token, 7, token.length)
-                .span 2452 13 2452 59
+                .span 2481 13 2481 59
                 eval let parsed = parse_decimal_number(value_text)
                 .if parsed.success
-                    .span 2454 17 2454 37
+                    .span 2483 17 2483 37
                     eval offset_found = true
-                    .span 2455 17 2455 45
+                    .span 2484 17 2484 45
                     eval offset_value = parsed.value
                 .else
-                    .span 2457 17 2457 160
+                    .span 2486 17 2486 160
                     eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid offset `" + value_text + "`")
                 .endif
             .else
                 .if starts_with(token, "size=")
-                    .span 2460 13 2460 64
+                    .span 2489 13 2489 64
                     eval let value_text = substring(token, 5, token.length)
-                    .span 2461 13 2461 59
+                    .span 2490 13 2490 59
                     eval let parsed = parse_decimal_number(value_text)
                     .if parsed.success
-                        .span 2463 17 2463 35
+                        .span 2492 17 2492 35
                         eval size_found = true
-                        .span 2464 17 2464 43
+                        .span 2493 17 2493 43
                         eval size_value = parsed.value
                     .else
-                        .span 2466 17 2466 158
+                        .span 2495 17 2495 158
                         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid size `" + value_text + "`")
                     .endif
                 .else
                     .if starts_with(token, "align=")
-                        .span 2469 13 2469 64
+                        .span 2498 13 2498 64
                         eval let value_text = substring(token, 6, token.length)
-                        .span 2470 13 2470 59
+                        .span 2499 13 2499 59
                         eval let parsed = parse_decimal_number(value_text)
                         .if parsed.success
-                            .span 2472 17 2472 36
+                            .span 2501 17 2501 36
                             eval align_found = true
-                            .span 2473 17 2473 44
+                            .span 2502 17 2502 44
                             eval align_value = parsed.value
                         .else
-                            .span 2475 17 2475 159
+                            .span 2504 17 2504 159
                             eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid align `" + value_text + "`")
                         .endif
                     .else
-                        .span 2478 13 2478 151
+                        .span 2507 13 2507 151
                         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` unrecognized token `" + token + "`")
                     .endif
                 .endif
             .endif
         .endif
-        .span 2480 9 2480 20
+        .span 2509 9 2509 20
         eval index += 1
     .endloop
     .if type_text.length == 0
-        .span 2483 9 2483 131
+        .span 2512 9 2512 131
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing type entry")
     .endif
     .if !offset_found
-        .span 2486 9 2486 133
+        .span 2515 9 2515 133
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing offset entry")
     .endif
     .if !size_found
-        .span 2489 9 2489 131
+        .span 2518 9 2518 131
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing size entry")
     .endif
     .if !align_found
-        .span 2492 9 2492 132
+        .span 2521 9 2521 132
         eval diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing align entry")
     .endif
-    .span 2494 5 2494 112
+    .span 2523 5 2523 112
     eval let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0
-    .span 2495 5 2495 150
+    .span 2524 5 2524 150
     eval let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value }
-    .span 2496 5 2496 124
+    .span 2525 5 2525 124
     ret EnumLayoutPayloadParse { success: success, variant_name: variant_name, field: field, diagnostics: diagnostics }
 .endfn
 
 .fn parse_let_instruction(line -> string, span -> NativeSourceSpan?, value_span -> NativeSourceSpan?) -> NativeInstruction
 .meta return NativeInstruction
 .meta effects none
-    .span 2499 26 2499 40
+    .span 2528 26 2528 40
     .param line -> string
-    .span 2499 42 2499 67
+    .span 2528 42 2528 67
     .param span -> NativeSourceSpan?
-    .span 2499 69 2499 100
+    .span 2528 69 2528 100
     .param value_span -> NativeSourceSpan?
-    .span 2500 5 2500 55
+    .span 2529 5 2529 55
     eval let body = trim_text(strip_prefix(line, ".let "))
-    .span 2501 5 2501 43
+    .span 2530 5 2530 43
     eval let mut is_mutable -> boolean = false
-    .span 2502 5 2502 40
+    .span 2531 5 2531 40
     eval let mut remainder -> string = body
     .if starts_with(remainder, "mut ")
-        .span 2504 9 2504 27
+        .span 2533 9 2533 27
         eval is_mutable = true
-        .span 2505 9 2505 64
+        .span 2534 9 2534 64
         eval remainder = trim_text(strip_prefix(remainder, "mut "))
     .endif
-    .span 2507 5 2507 54
+    .span 2536 5 2536 54
     eval let parsed = parse_binding_components(remainder)
-    .span 2508 5 2515 7
+    .span 2537 5 2544 7
     ret NativeInstruction.Let { name: parsed.name, mutable: is_mutable, type_annotation: parsed.type_annotation, value: parsed.value, span: span, value_span: value_span }
 .endfn
 
@@ -3891,638 +3934,638 @@
 .fn parse_binding_components(text -> string) -> BindingComponents
 .meta return BindingComponents
 .meta effects none
-    .span 2524 29 2524 43
+    .span 2553 29 2553 43
     .param text -> string
-    .span 2525 5 2525 33
+    .span 2554 5 2554 33
     eval let mut name -> string = ""
-    .span 2526 5 2526 33
+    .span 2555 5 2555 33
     eval let mut index -> number = 0
     .loop
         .if index >= text.length
             break
         .endif
-        .span 2531 9 2531 30
+        .span 2560 9 2560 30
         eval let ch = text[index]
         .if ch == " " || ch == ":" || ch == "="
             break
         .endif
-        .span 2535 9 2535 26
+        .span 2564 9 2564 26
         eval name = name + ch
-        .span 2536 9 2536 20
+        .span 2565 9 2565 20
         eval index += 1
     .endloop
-    .span 2538 5 2538 28
+    .span 2567 5 2567 28
     eval name = trim_text(name)
-    .span 2539 5 2539 44
+    .span 2568 5 2568 44
     eval let mut type_annotation -> string = ""
-    .span 2540 5 2540 37
+    .span 2569 5 2569 37
     eval let mut value -> string? = null
-    .span 2541 5 2541 82
+    .span 2570 5 2570 82
     eval let mut remainder -> string = trim_text(substring(text, index, text.length))
     .if remainder.length > 0
         .if starts_with(remainder, "->")
-            .span 2544 13 2544 66
+            .span 2573 13 2573 66
             eval remainder = trim_text(strip_prefix(remainder, "->"))
-            .span 2545 13 2545 57
+            .span 2574 13 2574 57
             eval let assign_index = index_of(remainder, "=")
             .if assign_index >= 0
-                .span 2547 17 2547 84
+                .span 2576 17 2576 84
                 eval type_annotation = trim_text(substring(remainder, 0, assign_index))
-                .span 2548 17 2548 102
+                .span 2577 17 2577 102
                 eval let value_text = trim_text(substring(remainder, assign_index + 1, remainder.length))
                 .if value_text.length > 0
-                    .span 2550 21 2550 40
+                    .span 2579 21 2579 40
                     eval value = value_text
                 .endif
             .else
-                .span 2553 17 2553 56
+                .span 2582 17 2582 56
                 eval type_annotation = trim_text(remainder)
             .endif
         .else
             .if starts_with(remainder, ":")
-                .span 2556 13 2556 65
+                .span 2585 13 2585 65
                 eval remainder = trim_text(strip_prefix(remainder, ":"))
-                .span 2557 13 2557 57
+                .span 2586 13 2586 57
                 eval let assign_index = index_of(remainder, "=")
                 .if assign_index >= 0
-                    .span 2559 17 2559 84
+                    .span 2588 17 2588 84
                     eval type_annotation = trim_text(substring(remainder, 0, assign_index))
-                    .span 2560 17 2560 102
+                    .span 2589 17 2589 102
                     eval let value_text = trim_text(substring(remainder, assign_index + 1, remainder.length))
                     .if value_text.length > 0
-                        .span 2562 21 2562 40
+                        .span 2591 21 2591 40
                         eval value = value_text
                     .endif
                 .else
-                    .span 2565 17 2565 56
+                    .span 2594 17 2594 56
                     eval type_annotation = trim_text(remainder)
                 .endif
             .else
                 .if starts_with(remainder, "=")
-                    .span 2568 13 2568 70
+                    .span 2597 13 2597 70
                     eval let value_text = trim_text(strip_prefix(remainder, "="))
                     .if value_text.length > 0
-                        .span 2570 17 2570 36
+                        .span 2599 17 2599 36
                         eval value = value_text
                     .endif
                 .else
-                    .span 2574 13 2574 31
+                    .span 2603 13 2603 31
                     eval value = remainder
                 .endif
             .endif
         .endif
     .endif
-    .span 2577 5 2577 93
+    .span 2606 5 2606 93
     ret BindingComponents { name: name, type_annotation: type_annotation, value: value }
 .endfn
 
 .fn parse_function_name(header -> string) -> string
 .meta return string
 .meta effects none
-    .span 2580 24 2580 40
+    .span 2609 24 2609 40
     .param header -> string
-    .span 2581 5 2581 41
+    .span 2610 5 2610 41
     eval let mut trimmed = trim_text(header)
     .if starts_with(trimmed, "async ")
-        .span 2583 9 2583 62
+        .span 2612 9 2612 62
         eval trimmed = trim_text(strip_prefix(trimmed, "async "))
     .endif
-    .span 2585 5 2585 46
+    .span 2614 5 2614 46
     eval let paren_index = index_of(trimmed, "(")
-    .span 2586 5 2586 38
+    .span 2615 5 2615 38
     eval let mut name -> string = trimmed
     .if paren_index >= 0
-        .span 2588 9 2588 62
+        .span 2617 9 2617 62
         eval name = trim_text(substring(trimmed, 0, paren_index))
     .endif
-    .span 2590 5 2590 52
+    .span 2619 5 2619 52
     eval let separator_index = last_index_of(name, ".")
     .if separator_index >= 0
-        .span 2592 9 2592 77
+        .span 2621 9 2621 77
         eval name = trim_text(substring(name, separator_index + 1, name.length))
     .endif
-    .span 2594 5 2594 33
+    .span 2623 5 2623 33
     ret strip_generics(name)
 .endfn
 
 .fn parse_parameter_entry(body -> string, span -> NativeSourceSpan?) -> NativeParameter?
 .meta return NativeParameter?
 .meta effects none
-    .span 2597 26 2597 40
+    .span 2626 26 2626 40
     .param body -> string
-    .span 2597 42 2597 67
+    .span 2626 42 2626 67
     .param span -> NativeSourceSpan?
-    .span 2598 5 2598 39
+    .span 2627 5 2627 39
     eval let mut trimmed = trim_text(body)
     .if trimmed.length == 0
-        .span 2600 9 2600 21
+        .span 2629 9 2629 21
         ret null
     .endif
-    .span 2602 5 2602 43
+    .span 2631 5 2631 43
     eval let mut is_mutable -> boolean = false
     .if starts_with(trimmed, "mut ")
-        .span 2604 9 2604 27
+        .span 2633 9 2633 27
         eval is_mutable = true
-        .span 2605 9 2605 60
+        .span 2634 9 2634 60
         eval trimmed = trim_text(strip_prefix(trimmed, "mut "))
     .endif
-    .span 2607 5 2607 33
+    .span 2636 5 2636 33
     eval let mut name -> string = ""
-    .span 2608 5 2608 33
+    .span 2637 5 2637 33
     eval let mut index -> number = 0
     .loop
         .if index >= trimmed.length
             break
         .endif
-        .span 2613 9 2613 33
+        .span 2642 9 2642 33
         eval let ch = trimmed[index]
         .if ch == " " || ch == "-" || ch == "="
             break
         .endif
-        .span 2617 9 2617 26
+        .span 2646 9 2646 26
         eval name = name + ch
-        .span 2618 9 2618 20
+        .span 2647 9 2647 20
         eval index += 1
     .endloop
-    .span 2620 5 2620 28
+    .span 2649 5 2649 28
     eval name = trim_text(name)
     .if name.length == 0
-        .span 2622 9 2622 21
+        .span 2651 9 2651 21
         ret null
     .endif
-    .span 2624 5 2624 44
+    .span 2653 5 2653 44
     eval let mut type_annotation -> string = ""
-    .span 2625 5 2625 45
+    .span 2654 5 2654 45
     eval let mut default_value -> string? = null
-    .span 2626 5 2626 78
+    .span 2655 5 2655 78
     eval let mut remainder = trim_text(substring(trimmed, index, trimmed.length))
     .if remainder.length > 0
         .if starts_with(remainder, "->")
-            .span 2629 13 2629 66
+            .span 2658 13 2658 66
             eval remainder = trim_text(strip_prefix(remainder, "->"))
-            .span 2630 13 2630 57
+            .span 2659 13 2659 57
             eval let assign_index = index_of(remainder, "=")
             .if assign_index >= 0
-                .span 2632 17 2632 84
+                .span 2661 17 2661 84
                 eval type_annotation = trim_text(substring(remainder, 0, assign_index))
-                .span 2633 17 2633 104
+                .span 2662 17 2662 104
                 eval let default_text = trim_text(substring(remainder, assign_index + 1, remainder.length))
                 .if default_text.length > 0
-                    .span 2635 21 2635 50
+                    .span 2664 21 2664 50
                     eval default_value = default_text
                 .endif
             .else
-                .span 2638 17 2638 56
+                .span 2667 17 2667 56
                 eval type_annotation = trim_text(remainder)
             .endif
         .else
             .if starts_with(remainder, "=")
-                .span 2641 13 2641 72
+                .span 2670 13 2670 72
                 eval let default_text = trim_text(strip_prefix(remainder, "="))
                 .if default_text.length > 0
-                    .span 2643 17 2643 46
+                    .span 2672 17 2672 46
                     eval default_value = default_text
                 .endif
             .endif
         .endif
     .endif
-    .span 2647 5 2653 7
+    .span 2676 5 2682 7
     ret NativeParameter { name: name, type_annotation: type_annotation, mutable: is_mutable, default_value: default_value, span: span }
 .endfn
 
 .fn line_looks_like_parameter_entry(text -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 2656 36 2656 50
+    .span 2685 36 2685 50
     .param text -> string
-    .span 2657 5 2657 35
+    .span 2686 5 2686 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 2659 9 2659 22
+        .span 2688 9 2688 22
         ret false
     .endif
     .if starts_with(trimmed, ".")
-        .span 2662 9 2662 22
+        .span 2691 9 2691 22
         ret false
     .endif
     .if starts_with(trimmed, ";")
-        .span 2665 9 2665 22
+        .span 2694 9 2694 22
         ret false
     .endif
-    .span 2667 5 2667 47
+    .span 2696 5 2696 47
     eval let arrow_index = index_of(trimmed, "->")
     .if arrow_index >= 0
-        .span 2669 9 2669 70
+        .span 2698 9 2698 70
         eval let mut head = trim_text(substring(trimmed, 0, arrow_index))
         .if head.length == 0
-            .span 2671 13 2671 26
-            ret false
-        .endif
-        .if starts_with(head, "mut ")
-            .span 2674 13 2674 58
-            eval head = trim_text(strip_prefix(head, "mut "))
-        .endif
-        .if head.length == 0
-            .span 2677 13 2677 26
-            ret false
-        .endif
-        .if index_of(head, " ") >= 0
-            .span 2680 13 2680 26
-            ret false
-        .endif
-        .if index_of(head, "\t") >= 0
-            .span 2683 13 2683 26
-            ret false
-        .endif
-        .span 2685 9 2685 21
-        ret true
-    .endif
-    .span 2687 5 2687 47
-    eval let assign_index = index_of(trimmed, "=")
-    .if assign_index >= 0
-        .span 2689 9 2689 71
-        eval let mut head = trim_text(substring(trimmed, 0, assign_index))
-        .if head.length == 0
-            .span 2691 13 2691 26
-            ret false
-        .endif
-        .if starts_with(head, "mut ")
-            .span 2694 13 2694 58
-            eval head = trim_text(strip_prefix(head, "mut "))
-        .endif
-        .if head.length == 0
-            .span 2697 13 2697 26
-            ret false
-        .endif
-        .if index_of(head, " ") >= 0
             .span 2700 13 2700 26
             ret false
         .endif
-        .if index_of(head, "\t") >= 0
-            .span 2703 13 2703 26
+        .if starts_with(head, "mut ")
+            .span 2703 13 2703 58
+            eval head = trim_text(strip_prefix(head, "mut "))
+        .endif
+        .if head.length == 0
+            .span 2706 13 2706 26
             ret false
         .endif
-        .span 2705 9 2705 21
+        .if index_of(head, " ") >= 0
+            .span 2709 13 2709 26
+            ret false
+        .endif
+        .if index_of(head, "\t") >= 0
+            .span 2712 13 2712 26
+            ret false
+        .endif
+        .span 2714 9 2714 21
         ret true
     .endif
-    .span 2707 5 2707 18
+    .span 2716 5 2716 47
+    eval let assign_index = index_of(trimmed, "=")
+    .if assign_index >= 0
+        .span 2718 9 2718 71
+        eval let mut head = trim_text(substring(trimmed, 0, assign_index))
+        .if head.length == 0
+            .span 2720 13 2720 26
+            ret false
+        .endif
+        .if starts_with(head, "mut ")
+            .span 2723 13 2723 58
+            eval head = trim_text(strip_prefix(head, "mut "))
+        .endif
+        .if head.length == 0
+            .span 2726 13 2726 26
+            ret false
+        .endif
+        .if index_of(head, " ") >= 0
+            .span 2729 13 2729 26
+            ret false
+        .endif
+        .if index_of(head, "\t") >= 0
+            .span 2732 13 2732 26
+            ret false
+        .endif
+        .span 2734 9 2734 21
+        ret true
+    .endif
+    .span 2736 5 2736 18
     ret false
 .endfn
 
 .fn split_parameter_entries(body -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 2710 28 2710 42
+    .span 2739 28 2739 42
     .param body -> string
-    .span 2711 5 2711 38
+    .span 2740 5 2740 38
     eval let mut entries -> string[] = []
-    .span 2712 5 2712 36
+    .span 2741 5 2741 36
     eval let mut current -> string = ""
-    .span 2713 5 2713 33
+    .span 2742 5 2742 33
     eval let mut index -> number = 0
-    .span 2714 5 2714 33
+    .span 2743 5 2743 33
     eval let mut depth -> number = 0
-    .span 2715 5 2715 34
+    .span 2744 5 2744 34
     eval let mut quote -> string = ""
     .loop
         .if index >= body.length
             break
         .endif
-        .span 2721 9 2721 30
+        .span 2750 9 2750 30
         eval let ch = body[index]
         .if quote.length > 0
-            .span 2724 13 2724 36
+            .span 2753 13 2753 36
             eval current = current + ch
             .if ch == "\\"
                 .if index + 1 < body.length
-                    .span 2727 21 2727 57
+                    .span 2756 21 2756 57
                     eval current = current + body[index + 1]
-                    .span 2728 21 2728 32
+                    .span 2757 21 2757 32
                     eval index += 2
                     continue
                 .endif
             .endif
             .if ch == quote
-                .span 2733 17 2733 28
+                .span 2762 17 2762 28
                 eval quote = ""
             .endif
-            .span 2735 13 2735 24
+            .span 2764 13 2764 24
             eval index += 1
             continue
         .endif
         .if ch == "\"" || ch == "'"
-            .span 2740 13 2740 24
+            .span 2769 13 2769 24
             eval quote = ch
-            .span 2741 13 2741 36
+            .span 2770 13 2770 36
             eval current = current + ch
-            .span 2742 13 2742 24
+            .span 2771 13 2771 24
             eval index += 1
             continue
         .endif
         .if ch == "(" || ch == "[" || ch == "{"
-            .span 2747 13 2747 24
+            .span 2776 13 2776 24
             eval depth += 1
-            .span 2748 13 2748 36
+            .span 2777 13 2777 36
             eval current = current + ch
-            .span 2749 13 2749 24
+            .span 2778 13 2778 24
             eval index += 1
             continue
         .endif
         .if ch == ")" || ch == "]" || ch == "}"
             .if depth > 0
-                .span 2755 17 2755 28
+                .span 2784 17 2784 28
                 eval depth -= 1
             .endif
-            .span 2757 13 2757 36
+            .span 2786 13 2786 36
             eval current = current + ch
-            .span 2758 13 2758 24
+            .span 2787 13 2787 24
             eval index += 1
             continue
         .endif
         .if ch == ","
             .if depth == 0
-                .span 2764 17 2764 50
+                .span 2793 17 2793 50
                 eval let segment = trim_text(current)
                 .if segment.length > 0
-                    .span 2766 21 2766 63
+                    .span 2795 21 2795 63
                     eval entries = append_string(entries, segment)
                 .endif
-                .span 2768 17 2768 30
+                .span 2797 17 2797 30
                 eval current = ""
-                .span 2769 17 2769 28
+                .span 2798 17 2798 28
                 eval index += 1
                 continue
             .endif
         .endif
-        .span 2774 9 2774 32
+        .span 2803 9 2803 32
         eval current = current + ch
-        .span 2775 9 2775 20
+        .span 2804 9 2804 20
         eval index += 1
     .endloop
-    .span 2778 5 2778 38
+    .span 2807 5 2807 38
     eval let segment = trim_text(current)
     .if segment.length > 0
-        .span 2780 9 2780 51
+        .span 2809 9 2809 51
         eval entries = append_string(entries, segment)
     .endif
-    .span 2783 5 2783 20
+    .span 2812 5 2812 20
     ret entries
 .endfn
 
 .fn parse_effect_list(text -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 2786 22 2786 36
+    .span 2815 22 2815 36
     .param text -> string
-    .span 2787 5 2787 35
+    .span 2816 5 2816 35
     eval let trimmed = trim_text(text)
     .if trimmed == "none"
-        .span 2789 9 2789 19
+        .span 2818 9 2818 19
         ret []
     .endif
-    .span 2791 5 2791 43
+    .span 2820 5 2820 43
     ret split_comma_separated(trimmed)
 .endfn
 
 .fn split_whitespace(value -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 2794 21 2794 36
+    .span 2823 21 2823 36
     .param value -> string
-    .span 2795 5 2795 36
+    .span 2824 5 2824 36
     eval let mut parts -> string[] = []
     .if value.length == 0
-        .span 2797 9 2797 22
+        .span 2826 9 2826 22
         ret parts
     .endif
-    .span 2799 5 2799 34
+    .span 2828 5 2828 34
     eval let mut start -> number = -1
-    .span 2800 5 2800 33
+    .span 2829 5 2829 33
     eval let mut index -> number = 0
     .loop
         .if index >= value.length
             break
         .endif
-        .span 2805 9 2805 45
+        .span 2834 9 2834 45
         eval let ch = text_char_at(value, index)
-        .span 2806 9 2806 76
+        .span 2835 9 2835 76
         eval let is_space = ch == " " || ch == "\t" || ch == "\n" || ch == "\r"
         .if is_space
             .if start >= 0
-                .span 2809 17 2809 78
+                .span 2838 17 2838 78
                 eval parts = append_string(parts, substring(value, start, index))
-                .span 2810 17 2810 28
+                .span 2839 17 2839 28
                 eval start = -1
             .endif
         .else
             .if start < 0
-                .span 2813 13 2813 27
+                .span 2842 13 2842 27
                 eval start = index
             .endif
         .endif
-        .span 2815 9 2815 20
+        .span 2844 9 2844 20
         eval index += 1
     .endloop
     .if start >= 0
-        .span 2818 9 2818 77
+        .span 2847 9 2847 77
         eval parts = append_string(parts, substring(value, start, value.length))
     .endif
-    .span 2820 5 2820 18
+    .span 2849 5 2849 18
     ret parts
 .endfn
 
 .fn parse_decimal_number(text -> string) -> NumberParseResult
 .meta return NumberParseResult
 .meta effects none
-    .span 2823 25 2823 39
+    .span 2852 25 2852 39
     .param text -> string
-    .span 2824 5 2824 35
+    .span 2853 5 2853 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 2826 9 2826 63
+        .span 2855 9 2855 63
         ret NumberParseResult { success: false, value: 0 }
     .endif
-    .span 2828 5 2828 31
+    .span 2857 5 2857 31
     eval let zero = char_code("0")
-    .span 2829 5 2829 31
+    .span 2858 5 2858 31
     eval let nine = char_code("9")
-    .span 2830 5 2830 33
+    .span 2859 5 2859 33
     eval let mut index -> number = 0
-    .span 2831 5 2831 33
+    .span 2860 5 2860 33
     eval let mut value -> number = 0
     .loop
         .if index >= trimmed.length
             break
         .endif
-        .span 2836 9 2836 33
+        .span 2865 9 2865 33
         eval let ch = trimmed[index]
-        .span 2837 9 2837 34
+        .span 2866 9 2866 34
         eval let code = char_code(ch)
         .if code < zero || code > nine
-            .span 2839 13 2839 67
+            .span 2868 13 2868 67
             ret NumberParseResult { success: false, value: 0 }
         .endif
-        .span 2841 9 2841 33
+        .span 2870 9 2870 33
         eval let digit = code - zero
-        .span 2842 9 2842 36
+        .span 2871 9 2871 36
         eval value = value * 10 + digit
-        .span 2843 9 2843 20
+        .span 2872 9 2872 20
         eval index += 1
     .endloop
-    .span 2845 5 2845 62
+    .span 2874 5 2874 62
     ret NumberParseResult { success: true, value: value }
 .endfn
 
 .fn split_lines(value -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 2848 16 2848 31
+    .span 2877 16 2877 31
     .param value -> string
-    .span 2849 5 2849 36
+    .span 2878 5 2878 36
     eval let mut lines -> string[] = []
-    .span 2850 5 2850 36
+    .span 2879 5 2879 36
     eval let mut current -> string = ""
-    .span 2851 5 2851 33
+    .span 2880 5 2880 33
     eval let mut index -> number = 0
     .loop
         .if index >= value.length
             break
         .endif
-        .span 2856 9 2856 31
+        .span 2885 9 2885 31
         eval let ch = value[index]
         .if ch == "\n"
-            .span 2858 13 2858 51
+            .span 2887 13 2887 51
             eval lines = append_string(lines, current)
-            .span 2859 13 2859 26
+            .span 2888 13 2888 26
             eval current = ""
         .else
-            .span 2861 13 2861 36
+            .span 2890 13 2890 36
             eval current = current + ch
         .endif
-        .span 2863 9 2863 20
+        .span 2892 9 2892 20
         eval index += 1
     .endloop
-    .span 2865 5 2865 43
+    .span 2894 5 2894 43
     eval lines = append_string(lines, current)
-    .span 2866 5 2866 18
+    .span 2895 5 2895 18
     ret lines
 .endfn
 
 .fn split_comma_separated(value -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 2869 26 2869 41
+    .span 2898 26 2898 41
     .param value -> string
-    .span 2870 5 2870 38
+    .span 2899 5 2899 38
     eval let mut results -> string[] = []
-    .span 2871 5 2871 36
+    .span 2900 5 2900 36
     eval let mut current -> string = ""
-    .span 2872 5 2872 33
+    .span 2901 5 2901 33
     eval let mut index -> number = 0
     .loop
         .if index >= value.length
             break
         .endif
-        .span 2877 9 2877 31
+        .span 2906 9 2906 31
         eval let ch = value[index]
         .if ch == ","
-            .span 2879 13 2879 66
+            .span 2908 13 2908 66
             eval results = append_string(results, trim_text(current))
-            .span 2880 13 2880 26
+            .span 2909 13 2909 26
             eval current = ""
         .else
-            .span 2882 13 2882 36
+            .span 2911 13 2911 36
             eval current = current + ch
         .endif
-        .span 2884 9 2884 20
+        .span 2913 9 2913 20
         eval index += 1
     .endloop
     .if current.length > 0
-        .span 2887 9 2887 62
+        .span 2916 9 2916 62
         eval results = append_string(results, trim_text(current))
     .endif
-    .span 2889 5 2889 39
+    .span 2918 5 2918 39
     eval let mut filtered -> string[] = []
-    .span 2890 5 2890 15
+    .span 2919 5 2919 15
     eval index = 0
     .loop
         .if index >= results.length
             break
         .endif
-        .span 2895 9 2895 36
+        .span 2924 9 2924 36
         eval let entry = results[index]
         .if entry.length > 0
-            .span 2897 13 2897 55
+            .span 2926 13 2926 55
             eval filtered = append_string(filtered, entry)
         .endif
-        .span 2899 9 2899 20
+        .span 2928 9 2928 20
         eval index += 1
     .endloop
-    .span 2901 5 2901 21
+    .span 2930 5 2930 21
     ret filtered
 .endfn
 
 .fn strip_generics(name -> string) -> string
 .meta return string
 .meta effects none
-    .span 2904 19 2904 33
+    .span 2933 19 2933 33
     .param name -> string
-    .span 2905 5 2905 35
+    .span 2934 5 2934 35
     eval let mut result -> string = ""
-    .span 2906 5 2906 33
+    .span 2935 5 2935 33
     eval let mut depth -> number = 0
-    .span 2907 5 2907 33
+    .span 2936 5 2936 33
     eval let mut index -> number = 0
     .loop
         .if index >= name.length
             break
         .endif
-        .span 2912 9 2912 30
+        .span 2941 9 2941 30
         eval let ch = name[index]
         .if ch == "<"
-            .span 2914 13 2914 24
+            .span 2943 13 2943 24
             eval depth += 1
-            .span 2915 13 2915 24
+            .span 2944 13 2944 24
             eval index += 1
             continue
         .endif
         .if ch == ">"
             .if depth > 0
-                .span 2920 17 2920 28
+                .span 2949 17 2949 28
                 eval depth -= 1
             .endif
-            .span 2922 13 2922 24
+            .span 2951 13 2951 24
             eval index += 1
             continue
         .endif
         .if depth == 0
-            .span 2926 13 2926 34
+            .span 2955 13 2955 34
             eval result = result + ch
         .endif
-        .span 2928 9 2928 20
+        .span 2957 9 2957 20
         eval index += 1
     .endloop
-    .span 2930 5 2930 30
+    .span 2959 5 2959 30
     ret trim_text(result)
 .endfn
 
 .fn trim_text(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 2933 14 2933 29
+    .span 2962 14 2962 29
     .param value -> string
-    .span 2934 5 2934 33
+    .span 2963 5 2963 33
     eval let mut start -> number = 0
-    .span 2935 5 2935 42
+    .span 2964 5 2964 42
     eval let mut end -> number = value.length
     .loop
         .if start >= end
             break
         .endif
-        .span 2940 9 2940 31
+        .span 2969 9 2969 31
         eval let ch = value[start]
         .if is_trim_char(ch)
-            .span 2942 13 2942 24
+            .span 2971 13 2971 24
             eval start += 1
             continue
         .endif
@@ -4532,105 +4575,155 @@
         .if end <= start
             break
         .endif
-        .span 2951 9 2951 33
+        .span 2980 9 2980 33
         eval let ch = value[end - 1]
         .if is_trim_char(ch)
-            .span 2953 13 2953 22
+            .span 2982 13 2982 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
     .if start == 0 && end == value.length
-        .span 2959 9 2959 22
+        .span 2988 9 2988 22
         ret value
     .endif
-    .span 2961 5 2961 41
+    .span 2990 5 2990 41
     ret substring(value, start, end)
 .endfn
 
 .fn parse_layout_manifest(text -> string) -> LayoutManifest
 .meta return LayoutManifest
 .meta effects none
-    .span 2964 26 2964 40
+    .span 2993 26 2993 40
     .param text -> string
-    .span 2965 5 2965 35
+    .span 2994 5 2994 35
     eval let lines = split_lines(text)
-    .span 2966 5 2966 42
+    .span 2995 5 2995 42
     eval let mut diagnostics -> string[] = []
-    .span 2967 5 2967 44
+    .span 2996 5 2996 44
     eval let mut structs -> NativeStruct[] = []
-    .span 2968 5 2968 40
+    .span 2997 5 2997 40
     eval let mut enums -> NativeEnum[] = []
-    .span 2969 5 2969 33
+    .span 2998 5 2998 33
     eval let mut index -> number = 0
     .loop
         .if index >= lines.length
             break
         .endif
-        .span 2975 9 2975 37
+        .span 3004 9 3004 37
         eval let raw_line = lines[index]
-        .span 2976 9 2976 40
-        eval let line = trim_text(raw_line)
+        .span 3005 9 3005 44
+        eval let mut line = trim_text(raw_line)
         .if line.length == 0
-            .span 2978 13 2978 24
+            .span 3007 13 3007 24
             eval index += 1
             continue
         .endif
         .if starts_with(line, ";")
-            .span 2982 13 2982 24
+            .span 3011 13 3011 24
             eval index += 1
             continue
         .endif
         .if starts_with(line, ".manifest ")
-            .span 2986 13 2986 24
+            .span 3015 13 3015 24
             eval index += 1
             continue
         .endif
+        .if starts_with(line, ".layout field ")
+            .span 3021 13 3021 72
+            eval let tail = trim_text(strip_prefix(line, ".layout field "))
+            .span 3022 13 3022 57
+            eval let mut is_struct_header -> boolean = false
+            .if starts_with(tail, "struct")
+                .if tail.length == 6
+                    .span 3025 21 3025 45
+                    eval is_struct_header = true
+                .else
+                    .if tail.length > 6
+                        .span 3027 21 3027 41
+                        eval let after = tail[6]
+                        .if is_trim_char(after)
+                            .span 3029 25 3029 49
+                            eval is_struct_header = true
+                        .endif
+                    .endif
+                .endif
+            .endif
+            .if is_struct_header
+                .span 3034 17 3034 75
+                eval let header_text = trim_text(strip_prefix(tail, "struct"))
+                .span 3035 17 3035 56
+                eval line = ".layout struct " + header_text
+            .endif
+        .endif
         .if starts_with(line, ".layout struct ")
-            .span 2992 13 2992 55
+            .span 3041 13 3041 55
             eval let body = strip_prefix(line, ".layout ")
-            .span 2993 13 2993 63
+            .span 3042 13 3042 63
             eval let struct_header = strip_prefix(body, "struct ")
-            .span 2994 13 2994 75
+            .span 3043 13 3043 75
             eval let header_result = parse_struct_layout_header(struct_header)
-            .span 2995 13 2995 73
+            .span 3044 13 3044 73
             eval diagnostics = diagnostics.concat(header_result.diagnostics)
             .if header_result.success
-                .span 2998 17 2998 66
+                .span 3047 17 3047 66
                 eval let mut fields -> NativeStructLayoutField[] = []
-                .span 2999 17 2999 54
+                .span 3048 17 3048 54
                 eval let struct_name = header_result.name
-                .span 3002 17 3002 28
+                .span 3051 17 3051 28
                 eval index += 1
                 .loop
                     .if index >= lines.length
                         break
                     .endif
-                    .span 3007 21 3007 62
+                    .span 3056 21 3056 62
                     eval let field_line = trim_text(lines[index])
                     .if field_line.length == 0
+                        .span 3060 25 3060 36
+                        eval index += 1
+                        break
+                    .endif
+                    .if starts_with(field_line, ".layout struct ") || starts_with(field_line, ".layout enum ")
                         break
                     .endif
                     .if !starts_with(field_line, ".layout field ")
                         break
                     .endif
-                    .span 3018 21 3018 69
-                    eval let body = strip_prefix(field_line, ".layout ")
-                    .span 3019 21 3019 67
-                    eval let field_text = strip_prefix(body, "field ")
-                    .span 3020 21 3020 91
-                    eval let field_result = parse_struct_layout_field(field_text, struct_name)
-                    .span 3021 21 3021 80
+                    .span 3073 21 3073 86
+                    eval let tail = trim_text(strip_prefix(field_line, ".layout field "))
+                    .span 3076 21 3076 65
+                    eval let mut is_struct_header -> boolean = false
+                    .if starts_with(tail, "struct")
+                        .if tail.length == 6
+                            .span 3079 29 3079 53
+                            eval is_struct_header = true
+                        .else
+                            .if tail.length > 6
+                                .span 3081 29 3081 49
+                                eval let after = tail[6]
+                                .if is_trim_char(after)
+                                    .span 3083 33 3083 57
+                                    eval is_struct_header = true
+                                .endif
+                            .endif
+                        .endif
+                    .endif
+                    .if is_struct_header
+                        break
+                    .endif
+                    .span 3091 21 3091 85
+                    eval let field_result = parse_struct_layout_field(tail, struct_name)
+                    .span 3092 21 3092 80
                     eval diagnostics = diagnostics.concat(field_result.diagnostics)
                     .if field_result.success
-                        .span 3024 25 3024 89
+                        .span 3095 25 3095 89
                         eval fields = append_struct_layout_field(fields, field_result.field)
                     .endif
-                    .span 3026 21 3026 32
+                    .span 3097 21 3097 32
                     eval index += 1
                 .endloop
-                .span 3030 17 3040 19
+                .span 3101 17 3111 19
                 eval let struct_def = NativeStruct {
                     name: struct_name,
                     fields: [],
@@ -4642,37 +4735,35 @@
                         fields: fields,
                     },
                 }
-                .span 3041 17 3041 62
+                .span 3112 17 3112 62
                 eval structs = append_struct(structs, struct_def)
             .endif
-            .span 3043 13 3043 24
-            eval index += 1
             continue
         .endif
         .if starts_with(line, ".layout enum ")
-            .span 3049 13 3049 55
+            .span 3119 13 3119 55
             eval let body = strip_prefix(line, ".layout ")
-            .span 3050 13 3050 59
+            .span 3120 13 3120 59
             eval let enum_header = strip_prefix(body, "enum ")
-            .span 3051 13 3051 71
+            .span 3121 13 3121 71
             eval let header_result = parse_enum_layout_header(enum_header)
-            .span 3052 13 3052 73
+            .span 3122 13 3122 73
             eval diagnostics = diagnostics.concat(header_result.diagnostics)
             .if header_result.success
-                .span 3055 17 3055 68
+                .span 3125 17 3125 68
                 eval let mut variants -> NativeEnumVariantLayout[] = []
-                .span 3056 17 3056 52
+                .span 3126 17 3126 52
                 eval let enum_name = header_result.name
-                .span 3057 17 3057 28
+                .span 3127 17 3127 28
                 eval index += 1
                 .loop
                     .if index >= lines.length
                         break
                     .endif
-                    .span 3064 21 3064 64
+                    .span 3134 21 3134 64
                     eval let variant_line = trim_text(lines[index])
                     .if variant_line.length == 0
-                        .span 3066 25 3066 36
+                        .span 3136 25 3136 36
                         eval index += 1
                         break
                     .endif
@@ -4680,41 +4771,41 @@
                         break
                     .endif
                     .if starts_with(variant_line, ".layout variant ")
-                        .span 3074 25 3074 75
+                        .span 3144 25 3144 75
                         eval let body = strip_prefix(variant_line, ".layout ")
-                        .span 3075 25 3075 75
+                        .span 3145 25 3145 75
                         eval let variant_text = strip_prefix(body, "variant ")
                         .if starts_with(variant_text, "enum ")
-                            .span 3079 29 3079 40
+                            .span 3149 29 3149 40
                             eval index += 1
                             continue
                         .endif
-                        .span 3082 25 3082 97
+                        .span 3152 25 3152 97
                         eval let variant_result = parse_enum_variant_layout(variant_text, enum_name)
-                        .span 3083 25 3083 86
+                        .span 3153 25 3153 86
                         eval diagnostics = diagnostics.concat(variant_result.diagnostics)
                         .if variant_result.success
-                            .span 3086 29 3086 101
+                            .span 3156 29 3156 101
                             eval variants = append_enum_variant_layout(variants, variant_result.variant)
                         .endif
                     .else
                         .if starts_with(variant_line, ".layout payload ")
-                            .span 3089 25 3089 75
+                            .span 3159 25 3159 75
                             eval let body = strip_prefix(variant_line, ".layout ")
-                            .span 3090 25 3090 75
+                            .span 3160 25 3160 75
                             eval let payload_text = strip_prefix(body, "payload ")
-                            .span 3091 25 3091 97
+                            .span 3161 25 3161 97
                             eval let payload_result = parse_enum_payload_layout(payload_text, enum_name)
-                            .span 3092 25 3092 86
+                            .span 3162 25 3162 86
                             eval diagnostics = diagnostics.concat(payload_result.diagnostics)
                             .if payload_result.success && variants.length > 0
-                                .span 3096 29 3096 66
+                                .span 3166 29 3166 66
                                 eval let last_index = variants.length - 1
-                                .span 3097 29 3097 69
+                                .span 3167 29 3167 69
                                 eval let last_variant = variants[last_index]
-                                .span 3098 29 3098 120
+                                .span 3168 29 3168 120
                                 eval let updated_fields = append_struct_layout_field(last_variant.fields, payload_result.field)
-                                .span 3099 29 3106 31
+                                .span 3169 29 3176 31
                                 eval variants[last_index] = NativeEnumVariantLayout {
                                 name: last_variant.name,
                                 tag: last_variant.tag,
@@ -4726,10 +4817,10 @@
                             .endif
                         .endif
                     .endif
-                    .span 3109 21 3109 32
+                    .span 3179 21 3179 32
                     eval index += 1
                 .endloop
-                .span 3113 17 3124 19
+                .span 3183 17 3194 19
                 eval let enum_def = NativeEnum {
                     name: enum_name,
                     variants: [],
@@ -4742,254 +4833,254 @@
                         variants: variants,
                     },
                 }
-                .span 3125 17 3125 54
+                .span 3195 17 3195 54
                 eval enums = append_enum(enums, enum_def)
             .else
-                .span 3127 17 3127 28
+                .span 3197 17 3197 28
                 eval index += 1
             .endif
             continue
         .endif
-        .span 3132 9 3132 20
+        .span 3202 9 3202 20
         eval index += 1
     .endloop
-    .span 3135 5 3139 7
+    .span 3205 5 3209 7
     ret LayoutManifest { structs: structs, enums: enums, diagnostics: diagnostics }
 .endfn
 
 .fn is_trim_char(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 3142 17 3142 29
+    .span 3212 17 3212 29
     .param ch -> string
-    .span 3143 5 3143 64
+    .span 3213 5 3213 64
     ret ch == " " || ch == "\n" || ch == "\r" || ch == "\t"
 .endfn
 
 .fn starts_with(value -> string, prefix -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 3146 16 3146 31
+    .span 3216 16 3216 31
     .param value -> string
-    .span 3146 33 3146 49
+    .span 3216 33 3216 49
     .param prefix -> string
     .if prefix.length == 0
-        .span 3148 9 3148 21
+        .span 3218 9 3218 21
         ret true
     .endif
     .if value.length < prefix.length
-        .span 3151 9 3151 22
+        .span 3221 9 3221 22
         ret false
     .endif
-    .span 3153 5 3153 33
+    .span 3223 5 3223 33
     eval let mut index -> number = 0
     .loop
         .if index >= prefix.length
             break
         .endif
         .if value[index] != prefix[index]
-            .span 3159 13 3159 26
+            .span 3229 13 3229 26
             ret false
         .endif
-        .span 3161 9 3161 20
+        .span 3231 9 3231 20
         eval index += 1
     .endloop
-    .span 3163 5 3163 17
+    .span 3233 5 3233 17
     ret true
 .endfn
 
 .fn strip_prefix(value -> string, prefix -> string) -> string
 .meta return string
 .meta effects none
-    .span 3166 17 3166 32
+    .span 3236 17 3236 32
     .param value -> string
-    .span 3166 34 3166 50
+    .span 3236 34 3236 50
     .param prefix -> string
     .if !starts_with(value, prefix)
-        .span 3168 9 3168 22
+        .span 3238 9 3238 22
         ret value
     .endif
-    .span 3170 5 3170 58
+    .span 3240 5 3240 58
     ret substring(value, prefix.length, value.length)
 .endfn
 
 .fn index_of(value -> string, target -> string) -> number
 .meta return number
 .meta effects none
-    .span 3173 13 3173 28
+    .span 3243 13 3243 28
     .param value -> string
-    .span 3173 30 3173 46
+    .span 3243 30 3243 46
     .param target -> string
     .if target.length == 0
-        .span 3175 9 3175 18
+        .span 3245 9 3245 18
         ret 0
     .endif
-    .span 3177 5 3177 33
+    .span 3247 5 3247 33
     eval let mut index -> number = 0
     .loop
         .if index + target.length > value.length
             break
         .endif
-        .span 3182 9 3182 43
+        .span 3252 9 3252 43
         eval let mut match_index -> number = 0
-        .span 3183 9 3183 43
+        .span 3253 9 3253 43
         eval let mut matches -> boolean = true
         .loop
             .if match_index >= target.length
                 break
             .endif
             .if value[index + match_index] != target[match_index]
-                .span 3189 17 3189 33
+                .span 3259 17 3259 33
                 eval matches = false
                 break
             .endif
-            .span 3192 13 3192 30
+            .span 3262 13 3262 30
             eval match_index += 1
         .endloop
         .if matches
-            .span 3195 13 3195 26
+            .span 3265 13 3265 26
             ret index
         .endif
-        .span 3197 9 3197 20
+        .span 3267 9 3267 20
         eval index += 1
     .endloop
-    .span 3199 5 3199 15
+    .span 3269 5 3269 15
     ret -1
 .endfn
 
 .fn last_index_of(value -> string, target -> string) -> number
 .meta return number
 .meta effects none
-    .span 3202 18 3202 33
+    .span 3272 18 3272 33
     .param value -> string
-    .span 3202 35 3202 51
+    .span 3272 35 3272 51
     .param target -> string
     .if target.length == 0
-        .span 3204 9 3204 29
+        .span 3274 9 3274 29
         ret value.length
     .endif
-    .span 3206 5 3206 60
+    .span 3276 5 3276 60
     eval let mut index -> number = value.length - target.length
     .loop
         .if index < 0
             break
         .endif
-        .span 3211 9 3211 43
+        .span 3281 9 3281 43
         eval let mut match_index -> number = 0
-        .span 3212 9 3212 43
+        .span 3282 9 3282 43
         eval let mut matches -> boolean = true
         .loop
             .if match_index >= target.length
                 break
             .endif
             .if value[index + match_index] != target[match_index]
-                .span 3218 17 3218 33
+                .span 3288 17 3288 33
                 eval matches = false
                 break
             .endif
-            .span 3221 13 3221 30
+            .span 3291 13 3291 30
             eval match_index += 1
         .endloop
         .if matches
-            .span 3224 13 3224 26
+            .span 3294 13 3294 26
             ret index
         .endif
-        .span 3226 9 3226 20
+        .span 3296 9 3296 20
         eval index -= 1
     .endloop
-    .span 3228 5 3228 15
+    .span 3298 5 3298 15
     ret -1
 .endfn
 
 .fn strip_quotes(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 3231 17 3231 32
+    .span 3301 17 3301 32
     .param value -> string
     .if value.length >= 2
-        .span 3233 9 3233 30
+        .span 3303 9 3303 30
         eval let first = value[0]
-        .span 3234 9 3234 44
+        .span 3304 9 3304 44
         eval let last = value[value.length - 1]
-        .span 3235 9 3235 55
+        .span 3305 9 3305 55
         eval let is_double = first == "\"" && last == "\""
-        .span 3236 9 3236 53
+        .span 3306 9 3306 53
         eval let is_single = first == "'" && last == "'"
         .if is_double || is_single
-            .span 3238 13 3238 58
+            .span 3308 13 3308 58
             ret substring(value, 1, value.length - 1)
         .endif
     .endif
-    .span 3241 5 3241 18
+    .span 3311 5 3311 18
     ret value
 .endfn
 
 .fn append_string(values -> string[], value -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 3244 18 3244 36
+    .span 3314 18 3314 36
     .param values -> string[]
-    .span 3244 38 3244 53
+    .span 3314 38 3314 53
     .param value -> string
-    .span 3245 5 3245 35
+    .span 3315 5 3315 35
     ret values.concat([value])
 .endfn
 
 .fn split_text(value -> string, delimiter -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 3248 15 3248 30
+    .span 3318 15 3318 30
     .param value -> string
-    .span 3248 32 3248 51
+    .span 3318 32 3318 51
     .param delimiter -> string
     .if delimiter.length == 0
-        .span 3250 9 3250 24
+        .span 3320 9 3320 24
         ret [value]
     .endif
-    .span 3252 5 3252 36
+    .span 3322 5 3322 36
     eval let mut parts -> string[] = []
-    .span 3253 5 3253 33
+    .span 3323 5 3323 33
     eval let mut start -> number = 0
-    .span 3254 5 3254 33
+    .span 3324 5 3324 33
     eval let mut index -> number = 0
     .loop
         .if index >= value.length
             break
         .endif
-        .span 3260 9 3260 78
+        .span 3330 9 3330 78
         eval let pos = index_of(substring(value, index, value.length), delimiter)
         .if pos < 0
             break
         .endif
-        .span 3264 9 3264 38
+        .span 3334 9 3334 38
         eval let actual_pos = index + pos
-        .span 3265 9 3265 75
+        .span 3335 9 3335 75
         eval parts = append_string(parts, substring(value, start, actual_pos))
-        .span 3266 9 3266 47
+        .span 3336 9 3336 47
         eval start = actual_pos + delimiter.length
-        .span 3267 9 3267 23
+        .span 3337 9 3337 23
         eval index = start
     .endloop
     .if start < value.length
-        .span 3271 9 3271 77
+        .span 3341 9 3341 77
         eval parts = append_string(parts, substring(value, start, value.length))
     .else
         .if start == value.length
-            .span 3273 9 3273 42
+            .span 3343 9 3343 42
             eval parts = append_string(parts, "")
         .endif
     .endif
-    .span 3276 5 3276 18
+    .span 3346 5 3346 18
     ret parts
 .endfn
 
 .fn append_parameter_array(values -> NativeParameter[], parameter -> NativeParameter) -> NativeParameter[]
 .meta return NativeParameter[]
 .meta effects none
-    .span 3279 27 3279 54
+    .span 3349 27 3349 54
     .param values -> NativeParameter[]
-    .span 3279 56 3279 84
+    .span 3349 56 3349 84
     .param parameter -> NativeParameter
-    .span 3280 5 3280 39
+    .span 3350 5 3350 39
     ret values.concat([parameter])
 .endfn

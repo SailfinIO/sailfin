@@ -990,6 +990,16 @@ def parse_pipeline(initial_parser, decorators):
     parsed_effects = effect_result.effects
     decorator_info = evaluate_decorators(decorators)
     inferred_effects = infer_effects(parsed_effects, decorator_info)
+    if return_type == None:
+        parser = skip_trivia(parser)
+        late_sep = consume_type_separator(parser)
+        if late_sep.found:
+            parser = late_sep.parser
+            capture = collect_until(skip_trivia(parser), ["{"])
+            parser = capture.parser
+            text = trim_text(tokens_to_text(capture.tokens))
+            if len(text) > 0:
+                return_type = TypeAnnotation(text=text)
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
@@ -1026,6 +1036,16 @@ def parse_tool(initial_parser, decorators):
     parsed_effects = effect_result.effects
     decorator_info = evaluate_decorators(decorators)
     inferred_effects = infer_effects(parsed_effects, decorator_info)
+    if return_type == None:
+        parser = skip_trivia(parser)
+        late_sep = consume_type_separator(parser)
+        if late_sep.found:
+            parser = late_sep.parser
+            capture = collect_until(skip_trivia(parser), ["{"])
+            parser = capture.parser
+            text = trim_text(tokens_to_text(capture.tokens))
+            if len(text) > 0:
+                return_type = TypeAnnotation(text=text)
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
@@ -1102,6 +1122,16 @@ def parse_function(initial_parser, starts_with_async, decorators):
     parsed_effects = effect_result.effects
     decorator_info = evaluate_decorators(decorators)
     inferred_effects = infer_effects(parsed_effects, decorator_info)
+    if return_type == None:
+        parser = skip_trivia(parser)
+        late_sep = consume_type_separator(parser)
+        if late_sep.found:
+            parser = late_sep.parser
+            capture = collect_until(skip_trivia(parser), ["{"])
+            parser = capture.parser
+            text = trim_text(tokens_to_text(capture.tokens))
+            if len(text) > 0:
+                return_type = TypeAnnotation(text=text)
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block
@@ -1519,6 +1549,11 @@ def parse_block_statement(parser):
     decorators = decorator_result.decorators
     after_decorators = skip_trivia(current)
     token = parser_peek_raw(after_decorators)
+    if symbol_matches(token, "{"):
+        if len(decorators) > 0:
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
+        body_result = parse_block(after_decorators)
+        return BlockStatementParseResult(parser=body_result.parser, statement=runtime.enum_instantiate(Statement, 'BlockStatement', [runtime.enum_field('body', body_result.block)]), success=True)
     if identifier_matches(token, "for"):
         return parse_for_statement(after_decorators, decorators)
     if identifier_matches(token, "loop"):

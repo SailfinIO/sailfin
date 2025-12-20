@@ -279,6 +279,9 @@ enum Statement {
         else_branch -> ElseBranch?;
         decorators -> Decorator[];
     },
+    BlockStatement {
+        body -> Block;
+    },
     ReturnStatement {
         expression -> Expression?;
         span -> SourceSpan?;

@@ -302,6 +302,8 @@ def emit_block_statement(builder, statement):
         return emit_with(builder, statement)
     if statement.variant == "IfStatement":
         return emit_if(builder, statement)
+    if statement.variant == "BlockStatement":
+        return emit_block(builder, statement.body)
     if statement.variant == "ForStatement":
         return emit_for(builder, statement)
     if statement.variant == "TestDeclaration":

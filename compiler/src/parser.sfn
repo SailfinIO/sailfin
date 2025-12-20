@@ -1219,6 +1219,21 @@ fn parse_pipeline(initial_parser -> Parser, decorators -> Decorator[]) -> Statem
     let decorator_info = evaluate_decorators(decorators);
     let inferred_effects = infer_effects(parsed_effects, decorator_info);
 
+    // Allow `pipeline foo() ![effects] -> T {}` ordering.
+    if return_type == null {
+        parser = skip_trivia(parser);
+        let late_sep = consume_type_separator(parser);
+        if late_sep.found {
+            parser = late_sep.parser;
+            let capture = collect_until(skip_trivia(parser), ["{"]);
+            parser = capture.parser;
+            let text = trim_text(tokens_to_text(capture.tokens));
+            if text.length > 0 {
+                return_type = TypeAnnotation { text: text };
+            }
+        }
+    }
+
     let block_result = parse_block(parser);
     parser = block_result.parser;
     let body = block_result.block;
@@ -1276,6 +1291,21 @@ fn parse_tool(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
     let parsed_effects = effect_result.effects;
     let decorator_info = evaluate_decorators(decorators);
     let inferred_effects = infer_effects(parsed_effects, decorator_info);
+
+    // Allow `tool foo() ![effects] -> T {}` ordering.
+    if return_type == null {
+        parser = skip_trivia(parser);
+        let late_sep = consume_type_separator(parser);
+        if late_sep.found {
+            parser = late_sep.parser;
+            let capture = collect_until(skip_trivia(parser), ["{"]);
+            parser = capture.parser;
+            let text = trim_text(tokens_to_text(capture.tokens));
+            if text.length > 0 {
+                return_type = TypeAnnotation { text: text };
+            }
+        }
+    }
 
     let block_result = parse_block(parser);
     parser = block_result.parser;
@@ -1392,6 +1422,21 @@ fn parse_function(initial_parser -> Parser, starts_with_async -> boolean, decora
     let parsed_effects = effect_result.effects;
     let decorator_info = evaluate_decorators(decorators);
     let inferred_effects = infer_effects(parsed_effects, decorator_info);
+
+    // Allow `fn foo() ![effects] -> T {}` ordering.
+    if return_type == null {
+        parser = skip_trivia(parser);
+        let late_sep = consume_type_separator(parser);
+        if late_sep.found {
+            parser = late_sep.parser;
+            let capture = collect_until(skip_trivia(parser), ["{"]);
+            parser = capture.parser;
+            let text = trim_text(tokens_to_text(capture.tokens));
+            if text.length > 0 {
+                return_type = TypeAnnotation { text: text };
+            }
+        }
+    }
 
     let block_result = parse_block(parser);
     parser = block_result.parser;
@@ -2006,6 +2051,17 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
 
     let after_decorators = skip_trivia(current);
     let token = parser_peek_raw(after_decorators);
+    if symbol_matches(token, "{") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        let body_result = parse_block(after_decorators);
+        return BlockStatementParseResult {
+            parser: body_result.parser,
+            statement: Statement.BlockStatement { body: body_result.block },
+            success: true,
+        };
+    }
     if identifier_matches(token, "for") {
         return parse_for_statement(after_decorators, decorators);
     }

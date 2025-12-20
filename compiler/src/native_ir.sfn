@@ -1274,7 +1274,36 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
                 continue;
             }
             if starts_with(body, "field ") {
-                let field_result = parse_struct_layout_field(strip_prefix(body, "field "), struct_name);
+                let tail = trim_text(strip_prefix(body, "field "));
+                let mut is_struct_header -> boolean = false;
+                if starts_with(tail, "struct") {
+                    if tail.length == 6 {
+                        is_struct_header = true;
+                    } else if tail.length > 6 {
+                        let after = tail[6];
+                        if is_trim_char(after) {
+                            is_struct_header = true;
+                        }
+                    }
+                }
+                if is_struct_header {
+                    let header_text = trim_text(strip_prefix(tail, "struct"));
+                    let header_result = parse_struct_layout_header(header_text);
+                    diagnostics = diagnostics.concat(header_result.diagnostics);
+                    if header_result.success {
+                        if struct_layout_header_success {
+                            diagnostics = append_string(diagnostics, "duplicate struct layout header in " + struct_name);
+                        } else {
+                            struct_layout_size = header_result.size;
+                            struct_layout_align = header_result.align;
+                            struct_layout_header_success = true;
+                        }
+                    }
+                    index += 1;
+                    continue;
+                }
+
+                let field_result = parse_struct_layout_field(tail, struct_name);
                 diagnostics = diagnostics.concat(field_result.diagnostics);
                 if field_result.success {
                     struct_layout_fields = append_struct_layout_field(struct_layout_fields, field_result.field);
@@ -2973,7 +3002,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
             break;
         }
         let raw_line = lines[index];
-        let line = trim_text(raw_line);
+        let mut line = trim_text(raw_line);
         if line.length == 0 {
             index += 1;
             continue;
@@ -2985,6 +3014,26 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
         if starts_with(line, ".manifest ") {
             index += 1;
             continue;
+        }
+
+        // Legacy/garbled manifests may spell struct headers as `.layout field struct ...` (sometimes with extra whitespace).
+        if starts_with(line, ".layout field ") {
+            let tail = trim_text(strip_prefix(line, ".layout field "));
+            let mut is_struct_header -> boolean = false;
+            if starts_with(tail, "struct") {
+                if tail.length == 6 {
+                    is_struct_header = true;
+                } else if tail.length > 6 {
+                    let after = tail[6];
+                    if is_trim_char(after) {
+                        is_struct_header = true;
+                    }
+                }
+            }
+            if is_struct_header {
+                let header_text = trim_text(strip_prefix(tail, "struct"));
+                line = ".layout struct " + header_text;
+            }
         }
         
         // Parse struct layouts
@@ -3008,18 +3057,40 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                     
                     // Stop if we hit a blank line or non-field line
                     if field_line.length == 0 {
+                        index += 1;
                         break;
                     }
+
+                    // If we hit a new header, stop without consuming it.
+                    if starts_with(field_line, ".layout struct ") || starts_with(field_line, ".layout enum ") {
+                        break;
+                    }
+
                     if !starts_with(field_line, ".layout field ") {
                         break;
                     }
-                    
-                    // Parse field - strip both ".layout " and "field "
-                    let body = strip_prefix(field_line, ".layout ");
-                    let field_text = strip_prefix(body, "field ");
-                    let field_result = parse_struct_layout_field(field_text, struct_name);
+
+                    let tail = trim_text(strip_prefix(field_line, ".layout field "));
+                    // Some inputs incorrectly spell a header as `.layout field struct ...`.
+                    // Treat it as a new header and stop without consuming it.
+                    let mut is_struct_header -> boolean = false;
+                    if starts_with(tail, "struct") {
+                        if tail.length == 6 {
+                            is_struct_header = true;
+                        } else if tail.length > 6 {
+                            let after = tail[6];
+                            if is_trim_char(after) {
+                                is_struct_header = true;
+                            }
+                        }
+                    }
+                    if is_struct_header {
+                        break;
+                    }
+
+                    let field_result = parse_struct_layout_field(tail, struct_name);
                     diagnostics = diagnostics.concat(field_result.diagnostics);
-                    
+
                     if field_result.success {
                         fields = append_struct_layout_field(fields, field_result.field);
                     }
@@ -3040,7 +3111,6 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                 };
                 structs = append_struct(structs, struct_def);
             }
-            index += 1;
             continue;
         }
         

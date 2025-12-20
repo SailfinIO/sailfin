@@ -6441,6 +6441,14 @@ def lower_borrow_expression(parse, bindings, locals, temp_index, lines):
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
     local = find_local_binding(locals, target)
     if local == None:
+        parameter = find_parameter_binding(bindings, target)
+        if parameter == None:
+            diagnostics = append_string(diagnostics, "llvm lowering: borrow target `" + target + "` not found")
+            return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
+        if ends_with(parameter.llvm_type, "*"):
+            operand = LLVMOperand(llvm_type=parameter.llvm_type, value=parameter.llvm_name)
+            return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
+        diagnostics = append_string(diagnostics, "llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)")
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
     pointer_type = local.llvm_type + "*"
     operand = LLVMOperand(llvm_type=pointer_type, value=local.pointer)

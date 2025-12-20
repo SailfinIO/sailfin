@@ -256,13 +256,15 @@
 .layout payload IfStatement.then_block type=Block offset=56 size=24 align=8
 .layout payload IfStatement.else_branch type=ElseBranch? offset=80 size=8 align=8
 .layout payload IfStatement.decorators type=Decorator[] offset=88 size=8 align=8
-.layout variant ReturnStatement tag=20 offset=8 size=16 align=8
+.layout variant BlockStatement tag=20 offset=8 size=24 align=8
+.layout payload BlockStatement.body type=Block offset=8 size=24 align=8
+.layout variant ReturnStatement tag=21 offset=8 size=16 align=8
 .layout payload ReturnStatement.expression type=Expression? offset=8 size=8 align=8
 .layout payload ReturnStatement.span type=SourceSpan? offset=16 size=8 align=8
-.layout variant ExpressionStatement tag=21 offset=8 size=56 align=8
+.layout variant ExpressionStatement tag=22 offset=8 size=56 align=8
 .layout payload ExpressionStatement.expression type=Expression offset=8 size=48 align=8
 .layout payload ExpressionStatement.span type=SourceSpan? offset=56 size=8 align=8
-.layout variant Unknown tag=22 offset=8 size=16 align=8
+.layout variant Unknown tag=23 offset=8 size=16 align=8
 .layout payload Unknown.tokens type=Token[] offset=8 size=8 align=8
 .layout payload Unknown.text type=string offset=16 size=8 align=8
 

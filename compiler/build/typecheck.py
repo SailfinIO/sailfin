@@ -200,6 +200,8 @@ def check_statement(statement, bindings, interfaces):
                 result = check_statement(branch.statement, bindings, interfaces)
                 diagnostics = (diagnostics) + (result.diagnostics)
         return ScopeResult(bindings=bindings, diagnostics=diagnostics)
+    if statement.variant == "BlockStatement":
+        return ScopeResult(bindings=bindings, diagnostics=check_block(statement.body, bindings, interfaces))
     if statement.variant == "PromptStatement":
         return ScopeResult(bindings=bindings, diagnostics=check_block(statement.body, bindings, interfaces))
     if statement.variant == "TypeAliasDeclaration":

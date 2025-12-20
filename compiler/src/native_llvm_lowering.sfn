@@ -9491,6 +9491,19 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
 
     let local = find_local_binding(locals, target);
     if local == null {
+        let parameter = find_parameter_binding(bindings, target);
+        if parameter == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: borrow target `" + target + "` not found");
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        }
+
+        // If the parameter is already a reference/pointer type, borrowing it is an identity.
+        if ends_with(parameter.llvm_type, "*") {
+            let operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+        }
+
+        diagnostics = append_string(diagnostics, "llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 

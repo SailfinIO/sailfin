@@ -263,6 +263,12 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             diagnostics: diagnostics,
         };
     }
+    if statement.variant == "BlockStatement" {
+        return ScopeResult {
+            bindings: bindings,
+            diagnostics: check_block(statement.body, bindings, interfaces),
+        };
+    }
     if statement.variant == "PromptStatement" {
         return ScopeResult {
             bindings: bindings,

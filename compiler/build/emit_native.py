@@ -268,6 +268,12 @@ def emit_statement(state, statement):
         return state_emit_line(state, "continue")
     if statement.variant == "IfStatement":
         return emit_if(state, statement)
+    if statement.variant == "BlockStatement":
+        current = state_emit_line(state, ".if 1 > 0")
+        current = state_push_indent(current)
+        current = emit_block(current, statement.body)
+        current = state_pop_indent(current)
+        return state_emit_line(current, ".endif")
     if statement.variant == "ReturnStatement":
         return emit_return(state, statement)
     if statement.variant == "ExpressionStatement":
