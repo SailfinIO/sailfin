@@ -4,6 +4,13 @@
 # different target triple than the host.
 CLANG_WARN_SUPPRESS ?= -Wno-override-module
 
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+STAGE2_NATIVE_LIBS ?=
+else
+STAGE2_NATIVE_LIBS ?= -lm
+endif
+
 .PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-emit-llvm stage2-native-sanity stage2-native-run-examples
 
 ifeq ($(origin CONDA_EXE), undefined)
@@ -80,7 +87,7 @@ native-stage2: bootstrap-stage2
 	  [ -z "$$m" ] && continue; \
 	  clang -O2 $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	clang -O2 $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2 build/native/obj/sailfin_runtime.o build/native/obj/stage2_driver.o build/native/obj/runtime_globals.o $$(sed 's|^|build/native/obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ')
+	clang -O2 $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2 build/native/obj/sailfin_runtime.o build/native/obj/stage2_driver.o build/native/obj/runtime_globals.o $$(sed 's|^|build/native/obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
 
 native-stage2-debug: bootstrap-stage2
 	@mkdir -p build/stage2/aot build/native/debug-obj
@@ -93,7 +100,7 @@ native-stage2-debug: bootstrap-stage2
 	  [ -z "$$m" ] && continue; \
 	  clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/debug-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/stage2_driver.o build/native/debug-obj/runtime_globals.o $$(sed 's|^|build/native/debug-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ')
+	clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/stage2_driver.o build/native/debug-obj/runtime_globals.o $$(sed 's|^|build/native/debug-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
 
 native-stage2-asan: bootstrap-stage2
 	@mkdir -p build/stage2/aot build/native/asan-obj
@@ -106,7 +113,7 @@ native-stage2-asan: bootstrap-stage2
 	  [ -z "$$m" ] && continue; \
 	  clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/asan-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/stage2_driver.o build/native/asan-obj/runtime_globals.o $$(sed 's|^|build/native/asan-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ')
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/stage2_driver.o build/native/asan-obj/runtime_globals.o $$(sed 's|^|build/native/asan-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
 
 stage2-native-sanity: native-stage2
 	build/native/sailfin-stage2 --emit sailfin examples/basics/hello-world.sfn > /dev/null
@@ -140,6 +147,6 @@ stage2-native-run-examples: native-stage2
 		out_bin=build/native/examples/$$name; \
 		echo "[stage2-native] llvm $$ex -> $$out_bin"; \
 		build/native/sailfin-stage2 --emit llvm $$ex > $$out_ll; \
-		clang -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include runtime/native/src/sailfin_runtime.c runtime/native/ir/runtime_globals.ll $$out_ll -o $$out_bin; \
+		clang -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include runtime/native/src/sailfin_runtime.c runtime/native/ir/runtime_globals.ll $$out_ll -o $$out_bin $(STAGE2_NATIVE_LIBS); \
 		$$out_bin; \
 	done
