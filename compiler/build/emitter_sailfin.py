@@ -294,7 +294,8 @@ def emit_block_statement(builder, statement):
 def format_optional_expression(expression):
     if expression == None:
         return ""
-    return format_expression(expression)
+    value = expression
+    return format_expression(value)
 
 def emit_prompt(builder, statement):
     current = emit_decorators(builder, statement.decorators)
@@ -373,7 +374,7 @@ def emit_match_case(builder, case):
     if guard == None:
         line = line + " => {"
     else:
-        line = line + " if " + format_expression(guard) + " => {"
+        line = line + " if " + format_optional_expression(guard) + " => {"
     current = builder_emit_line(builder, line)
     current = builder_push_indent(current)
     current = emit_block_body(current, case.body)
@@ -469,7 +470,7 @@ def format_enum_variant(variant):
             break
         parts = append_string(parts, format_field(variant.fields[index]))
         index += 1
-    return variant.name + " { " + join_with_separator(parts, "; ") + " }"
+    return variant.name + " { " + join_with_separator(parts, "; ") + " " + "}"
 
 def format_parameters(parameters):
     if len(parameters) == 0:
@@ -492,7 +493,7 @@ def format_parameter(parameter):
     if parameter.type_annotation != None:
         line = line + " -> " + parameter.type_annotation.text
     if parameter.default_value != None:
-        line = line + " = " + format_expression(parameter.default_value)
+        line = line + " = " + format_optional_expression(parameter.default_value)
     return line
 
 def format_type_parameters(parameters):
@@ -517,9 +518,7 @@ def format_type_annotation(annotation):
     return " -> " + annotation.text
 
 def format_initializer(initializer):
-    if initializer == None:
-        return ""
-    value = format_expression(initializer)
+    value = format_optional_expression(initializer)
     if len(value) == 0:
         return ""
     return " = " + value
@@ -613,7 +612,7 @@ def format_expression(expression):
             rendered = append_string(rendered, field.name + ": " + value)
             index += 1
         body = join_with_separator(rendered, ", ")
-        return type_name + " { " + body + " }"
+        return type_name + " { " + body + " " + "}"
     if expression.variant == "Range":
         start_value = format_expression(expression.start)
         end_value = format_expression(expression.end)

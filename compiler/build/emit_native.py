@@ -318,7 +318,10 @@ def append_optional_type_annotation(line, annotation):
 def append_optional_initializer(line, initializer):
     if initializer == None:
         return line
-    return line + " = " + format_expression(initializer)
+    rendered = format_optional_expression(initializer)
+    if len(rendered) == 0:
+        return line
+    return line + " = " + rendered
 
 def format_span(span):
     return number_to_string(span.start_line) + " " + number_to_string(span.start_column) + " " + number_to_string(span.end_line) + " " + number_to_string(span.end_column)
@@ -571,7 +574,7 @@ def format_match_case_head(case):
     guard = case.guard
     if guard == None:
         return head
-    return head + " if " + format_expression(guard)
+    return head + " if " + format_optional_expression(guard)
 
 def format_inline_case_body(statement):
     if statement.variant == "ExpressionStatement":
@@ -620,7 +623,8 @@ def emit_return(state, statement):
 def format_optional_expression(expression):
     if expression == None:
         return ""
-    return format_expression(expression)
+    value = expression
+    return format_expression(value)
 
 def emit_expression_statement(state, statement):
     current = emit_span_if_present(state, statement.span)
@@ -677,7 +681,7 @@ def emit_parameter_metadata(state, parameters):
         if parameter.type_annotation != None:
             line = line + " -> " + parameter.type_annotation.text
         if parameter.default_value != None:
-            line = line + " = " + format_expression(parameter.default_value)
+            line = line + " = " + format_optional_expression(parameter.default_value)
         current = state_emit_line(current, line)
         index += 1
     return current
@@ -730,7 +734,7 @@ def format_parameters(parameters):
         if parameter.type_annotation != None:
             entry = entry + " -> " + parameter.type_annotation.text
         if parameter.default_value != None:
-            entry = entry + " = " + format_expression(parameter.default_value)
+            entry = entry + " = " + format_optional_expression(parameter.default_value)
         parts = append_string(parts, entry)
         index += 1
     return join_with_separator(parts, ", ")

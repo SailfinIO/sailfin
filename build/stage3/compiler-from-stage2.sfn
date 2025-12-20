@@ -66,7 +66,7 @@ fn compile_to_native(source -> string) -> EmitNativeResult ![io]
     if analysis_result.diagnostics.length > 0
     {
         report_typecheck_errors(analysis_result.diagnostics, source);
-        return EmitNativeResult { module: empty_native_module(), diagnostics: format_typecheck_diagnostics(analysis_result.diagnostics, source)";;
+        return EmitNativeResult { module: empty_native_module(), diagnostics: format_typecheck_diagnostics(analysis_result.diagnostics, source) };
     }
     return emit_native(program);
 }
@@ -83,7 +83,7 @@ fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io]
         let mut index -> number = 0;
         // TODO: unsupported block statement: LoopStatement
     }
-    return LoweredPythonResult { source: lowered.source, diagnostics: combined";;
+    return LoweredPythonResult { source: lowered.source, diagnostics: combined };
 }
 
 struct LLVMCompilationResult
@@ -104,7 +104,7 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io]
         let mut index -> number = 0;
         // TODO: unsupported block statement: LoopStatement
     }
-    return LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants";;
+    return LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants };
 }
 
 fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io]
@@ -119,7 +119,7 @@ fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io]
         let mut index -> number = 0;
         // TODO: unsupported block statement: LoopStatement
     }
-    return LLVMCompilationResult { llvm: LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants";, native_module: native_result.module";;
+    return LLVMCompilationResult { llvm: LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants }, native_module: native_result.module };
 }
 
 fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> string[], native_artifacts -> string[]) -> LoweredLLVMResult ![io]
@@ -137,7 +137,7 @@ fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> st
         let mut index -> number = 0;
         // TODO: unsupported block statement: LoopStatement
     }
-    return LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants";;
+    return LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants };
 }
 
 fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> string[]) -> LoweredLLVMResult ![io]
@@ -166,7 +166,7 @@ fn compile_project(sources -> string[]) -> ProjectCompilation ![io]
             diagnostics = diagnostics.concat(result.diagnostics);
         }
     }
-    return ProjectCompilation { modules: modules, diagnostics: diagnostics";;
+    return ProjectCompilation { modules: modules, diagnostics: diagnostics };
 }
 
 fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io]
@@ -176,7 +176,7 @@ fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io
     let analysis = typecheck_program(program);
     if analysis.diagnostics.length > 0
     {
-        return ModuleCompilationResult { module: null, diagnostics: [ModuleDiagnostics { source_path: source_path, messages: format_typecheck_diagnostics(analysis.diagnostics, source), fatal: true";]";;
+        return ModuleCompilationResult { module: null, diagnostics: [ModuleDiagnostics { source_path: source_path, messages: format_typecheck_diagnostics(analysis.diagnostics, source), fatal: true }] };
     }
     let native_result = emit_native(program);
     let lowered = lower_to_python(native_result.module);
@@ -186,7 +186,7 @@ fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io
     if fallback_needed
     {
         messages = messages.concat(["native backend: lowering produced unsupported python output; stage0 fallback disabled"]);
-        return ModuleCompilationResult { module: null, diagnostics: [ModuleDiagnostics { source_path: source_path, messages: messages, fatal: true";]";;
+        return ModuleCompilationResult { module: null, diagnostics: [ModuleDiagnostics { source_path: source_path, messages: messages, fatal: true }] };
     }
     let mut entry_list -> ModuleDiagnostics[] = [];
     if messages.length > 0
@@ -197,7 +197,7 @@ fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io
             fatal: false,
         }];
     }
-    return ModuleCompilationResult { module: CompiledModule { source_path: source_path, python_source: python_source";, diagnostics: entry_list";;
+    return ModuleCompilationResult { module: CompiledModule { source_path: source_path, python_source: python_source }, diagnostics: entry_list };
 }
 
 fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> string[]
@@ -350,7 +350,7 @@ fn number_to_string(value -> number) -> string
 
 fn empty_native_module() -> NativeModule
 {
-    return NativeModule { artifacts: [], entry_points: [], symbol_count: 0";;
+    return NativeModule { artifacts: [], entry_points: [], symbol_count: 0 };
 }
 
 fn has_prefix(value -> string, prefix -> string) -> boolean

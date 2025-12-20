@@ -640,1292 +640,1290 @@
         ret ""
     .endif
     .span 396 5 396 42
-    ret format_expression(expression)
+    eval let value -> Expression = expression
+    .span 397 5 397 37
+    ret format_expression(value)
 .endfn
 
 .fn emit_prompt(builder -> TextBuilder, statement -> Statement) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 399 16 399 38
+    .span 400 16 400 38
     .param builder -> TextBuilder
-    .span 399 40 399 62
+    .span 400 40 400 62
     .param statement -> Statement
-    .span 400 5 400 70
+    .span 401 5 401 70
     eval let mut current = emit_decorators(builder, statement.decorators)
-    .span 401 5 401 48
+    .span 402 5 402 48
     eval let header = "prompt " + statement.channel
-    .span 402 5 402 50
+    .span 403 5 403 50
     eval current = builder_emit_line(current, header)
-    .span 403 5 403 51
+    .span 404 5 404 51
     eval current = emit_block(current, statement.body)
-    .span 404 5 404 44
+    .span 405 5 405 44
     ret builder_emit_line(current, ";")
 .endfn
 
 .fn emit_with(builder -> TextBuilder, statement -> Statement) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 407 14 407 36
+    .span 408 14 408 36
     .param builder -> TextBuilder
-    .span 407 38 407 60
+    .span 408 38 408 60
     .param statement -> Statement
-    .span 408 5 408 70
+    .span 409 5 409 70
     eval let mut current = emit_decorators(builder, statement.decorators)
-    .span 409 5 409 38
+    .span 410 5 410 38
     eval let mut line -> string = "with "
-    .span 410 5 410 33
+    .span 411 5 411 33
     eval let mut index -> number = 0
     .loop
         .if index >= statement.clauses.length
             break
         .endif
         .if index > 0
-            .span 416 13 416 32
+            .span 417 13 417 32
             eval line = line + ", "
         .endif
-        .span 418 9 418 78
+        .span 419 9 419 78
         eval line = line + format_expression(statement.clauses[index].expression)
-        .span 419 9 419 20
+        .span 420 9 420 20
         eval index += 1
     .endloop
-    .span 421 5 421 48
+    .span 422 5 422 48
     eval current = builder_emit_line(current, line)
-    .span 422 5 422 51
+    .span 423 5 423 51
     eval current = emit_block(current, statement.body)
-    .span 423 5 423 20
+    .span 424 5 424 20
     ret current
 .endfn
 
 .fn emit_if(builder -> TextBuilder, statement -> Statement) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 426 12 426 34
+    .span 427 12 427 34
     .param builder -> TextBuilder
-    .span 426 36 426 58
+    .span 427 36 427 58
     .param statement -> Statement
-    .span 427 5 427 70
+    .span 428 5 428 70
     eval let mut current = emit_decorators(builder, statement.decorators)
-    .span 428 5 428 63
+    .span 429 5 429 63
     eval let line = "if " + format_expression(statement.condition)
-    .span 429 5 429 48
+    .span 430 5 430 48
     eval current = builder_emit_line(current, line)
-    .span 430 5 430 57
+    .span 431 5 431 57
     eval current = emit_block(current, statement.then_block)
-    .span 431 5 431 45
+    .span 432 5 432 45
     eval let else_branch = statement.else_branch
     .if else_branch == null
-        .span 433 9 433 24
+        .span 434 9 434 24
         ret current
     .endif
-    .span 435 5 435 51
+    .span 436 5 436 51
     ret emit_else_branch(current, else_branch)
 .endfn
 
 .fn emit_else_branch(builder -> TextBuilder, branch -> ElseBranch) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 438 21 438 43
+    .span 439 21 439 43
     .param builder -> TextBuilder
-    .span 438 45 438 65
+    .span 439 45 439 65
     .param branch -> ElseBranch
-    .span 439 5 439 28
+    .span 440 5 440 28
     eval let body = branch.body
     .if body == null
-        .span 441 9 441 39
+        .span 442 9 442 39
         eval let nested = branch.statement
         .if nested == null
-            .span 443 13 443 28
+            .span 444 13 444 28
             ret builder
         .endif
         .if nested.variant == "IfStatement"
-            .span 446 13 446 104
+            .span 447 13 447 104
             eval let current = builder_emit_line(builder, "else if " + format_expression(nested.condition))
-            .span 447 13 447 64
+            .span 448 13 448 64
             eval let after = emit_block(current, nested.then_block)
-            .span 448 13 448 50
+            .span 449 13 449 50
             eval let nested_else = nested.else_branch
             .if nested_else == null
-                .span 450 17 450 30
+                .span 451 17 451 30
                 ret after
             .endif
-            .span 452 13 452 57
+            .span 453 13 453 57
             ret emit_else_branch(after, nested_else)
         .endif
-        .span 454 9 454 58
+        .span 455 9 455 58
         eval let current = builder_emit_line(builder, "else")
-        .span 455 9 455 54
+        .span 456 9 456 54
         ret emit_block_statement(current, nested)
     .endif
-    .span 457 5 457 54
+    .span 458 5 458 54
     eval let current = builder_emit_line(builder, "else")
-    .span 458 5 458 38
+    .span 459 5 459 38
     ret emit_block(current, body)
 .endfn
 
 .fn emit_for(builder -> TextBuilder, statement -> Statement) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 461 13 461 35
+    .span 462 13 462 35
     .param builder -> TextBuilder
-    .span 461 37 461 59
+    .span 462 37 462 59
     .param statement -> Statement
-    .span 462 5 462 70
+    .span 463 5 463 70
     eval let mut current = emit_decorators(builder, statement.decorators)
-    .span 463 5 463 63
+    .span 464 5 464 63
     eval let header = "for " + format_for_clause(statement.clause)
-    .span 464 5 464 50
+    .span 465 5 465 50
     eval current = builder_emit_line(current, header)
-    .span 465 5 465 48
+    .span 466 5 466 48
     ret emit_block(current, statement.body)
 .endfn
 
 .fn emit_match(builder -> TextBuilder, statement -> Statement) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 468 15 468 37
+    .span 469 15 469 37
     .param builder -> TextBuilder
-    .span 468 39 468 61
+    .span 469 39 469 61
     .param statement -> Statement
-    .span 469 5 469 70
+    .span 470 5 470 70
     eval let mut current = emit_decorators(builder, statement.decorators)
-    .span 470 5 470 69
+    .span 471 5 471 69
     eval let header = "match " + format_expression(statement.expression)
-    .span 471 5 471 50
+    .span 472 5 472 50
     eval current = builder_emit_line(current, header)
-    .span 472 5 472 47
+    .span 473 5 473 47
     eval current = builder_emit_line(current, "{")
-    .span 473 5 473 44
+    .span 474 5 474 44
     eval current = builder_push_indent(current)
-    .span 474 5 474 33
+    .span 475 5 475 33
     eval let mut index -> number = 0
     .loop
         .if index >= statement.cases.length
             break
         .endif
-        .span 479 9 479 68
+        .span 480 9 480 68
         eval current = emit_match_case(current, statement.cases[index])
-        .span 480 9 480 20
+        .span 481 9 481 20
         eval index += 1
     .endloop
-    .span 482 5 482 43
+    .span 483 5 483 43
     eval current = builder_pop_indent(current)
-    .span 483 5 483 44
+    .span 484 5 484 44
     ret builder_emit_line(current, "}")
 .endfn
 
 .fn emit_match_case(builder -> TextBuilder, case -> MatchCase) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 486 20 486 42
+    .span 487 20 487 42
     .param builder -> TextBuilder
-    .span 486 44 486 61
+    .span 487 44 487 61
     .param case -> MatchCase
-    .span 487 5 487 72
+    .span 488 5 488 72
     eval let mut line -> string = "case " + format_expression(case.pattern)
-    .span 488 5 488 28
+    .span 489 5 489 28
     eval let guard = case.guard
     .if guard == null
-        .span 490 9 490 31
+        .span 491 9 491 31
         eval line = line + " => {"
     .else
-        .span 492 9 492 67
-        eval line = line + " if " + format_expression(guard) + " => {"
+        .span 493 9 493 76
+        eval line = line + " if " + format_optional_expression(guard) + " => {"
     .endif
-    .span 494 5 494 56
+    .span 495 5 495 56
     eval let mut current = builder_emit_line(builder, line)
-    .span 495 5 495 44
+    .span 496 5 496 44
     eval current = builder_push_indent(current)
-    .span 496 5 496 51
+    .span 497 5 497 51
     eval current = emit_block_body(current, case.body)
-    .span 497 5 497 43
+    .span 498 5 498 43
     eval current = builder_pop_indent(current)
-    .span 498 5 498 44
+    .span 499 5 499 44
     ret builder_emit_line(current, "}")
 .endfn
 
 .fn emit_block_start(builder -> TextBuilder) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 501 21 501 43
+    .span 502 21 502 43
     .param builder -> TextBuilder
-    .span 502 5 502 51
+    .span 503 5 503 51
     eval let current = builder_emit_line(builder, "{")
-    .span 503 5 503 41
+    .span 504 5 504 41
     ret builder_push_indent(current)
 .endfn
 
 .fn emit_block_end(builder -> TextBuilder) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 506 19 506 41
+    .span 507 19 507 41
     .param builder -> TextBuilder
-    .span 507 5 507 47
+    .span 508 5 508 47
     eval let current = builder_pop_indent(builder)
-    .span 508 5 508 44
+    .span 509 5 509 44
     ret builder_emit_line(current, "}")
 .endfn
 
 .fn emit_decorators_then_line(builder -> TextBuilder, decorators -> Decorator[], line -> string) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 511 30 511 52
+    .span 512 30 512 52
     .param builder -> TextBuilder
-    .span 511 54 511 79
+    .span 512 54 512 79
     .param decorators -> Decorator[]
-    .span 511 81 511 95
+    .span 512 81 512 95
     .param line -> string
-    .span 512 5 512 56
+    .span 513 5 513 56
     eval let current = emit_decorators(builder, decorators)
-    .span 513 5 513 45
+    .span 514 5 514 45
     ret builder_emit_line(current, line)
 .endfn
 
 .fn emit_decorators(builder -> TextBuilder, decorators -> Decorator[]) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 516 20 516 42
+    .span 517 20 517 42
     .param builder -> TextBuilder
-    .span 516 44 516 69
+    .span 517 44 517 69
     .param decorators -> Decorator[]
-    .span 517 5 517 31
+    .span 518 5 518 31
     eval let mut current = builder
-    .span 518 5 518 33
+    .span 519 5 519 33
     eval let mut index -> number = 0
     .loop
         .if index >= decorators.length
             break
         .endif
-        .span 523 9 523 83
+        .span 524 9 524 83
         eval current = builder_emit_line(current, format_decorator(decorators[index]))
-        .span 524 9 524 20
+        .span 525 9 525 20
         eval index += 1
     .endloop
-    .span 526 5 526 20
+    .span 527 5 527 20
     ret current
 .endfn
 
 .fn format_decorator(decorator -> Decorator) -> string
 .meta return string
 .meta effects none
-    .span 529 21 529 43
+    .span 530 21 530 43
     .param decorator -> Decorator
-    .span 530 5 530 51
+    .span 531 5 531 51
     eval let mut line -> string = "@" + decorator.name
     .if decorator.arguments.length == 0
-        .span 532 9 532 21
+        .span 533 9 533 21
         ret line
     .endif
-    .span 534 5 534 36
+    .span 535 5 535 36
     eval let mut parts -> string[] = []
-    .span 535 5 535 33
+    .span 536 5 536 33
     eval let mut index -> number = 0
     .loop
         .if index >= decorator.arguments.length
             break
         .endif
-        .span 540 9 540 93
+        .span 541 9 541 93
         eval parts = append_string(parts, format_decorator_argument(decorator.arguments[index]))
-        .span 541 9 541 20
+        .span 542 9 542 20
         eval index += 1
     .endloop
-    .span 543 5 543 64
+    .span 544 5 544 64
     ret line + "(" + join_with_separator(parts, ", ") + ")"
 .endfn
 
 .fn format_decorator_argument(argument -> DecoratorArgument) -> string
 .meta return string
 .meta effects none
-    .span 546 30 546 59
+    .span 547 30 547 59
     .param argument -> DecoratorArgument
-    .span 547 5 547 56
+    .span 548 5 548 56
     eval let value = format_expression(argument.expression)
     .if argument.name == null
-        .span 549 9 549 22
+        .span 550 9 550 22
         ret value
     .endif
-    .span 551 5 551 41
+    .span 552 5 552 41
     ret argument.name + ": " + value
 .endfn
 
 .fn format_for_clause(clause -> ForClause) -> string
 .meta return string
 .meta effects none
-    .span 554 22 554 41
+    .span 555 22 555 41
     .param clause -> ForClause
-    .span 555 5 555 51
+    .span 556 5 556 51
     eval let target = format_expression(clause.target)
-    .span 556 5 556 55
+    .span 557 5 557 55
     eval let iterable = format_expression(clause.iterable)
     .if target.length == 0 || iterable.length == 0
-        .span 558 9 558 48
+        .span 559 9 559 48
         ret tokens_to_source(clause.tokens)
     .endif
-    .span 560 5 560 39
+    .span 561 5 561 39
     ret target + " in " + iterable
 .endfn
 
 .fn format_function_header(signature -> FunctionSignature) -> string
 .meta return string
 .meta effects none
-    .span 563 27 563 57
+    .span 564 27 564 57
     .param signature -> FunctionSignature
-    .span 564 5 564 51
+    .span 565 5 565 51
     ret format_signature_line("fn", signature)
 .endfn
 
 .fn format_method_header(signature -> FunctionSignature) -> string
 .meta return string
 .meta effects none
-    .span 567 25 567 55
+    .span 568 25 568 55
     .param signature -> FunctionSignature
-    .span 568 5 568 51
+    .span 569 5 569 51
     ret format_signature_line("fn", signature)
 .endfn
 
 .fn format_callable_header(keyword -> string, signature -> FunctionSignature) -> string
 .meta return string
 .meta effects none
-    .span 571 27 571 44
+    .span 572 27 572 44
     .param keyword -> string
-    .span 571 46 571 76
+    .span 572 46 572 76
     .param signature -> FunctionSignature
-    .span 572 5 572 54
+    .span 573 5 573 54
     ret format_signature_line(keyword, signature)
 .endfn
 
 .fn format_signature_line(keyword -> string, signature -> FunctionSignature) -> string
 .meta return string
 .meta effects none
-    .span 575 26 575 43
+    .span 576 26 576 43
     .param keyword -> string
-    .span 575 45 575 75
+    .span 576 45 576 75
     .param signature -> FunctionSignature
-    .span 576 5 576 35
+    .span 577 5 577 35
     eval let mut prefix -> string = ""
     .if signature.is_async
-        .span 578 9 578 27
+        .span 579 9 579 27
         eval prefix = "async "
     .endif
-    .span 580 5 580 70
+    .span 581 5 581 70
     eval let mut line -> string = prefix + keyword + " " + signature.name
-    .span 581 5 581 69
+    .span 582 5 582 69
     eval line = line + format_type_parameters(signature.type_parameters)
-    .span 582 5 582 71
+    .span 583 5 583 71
     eval line = line + "(" + format_parameters(signature.parameters) + ")"
     .if signature.return_type != null
-        .span 584 9 584 59
+        .span 585 9 585 59
         eval line = line + " -> " + signature.return_type.text
     .endif
-    .span 586 5 586 53
+    .span 587 5 587 53
     eval let effects = format_effects(signature.effects)
     .if effects.length > 0
-        .span 588 9 588 37
+        .span 589 9 589 37
         eval line = line + " " + effects
     .endif
-    .span 590 5 590 17
+    .span 591 5 591 17
     ret line
 .endfn
 
 .fn format_field(field -> FieldDeclaration) -> string
 .meta return string
 .meta effects none
-    .span 593 17 593 42
+    .span 594 17 594 42
     .param field -> FieldDeclaration
-    .span 594 5 594 33
+    .span 595 5 595 33
     eval let mut line -> string = ""
     .if field.mutable
-        .span 596 9 596 30
+        .span 597 9 597 30
         eval line = line + "mut "
     .endif
-    .span 598 5 598 30
+    .span 599 5 599 30
     eval line = line + field.name
-    .span 599 5 599 55
+    .span 600 5 600 55
     eval line = line + " -> " + field.type_annotation.text
-    .span 600 5 600 17
+    .span 601 5 601 17
     ret line
 .endfn
 
 .fn format_enum_variant(variant -> EnumVariant) -> string
 .meta return string
 .meta effects none
-    .span 603 24 603 46
+    .span 604 24 604 46
     .param variant -> EnumVariant
     .if variant.fields.length == 0
-        .span 605 9 605 29
+        .span 606 9 606 29
         ret variant.name
     .endif
-    .span 607 5 607 36
+    .span 608 5 608 36
     eval let mut parts -> string[] = []
-    .span 608 5 608 33
+    .span 609 5 609 33
     eval let mut index -> number = 0
     .loop
         .if index >= variant.fields.length
             break
         .endif
-        .span 613 9 613 75
+        .span 614 9 614 75
         eval parts = append_string(parts, format_field(variant.fields[index]))
-        .span 614 9 614 20
+        .span 615 9 615 20
         eval index += 1
     .endloop
-    .span 616 5 616 75
-    ret variant.name + " { " + join_with_separator(parts, "; ") + " }"
+    .span 617 5 617 80
+    ret variant.name + " { " + join_with_separator(parts, "; ") + " " + "}"
 .endfn
 
 .fn format_parameters(parameters -> Parameter[]) -> string
 .meta return string
 .meta effects none
-    .span 619 22 619 47
+    .span 620 22 620 47
     .param parameters -> Parameter[]
     .if parameters.length == 0
-        .span 621 9 621 19
+        .span 622 9 622 19
         ret ""
     .endif
-    .span 623 5 623 36
+    .span 624 5 624 36
     eval let mut parts -> string[] = []
-    .span 624 5 624 33
+    .span 625 5 625 33
     eval let mut index -> number = 0
     .loop
         .if index >= parameters.length
             break
         .endif
-        .span 629 9 629 75
+        .span 630 9 630 75
         eval parts = append_string(parts, format_parameter(parameters[index]))
-        .span 630 9 630 20
+        .span 631 9 631 20
         eval index += 1
     .endloop
-    .span 632 5 632 45
+    .span 633 5 633 45
     ret join_with_separator(parts, ", ")
 .endfn
 
 .fn format_parameter(parameter -> Parameter) -> string
 .meta return string
 .meta effects none
-    .span 635 21 635 43
+    .span 636 21 636 43
     .param parameter -> Parameter
-    .span 636 5 636 33
+    .span 637 5 637 33
     eval let mut line -> string = ""
     .if parameter.mutable
-        .span 638 9 638 40
+        .span 639 9 639 40
         eval line = "mut " + parameter.name
     .else
-        .span 640 9 640 31
+        .span 641 9 641 31
         eval line = parameter.name
     .endif
     .if parameter.type_annotation != null
-        .span 643 9 643 63
+        .span 644 9 644 63
         eval line = line + " -> " + parameter.type_annotation.text
     .endif
     .if parameter.default_value != null
-        .span 646 9 646 74
-        eval line = line + " = " + format_expression(parameter.default_value)
+        .span 647 9 647 83
+        eval line = line + " = " + format_optional_expression(parameter.default_value)
     .endif
-    .span 648 5 648 17
+    .span 649 5 649 17
     ret line
 .endfn
 
 .fn format_type_parameters(parameters -> TypeParameter[]) -> string
 .meta return string
 .meta effects none
-    .span 651 27 651 56
+    .span 652 27 652 56
     .param parameters -> TypeParameter[]
     .if parameters.length == 0
-        .span 653 9 653 19
+        .span 654 9 654 19
         ret ""
     .endif
-    .span 655 5 655 36
+    .span 656 5 656 36
     eval let mut names -> string[] = []
-    .span 656 5 656 33
+    .span 657 5 657 33
     eval let mut index -> number = 0
     .loop
         .if index >= parameters.length
             break
         .endif
-        .span 661 9 661 43
+        .span 662 9 662 43
         eval let parameter = parameters[index]
-        .span 662 9 662 49
+        .span 663 9 663 49
         eval let mut part -> string = parameter.name
         .if parameter.bound != null
-            .span 664 13 664 56
+            .span 665 13 665 56
             eval part = part + " : " + parameter.bound.text
         .endif
-        .span 666 9 666 44
+        .span 667 9 667 44
         eval names = append_string(names, part)
-        .span 667 9 667 20
+        .span 668 9 668 20
         eval index += 1
     .endloop
-    .span 669 5 669 57
+    .span 670 5 670 57
     ret "<" + join_with_separator(names, ", ") + ">"
 .endfn
 
 .fn format_type_annotation(annotation -> TypeAnnotation?) -> string
 .meta return string
 .meta effects none
-    .span 672 27 672 56
+    .span 673 27 673 56
     .param annotation -> TypeAnnotation?
     .if annotation == null
-        .span 674 9 674 19
+        .span 675 9 675 19
         ret ""
     .endif
-    .span 676 5 676 37
+    .span 677 5 677 37
     ret " -> " + annotation.text
 .endfn
 
 .fn format_initializer(initializer -> Expression?) -> string
 .meta return string
 .meta effects none
-    .span 679 23 679 49
+    .span 680 23 680 49
     .param initializer -> Expression?
-    .if initializer == null
-        .span 681 9 681 19
-        ret ""
-    .endif
-    .span 683 5 683 48
-    eval let value = format_expression(initializer)
+    .span 681 5 681 57
+    eval let value = format_optional_expression(initializer)
     .if value.length == 0
-        .span 685 9 685 19
+        .span 683 9 683 19
         ret ""
     .endif
-    .span 687 5 687 26
+    .span 685 5 685 26
     ret " = " + value
 .endfn
 
 .fn format_effects(effects -> string[]) -> string
 .meta return string
 .meta effects none
-    .span 690 19 690 38
+    .span 688 19 688 38
     .param effects -> string[]
     .if effects.length == 0
-        .span 692 9 692 19
+        .span 690 9 690 19
         ret ""
     .endif
-    .span 694 5 694 60
+    .span 692 5 692 60
     ret "![" + join_with_separator(effects, ", ") + "]"
 .endfn
 
 .fn join_type_annotations(values -> TypeAnnotation[]) -> string
 .meta return string
 .meta effects none
-    .span 697 26 697 52
+    .span 695 26 695 52
     .param values -> TypeAnnotation[]
     .if values.length == 0
-        .span 699 9 699 19
+        .span 697 9 697 19
         ret ""
     .endif
-    .span 701 5 701 36
+    .span 699 5 699 36
     eval let mut parts -> string[] = []
-    .span 702 5 702 33
+    .span 700 5 700 33
     eval let mut index -> number = 0
     .loop
         .if index >= values.length
             break
         .endif
-        .span 707 9 707 58
+        .span 705 9 705 58
         eval parts = append_string(parts, values[index].text)
-        .span 708 9 708 20
+        .span 706 9 706 20
         eval index += 1
     .endloop
-    .span 710 5 710 45
+    .span 708 5 708 45
     ret join_with_separator(parts, ", ")
 .endfn
 
 .fn format_expression(expression -> Expression) -> string
 .meta return string
 .meta effects none
-    .span 713 22 713 46
+    .span 711 22 711 46
     .param expression -> Expression
     .if expression.variant == "Identifier"
-        .span 715 9 715 32
+        .span 713 9 713 32
         ret expression.name
     .endif
     .if expression.variant == "NumberLiteral"
-        .span 718 9 718 33
+        .span 716 9 716 33
         ret expression.value
     .endif
     .if expression.variant == "BooleanLiteral"
-        .span 721 9 721 33
+        .span 719 9 719 33
         ret expression.value
     .endif
     .if expression.variant == "NullLiteral"
-        .span 724 9 724 23
+        .span 722 9 722 23
         ret "null"
     .endif
     .if expression.variant == "StringLiteral"
-        .span 727 9 727 47
+        .span 725 9 725 47
         ret quote_string(expression.value)
     .endif
     .if expression.variant == "Unary"
-        .span 730 9 730 61
+        .span 728 9 728 61
         eval let operand = format_expression(expression.operand)
         .if expression.operator == "!"
-            .span 732 13 732 34
+            .span 730 13 730 34
             ret "!" + operand
         .endif
-        .span 734 9 734 46
+        .span 732 9 732 46
         ret expression.operator + operand
     .endif
     .if expression.variant == "Binary"
-        .span 737 9 737 55
+        .span 735 9 735 55
         eval let left = format_expression(expression.left)
-        .span 738 9 738 57
+        .span 736 9 736 57
         eval let right = format_expression(expression.right)
-        .span 739 9 739 38
+        .span 737 9 737 38
         eval let op = expression.operator
-        .span 740 9 740 37
+        .span 738 9 738 37
         eval let spaced = " " + op + " "
-        .span 741 9 741 38
+        .span 739 9 739 38
         ret left + spaced + right
     .endif
     .if expression.variant == "Member"
-        .span 744 9 744 79
+        .span 742 9 742 79
         ret format_expression(expression.object) + "." + expression.member
     .endif
     .if expression.variant == "Call"
-        .span 747 9 747 43
+        .span 745 9 745 43
         eval let mut rendered -> string[] = []
-        .span 748 9 748 37
+        .span 746 9 746 37
         eval let mut index -> number = 0
         .loop
             .if index >= expression.arguments.length
                 break
             .endif
-            .span 753 13 753 96
+            .span 751 13 751 96
             eval rendered = append_string(rendered, format_expression(expression.arguments[index]))
-            .span 754 13 754 24
+            .span 752 13 752 24
             eval index += 1
         .endloop
-        .span 756 9 756 56
+        .span 754 9 754 56
         eval let args = join_with_separator(rendered, ", ")
-        .span 757 9 757 72
+        .span 755 9 755 72
         ret format_expression(expression.callee) + "(" + args + ")"
     .endif
     .if expression.variant == "Index"
-        .span 760 9 760 61
+        .span 758 9 758 61
         eval let target = format_expression(expression.sequence)
-        .span 761 9 761 58
+        .span 759 9 759 58
         eval let offset = format_expression(expression.index)
-        .span 762 9 762 44
+        .span 760 9 760 44
         ret target + "[" + offset + "]"
     .endif
     .if expression.variant == "Array"
-        .span 765 9 765 43
+        .span 763 9 763 43
         eval let mut rendered -> string[] = []
-        .span 766 9 766 37
+        .span 764 9 764 37
         eval let mut index -> number = 0
         .loop
             .if index >= expression.elements.length
                 break
             .endif
-            .span 771 13 771 95
+            .span 769 13 769 95
             eval rendered = append_string(rendered, format_expression(expression.elements[index]))
-            .span 772 13 772 24
+            .span 770 13 770 24
             eval index += 1
         .endloop
-        .span 774 9 774 60
+        .span 772 9 772 60
         eval let contents = join_with_separator(rendered, ", ")
-        .span 775 9 775 37
+        .span 773 9 773 37
         ret "[" + contents + "]"
     .endif
     .if expression.variant == "Object"
-        .span 778 9 778 43
+        .span 776 9 776 43
         eval let mut rendered -> string[] = []
-        .span 779 9 779 37
+        .span 777 9 777 37
         eval let mut index -> number = 0
         .loop
             .if index >= expression.fields.length
                 break
             .endif
-            .span 784 13 784 50
+            .span 782 13 782 50
             eval let field = expression.fields[index]
-            .span 785 13 785 56
+            .span 783 13 783 56
             eval let value = format_expression(field.value)
-            .span 786 13 786 75
+            .span 784 13 784 75
             eval rendered = append_string(rendered, field.name + ": " + value)
-            .span 787 13 787 24
+            .span 785 13 785 24
             eval index += 1
         .endloop
-        .span 789 9 789 56
+        .span 787 9 787 56
         eval let body = join_with_separator(rendered, ", ")
-        .span 790 9 790 45
+        .span 788 9 788 45
         ret "{" + " " + body + " " + "}"
     .endif
     .if expression.variant == "Struct"
-        .span 793 9 793 72
+        .span 791 9 791 72
         eval let type_name = join_with_separator(expression.type_name, ".")
-        .span 794 9 794 43
+        .span 792 9 792 43
         eval let mut rendered -> string[] = []
-        .span 795 9 795 37
+        .span 793 9 793 37
         eval let mut index -> number = 0
         .loop
             .if index >= expression.fields.length
                 break
             .endif
-            .span 800 13 800 50
+            .span 798 13 798 50
             eval let field = expression.fields[index]
-            .span 801 13 801 56
+            .span 799 13 799 56
             eval let value = format_expression(field.value)
-            .span 802 13 802 75
+            .span 800 13 800 75
             eval rendered = append_string(rendered, field.name + ": " + value)
-            .span 803 13 803 24
+            .span 801 13 801 24
             eval index += 1
         .endloop
-        .span 805 9 805 56
+        .span 803 9 803 56
         eval let body = join_with_separator(rendered, ", ")
-        .span 806 9 806 48
-        ret type_name + " { " + body + " }"
+        .span 805 9 805 53
+        ret type_name + " { " + body + " " + "}"
     .endif
     .if expression.variant == "Range"
-        .span 809 9 809 63
+        .span 808 9 808 63
         eval let start_value = format_expression(expression.start)
-        .span 810 9 810 59
+        .span 809 9 809 59
         eval let end_value = format_expression(expression.end)
-        .span 811 9 811 47
+        .span 810 9 810 47
         ret start_value + ".." + end_value
     .endif
     .if expression.variant == "Lambda"
-        .span 814 9 814 53
+        .span 813 9 813 53
         ret format_lambda_expression(expression)
     .endif
     .if expression.variant == "Raw"
-        .span 817 9 817 43
+        .span 816 9 816 43
         ret trim_text(expression.text)
     .endif
-    .span 819 5 819 15
+    .span 818 5 818 15
     ret ""
 .endfn
 
 .fn format_lambda_expression(expression -> Expression) -> string
 .meta return string
 .meta effects none
-    .span 822 29 822 53
+    .span 821 29 821 53
     .param expression -> Expression
-    .span 823 5 823 66
+    .span 822 5 822 66
     eval let params = format_lambda_parameters(expression.parameters)
-    .span 824 5 824 47
+    .span 823 5 823 47
     eval let mut header -> string = "fn " + params
-    .span 825 5 825 70
+    .span 824 5 824 70
     eval header = header + format_type_annotation(expression.return_type)
-    .span 827 5 827 52
+    .span 826 5 826 52
     eval let body = format_lambda_body(expression.body)
-    .span 828 5 828 32
+    .span 827 5 827 32
     ret header + " " + body
 .endfn
 
 .fn format_lambda_parameters(parameters -> Parameter[]) -> string
 .meta return string
 .meta effects none
-    .span 831 29 831 54
+    .span 830 29 830 54
     .param parameters -> Parameter[]
-    .span 832 5 832 39
+    .span 831 5 831 39
     eval let mut rendered -> string[] = []
-    .span 833 5 833 33
+    .span 832 5 832 33
     eval let mut index -> number = 0
     .loop
         .if index >= parameters.length
             break
         .endif
-        .span 838 9 838 39
+        .span 837 9 837 39
         eval let param = parameters[index]
-        .span 839 9 839 46
+        .span 838 9 838 46
         eval let mut entry -> string = param.name
-        .span 840 9 840 71
+        .span 839 9 839 71
         eval entry = entry + format_type_annotation(param.type_annotation)
-        .span 841 9 841 51
+        .span 840 9 840 51
         eval rendered = append_string(rendered, entry)
-        .span 842 9 842 20
+        .span 841 9 841 20
         eval index += 1
     .endloop
-    .span 844 5 844 52
+    .span 843 5 843 52
     eval let args = join_with_separator(rendered, ", ")
-    .span 845 5 845 29
+    .span 844 5 844 29
     ret "(" + args + ")"
 .endfn
 
 .fn format_lambda_body(body -> Block) -> string
 .meta return string
 .meta effects none
-    .span 848 23 848 36
+    .span 847 23 847 36
     .param body -> Block
-    .span 849 5 849 36
+    .span 848 5 848 36
     eval let mut lines -> string[] = []
     .if body.statements.length == 0
-        .span 851 9 851 55
+        .span 850 9 850 55
         eval lines = append_string(lines, "// empty body")
     .else
-        .span 853 9 853 37
+        .span 852 9 852 37
         eval let mut index -> number = 0
         .loop
             .if index >= body.statements.length
                 break
             .endif
-            .span 858 13 858 91
+            .span 857 13 857 91
             eval lines = append_string(lines, format_lambda_statement(body.statements[index]))
-            .span 859 13 859 24
+            .span 858 13 858 24
             eval index += 1
         .endloop
     .endif
-    .span 863 5 863 43
+    .span 862 5 862 43
     eval let indented = indent_lines(lines, 1)
-    .span 864 5 864 64
+    .span 863 5 863 64
     ret "{\n" + join_with_separator(indented, "\n") + "\n}"
 .endfn
 
 .fn format_lambda_statement(statement -> Statement) -> string
 .meta return string
 .meta effects none
-    .span 867 28 867 50
+    .span 866 28 866 50
     .param statement -> Statement
     .if statement.variant == "ReturnStatement"
-        .span 869 9 869 73
+        .span 868 9 868 73
         eval let rendered = format_optional_expression(statement.expression)
         .if rendered.length == 0
-            .span 871 13 871 30
+            .span 870 13 870 30
             ret "return;"
         .endif
-        .span 873 9 873 43
+        .span 872 9 872 43
         ret "return " + rendered + ";"
     .endif
     .if statement.variant == "ExpressionStatement"
-        .span 876 9 876 62
+        .span 875 9 875 62
         ret format_expression(statement.expression) + ";"
     .endif
     .if statement.variant == "VariableDeclaration"
-        .span 879 9 879 41
+        .span 878 9 878 41
         eval let mut line -> string = "let "
         .if statement.mutable
-            .span 881 13 881 34
+            .span 880 13 880 34
             eval line = line + "mut "
         .endif
-        .span 883 9 883 38
+        .span 882 9 882 38
         eval line = line + statement.name
-        .span 884 9 884 73
+        .span 883 9 883 73
         eval line = line + format_type_annotation(statement.type_annotation)
-        .span 885 9 885 65
+        .span 884 9 884 65
         eval line = line + format_initializer(statement.initializer)
-        .span 886 9 886 27
+        .span 885 9 885 27
         ret line + ";"
     .endif
     .if statement.variant == "Unknown"
-        .span 889 9 889 70
+        .span 888 9 888 70
         ret "// original: " + collapse_whitespace(statement.text)
     .endif
-    .span 891 5 891 74
+    .span 890 5 890 74
     ret "// TODO: unsupported lambda statement: " + statement.variant
 .endfn
 
 .fn indent_lines(lines -> string[], depth -> number) -> string[]
 .meta return string[]
 .meta effects none
-    .span 894 17 894 34
+    .span 893 17 893 34
     .param lines -> string[]
-    .span 894 36 894 51
+    .span 893 36 893 51
     .param depth -> number
-    .span 895 5 895 37
+    .span 894 5 894 37
     eval let mut result -> string[] = []
-    .span 896 5 896 33
+    .span 895 5 895 33
     eval let mut index -> number = 0
     .loop
         .if index >= lines.length
             break
         .endif
-        .span 901 9 901 39
+        .span 900 9 900 39
         eval let mut prefix -> string = ""
-        .span 902 9 902 37
+        .span 901 9 901 37
         eval let mut count -> number = 0
         .loop
             .if count >= depth
                 break
             .endif
-            .span 907 13 907 38
+            .span 906 13 906 38
             eval prefix = prefix + "    "
-            .span 908 13 908 24
+            .span 907 13 907 24
             eval count += 1
         .endloop
-        .span 910 9 910 63
+        .span 909 9 909 63
         eval result = append_string(result, prefix + lines[index])
-        .span 911 9 911 20
+        .span 910 9 910 20
         eval index += 1
     .endloop
-    .span 913 5 913 19
+    .span 912 5 912 19
     ret result
 .endfn
 
 .fn quote_string(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 916 17 916 32
+    .span 915 17 915 32
     .param value -> string
-    .span 917 5 917 37
+    .span 916 5 916 37
     eval let mut result -> string = "\""
-    .span 918 5 918 33
+    .span 917 5 917 33
     eval let mut index -> number = 0
     .loop
         .if index >= value.length
             break
         .endif
-        .span 923 9 923 69
+        .span 922 9 922 69
         eval result = result + escape_string_char(char_at(value, index))
-        .span 924 9 924 20
+        .span 923 9 923 20
         eval index += 1
     .endloop
-    .span 926 5 926 28
+    .span 925 5 925 28
     eval result = result + "\""
-    .span 927 5 927 19
+    .span 926 5 926 19
     ret result
 .endfn
 
 .fn escape_string_char(ch -> string) -> string
 .meta return string
 .meta effects none
-    .span 930 23 930 35
+    .span 929 23 929 35
     .param ch -> string
     .if ch == "\""
-        .span 932 9 932 23
+        .span 931 9 931 23
         ret "\\\""
     .endif
     .if ch == "\\"
-        .span 935 9 935 23
+        .span 934 9 934 23
         ret "\\\\"
     .endif
     .if ch == "\n"
-        .span 938 9 938 22
+        .span 937 9 937 22
         ret "\\n"
     .endif
     .if ch == "\r"
-        .span 941 9 941 22
+        .span 940 9 940 22
         ret "\\r"
     .endif
     .if ch == "\t"
-        .span 944 9 944 22
+        .span 943 9 943 22
         ret "\\t"
     .endif
-    .span 946 5 946 15
+    .span 945 5 945 15
     ret ch
 .endfn
 
 .fn format_test_name(name -> string) -> string
 .meta return string
 .meta effects none
-    .span 949 21 949 35
+    .span 948 21 948 35
     .param name -> string
-    .span 950 5 950 31
+    .span 949 5 949 31
     ret quote_string(name)
 .endfn
 
 .fn is_identifier(value -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 953 18 953 33
+    .span 952 18 952 33
     .param value -> string
     .if value.length == 0
-        .span 955 9 955 22
+        .span 954 9 954 22
         ret false
     .endif
-    .span 957 5 957 35
+    .span 956 5 956 35
     eval let first = char_at(value, 0)
     .if !is_identifier_start(first)
-        .span 959 9 959 22
+        .span 958 9 958 22
         ret false
     .endif
-    .span 961 5 961 33
+    .span 960 5 960 33
     eval let mut index -> number = 1
     .loop
         .if index >= value.length
             break
         .endif
         .if !is_identifier_part(char_at(value, index))
-            .span 967 13 967 26
+            .span 966 13 966 26
             ret false
         .endif
-        .span 969 9 969 20
+        .span 968 9 968 20
         eval index += 1
     .endloop
-    .span 971 5 971 17
+    .span 970 5 970 17
     ret true
 .endfn
 
 .fn is_identifier_start(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 974 24 974 36
+    .span 973 24 973 36
     .param ch -> string
     .if ch == "_"
-        .span 976 9 976 21
+        .span 975 9 975 21
         ret true
     .endif
-    .span 978 5 978 30
+    .span 977 5 977 30
     eval let code = char_code(ch)
-    .span 979 5 980 63
+    .span 978 5 979 63
     ret code >= char_code("a") && code <= char_code("z") || code >= char_code("A") && code <= char_code("Z")
 .endfn
 
 .fn is_identifier_part(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 983 23 983 35
+    .span 982 23 982 35
     .param ch -> string
     .if is_identifier_start(ch)
-        .span 985 9 985 21
+        .span 984 9 984 21
         ret true
     .endif
-    .span 987 5 987 30
+    .span 986 5 986 30
     eval let code = char_code(ch)
-    .span 988 5 988 61
+    .span 987 5 987 61
     ret code >= char_code("0") && code <= char_code("9")
 .endfn
 
 .fn trim_block_body(text -> string) -> string
 .meta return string
 .meta effects none
-    .span 991 20 991 34
+    .span 990 20 990 34
     .param text -> string
-    .span 992 5 992 35
+    .span 991 5 991 35
     eval let trimmed = trim_text(text)
     .if trimmed.length == 0
-        .span 994 9 994 24
+        .span 993 9 993 24
         ret trimmed
     .endif
     .if char_at(trimmed, 0) == "{" && char_at(trimmed, trimmed.length - 1) == "}"
-        .span 997 9 997 69
+        .span 996 9 996 69
         ret trim_text(substring(trimmed, 1, trimmed.length - 1))
     .endif
-    .span 999 5 999 20
+    .span 998 5 998 20
     ret trimmed
 .endfn
 
 .fn collapse_whitespace(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 1002 24 1002 39
+    .span 1001 24 1001 39
     .param value -> string
-    .span 1003 5 1003 35
+    .span 1002 5 1002 35
     eval let mut result -> string = ""
-    .span 1004 5 1004 33
+    .span 1003 5 1003 33
     eval let mut index -> number = 0
-    .span 1005 5 1005 43
+    .span 1004 5 1004 43
     eval let mut last_space -> boolean = false
     .loop
         .if index >= value.length
             break
         .endif
-        .span 1010 9 1010 40
+        .span 1009 9 1009 40
         eval let ch = char_at(value, index)
-        .span 1011 9 1011 76
+        .span 1010 9 1010 76
         eval let is_space = ch == " " || ch == "\n" || ch == "\r" || ch == "\t"
         .if is_space
             .if !last_space
-                .span 1014 17 1014 39
+                .span 1013 17 1013 39
                 eval result = result + " "
-                .span 1015 17 1015 35
+                .span 1014 17 1014 35
                 eval last_space = true
             .endif
         .else
-            .span 1018 13 1018 34
+            .span 1017 13 1017 34
             eval result = result + ch
-            .span 1019 13 1019 32
+            .span 1018 13 1018 32
             eval last_space = false
         .endif
-        .span 1021 9 1021 20
+        .span 1020 9 1020 20
         eval index += 1
     .endloop
-    .span 1023 5 1023 30
+    .span 1022 5 1022 30
     ret trim_text(result)
 .endfn
 
 .fn tokens_to_source(tokens -> Token[]) -> string
 .meta return string
 .meta effects none
-    .span 1026 21 1026 38
+    .span 1025 21 1025 38
     .param tokens -> Token[]
     .if tokens.length == 0
-        .span 1028 9 1028 19
+        .span 1027 9 1027 19
         ret ""
     .endif
-    .span 1030 5 1030 36
+    .span 1029 5 1029 36
     eval let mut parts -> string[] = []
-    .span 1031 5 1031 33
+    .span 1030 5 1030 33
     eval let mut index -> number = 0
     .loop
         .if index >= tokens.length
             break
         .endif
-        .span 1036 9 1036 60
+        .span 1035 9 1035 60
         eval parts = append_string(parts, tokens[index].lexeme)
-        .span 1037 9 1037 20
+        .span 1036 9 1036 20
         eval index += 1
     .endloop
-    .span 1039 5 1039 64
+    .span 1038 5 1038 64
     ret collapse_whitespace(join_with_separator(parts, ""))
 .endfn
 
 .fn builder_new() -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1043 5 1043 49
+    .span 1042 5 1042 49
     ret TextBuilder { lines: [], indent: 0 }
 .endfn
 
 .fn builder_emit_line(builder -> TextBuilder, line -> string) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1046 22 1046 44
+    .span 1045 22 1045 44
     .param builder -> TextBuilder
-    .span 1046 46 1046 60
+    .span 1045 46 1045 60
     .param line -> string
-    .span 1047 5 1047 35
+    .span 1046 5 1046 35
     eval let mut prefix -> string = ""
-    .span 1048 5 1048 33
+    .span 1047 5 1047 33
     eval let mut count -> number = 0
     .loop
         .if count >= builder.indent
             break
         .endif
-        .span 1053 9 1053 34
+        .span 1052 9 1052 34
         eval prefix = prefix + "    "
-        .span 1054 9 1054 20
+        .span 1053 9 1053 20
         eval count += 1
     .endloop
-    .span 1056 5 1056 47
+    .span 1055 5 1055 47
     eval let full_line = prefix + trim_right(line)
-    .span 1057 5 1057 57
+    .span 1056 5 1056 57
     eval let lines = append_string(builder.lines, full_line)
-    .span 1058 5 1058 65
+    .span 1057 5 1057 65
     ret TextBuilder { lines: lines, indent: builder.indent }
 .endfn
 
 .fn builder_emit_blank(builder -> TextBuilder) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1061 23 1061 45
+    .span 1060 23 1060 45
     .param builder -> TextBuilder
-    .span 1062 5 1062 50
+    .span 1061 5 1061 50
     eval let lines = append_string(builder.lines, "")
-    .span 1063 5 1063 65
+    .span 1062 5 1062 65
     ret TextBuilder { lines: lines, indent: builder.indent }
 .endfn
 
 .fn builder_push_indent(builder -> TextBuilder) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1066 24 1066 46
+    .span 1065 24 1065 46
     .param builder -> TextBuilder
-    .span 1067 5 1067 77
+    .span 1066 5 1066 77
     ret TextBuilder { lines: builder.lines, indent: builder.indent + 1 }
 .endfn
 
 .fn builder_pop_indent(builder -> TextBuilder) -> TextBuilder
 .meta return TextBuilder
 .meta effects none
-    .span 1070 23 1070 45
+    .span 1069 23 1069 45
     .param builder -> TextBuilder
-    .span 1071 5 1071 37
+    .span 1070 5 1070 37
     eval let mut indent = builder.indent
     .if indent > 0
-        .span 1073 9 1073 21
+        .span 1072 9 1072 21
         eval indent -= 1
     .endif
-    .span 1075 5 1075 65
+    .span 1074 5 1074 65
     ret TextBuilder { lines: builder.lines, indent: indent }
 .endfn
 
 .fn builder_to_string(builder -> TextBuilder) -> string
 .meta return string
 .meta effects none
-    .span 1078 22 1078 44
+    .span 1077 22 1077 44
     .param builder -> TextBuilder
-    .span 1079 5 1079 60
+    .span 1078 5 1078 60
     eval let content = join_with_separator(builder.lines, "\n")
     .if content.length == 0
-        .span 1081 9 1081 19
+        .span 1080 9 1080 19
         ret ""
     .endif
-    .span 1083 5 1083 27
+    .span 1082 5 1082 27
     ret content + "\n"
 .endfn
 
 .fn trim_right(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 1086 15 1086 30
+    .span 1085 15 1085 30
     .param value -> string
-    .span 1087 5 1087 42
+    .span 1086 5 1086 42
     eval let mut end -> number = value.length
     .loop
         .if end <= 0
             break
         .endif
-        .span 1092 9 1092 42
+        .span 1091 9 1091 42
         eval let ch = char_at(value, end - 1)
         .if ch == " " || ch == "\t"
-            .span 1094 13 1094 22
+            .span 1093 13 1093 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
     .if end == value.length
-        .span 1100 9 1100 22
+        .span 1099 9 1099 22
         ret value
     .endif
-    .span 1102 5 1102 37
+    .span 1101 5 1101 37
     ret substring(value, 0, end)
 .endfn
 
 .fn append_string(values -> string[], value -> string) -> string[]
 .meta return string[]
 .meta effects none
-    .span 1105 18 1105 36
+    .span 1104 18 1104 36
     .param values -> string[]
-    .span 1105 38 1105 53
+    .span 1104 38 1104 53
     .param value -> string
-    .span 1106 5 1106 35
+    .span 1105 5 1105 35
     ret values.concat([value])
 .endfn
 
 .fn join_with_separator(values -> string[], separator -> string) -> string
 .meta return string
 .meta effects none
-    .span 1109 24 1109 42
+    .span 1108 24 1108 42
     .param values -> string[]
-    .span 1109 44 1109 63
+    .span 1108 44 1108 63
     .param separator -> string
     .if values.length == 0
-        .span 1111 9 1111 19
+        .span 1110 9 1110 19
         ret ""
     .endif
-    .span 1113 5 1113 42
+    .span 1112 5 1112 42
     eval let mut result -> string = values[0]
-    .span 1114 5 1114 33
+    .span 1113 5 1113 33
     eval let mut index -> number = 1
     .loop
         .if index >= values.length
             break
         .endif
-        .span 1119 9 1119 53
+        .span 1118 9 1118 53
         eval result = result + separator + values[index]
-        .span 1120 9 1120 20
+        .span 1119 9 1119 20
         eval index += 1
     .endloop
-    .span 1122 5 1122 19
+    .span 1121 5 1121 19
     ret result
 .endfn
 
 .fn trim_text(value -> string) -> string
 .meta return string
 .meta effects none
-    .span 1125 14 1125 29
+    .span 1124 14 1124 29
     .param value -> string
-    .span 1126 5 1126 33
+    .span 1125 5 1125 33
     eval let mut start -> number = 0
-    .span 1127 5 1127 42
+    .span 1126 5 1126 42
     eval let mut end -> number = value.length
     .loop
         .if start >= end
             break
         .endif
-        .span 1132 9 1132 40
+        .span 1131 9 1131 40
         eval let ch = char_at(value, start)
         .if is_trim_char(ch)
-            .span 1134 13 1134 24
+            .span 1133 13 1133 24
             eval start += 1
             continue
         .endif
@@ -1935,28 +1933,28 @@
         .if end <= start
             break
         .endif
-        .span 1143 9 1143 42
+        .span 1142 9 1142 42
         eval let ch = char_at(value, end - 1)
         .if is_trim_char(ch)
-            .span 1145 13 1145 22
+            .span 1144 13 1144 22
             eval end -= 1
             continue
         .endif
         break
     .endloop
     .if start == 0 && end == value.length
-        .span 1151 9 1151 22
+        .span 1150 9 1150 22
         ret value
     .endif
-    .span 1153 5 1153 41
+    .span 1152 5 1152 41
     ret substring(value, start, end)
 .endfn
 
 .fn is_trim_char(ch -> string) -> boolean
 .meta return boolean
 .meta effects none
-    .span 1156 17 1156 29
+    .span 1155 17 1155 29
     .param ch -> string
-    .span 1157 5 1157 64
+    .span 1156 5 1156 64
     ret ch == " " || ch == "\n" || ch == "\r" || ch == "\t"
 .endfn

@@ -3238,19 +3238,30 @@ merge1:
 
 define i8* @append_optional_initializer(i8* %line, %Expression* %initializer) {
 block.entry:
+  %l0 = alloca i8*
   %t0 = icmp eq %Expression* %initializer, null
   br i1 %t0, label %then0, label %merge1
 then0:
   call void @sailfin_runtime_mark_persistent(i8* %line)
   ret i8* %line
 merge1:
-  %s1 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087691079, i32 0, i32 0
-  %t2 = call i8* @sailfin_runtime_string_concat(i8* %line, i8* %s1)
-  %t3 = load %Expression, %Expression* %initializer
-  %t4 = call i8* @format_expression(%Expression %t3)
-  %t5 = call i8* @sailfin_runtime_string_concat(i8* %t2, i8* %t4)
-  call void @sailfin_runtime_mark_persistent(i8* %t5)
-  ret i8* %t5
+  %t1 = call i8* @format_optional_expression(%Expression* %initializer)
+  store i8* %t1, i8** %l0
+  %t2 = load i8*, i8** %l0
+  %t3 = call i64 @sailfin_runtime_string_length(i8* %t2)
+  %t4 = icmp eq i64 %t3, 0
+  %t5 = load i8*, i8** %l0
+  br i1 %t4, label %then2, label %merge3
+then2:
+  call void @sailfin_runtime_mark_persistent(i8* %line)
+  ret i8* %line
+merge3:
+  %s6 = getelementptr inbounds [4 x i8], [4 x i8]* @.str.len3.h2087691079, i32 0, i32 0
+  %t7 = call i8* @sailfin_runtime_string_concat(i8* %line, i8* %s6)
+  %t8 = load i8*, i8** %l0
+  %t9 = call i8* @sailfin_runtime_string_concat(i8* %t7, i8* %t8)
+  call void @sailfin_runtime_mark_persistent(i8* %t9)
+  ret i8* %t9
 }
 
 define i8* @format_span(%SourceSpan %span) {
@@ -7731,11 +7742,10 @@ merge1:
   %s9 = getelementptr inbounds [5 x i8], [5 x i8]* @.str.len4.h175987322, i32 0, i32 0
   %t10 = call i8* @sailfin_runtime_string_concat(i8* %t8, i8* %s9)
   %t11 = load %Expression*, %Expression** %l1
-  %t12 = load %Expression, %Expression* %t11
-  %t13 = call i8* @format_expression(%Expression %t12)
-  %t14 = call i8* @sailfin_runtime_string_concat(i8* %t10, i8* %t13)
-  call void @sailfin_runtime_mark_persistent(i8* %t14)
-  ret i8* %t14
+  %t12 = call i8* @format_optional_expression(%Expression* %t11)
+  %t13 = call i8* @sailfin_runtime_string_concat(i8* %t10, i8* %t12)
+  call void @sailfin_runtime_mark_persistent(i8* %t13)
+  ret i8* %t13
 }
 
 define i8* @format_inline_case_body(%Statement %statement) {
@@ -8252,6 +8262,7 @@ merge1:
 
 define i8* @format_optional_expression(%Expression* %expression) {
 block.entry:
+  %l0 = alloca %Expression
   %t0 = icmp eq %Expression* %expression, null
   br i1 %t0, label %then0, label %merge1
 then0:
@@ -8260,9 +8271,11 @@ then0:
   ret i8* %s1
 merge1:
   %t2 = load %Expression, %Expression* %expression
-  %t3 = call i8* @format_expression(%Expression %t2)
-  call void @sailfin_runtime_mark_persistent(i8* %t3)
-  ret i8* %t3
+  store %Expression %t2, %Expression* %l0
+  %t3 = load %Expression, %Expression* %l0
+  %t4 = call i8* @format_expression(%Expression %t3)
+  call void @sailfin_runtime_mark_persistent(i8* %t4)
+  ret i8* %t4
 }
 
 define %NativeState @emit_expression_statement(%NativeState %state, %Statement %statement) {
@@ -8540,10 +8553,10 @@ block.entry:
   %t2 = load double, double* %l1
   br label %loop.header0
 loop.header0:
-  %t81 = phi %NativeState [ %t1, %block.entry ], [ %t79, %loop.latch2 ]
-  %t82 = phi double [ %t2, %block.entry ], [ %t80, %loop.latch2 ]
-  store %NativeState %t81, %NativeState* %l0
-  store double %t82, double* %l1
+  %t80 = phi %NativeState [ %t1, %block.entry ], [ %t78, %loop.latch2 ]
+  %t81 = phi double [ %t2, %block.entry ], [ %t79, %loop.latch2 ]
+  store %NativeState %t80, %NativeState* %l0
+  store double %t81, double* %l1
   br label %loop.body1
 loop.body1:
   %t3 = load double, double* %l1
@@ -8635,33 +8648,32 @@ then10:
   %t65 = call i8* @sailfin_runtime_string_concat(i8* %t63, i8* %s64)
   %t66 = load %Parameter, %Parameter* %l2
   %t67 = extractvalue %Parameter %t66, 2
-  %t68 = load %Expression, %Expression* %t67
-  %t69 = call i8* @format_expression(%Expression %t68)
-  %t70 = call i8* @sailfin_runtime_string_concat(i8* %t65, i8* %t69)
-  store i8* %t70, i8** %l3
-  %t71 = load i8*, i8** %l3
+  %t68 = call i8* @format_optional_expression(%Expression* %t67)
+  %t69 = call i8* @sailfin_runtime_string_concat(i8* %t65, i8* %t68)
+  store i8* %t69, i8** %l3
+  %t70 = load i8*, i8** %l3
   br label %merge11
 merge11:
-  %t72 = phi i8* [ %t71, %then10 ], [ %t62, %merge9 ]
-  store i8* %t72, i8** %l3
-  %t73 = load %NativeState, %NativeState* %l0
-  %t74 = load i8*, i8** %l3
-  %t75 = call %NativeState @state_emit_line(%NativeState %t73, i8* %t74)
-  store %NativeState %t75, %NativeState* %l0
-  %t76 = load double, double* %l1
-  %t77 = sitofp i64 1 to double
-  %t78 = fadd double %t76, %t77
-  store double %t78, double* %l1
+  %t71 = phi i8* [ %t70, %then10 ], [ %t62, %merge9 ]
+  store i8* %t71, i8** %l3
+  %t72 = load %NativeState, %NativeState* %l0
+  %t73 = load i8*, i8** %l3
+  %t74 = call %NativeState @state_emit_line(%NativeState %t72, i8* %t73)
+  store %NativeState %t74, %NativeState* %l0
+  %t75 = load double, double* %l1
+  %t76 = sitofp i64 1 to double
+  %t77 = fadd double %t75, %t76
+  store double %t77, double* %l1
   br label %loop.latch2
 loop.latch2:
-  %t79 = load %NativeState, %NativeState* %l0
-  %t80 = load double, double* %l1
+  %t78 = load %NativeState, %NativeState* %l0
+  %t79 = load double, double* %l1
   br label %loop.header0
 afterloop3:
-  %t83 = load %NativeState, %NativeState* %l0
-  %t84 = load double, double* %l1
-  %t85 = load %NativeState, %NativeState* %l0
-  ret %NativeState %t85
+  %t82 = load %NativeState, %NativeState* %l0
+  %t83 = load double, double* %l1
+  %t84 = load %NativeState, %NativeState* %l0
+  ret %NativeState %t84
 }
 
 define i8* @format_decorator(%Decorator %decorator) {
@@ -8953,10 +8965,10 @@ merge1:
   %t18 = load double, double* %l1
   br label %loop.header2
 loop.header2:
-  %t93 = phi { i8**, i64 }* [ %t17, %merge1 ], [ %t91, %loop.latch4 ]
-  %t94 = phi double [ %t18, %merge1 ], [ %t92, %loop.latch4 ]
-  store { i8**, i64 }* %t93, { i8**, i64 }** %l0
-  store double %t94, double* %l1
+  %t92 = phi { i8**, i64 }* [ %t17, %merge1 ], [ %t90, %loop.latch4 ]
+  %t93 = phi double [ %t18, %merge1 ], [ %t91, %loop.latch4 ]
+  store { i8**, i64 }* %t92, { i8**, i64 }** %l0
+  store double %t93, double* %l1
   br label %loop.body3
 loop.body3:
   %t19 = load double, double* %l1
@@ -9045,36 +9057,35 @@ then13:
   %t77 = call i8* @sailfin_runtime_string_concat(i8* %t75, i8* %s76)
   %t78 = load %Parameter, %Parameter* %l2
   %t79 = extractvalue %Parameter %t78, 2
-  %t80 = load %Expression, %Expression* %t79
-  %t81 = call i8* @format_expression(%Expression %t80)
-  %t82 = call i8* @sailfin_runtime_string_concat(i8* %t77, i8* %t81)
-  store i8* %t82, i8** %l3
-  %t83 = load i8*, i8** %l3
+  %t80 = call i8* @format_optional_expression(%Expression* %t79)
+  %t81 = call i8* @sailfin_runtime_string_concat(i8* %t77, i8* %t80)
+  store i8* %t81, i8** %l3
+  %t82 = load i8*, i8** %l3
   br label %merge14
 merge14:
-  %t84 = phi i8* [ %t83, %then13 ], [ %t74, %merge12 ]
-  store i8* %t84, i8** %l3
-  %t85 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t86 = load i8*, i8** %l3
-  %t87 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t85, i8* %t86)
-  store { i8**, i64 }* %t87, { i8**, i64 }** %l0
-  %t88 = load double, double* %l1
-  %t89 = sitofp i64 1 to double
-  %t90 = fadd double %t88, %t89
-  store double %t90, double* %l1
+  %t83 = phi i8* [ %t82, %then13 ], [ %t74, %merge12 ]
+  store i8* %t83, i8** %l3
+  %t84 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t85 = load i8*, i8** %l3
+  %t86 = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %t84, i8* %t85)
+  store { i8**, i64 }* %t86, { i8**, i64 }** %l0
+  %t87 = load double, double* %l1
+  %t88 = sitofp i64 1 to double
+  %t89 = fadd double %t87, %t88
+  store double %t89, double* %l1
   br label %loop.latch4
 loop.latch4:
-  %t91 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t92 = load double, double* %l1
+  %t90 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t91 = load double, double* %l1
   br label %loop.header2
 afterloop5:
-  %t95 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %t96 = load double, double* %l1
-  %t97 = load { i8**, i64 }*, { i8**, i64 }** %l0
-  %s98 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
-  %t99 = call i8* @join_with_separator({ i8**, i64 }* %t97, i8* %s98)
-  call void @sailfin_runtime_mark_persistent(i8* %t99)
-  ret i8* %t99
+  %t94 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %t95 = load double, double* %l1
+  %t96 = load { i8**, i64 }*, { i8**, i64 }** %l0
+  %s97 = getelementptr inbounds [3 x i8], [3 x i8]* @.str.len2.h193425971, i32 0, i32 0
+  %t98 = call i8* @join_with_separator({ i8**, i64 }* %t96, i8* %s97)
+  call void @sailfin_runtime_mark_persistent(i8* %t98)
+  ret i8* %t98
 }
 
 define i8* @format_type_parameters({ %TypeParameter*, i64 }* %parameters) {
@@ -17599,91 +17610,91 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.str.len14.h1053492670 = private unnamed_addr constant [15 x i8] c".layout field \00"
-@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
-@.str.len3.h2090304184 = private unnamed_addr constant [4 x i8] c"i32\00"
-@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
-@.str.len15.h1897143060 = private unnamed_addr constant [16 x i8] c".meta generics \00"
 @.str.len55.h700951597 = private unnamed_addr constant [56 x i8] c"` missing type annotation; defaulting to pointer layout\00"
-@.str.len3.h2090684245 = private unnamed_addr constant [4 x i8] c"ret\00"
-@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
-@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.str.len5.h1525558983 = private unnamed_addr constant [6 x i8] c" tag=\00"
-@.str.len16.h1290415774 = private unnamed_addr constant [17 x i8] c".layout payload \00"
-@.str.len3.h2090083282 = private unnamed_addr constant [4 x i8] c"any\00"
-@.str.len17.h1970266448 = private unnamed_addr constant [18 x i8] c".meta return void\00"
-@.str.len6.h980153509 = private unnamed_addr constant [7 x i8] c" type=\00"
-@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.str.len7.h513898090 = private unnamed_addr constant [8 x i8] c"variant\00"
-@.str.len9.h1814778076 = private unnamed_addr constant [10 x i8] c".import \22\00"
-@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len3.h2090307517 = private unnamed_addr constant [4 x i8] c"i64\00"
-@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
-@.str.len2.h193512002 = private unnamed_addr constant [3 x i8] c"{ \00"
-@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
-@.str.len13.h1678412334 = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
-@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
-@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len5.h500836810 = private unnamed_addr constant [6 x i8] c"test:\00"
-@.str.len3.h2090370613 = private unnamed_addr constant [4 x i8] c"int\00"
-@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
-@.str.len7.h398443637 = private unnamed_addr constant [8 x i8] c".field \00"
-@.str.len10.h381722796 = private unnamed_addr constant [11 x i8] c".property \00"
-@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len17.h1998778048 = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
-@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.str.len17.h689147423 = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.str.len11.h1482555192 = private unnamed_addr constant [12 x i8] c".decorator \00"
-@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"
-@.str.len18.h1250048525 = private unnamed_addr constant [19 x i8] c".meta effects none\00"
-@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
 @.str.len17.h1813262795 = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
-@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
-@.str.len13.h1610966039 = private unnamed_addr constant [14 x i8] c".meta return \00"
-@.str.len2.h193492961 = private unnamed_addr constant [3 x i8] c"i1\00"
-@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
-@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
-@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len16.h1695010494 = private unnamed_addr constant [17 x i8] c".layout variant \00"
-@.str.len14.h88846349 = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
 @.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
-@.str.len4.h268717223 = private unnamed_addr constant [5 x i8] c"noop\00"
-@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
-@.str.len6.h1187178968 = private unnamed_addr constant [7 x i8] c".case \00"
-@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len9.h1814778076 = private unnamed_addr constant [10 x i8] c".import \22\00"
 @.str.len19.h868168677 = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.str.len5.h1958778164 = private unnamed_addr constant [6 x i8] c"break\00"
-@.str.len5.h2072555103 = private unnamed_addr constant [6 x i8] c".sig \00"
-@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.str.len2.h193478309 = private unnamed_addr constant [3 x i8] c"\5C\22\00"
-@.str.len9.h1311191977 = private unnamed_addr constant [10 x i8] c".variant \00"
-@.str.len8.h455185518 = private unnamed_addr constant [9 x i8] c" offset=\00"
-@.str.len4.h254486039 = private unnamed_addr constant [5 x i8] c"bool\00"
-@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len70.h1478160845 = private unnamed_addr constant [71 x i8] c"` optional type missing inner annotation; defaulting to pointer layout\00"
-@.str.len14.h110444378 = private unnamed_addr constant [15 x i8] c".meta effects \00"
-@.str.len3.h2087662534 = private unnamed_addr constant [4 x i8] c" ![\00"
-@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
+@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
+@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
+@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.str.len17.h1998778048 = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
 @.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
-@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
-@.str.len9.h1091414306 = private unnamed_addr constant [10 x i8] c".export \22\00"
-@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.str.len8.h573909064 = private unnamed_addr constant [9 x i8] c"<lambda>\00"
-@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.str.len14.h88846349 = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.str.len7.h398443637 = private unnamed_addr constant [8 x i8] c".field \00"
 @.str.len7.h130169768 = private unnamed_addr constant [8 x i8] c".param \00"
+@.str.len13.h1678412334 = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
+@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.str.len13.h1610966039 = private unnamed_addr constant [14 x i8] c".meta return \00"
+@.str.len6.h1187178968 = private unnamed_addr constant [7 x i8] c".case \00"
+@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
+@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
+@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
+@.str.len7.h513898090 = private unnamed_addr constant [8 x i8] c"variant\00"
+@.str.len3.h2090304184 = private unnamed_addr constant [4 x i8] c"i32\00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len10.h381722796 = private unnamed_addr constant [11 x i8] c".property \00"
+@.str.len6.h1061063223 = private unnamed_addr constant [7 x i8] c"return\00"
+@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
+@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
+@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.str.len17.h1970266448 = private unnamed_addr constant [18 x i8] c".meta return void\00"
+@.str.len4.h254486039 = private unnamed_addr constant [5 x i8] c"bool\00"
+@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
+@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len14.h1053492670 = private unnamed_addr constant [15 x i8] c".layout field \00"
+@.str.len2.h193441217 = private unnamed_addr constant [3 x i8] c": \00"
+@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.str.len5.h2072555103 = private unnamed_addr constant [6 x i8] c".sig \00"
+@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.str.len17.h689147423 = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len3.h2090307517 = private unnamed_addr constant [4 x i8] c"i64\00"
+@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
+@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.str.len3.h2090083282 = private unnamed_addr constant [4 x i8] c"any\00"
+@.str.len9.h1091414306 = private unnamed_addr constant [10 x i8] c".export \22\00"
+@.str.len3.h2090684245 = private unnamed_addr constant [4 x i8] c"ret\00"
+@.str.len18.h1250048525 = private unnamed_addr constant [19 x i8] c".meta effects none\00"
+@.str.len16.h1290415774 = private unnamed_addr constant [17 x i8] c".layout payload \00"
+@.str.len2.h193512002 = private unnamed_addr constant [3 x i8] c"{ \00"
+@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.str.len14.h110444378 = private unnamed_addr constant [15 x i8] c".meta effects \00"
+@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
+@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
+@.str.len11.h1482555192 = private unnamed_addr constant [12 x i8] c".decorator \00"
+@.str.len8.h573909064 = private unnamed_addr constant [9 x i8] c"<lambda>\00"
+@.str.len70.h1478160845 = private unnamed_addr constant [71 x i8] c"` optional type missing inner annotation; defaulting to pointer layout\00"
+@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
+@.str.len3.h2090370613 = private unnamed_addr constant [4 x i8] c"int\00"
+@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
+@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
+@.str.len8.h455185518 = private unnamed_addr constant [9 x i8] c" offset=\00"
+@.str.len2.h193492961 = private unnamed_addr constant [3 x i8] c"i1\00"
+@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
+@.str.len5.h1525558983 = private unnamed_addr constant [6 x i8] c" tag=\00"
+@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
+@.str.len6.h980153509 = private unnamed_addr constant [7 x i8] c" type=\00"
+@.str.len4.h268717223 = private unnamed_addr constant [5 x i8] c"noop\00"
+@.str.len15.h1897143060 = private unnamed_addr constant [16 x i8] c".meta generics \00"
+@.str.len3.h2087662534 = private unnamed_addr constant [4 x i8] c" ![\00"
+@.str.len5.h500836810 = private unnamed_addr constant [6 x i8] c"test:\00"
+@.str.len2.h193478309 = private unnamed_addr constant [3 x i8] c"\5C\22\00"
+@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.str.len5.h1958778164 = private unnamed_addr constant [6 x i8] c"break\00"
+@.str.len16.h1695010494 = private unnamed_addr constant [17 x i8] c".layout variant \00"
+@.str.len9.h1311191977 = private unnamed_addr constant [10 x i8] c".variant \00"
+@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.str.len8.h528348603 = private unnamed_addr constant [9 x i8] c"continue\00"

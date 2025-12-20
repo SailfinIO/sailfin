@@ -344,7 +344,11 @@ fn append_optional_initializer(line -> string, initializer -> Expression?) -> st
     if initializer == null {
         return line;
     }
-    return line + " = " + format_expression(initializer);
+    let rendered = format_optional_expression(initializer);
+    if rendered.length == 0 {
+        return line;
+    }
+    return line + " = " + rendered;
 }
 
 fn format_span(span -> SourceSpan) -> string {
@@ -672,7 +676,7 @@ fn format_match_case_head(case -> MatchCase) -> string {
     if guard == null {
         return head;
     }
-    return head + " if " + format_expression(guard);
+    return head + " if " + format_optional_expression(guard);
 }
 
 fn format_inline_case_body(statement -> Statement) -> string {
@@ -734,7 +738,8 @@ fn format_optional_expression(expression -> Expression?) -> string {
     if expression == null {
         return "";
     }
-    return format_expression(expression);
+    let value -> Expression = expression;
+    return format_expression(value);
 }
 
 fn emit_expression_statement(state -> NativeState, statement -> Statement) -> NativeState {
@@ -807,7 +812,7 @@ fn emit_parameter_metadata(state -> NativeState, parameters -> Parameter[]) -> N
             line = line + " -> " + parameter.type_annotation.text;
         }
         if parameter.default_value != null {
-            line = line + " = " + format_expression(parameter.default_value);
+            line = line + " = " + format_optional_expression(parameter.default_value);
         }
         current = state_emit_line(current, line);
         index += 1;
@@ -876,7 +881,7 @@ fn format_parameters(parameters -> Parameter[]) -> string {
             entry = entry + " -> " + parameter.type_annotation.text;
         }
         if parameter.default_value != null {
-            entry = entry + " = " + format_expression(parameter.default_value);
+            entry = entry + " = " + format_optional_expression(parameter.default_value);
         }
         parts = append_string(parts, entry);
         index += 1;
