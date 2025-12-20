@@ -680,10 +680,11 @@ fn format_inline_case_body(statement -> Statement) -> string {
         return format_expression(statement.expression);
     }
     if statement.variant == "ReturnStatement" {
-        if statement.expression == null {
+        let rendered = format_optional_expression(statement.expression);
+        if rendered.length == 0 {
             return "return";
         }
-        return "return " + format_expression(statement.expression);
+        return "return " + rendered;
     }
     return "";
 }
@@ -722,10 +723,18 @@ fn emit_else_branch(state -> NativeState, branch -> ElseBranch) -> NativeState {
 
 fn emit_return(state -> NativeState, statement -> Statement) -> NativeState {
     let mut current = emit_span_if_present(state, statement.span);
-    if statement.expression == null {
+    let rendered = format_optional_expression(statement.expression);
+    if rendered.length == 0 {
         return state_emit_line(current, "ret");
     }
-    return state_emit_line(current, "ret " + format_expression(statement.expression));
+    return state_emit_line(current, "ret " + rendered);
+}
+
+fn format_optional_expression(expression -> Expression?) -> string {
+    if expression == null {
+        return "";
+    }
+    return format_expression(expression);
 }
 
 fn emit_expression_statement(state -> NativeState, statement -> Statement) -> NativeState {

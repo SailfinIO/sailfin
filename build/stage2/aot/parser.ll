@@ -103,11 +103,12 @@ declare %LiteralValue @evaluate_expression(%Expression)
 declare { %DecoratorInfo*, i64 }* @evaluate_statement_decorators(%Statement)
 declare i8* @trim_whitespace(i8*)
 declare i1 @looks_like_quoted_string(i8*)
+declare i1 @is_decimal_digit_codepoint(double)
 declare { %DecoratorInfo*, i64 }* @append_decorator_info({ %DecoratorInfo*, i64 }*, %DecoratorInfo)
 declare { %DecoratorArgumentInfo*, i64 }* @append_argument_info({ %DecoratorArgumentInfo*, i64 }*, %DecoratorArgumentInfo)
 declare { i8**, i64 }* @clone_effects({ i8**, i64 }*)
 declare i1 @contains_effect({ i8**, i64 }*, i8*)
-declare i1 @is_whitespace_char(i64)
+declare i1 @is_whitespace_codepoint(double)
 declare i8* @slice_text(i8*, double, double)
 declare i8* @char_at(i8*, double)
 declare i1 @is_symbol_char(i8*)
@@ -12478,7 +12479,7 @@ afterloop21:
   %t255 = load double, double* %l11
   %t256 = load { %Token*, i64 }*, { %Token*, i64 }** %l12
   %t257 = load %Expression*, %Expression** %l13
-  br i1 %t244, label %then24, label %merge25
+  br i1 %t244, label %then24, label %else25
 then24:
   %t258 = load { %Token*, i64 }*, { %Token*, i64 }** %l12
   %t259 = call %Expression @expression_from_tokens({ %Token*, i64 }* %t258)
@@ -12490,434 +12491,472 @@ then24:
   call void @sailfin_runtime_mark_persistent(i8* %t262)
   store %Expression* %t263, %Expression** %l13
   %t264 = load %Expression*, %Expression** %l13
-  br label %merge25
-merge25:
-  %t265 = phi %Expression* [ %t264, %then24 ], [ %t257, %afterloop21 ]
-  store %Expression* %t265, %Expression** %l13
-  %t266 = load %CaptureResult, %CaptureResult* %l10
-  %t267 = extractvalue %CaptureResult %t266, 0
-  %t268 = call %Parser @skip_trivia(%Parser %t267)
-  store %Parser %t268, %Parser* %l1
-  %t269 = load %Parser, %Parser* %l1
-  %t270 = call %Token @parser_peek_raw(%Parser %t269)
-  store %Token %t270, %Token* %l14
-  %t271 = load %Token, %Token* %l14
-  %t272 = add i64 0, 2
-  %t273 = call i8* @malloc(i64 %t272)
-  store i8 59, i8* %t273
-  %t274 = getelementptr i8, i8* %t273, i64 1
-  store i8 0, i8* %t274
-  call void @sailfin_runtime_mark_persistent(i8* %t273)
-  %t275 = call i1 @symbol_matches(%Token %t271, i8* %t273)
-  %t276 = load %Parser, %Parser* %l0
-  %t277 = load %Parser, %Parser* %l1
-  %t278 = load %PatternCaptureResult, %PatternCaptureResult* %l2
-  %t279 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
-  %t280 = load %Expression, %Expression* %l4
-  %t281 = load %Expression*, %Expression** %l5
-  %t282 = load %Token, %Token* %l6
-  %t283 = load %Block*, %Block** %l7
-  %t284 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
-  %t285 = load %CaptureResult, %CaptureResult* %l10
-  %t286 = load double, double* %l11
-  %t287 = load { %Token*, i64 }*, { %Token*, i64 }** %l12
-  %t288 = load %Expression*, %Expression** %l13
-  %t289 = load %Token, %Token* %l14
-  br i1 %t275, label %then26, label %merge27
-then26:
-  %t290 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
-  %t291 = load %Token, %Token* %l14
-  %t292 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t290, %Token %t291)
-  store { %Token*, i64 }* %t292, { %Token*, i64 }** %l9
-  %t293 = load %Parser, %Parser* %l1
-  %t294 = call %Parser @parser_advance_raw(%Parser %t293)
-  store %Parser %t294, %Parser* %l1
-  %t295 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
-  %t296 = load %Parser, %Parser* %l1
-  br label %merge27
-merge27:
-  %t297 = phi { %Token*, i64 }* [ %t295, %then26 ], [ %t284, %merge25 ]
-  %t298 = phi %Parser [ %t296, %then26 ], [ %t277, %merge25 ]
-  store { %Token*, i64 }* %t297, { %Token*, i64 }** %l9
-  store %Parser %t298, %Parser* %l1
-  %t299 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
-  %t300 = call { %Token*, i64 }* @trim_token_edges({ %Token*, i64 }* %t299)
-  store { %Token*, i64 }* %t300, { %Token*, i64 }** %l9
-  %t301 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
-  %t302 = call %SourceSpan* @source_span_from_tokens({ %Token*, i64 }* %t301)
-  store %SourceSpan* %t302, %SourceSpan** %l15
-  %t303 = getelementptr [0 x %Statement], [0 x %Statement]* null, i32 1
-  %t304 = ptrtoint [0 x %Statement]* %t303 to i64
-  %t305 = icmp eq i64 %t304, 0
-  %t306 = select i1 %t305, i64 1, i64 %t304
-  %t307 = call i8* @malloc(i64 %t306)
-  %t308 = bitcast i8* %t307 to %Statement*
-  %t309 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* null, i32 1
-  %t310 = ptrtoint { %Statement*, i64 }* %t309 to i64
-  %t311 = call i8* @malloc(i64 %t310)
-  %t312 = bitcast i8* %t311 to { %Statement*, i64 }*
-  %t313 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t312, i32 0, i32 0
-  store %Statement* %t308, %Statement** %t313
-  %t314 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t312, i32 0, i32 1
-  store i64 0, i64* %t314
-  store { %Statement*, i64 }* %t312, { %Statement*, i64 }** %l16
-  %t315 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l16
-  %t316 = alloca %Statement
-  %t317 = getelementptr inbounds %Statement, %Statement* %t316, i32 0, i32 0
-  store i32 20, i32* %t317
-  %t318 = load %Expression*, %Expression** %l13
-  %t319 = getelementptr inbounds %Statement, %Statement* %t316, i32 0, i32 1
-  %t320 = bitcast [16 x i8]* %t319 to i8*
-  %t321 = bitcast i8* %t320 to %Expression**
-  store %Expression* %t318, %Expression** %t321
-  %t322 = load %SourceSpan*, %SourceSpan** %l15
-  %t323 = getelementptr inbounds %Statement, %Statement* %t316, i32 0, i32 1
-  %t324 = bitcast [16 x i8]* %t323 to i8*
-  %t325 = getelementptr inbounds i8, i8* %t324, i64 8
-  %t326 = bitcast i8* %t325 to %SourceSpan**
-  store %SourceSpan* %t322, %SourceSpan** %t326
-  %t327 = load %Statement, %Statement* %t316
-  %t328 = call { %Statement*, i64 }* @append_statement({ %Statement*, i64 }* %t315, %Statement %t327)
-  store { %Statement*, i64 }* %t328, { %Statement*, i64 }** %l16
+  br label %merge26
+else25:
+  %t265 = load %CaptureResult, %CaptureResult* %l10
+  %t266 = extractvalue %CaptureResult %t265, 1
+  %t267 = load { %Token*, i64 }, { %Token*, i64 }* %t266
+  %t268 = extractvalue { %Token*, i64 } %t267, 1
+  %t269 = icmp sgt i64 %t268, 0
+  %t270 = load %Parser, %Parser* %l0
+  %t271 = load %Parser, %Parser* %l1
+  %t272 = load %PatternCaptureResult, %PatternCaptureResult* %l2
+  %t273 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
+  %t274 = load %Expression, %Expression* %l4
+  %t275 = load %Expression*, %Expression** %l5
+  %t276 = load %Token, %Token* %l6
+  %t277 = load %Block*, %Block** %l7
+  %t278 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
+  %t279 = load %CaptureResult, %CaptureResult* %l10
+  %t280 = load double, double* %l11
+  %t281 = load { %Token*, i64 }*, { %Token*, i64 }** %l12
+  %t282 = load %Expression*, %Expression** %l13
+  br i1 %t269, label %then27, label %merge28
+then27:
+  %t283 = load %CaptureResult, %CaptureResult* %l10
+  %t284 = extractvalue %CaptureResult %t283, 1
+  %t285 = call %Expression @expression_from_tokens({ %Token*, i64 }* %t284)
+  %t286 = getelementptr %Expression, %Expression* null, i32 1
+  %t287 = ptrtoint %Expression* %t286 to i64
+  %t288 = call noalias i8* @malloc(i64 %t287)
+  %t289 = bitcast i8* %t288 to %Expression*
+  store %Expression %t285, %Expression* %t289
+  call void @sailfin_runtime_mark_persistent(i8* %t288)
+  store %Expression* %t289, %Expression** %l13
+  %t290 = load %Expression*, %Expression** %l13
+  br label %merge28
+merge28:
+  %t291 = phi %Expression* [ %t290, %then27 ], [ %t282, %else25 ]
+  store %Expression* %t291, %Expression** %l13
+  %t292 = load %Expression*, %Expression** %l13
+  br label %merge26
+merge26:
+  %t293 = phi %Expression* [ %t264, %then24 ], [ %t292, %merge28 ]
+  store %Expression* %t293, %Expression** %l13
+  %t294 = load %CaptureResult, %CaptureResult* %l10
+  %t295 = extractvalue %CaptureResult %t294, 0
+  %t296 = call %Parser @skip_trivia(%Parser %t295)
+  store %Parser %t296, %Parser* %l1
+  %t297 = load %Parser, %Parser* %l1
+  %t298 = call %Token @parser_peek_raw(%Parser %t297)
+  store %Token %t298, %Token* %l14
+  %t299 = load %Token, %Token* %l14
+  %t300 = add i64 0, 2
+  %t301 = call i8* @malloc(i64 %t300)
+  store i8 59, i8* %t301
+  %t302 = getelementptr i8, i8* %t301, i64 1
+  store i8 0, i8* %t302
+  call void @sailfin_runtime_mark_persistent(i8* %t301)
+  %t303 = call i1 @symbol_matches(%Token %t299, i8* %t301)
+  %t304 = load %Parser, %Parser* %l0
+  %t305 = load %Parser, %Parser* %l1
+  %t306 = load %PatternCaptureResult, %PatternCaptureResult* %l2
+  %t307 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
+  %t308 = load %Expression, %Expression* %l4
+  %t309 = load %Expression*, %Expression** %l5
+  %t310 = load %Token, %Token* %l6
+  %t311 = load %Block*, %Block** %l7
+  %t312 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
+  %t313 = load %CaptureResult, %CaptureResult* %l10
+  %t314 = load double, double* %l11
+  %t315 = load { %Token*, i64 }*, { %Token*, i64 }** %l12
+  %t316 = load %Expression*, %Expression** %l13
+  %t317 = load %Token, %Token* %l14
+  br i1 %t303, label %then29, label %merge30
+then29:
+  %t318 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
+  %t319 = load %Token, %Token* %l14
+  %t320 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t318, %Token %t319)
+  store { %Token*, i64 }* %t320, { %Token*, i64 }** %l9
+  %t321 = load %Parser, %Parser* %l1
+  %t322 = call %Parser @parser_advance_raw(%Parser %t321)
+  store %Parser %t322, %Parser* %l1
+  %t323 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
+  %t324 = load %Parser, %Parser* %l1
+  br label %merge30
+merge30:
+  %t325 = phi { %Token*, i64 }* [ %t323, %then29 ], [ %t312, %merge26 ]
+  %t326 = phi %Parser [ %t324, %then29 ], [ %t305, %merge26 ]
+  store { %Token*, i64 }* %t325, { %Token*, i64 }** %l9
+  store %Parser %t326, %Parser* %l1
+  %t327 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
+  %t328 = call { %Token*, i64 }* @trim_token_edges({ %Token*, i64 }* %t327)
+  store { %Token*, i64 }* %t328, { %Token*, i64 }** %l9
   %t329 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
-  %t330 = call i8* @tokens_to_text({ %Token*, i64 }* %t329)
-  %t331 = call i8* @trim_text__parser(i8* %t330)
-  store i8* %t331, i8** %l17
-  %t332 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
-  %t333 = insertvalue %Block undef, { %Token*, i64 }* %t332, 0
-  %t334 = load i8*, i8** %l17
-  %t335 = insertvalue %Block %t333, i8* %t334, 1
-  %t336 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l16
-  %t337 = insertvalue %Block %t335, { %Statement*, i64 }* %t336, 2
-  %t338 = getelementptr %Block, %Block* null, i32 1
-  %t339 = ptrtoint %Block* %t338 to i64
-  %t340 = call noalias i8* @malloc(i64 %t339)
-  %t341 = bitcast i8* %t340 to %Block*
-  store %Block %t337, %Block* %t341
-  call void @sailfin_runtime_mark_persistent(i8* %t340)
-  store %Block* %t341, %Block** %l7
-  %t342 = load %Parser, %Parser* %l1
-  %t343 = load %Parser, %Parser* %l1
-  %t344 = load %Parser, %Parser* %l1
-  %t345 = load %Block*, %Block** %l7
+  %t330 = call %SourceSpan* @source_span_from_tokens({ %Token*, i64 }* %t329)
+  store %SourceSpan* %t330, %SourceSpan** %l15
+  %t331 = getelementptr [0 x %Statement], [0 x %Statement]* null, i32 1
+  %t332 = ptrtoint [0 x %Statement]* %t331 to i64
+  %t333 = icmp eq i64 %t332, 0
+  %t334 = select i1 %t333, i64 1, i64 %t332
+  %t335 = call i8* @malloc(i64 %t334)
+  %t336 = bitcast i8* %t335 to %Statement*
+  %t337 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* null, i32 1
+  %t338 = ptrtoint { %Statement*, i64 }* %t337 to i64
+  %t339 = call i8* @malloc(i64 %t338)
+  %t340 = bitcast i8* %t339 to { %Statement*, i64 }*
+  %t341 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t340, i32 0, i32 0
+  store %Statement* %t336, %Statement** %t341
+  %t342 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t340, i32 0, i32 1
+  store i64 0, i64* %t342
+  store { %Statement*, i64 }* %t340, { %Statement*, i64 }** %l16
+  %t343 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l16
+  %t344 = alloca %Statement
+  %t345 = getelementptr inbounds %Statement, %Statement* %t344, i32 0, i32 0
+  store i32 20, i32* %t345
+  %t346 = load %Expression*, %Expression** %l13
+  %t347 = getelementptr inbounds %Statement, %Statement* %t344, i32 0, i32 1
+  %t348 = bitcast [16 x i8]* %t347 to i8*
+  %t349 = bitcast i8* %t348 to %Expression**
+  store %Expression* %t346, %Expression** %t349
+  %t350 = load %SourceSpan*, %SourceSpan** %l15
+  %t351 = getelementptr inbounds %Statement, %Statement* %t344, i32 0, i32 1
+  %t352 = bitcast [16 x i8]* %t351 to i8*
+  %t353 = getelementptr inbounds i8, i8* %t352, i64 8
+  %t354 = bitcast i8* %t353 to %SourceSpan**
+  store %SourceSpan* %t350, %SourceSpan** %t354
+  %t355 = load %Statement, %Statement* %t344
+  %t356 = call { %Statement*, i64 }* @append_statement({ %Statement*, i64 }* %t343, %Statement %t355)
+  store { %Statement*, i64 }* %t356, { %Statement*, i64 }** %l16
+  %t357 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
+  %t358 = call i8* @tokens_to_text({ %Token*, i64 }* %t357)
+  %t359 = call i8* @trim_text__parser(i8* %t358)
+  store i8* %t359, i8** %l17
+  %t360 = load { %Token*, i64 }*, { %Token*, i64 }** %l9
+  %t361 = insertvalue %Block undef, { %Token*, i64 }* %t360, 0
+  %t362 = load i8*, i8** %l17
+  %t363 = insertvalue %Block %t361, i8* %t362, 1
+  %t364 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l16
+  %t365 = insertvalue %Block %t363, { %Statement*, i64 }* %t364, 2
+  %t366 = getelementptr %Block, %Block* null, i32 1
+  %t367 = ptrtoint %Block* %t366 to i64
+  %t368 = call noalias i8* @malloc(i64 %t367)
+  %t369 = bitcast i8* %t368 to %Block*
+  store %Block %t365, %Block* %t369
+  call void @sailfin_runtime_mark_persistent(i8* %t368)
+  store %Block* %t369, %Block** %l7
+  %t370 = load %Parser, %Parser* %l1
+  %t371 = load %Parser, %Parser* %l1
+  %t372 = load %Parser, %Parser* %l1
+  %t373 = load %Block*, %Block** %l7
   br label %merge17
 else16:
-  %t346 = load %Parser, %Parser* %l1
-  %t347 = add i64 0, 2
-  %t348 = call i8* @malloc(i64 %t347)
-  store i8 59, i8* %t348
-  %t349 = getelementptr i8, i8* %t348, i64 1
-  store i8 0, i8* %t349
-  call void @sailfin_runtime_mark_persistent(i8* %t348)
-  %t350 = add i64 0, 2
-  %t351 = call i8* @malloc(i64 %t350)
-  store i8 125, i8* %t351
-  %t352 = getelementptr i8, i8* %t351, i64 1
-  store i8 0, i8* %t352
-  call void @sailfin_runtime_mark_persistent(i8* %t351)
-  %t353 = getelementptr [2 x i8*], [2 x i8*]* null, i32 1
-  %t354 = ptrtoint [2 x i8*]* %t353 to i64
-  %t355 = icmp eq i64 %t354, 0
-  %t356 = select i1 %t355, i64 1, i64 %t354
-  %t357 = call i8* @malloc(i64 %t356)
-  %t358 = bitcast i8* %t357 to i8**
-  %t359 = getelementptr i8*, i8** %t358, i64 0
-  store i8* %t348, i8** %t359
-  %t360 = getelementptr i8*, i8** %t358, i64 1
-  store i8* %t351, i8** %t360
-  %t361 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
-  %t362 = ptrtoint { i8**, i64 }* %t361 to i64
-  %t363 = call i8* @malloc(i64 %t362)
-  %t364 = bitcast i8* %t363 to { i8**, i64 }*
-  %t365 = getelementptr { i8**, i64 }, { i8**, i64 }* %t364, i32 0, i32 0
-  store i8** %t358, i8*** %t365
-  %t366 = getelementptr { i8**, i64 }, { i8**, i64 }* %t364, i32 0, i32 1
-  store i64 2, i64* %t366
-  %t367 = call %CaptureResult @collect_until(%Parser %t346, { i8**, i64 }* %t364)
-  store %CaptureResult %t367, %CaptureResult* %l18
-  %t368 = load %CaptureResult, %CaptureResult* %l18
-  %t369 = extractvalue %CaptureResult %t368, 1
-  %t370 = call { %Token*, i64 }* @trim_token_edges({ %Token*, i64 }* %t369)
-  store { %Token*, i64 }* %t370, { %Token*, i64 }** %l19
-  %t371 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
-  %t372 = load { %Token*, i64 }, { %Token*, i64 }* %t371
-  %t373 = extractvalue { %Token*, i64 } %t372, 1
-  %t374 = icmp eq i64 %t373, 0
-  %t375 = load %Parser, %Parser* %l0
-  %t376 = load %Parser, %Parser* %l1
-  %t377 = load %PatternCaptureResult, %PatternCaptureResult* %l2
-  %t378 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
-  %t379 = load %Expression, %Expression* %l4
-  %t380 = load %Expression*, %Expression** %l5
-  %t381 = load %Token, %Token* %l6
-  %t382 = load %Block*, %Block** %l7
-  %t383 = load %CaptureResult, %CaptureResult* %l18
-  %t384 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
-  br i1 %t374, label %then28, label %merge29
-then28:
-  %t385 = load %Parser, %Parser* %l0
-  %t386 = insertvalue %MatchCaseParseResult undef, %Parser %t385, 0
-  %t387 = bitcast i8* null to %MatchCase*
-  %t388 = insertvalue %MatchCaseParseResult %t386, %MatchCase* %t387, 1
-  %t389 = insertvalue %MatchCaseParseResult %t388, i1 0, 2
-  ret %MatchCaseParseResult %t389
-merge29:
-  %t390 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
-  %t391 = call %Expression @expression_from_tokens({ %Token*, i64 }* %t390)
-  store %Expression %t391, %Expression* %l20
-  %t392 = getelementptr [0 x %Token], [0 x %Token]* null, i32 1
-  %t393 = ptrtoint [0 x %Token]* %t392 to i64
-  %t394 = icmp eq i64 %t393, 0
-  %t395 = select i1 %t394, i64 1, i64 %t393
-  %t396 = call i8* @malloc(i64 %t395)
-  %t397 = bitcast i8* %t396 to %Token*
-  %t398 = getelementptr { %Token*, i64 }, { %Token*, i64 }* null, i32 1
-  %t399 = ptrtoint { %Token*, i64 }* %t398 to i64
-  %t400 = call i8* @malloc(i64 %t399)
-  %t401 = bitcast i8* %t400 to { %Token*, i64 }*
-  %t402 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t401, i32 0, i32 0
-  store %Token* %t397, %Token** %t402
-  %t403 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t401, i32 0, i32 1
-  store i64 0, i64* %t403
-  store { %Token*, i64 }* %t401, { %Token*, i64 }** %l21
-  %t404 = sitofp i64 0 to double
-  store double %t404, double* %l22
-  %t405 = load %Parser, %Parser* %l0
-  %t406 = load %Parser, %Parser* %l1
-  %t407 = load %PatternCaptureResult, %PatternCaptureResult* %l2
-  %t408 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
-  %t409 = load %Expression, %Expression* %l4
-  %t410 = load %Expression*, %Expression** %l5
-  %t411 = load %Token, %Token* %l6
-  %t412 = load %Block*, %Block** %l7
-  %t413 = load %CaptureResult, %CaptureResult* %l18
-  %t414 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
-  %t415 = load %Expression, %Expression* %l20
-  %t416 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t417 = load double, double* %l22
-  br label %loop.header30
-loop.header30:
-  %t456 = phi { %Token*, i64 }* [ %t416, %merge29 ], [ %t454, %loop.latch32 ]
-  %t457 = phi double [ %t417, %merge29 ], [ %t455, %loop.latch32 ]
-  store { %Token*, i64 }* %t456, { %Token*, i64 }** %l21
-  store double %t457, double* %l22
-  br label %loop.body31
-loop.body31:
-  %t418 = load double, double* %l22
-  %t419 = load %CaptureResult, %CaptureResult* %l18
-  %t420 = extractvalue %CaptureResult %t419, 1
-  %t421 = load { %Token*, i64 }, { %Token*, i64 }* %t420
-  %t422 = extractvalue { %Token*, i64 } %t421, 1
-  %t423 = sitofp i64 %t422 to double
-  %t424 = fcmp oge double %t418, %t423
-  %t425 = load %Parser, %Parser* %l0
-  %t426 = load %Parser, %Parser* %l1
-  %t427 = load %PatternCaptureResult, %PatternCaptureResult* %l2
-  %t428 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
-  %t429 = load %Expression, %Expression* %l4
-  %t430 = load %Expression*, %Expression** %l5
-  %t431 = load %Token, %Token* %l6
-  %t432 = load %Block*, %Block** %l7
-  %t433 = load %CaptureResult, %CaptureResult* %l18
-  %t434 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
-  %t435 = load %Expression, %Expression* %l20
-  %t436 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t437 = load double, double* %l22
-  br i1 %t424, label %then34, label %merge35
-then34:
-  br label %afterloop33
-merge35:
-  %t438 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t439 = load %CaptureResult, %CaptureResult* %l18
-  %t440 = extractvalue %CaptureResult %t439, 1
-  %t441 = load double, double* %l22
-  %t442 = call double @llvm.round.f64(double %t441)
-  %t443 = fptosi double %t442 to i64
-  %t444 = load { %Token*, i64 }, { %Token*, i64 }* %t440
-  %t445 = extractvalue { %Token*, i64 } %t444, 0
-  %t446 = extractvalue { %Token*, i64 } %t444, 1
-  %t447 = icmp uge i64 %t443, %t446
-  ; bounds check: %t447 (if true, out of bounds)
-  call void @sailfin_runtime_bounds_check(i64 %t443, i64 %t446)
-  %t448 = getelementptr %Token, %Token* %t445, i64 %t443
-  %t449 = load %Token, %Token* %t448
-  %t450 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t438, %Token %t449)
-  store { %Token*, i64 }* %t450, { %Token*, i64 }** %l21
-  %t451 = load double, double* %l22
-  %t452 = sitofp i64 1 to double
-  %t453 = fadd double %t451, %t452
-  store double %t453, double* %l22
-  br label %loop.latch32
-loop.latch32:
-  %t454 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t455 = load double, double* %l22
-  br label %loop.header30
-afterloop33:
-  %t458 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t459 = load double, double* %l22
-  %t460 = load %CaptureResult, %CaptureResult* %l18
-  %t461 = extractvalue %CaptureResult %t460, 0
-  %t462 = call %Parser @skip_trivia(%Parser %t461)
-  store %Parser %t462, %Parser* %l1
-  %t463 = load %Parser, %Parser* %l1
-  %t464 = call %Token @parser_peek_raw(%Parser %t463)
-  store %Token %t464, %Token* %l23
-  %t465 = load %Token, %Token* %l23
-  %t466 = add i64 0, 2
-  %t467 = call i8* @malloc(i64 %t466)
-  store i8 59, i8* %t467
-  %t468 = getelementptr i8, i8* %t467, i64 1
-  store i8 0, i8* %t468
-  call void @sailfin_runtime_mark_persistent(i8* %t467)
-  %t469 = call i1 @symbol_matches(%Token %t465, i8* %t467)
-  %t470 = load %Parser, %Parser* %l0
-  %t471 = load %Parser, %Parser* %l1
-  %t472 = load %PatternCaptureResult, %PatternCaptureResult* %l2
-  %t473 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
-  %t474 = load %Expression, %Expression* %l4
-  %t475 = load %Expression*, %Expression** %l5
-  %t476 = load %Token, %Token* %l6
-  %t477 = load %Block*, %Block** %l7
-  %t478 = load %CaptureResult, %CaptureResult* %l18
-  %t479 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
-  %t480 = load %Expression, %Expression* %l20
-  %t481 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t482 = load double, double* %l22
-  %t483 = load %Token, %Token* %l23
-  br i1 %t469, label %then36, label %merge37
-then36:
-  %t484 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t485 = load %Token, %Token* %l23
-  %t486 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t484, %Token %t485)
-  store { %Token*, i64 }* %t486, { %Token*, i64 }** %l21
-  %t487 = load %Parser, %Parser* %l1
-  %t488 = call %Parser @parser_advance_raw(%Parser %t487)
-  store %Parser %t488, %Parser* %l1
-  %t489 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t490 = load %Parser, %Parser* %l1
-  br label %merge37
-merge37:
-  %t491 = phi { %Token*, i64 }* [ %t489, %then36 ], [ %t481, %afterloop33 ]
-  %t492 = phi %Parser [ %t490, %then36 ], [ %t471, %afterloop33 ]
-  store { %Token*, i64 }* %t491, { %Token*, i64 }** %l21
-  store %Parser %t492, %Parser* %l1
-  %t493 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t494 = call { %Token*, i64 }* @trim_token_edges({ %Token*, i64 }* %t493)
-  store { %Token*, i64 }* %t494, { %Token*, i64 }** %l21
-  %t495 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t496 = call %SourceSpan* @source_span_from_tokens({ %Token*, i64 }* %t495)
-  store %SourceSpan* %t496, %SourceSpan** %l24
-  %t497 = getelementptr [0 x %Statement], [0 x %Statement]* null, i32 1
-  %t498 = ptrtoint [0 x %Statement]* %t497 to i64
-  %t499 = icmp eq i64 %t498, 0
-  %t500 = select i1 %t499, i64 1, i64 %t498
-  %t501 = call i8* @malloc(i64 %t500)
-  %t502 = bitcast i8* %t501 to %Statement*
-  %t503 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* null, i32 1
-  %t504 = ptrtoint { %Statement*, i64 }* %t503 to i64
-  %t505 = call i8* @malloc(i64 %t504)
-  %t506 = bitcast i8* %t505 to { %Statement*, i64 }*
-  %t507 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t506, i32 0, i32 0
-  store %Statement* %t502, %Statement** %t507
-  %t508 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t506, i32 0, i32 1
-  store i64 0, i64* %t508
-  store { %Statement*, i64 }* %t506, { %Statement*, i64 }** %l25
-  %t509 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l25
-  %t510 = alloca %Statement
-  %t511 = getelementptr inbounds %Statement, %Statement* %t510, i32 0, i32 0
-  store i32 21, i32* %t511
-  %t512 = load %Expression, %Expression* %l20
-  %t513 = getelementptr inbounds %Statement, %Statement* %t510, i32 0, i32 1
-  %t514 = bitcast [56 x i8]* %t513 to i8*
-  %t515 = bitcast i8* %t514 to %Expression*
-  store %Expression %t512, %Expression* %t515
-  %t516 = load %SourceSpan*, %SourceSpan** %l24
-  %t517 = getelementptr inbounds %Statement, %Statement* %t510, i32 0, i32 1
-  %t518 = bitcast [56 x i8]* %t517 to i8*
-  %t519 = getelementptr inbounds i8, i8* %t518, i64 48
-  %t520 = bitcast i8* %t519 to %SourceSpan**
-  store %SourceSpan* %t516, %SourceSpan** %t520
-  %t521 = load %Statement, %Statement* %t510
-  %t522 = call { %Statement*, i64 }* @append_statement({ %Statement*, i64 }* %t509, %Statement %t521)
-  store { %Statement*, i64 }* %t522, { %Statement*, i64 }** %l25
+  %t374 = load %Parser, %Parser* %l1
+  %t375 = add i64 0, 2
+  %t376 = call i8* @malloc(i64 %t375)
+  store i8 59, i8* %t376
+  %t377 = getelementptr i8, i8* %t376, i64 1
+  store i8 0, i8* %t377
+  call void @sailfin_runtime_mark_persistent(i8* %t376)
+  %t378 = add i64 0, 2
+  %t379 = call i8* @malloc(i64 %t378)
+  store i8 125, i8* %t379
+  %t380 = getelementptr i8, i8* %t379, i64 1
+  store i8 0, i8* %t380
+  call void @sailfin_runtime_mark_persistent(i8* %t379)
+  %t381 = getelementptr [2 x i8*], [2 x i8*]* null, i32 1
+  %t382 = ptrtoint [2 x i8*]* %t381 to i64
+  %t383 = icmp eq i64 %t382, 0
+  %t384 = select i1 %t383, i64 1, i64 %t382
+  %t385 = call i8* @malloc(i64 %t384)
+  %t386 = bitcast i8* %t385 to i8**
+  %t387 = getelementptr i8*, i8** %t386, i64 0
+  store i8* %t376, i8** %t387
+  %t388 = getelementptr i8*, i8** %t386, i64 1
+  store i8* %t379, i8** %t388
+  %t389 = getelementptr { i8**, i64 }, { i8**, i64 }* null, i32 1
+  %t390 = ptrtoint { i8**, i64 }* %t389 to i64
+  %t391 = call i8* @malloc(i64 %t390)
+  %t392 = bitcast i8* %t391 to { i8**, i64 }*
+  %t393 = getelementptr { i8**, i64 }, { i8**, i64 }* %t392, i32 0, i32 0
+  store i8** %t386, i8*** %t393
+  %t394 = getelementptr { i8**, i64 }, { i8**, i64 }* %t392, i32 0, i32 1
+  store i64 2, i64* %t394
+  %t395 = call %CaptureResult @collect_until(%Parser %t374, { i8**, i64 }* %t392)
+  store %CaptureResult %t395, %CaptureResult* %l18
+  %t396 = load %CaptureResult, %CaptureResult* %l18
+  %t397 = extractvalue %CaptureResult %t396, 1
+  %t398 = call { %Token*, i64 }* @trim_token_edges({ %Token*, i64 }* %t397)
+  store { %Token*, i64 }* %t398, { %Token*, i64 }** %l19
+  %t399 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
+  %t400 = load { %Token*, i64 }, { %Token*, i64 }* %t399
+  %t401 = extractvalue { %Token*, i64 } %t400, 1
+  %t402 = icmp eq i64 %t401, 0
+  %t403 = load %Parser, %Parser* %l0
+  %t404 = load %Parser, %Parser* %l1
+  %t405 = load %PatternCaptureResult, %PatternCaptureResult* %l2
+  %t406 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
+  %t407 = load %Expression, %Expression* %l4
+  %t408 = load %Expression*, %Expression** %l5
+  %t409 = load %Token, %Token* %l6
+  %t410 = load %Block*, %Block** %l7
+  %t411 = load %CaptureResult, %CaptureResult* %l18
+  %t412 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
+  br i1 %t402, label %then31, label %merge32
+then31:
+  %t413 = load %Parser, %Parser* %l0
+  %t414 = insertvalue %MatchCaseParseResult undef, %Parser %t413, 0
+  %t415 = bitcast i8* null to %MatchCase*
+  %t416 = insertvalue %MatchCaseParseResult %t414, %MatchCase* %t415, 1
+  %t417 = insertvalue %MatchCaseParseResult %t416, i1 0, 2
+  ret %MatchCaseParseResult %t417
+merge32:
+  %t418 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
+  %t419 = call %Expression @expression_from_tokens({ %Token*, i64 }* %t418)
+  store %Expression %t419, %Expression* %l20
+  %t420 = getelementptr [0 x %Token], [0 x %Token]* null, i32 1
+  %t421 = ptrtoint [0 x %Token]* %t420 to i64
+  %t422 = icmp eq i64 %t421, 0
+  %t423 = select i1 %t422, i64 1, i64 %t421
+  %t424 = call i8* @malloc(i64 %t423)
+  %t425 = bitcast i8* %t424 to %Token*
+  %t426 = getelementptr { %Token*, i64 }, { %Token*, i64 }* null, i32 1
+  %t427 = ptrtoint { %Token*, i64 }* %t426 to i64
+  %t428 = call i8* @malloc(i64 %t427)
+  %t429 = bitcast i8* %t428 to { %Token*, i64 }*
+  %t430 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t429, i32 0, i32 0
+  store %Token* %t425, %Token** %t430
+  %t431 = getelementptr { %Token*, i64 }, { %Token*, i64 }* %t429, i32 0, i32 1
+  store i64 0, i64* %t431
+  store { %Token*, i64 }* %t429, { %Token*, i64 }** %l21
+  %t432 = sitofp i64 0 to double
+  store double %t432, double* %l22
+  %t433 = load %Parser, %Parser* %l0
+  %t434 = load %Parser, %Parser* %l1
+  %t435 = load %PatternCaptureResult, %PatternCaptureResult* %l2
+  %t436 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
+  %t437 = load %Expression, %Expression* %l4
+  %t438 = load %Expression*, %Expression** %l5
+  %t439 = load %Token, %Token* %l6
+  %t440 = load %Block*, %Block** %l7
+  %t441 = load %CaptureResult, %CaptureResult* %l18
+  %t442 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
+  %t443 = load %Expression, %Expression* %l20
+  %t444 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t445 = load double, double* %l22
+  br label %loop.header33
+loop.header33:
+  %t484 = phi { %Token*, i64 }* [ %t444, %merge32 ], [ %t482, %loop.latch35 ]
+  %t485 = phi double [ %t445, %merge32 ], [ %t483, %loop.latch35 ]
+  store { %Token*, i64 }* %t484, { %Token*, i64 }** %l21
+  store double %t485, double* %l22
+  br label %loop.body34
+loop.body34:
+  %t446 = load double, double* %l22
+  %t447 = load %CaptureResult, %CaptureResult* %l18
+  %t448 = extractvalue %CaptureResult %t447, 1
+  %t449 = load { %Token*, i64 }, { %Token*, i64 }* %t448
+  %t450 = extractvalue { %Token*, i64 } %t449, 1
+  %t451 = sitofp i64 %t450 to double
+  %t452 = fcmp oge double %t446, %t451
+  %t453 = load %Parser, %Parser* %l0
+  %t454 = load %Parser, %Parser* %l1
+  %t455 = load %PatternCaptureResult, %PatternCaptureResult* %l2
+  %t456 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
+  %t457 = load %Expression, %Expression* %l4
+  %t458 = load %Expression*, %Expression** %l5
+  %t459 = load %Token, %Token* %l6
+  %t460 = load %Block*, %Block** %l7
+  %t461 = load %CaptureResult, %CaptureResult* %l18
+  %t462 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
+  %t463 = load %Expression, %Expression* %l20
+  %t464 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t465 = load double, double* %l22
+  br i1 %t452, label %then37, label %merge38
+then37:
+  br label %afterloop36
+merge38:
+  %t466 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t467 = load %CaptureResult, %CaptureResult* %l18
+  %t468 = extractvalue %CaptureResult %t467, 1
+  %t469 = load double, double* %l22
+  %t470 = call double @llvm.round.f64(double %t469)
+  %t471 = fptosi double %t470 to i64
+  %t472 = load { %Token*, i64 }, { %Token*, i64 }* %t468
+  %t473 = extractvalue { %Token*, i64 } %t472, 0
+  %t474 = extractvalue { %Token*, i64 } %t472, 1
+  %t475 = icmp uge i64 %t471, %t474
+  ; bounds check: %t475 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t471, i64 %t474)
+  %t476 = getelementptr %Token, %Token* %t473, i64 %t471
+  %t477 = load %Token, %Token* %t476
+  %t478 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t466, %Token %t477)
+  store { %Token*, i64 }* %t478, { %Token*, i64 }** %l21
+  %t479 = load double, double* %l22
+  %t480 = sitofp i64 1 to double
+  %t481 = fadd double %t479, %t480
+  store double %t481, double* %l22
+  br label %loop.latch35
+loop.latch35:
+  %t482 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t483 = load double, double* %l22
+  br label %loop.header33
+afterloop36:
+  %t486 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t487 = load double, double* %l22
+  %t488 = load %CaptureResult, %CaptureResult* %l18
+  %t489 = extractvalue %CaptureResult %t488, 0
+  %t490 = call %Parser @skip_trivia(%Parser %t489)
+  store %Parser %t490, %Parser* %l1
+  %t491 = load %Parser, %Parser* %l1
+  %t492 = call %Token @parser_peek_raw(%Parser %t491)
+  store %Token %t492, %Token* %l23
+  %t493 = load %Token, %Token* %l23
+  %t494 = add i64 0, 2
+  %t495 = call i8* @malloc(i64 %t494)
+  store i8 59, i8* %t495
+  %t496 = getelementptr i8, i8* %t495, i64 1
+  store i8 0, i8* %t496
+  call void @sailfin_runtime_mark_persistent(i8* %t495)
+  %t497 = call i1 @symbol_matches(%Token %t493, i8* %t495)
+  %t498 = load %Parser, %Parser* %l0
+  %t499 = load %Parser, %Parser* %l1
+  %t500 = load %PatternCaptureResult, %PatternCaptureResult* %l2
+  %t501 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
+  %t502 = load %Expression, %Expression* %l4
+  %t503 = load %Expression*, %Expression** %l5
+  %t504 = load %Token, %Token* %l6
+  %t505 = load %Block*, %Block** %l7
+  %t506 = load %CaptureResult, %CaptureResult* %l18
+  %t507 = load { %Token*, i64 }*, { %Token*, i64 }** %l19
+  %t508 = load %Expression, %Expression* %l20
+  %t509 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t510 = load double, double* %l22
+  %t511 = load %Token, %Token* %l23
+  br i1 %t497, label %then39, label %merge40
+then39:
+  %t512 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t513 = load %Token, %Token* %l23
+  %t514 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t512, %Token %t513)
+  store { %Token*, i64 }* %t514, { %Token*, i64 }** %l21
+  %t515 = load %Parser, %Parser* %l1
+  %t516 = call %Parser @parser_advance_raw(%Parser %t515)
+  store %Parser %t516, %Parser* %l1
+  %t517 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t518 = load %Parser, %Parser* %l1
+  br label %merge40
+merge40:
+  %t519 = phi { %Token*, i64 }* [ %t517, %then39 ], [ %t509, %afterloop36 ]
+  %t520 = phi %Parser [ %t518, %then39 ], [ %t499, %afterloop36 ]
+  store { %Token*, i64 }* %t519, { %Token*, i64 }** %l21
+  store %Parser %t520, %Parser* %l1
+  %t521 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t522 = call { %Token*, i64 }* @trim_token_edges({ %Token*, i64 }* %t521)
+  store { %Token*, i64 }* %t522, { %Token*, i64 }** %l21
   %t523 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t524 = call i8* @tokens_to_text({ %Token*, i64 }* %t523)
-  %t525 = call i8* @trim_text__parser(i8* %t524)
-  store i8* %t525, i8** %l26
-  %t526 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
-  %t527 = insertvalue %Block undef, { %Token*, i64 }* %t526, 0
-  %t528 = load i8*, i8** %l26
-  %t529 = insertvalue %Block %t527, i8* %t528, 1
-  %t530 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l25
-  %t531 = insertvalue %Block %t529, { %Statement*, i64 }* %t530, 2
-  %t532 = getelementptr %Block, %Block* null, i32 1
-  %t533 = ptrtoint %Block* %t532 to i64
-  %t534 = call noalias i8* @malloc(i64 %t533)
-  %t535 = bitcast i8* %t534 to %Block*
-  store %Block %t531, %Block* %t535
-  call void @sailfin_runtime_mark_persistent(i8* %t534)
-  store %Block* %t535, %Block** %l7
-  %t536 = load %Parser, %Parser* %l1
-  %t537 = load %Parser, %Parser* %l1
-  %t538 = load %Block*, %Block** %l7
+  %t524 = call %SourceSpan* @source_span_from_tokens({ %Token*, i64 }* %t523)
+  store %SourceSpan* %t524, %SourceSpan** %l24
+  %t525 = getelementptr [0 x %Statement], [0 x %Statement]* null, i32 1
+  %t526 = ptrtoint [0 x %Statement]* %t525 to i64
+  %t527 = icmp eq i64 %t526, 0
+  %t528 = select i1 %t527, i64 1, i64 %t526
+  %t529 = call i8* @malloc(i64 %t528)
+  %t530 = bitcast i8* %t529 to %Statement*
+  %t531 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* null, i32 1
+  %t532 = ptrtoint { %Statement*, i64 }* %t531 to i64
+  %t533 = call i8* @malloc(i64 %t532)
+  %t534 = bitcast i8* %t533 to { %Statement*, i64 }*
+  %t535 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t534, i32 0, i32 0
+  store %Statement* %t530, %Statement** %t535
+  %t536 = getelementptr { %Statement*, i64 }, { %Statement*, i64 }* %t534, i32 0, i32 1
+  store i64 0, i64* %t536
+  store { %Statement*, i64 }* %t534, { %Statement*, i64 }** %l25
+  %t537 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l25
+  %t538 = alloca %Statement
+  %t539 = getelementptr inbounds %Statement, %Statement* %t538, i32 0, i32 0
+  store i32 21, i32* %t539
+  %t540 = load %Expression, %Expression* %l20
+  %t541 = getelementptr inbounds %Statement, %Statement* %t538, i32 0, i32 1
+  %t542 = bitcast [56 x i8]* %t541 to i8*
+  %t543 = bitcast i8* %t542 to %Expression*
+  store %Expression %t540, %Expression* %t543
+  %t544 = load %SourceSpan*, %SourceSpan** %l24
+  %t545 = getelementptr inbounds %Statement, %Statement* %t538, i32 0, i32 1
+  %t546 = bitcast [56 x i8]* %t545 to i8*
+  %t547 = getelementptr inbounds i8, i8* %t546, i64 48
+  %t548 = bitcast i8* %t547 to %SourceSpan**
+  store %SourceSpan* %t544, %SourceSpan** %t548
+  %t549 = load %Statement, %Statement* %t538
+  %t550 = call { %Statement*, i64 }* @append_statement({ %Statement*, i64 }* %t537, %Statement %t549)
+  store { %Statement*, i64 }* %t550, { %Statement*, i64 }** %l25
+  %t551 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t552 = call i8* @tokens_to_text({ %Token*, i64 }* %t551)
+  %t553 = call i8* @trim_text__parser(i8* %t552)
+  store i8* %t553, i8** %l26
+  %t554 = load { %Token*, i64 }*, { %Token*, i64 }** %l21
+  %t555 = insertvalue %Block undef, { %Token*, i64 }* %t554, 0
+  %t556 = load i8*, i8** %l26
+  %t557 = insertvalue %Block %t555, i8* %t556, 1
+  %t558 = load { %Statement*, i64 }*, { %Statement*, i64 }** %l25
+  %t559 = insertvalue %Block %t557, { %Statement*, i64 }* %t558, 2
+  %t560 = getelementptr %Block, %Block* null, i32 1
+  %t561 = ptrtoint %Block* %t560 to i64
+  %t562 = call noalias i8* @malloc(i64 %t561)
+  %t563 = bitcast i8* %t562 to %Block*
+  store %Block %t559, %Block* %t563
+  call void @sailfin_runtime_mark_persistent(i8* %t562)
+  store %Block* %t563, %Block** %l7
+  %t564 = load %Parser, %Parser* %l1
+  %t565 = load %Parser, %Parser* %l1
+  %t566 = load %Block*, %Block** %l7
   br label %merge17
 merge17:
-  %t539 = phi %Parser [ %t342, %merge27 ], [ %t536, %merge37 ]
-  %t540 = phi %Block* [ %t345, %merge27 ], [ %t538, %merge37 ]
-  store %Parser %t539, %Parser* %l1
-  store %Block* %t540, %Block** %l7
-  %t541 = load %Parser, %Parser* %l1
-  %t542 = load %Parser, %Parser* %l1
-  %t543 = load %Parser, %Parser* %l1
-  %t544 = load %Block*, %Block** %l7
-  %t545 = load %Parser, %Parser* %l1
-  %t546 = load %Parser, %Parser* %l1
-  %t547 = load %Block*, %Block** %l7
+  %t567 = phi %Parser [ %t370, %merge30 ], [ %t564, %merge40 ]
+  %t568 = phi %Block* [ %t373, %merge30 ], [ %t566, %merge40 ]
+  store %Parser %t567, %Parser* %l1
+  store %Block* %t568, %Block** %l7
+  %t569 = load %Parser, %Parser* %l1
+  %t570 = load %Parser, %Parser* %l1
+  %t571 = load %Parser, %Parser* %l1
+  %t572 = load %Block*, %Block** %l7
+  %t573 = load %Parser, %Parser* %l1
+  %t574 = load %Parser, %Parser* %l1
+  %t575 = load %Block*, %Block** %l7
   br label %merge12
 merge12:
-  %t548 = phi %Parser [ %t133, %merge14 ], [ %t541, %merge17 ]
-  %t549 = phi %Block* [ %t134, %merge14 ], [ %t544, %merge17 ]
-  store %Parser %t548, %Parser* %l1
-  store %Block* %t549, %Block** %l7
-  %t550 = load %Block*, %Block** %l7
-  %t551 = icmp eq %Block* %t550, null
-  %t552 = load %Parser, %Parser* %l0
-  %t553 = load %Parser, %Parser* %l1
-  %t554 = load %PatternCaptureResult, %PatternCaptureResult* %l2
-  %t555 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
-  %t556 = load %Expression, %Expression* %l4
-  %t557 = load %Expression*, %Expression** %l5
-  %t558 = load %Token, %Token* %l6
-  %t559 = load %Block*, %Block** %l7
-  br i1 %t551, label %then38, label %merge39
-then38:
-  %t560 = load %Parser, %Parser* %l0
-  %t561 = insertvalue %MatchCaseParseResult undef, %Parser %t560, 0
-  %t562 = bitcast i8* null to %MatchCase*
-  %t563 = insertvalue %MatchCaseParseResult %t561, %MatchCase* %t562, 1
-  %t564 = insertvalue %MatchCaseParseResult %t563, i1 0, 2
-  ret %MatchCaseParseResult %t564
-merge39:
-  %t565 = load %Expression, %Expression* %l4
-  %t566 = insertvalue %MatchCase undef, %Expression %t565, 0
-  %t567 = load %Expression*, %Expression** %l5
-  %t568 = insertvalue %MatchCase %t566, %Expression* %t567, 1
-  %t569 = load %Block*, %Block** %l7
-  %t570 = load %Block, %Block* %t569
-  %t571 = insertvalue %MatchCase %t568, %Block %t570, 2
-  store %MatchCase %t571, %MatchCase* %l27
-  %t572 = load %Parser, %Parser* %l1
-  %t573 = insertvalue %MatchCaseParseResult undef, %Parser %t572, 0
-  %t574 = load %MatchCase, %MatchCase* %l27
-  %t575 = getelementptr %MatchCase, %MatchCase* null, i32 1
-  %t576 = ptrtoint %MatchCase* %t575 to i64
-  %t577 = call noalias i8* @malloc(i64 %t576)
-  %t578 = bitcast i8* %t577 to %MatchCase*
-  store %MatchCase %t574, %MatchCase* %t578
-  call void @sailfin_runtime_mark_persistent(i8* %t577)
-  %t579 = insertvalue %MatchCaseParseResult %t573, %MatchCase* %t578, 1
-  %t580 = insertvalue %MatchCaseParseResult %t579, i1 1, 2
-  ret %MatchCaseParseResult %t580
+  %t576 = phi %Parser [ %t133, %merge14 ], [ %t569, %merge17 ]
+  %t577 = phi %Block* [ %t134, %merge14 ], [ %t572, %merge17 ]
+  store %Parser %t576, %Parser* %l1
+  store %Block* %t577, %Block** %l7
+  %t578 = load %Block*, %Block** %l7
+  %t579 = icmp eq %Block* %t578, null
+  %t580 = load %Parser, %Parser* %l0
+  %t581 = load %Parser, %Parser* %l1
+  %t582 = load %PatternCaptureResult, %PatternCaptureResult* %l2
+  %t583 = load %MatchCaseTokenSplit, %MatchCaseTokenSplit* %l3
+  %t584 = load %Expression, %Expression* %l4
+  %t585 = load %Expression*, %Expression** %l5
+  %t586 = load %Token, %Token* %l6
+  %t587 = load %Block*, %Block** %l7
+  br i1 %t579, label %then41, label %merge42
+then41:
+  %t588 = load %Parser, %Parser* %l0
+  %t589 = insertvalue %MatchCaseParseResult undef, %Parser %t588, 0
+  %t590 = bitcast i8* null to %MatchCase*
+  %t591 = insertvalue %MatchCaseParseResult %t589, %MatchCase* %t590, 1
+  %t592 = insertvalue %MatchCaseParseResult %t591, i1 0, 2
+  ret %MatchCaseParseResult %t592
+merge42:
+  %t593 = load %Expression, %Expression* %l4
+  %t594 = insertvalue %MatchCase undef, %Expression %t593, 0
+  %t595 = load %Expression*, %Expression** %l5
+  %t596 = insertvalue %MatchCase %t594, %Expression* %t595, 1
+  %t597 = load %Block*, %Block** %l7
+  %t598 = load %Block, %Block* %t597
+  %t599 = insertvalue %MatchCase %t596, %Block %t598, 2
+  store %MatchCase %t599, %MatchCase* %l27
+  %t600 = load %Parser, %Parser* %l1
+  %t601 = insertvalue %MatchCaseParseResult undef, %Parser %t600, 0
+  %t602 = load %MatchCase, %MatchCase* %l27
+  %t603 = getelementptr %MatchCase, %MatchCase* null, i32 1
+  %t604 = ptrtoint %MatchCase* %t603 to i64
+  %t605 = call noalias i8* @malloc(i64 %t604)
+  %t606 = bitcast i8* %t605 to %MatchCase*
+  store %MatchCase %t602, %MatchCase* %t606
+  call void @sailfin_runtime_mark_persistent(i8* %t605)
+  %t607 = insertvalue %MatchCaseParseResult %t601, %MatchCase* %t606, 1
+  %t608 = insertvalue %MatchCaseParseResult %t607, i1 1, 2
+  ret %MatchCaseParseResult %t608
 }
 
 define %BlockStatementParseResult @parse_prompt_statement(%Parser %parser, { %Decorator*, i64 }* %decorators) {
@@ -13551,7 +13590,7 @@ merge1:
   %t68 = load %CaptureResult, %CaptureResult* %l3
   %t69 = load { %Token*, i64 }*, { %Token*, i64 }** %l4
   %t70 = load %Expression*, %Expression** %l5
-  br i1 %t64, label %then2, label %merge3
+  br i1 %t64, label %then2, label %else3
 then2:
   %t71 = load { %Token*, i64 }*, { %Token*, i64 }** %l4
   %t72 = call %Expression @expression_from_tokens({ %Token*, i64 }* %t71)
@@ -13563,143 +13602,174 @@ then2:
   call void @sailfin_runtime_mark_persistent(i8* %t75)
   store %Expression* %t76, %Expression** %l5
   %t77 = load %Expression*, %Expression** %l5
-  br label %merge3
-merge3:
-  %t78 = phi %Expression* [ %t77, %then2 ], [ %t70, %merge1 ]
-  store %Expression* %t78, %Expression** %l5
-  %t79 = sitofp i64 0 to double
-  store double %t79, double* %l6
-  %t80 = load %Parser, %Parser* %l0
-  %t81 = load %Parser, %Parser* %l1
-  %t82 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
-  %t83 = load %CaptureResult, %CaptureResult* %l3
-  %t84 = load { %Token*, i64 }*, { %Token*, i64 }** %l4
-  %t85 = load %Expression*, %Expression** %l5
-  %t86 = load double, double* %l6
-  br label %loop.header4
-loop.header4:
-  %t119 = phi { %Token*, i64 }* [ %t82, %merge3 ], [ %t117, %loop.latch6 ]
-  %t120 = phi double [ %t86, %merge3 ], [ %t118, %loop.latch6 ]
-  store { %Token*, i64 }* %t119, { %Token*, i64 }** %l2
-  store double %t120, double* %l6
-  br label %loop.body5
-loop.body5:
-  %t87 = load double, double* %l6
-  %t88 = load %CaptureResult, %CaptureResult* %l3
-  %t89 = extractvalue %CaptureResult %t88, 1
-  %t90 = load { %Token*, i64 }, { %Token*, i64 }* %t89
-  %t91 = extractvalue { %Token*, i64 } %t90, 1
-  %t92 = sitofp i64 %t91 to double
-  %t93 = fcmp oge double %t87, %t92
-  %t94 = load %Parser, %Parser* %l0
-  %t95 = load %Parser, %Parser* %l1
-  %t96 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
-  %t97 = load %CaptureResult, %CaptureResult* %l3
-  %t98 = load { %Token*, i64 }*, { %Token*, i64 }** %l4
-  %t99 = load %Expression*, %Expression** %l5
-  %t100 = load double, double* %l6
-  br i1 %t93, label %then8, label %merge9
-then8:
-  br label %afterloop7
-merge9:
-  %t101 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
-  %t102 = load %CaptureResult, %CaptureResult* %l3
-  %t103 = extractvalue %CaptureResult %t102, 1
-  %t104 = load double, double* %l6
-  %t105 = call double @llvm.round.f64(double %t104)
-  %t106 = fptosi double %t105 to i64
-  %t107 = load { %Token*, i64 }, { %Token*, i64 }* %t103
-  %t108 = extractvalue { %Token*, i64 } %t107, 0
-  %t109 = extractvalue { %Token*, i64 } %t107, 1
-  %t110 = icmp uge i64 %t106, %t109
-  ; bounds check: %t110 (if true, out of bounds)
-  call void @sailfin_runtime_bounds_check(i64 %t106, i64 %t109)
-  %t111 = getelementptr %Token, %Token* %t108, i64 %t106
-  %t112 = load %Token, %Token* %t111
-  %t113 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t101, %Token %t112)
-  store { %Token*, i64 }* %t113, { %Token*, i64 }** %l2
-  %t114 = load double, double* %l6
-  %t115 = sitofp i64 1 to double
-  %t116 = fadd double %t114, %t115
-  store double %t116, double* %l6
-  br label %loop.latch6
-loop.latch6:
+  br label %merge4
+else3:
+  %t78 = load %CaptureResult, %CaptureResult* %l3
+  %t79 = extractvalue %CaptureResult %t78, 1
+  %t80 = load { %Token*, i64 }, { %Token*, i64 }* %t79
+  %t81 = extractvalue { %Token*, i64 } %t80, 1
+  %t82 = icmp sgt i64 %t81, 0
+  %t83 = load %Parser, %Parser* %l0
+  %t84 = load %Parser, %Parser* %l1
+  %t85 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t86 = load %CaptureResult, %CaptureResult* %l3
+  %t87 = load { %Token*, i64 }*, { %Token*, i64 }** %l4
+  %t88 = load %Expression*, %Expression** %l5
+  br i1 %t82, label %then5, label %merge6
+then5:
+  %t89 = load %CaptureResult, %CaptureResult* %l3
+  %t90 = extractvalue %CaptureResult %t89, 1
+  %t91 = call %Expression @expression_from_tokens({ %Token*, i64 }* %t90)
+  %t92 = getelementptr %Expression, %Expression* null, i32 1
+  %t93 = ptrtoint %Expression* %t92 to i64
+  %t94 = call noalias i8* @malloc(i64 %t93)
+  %t95 = bitcast i8* %t94 to %Expression*
+  store %Expression %t91, %Expression* %t95
+  call void @sailfin_runtime_mark_persistent(i8* %t94)
+  store %Expression* %t95, %Expression** %l5
+  %t96 = load %Expression*, %Expression** %l5
+  br label %merge6
+merge6:
+  %t97 = phi %Expression* [ %t96, %then5 ], [ %t88, %else3 ]
+  store %Expression* %t97, %Expression** %l5
+  %t98 = load %Expression*, %Expression** %l5
+  br label %merge4
+merge4:
+  %t99 = phi %Expression* [ %t77, %then2 ], [ %t98, %merge6 ]
+  store %Expression* %t99, %Expression** %l5
+  %t100 = sitofp i64 0 to double
+  store double %t100, double* %l6
+  %t101 = load %Parser, %Parser* %l0
+  %t102 = load %Parser, %Parser* %l1
+  %t103 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t104 = load %CaptureResult, %CaptureResult* %l3
+  %t105 = load { %Token*, i64 }*, { %Token*, i64 }** %l4
+  %t106 = load %Expression*, %Expression** %l5
+  %t107 = load double, double* %l6
+  br label %loop.header7
+loop.header7:
+  %t140 = phi { %Token*, i64 }* [ %t103, %merge4 ], [ %t138, %loop.latch9 ]
+  %t141 = phi double [ %t107, %merge4 ], [ %t139, %loop.latch9 ]
+  store { %Token*, i64 }* %t140, { %Token*, i64 }** %l2
+  store double %t141, double* %l6
+  br label %loop.body8
+loop.body8:
+  %t108 = load double, double* %l6
+  %t109 = load %CaptureResult, %CaptureResult* %l3
+  %t110 = extractvalue %CaptureResult %t109, 1
+  %t111 = load { %Token*, i64 }, { %Token*, i64 }* %t110
+  %t112 = extractvalue { %Token*, i64 } %t111, 1
+  %t113 = sitofp i64 %t112 to double
+  %t114 = fcmp oge double %t108, %t113
+  %t115 = load %Parser, %Parser* %l0
+  %t116 = load %Parser, %Parser* %l1
   %t117 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
-  %t118 = load double, double* %l6
-  br label %loop.header4
-afterloop7:
-  %t121 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
-  %t122 = load double, double* %l6
-  %t123 = load %Parser, %Parser* %l1
-  %t124 = call %Parser @skip_trivia(%Parser %t123)
-  store %Parser %t124, %Parser* %l1
-  %t125 = load %Parser, %Parser* %l1
-  %t126 = call %Token @parser_peek_raw(%Parser %t125)
-  store %Token %t126, %Token* %l7
-  %t127 = load %Token, %Token* %l7
-  %t128 = add i64 0, 2
-  %t129 = call i8* @malloc(i64 %t128)
-  store i8 59, i8* %t129
-  %t130 = getelementptr i8, i8* %t129, i64 1
-  store i8 0, i8* %t130
-  call void @sailfin_runtime_mark_persistent(i8* %t129)
-  %t131 = call i1 @symbol_matches(%Token %t127, i8* %t129)
-  %t132 = load %Parser, %Parser* %l0
-  %t133 = load %Parser, %Parser* %l1
-  %t134 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
-  %t135 = load %CaptureResult, %CaptureResult* %l3
-  %t136 = load { %Token*, i64 }*, { %Token*, i64 }** %l4
-  %t137 = load %Expression*, %Expression** %l5
-  %t138 = load double, double* %l6
-  %t139 = load %Token, %Token* %l7
-  br i1 %t131, label %then10, label %merge11
-then10:
-  %t140 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
-  %t141 = load %Token, %Token* %l7
-  %t142 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t140, %Token %t141)
-  store { %Token*, i64 }* %t142, { %Token*, i64 }** %l2
-  %t143 = load %Parser, %Parser* %l1
-  %t144 = call %Parser @parser_advance_raw(%Parser %t143)
-  store %Parser %t144, %Parser* %l1
-  %t145 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t118 = load %CaptureResult, %CaptureResult* %l3
+  %t119 = load { %Token*, i64 }*, { %Token*, i64 }** %l4
+  %t120 = load %Expression*, %Expression** %l5
+  %t121 = load double, double* %l6
+  br i1 %t114, label %then11, label %merge12
+then11:
+  br label %afterloop10
+merge12:
+  %t122 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t123 = load %CaptureResult, %CaptureResult* %l3
+  %t124 = extractvalue %CaptureResult %t123, 1
+  %t125 = load double, double* %l6
+  %t126 = call double @llvm.round.f64(double %t125)
+  %t127 = fptosi double %t126 to i64
+  %t128 = load { %Token*, i64 }, { %Token*, i64 }* %t124
+  %t129 = extractvalue { %Token*, i64 } %t128, 0
+  %t130 = extractvalue { %Token*, i64 } %t128, 1
+  %t131 = icmp uge i64 %t127, %t130
+  ; bounds check: %t131 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t127, i64 %t130)
+  %t132 = getelementptr %Token, %Token* %t129, i64 %t127
+  %t133 = load %Token, %Token* %t132
+  %t134 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t122, %Token %t133)
+  store { %Token*, i64 }* %t134, { %Token*, i64 }** %l2
+  %t135 = load double, double* %l6
+  %t136 = sitofp i64 1 to double
+  %t137 = fadd double %t135, %t136
+  store double %t137, double* %l6
+  br label %loop.latch9
+loop.latch9:
+  %t138 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t139 = load double, double* %l6
+  br label %loop.header7
+afterloop10:
+  %t142 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t143 = load double, double* %l6
+  %t144 = load %Parser, %Parser* %l1
+  %t145 = call %Parser @skip_trivia(%Parser %t144)
+  store %Parser %t145, %Parser* %l1
   %t146 = load %Parser, %Parser* %l1
-  br label %merge11
-merge11:
-  %t147 = phi { %Token*, i64 }* [ %t145, %then10 ], [ %t134, %afterloop7 ]
-  %t148 = phi %Parser [ %t146, %then10 ], [ %t133, %afterloop7 ]
-  store { %Token*, i64 }* %t147, { %Token*, i64 }** %l2
-  store %Parser %t148, %Parser* %l1
-  %t149 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
-  %t150 = call %SourceSpan* @source_span_from_tokens({ %Token*, i64 }* %t149)
-  store %SourceSpan* %t150, %SourceSpan** %l8
-  %t151 = alloca %Statement
-  %t152 = getelementptr inbounds %Statement, %Statement* %t151, i32 0, i32 0
-  store i32 20, i32* %t152
-  %t153 = load %Expression*, %Expression** %l5
-  %t154 = getelementptr inbounds %Statement, %Statement* %t151, i32 0, i32 1
-  %t155 = bitcast [16 x i8]* %t154 to i8*
-  %t156 = bitcast i8* %t155 to %Expression**
-  store %Expression* %t153, %Expression** %t156
-  %t157 = load %SourceSpan*, %SourceSpan** %l8
-  %t158 = getelementptr inbounds %Statement, %Statement* %t151, i32 0, i32 1
-  %t159 = bitcast [16 x i8]* %t158 to i8*
-  %t160 = getelementptr inbounds i8, i8* %t159, i64 8
-  %t161 = bitcast i8* %t160 to %SourceSpan**
-  store %SourceSpan* %t157, %SourceSpan** %t161
-  %t162 = load %Statement, %Statement* %t151
-  store %Statement %t162, %Statement* %l9
-  %t163 = load %Parser, %Parser* %l1
-  %t164 = insertvalue %BlockStatementParseResult undef, %Parser %t163, 0
-  %t165 = load %Statement, %Statement* %l9
-  %t166 = getelementptr %Statement, %Statement* null, i32 1
-  %t167 = ptrtoint %Statement* %t166 to i64
-  %t168 = call noalias i8* @malloc(i64 %t167)
-  %t169 = bitcast i8* %t168 to %Statement*
-  store %Statement %t165, %Statement* %t169
-  call void @sailfin_runtime_mark_persistent(i8* %t168)
-  %t170 = insertvalue %BlockStatementParseResult %t164, %Statement* %t169, 1
-  %t171 = insertvalue %BlockStatementParseResult %t170, i1 1, 2
-  ret %BlockStatementParseResult %t171
+  %t147 = call %Token @parser_peek_raw(%Parser %t146)
+  store %Token %t147, %Token* %l7
+  %t148 = load %Token, %Token* %l7
+  %t149 = add i64 0, 2
+  %t150 = call i8* @malloc(i64 %t149)
+  store i8 59, i8* %t150
+  %t151 = getelementptr i8, i8* %t150, i64 1
+  store i8 0, i8* %t151
+  call void @sailfin_runtime_mark_persistent(i8* %t150)
+  %t152 = call i1 @symbol_matches(%Token %t148, i8* %t150)
+  %t153 = load %Parser, %Parser* %l0
+  %t154 = load %Parser, %Parser* %l1
+  %t155 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t156 = load %CaptureResult, %CaptureResult* %l3
+  %t157 = load { %Token*, i64 }*, { %Token*, i64 }** %l4
+  %t158 = load %Expression*, %Expression** %l5
+  %t159 = load double, double* %l6
+  %t160 = load %Token, %Token* %l7
+  br i1 %t152, label %then13, label %merge14
+then13:
+  %t161 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t162 = load %Token, %Token* %l7
+  %t163 = call { %Token*, i64 }* @append_token({ %Token*, i64 }* %t161, %Token %t162)
+  store { %Token*, i64 }* %t163, { %Token*, i64 }** %l2
+  %t164 = load %Parser, %Parser* %l1
+  %t165 = call %Parser @parser_advance_raw(%Parser %t164)
+  store %Parser %t165, %Parser* %l1
+  %t166 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t167 = load %Parser, %Parser* %l1
+  br label %merge14
+merge14:
+  %t168 = phi { %Token*, i64 }* [ %t166, %then13 ], [ %t155, %afterloop10 ]
+  %t169 = phi %Parser [ %t167, %then13 ], [ %t154, %afterloop10 ]
+  store { %Token*, i64 }* %t168, { %Token*, i64 }** %l2
+  store %Parser %t169, %Parser* %l1
+  %t170 = load { %Token*, i64 }*, { %Token*, i64 }** %l2
+  %t171 = call %SourceSpan* @source_span_from_tokens({ %Token*, i64 }* %t170)
+  store %SourceSpan* %t171, %SourceSpan** %l8
+  %t172 = alloca %Statement
+  %t173 = getelementptr inbounds %Statement, %Statement* %t172, i32 0, i32 0
+  store i32 20, i32* %t173
+  %t174 = load %Expression*, %Expression** %l5
+  %t175 = getelementptr inbounds %Statement, %Statement* %t172, i32 0, i32 1
+  %t176 = bitcast [16 x i8]* %t175 to i8*
+  %t177 = bitcast i8* %t176 to %Expression**
+  store %Expression* %t174, %Expression** %t177
+  %t178 = load %SourceSpan*, %SourceSpan** %l8
+  %t179 = getelementptr inbounds %Statement, %Statement* %t172, i32 0, i32 1
+  %t180 = bitcast [16 x i8]* %t179 to i8*
+  %t181 = getelementptr inbounds i8, i8* %t180, i64 8
+  %t182 = bitcast i8* %t181 to %SourceSpan**
+  store %SourceSpan* %t178, %SourceSpan** %t182
+  %t183 = load %Statement, %Statement* %t172
+  store %Statement %t183, %Statement* %l9
+  %t184 = load %Parser, %Parser* %l1
+  %t185 = insertvalue %BlockStatementParseResult undef, %Parser %t184, 0
+  %t186 = load %Statement, %Statement* %l9
+  %t187 = getelementptr %Statement, %Statement* null, i32 1
+  %t188 = ptrtoint %Statement* %t187 to i64
+  %t189 = call noalias i8* @malloc(i64 %t188)
+  %t190 = bitcast i8* %t189 to %Statement*
+  store %Statement %t186, %Statement* %t190
+  call void @sailfin_runtime_mark_persistent(i8* %t189)
+  %t191 = insertvalue %BlockStatementParseResult %t185, %Statement* %t190, 1
+  %t192 = insertvalue %BlockStatementParseResult %t191, i1 1, 2
+  ret %BlockStatementParseResult %t192
 }
 
 define %BlockStatementParseResult @parse_expression_statement(%Parser %parser, { %Decorator*, i64 }* %decorators) {
@@ -17026,7 +17096,7 @@ afterloop9:
   ret i1 1
 }
 
-define i1 @is_decimal_digit__parser(i8* %ch) {
+define i1 @is_decimal_digit(i8* %ch) {
 block.entry:
   %t1 = load i8, i8* %ch
   %t2 = icmp eq i8 %t1, 48
@@ -28501,85 +28571,85 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
-@.str.len7.h936649884 = private unnamed_addr constant [8 x i8] c"Comment\00"
-@.str.len10.h715288307 = private unnamed_addr constant [11 x i8] c"Whitespace\00"
-@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.enum.TokenKind.EndOfFile.variant = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
-@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.str.len5.h1921561325 = private unnamed_addr constant [6 x i8] c"async\00"
-@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
-@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.enum.TokenKind.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.enum.TokenKind.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
 @.str.len2.h193445474 = private unnamed_addr constant [3 x i8] c"=>\00"
-@.enum.TokenKind.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.enum.TokenKind.Symbol.variant = private unnamed_addr constant [7 x i8] c"Symbol\00"
-@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
-@.str.len2.h193429733 = private unnamed_addr constant [3 x i8] c"//\00"
-@.str.len4.h257940116 = private unnamed_addr constant [5 x i8] c"else\00"
-@.str.len2.h193445441 = private unnamed_addr constant [3 x i8] c"==\00"
-@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len2.h193486427 = private unnamed_addr constant [3 x i8] c"as\00"
-@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len4.h255172967 = private unnamed_addr constant [5 x i8] c"case\00"
-@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
-@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
-@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
-@.str.len2.h193446530 = private unnamed_addr constant [3 x i8] c">=\00"
-@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
-@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.enum.TokenKind.Whitespace.variant = private unnamed_addr constant [11 x i8] c"Whitespace\00"
-@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len3.h2090521984 = private unnamed_addr constant [4 x i8] c"mut\00"
-@.enum.TokenKind.Comment.variant = private unnamed_addr constant [8 x i8] c"Comment\00"
-@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
-@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
-@.str.len9.h1021477046 = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
-@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
 @.enum.Statement.ToolDeclaration.variant = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
 @.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
-@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
-@.str.len15.h1896695889 = private unnamed_addr constant [16 x i8] c"... (truncated)\00"
-@.str.len30.h1141851511 = private unnamed_addr constant [31 x i8] c" /* parse_unknown truncated */\00"
-@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Statement.ReturnStatement.variant = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
 @.str.len2.h193444352 = private unnamed_addr constant [3 x i8] c"<=\00"
-@.str.len2.h193429568 = private unnamed_addr constant [3 x i8] c"/*\00"
-@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.enum.Statement.PipelineDeclaration.variant = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
 @.enum.Statement.TestDeclaration.variant = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
-@.str.len6.h453982107 = private unnamed_addr constant [7 x i8] c"Symbol\00"
-@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.enum.TokenKind.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len2.h193486427 = private unnamed_addr constant [3 x i8] c"as\00"
+@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
+@.enum.Statement.VariableDeclaration.variant = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.str.len2.h193428050 = private unnamed_addr constant [3 x i8] c"->\00"
 @.enum.TokenKind.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.enum.TokenKind.Symbol.variant = private unnamed_addr constant [7 x i8] c"Symbol\00"
+@.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len2.h193516127 = private unnamed_addr constant [3 x i8] c"||\00"
+@.str.len2.h193419635 = private unnamed_addr constant [3 x i8] c"&&\00"
+@.enum.Statement.ImportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
+@.str.len30.h1141851511 = private unnamed_addr constant [31 x i8] c" /* parse_unknown truncated */\00"
 @.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len6.h453982107 = private unnamed_addr constant [7 x i8] c"Symbol\00"
+@.str.len5.h1921561325 = private unnamed_addr constant [6 x i8] c"async\00"
+@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.enum.TokenKind.Whitespace.variant = private unnamed_addr constant [11 x i8] c"Whitespace\00"
+@.enum.Statement.MatchStatement.variant = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len10.h715288307 = private unnamed_addr constant [11 x i8] c"Whitespace\00"
+@.str.len15.h1896695889 = private unnamed_addr constant [16 x i8] c"... (truncated)\00"
+@.enum.Statement.EnumDeclaration.variant = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len2.h193414949 = private unnamed_addr constant [3 x i8] c"!=\00"
+@.enum.Statement.BreakStatement.variant = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.str.len2.h193429568 = private unnamed_addr constant [3 x i8] c"/*\00"
+@.enum.Statement.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Statement.ContinueStatement.variant = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.enum.Statement.TypeAliasDeclaration.variant = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.str.len9.h1021477046 = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
+@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len3.h2090521984 = private unnamed_addr constant [4 x i8] c"mut\00"
+@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.str.len2.h193429733 = private unnamed_addr constant [3 x i8] c"//\00"
+@.enum.TokenKind.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.enum.Statement.IfStatement.variant = private unnamed_addr constant [12 x i8] c"IfStatement\00"
 @.enum.Statement.ExportDeclaration.variant = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len7.h936649884 = private unnamed_addr constant [8 x i8] c"Comment\00"
+@.enum.TokenKind.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len4.h257940116 = private unnamed_addr constant [5 x i8] c"else\00"
+@.enum.TokenKind.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.enum.Statement.Unknown.variant = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Statement.ForStatement.variant = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.enum.TokenKind.Comment.variant = private unnamed_addr constant [8 x i8] c"Comment\00"
+@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
+@.enum.Statement.InterfaceDeclaration.variant = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.enum.Statement.ModelDeclaration.variant = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.str.len2.h193446530 = private unnamed_addr constant [3 x i8] c">=\00"
+@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.enum.Statement.StructDeclaration.variant = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len4.h255172967 = private unnamed_addr constant [5 x i8] c"case\00"
+@.enum.TokenKind.EndOfFile.variant = private unnamed_addr constant [10 x i8] c"EndOfFile\00"
+@.enum.Statement.LoopStatement.variant = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
+@.enum.Statement.FunctionDeclaration.variant = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.enum.TokenKind.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Statement.WithStatement.variant = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.enum.Statement.PromptStatement.variant = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
+@.str.len2.h193445441 = private unnamed_addr constant [3 x i8] c"==\00"
+@.enum.Statement.ExpressionStatement.variant = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"

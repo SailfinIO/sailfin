@@ -64,9 +64,6 @@ declare noalias i8* @malloc(i64)
 @.str.len5.h261050197 = private unnamed_addr constant [6 x i8] c"named\00"
 @.str.len7.h186837049 = private unnamed_addr constant [8 x i8] c"unknown\00"
 @.str.len42.h1658844115 = private unnamed_addr constant [43 x i8] c"Non-exhaustive match for value {{ value }}\00"
-@.str.len10.h626550212 = private unnamed_addr constant [11 x i8] c"0123456789\00"
-@.str.len26.h287370135 = private unnamed_addr constant [27 x i8] c"abcdefghijklmnopqrstuvwxyz\00"
-@.str.len26.h645889856 = private unnamed_addr constant [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00"
 
 declare void @sailfin_runtime_copy_bytes(i8*, i8*, i64)
 
@@ -3479,13 +3476,6 @@ block.entry:
 
 define double @char_code(i8* %character) {
 block.entry:
-  %l0 = alloca i8*
-  %l1 = alloca i8*
-  %l2 = alloca double
-  %l3 = alloca i8*
-  %l4 = alloca double
-  %l5 = alloca i8*
-  %l6 = alloca double
   %t0 = call i64 @sailfin_runtime_string_length(i8* %character)
   %t1 = icmp eq i64 %t0, 0
   br i1 %t1, label %then0, label %merge1
@@ -3495,181 +3485,8 @@ then0:
 merge1:
   %t3 = sitofp i64 0 to double
   %t4 = call i8* @char_at__prelude(i8* %character, double %t3)
-  store i8* %t4, i8** %l0
-  %s5 = getelementptr inbounds [11 x i8], [11 x i8]* @.str.len10.h626550212, i32 0, i32 0
-  store i8* %s5, i8** %l1
-  %t6 = load i8*, i8** %l1
-  %t7 = load i8*, i8** %l0
-  %t8 = sitofp i64 0 to double
-  %t9 = call double @find_char(i8* %t6, i8* %t7, double %t8)
-  store double %t9, double* %l2
-  %t10 = load double, double* %l2
-  %t11 = sitofp i64 0 to double
-  %t12 = fcmp oge double %t10, %t11
-  %t13 = load i8*, i8** %l0
-  %t14 = load i8*, i8** %l1
-  %t15 = load double, double* %l2
-  br i1 %t12, label %then2, label %merge3
-then2:
-  %t16 = load double, double* %l2
-  %t17 = sitofp i64 48 to double
-  %t18 = fadd double %t17, %t16
-  ret double %t18
-merge3:
-  %s19 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.len26.h287370135, i32 0, i32 0
-  store i8* %s19, i8** %l3
-  %t20 = load i8*, i8** %l3
-  %t21 = load i8*, i8** %l0
-  %t22 = sitofp i64 0 to double
-  %t23 = call double @find_char(i8* %t20, i8* %t21, double %t22)
-  store double %t23, double* %l4
-  %t24 = load double, double* %l4
-  %t25 = sitofp i64 0 to double
-  %t26 = fcmp oge double %t24, %t25
-  %t27 = load i8*, i8** %l0
-  %t28 = load i8*, i8** %l1
-  %t29 = load double, double* %l2
-  %t30 = load i8*, i8** %l3
-  %t31 = load double, double* %l4
-  br i1 %t26, label %then4, label %merge5
-then4:
-  %t32 = load double, double* %l4
-  %t33 = sitofp i64 97 to double
-  %t34 = fadd double %t33, %t32
-  ret double %t34
-merge5:
-  %s35 = getelementptr inbounds [27 x i8], [27 x i8]* @.str.len26.h645889856, i32 0, i32 0
-  store i8* %s35, i8** %l5
-  %t36 = load i8*, i8** %l5
-  %t37 = load i8*, i8** %l0
-  %t38 = sitofp i64 0 to double
-  %t39 = call double @find_char(i8* %t36, i8* %t37, double %t38)
-  store double %t39, double* %l6
-  %t40 = load double, double* %l6
-  %t41 = sitofp i64 0 to double
-  %t42 = fcmp oge double %t40, %t41
-  %t43 = load i8*, i8** %l0
-  %t44 = load i8*, i8** %l1
-  %t45 = load double, double* %l2
-  %t46 = load i8*, i8** %l3
-  %t47 = load double, double* %l4
-  %t48 = load i8*, i8** %l5
-  %t49 = load double, double* %l6
-  br i1 %t42, label %then6, label %merge7
-then6:
-  %t50 = load double, double* %l6
-  %t51 = sitofp i64 65 to double
-  %t52 = fadd double %t51, %t50
-  ret double %t52
-merge7:
-  %t53 = load i8*, i8** %l0
-  %t54 = load i8, i8* %t53
-  %t55 = icmp eq i8 %t54, 32
-  %t56 = load i8*, i8** %l0
-  %t57 = load i8*, i8** %l1
-  %t58 = load double, double* %l2
-  %t59 = load i8*, i8** %l3
-  %t60 = load double, double* %l4
-  %t61 = load i8*, i8** %l5
-  %t62 = load double, double* %l6
-  br i1 %t55, label %then8, label %merge9
-then8:
-  %t63 = sitofp i64 32 to double
-  ret double %t63
-merge9:
-  %t64 = load i8*, i8** %l0
-  %t65 = load i8, i8* %t64
-  %t66 = icmp eq i8 %t65, 10
-  %t67 = load i8*, i8** %l0
-  %t68 = load i8*, i8** %l1
-  %t69 = load double, double* %l2
-  %t70 = load i8*, i8** %l3
-  %t71 = load double, double* %l4
-  %t72 = load i8*, i8** %l5
-  %t73 = load double, double* %l6
-  br i1 %t66, label %then10, label %merge11
-then10:
-  %t74 = sitofp i64 10 to double
-  ret double %t74
-merge11:
-  %t75 = load i8*, i8** %l0
-  %t76 = load i8, i8* %t75
-  %t77 = icmp eq i8 %t76, 13
-  %t78 = load i8*, i8** %l0
-  %t79 = load i8*, i8** %l1
-  %t80 = load double, double* %l2
-  %t81 = load i8*, i8** %l3
-  %t82 = load double, double* %l4
-  %t83 = load i8*, i8** %l5
-  %t84 = load double, double* %l6
-  br i1 %t77, label %then12, label %merge13
-then12:
-  %t85 = sitofp i64 13 to double
-  ret double %t85
-merge13:
-  %t86 = load i8*, i8** %l0
-  %t87 = load i8, i8* %t86
-  %t88 = icmp eq i8 %t87, 9
-  %t89 = load i8*, i8** %l0
-  %t90 = load i8*, i8** %l1
-  %t91 = load double, double* %l2
-  %t92 = load i8*, i8** %l3
-  %t93 = load double, double* %l4
-  %t94 = load i8*, i8** %l5
-  %t95 = load double, double* %l6
-  br i1 %t88, label %then14, label %merge15
-then14:
-  %t96 = sitofp i64 9 to double
-  ret double %t96
-merge15:
-  %t97 = load i8*, i8** %l0
-  %t98 = load i8, i8* %t97
-  %t99 = icmp eq i8 %t98, 34
-  %t100 = load i8*, i8** %l0
-  %t101 = load i8*, i8** %l1
-  %t102 = load double, double* %l2
-  %t103 = load i8*, i8** %l3
-  %t104 = load double, double* %l4
-  %t105 = load i8*, i8** %l5
-  %t106 = load double, double* %l6
-  br i1 %t99, label %then16, label %merge17
-then16:
-  %t107 = sitofp i64 34 to double
-  ret double %t107
-merge17:
-  %t108 = load i8*, i8** %l0
-  %t109 = load i8, i8* %t108
-  %t110 = icmp eq i8 %t109, 92
-  %t111 = load i8*, i8** %l0
-  %t112 = load i8*, i8** %l1
-  %t113 = load double, double* %l2
-  %t114 = load i8*, i8** %l3
-  %t115 = load double, double* %l4
-  %t116 = load i8*, i8** %l5
-  %t117 = load double, double* %l6
-  br i1 %t110, label %then18, label %merge19
-then18:
-  %t118 = sitofp i64 92 to double
-  ret double %t118
-merge19:
-  %t119 = load i8*, i8** %l0
-  %t120 = load i8, i8* %t119
-  %t121 = icmp eq i8 %t120, 95
-  %t122 = load i8*, i8** %l0
-  %t123 = load i8*, i8** %l1
-  %t124 = load double, double* %l2
-  %t125 = load i8*, i8** %l3
-  %t126 = load double, double* %l4
-  %t127 = load i8*, i8** %l5
-  %t128 = load double, double* %l6
-  br i1 %t121, label %then20, label %merge21
-then20:
-  %t129 = sitofp i64 95 to double
-  ret double %t129
-merge21:
-  %t130 = load i8*, i8** %l0
-  %t131 = call double @sailfin_runtime_char_code(i8* %t130)
-  ret double %t131
+  %t5 = call double @sailfin_runtime_char_code(i8* %t4)
+  ret double %t5
 }
 
 define double @grapheme_count(i8* %text) {
@@ -3690,11 +3507,11 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
-@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
-@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
 @.str.len2.h193425971 = private unnamed_addr constant [3 x i8] c", \00"
-@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
-@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"
-@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
+@.str.len6.h807326654 = private unnamed_addr constant [7 x i8] c"number\00"
+@.str.len3.h2090260294 = private unnamed_addr constant [4 x i8] c"fn(\00"
 @.str.len7.h1483009776 = private unnamed_addr constant [8 x i8] c"boolean\00"
+@.str.len8.h2085806430 = private unnamed_addr constant [9 x i8] c"runtime.\00"
+@.str.len4.h278197661 = private unnamed_addr constant [5 x i8] c"void\00"
+@.str.len6.h789270767 = private unnamed_addr constant [7 x i8] c"string\00"
+@.str.len2.h193479167 = private unnamed_addr constant [3 x i8] c"[]\00"

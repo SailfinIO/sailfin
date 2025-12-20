@@ -577,9 +577,10 @@ def format_inline_case_body(statement):
     if statement.variant == "ExpressionStatement":
         return format_expression(statement.expression)
     if statement.variant == "ReturnStatement":
-        if statement.expression == None:
+        rendered = format_optional_expression(statement.expression)
+        if len(rendered) == 0:
             return "return"
-        return "return " + format_expression(statement.expression)
+        return "return " + rendered
     return ""
 
 def emit_if(state, statement):
@@ -611,9 +612,15 @@ def emit_else_branch(state, branch):
 
 def emit_return(state, statement):
     current = emit_span_if_present(state, statement.span)
-    if statement.expression == None:
+    rendered = format_optional_expression(statement.expression)
+    if len(rendered) == 0:
         return state_emit_line(current, "ret")
-    return state_emit_line(current, "ret " + format_expression(statement.expression))
+    return state_emit_line(current, "ret " + rendered)
+
+def format_optional_expression(expression):
+    if expression == None:
+        return ""
+    return format_expression(expression)
 
 def emit_expression_statement(state, statement):
     current = emit_span_if_present(state, statement.span)
