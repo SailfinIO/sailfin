@@ -187,9 +187,7 @@ fn emit_function(
 ) -> TextBuilder {
     let mut current = emit_decorators(builder, decorators);
     let header = format_function_header(signature);
-    current = builder_emit_line(current, header);
-    current = emit_block(current, body);
-    return current;
+    return emit_block_with_header(current, header, body);
 }
 
 fn emit_callable(
@@ -201,9 +199,7 @@ fn emit_callable(
 ) -> TextBuilder {
     let mut current = emit_decorators(builder, decorators);
     let header = format_callable_header(keyword, signature);
-    current = builder_emit_line(current, header);
-    current = emit_block(current, body);
-    return current;
+    return emit_block_with_header(current, header, body);
 }
 
 fn emit_test(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
@@ -214,9 +210,7 @@ fn emit_test(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     if effects.length > 0 {
         header = header + " " + effects;
     }
-    current = builder_emit_line(current, header);
-    current = emit_block(current, statement.body);
-    return current;
+    return emit_block_with_header(current, header, statement.body);
 }
 
 fn emit_model(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
@@ -226,9 +220,7 @@ fn emit_model(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     if effects.length > 0 {
         header = header + " " + effects;
     }
-    current = builder_emit_line(current, header);
-    current = builder_emit_line(current, "{");
-    current = builder_push_indent(current);
+    current = emit_block_header(current, header);
     let mut index -> number = 0;
     loop {
         if index >= statement.properties.length {
@@ -242,8 +234,7 @@ fn emit_model(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     if statement.properties.length == 0 {
         current = builder_emit_line(current, "// empty model body");
     }
-    current = builder_pop_indent(current);
-    current = builder_emit_line(current, "}");
+    current = emit_block_end(current);
     return current;
 }
 
@@ -313,8 +304,7 @@ fn emit_enum(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     let mut current = emit_decorators(builder, statement.decorators);
     let mut header -> string = "enum " + statement.name;
     header = header + format_type_parameters(statement.type_parameters);
-    current = builder_emit_line(current, header);
-    current = emit_block_start(current);
+    current = emit_block_header(current, header);
     let mut index -> number = 0;
     loop {
         if index >= statement.variants.length {
@@ -335,8 +325,7 @@ fn emit_struct(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     if statement.implements_types.length > 0 {
         header = header + " implements " + join_type_annotations(statement.implements_types);
     }
-    current = builder_emit_line(current, header);
-    current = emit_block_start(current);
+    current = emit_block_header(current, header);
 
     let mut field_index -> number = 0;
     loop {
@@ -354,8 +343,7 @@ fn emit_struct(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
         }
         let method = statement.methods[method_index];
         current = emit_decorators(current, method.decorators);
-        current = builder_emit_line(current, format_method_header(method.signature));
-        current = emit_block(current, method.body);
+        current = emit_block_with_header(current, format_method_header(method.signature), method.body);
         if method_index + 1 < statement.methods.length {
             current = builder_emit_blank(current);
         }
@@ -408,9 +396,7 @@ fn emit_block_statement(builder -> TextBuilder, statement -> Statement) -> TextB
     }
     if statement.variant == "LoopStatement" {
         let mut current = emit_decorators(builder, statement.decorators);
-        current = builder_emit_line(current, "loop");
-        current = emit_block(current, statement.body);
-        return current;
+        return emit_block_with_header(current, "loop", statement.body);
     }
     if statement.variant == "BreakStatement" {
         return builder_emit_line(builder, "break;");
@@ -463,8 +449,7 @@ fn format_optional_expression(expression -> Expression?) -> string {
 fn emit_prompt(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     let mut current = emit_decorators(builder, statement.decorators);
     let header = "prompt " + statement.channel;
-    current = builder_emit_line(current, header);
-    current = emit_block(current, statement.body);
+    current = emit_block_with_header(current, header, statement.body);
     return builder_emit_line(current, ";");
 }
 
@@ -483,15 +468,13 @@ fn emit_with(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
         index += 1;
     }
     current = builder_emit_line(current, line);
-    current = emit_block(current, statement.body);
-    return current;
+    return emit_block_with_header(current, line, statement.body);
 }
 
 fn emit_if(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     let mut current = emit_decorators(builder, statement.decorators);
     let line = "if " + format_expression(statement.condition);
-    current = builder_emit_line(current, line);
-    current = emit_block(current, statement.then_block);
+    current = emit_block_with_header(current, line, statement.then_block);
     let else_branch = statement.else_branch;
     if else_branch == null {
         return current;
@@ -507,8 +490,7 @@ fn emit_else_branch(builder -> TextBuilder, branch -> ElseBranch) -> TextBuilder
             return builder;
         }
         if nested.variant == "IfStatement" {
-            let current = builder_emit_line(builder, "else if " + format_expression(nested.condition));
-            let after = emit_block(current, nested.then_block);
+            let after = emit_block_with_header(builder, "else if " + format_expression(nested.condition), nested.then_block);
             let nested_else = nested.else_branch;
             if nested_else == null {
                 return after;
@@ -518,23 +500,19 @@ fn emit_else_branch(builder -> TextBuilder, branch -> ElseBranch) -> TextBuilder
         let current = builder_emit_line(builder, "else");
         return emit_block_statement(current, nested);
     }
-    let current = builder_emit_line(builder, "else");
-    return emit_block(current, body);
+    return emit_block_with_header(builder, "else", body);
 }
 
 fn emit_for(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     let mut current = emit_decorators(builder, statement.decorators);
     let header = "for " + format_for_clause(statement.clause);
-    current = builder_emit_line(current, header);
-    return emit_block(current, statement.body);
+    return emit_block_with_header(current, header, statement.body);
 }
 
 fn emit_match(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
     let mut current = emit_decorators(builder, statement.decorators);
     let header = "match " + format_expression(statement.expression);
-    current = builder_emit_line(current, header);
-    current = builder_emit_line(current, "{");
-    current = builder_push_indent(current);
+    current = emit_block_header(current, header);
     let mut index -> number = 0;
     loop {
         if index >= statement.cases.length {
@@ -543,8 +521,7 @@ fn emit_match(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
         current = emit_match_case(current, statement.cases[index]);
         index += 1;
     }
-    current = builder_pop_indent(current);
-    return builder_emit_line(current, "}");
+    return emit_block_end(current);
 }
 
 fn emit_match_case(builder -> TextBuilder, case -> MatchCase) -> TextBuilder {
@@ -565,6 +542,20 @@ fn emit_match_case(builder -> TextBuilder, case -> MatchCase) -> TextBuilder {
 fn emit_block_start(builder -> TextBuilder) -> TextBuilder {
     let current = builder_emit_line(builder, "{");
     return builder_push_indent(current);
+}
+
+fn emit_block_header(builder -> TextBuilder, header -> string) -> TextBuilder {
+    // Prefer K&R formatting: put the opening brace on the same line as the header.
+    // Avoid string literals like " }" (historically problematic in stage2 emission).
+    let current = builder_emit_line(builder, header + " " + "{");
+    return builder_push_indent(current);
+}
+
+fn emit_block_with_header(builder -> TextBuilder, header -> string, block -> Block) -> TextBuilder {
+    let mut current = emit_block_header(builder, header);
+    current = emit_block_body(current, block);
+    current = emit_block_end(current);
+    return current;
 }
 
 fn emit_block_end(builder -> TextBuilder) -> TextBuilder {

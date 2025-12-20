@@ -129,16 +129,12 @@ def emit_variable(builder, statement):
 def emit_function(builder, signature, body, decorators):
     current = emit_decorators(builder, decorators)
     header = format_function_header(signature)
-    current = builder_emit_line(current, header)
-    current = emit_block(current, body)
-    return current
+    return emit_block_with_header(current, header, body)
 
 def emit_callable(builder, keyword, signature, body, decorators):
     current = emit_decorators(builder, decorators)
     header = format_callable_header(keyword, signature)
-    current = builder_emit_line(current, header)
-    current = emit_block(current, body)
-    return current
+    return emit_block_with_header(current, header, body)
 
 def emit_test(builder, statement):
     current = emit_decorators(builder, statement.decorators)
@@ -147,9 +143,7 @@ def emit_test(builder, statement):
     header = "test " + name
     if len(effects) > 0:
         header = header + " " + effects
-    current = builder_emit_line(current, header)
-    current = emit_block(current, statement.body)
-    return current
+    return emit_block_with_header(current, header, statement.body)
 
 def emit_model(builder, statement):
     current = emit_decorators(builder, statement.decorators)
@@ -157,9 +151,7 @@ def emit_model(builder, statement):
     effects = format_effects(statement.effects)
     if len(effects) > 0:
         header = header + " " + effects
-    current = builder_emit_line(current, header)
-    current = builder_emit_line(current, "{")
-    current = builder_push_indent(current)
+    current = emit_block_header(current, header)
     index = 0
     while True:
         if index >= len(statement.properties):
@@ -170,8 +162,7 @@ def emit_model(builder, statement):
         index += 1
     if len(statement.properties) == 0:
         current = builder_emit_line(current, "// empty model body")
-    current = builder_pop_indent(current)
-    current = builder_emit_line(current, "}")
+    current = emit_block_end(current)
     return current
 
 def format_import_specifiers(specifiers):
@@ -228,8 +219,7 @@ def emit_enum(builder, statement):
     current = emit_decorators(builder, statement.decorators)
     header = "enum " + statement.name
     header = header + format_type_parameters(statement.type_parameters)
-    current = builder_emit_line(current, header)
-    current = emit_block_start(current)
+    current = emit_block_header(current, header)
     index = 0
     while True:
         if index >= len(statement.variants):
@@ -246,8 +236,7 @@ def emit_struct(builder, statement):
     header = header + format_type_parameters(statement.type_parameters)
     if len(statement.implements_types) > 0:
         header = header + " implements " + join_type_annotations(statement.implements_types)
-    current = builder_emit_line(current, header)
-    current = emit_block_start(current)
+    current = emit_block_header(current, header)
     field_index = 0
     while True:
         if field_index >= len(statement.fields):
@@ -260,8 +249,7 @@ def emit_struct(builder, statement):
             break
         method = statement.methods[method_index]
         current = emit_decorators(current, method.decorators)
-        current = builder_emit_line(current, format_method_header(method.signature))
-        current = emit_block(current, method.body)
+        current = emit_block_with_header(current, format_method_header(method.signature), method.body)
         if method_index + 1 < len(statement.methods):
             current = builder_emit_blank(current)
         method_index += 1
@@ -299,9 +287,7 @@ def emit_block_statement(builder, statement):
         return builder_emit_line(builder, "return " + rendered + ";")
     if statement.variant == "LoopStatement":
         current = emit_decorators(builder, statement.decorators)
-        current = builder_emit_line(current, "loop")
-        current = emit_block(current, statement.body)
-        return current
+        return emit_block_with_header(current, "loop", statement.body)
     if statement.variant == "BreakStatement":
         return builder_emit_line(builder, "break;")
     if statement.variant == "ContinueStatement":
@@ -338,8 +324,7 @@ def format_optional_expression(expression):
 def emit_prompt(builder, statement):
     current = emit_decorators(builder, statement.decorators)
     header = "prompt " + statement.channel
-    current = builder_emit_line(current, header)
-    current = emit_block(current, statement.body)
+    current = emit_block_with_header(current, header, statement.body)
     return builder_emit_line(current, ";")
 
 def emit_with(builder, statement):
@@ -354,14 +339,12 @@ def emit_with(builder, statement):
         line = line + format_expression(statement.clauses[index].expression)
         index += 1
     current = builder_emit_line(current, line)
-    current = emit_block(current, statement.body)
-    return current
+    return emit_block_with_header(current, line, statement.body)
 
 def emit_if(builder, statement):
     current = emit_decorators(builder, statement.decorators)
     line = "if " + format_expression(statement.condition)
-    current = builder_emit_line(current, line)
-    current = emit_block(current, statement.then_block)
+    current = emit_block_with_header(current, line, statement.then_block)
     else_branch = statement.else_branch
     if else_branch == None:
         return current
@@ -374,37 +357,31 @@ def emit_else_branch(builder, branch):
         if nested == None:
             return builder
         if nested.variant == "IfStatement":
-            current = builder_emit_line(builder, "else if " + format_expression(nested.condition))
-            after = emit_block(current, nested.then_block)
+            after = emit_block_with_header(builder, "else if " + format_expression(nested.condition), nested.then_block)
             nested_else = nested.else_branch
             if nested_else == None:
                 return after
             return emit_else_branch(after, nested_else)
         current = builder_emit_line(builder, "else")
         return emit_block_statement(current, nested)
-    current = builder_emit_line(builder, "else")
-    return emit_block(current, body)
+    return emit_block_with_header(builder, "else", body)
 
 def emit_for(builder, statement):
     current = emit_decorators(builder, statement.decorators)
     header = "for " + format_for_clause(statement.clause)
-    current = builder_emit_line(current, header)
-    return emit_block(current, statement.body)
+    return emit_block_with_header(current, header, statement.body)
 
 def emit_match(builder, statement):
     current = emit_decorators(builder, statement.decorators)
     header = "match " + format_expression(statement.expression)
-    current = builder_emit_line(current, header)
-    current = builder_emit_line(current, "{")
-    current = builder_push_indent(current)
+    current = emit_block_header(current, header)
     index = 0
     while True:
         if index >= len(statement.cases):
             break
         current = emit_match_case(current, statement.cases[index])
         index += 1
-    current = builder_pop_indent(current)
-    return builder_emit_line(current, "}")
+    return emit_block_end(current)
 
 def emit_match_case(builder, case):
     line = "case " + format_expression(case.pattern)
@@ -422,6 +399,16 @@ def emit_match_case(builder, case):
 def emit_block_start(builder):
     current = builder_emit_line(builder, "{")
     return builder_push_indent(current)
+
+def emit_block_header(builder, header):
+    current = builder_emit_line(builder, header + " " + "{")
+    return builder_push_indent(current)
+
+def emit_block_with_header(builder, header, block):
+    current = emit_block_header(builder, header)
+    current = emit_block_body(current, block)
+    current = emit_block_end(current)
+    return current
 
 def emit_block_end(builder):
     current = builder_pop_indent(builder)
