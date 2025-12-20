@@ -570,6 +570,32 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     return out;
 }
 
+char *sailfin_runtime_number_to_string(double value)
+{
+    char buf[64];
+    // Use a `%.15g` style to match the typical language-level printing of numbers:
+    // integers render without a trailing `.0`, floats preserve useful precision.
+    int written = snprintf(buf, sizeof(buf), "%.15g", value);
+    if (written < 0)
+    {
+        return NULL;
+    }
+    size_t len = (size_t)written;
+    if (len >= sizeof(buf))
+    {
+        len = sizeof(buf) - 1;
+        buf[len] = '\0';
+    }
+
+    char *out = (char *)malloc(len + 1);
+    if (!out)
+    {
+        return NULL;
+    }
+    memcpy(out, buf, len + 1);
+    return out;
+}
+
 static SailfinPtrArray *_alloc_array(int64_t len)
 {
     SailfinPtrArray *arr = (SailfinPtrArray *)malloc(sizeof(SailfinPtrArray));

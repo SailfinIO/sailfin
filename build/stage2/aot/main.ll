@@ -104,6 +104,7 @@ source_filename = "sailfin"
 %FunctionCallEntry = type { i8*, { i8**, i64 }* }
 %StringConstant = type { i8*, i8*, double }
 %StringPointerResult = type { { i8**, i64 }*, double, i8* }
+%InterpolatedTemplateParse = type { { i8**, i64 }*, { i8**, i64 }*, i1 }
 %LoweredLLVMResult = type { i8*, { i8**, i64 }*, %TraitMetadata, { %FunctionEffectEntry*, i64 }*, { %LifetimeRegionMetadata*, i64 }*, %CapabilityManifest, { %StringConstant*, i64 }* }
 %LayoutManifestApplication = type { { %NativeStruct*, i64 }*, { %NativeEnum*, i64 }*, { i8**, i64 }* }
 %ImportedModuleContext = type { { %LayoutManifest*, i64 }*, { i8**, i64 }*, { i8**, i64 }* }
@@ -227,6 +228,7 @@ declare i8* @sailfin_adapter_fs_read_file(i8*)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare i8* @sailfin_runtime_number_to_string(double)
 declare i1 @strings_equal(i8*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }*, i8*)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
@@ -838,6 +840,12 @@ declare double @get_character_literal_value(i8*)
 declare i8* @make_string_constant_name(i8*)
 declare double @compute_string_constant_hash(i8*)
 declare %ExpressionResult @lower_string_literal(i8*, double, { i8**, i64 }*)
+declare %ExpressionResult* @try_lower_interpolated_string_literal(i8*, { %ParameterBinding*, i64 }*, { %LocalBinding*, i64 }*, double, { i8**, i64 }*, { %NativeFunction*, i64 }*, %TypeContext)
+declare %InterpolatedTemplateParse @parse_interpolated_template(i8*)
+declare i8* @encode_string_literal_for_sailfin(i8*)
+declare i8* @escape_string_for_sailfin_literal(i8*)
+declare %ExpressionResult @emit_string_concat(%LLVMOperand, %LLVMOperand, double, { i8**, i64 }*)
+declare %ExpressionResult @coerce_operand_to_string(%LLVMOperand, double, { i8**, i64 }*)
 declare i8* @unescape_string_literal(i8*)
 declare double @find_last_index_of_char(i8*, i8*)
 declare { %MatchArmMutations*, i64 }* @append_match_arm_mutations({ %MatchArmMutations*, i64 }*, %MatchArmMutations)

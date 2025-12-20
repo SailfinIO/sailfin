@@ -106,6 +106,15 @@ class StringPointerResult:
     def __repr__(self):
         return runtime.struct_repr('StringPointerResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('pointer', self.pointer)])
 
+class InterpolatedTemplateParse:
+    def __init__(self, parts, expressions, success):
+        self.parts = parts
+        self.expressions = expressions
+        self.success = success
+
+    def __repr__(self):
+        return runtime.struct_repr('InterpolatedTemplateParse', [runtime.struct_field('parts', self.parts), runtime.struct_field('expressions', self.expressions), runtime.struct_field('success', self.success)])
+
 class LoweredLLVMResult:
     def __init__(self, ir, diagnostics, trait_metadata, function_effects, lifetime_regions, capability_manifest, string_constants):
         self.ir = ir
@@ -971,6 +980,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     runtime_helpers = collect_runtime_helper_targets(local_functions)
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field")
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat")
+    runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string")
     runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal")
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check")
     runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent")
@@ -2544,6 +2554,7 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="substring", symbol="sailfin_runtime_substring", return_type="i8*", parameter_types=["i8*", "i64", "i64"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="len(string)", symbol="sailfin_runtime_string_length", return_type="i64", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="string.concat", symbol="sailfin_runtime_string_concat", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="number.to_string", symbol="sailfin_runtime_number_to_string", return_type="i8*", parameter_types=["double"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="strings_equal", symbol="strings_equal", return_type="i1", parameter_types=["i8*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="char_code", symbol="char_code", return_type="double", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_grapheme_count_fn", symbol="sailfin_runtime_grapheme_count", return_type="double", parameter_types=["i8*"], effects=[]))
@@ -6004,6 +6015,11 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
             char_value = get_character_literal_value(literal_candidate)
             operand = LLVMOperand(llvm_type="i8", value=number_to_string(char_value))
             return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
+        interpolated = try_lower_interpolated_string_literal(literal_candidate, bindings, locals, temp_index, lines, functions, context)
+        if interpolated != None:
+            lowered = interpolated
+            combined = (diagnostics) + (lowered.diagnostics)
+            return ExpressionResult(lines=lowered.lines, temp_index=lowered.temp_index, operand=lowered.operand, diagnostics=combined, string_constants=lowered.string_constants)
         return lower_string_literal(literal_candidate, temp_index, lines)
     if is_boolean_literal(literal_candidate):
         value = "0"
@@ -9790,6 +9806,195 @@ def lower_string_literal(literal, temp_index, lines):
     operand = LLVMOperand(llvm_type="i8*", value=malloc_temp)
     empty_constants = empty_string_constant_set()
     return ExpressionResult(lines=current_lines, temp_index=temp_index + 2, operand=operand, diagnostics=[], string_constants=empty_constants)
+
+def try_lower_interpolated_string_literal(literal, bindings, locals, temp_index, lines, functions, context):
+    content = unescape_string_literal(literal)
+    if find_substring_from(content, "{{", 0) < 0:
+        return None
+    if find_substring_from(content, "}}", 0) < 0:
+        return None
+    parsed = parse_interpolated_template(content)
+    if not parsed.success:
+        return None
+    if len(parsed.expressions) == 0:
+        return None
+    if len(parsed.parts) != len(parsed.expressions) + 1:
+        return None
+    current_lines = lines
+    current_temp = temp_index
+    diagnostics = []
+    collected_string_constants = empty_string_constant_set()
+    first_literal = encode_string_literal_for_sailfin(parsed.parts[0])
+    first = lower_string_literal(first_literal, current_temp, current_lines)
+    current_lines = first.lines
+    current_temp = first.temp_index
+    if first.operand == None:
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+    current_operand = first.operand
+    index = 0
+    while True:
+        if index >= len(parsed.expressions):
+            break
+        expr_text = parsed.expressions[index]
+        lowered_expr = lower_expression(expr_text, bindings, locals, current_temp, current_lines, functions, context, "")
+        diagnostics = (diagnostics) + (lowered_expr.diagnostics)
+        current_lines = lowered_expr.lines
+        current_temp = lowered_expr.temp_index
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants)
+        if lowered_expr.operand == None:
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower interpolated expression `" + expr_text + "`")
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+        coerced = coerce_operand_to_string(lowered_expr.operand, current_temp, current_lines)
+        diagnostics = (diagnostics) + (coerced.diagnostics)
+        current_lines = coerced.lines
+        current_temp = coerced.temp_index
+        collected_string_constants = merge_string_constants(collected_string_constants, coerced.string_constants)
+        if coerced.operand == None:
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to stringify interpolated expression `" + expr_text + "`")
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+        concat1 = emit_string_concat(current_operand, coerced.operand, current_temp, current_lines)
+        diagnostics = (diagnostics) + (concat1.diagnostics)
+        current_lines = concat1.lines
+        current_temp = concat1.temp_index
+        if concat1.operand == None:
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+        current_operand = concat1.operand
+        part_literal = encode_string_literal_for_sailfin(parsed.parts[index + 1])
+        part_value = lower_string_literal(part_literal, current_temp, current_lines)
+        current_lines = part_value.lines
+        current_temp = part_value.temp_index
+        if part_value.operand == None:
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+        concat2 = emit_string_concat(current_operand, part_value.operand, current_temp, current_lines)
+        diagnostics = (diagnostics) + (concat2.diagnostics)
+        current_lines = concat2.lines
+        current_temp = concat2.temp_index
+        if concat2.operand == None:
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+        current_operand = concat2.operand
+        index += 1
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=current_operand, diagnostics=diagnostics, string_constants=collected_string_constants)
+
+def parse_interpolated_template(content):
+    parts = []
+    expressions = []
+    index = 0
+    while True:
+        if index > len(content):
+            break
+        start = find_substring_from(content, "{{", index)
+        if start < 0:
+            parts = append_string(parts, substring(content, index, len(content)))
+            break
+        parts = append_string(parts, substring(content, index, start))
+        end = find_substring_from(content, "}}", start + 2)
+        if end < 0:
+            return InterpolatedTemplateParse(parts=[], expressions=[], success=False)
+        expr_text = trim_text(substring(content, start + 2, end))
+        if len(expr_text) == 0:
+            return InterpolatedTemplateParse(parts=[], expressions=[], success=False)
+        expressions = append_string(expressions, expr_text)
+        index = end + 2
+    return InterpolatedTemplateParse(parts=parts, expressions=expressions, success=True)
+
+def find_substring_from(value, target, start):
+    if len(target) == 0:
+        return start
+    index = start
+    if index < 0:
+        index = 0
+    while True:
+        if index + len(target) > len(value):
+            break
+        match_index = 0
+        matches = True
+        while True:
+            if match_index >= len(target):
+                break
+            if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index):
+                matches = False
+                break
+            match_index += 1
+        if matches:
+            return index
+        index += 1
+    return -1
+
+def encode_string_literal_for_sailfin(content):
+    escaped = escape_string_for_sailfin_literal(content)
+    return "\"" + escaped + "\""
+
+def escape_string_for_sailfin_literal(content):
+    result = ""
+    index = 0
+    while True:
+        if index >= len(content):
+            break
+        ch = content[index]
+        if ch == "\\":
+            result = result + "\\\\"
+        else:
+            if ch == "\"":
+                result = result + "\\\""
+            else:
+                if ch == "\n":
+                    result = result + "\\n"
+                else:
+                    if ch == "\r":
+                        result = result + "\\r"
+                    else:
+                        if ch == "\t":
+                            result = result + "\\t"
+                        else:
+                            result = result + ch
+        index += 1
+    return result
+
+def emit_string_concat(left, right, temp_index, lines):
+    harmonised = harmonise_operands(left, right, temp_index, lines)
+    if harmonised.left == None  or  harmonised.right == None:
+        return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=None, diagnostics=harmonised.diagnostics, string_constants=empty_string_constant_set())
+    left_aligned = coerce_operand_to_type(harmonised.left, "i8*", harmonised.temp_index, harmonised.lines)
+    diagnostics = (harmonised.diagnostics) + (left_aligned.diagnostics)
+    right_aligned = coerce_operand_to_type(harmonised.right, "i8*", left_aligned.temp_index, left_aligned.lines)
+    diagnostics = (diagnostics) + (right_aligned.diagnostics)
+    if left_aligned.operand == None  or  right_aligned.operand == None:
+        return ExpressionResult(lines=right_aligned.lines, temp_index=right_aligned.temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_string_constant_set())
+    temp_name = format_temp_name(right_aligned.temp_index)
+    line = "  " + temp_name + " = call i8* @sailfin_runtime_string_concat(i8* " + left_aligned.operand.value + ", i8* " + right_aligned.operand.value + ")"
+    out_lines = append_string(right_aligned.lines, line)
+    operand = LLVMOperand(llvm_type="i8*", value=temp_name)
+    return ExpressionResult(lines=out_lines, temp_index=right_aligned.temp_index + 1, operand=operand, diagnostics=diagnostics, string_constants=empty_string_constant_set())
+
+def coerce_operand_to_string(operand, temp_index, lines):
+    empty_constants = empty_string_constant_set()
+    if operand.llvm_type == "i8*":
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=[], string_constants=empty_constants)
+    if operand.llvm_type == "double":
+        temp_name = format_temp_name(temp_index)
+        out_lines = append_string(lines, "  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")")
+        out_operand = LLVMOperand(llvm_type="i8*", value=temp_name)
+        return ExpressionResult(lines=out_lines, temp_index=temp_index + 1, operand=out_operand, diagnostics=[], string_constants=empty_constants)
+    if operand.llvm_type == "i64":
+        cast_temp = format_temp_name(temp_index)
+        out_lines = append_string(lines, "  " + cast_temp + " = sitofp i64 " + operand.value + " to double")
+        call_temp = format_temp_name(temp_index + 1)
+        out_lines = append_string(out_lines, "  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")")
+        out_operand = LLVMOperand(llvm_type="i8*", value=call_temp)
+        return ExpressionResult(lines=out_lines, temp_index=temp_index + 2, operand=out_operand, diagnostics=[], string_constants=empty_constants)
+    if operand.llvm_type == "i1":
+        true_lit = lower_string_literal("\"true\"", temp_index, lines)
+        if true_lit.operand == None:
+            return ExpressionResult(lines=true_lit.lines, temp_index=true_lit.temp_index, operand=None, diagnostics=[], string_constants=empty_constants)
+        false_lit = lower_string_literal("\"false\"", true_lit.temp_index, true_lit.lines)
+        if false_lit.operand == None:
+            return ExpressionResult(lines=false_lit.lines, temp_index=false_lit.temp_index, operand=None, diagnostics=[], string_constants=empty_constants)
+        select_temp = format_temp_name(false_lit.temp_index)
+        out_lines = append_string(false_lit.lines, "  " + select_temp + " = select i1 " + operand.value + ", i8* " + true_lit.operand.value + ", i8* " + false_lit.operand.value)
+        out_operand = LLVMOperand(llvm_type="i8*", value=select_temp)
+        return ExpressionResult(lines=out_lines, temp_index=false_lit.temp_index + 1, operand=out_operand, diagnostics=[], string_constants=empty_constants)
+    diagnostics = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"]
+    return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
 
 def unescape_string_literal(literal):
     if len(literal) < 2:

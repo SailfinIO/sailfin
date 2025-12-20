@@ -1750,7 +1750,7 @@ def parse_match_case(parser):
             block_tokens = []
             block_tokens = append_token(block_tokens, next)
             current = parser_advance_raw(current)
-            capture = collect_until(current, [";", "}"])
+            capture = collect_until(current, [";", ",", "}"])
             index = 0
             while True:
                 if index >= len(capture.tokens):
@@ -1776,7 +1776,7 @@ def parse_match_case(parser):
             text = trim_text(tokens_to_text(block_tokens))
             body = Block(tokens=block_tokens, text=text, statements=statements)
         else:
-            capture = collect_until(current, [";", "}"])
+            capture = collect_until(current, [";", ",", "}"])
             trimmed_expression_tokens = trim_token_edges(capture.tokens)
             if len(trimmed_expression_tokens) == 0:
                 return MatchCaseParseResult(parser=original, case=None, success=False)

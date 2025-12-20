@@ -3433,8 +3433,8 @@
             eval block_tokens = append_token(block_tokens, next)
             .span 2384 9 2384 47
             eval current = parser_advance_raw(current)
-            .span 2386 9 2386 58
-            eval let capture = collect_until(current, [";", "}"])
+            .span 2386 9 2386 63
+            eval let capture = collect_until(current, [";", ",", "}"])
             .span 2387 9 2387 37
             eval let mut index -> number = 0
             .loop
@@ -3482,8 +3482,8 @@
             .span 2418 9 2418 83
             eval body = Block { tokens: block_tokens, text: text, statements: statements }
         .else
-            .span 2420 9 2420 58
-            eval let capture = collect_until(current, [";", "}"])
+            .span 2420 9 2420 63
+            eval let capture = collect_until(current, [";", ",", "}"])
             .span 2421 9 2421 74
             eval let trimmed_expression_tokens = trim_token_edges(capture.tokens)
             .if trimmed_expression_tokens.length == 0

@@ -46,6 +46,11 @@
 .layout field temp_index type=number offset=8 size=8 align=8
 .layout field pointer type=string offset=16 size=8 align=8
 
+.layout struct name=InterpolatedTemplateParse size=24 align=8
+.layout field parts type=string[] offset=0 size=8 align=8
+.layout field expressions type=string[] offset=8 size=8 align=8
+.layout field success type=boolean offset=16 size=1 align=1
+
 .layout struct name=LoweredLLVMResult size=64 align=8
 .layout field ir type=string offset=0 size=8 align=8
 .layout field diagnostics type=string[] offset=8 size=8 align=8

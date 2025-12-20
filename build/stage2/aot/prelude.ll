@@ -45,6 +45,7 @@ declare i8* @sailfin_runtime_array_reduce(i8*, i8*, i8*)
 declare i8* @sailfin_runtime_substring(i8*, i64, i64)
 declare i64 @sailfin_runtime_string_length(i8*)
 declare i8* @sailfin_runtime_string_concat(i8*, i8*)
+declare i8* @sailfin_runtime_number_to_string(double)
 declare double @sailfin_runtime_grapheme_count(i8*)
 declare i8* @sailfin_runtime_grapheme_at(i8*, double)
 declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
@@ -3525,12 +3526,17 @@ afterloop19:
 define void @match_exhaustive_failed(i8* %value) {
 block.entry:
   %l0 = alloca i8*
-  %t0 = call i8* @malloc(i64 43)
-  %t1 = bitcast i8* %t0 to [43 x i8]*
-  store [43 x i8] c"Non-exhaustive match for value {{ value }}\00", [43 x i8]* %t1
-  store i8* %t0, i8** %l0
-  %t2 = load i8*, i8** %l0
-  call void @sailfin_runtime_raise_value_error(i8* %t2)
+  %t0 = call i8* @malloc(i64 32)
+  %t1 = bitcast i8* %t0 to [32 x i8]*
+  store [32 x i8] c"Non-exhaustive match for value \00", [32 x i8]* %t1
+  %t2 = call i8* @sailfin_runtime_string_concat(i8* %t0, i8* %value)
+  %t3 = call i8* @malloc(i64 1)
+  %t4 = bitcast i8* %t3 to [1 x i8]*
+  store [1 x i8] c"\00", [1 x i8]* %t4
+  %t5 = call i8* @sailfin_runtime_string_concat(i8* %t2, i8* %t3)
+  store i8* %t5, i8** %l0
+  %t6 = load i8*, i8** %l0
+  call void @sailfin_runtime_raise_value_error(i8* %t6)
   ret void
 }
 

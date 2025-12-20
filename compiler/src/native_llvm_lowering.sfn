@@ -63,6 +63,12 @@ struct StringPointerResult {
     pointer -> string;
 }
 
+struct InterpolatedTemplateParse {
+    parts -> string[];
+    expressions -> string[];
+    success -> boolean;
+}
+
 struct LoweredLLVMResult {
     ir -> string;
     diagnostics -> string[];
@@ -795,6 +801,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
+    runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
     runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
     runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent");
@@ -3395,6 +3402,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         symbol: "sailfin_runtime_string_concat",
         return_type: "i8*",
         parameter_types: ["i8*", "i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "number.to_string",
+        symbol: "sailfin_runtime_number_to_string",
+        return_type: "i8*",
+        parameter_types: ["double"],
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
@@ -8866,6 +8880,19 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             let operand = LLVMOperand { llvm_type: "i8", value: number_to_string(char_value) };
             return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
         }
+
+        let interpolated = try_lower_interpolated_string_literal(literal_candidate, bindings, locals, temp_index, lines, functions, context);
+        if interpolated != null {
+            let lowered = interpolated;
+            let combined = diagnostics.concat(lowered.diagnostics);
+            return ExpressionResult {
+                lines: lowered.lines,
+                temp_index: lowered.temp_index,
+                operand: lowered.operand,
+                diagnostics: combined,
+                string_constants: lowered.string_constants,
+            };
+        }
         return lower_string_literal(literal_candidate, temp_index, lines);
     }
 
@@ -14098,6 +14125,258 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
         diagnostics: [],
         string_constants: empty_constants
     };
+}
+
+fn try_lower_interpolated_string_literal(literal -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult? {
+    let content = unescape_string_literal(literal);
+    if find_substring_from(content, "{{", 0) < 0 {
+        return null;
+    }
+    if find_substring_from(content, "}}", 0) < 0 {
+        return null;
+    }
+
+    let parsed = parse_interpolated_template(content);
+    if !parsed.success {
+        return null;
+    }
+    if parsed.expressions.length == 0 {
+        return null;
+    }
+    if parsed.parts.length != parsed.expressions.length + 1 {
+        return null;
+    }
+
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut diagnostics -> string[] = [];
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+
+    let first_literal = encode_string_literal_for_sailfin(parsed.parts[0]);
+    let first = lower_string_literal(first_literal, current_temp, current_lines);
+    current_lines = first.lines;
+    current_temp = first.temp_index;
+
+    if first.operand == null {
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+    let mut current_operand -> LLVMOperand = first.operand;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= parsed.expressions.length {
+            break;
+        }
+
+        let expr_text = parsed.expressions[index];
+        let lowered_expr = lower_expression(expr_text, bindings, locals, current_temp, current_lines, functions, context, "");
+        diagnostics = diagnostics.concat(lowered_expr.diagnostics);
+        current_lines = lowered_expr.lines;
+        current_temp = lowered_expr.temp_index;
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants);
+
+        if lowered_expr.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower interpolated expression `" + expr_text + "`");
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+
+        let coerced = coerce_operand_to_string(lowered_expr.operand, current_temp, current_lines);
+        diagnostics = diagnostics.concat(coerced.diagnostics);
+        current_lines = coerced.lines;
+        current_temp = coerced.temp_index;
+        collected_string_constants = merge_string_constants(collected_string_constants, coerced.string_constants);
+        if coerced.operand == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: unable to stringify interpolated expression `" + expr_text + "`");
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+
+        let concat1 = emit_string_concat(current_operand, coerced.operand, current_temp, current_lines);
+        diagnostics = diagnostics.concat(concat1.diagnostics);
+        current_lines = concat1.lines;
+        current_temp = concat1.temp_index;
+        if concat1.operand == null {
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+        current_operand = concat1.operand;
+
+        let part_literal = encode_string_literal_for_sailfin(parsed.parts[index + 1]);
+        let part_value = lower_string_literal(part_literal, current_temp, current_lines);
+        current_lines = part_value.lines;
+        current_temp = part_value.temp_index;
+        if part_value.operand == null {
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+
+        let concat2 = emit_string_concat(current_operand, part_value.operand, current_temp, current_lines);
+        diagnostics = diagnostics.concat(concat2.diagnostics);
+        current_lines = concat2.lines;
+        current_temp = concat2.temp_index;
+        if concat2.operand == null {
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+        current_operand = concat2.operand;
+
+        index += 1;
+    }
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: current_operand,
+        diagnostics: diagnostics,
+        string_constants: collected_string_constants,
+    };
+}
+
+fn parse_interpolated_template(content -> string) -> InterpolatedTemplateParse {
+    let mut parts -> string[] = [];
+    let mut expressions -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index > content.length {
+            break;
+        }
+        let start = find_substring_from(content, "{{", index);
+        if start < 0 {
+            parts = append_string(parts, substring(content, index, content.length));
+            break;
+        }
+        parts = append_string(parts, substring(content, index, start));
+        let end = find_substring_from(content, "}}", start + 2);
+        if end < 0 {
+            return InterpolatedTemplateParse { parts: [], expressions: [], success: false };
+        }
+        let expr_text = trim_text(substring(content, start + 2, end));
+        if expr_text.length == 0 {
+            return InterpolatedTemplateParse { parts: [], expressions: [], success: false };
+        }
+        expressions = append_string(expressions, expr_text);
+        index = end + 2;
+    }
+    return InterpolatedTemplateParse { parts: parts, expressions: expressions, success: true };
+}
+
+fn find_substring_from(value -> string, target -> string, start -> number) -> number {
+    if target.length == 0 {
+        return start;
+    }
+    let mut index -> number = start;
+    if index < 0 {
+        index = 0;
+    }
+    loop {
+        if index + target.length > value.length {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index) {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn encode_string_literal_for_sailfin(content -> string) -> string {
+    let escaped = escape_string_for_sailfin_literal(content);
+    return "\"" + escaped + "\"";
+}
+
+fn escape_string_for_sailfin_literal(content -> string) -> string {
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= content.length {
+            break;
+        }
+        let ch = content[index];
+        if ch == "\\" {
+            result = result + "\\\\";
+        } else if ch == "\"" {
+            result = result + "\\\"";
+        } else if ch == "\n" {
+            result = result + "\\n";
+        } else if ch == "\r" {
+            result = result + "\\r";
+        } else if ch == "\t" {
+            result = result + "\\t";
+        } else {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> number, lines -> string[]) -> ExpressionResult {
+    let harmonised = harmonise_operands(left, right, temp_index, lines);
+    if harmonised.left == null || harmonised.right == null {
+        return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: harmonised.diagnostics, string_constants: empty_string_constant_set() };
+    }
+    let left_aligned = coerce_operand_to_type(harmonised.left, "i8*", harmonised.temp_index, harmonised.lines);
+    let mut diagnostics = harmonised.diagnostics.concat(left_aligned.diagnostics);
+    let right_aligned = coerce_operand_to_type(harmonised.right, "i8*", left_aligned.temp_index, left_aligned.lines);
+    diagnostics = diagnostics.concat(right_aligned.diagnostics);
+    if left_aligned.operand == null || right_aligned.operand == null {
+        return ExpressionResult { lines: right_aligned.lines, temp_index: right_aligned.temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_string_constant_set() };
+    }
+    let temp_name = format_temp_name(right_aligned.temp_index);
+    let line = "  " + temp_name + " = call i8* @sailfin_runtime_string_concat(i8* " + left_aligned.operand.value + ", i8* " + right_aligned.operand.value + ")";
+    let mut out_lines = append_string(right_aligned.lines, line);
+    let operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
+    return ExpressionResult { lines: out_lines, temp_index: right_aligned.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: empty_string_constant_set() };
+}
+
+fn coerce_operand_to_string(operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ExpressionResult {
+    let empty_constants = empty_string_constant_set();
+    if operand.llvm_type == "i8*" {
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    if operand.llvm_type == "double" {
+        let temp_name = format_temp_name(temp_index);
+        let mut out_lines = append_string(lines, "  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")");
+        let out_operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
+        return ExpressionResult { lines: out_lines, temp_index: temp_index + 1, operand: out_operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    if operand.llvm_type == "i64" {
+        let cast_temp = format_temp_name(temp_index);
+        let mut out_lines = append_string(lines, "  " + cast_temp + " = sitofp i64 " + operand.value + " to double");
+        let call_temp = format_temp_name(temp_index + 1);
+        out_lines = append_string(out_lines, "  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")");
+        let out_operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
+        return ExpressionResult { lines: out_lines, temp_index: temp_index + 2, operand: out_operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    if operand.llvm_type == "i1" {
+        let true_lit = lower_string_literal("\"true\"", temp_index, lines);
+        if true_lit.operand == null {
+            return ExpressionResult { lines: true_lit.lines, temp_index: true_lit.temp_index, operand: null, diagnostics: [], string_constants: empty_constants };
+        }
+        let false_lit = lower_string_literal("\"false\"", true_lit.temp_index, true_lit.lines);
+        if false_lit.operand == null {
+            return ExpressionResult { lines: false_lit.lines, temp_index: false_lit.temp_index, operand: null, diagnostics: [], string_constants: empty_constants };
+        }
+        let select_temp = format_temp_name(false_lit.temp_index);
+        let mut out_lines = append_string(false_lit.lines, "  " + select_temp + " = select i1 " + operand.value + ", i8* " + true_lit.operand.value + ", i8* " + false_lit.operand.value);
+        let out_operand = LLVMOperand { llvm_type: "i8*", value: select_temp };
+        return ExpressionResult { lines: out_lines, temp_index: false_lit.temp_index + 1, operand: out_operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    let diagnostics = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"]; 
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
 }
 
 fn unescape_string_literal(literal -> string) -> string {

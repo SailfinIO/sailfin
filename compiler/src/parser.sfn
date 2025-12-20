@@ -2383,7 +2383,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
         block_tokens = append_token(block_tokens, next);
         current = parser_advance_raw(current);
 
-        let capture = collect_until(current, [";", "}"]);
+        let capture = collect_until(current, [";", ",", "}"]);
         let mut index -> number = 0;
         loop {
             if index >= capture.tokens.length {
@@ -2417,7 +2417,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
         let text = trim_text(tokens_to_text(block_tokens));
         body = Block { tokens: block_tokens, text: text, statements: statements };
     } else {
-        let capture = collect_until(current, [";", "}"]);
+        let capture = collect_until(current, [";", ",", "}"]);
         let trimmed_expression_tokens = trim_token_edges(capture.tokens);
         if trimmed_expression_tokens.length == 0 {
             return MatchCaseParseResult { parser: original, case: null, success: false };
