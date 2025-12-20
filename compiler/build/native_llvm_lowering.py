@@ -3021,6 +3021,8 @@ active_label
                         current_next_local = lowered.next_local_id
                         current_next_region = lowered.next_lifetime_region_id
                         current_mutations = (current_mutations) + (lowered.mutations)
+                        temp_constants = collected_string_constants
+                        collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
                         terminated = lowered.terminated
                         index = lowered.next_index
                         active_label = find_last_label(current_lines, active_label)
@@ -3060,6 +3062,8 @@ active_label
                             current_next_local = lowered.next_local_id
                             current_next_region = lowered.next_lifetime_region_id
                             current_mutations = (current_mutations) + (lowered.mutations)
+                            temp_constants = collected_string_constants
+                            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
                             terminated = lowered.terminated
                             index = lowered.next_index
                             active_label = find_last_label(current_lines, active_label)
@@ -3099,6 +3103,8 @@ active_label
                                 current_next_local = lowered.next_local_id
                                 current_next_region = lowered.next_lifetime_region_id
                                 current_mutations = (current_mutations) + (lowered.mutations)
+                                temp_constants = collected_string_constants
+                                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
                                 terminated = lowered.terminated
                                 index = lowered.next_index
                                 active_label = find_last_label(current_lines, active_label)
@@ -3168,6 +3174,8 @@ active_label
                                                     current_next_local = lowered.next_local_id
                                                     current_next_region = lowered.next_lifetime_region_id
                                                     current_mutations = (current_mutations) + (lowered.mutations)
+                                                    temp_constants = collected_string_constants
+                                                    collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
                                                     terminated = lowered.terminated
                                                     index = lowered.next_index
                                                     active_label = find_last_label(current_lines, active_label)
@@ -9770,15 +9778,18 @@ def compute_string_constant_hash(content):
 
 def lower_string_literal(literal, temp_index, lines):
     content = unescape_string_literal(literal)
-    global_name = make_string_constant_name(content)
-    constant = StringConstant(name=global_name, content=content, byte_count=len(content))
-    base_constants = empty_string_constant_set()
-    constant_set = append_string_constant(base_constants, constant)
-    array_type = "[" + number_to_string(len(content) + 1) + " x i8]"
-    gep_instr = "  %s" + number_to_string(temp_index) + " = getelementptr inbounds " + array_type + ", " + array_type + "* " + global_name + ", i32 0, i32 0"
-    updated_lines = append_string(lines, gep_instr)
-    operand = LLVMOperand(llvm_type="i8*", value="%s" + number_to_string(temp_index))
-    return ExpressionResult(lines=updated_lines, temp_index=temp_index + 1, operand=operand, diagnostics=[], string_constants=constant_set)
+    escaped = escape_string_for_llvm(content)
+    array_length = len(content) + 1
+    array_type = "[" + number_to_string(array_length) + " x i8]"
+    current_lines = lines
+    malloc_temp = format_temp_name(temp_index)
+    current_lines = append_string(current_lines, "  " + malloc_temp + " = call i8* @malloc(i64 " + number_to_string(array_length) + ")")
+    cast_temp = format_temp_name(temp_index + 1)
+    current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + array_type + "*")
+    current_lines = append_string(current_lines, "  store " + array_type + " c\"" + escaped + "\\00\", " + array_type + "* " + cast_temp)
+    operand = LLVMOperand(llvm_type="i8*", value=malloc_temp)
+    empty_constants = empty_string_constant_set()
+    return ExpressionResult(lines=current_lines, temp_index=temp_index + 2, operand=operand, diagnostics=[], string_constants=empty_constants)
 
 def unescape_string_literal(literal):
     if len(literal) < 2:

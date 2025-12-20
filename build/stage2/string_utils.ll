@@ -71,44 +71,48 @@ declare noalias i8* @malloc(i64)
 
 @runtime = external global i8**
 
-@.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"
-
 define i8* @char_at(i8* %value, double %index) {
 block.entry:
   %t0 = call i64 @sailfin_runtime_string_length(i8* %value)
   %t1 = icmp eq i64 %t0, 0
   br i1 %t1, label %then0, label %merge1
 then0:
-  %s2 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  call void @sailfin_runtime_mark_persistent(i8* %s2)
-  ret i8* %s2
+  %t2 = call i8* @malloc(i64 1)
+  %t3 = bitcast i8* %t2 to [1 x i8]*
+  store [1 x i8] c"\00", [1 x i8]* %t3
+  call void @sailfin_runtime_mark_persistent(i8* %t2)
+  ret i8* %t2
 merge1:
-  %t3 = sitofp i64 0 to double
-  %t4 = fcmp olt double %index, %t3
-  br i1 %t4, label %then2, label %merge3
+  %t4 = sitofp i64 0 to double
+  %t5 = fcmp olt double %index, %t4
+  br i1 %t5, label %then2, label %merge3
 then2:
-  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  call void @sailfin_runtime_mark_persistent(i8* %s5)
-  ret i8* %s5
+  %t6 = call i8* @malloc(i64 1)
+  %t7 = bitcast i8* %t6 to [1 x i8]*
+  store [1 x i8] c"\00", [1 x i8]* %t7
+  call void @sailfin_runtime_mark_persistent(i8* %t6)
+  ret i8* %t6
 merge3:
-  %t6 = call i64 @sailfin_runtime_string_length(i8* %value)
-  %t7 = sitofp i64 %t6 to double
-  %t8 = fcmp oge double %index, %t7
-  br i1 %t8, label %then4, label %merge5
+  %t8 = call i64 @sailfin_runtime_string_length(i8* %value)
+  %t9 = sitofp i64 %t8 to double
+  %t10 = fcmp oge double %index, %t9
+  br i1 %t10, label %then4, label %merge5
 then4:
-  %s9 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  call void @sailfin_runtime_mark_persistent(i8* %s9)
-  ret i8* %s9
+  %t11 = call i8* @malloc(i64 1)
+  %t12 = bitcast i8* %t11 to [1 x i8]*
+  store [1 x i8] c"\00", [1 x i8]* %t12
+  call void @sailfin_runtime_mark_persistent(i8* %t11)
+  ret i8* %t11
 merge5:
-  %t10 = sitofp i64 1 to double
-  %t11 = fadd double %index, %t10
-  %t12 = call double @llvm.round.f64(double %index)
-  %t13 = fptosi double %t12 to i64
-  %t14 = call double @llvm.round.f64(double %t11)
-  %t15 = fptosi double %t14 to i64
-  %t16 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t13, i64 %t15)
-  call void @sailfin_runtime_mark_persistent(i8* %t16)
-  ret i8* %t16
+  %t13 = sitofp i64 1 to double
+  %t14 = fadd double %index, %t13
+  %t15 = call double @llvm.round.f64(double %index)
+  %t16 = fptosi double %t15 to i64
+  %t17 = call double @llvm.round.f64(double %t14)
+  %t18 = fptosi double %t17 to i64
+  %t19 = call i8* @sailfin_runtime_substring(i8* %value, i64 %t16, i64 %t18)
+  call void @sailfin_runtime_mark_persistent(i8* %t19)
+  ret i8* %t19
 }
 
 define i1 @is_symbol_char(i8* %ch) {
@@ -291,144 +295,146 @@ then0:
   call void @sailfin_runtime_mark_persistent(i8* %t3)
   ret i8* %t3
 merge1:
-  %s5 = getelementptr inbounds [1 x i8], [1 x i8]* @.str.len0.h177573, i32 0, i32 0
-  store i8* %s5, i8** %l0
-  %t6 = sitofp i64 0 to double
-  store double %t6, double* %l1
-  %t7 = load i8*, i8** %l0
-  %t8 = load double, double* %l1
+  %t5 = call i8* @malloc(i64 1)
+  %t6 = bitcast i8* %t5 to [1 x i8]*
+  store [1 x i8] c"\00", [1 x i8]* %t6
+  store i8* %t5, i8** %l0
+  %t7 = sitofp i64 0 to double
+  store double %t7, double* %l1
+  %t8 = load i8*, i8** %l0
+  %t9 = load double, double* %l1
   br label %loop.header2
 loop.header2:
-  %t32 = phi i8* [ %t7, %merge1 ], [ %t30, %loop.latch4 ]
-  %t33 = phi double [ %t8, %merge1 ], [ %t31, %loop.latch4 ]
-  store i8* %t32, i8** %l0
-  store double %t33, double* %l1
+  %t33 = phi i8* [ %t8, %merge1 ], [ %t31, %loop.latch4 ]
+  %t34 = phi double [ %t9, %merge1 ], [ %t32, %loop.latch4 ]
+  store i8* %t33, i8** %l0
+  store double %t34, double* %l1
   br label %loop.body3
 loop.body3:
-  %t9 = load double, double* %l1
-  %t10 = call i64 @sailfin_runtime_string_length(i8* %name)
-  %t11 = sitofp i64 %t10 to double
-  %t12 = fcmp oge double %t9, %t11
-  %t13 = load i8*, i8** %l0
-  %t14 = load double, double* %l1
-  br i1 %t12, label %then6, label %merge7
+  %t10 = load double, double* %l1
+  %t11 = call i64 @sailfin_runtime_string_length(i8* %name)
+  %t12 = sitofp i64 %t11 to double
+  %t13 = fcmp oge double %t10, %t12
+  %t14 = load i8*, i8** %l0
+  %t15 = load double, double* %l1
+  br i1 %t13, label %then6, label %merge7
 then6:
   br label %afterloop5
 merge7:
-  %t15 = load double, double* %l1
-  %t16 = call i8* @char_at(i8* %name, double %t15)
-  store i8* %t16, i8** %l2
-  %t17 = load i8*, i8** %l2
-  %t18 = call i1 @is_symbol_char(i8* %t17)
-  %t19 = load i8*, i8** %l0
-  %t20 = load double, double* %l1
-  %t21 = load i8*, i8** %l2
-  br i1 %t18, label %then8, label %merge9
+  %t16 = load double, double* %l1
+  %t17 = call i8* @char_at(i8* %name, double %t16)
+  store i8* %t17, i8** %l2
+  %t18 = load i8*, i8** %l2
+  %t19 = call i1 @is_symbol_char(i8* %t18)
+  %t20 = load i8*, i8** %l0
+  %t21 = load double, double* %l1
+  %t22 = load i8*, i8** %l2
+  br i1 %t19, label %then8, label %merge9
 then8:
-  %t22 = load i8*, i8** %l0
-  %t23 = load i8*, i8** %l2
-  %t24 = call i8* @sailfin_runtime_string_concat(i8* %t22, i8* %t23)
-  store i8* %t24, i8** %l0
-  %t25 = load i8*, i8** %l0
+  %t23 = load i8*, i8** %l0
+  %t24 = load i8*, i8** %l2
+  %t25 = call i8* @sailfin_runtime_string_concat(i8* %t23, i8* %t24)
+  store i8* %t25, i8** %l0
+  %t26 = load i8*, i8** %l0
   br label %merge9
 merge9:
-  %t26 = phi i8* [ %t25, %then8 ], [ %t19, %merge7 ]
-  store i8* %t26, i8** %l0
-  %t27 = load double, double* %l1
-  %t28 = sitofp i64 1 to double
-  %t29 = fadd double %t27, %t28
-  store double %t29, double* %l1
+  %t27 = phi i8* [ %t26, %then8 ], [ %t20, %merge7 ]
+  store i8* %t27, i8** %l0
+  %t28 = load double, double* %l1
+  %t29 = sitofp i64 1 to double
+  %t30 = fadd double %t28, %t29
+  store double %t30, double* %l1
   br label %loop.latch4
 loop.latch4:
-  %t30 = load i8*, i8** %l0
-  %t31 = load double, double* %l1
+  %t31 = load i8*, i8** %l0
+  %t32 = load double, double* %l1
   br label %loop.header2
 afterloop5:
-  %t34 = load i8*, i8** %l0
-  %t35 = load double, double* %l1
-  %t36 = load i8*, i8** %l0
-  %t37 = call i64 @sailfin_runtime_string_length(i8* %t36)
-  %t38 = icmp eq i64 %t37, 0
-  %t39 = load i8*, i8** %l0
-  %t40 = load double, double* %l1
-  br i1 %t38, label %then10, label %merge11
+  %t35 = load i8*, i8** %l0
+  %t36 = load double, double* %l1
+  %t37 = load i8*, i8** %l0
+  %t38 = call i64 @sailfin_runtime_string_length(i8* %t37)
+  %t39 = icmp eq i64 %t38, 0
+  %t40 = load i8*, i8** %l0
+  %t41 = load double, double* %l1
+  br i1 %t39, label %then10, label %merge11
 then10:
-  %t41 = add i64 0, 2
-  %t42 = call i8* @malloc(i64 %t41)
-  store i8 95, i8* %t42
-  %t43 = getelementptr i8, i8* %t42, i64 1
-  store i8 0, i8* %t43
-  call void @sailfin_runtime_mark_persistent(i8* %t42)
-  call void @sailfin_runtime_mark_persistent(i8* %t42)
-  ret i8* %t42
+  %t42 = add i64 0, 2
+  %t43 = call i8* @malloc(i64 %t42)
+  store i8 95, i8* %t43
+  %t44 = getelementptr i8, i8* %t43, i64 1
+  store i8 0, i8* %t44
+  call void @sailfin_runtime_mark_persistent(i8* %t43)
+  call void @sailfin_runtime_mark_persistent(i8* %t43)
+  ret i8* %t43
 merge11:
-  %t44 = load i8*, i8** %l0
-  %t45 = sitofp i64 0 to double
-  %t46 = call i8* @char_at(i8* %t44, double %t45)
-  store i8* %t46, i8** %l3
-  %t47 = load i8*, i8** %l3
-  %t48 = call double @char_code(i8* %t47)
-  store double %t48, double* %l4
-  %t49 = add i64 0, 2
-  %t50 = call i8* @malloc(i64 %t49)
-  store i8 48, i8* %t50
-  %t51 = getelementptr i8, i8* %t50, i64 1
-  store i8 0, i8* %t51
-  call void @sailfin_runtime_mark_persistent(i8* %t50)
-  %t52 = call double @char_code(i8* %t50)
-  store double %t52, double* %l5
-  %t53 = add i64 0, 2
-  %t54 = call i8* @malloc(i64 %t53)
-  store i8 57, i8* %t54
-  %t55 = getelementptr i8, i8* %t54, i64 1
-  store i8 0, i8* %t55
-  call void @sailfin_runtime_mark_persistent(i8* %t54)
-  %t56 = call double @char_code(i8* %t54)
-  store double %t56, double* %l6
-  %t58 = load double, double* %l4
-  %t59 = load double, double* %l5
-  %t60 = fcmp oge double %t58, %t59
-  br label %logical_and_entry_57
+  %t45 = load i8*, i8** %l0
+  %t46 = sitofp i64 0 to double
+  %t47 = call i8* @char_at(i8* %t45, double %t46)
+  store i8* %t47, i8** %l3
+  %t48 = load i8*, i8** %l3
+  %t49 = call double @char_code(i8* %t48)
+  store double %t49, double* %l4
+  %t50 = add i64 0, 2
+  %t51 = call i8* @malloc(i64 %t50)
+  store i8 48, i8* %t51
+  %t52 = getelementptr i8, i8* %t51, i64 1
+  store i8 0, i8* %t52
+  call void @sailfin_runtime_mark_persistent(i8* %t51)
+  %t53 = call double @char_code(i8* %t51)
+  store double %t53, double* %l5
+  %t54 = add i64 0, 2
+  %t55 = call i8* @malloc(i64 %t54)
+  store i8 57, i8* %t55
+  %t56 = getelementptr i8, i8* %t55, i64 1
+  store i8 0, i8* %t56
+  call void @sailfin_runtime_mark_persistent(i8* %t55)
+  %t57 = call double @char_code(i8* %t55)
+  store double %t57, double* %l6
+  %t59 = load double, double* %l4
+  %t60 = load double, double* %l5
+  %t61 = fcmp oge double %t59, %t60
+  br label %logical_and_entry_58
 
-logical_and_entry_57:
-  br i1 %t60, label %logical_and_right_57, label %logical_and_merge_57
+logical_and_entry_58:
+  br i1 %t61, label %logical_and_right_58, label %logical_and_merge_58
 
-logical_and_right_57:
-  %t61 = load double, double* %l4
-  %t62 = load double, double* %l6
-  %t63 = fcmp ole double %t61, %t62
-  br label %logical_and_right_end_57
+logical_and_right_58:
+  %t62 = load double, double* %l4
+  %t63 = load double, double* %l6
+  %t64 = fcmp ole double %t62, %t63
+  br label %logical_and_right_end_58
 
-logical_and_right_end_57:
-  br label %logical_and_merge_57
+logical_and_right_end_58:
+  br label %logical_and_merge_58
 
-logical_and_merge_57:
-  %t64 = phi i1 [ false, %logical_and_entry_57 ], [ %t63, %logical_and_right_end_57 ]
-  %t65 = load i8*, i8** %l0
-  %t66 = load double, double* %l1
-  %t67 = load i8*, i8** %l3
-  %t68 = load double, double* %l4
-  %t69 = load double, double* %l5
-  %t70 = load double, double* %l6
-  br i1 %t64, label %then12, label %merge13
+logical_and_merge_58:
+  %t65 = phi i1 [ false, %logical_and_entry_58 ], [ %t64, %logical_and_right_end_58 ]
+  %t66 = load i8*, i8** %l0
+  %t67 = load double, double* %l1
+  %t68 = load i8*, i8** %l3
+  %t69 = load double, double* %l4
+  %t70 = load double, double* %l5
+  %t71 = load double, double* %l6
+  br i1 %t65, label %then12, label %merge13
 then12:
-  %t71 = load i8*, i8** %l0
-  %t72 = add i64 0, 2
-  %t73 = call i8* @malloc(i64 %t72)
-  store i8 95, i8* %t73
-  %t74 = getelementptr i8, i8* %t73, i64 1
-  store i8 0, i8* %t74
-  call void @sailfin_runtime_mark_persistent(i8* %t73)
-  %t75 = call i8* @sailfin_runtime_string_concat(i8* %t73, i8* %t71)
-  store i8* %t75, i8** %l0
-  %t76 = load i8*, i8** %l0
+  %t72 = load i8*, i8** %l0
+  %t73 = add i64 0, 2
+  %t74 = call i8* @malloc(i64 %t73)
+  store i8 95, i8* %t74
+  %t75 = getelementptr i8, i8* %t74, i64 1
+  store i8 0, i8* %t75
+  call void @sailfin_runtime_mark_persistent(i8* %t74)
+  %t76 = call i8* @sailfin_runtime_string_concat(i8* %t74, i8* %t72)
+  store i8* %t76, i8** %l0
+  %t77 = load i8*, i8** %l0
   br label %merge13
 merge13:
-  %t77 = phi i8* [ %t76, %then12 ], [ %t65, %logical_and_merge_57 ]
-  store i8* %t77, i8** %l0
-  %t78 = load i8*, i8** %l0
-  call void @sailfin_runtime_mark_persistent(i8* %t78)
-  ret i8* %t78
+  %t78 = phi i8* [ %t77, %then12 ], [ %t66, %logical_and_merge_58 ]
+  store i8* %t78, i8** %l0
+  %t79 = load i8*, i8** %l0
+  call void @sailfin_runtime_mark_persistent(i8* %t79)
+  ret i8* %t79
 }
 
 define i1 @strings_equal(i8* %left, i8* %right) {

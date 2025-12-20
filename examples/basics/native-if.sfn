@@ -1,0 +1,9 @@
+// examples/basics/native-if.sfn
+
+fn main() ![io] {
+    if 1 > 0 {
+        print.info("if ok");
+    } else {
+        print.info("if not ok");
+    }
+}

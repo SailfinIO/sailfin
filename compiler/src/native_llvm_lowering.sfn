@@ -4095,6 +4095,8 @@ fn lower_instruction_range(
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_lifetime_region_id;
             current_mutations = current_mutations.concat(lowered.mutations);
+            let temp_constants = collected_string_constants;
+            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             terminated = lowered.terminated;
             index = lowered.next_index;
             active_label = find_last_label(current_lines, active_label);
@@ -4134,6 +4136,8 @@ fn lower_instruction_range(
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_lifetime_region_id;
             current_mutations = current_mutations.concat(lowered.mutations);
+            let temp_constants = collected_string_constants;
+            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             terminated = lowered.terminated;
             index = lowered.next_index;
             active_label = find_last_label(current_lines, active_label);
@@ -4173,6 +4177,8 @@ fn lower_instruction_range(
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_lifetime_region_id;
             current_mutations = current_mutations.concat(lowered.mutations);
+            let temp_constants = collected_string_constants;
+            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             terminated = lowered.terminated;
             index = lowered.next_index;
             active_label = find_last_label(current_lines, active_label);
@@ -4242,6 +4248,8 @@ fn lower_instruction_range(
             current_next_local = lowered.next_local_id;
             current_next_region = lowered.next_lifetime_region_id;
             current_mutations = current_mutations.concat(lowered.mutations);
+            let temp_constants = collected_string_constants;
+            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             terminated = lowered.terminated;
             index = lowered.next_index;
             active_label = find_last_label(current_lines, active_label);
@@ -14063,23 +14071,32 @@ fn compute_string_constant_hash(content -> string) -> number {
 }
 
 fn lower_string_literal(literal -> string, temp_index -> number, lines -> string[]) -> ExpressionResult {
+    // Stage2-native note:
+    // The original lowering model used global string constants (@.str.len...).
+    // Stage2's struct-return plumbing can drop the collected constant table,
+    // yielding link-time failures (undefined @.str.*). To keep emitted LLVM
+    // self-contained and clang-linkable, we materialize literals directly
+    // into heap memory via malloc + store of an inline constant array.
     let content = unescape_string_literal(literal);
-    let global_name = make_string_constant_name(content);
-    let constant = StringConstant { name: global_name, content: content, byte_count: content.length };
-    let base_constants = empty_string_constant_set();
-    let constant_set = append_string_constant(base_constants, constant);
+    let escaped = escape_string_for_llvm(content);
+    let array_length = content.length + 1;
+    let array_type = "[" + number_to_string(array_length) + " x i8]";
 
-    let array_type = "[" + number_to_string(content.length + 1) + " x i8]";
-    let gep_instr = "  %s" + number_to_string(temp_index) + " = getelementptr inbounds " + array_type + ", " + array_type + "* " + global_name + ", i32 0, i32 0";
-    let updated_lines = append_string(lines, gep_instr);
+    let mut current_lines -> string[] = lines;
+    let malloc_temp = format_temp_name(temp_index);
+    current_lines = append_string(current_lines, "  " + malloc_temp + " = call i8* @malloc(i64 " + number_to_string(array_length) + ")");
+    let cast_temp = format_temp_name(temp_index + 1);
+    current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + array_type + "*");
+    current_lines = append_string(current_lines, "  store " + array_type + " c\"" + escaped + "\\00\", " + array_type + "* " + cast_temp);
 
-    let operand = LLVMOperand { llvm_type: "i8*", value: "%s" + number_to_string(temp_index) };
+    let operand = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
+    let empty_constants = empty_string_constant_set();
     return ExpressionResult {
-        lines: updated_lines,
-        temp_index: temp_index + 1,
+        lines: current_lines,
+        temp_index: temp_index + 2,
         operand: operand,
         diagnostics: [],
-        string_constants: constant_set
+        string_constants: empty_constants
     };
 }
 

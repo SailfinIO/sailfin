@@ -4,7 +4,7 @@
 # different target triple than the host.
 CLANG_WARN_SUPPRESS ?= -Wno-override-module
 
-.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-emit-llvm stage2-native-sanity
+.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-emit-llvm stage2-native-sanity stage2-native-run-examples
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -127,3 +127,18 @@ stage2-native-emit-llvm: native-stage2
 	@mkdir -p build/stage3
 	build/native/sailfin-stage2 --emit llvm compiler/src/main.sfn > build/stage3/main-from-stage2.ll
 	@echo "[stage2-native] wrote build/stage3/main-from-stage2.ll"
+
+stage2-native-run-examples: native-stage2
+	@mkdir -p scratch/native-examples build/native/examples
+	@for ex in \
+		examples/basics/hello-world.sfn \
+		examples/basics/conditionals.sfn \
+		examples/basics/native-if.sfn ; do \
+		name=$$(basename $$ex .sfn); \
+		out_ll=scratch/native-examples/$$name.ll; \
+		out_bin=build/native/examples/$$name; \
+		echo "[stage2-native] llvm $$ex -> $$out_bin"; \
+		build/native/sailfin-stage2 --emit llvm $$ex > $$out_ll; \
+		clang -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include runtime/native/src/sailfin_runtime.c runtime/native/ir/runtime_globals.ll $$out_ll -o $$out_bin; \
+		$$out_bin; \
+	done
