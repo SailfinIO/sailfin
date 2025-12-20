@@ -1834,7 +1834,27 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
                 continue;
             }
             if starts_with(body, "variant ") {
-                let variant_result = parse_enum_variant_layout(strip_prefix(body, "variant "), enum_name);
+                let variant_text = strip_prefix(body, "variant ");
+                // Legacy/buggy emitters sometimes encode enum header metadata as a "variant" named `enum`.
+                // Accept it as header metadata (or ignore duplicates) to avoid noisy diagnostics.
+                if starts_with(variant_text, "enum ") {
+                    let header_result = parse_enum_layout_header(strip_prefix(variant_text, "enum "));
+                    // Only apply if it parses cleanly; otherwise fall through to the normal variant parser.
+                    if header_result.success {
+                        if !enum_layout_header_success {
+                            enum_layout_size = header_result.size;
+                            enum_layout_align = header_result.align;
+                            enum_layout_tag_type = header_result.tag_type;
+                            enum_layout_tag_size = header_result.tag_size;
+                            enum_layout_tag_align = header_result.tag_align;
+                            enum_layout_header_success = true;
+                        }
+                        index += 1;
+                        continue;
+                    }
+                }
+
+                let variant_result = parse_enum_variant_layout(variant_text, enum_name);
                 diagnostics = diagnostics.concat(variant_result.diagnostics);
                 if variant_result.success {
                     let existing_index = find_enum_variant_layout(enum_layout_variants, variant_result.variant.name);
@@ -3053,6 +3073,12 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                     if starts_with(variant_line, ".layout variant ") {
                         let body = strip_prefix(variant_line, ".layout ");
                         let variant_text = strip_prefix(body, "variant ");
+                        // Some legacy/buggy manifest emitters include enum header metadata as a "variant" named `enum`.
+                        // Ignore these lines; the compiler can synthesize unit-enum variant layouts when needed.
+                        if starts_with(variant_text, "enum ") {
+                            index += 1;
+                            continue;
+                        }
                         let variant_result = parse_enum_variant_layout(variant_text, enum_name);
                         diagnostics = diagnostics.concat(variant_result.diagnostics);
                         

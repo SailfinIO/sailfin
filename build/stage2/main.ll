@@ -94,6 +94,7 @@ source_filename = "sailfin"
 %ExpressionContinuationCapture = type { i8*, double, i1 }
 %ExtractedSpan = type { i8*, double, double, i1 }
 %PythonBuilder = type { { i8**, i64 }*, double }
+%EnumLayoutFixupResult = type { { %NativeEnum*, i64 }*, { i8**, i64 }* }
 %TraitImplementationDescriptor = type { i8*, { i8**, i64 }* }
 %TraitDescriptor = type { i8*, { i8**, i64 }*, { %NativeInterfaceSignature*, i64 }* }
 %TraitMetadata = type { { %TraitDescriptor*, i64 }*, { %TraitImplementationDescriptor*, i64 }* }
@@ -575,6 +576,10 @@ declare i1 @starts_with(i8*, i8*)
 declare i8* @replace_all(i8*, i8*, i8*)
 declare { i8**, i64 }* @append_lowering_diagnostic({ i8**, i64 }*, i8*, i8*)
 declare i8* @char_at(i8*, double)
+declare i1 @is_unit_enum(%NativeEnum)
+declare %NativeEnumLayout @synthesize_unit_enum_layout(%NativeEnum)
+declare i1 @enum_layout_matches_variants(%NativeEnum, %NativeEnumLayout)
+declare %EnumLayoutFixupResult @fixup_enum_layouts({ %NativeEnum*, i64 }*)
 declare { %LayoutManifest*, i64 }* @load_imported_layout_manifests({ %NativeImport*, i64 }*)
 declare %ImportedModuleContext @collect_imported_module_context({ %NativeImport*, i64 }*)
 declare i8* @resolve_import_module_slug(i8*)

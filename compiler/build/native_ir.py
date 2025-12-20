@@ -1498,7 +1498,20 @@ def parse_enum_definition(lines, start_index):
                 index += 1
                 continue
             if starts_with(body, "variant "):
-                variant_result = parse_enum_variant_layout(strip_prefix(body, "variant "), enum_name)
+                variant_text = strip_prefix(body, "variant ")
+                if starts_with(variant_text, "enum "):
+                    header_result = parse_enum_layout_header(strip_prefix(variant_text, "enum "))
+                    if header_result.success:
+                        if not enum_layout_header_success:
+                            enum_layout_size = header_result.size
+                            enum_layout_align = header_result.align
+                            enum_layout_tag_type = header_result.tag_type
+                            enum_layout_tag_size = header_result.tag_size
+                            enum_layout_tag_align = header_result.tag_align
+                            enum_layout_header_success = True
+                        index += 1
+                        continue
+                variant_result = parse_enum_variant_layout(variant_text, enum_name)
                 diagnostics = (diagnostics) + (variant_result.diagnostics)
                 if variant_result.success:
                     existing_index = find_enum_variant_layout(enum_layout_variants, variant_result.variant.name)
@@ -2424,6 +2437,9 @@ def parse_layout_manifest(text):
                     if starts_with(variant_line, ".layout variant "):
                         body = strip_prefix(variant_line, ".layout ")
                         variant_text = strip_prefix(body, "variant ")
+                        if starts_with(variant_text, "enum "):
+                            index += 1
+                            continue
                         variant_result = parse_enum_variant_layout(variant_text, enum_name)
                         diagnostics = (diagnostics) + (variant_result.diagnostics)
                         if variant_result.success:

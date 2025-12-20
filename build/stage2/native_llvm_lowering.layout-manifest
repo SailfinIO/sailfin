@@ -1,6 +1,10 @@
 ; Sailfin Layout Manifest
 .manifest version=1
 
+.layout struct name=EnumLayoutFixupResult size=16 align=8
+.layout field enums type=NativeEnum[] offset=0 size=8 align=8
+.layout field diagnostics type=string[] offset=8 size=8 align=8
+
 .layout struct name=TraitImplementationDescriptor size=16 align=8
 .layout field struct_name type=string offset=0 size=8 align=8
 .layout field interfaces type=string[] offset=8 size=8 align=8

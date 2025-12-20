@@ -5,8 +5,128 @@
 // without relying on the Python runtime scaffold.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest } from "./native_ir";
+import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest } from "./native_ir";
 import { substring, char_code, char_at } from "./string_utils";
+
+struct EnumLayoutFixupResult {
+    enums -> NativeEnum[];
+    diagnostics -> string[];
+}
+
+fn is_unit_enum(enum_def -> NativeEnum) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= enum_def.variants.length {
+            break;
+        }
+        let variant = enum_def.variants[index];
+        if variant.fields.length > 0 {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn synthesize_unit_enum_layout(enum_def -> NativeEnum) -> NativeEnumLayout {
+    let tag_size -> number = 4;
+    let tag_align -> number = 4;
+    let mut layouts -> NativeEnumVariantLayout[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= enum_def.variants.length {
+            break;
+        }
+        let variant = enum_def.variants[index];
+        layouts = layouts.concat([
+            NativeEnumVariantLayout {
+                name: variant.name,
+                tag: index,
+                offset: 0,
+                size: tag_size,
+                align: tag_align,
+                fields: [],
+            },
+        ]);
+        index += 1;
+    }
+    return NativeEnumLayout {
+        size: tag_size,
+        align: tag_align,
+        tag_type: "i32",
+        tag_size: tag_size,
+        tag_align: tag_align,
+        variants: layouts,
+    };
+}
+
+fn enum_layout_matches_variants(enum_def -> NativeEnum, layout -> NativeEnumLayout) -> boolean {
+    if layout.variants.length != enum_def.variants.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= enum_def.variants.length {
+            break;
+        }
+        let expected = enum_def.variants[index].name;
+        let mut found -> boolean = false;
+        let mut layout_index -> number = 0;
+        loop {
+            if layout_index >= layout.variants.length {
+                break;
+            }
+            if layout.variants[layout_index].name == expected {
+                found = true;
+                break;
+            }
+            layout_index += 1;
+        }
+        if !found {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
+    let mut diagnostics -> string[] = [];
+    let mut updated -> NativeEnum[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= enums.length {
+            break;
+        }
+        let enum_def = enums[index];
+        let mut fixed = enum_def;
+
+        if enum_def.layout == null {
+            if is_unit_enum(enum_def) {
+                fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
+                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout"]);
+            }
+            updated = updated.concat([fixed]);
+            index += 1;
+            continue;
+        }
+
+        let layout = enum_def.layout;
+        if !enum_layout_matches_variants(enum_def, layout) {
+            if is_unit_enum(enum_def) {
+                fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
+                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout"]);
+            } else {
+                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata"]);
+            }
+        }
+
+        updated = updated.concat([fixed]);
+        index += 1;
+    }
+
+    return EnumLayoutFixupResult { enums: updated, diagnostics: diagnostics };
+}
 
 struct TraitImplementationDescriptor {
     struct_name -> string;
@@ -789,7 +909,9 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let combined_interfaces = parse.interfaces.concat(imported_interfaces);
 
     let trait_metadata = build_trait_metadata(combined_interfaces, combined_structs);
-    let type_build = build_type_context(combined_structs, combined_enums, combined_interfaces);
+    let fixed_enums = fixup_enum_layouts(combined_enums);
+    diagnostics = diagnostics.concat(fixed_enums.diagnostics);
+    let type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces);
     diagnostics = diagnostics.concat(type_build.diagnostics);
     let type_context = type_build.context;
 
@@ -9546,6 +9668,44 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
     let mut right_operand = right_result.operand;
     let is_equality = match.symbol == "==" || match.symbol == "!=";
     if is_equality && left_operand != null && right_operand != null {
+        // Enum equality compares tags (unit enums and as a conservative default).
+        if left_operand.llvm_type == right_operand.llvm_type {
+            let enum_info = find_enum_info_by_llvm_type(context, left_operand.llvm_type);
+            if enum_info != null {
+                let mut tag_llvm_type -> string = "i32";
+                if enum_info.tag_type == "i8" {
+                    tag_llvm_type = "i8";
+                }
+                if enum_info.tag_type == "i16" {
+                    tag_llvm_type = "i16";
+                }
+                if enum_info.tag_type == "i32" {
+                    tag_llvm_type = "i32";
+                }
+                if enum_info.tag_type == "i64" {
+                    tag_llvm_type = "i64";
+                }
+
+                let left_tag_temp = format_temp_name(alignment_temp);
+                alignment_temp += 1;
+                alignment_lines = append_string(alignment_lines, "  " + left_tag_temp + " = extractvalue " + left_operand.llvm_type + " " + left_operand.value + ", 0");
+
+                let right_tag_temp = format_temp_name(alignment_temp);
+                alignment_temp += 1;
+                alignment_lines = append_string(alignment_lines, "  " + right_tag_temp + " = extractvalue " + right_operand.llvm_type + " " + right_operand.value + ", 0");
+
+                let compare_temp = format_temp_name(alignment_temp);
+                alignment_temp += 1;
+                let mut predicate -> string = "icmp eq";
+                if match.symbol == "!=" {
+                    predicate = "icmp ne";
+                }
+                alignment_lines = append_string(alignment_lines, "  " + compare_temp + " = " + predicate + " " + tag_llvm_type + " " + left_tag_temp + ", " + right_tag_temp);
+                let operand = LLVMOperand { llvm_type: "i1", value: compare_temp };
+                return ExpressionResult { lines: alignment_lines, temp_index: alignment_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+            }
+        }
+
         let left_is_char = left_operand.llvm_type == "i8";
         let right_is_char = right_operand.llvm_type == "i8";
         let left_is_pointer = ends_with_pointer_suffix(left_operand.llvm_type);

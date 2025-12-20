@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.emit_native import NativeModule
-from compiler.build.native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeSourceSpan, NativeImport, LayoutManifest
+from compiler.build.native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest
 from compiler.build.string_utils import substring, char_code, char_at
 
 print = runtime.console
@@ -20,6 +20,14 @@ array_filter = runtime.array_filter
 array_reduce = runtime.array_reduce
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
+
+class EnumLayoutFixupResult:
+    def __init__(self, enums, diagnostics):
+        self.enums = enums
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('EnumLayoutFixupResult', [runtime.struct_field('enums', self.enums), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class TraitImplementationDescriptor:
     def __init__(self, struct_name, interfaces):
@@ -769,6 +777,79 @@ class LoadLocalResult:
     def __repr__(self):
         return runtime.struct_repr('LoadLocalResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
 
+def is_unit_enum(enum_def):
+    index = 0
+    while True:
+        if index >= len(enum_def.variants):
+            break
+        variant = enum_def.variants[index]
+        if len(variant.fields) > 0:
+            return False
+        index += 1
+    return True
+
+def synthesize_unit_enum_layout(enum_def):
+    tag_size = 4
+    tag_align = 4
+    layouts = []
+    index = 0
+    while True:
+        if index >= len(enum_def.variants):
+            break
+        variant = enum_def.variants[index]
+        layouts = (layouts) + ([NativeEnumVariantLayout(name=variant.name, tag=index, offset=0, size=tag_size, align=tag_align, fields=[])])
+        index += 1
+    return NativeEnumLayout(size=tag_size, align=tag_align, tag_type="i32", tag_size=tag_size, tag_align=tag_align, variants=layouts)
+
+def enum_layout_matches_variants(enum_def, layout):
+    if len(layout.variants) != len(enum_def.variants):
+        return False
+    index = 0
+    while True:
+        if index >= len(enum_def.variants):
+            break
+        expected = enum_def.variants[index].name
+        found = False
+        layout_index = 0
+        while True:
+            if layout_index >= len(layout.variants):
+                break
+            if layout.variants[layout_index].name == expected:
+                found = True
+                break
+            layout_index += 1
+        if not found:
+            return False
+        index += 1
+    return True
+
+def fixup_enum_layouts(enums):
+    diagnostics = []
+    updated = []
+    index = 0
+    while True:
+        if index >= len(enums):
+            break
+        enum_def = enums[index]
+        fixed = enum_def
+        if enum_def.layout == None:
+            if is_unit_enum(enum_def):
+                fixed = NativeEnum(name=enum_def.name, variants=enum_def.variants, layout=synthesize_unit_enum_layout(enum_def))
+                diagnostics = (diagnostics) + (["llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout"])
+            updated = (updated) + ([fixed])
+            index += 1
+            continue
+        layout = enum_def.layout
+        if not enum_layout_matches_variants(enum_def, layout):
+            if is_unit_enum(enum_def):
+                fixed = NativeEnum(name=enum_def.name, variants=enum_def.variants, layout=synthesize_unit_enum_layout(enum_def))
+                diagnostics = (diagnostics) + (["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout"])
+            else:
+                diagnostics = (diagnostics) + (["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata"])
+        updated = (updated) + ([fixed])
+        index += 1
+    return EnumLayoutFixupResult(enums=updated, diagnostics=diagnostics)
+
 def load_imported_layout_manifests(imports):
     # effects: io
     context = collect_imported_module_context(imports)
@@ -970,7 +1051,9 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     combined_enums = (module_enums) + (imported_enums)
     combined_interfaces = (parse.interfaces) + (imported_interfaces)
     trait_metadata = build_trait_metadata(combined_interfaces, combined_structs)
-    type_build = build_type_context(combined_structs, combined_enums, combined_interfaces)
+    fixed_enums = fixup_enum_layouts(combined_enums)
+    diagnostics = (diagnostics) + (fixed_enums.diagnostics)
+    type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces)
     diagnostics = (diagnostics) + (type_build.diagnostics)
     type_context = type_build.context
     module_struct_methods = flatten_struct_methods(module_structs)
@@ -6485,6 +6568,32 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
     right_operand = right_result.operand
     is_equality = match.symbol == "=="  or  match.symbol == "!="
     if is_equality  and  left_operand != None  and  right_operand != None:
+        if left_operand.llvm_type == right_operand.llvm_type:
+            enum_info = find_enum_info_by_llvm_type(context, left_operand.llvm_type)
+            if enum_info != None:
+                tag_llvm_type = "i32"
+                if enum_info.tag_type == "i8":
+                    tag_llvm_type = "i8"
+                if enum_info.tag_type == "i16":
+                    tag_llvm_type = "i16"
+                if enum_info.tag_type == "i32":
+                    tag_llvm_type = "i32"
+                if enum_info.tag_type == "i64":
+                    tag_llvm_type = "i64"
+                left_tag_temp = format_temp_name(alignment_temp)
+                alignment_temp += 1
+                alignment_lines = append_string(alignment_lines, "  " + left_tag_temp + " = extractvalue " + left_operand.llvm_type + " " + left_operand.value + ", 0")
+                right_tag_temp = format_temp_name(alignment_temp)
+                alignment_temp += 1
+                alignment_lines = append_string(alignment_lines, "  " + right_tag_temp + " = extractvalue " + right_operand.llvm_type + " " + right_operand.value + ", 0")
+                compare_temp = format_temp_name(alignment_temp)
+                alignment_temp += 1
+                predicate = "icmp eq"
+                if match.symbol == "!=":
+                    predicate = "icmp ne"
+                alignment_lines = append_string(alignment_lines, "  " + compare_temp + " = " + predicate + " " + tag_llvm_type + " " + left_tag_temp + ", " + right_tag_temp)
+                operand = LLVMOperand(llvm_type="i1", value=compare_temp)
+                return ExpressionResult(lines=alignment_lines, temp_index=alignment_temp, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
         left_is_char = left_operand.llvm_type == "i8"
         right_is_char = right_operand.llvm_type == "i8"
         left_is_pointer = ends_with_pointer_suffix(left_operand.llvm_type)
