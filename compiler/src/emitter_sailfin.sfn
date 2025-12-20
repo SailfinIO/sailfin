@@ -42,7 +42,7 @@ fn emit_program(program -> Program) -> string {
     builder = builder_emit_blank(builder);
     builder = builder_emit_line(
         builder,
-        "import() from \"sailfin/runtime\";"
+        "import { } from \"sailfin/runtime\";"
     );
     builder = builder_emit_blank(builder);
 
@@ -107,13 +107,13 @@ fn emit_statement(builder -> TextBuilder, statement -> Statement) -> TextBuilder
 
 fn emit_import(builder -> TextBuilder, specifiers -> ImportSpecifier[], source -> string) -> TextBuilder {
     let list = format_import_specifiers(specifiers);
-    let line = "import() from \"" + source + "\";";
+    let line = "import { " + list + " } from \"" + source + "\";";
     return builder_emit_line(builder, line);
 }
 
 fn emit_export(builder -> TextBuilder, specifiers -> ExportSpecifier[], source -> string) -> TextBuilder {
     let list = format_export_specifiers(specifiers);
-    let line = "export() from \"" + source + "\";";
+    let line = "export { " + list + " } from \"" + source + "\";";
     return builder_emit_line(builder, line);
 }
 
@@ -354,6 +354,18 @@ fn emit_block_statement(builder -> TextBuilder, statement -> Statement) -> TextB
                 return builder_emit_line(builder, "return;");
             }
             return builder_emit_line(builder, "return " + rendered + ";");
+    }
+    if statement.variant == "LoopStatement" {
+        let mut current = emit_decorators(builder, statement.decorators);
+        current = builder_emit_line(current, "loop");
+        current = emit_block(current, statement.body);
+        return current;
+    }
+    if statement.variant == "BreakStatement" {
+        return builder_emit_line(builder, "break;");
+    }
+    if statement.variant == "ContinueStatement" {
+        return builder_emit_line(builder, "continue;");
     }
     if statement.variant == "ExpressionStatement" {
         return builder_emit_line(builder, format_expression(statement.expression) + ";");

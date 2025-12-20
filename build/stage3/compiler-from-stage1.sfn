@@ -81,7 +81,15 @@ fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io]
     if combined.length > 0
     {
         let mut index -> number = 0;
-        // TODO: unsupported block statement: LoopStatement
+        loop
+        {
+            if index >= combined.length
+            {
+                break;
+            }
+            print.warn("[native] " + combined[index]);
+            index += 1;
+        }
     }
     return LoweredPythonResult { source: lowered.source, diagnostics: combined };
 }
@@ -102,7 +110,15 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io]
     if combined.length > 0
     {
         let mut index -> number = 0;
-        // TODO: unsupported block statement: LoopStatement
+        loop
+        {
+            if index >= combined.length
+            {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
     }
     return LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants };
 }
@@ -117,7 +133,15 @@ fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io]
     if combined.length > 0
     {
         let mut index -> number = 0;
-        // TODO: unsupported block statement: LoopStatement
+        loop
+        {
+            if index >= combined.length
+            {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
     }
     return LLVMCompilationResult { llvm: LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants }, native_module: native_result.module };
 }
@@ -127,7 +151,28 @@ fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> st
     let native_result = compile_to_native(source);
     let mut manifests -> LayoutManifest[] = [];
     let mut manifest_index -> number = 0;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if manifest_index >= manifest_contents.length
+        {
+            break;
+        }
+        let manifest_text = manifest_contents[manifest_index];
+        if manifest_text.length == 0
+        {
+            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+        }
+        else
+        {
+            let parsed = parse_layout_manifest(manifest_text);
+            manifests = manifests.concat([LayoutManifest {
+                structs: parsed.structs,
+                enums: parsed.enums,
+                diagnostics: [],
+            }]);
+        }
+        manifest_index += 1;
+    }
     let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts, []);
     let mut combined -> string[] = [];
     combined = combined.concat(native_result.diagnostics);
@@ -135,7 +180,15 @@ fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> st
     if combined.length > 0
     {
         let mut index -> number = 0;
-        // TODO: unsupported block statement: LoopStatement
+        loop
+        {
+            if index >= combined.length
+            {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
     }
     return LoweredLLVMResult { ir: lowered.ir, diagnostics: combined, trait_metadata: lowered.trait_metadata, function_effects: lowered.function_effects, lifetime_regions: lowered.lifetime_regions, capability_manifest: lowered.capability_manifest, string_constants: lowered.string_constants };
 }
@@ -210,7 +263,16 @@ fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> st
     }
     let mut messages -> string[] = [];
     let mut index -> number = 0;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index >= entries.length
+        {
+            break;
+        }
+        let formatted = format_typecheck_diagnostic(entries[index], lines, padding_width);
+        messages = append_string(messages, formatted);
+        index += 1;
+    }
     return messages;
 }
 
@@ -220,7 +282,39 @@ fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io]
     let prefix = "[typecheck] ";
     let padding = repeat_character(" ", prefix.length);
     let mut index -> number = 0;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index >= formatted.length
+        {
+            break;
+        }
+        let message = formatted[index];
+        let lines = split_source_lines(message);
+        if lines.length == 0
+        {
+            print.error(prefix);
+            index += 1;
+            continue;
+        }
+        let mut line_index -> number = 0;
+        loop
+        {
+            if line_index >= lines.length
+            {
+                break;
+            }
+            if line_index == 0
+            {
+                print.error(prefix + lines[line_index]);
+            }
+            else
+            {
+                print.error(padding + lines[line_index]);
+            }
+            line_index += 1;
+        }
+        index += 1;
+    }
 }
 
 fn format_typecheck_diagnostic(entry -> Diagnostic, source_lines -> string[], line_padding -> number) -> string
@@ -265,7 +359,39 @@ fn split_source_lines(source -> string) -> string[]
     let mut lines -> string[] = [];
     let mut current -> string = "";
     let mut index -> number = 0;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index >= source.length
+        {
+            break;
+        }
+        let ch = substring(source, index, index + 1);
+        if ch == "\r"
+        {
+            lines = append_string(lines, current);
+            current = "";
+            if index + 1 < source.length
+            {
+                let next = substring(source, index + 1, index + 2);
+                if next == "\n"
+                {
+                    index += 2;
+                    continue;
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\n"
+        {
+            lines = append_string(lines, current);
+            current = "";
+            index += 1;
+            continue;
+        }
+        current = current + ch;
+        index += 1;
+    }
     lines = append_string(lines, current);
     return lines;
 }
@@ -287,7 +413,30 @@ fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -
     }
     let mut pointer -> string = "";
     let mut index -> number = 1;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index >= start_column
+        {
+            break;
+        }
+        if index <= line_text.length
+        {
+            let current = substring(line_text, index - 1, index);
+            if current == "\t"
+            {
+                pointer = pointer + "\t";
+            }
+            else
+            {
+                pointer = pointer + " ";
+            }
+        }
+        else
+        {
+            pointer = pointer + " ";
+        }
+        index += 1;
+    }
     let mut highlight_length -> number = lexeme.length;
     if highlight_length <= 0
     {
@@ -303,7 +452,15 @@ fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -
         highlight_length = remaining;
     }
     let mut highlight_index -> number = 0;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if highlight_index >= highlight_length
+        {
+            break;
+        }
+        pointer = pointer + "^";
+        highlight_index += 1;
+    }
     return pointer;
 }
 
@@ -315,7 +472,15 @@ fn join_lines(lines -> string[]) -> string
     }
     let mut result -> string = lines[0];
     let mut index -> number = 1;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index >= lines.length
+        {
+            break;
+        }
+        result = result + "\n" + lines[index];
+        index += 1;
+    }
     return result;
 }
 
@@ -340,7 +505,27 @@ fn number_to_string(value -> number) -> string
     let digits = "0123456789";
     let mut remaining -> number = working;
     let mut output -> string = "";
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if remaining <= 0
+        {
+            break;
+        }
+        let mut temp -> number = remaining;
+        let mut quotient -> number = 0;
+        loop
+        {
+            if temp < 10
+            {
+                break;
+            }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
     if negative
     {
         output = "-" + output;
@@ -360,7 +545,18 @@ fn has_prefix(value -> string, prefix -> string) -> boolean
         return false;
     }
     let mut index -> number = 0;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index >= prefix.length
+        {
+            break;
+        }
+        if value[index] != prefix[index]
+        {
+            return false;
+        }
+        index += 1;
+    }
     return true;
 }
 
@@ -444,7 +640,33 @@ fn string_contains(value -> string, pattern -> string) -> boolean
         return false;
     }
     let mut index -> number = 0;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index + pattern.length > value.length
+        {
+            break;
+        }
+        let mut match_flag -> boolean = true;
+        let mut offset -> number = 0;
+        loop
+        {
+            if offset >= pattern.length
+            {
+                break;
+            }
+            if value[index + offset] != pattern[offset]
+            {
+                match_flag = false;
+                break;
+            }
+            offset += 1;
+        }
+        if match_flag
+        {
+            return true;
+        }
+        index += 1;
+    }
     return false;
 }
 
@@ -473,7 +695,34 @@ fn strip_python_string_literals(value -> string) -> string
 {
     let mut index -> number = 0;
     let mut result -> string = "";
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index >= value.length
+        {
+            break;
+        }
+        let ch = substring(value, index, index + 1);
+        if ch == "'"
+        {
+            let quote_length = python_quote_length(value, index, "'");
+            let quotes = repeat_character("'", quote_length);
+            result = result + quotes;
+            index = skip_python_string_literal(value, index + quote_length, "'", quote_length);
+            result = result + quotes;
+            continue;
+        }
+        if ch == "\""
+        {
+            let quote_length = python_quote_length(value, index, "\"");
+            let quotes = repeat_character("\"", quote_length);
+            result = result + quotes;
+            index = skip_python_string_literal(value, index + quote_length, "\"", quote_length);
+            result = result + quotes;
+            continue;
+        }
+        result = result + ch;
+        index += 1;
+    }
     return result;
 }
 
@@ -498,10 +747,59 @@ fn skip_python_string_literal(value -> string, position -> number, delimiter -> 
     {
         let mut index -> number = position;
         let mut escaped -> boolean = false;
-        // TODO: unsupported block statement: LoopStatement
+        loop
+        {
+            if index >= value.length
+            {
+                return index;
+            }
+            let current = substring(value, index, index + 1);
+            index += 1;
+            if escaped
+            {
+                escaped = false;
+                continue;
+            }
+            if current == "\\"
+            {
+                escaped = true;
+                continue;
+            }
+            if current == delimiter
+            {
+                return index;
+            }
+        }
     }
     let mut search_index -> number = position;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if search_index + quote_length > value.length
+        {
+            return value.length;
+        }
+        let mut matches -> boolean = true;
+        let mut offset -> number = 0;
+        loop
+        {
+            if offset >= quote_length
+            {
+                break;
+            }
+            let current = substring(value, search_index + offset, search_index + offset + 1);
+            if current != delimiter
+            {
+                matches = false;
+                break;
+            }
+            offset += 1;
+        }
+        if matches
+        {
+            return search_index + quote_length;
+        }
+        search_index += 1;
+    }
     return value.length;
 }
 
@@ -513,7 +811,15 @@ fn repeat_character(ch -> string, count -> number) -> string
     }
     let mut index -> number = 0;
     let mut result -> string = "";
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index >= count
+        {
+            break;
+        }
+        result = result + ch;
+        index += 1;
+    }
     return result;
 }
 
@@ -528,7 +834,33 @@ fn find_substring(value -> string, pattern -> string) -> number
         return -1;
     }
     let mut index -> number = 0;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index + pattern.length > value.length
+        {
+            break;
+        }
+        let mut match_flag -> boolean = true;
+        let mut offset -> number = 0;
+        loop
+        {
+            if offset >= pattern.length
+            {
+                break;
+            }
+            if value[index + offset] != pattern[offset]
+            {
+                match_flag = false;
+                break;
+            }
+            offset += 1;
+        }
+        if match_flag
+        {
+            return index;
+        }
+        index += 1;
+    }
     return -1;
 }
 
@@ -543,13 +875,51 @@ fn find_substring_from(value -> string, pattern -> string, start -> number) -> n
         return -1;
     }
     let mut index -> number = start;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index + pattern.length > value.length
+        {
+            break;
+        }
+        let mut match_flag -> boolean = true;
+        let mut offset -> number = 0;
+        loop
+        {
+            if offset >= pattern.length
+            {
+                break;
+            }
+            if value[index + offset] != pattern[offset]
+            {
+                match_flag = false;
+                break;
+            }
+            offset += 1;
+        }
+        if match_flag
+        {
+            return index;
+        }
+        index += 1;
+    }
     return -1;
 }
 
 fn advance_to_line_end(value -> string, position -> number) -> number
 {
     let mut index -> number = position;
-    // TODO: unsupported block statement: LoopStatement
+    loop
+    {
+        if index >= value.length
+        {
+            break;
+        }
+        let ch = substring(value, index, index + 1);
+        index += 1;
+        if ch == "\n"
+        {
+            break;
+        }
+    }
     return index;
 }

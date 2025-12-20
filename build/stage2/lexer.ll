@@ -2005,6 +2005,6 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
 @.str.len4.h275946731 = private unnamed_addr constant [5 x i8] c"true\00"
+@.str.len5.h2095430042 = private unnamed_addr constant [6 x i8] c"false\00"
 @.str.len0.h177573 = private unnamed_addr constant [1 x i8] c"\00"

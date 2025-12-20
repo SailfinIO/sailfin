@@ -268,6 +268,15 @@ def emit_block_statement(builder, statement):
         if len(rendered) == 0:
             return builder_emit_line(builder, "return;")
         return builder_emit_line(builder, "return " + rendered + ";")
+    if statement.variant == "LoopStatement":
+        current = emit_decorators(builder, statement.decorators)
+        current = builder_emit_line(current, "loop")
+        current = emit_block(current, statement.body)
+        return current
+    if statement.variant == "BreakStatement":
+        return builder_emit_line(builder, "break;")
+    if statement.variant == "ContinueStatement":
+        return builder_emit_line(builder, "continue;")
     if statement.variant == "ExpressionStatement":
         return builder_emit_line(builder, format_expression(statement.expression) + ";")
     if statement.variant == "VariableDeclaration":

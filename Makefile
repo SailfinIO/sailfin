@@ -1,5 +1,9 @@
 # Sailfin project automation
 
+# Silence noisy clang warning when compiling embedded-IR modules that carry a
+# different target triple than the host.
+CLANG_WARN_SUPPRESS ?= -Wno-override-module
+
 .PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-sanity
 
 ifeq ($(origin CONDA_EXE), undefined)
@@ -67,40 +71,40 @@ native-stage2: bootstrap-stage2
 	@mkdir -p build/stage2/aot build/native/obj
 	@rm -f build/native/obj/*.o
 	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
-	clang -O2 -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.o
-	clang -O2 -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.o
-	clang -O2 -c runtime/native/ir/runtime_globals.ll -o build/native/obj/runtime_globals.o
+	clang -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.o
+	clang -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.o
+	clang -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
-	  clang -O2 -fPIC -c build/stage2/aot/$$m.ll -o build/native/obj/$$m.o; \
+	  clang -O2 $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	clang -O2 -o build/native/sailfin-stage2 build/native/obj/sailfin_runtime.o build/native/obj/stage2_driver.o build/native/obj/runtime_globals.o $(addprefix build/native/obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
+	clang -O2 $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2 build/native/obj/sailfin_runtime.o build/native/obj/stage2_driver.o build/native/obj/runtime_globals.o $(addprefix build/native/obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
 
 native-stage2-debug: bootstrap-stage2
 	@mkdir -p build/stage2/aot build/native/debug-obj
 	@rm -f build/native/debug-obj/*.o
 	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
-	clang -O0 -g -fno-omit-frame-pointer -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/debug-obj/sailfin_runtime.o
-	clang -O0 -g -fno-omit-frame-pointer -c runtime/native/src/stage2_driver.c -o build/native/debug-obj/stage2_driver.o
-	clang -O0 -g -fno-omit-frame-pointer -c runtime/native/ir/runtime_globals.ll -o build/native/debug-obj/runtime_globals.o
+	clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/debug-obj/sailfin_runtime.o
+	clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -c runtime/native/src/stage2_driver.c -o build/native/debug-obj/stage2_driver.o
+	clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/debug-obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
-	  clang -O0 -g -fno-omit-frame-pointer -fPIC -c build/stage2/aot/$$m.ll -o build/native/debug-obj/$$m.o; \
+	  clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/debug-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	clang -O0 -g -fno-omit-frame-pointer -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/stage2_driver.o build/native/debug-obj/runtime_globals.o $(addprefix build/native/debug-obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
+	clang -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/stage2_driver.o build/native/debug-obj/runtime_globals.o $(addprefix build/native/debug-obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
 
 native-stage2-asan: bootstrap-stage2
 	@mkdir -p build/stage2/aot build/native/asan-obj
 	@rm -f build/native/asan-obj/*.o
 	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
-	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/asan-obj/sailfin_runtime.o
-	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -c runtime/native/src/stage2_driver.c -o build/native/asan-obj/stage2_driver.o
-	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -c runtime/native/ir/runtime_globals.ll -o build/native/asan-obj/runtime_globals.o
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/asan-obj/sailfin_runtime.o
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -c runtime/native/src/stage2_driver.c -o build/native/asan-obj/stage2_driver.o
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/asan-obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
-	  clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -fPIC -c build/stage2/aot/$$m.ll -o build/native/asan-obj/$$m.o; \
+	  clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/asan-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/stage2_driver.o build/native/asan-obj/runtime_globals.o $(addprefix build/native/asan-obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
+	clang -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/stage2_driver.o build/native/asan-obj/runtime_globals.o $(addprefix build/native/asan-obj/,$(addsuffix .o,$(shell cat build/stage2/aot/modules.txt)))
 
 stage2-native-sanity: native-stage2
 	build/native/sailfin-stage2 examples/basics/hello-world.sfn > /dev/null
