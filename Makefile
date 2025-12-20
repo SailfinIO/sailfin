@@ -4,7 +4,7 @@
 # different target triple than the host.
 CLANG_WARN_SUPPRESS ?= -Wno-override-module
 
-.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-sanity
+.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-sanity
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -34,6 +34,7 @@ help:
 	@echo "  make native-stage2-asan # Same, but with AddressSanitizer for memory bugs"
 	@echo "  make stage2-native-sanity # Bootstrap + build native stage2 + compile hello-world"
 	@echo "  make stage2-native-roundtrip # Bootstrap + build native stage2 + run it on compiler/src/main.sfn"
+	@echo "  make stage2-native-fixed-point # Ensure Stage3→Stage4 is a stable fixed-point"
 
 install:
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
@@ -114,3 +115,9 @@ stage2-native-roundtrip: native-stage2
 	@mkdir -p build/stage3
 	build/native/sailfin-stage2 compiler/src/main.sfn > build/stage3/compiler-from-stage2.sfn
 	@echo "[stage2-native] wrote build/stage3/compiler-from-stage2.sfn"
+
+stage2-native-fixed-point: stage2-native-roundtrip
+	@mkdir -p build/stage4
+	build/native/sailfin-stage2 build/stage3/compiler-from-stage2.sfn > build/stage4/compiler-from-stage3.sfn
+	@diff -q build/stage3/compiler-from-stage2.sfn build/stage4/compiler-from-stage3.sfn > /dev/null
+	@echo "[stage2-native] fixed-point ok (Stage3 == Stage4)"

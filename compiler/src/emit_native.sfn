@@ -1,4 +1,5 @@
 // compiler/src/emit_native.sfn
+//
 // Prototype native backend that synthesises a textual intermediate format.
 // The current goal is to surface deterministic structure that future LLVM
 // and WASM lowering passes can consume. The artifact mirrors a simplified

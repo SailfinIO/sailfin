@@ -1,7 +1,8 @@
 // compiler/src/typecheck.sfn
-// Foundational semantic analysis pass for the Sailfin self-hosted compiler.
-// Duplicate symbol detection now covers top-level declarations, parameters,
-// and block-local bindings so future analyses can assume consistent scopes.
+//
+// Typechecking and semantic analysis for Sailfin programs. This phase 
+// validates symbol usage, scopes, and effect requirements, producing
+// diagnostics for any issues found.
 
 import { Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodDeclaration, EnumVariant, ModelProperty, TypeParameter, TypeAnnotation, SourceSpan } from "./ast";
 import { Token, TokenKind } from "./token";

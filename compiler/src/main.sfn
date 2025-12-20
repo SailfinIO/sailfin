@@ -1,5 +1,7 @@
 // compiler/src/main.sfn
-// Temporary entry point for the Sailfin compiler (self-hosting prototype).
+//
+// Sailfin compiler main module and compilation entry points. 
+
 
 import { parse_program } from "./parser";
 import { Program } from "./ast";
