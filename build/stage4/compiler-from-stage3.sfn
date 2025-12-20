@@ -11,6 +11,7 @@ import { LayoutManifest, parse_layout_manifest } from "./native_ir";
 import { substring } from "./string_utils";
 import { Token } from "./token";
 import { typecheck_program } from "./typecheck";
+
 struct CompiledModule
 {
     source_path -> string;

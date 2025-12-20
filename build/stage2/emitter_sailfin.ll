@@ -114,17 +114,177 @@ declare noalias i8* @malloc(i64)
 @.str.len2.h193392014 = private unnamed_addr constant [3 x i8] c"\0A}\00"
 @.str.len39.h1477088561 = private unnamed_addr constant [40 x i8] c"// TODO: unsupported lambda statement: \00"
 
+define i1 @is_import_like(%Statement %statement) {
+block.entry:
+  %t0 = extractvalue %Statement %statement, 0
+  %t1 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Statement.variant.default, i32 0, i32 0
+  %t2 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ImportDeclaration.variant, i32 0, i32 0
+  %t3 = icmp eq i32 %t0, 0
+  %t4 = select i1 %t3, i8* %t2, i8* %t1
+  %t5 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ExportDeclaration.variant, i32 0, i32 0
+  %t6 = icmp eq i32 %t0, 1
+  %t7 = select i1 %t6, i8* %t5, i8* %t4
+  %t8 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.VariableDeclaration.variant, i32 0, i32 0
+  %t9 = icmp eq i32 %t0, 2
+  %t10 = select i1 %t9, i8* %t8, i8* %t7
+  %t11 = getelementptr inbounds [17 x i8], [17 x i8]* @.enum.Statement.ModelDeclaration.variant, i32 0, i32 0
+  %t12 = icmp eq i32 %t0, 3
+  %t13 = select i1 %t12, i8* %t11, i8* %t10
+  %t14 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.PipelineDeclaration.variant, i32 0, i32 0
+  %t15 = icmp eq i32 %t0, 4
+  %t16 = select i1 %t15, i8* %t14, i8* %t13
+  %t17 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ToolDeclaration.variant, i32 0, i32 0
+  %t18 = icmp eq i32 %t0, 5
+  %t19 = select i1 %t18, i8* %t17, i8* %t16
+  %t20 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.TestDeclaration.variant, i32 0, i32 0
+  %t21 = icmp eq i32 %t0, 6
+  %t22 = select i1 %t21, i8* %t20, i8* %t19
+  %t23 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.FunctionDeclaration.variant, i32 0, i32 0
+  %t24 = icmp eq i32 %t0, 7
+  %t25 = select i1 %t24, i8* %t23, i8* %t22
+  %t26 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.StructDeclaration.variant, i32 0, i32 0
+  %t27 = icmp eq i32 %t0, 8
+  %t28 = select i1 %t27, i8* %t26, i8* %t25
+  %t29 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.TypeAliasDeclaration.variant, i32 0, i32 0
+  %t30 = icmp eq i32 %t0, 9
+  %t31 = select i1 %t30, i8* %t29, i8* %t28
+  %t32 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.InterfaceDeclaration.variant, i32 0, i32 0
+  %t33 = icmp eq i32 %t0, 10
+  %t34 = select i1 %t33, i8* %t32, i8* %t31
+  %t35 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.EnumDeclaration.variant, i32 0, i32 0
+  %t36 = icmp eq i32 %t0, 11
+  %t37 = select i1 %t36, i8* %t35, i8* %t34
+  %t38 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.PromptStatement.variant, i32 0, i32 0
+  %t39 = icmp eq i32 %t0, 12
+  %t40 = select i1 %t39, i8* %t38, i8* %t37
+  %t41 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.WithStatement.variant, i32 0, i32 0
+  %t42 = icmp eq i32 %t0, 13
+  %t43 = select i1 %t42, i8* %t41, i8* %t40
+  %t44 = getelementptr inbounds [13 x i8], [13 x i8]* @.enum.Statement.ForStatement.variant, i32 0, i32 0
+  %t45 = icmp eq i32 %t0, 14
+  %t46 = select i1 %t45, i8* %t44, i8* %t43
+  %t47 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.LoopStatement.variant, i32 0, i32 0
+  %t48 = icmp eq i32 %t0, 15
+  %t49 = select i1 %t48, i8* %t47, i8* %t46
+  %t50 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.BreakStatement.variant, i32 0, i32 0
+  %t51 = icmp eq i32 %t0, 16
+  %t52 = select i1 %t51, i8* %t50, i8* %t49
+  %t53 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ContinueStatement.variant, i32 0, i32 0
+  %t54 = icmp eq i32 %t0, 17
+  %t55 = select i1 %t54, i8* %t53, i8* %t52
+  %t56 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.MatchStatement.variant, i32 0, i32 0
+  %t57 = icmp eq i32 %t0, 18
+  %t58 = select i1 %t57, i8* %t56, i8* %t55
+  %t59 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Statement.IfStatement.variant, i32 0, i32 0
+  %t60 = icmp eq i32 %t0, 19
+  %t61 = select i1 %t60, i8* %t59, i8* %t58
+  %t62 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ReturnStatement.variant, i32 0, i32 0
+  %t63 = icmp eq i32 %t0, 20
+  %t64 = select i1 %t63, i8* %t62, i8* %t61
+  %t65 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.ExpressionStatement.variant, i32 0, i32 0
+  %t66 = icmp eq i32 %t0, 21
+  %t67 = select i1 %t66, i8* %t65, i8* %t64
+  %t68 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
+  %t69 = icmp eq i32 %t0, 22
+  %t70 = select i1 %t69, i8* %t68, i8* %t67
+  %s71 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h689147423, i32 0, i32 0
+  %t72 = call i1 @strings_equal(i8* %t70, i8* %s71)
+  br i1 %t72, label %then0, label %merge1
+then0:
+  ret i1 1
+merge1:
+  %t73 = extractvalue %Statement %statement, 0
+  %t74 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Statement.variant.default, i32 0, i32 0
+  %t75 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ImportDeclaration.variant, i32 0, i32 0
+  %t76 = icmp eq i32 %t73, 0
+  %t77 = select i1 %t76, i8* %t75, i8* %t74
+  %t78 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ExportDeclaration.variant, i32 0, i32 0
+  %t79 = icmp eq i32 %t73, 1
+  %t80 = select i1 %t79, i8* %t78, i8* %t77
+  %t81 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.VariableDeclaration.variant, i32 0, i32 0
+  %t82 = icmp eq i32 %t73, 2
+  %t83 = select i1 %t82, i8* %t81, i8* %t80
+  %t84 = getelementptr inbounds [17 x i8], [17 x i8]* @.enum.Statement.ModelDeclaration.variant, i32 0, i32 0
+  %t85 = icmp eq i32 %t73, 3
+  %t86 = select i1 %t85, i8* %t84, i8* %t83
+  %t87 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.PipelineDeclaration.variant, i32 0, i32 0
+  %t88 = icmp eq i32 %t73, 4
+  %t89 = select i1 %t88, i8* %t87, i8* %t86
+  %t90 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ToolDeclaration.variant, i32 0, i32 0
+  %t91 = icmp eq i32 %t73, 5
+  %t92 = select i1 %t91, i8* %t90, i8* %t89
+  %t93 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.TestDeclaration.variant, i32 0, i32 0
+  %t94 = icmp eq i32 %t73, 6
+  %t95 = select i1 %t94, i8* %t93, i8* %t92
+  %t96 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.FunctionDeclaration.variant, i32 0, i32 0
+  %t97 = icmp eq i32 %t73, 7
+  %t98 = select i1 %t97, i8* %t96, i8* %t95
+  %t99 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.StructDeclaration.variant, i32 0, i32 0
+  %t100 = icmp eq i32 %t73, 8
+  %t101 = select i1 %t100, i8* %t99, i8* %t98
+  %t102 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.TypeAliasDeclaration.variant, i32 0, i32 0
+  %t103 = icmp eq i32 %t73, 9
+  %t104 = select i1 %t103, i8* %t102, i8* %t101
+  %t105 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.InterfaceDeclaration.variant, i32 0, i32 0
+  %t106 = icmp eq i32 %t73, 10
+  %t107 = select i1 %t106, i8* %t105, i8* %t104
+  %t108 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.EnumDeclaration.variant, i32 0, i32 0
+  %t109 = icmp eq i32 %t73, 11
+  %t110 = select i1 %t109, i8* %t108, i8* %t107
+  %t111 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.PromptStatement.variant, i32 0, i32 0
+  %t112 = icmp eq i32 %t73, 12
+  %t113 = select i1 %t112, i8* %t111, i8* %t110
+  %t114 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.WithStatement.variant, i32 0, i32 0
+  %t115 = icmp eq i32 %t73, 13
+  %t116 = select i1 %t115, i8* %t114, i8* %t113
+  %t117 = getelementptr inbounds [13 x i8], [13 x i8]* @.enum.Statement.ForStatement.variant, i32 0, i32 0
+  %t118 = icmp eq i32 %t73, 14
+  %t119 = select i1 %t118, i8* %t117, i8* %t116
+  %t120 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.LoopStatement.variant, i32 0, i32 0
+  %t121 = icmp eq i32 %t73, 15
+  %t122 = select i1 %t121, i8* %t120, i8* %t119
+  %t123 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.BreakStatement.variant, i32 0, i32 0
+  %t124 = icmp eq i32 %t73, 16
+  %t125 = select i1 %t124, i8* %t123, i8* %t122
+  %t126 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ContinueStatement.variant, i32 0, i32 0
+  %t127 = icmp eq i32 %t73, 17
+  %t128 = select i1 %t127, i8* %t126, i8* %t125
+  %t129 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.MatchStatement.variant, i32 0, i32 0
+  %t130 = icmp eq i32 %t73, 18
+  %t131 = select i1 %t130, i8* %t129, i8* %t128
+  %t132 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Statement.IfStatement.variant, i32 0, i32 0
+  %t133 = icmp eq i32 %t73, 19
+  %t134 = select i1 %t133, i8* %t132, i8* %t131
+  %t135 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ReturnStatement.variant, i32 0, i32 0
+  %t136 = icmp eq i32 %t73, 20
+  %t137 = select i1 %t136, i8* %t135, i8* %t134
+  %t138 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.ExpressionStatement.variant, i32 0, i32 0
+  %t139 = icmp eq i32 %t73, 21
+  %t140 = select i1 %t139, i8* %t138, i8* %t137
+  %t141 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
+  %t142 = icmp eq i32 %t73, 22
+  %t143 = select i1 %t142, i8* %t141, i8* %t140
+  %s144 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1813262795, i32 0, i32 0
+  %t145 = call i1 @strings_equal(i8* %t143, i8* %s144)
+  br i1 %t145, label %then2, label %merge3
+then2:
+  ret i1 1
+merge3:
+  ret i1 0
+}
+
 define i8* @emit_program(%Program %program) {
 block.entry:
   %l0 = alloca %TextBuilder
   %l1 = alloca i1
   %l2 = alloca double
   %l3 = alloca %Statement
-  %l4 = alloca double
-  %l5 = alloca %Statement
+  %l4 = alloca i1
+  %l5 = alloca double
   %l6 = alloca %Statement
   %l7 = alloca i1
-  %l8 = alloca i1
+  %l8 = alloca %Statement
+  %l9 = alloca i1
   %t0 = call %TextBuilder @builder_new()
   store %TextBuilder %t0, %TextBuilder* %l0
   %t1 = load %TextBuilder, %TextBuilder* %l0
@@ -300,486 +460,208 @@ loop.latch2:
 afterloop3:
   %t139 = load i1, i1* %l1
   %t140 = load double, double* %l2
+  store i1 0, i1* %l4
   %t141 = load i1, i1* %l1
   %t142 = xor i1 %t141, 1
   %t143 = load %TextBuilder, %TextBuilder* %l0
   %t144 = load i1, i1* %l1
   %t145 = load double, double* %l2
+  %t146 = load i1, i1* %l4
   br i1 %t142, label %then10, label %merge11
 then10:
-  %t146 = load %TextBuilder, %TextBuilder* %l0
-  %s147 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.len34.h160552901, i32 0, i32 0
-  %t148 = call %TextBuilder @builder_emit_line(%TextBuilder %t146, i8* %s147)
-  store %TextBuilder %t148, %TextBuilder* %l0
-  %t149 = load %TextBuilder, %TextBuilder* %l0
+  %t147 = load %TextBuilder, %TextBuilder* %l0
+  %s148 = getelementptr inbounds [35 x i8], [35 x i8]* @.str.len34.h160552901, i32 0, i32 0
+  %t149 = call %TextBuilder @builder_emit_line(%TextBuilder %t147, i8* %s148)
+  store %TextBuilder %t149, %TextBuilder* %l0
+  store i1 1, i1* %l4
+  %t150 = load %TextBuilder, %TextBuilder* %l0
+  %t151 = load i1, i1* %l4
   br label %merge11
 merge11:
-  %t150 = phi %TextBuilder [ %t149, %then10 ], [ %t143, %afterloop3 ]
-  store %TextBuilder %t150, %TextBuilder* %l0
-  %t151 = sitofp i64 0 to double
-  store double %t151, double* %l4
-  %t152 = load %TextBuilder, %TextBuilder* %l0
-  %t153 = load i1, i1* %l1
-  %t154 = load double, double* %l2
-  %t155 = load double, double* %l4
+  %t152 = phi %TextBuilder [ %t150, %then10 ], [ %t143, %afterloop3 ]
+  %t153 = phi i1 [ %t151, %then10 ], [ %t146, %afterloop3 ]
+  store %TextBuilder %t152, %TextBuilder* %l0
+  store i1 %t153, i1* %l4
+  %t154 = sitofp i64 0 to double
+  store double %t154, double* %l5
+  %t155 = load %TextBuilder, %TextBuilder* %l0
+  %t156 = load i1, i1* %l1
+  %t157 = load double, double* %l2
+  %t158 = load i1, i1* %l4
+  %t159 = load double, double* %l5
   br label %loop.header12
 loop.header12:
-  %t536 = phi %TextBuilder [ %t152, %merge11 ], [ %t534, %loop.latch14 ]
-  %t537 = phi double [ %t155, %merge11 ], [ %t535, %loop.latch14 ]
-  store %TextBuilder %t536, %TextBuilder* %l0
-  store double %t537, double* %l4
+  %t258 = phi %TextBuilder [ %t155, %merge11 ], [ %t255, %loop.latch14 ]
+  %t259 = phi i1 [ %t158, %merge11 ], [ %t256, %loop.latch14 ]
+  %t260 = phi double [ %t159, %merge11 ], [ %t257, %loop.latch14 ]
+  store %TextBuilder %t258, %TextBuilder* %l0
+  store i1 %t259, i1* %l4
+  store double %t260, double* %l5
   br label %loop.body13
 loop.body13:
-  %t156 = load double, double* %l4
-  %t157 = extractvalue %Program %program, 0
-  %t158 = load { %Statement*, i64 }, { %Statement*, i64 }* %t157
-  %t159 = extractvalue { %Statement*, i64 } %t158, 1
-  %t160 = sitofp i64 %t159 to double
-  %t161 = fcmp oge double %t156, %t160
-  %t162 = load %TextBuilder, %TextBuilder* %l0
-  %t163 = load i1, i1* %l1
-  %t164 = load double, double* %l2
-  %t165 = load double, double* %l4
-  br i1 %t161, label %then16, label %merge17
+  %t160 = load double, double* %l5
+  %t161 = extractvalue %Program %program, 0
+  %t162 = load { %Statement*, i64 }, { %Statement*, i64 }* %t161
+  %t163 = extractvalue { %Statement*, i64 } %t162, 1
+  %t164 = sitofp i64 %t163 to double
+  %t165 = fcmp oge double %t160, %t164
+  %t166 = load %TextBuilder, %TextBuilder* %l0
+  %t167 = load i1, i1* %l1
+  %t168 = load double, double* %l2
+  %t169 = load i1, i1* %l4
+  %t170 = load double, double* %l5
+  br i1 %t165, label %then16, label %merge17
 then16:
   br label %afterloop15
 merge17:
-  %t166 = load %TextBuilder, %TextBuilder* %l0
-  %t167 = extractvalue %Program %program, 0
-  %t168 = load double, double* %l4
-  %t169 = call double @llvm.round.f64(double %t168)
-  %t170 = fptosi double %t169 to i64
-  %t171 = load { %Statement*, i64 }, { %Statement*, i64 }* %t167
-  %t172 = extractvalue { %Statement*, i64 } %t171, 0
-  %t173 = extractvalue { %Statement*, i64 } %t171, 1
-  %t174 = icmp uge i64 %t170, %t173
-  ; bounds check: %t174 (if true, out of bounds)
-  call void @sailfin_runtime_bounds_check(i64 %t170, i64 %t173)
-  %t175 = getelementptr %Statement, %Statement* %t172, i64 %t170
-  %t176 = load %Statement, %Statement* %t175
-  %t177 = call %TextBuilder @emit_statement(%TextBuilder %t166, %Statement %t176)
-  store %TextBuilder %t177, %TextBuilder* %l0
-  %t178 = load double, double* %l4
-  %t179 = sitofp i64 1 to double
-  %t180 = fadd double %t178, %t179
-  %t181 = extractvalue %Program %program, 0
-  %t182 = load { %Statement*, i64 }, { %Statement*, i64 }* %t181
-  %t183 = extractvalue { %Statement*, i64 } %t182, 1
-  %t184 = sitofp i64 %t183 to double
-  %t185 = fcmp olt double %t180, %t184
-  %t186 = load %TextBuilder, %TextBuilder* %l0
-  %t187 = load i1, i1* %l1
-  %t188 = load double, double* %l2
-  %t189 = load double, double* %l4
-  br i1 %t185, label %then18, label %merge19
+  %t171 = extractvalue %Program %program, 0
+  %t172 = load double, double* %l5
+  %t173 = call double @llvm.round.f64(double %t172)
+  %t174 = fptosi double %t173 to i64
+  %t175 = load { %Statement*, i64 }, { %Statement*, i64 }* %t171
+  %t176 = extractvalue { %Statement*, i64 } %t175, 0
+  %t177 = extractvalue { %Statement*, i64 } %t175, 1
+  %t178 = icmp uge i64 %t174, %t177
+  ; bounds check: %t178 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t174, i64 %t177)
+  %t179 = getelementptr %Statement, %Statement* %t176, i64 %t174
+  %t180 = load %Statement, %Statement* %t179
+  store %Statement %t180, %Statement* %l6
+  %t181 = load %Statement, %Statement* %l6
+  %t182 = call i1 @is_import_like(%Statement %t181)
+  store i1 %t182, i1* %l7
+  %t184 = load i1, i1* %l4
+  br label %logical_and_entry_183
+
+logical_and_entry_183:
+  br i1 %t184, label %logical_and_right_183, label %logical_and_merge_183
+
+logical_and_right_183:
+  %t185 = load i1, i1* %l7
+  %t186 = xor i1 %t185, 1
+  br label %logical_and_right_end_183
+
+logical_and_right_end_183:
+  br label %logical_and_merge_183
+
+logical_and_merge_183:
+  %t187 = phi i1 [ false, %logical_and_entry_183 ], [ %t186, %logical_and_right_end_183 ]
+  %t188 = load %TextBuilder, %TextBuilder* %l0
+  %t189 = load i1, i1* %l1
+  %t190 = load double, double* %l2
+  %t191 = load i1, i1* %l4
+  %t192 = load double, double* %l5
+  %t193 = load %Statement, %Statement* %l6
+  %t194 = load i1, i1* %l7
+  br i1 %t187, label %then18, label %merge19
 then18:
-  %t190 = extractvalue %Program %program, 0
-  %t191 = load double, double* %l4
-  %t192 = call double @llvm.round.f64(double %t191)
-  %t193 = fptosi double %t192 to i64
-  %t194 = load { %Statement*, i64 }, { %Statement*, i64 }* %t190
-  %t195 = extractvalue { %Statement*, i64 } %t194, 0
-  %t196 = extractvalue { %Statement*, i64 } %t194, 1
-  %t197 = icmp uge i64 %t193, %t196
-  ; bounds check: %t197 (if true, out of bounds)
-  call void @sailfin_runtime_bounds_check(i64 %t193, i64 %t196)
-  %t198 = getelementptr %Statement, %Statement* %t195, i64 %t193
-  %t199 = load %Statement, %Statement* %t198
-  store %Statement %t199, %Statement* %l5
-  %t200 = extractvalue %Program %program, 0
-  %t201 = load double, double* %l4
-  %t202 = sitofp i64 1 to double
-  %t203 = fadd double %t201, %t202
-  %t204 = call double @llvm.round.f64(double %t203)
-  %t205 = fptosi double %t204 to i64
-  %t206 = load { %Statement*, i64 }, { %Statement*, i64 }* %t200
-  %t207 = extractvalue { %Statement*, i64 } %t206, 0
-  %t208 = extractvalue { %Statement*, i64 } %t206, 1
-  %t209 = icmp uge i64 %t205, %t208
-  ; bounds check: %t209 (if true, out of bounds)
-  call void @sailfin_runtime_bounds_check(i64 %t205, i64 %t208)
-  %t210 = getelementptr %Statement, %Statement* %t207, i64 %t205
-  %t211 = load %Statement, %Statement* %t210
-  store %Statement %t211, %Statement* %l6
-  %t213 = load %Statement, %Statement* %l5
-  %t214 = extractvalue %Statement %t213, 0
-  %t215 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Statement.variant.default, i32 0, i32 0
-  %t216 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ImportDeclaration.variant, i32 0, i32 0
-  %t217 = icmp eq i32 %t214, 0
-  %t218 = select i1 %t217, i8* %t216, i8* %t215
-  %t219 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ExportDeclaration.variant, i32 0, i32 0
-  %t220 = icmp eq i32 %t214, 1
-  %t221 = select i1 %t220, i8* %t219, i8* %t218
-  %t222 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.VariableDeclaration.variant, i32 0, i32 0
-  %t223 = icmp eq i32 %t214, 2
-  %t224 = select i1 %t223, i8* %t222, i8* %t221
-  %t225 = getelementptr inbounds [17 x i8], [17 x i8]* @.enum.Statement.ModelDeclaration.variant, i32 0, i32 0
-  %t226 = icmp eq i32 %t214, 3
-  %t227 = select i1 %t226, i8* %t225, i8* %t224
-  %t228 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.PipelineDeclaration.variant, i32 0, i32 0
-  %t229 = icmp eq i32 %t214, 4
-  %t230 = select i1 %t229, i8* %t228, i8* %t227
-  %t231 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ToolDeclaration.variant, i32 0, i32 0
-  %t232 = icmp eq i32 %t214, 5
-  %t233 = select i1 %t232, i8* %t231, i8* %t230
-  %t234 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.TestDeclaration.variant, i32 0, i32 0
-  %t235 = icmp eq i32 %t214, 6
-  %t236 = select i1 %t235, i8* %t234, i8* %t233
-  %t237 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.FunctionDeclaration.variant, i32 0, i32 0
-  %t238 = icmp eq i32 %t214, 7
-  %t239 = select i1 %t238, i8* %t237, i8* %t236
-  %t240 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.StructDeclaration.variant, i32 0, i32 0
-  %t241 = icmp eq i32 %t214, 8
-  %t242 = select i1 %t241, i8* %t240, i8* %t239
-  %t243 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.TypeAliasDeclaration.variant, i32 0, i32 0
-  %t244 = icmp eq i32 %t214, 9
-  %t245 = select i1 %t244, i8* %t243, i8* %t242
-  %t246 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.InterfaceDeclaration.variant, i32 0, i32 0
-  %t247 = icmp eq i32 %t214, 10
-  %t248 = select i1 %t247, i8* %t246, i8* %t245
-  %t249 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.EnumDeclaration.variant, i32 0, i32 0
-  %t250 = icmp eq i32 %t214, 11
-  %t251 = select i1 %t250, i8* %t249, i8* %t248
-  %t252 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.PromptStatement.variant, i32 0, i32 0
-  %t253 = icmp eq i32 %t214, 12
-  %t254 = select i1 %t253, i8* %t252, i8* %t251
-  %t255 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.WithStatement.variant, i32 0, i32 0
-  %t256 = icmp eq i32 %t214, 13
-  %t257 = select i1 %t256, i8* %t255, i8* %t254
-  %t258 = getelementptr inbounds [13 x i8], [13 x i8]* @.enum.Statement.ForStatement.variant, i32 0, i32 0
-  %t259 = icmp eq i32 %t214, 14
-  %t260 = select i1 %t259, i8* %t258, i8* %t257
-  %t261 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.LoopStatement.variant, i32 0, i32 0
-  %t262 = icmp eq i32 %t214, 15
-  %t263 = select i1 %t262, i8* %t261, i8* %t260
-  %t264 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.BreakStatement.variant, i32 0, i32 0
-  %t265 = icmp eq i32 %t214, 16
-  %t266 = select i1 %t265, i8* %t264, i8* %t263
-  %t267 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ContinueStatement.variant, i32 0, i32 0
-  %t268 = icmp eq i32 %t214, 17
-  %t269 = select i1 %t268, i8* %t267, i8* %t266
-  %t270 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.MatchStatement.variant, i32 0, i32 0
-  %t271 = icmp eq i32 %t214, 18
-  %t272 = select i1 %t271, i8* %t270, i8* %t269
-  %t273 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Statement.IfStatement.variant, i32 0, i32 0
-  %t274 = icmp eq i32 %t214, 19
-  %t275 = select i1 %t274, i8* %t273, i8* %t272
-  %t276 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ReturnStatement.variant, i32 0, i32 0
-  %t277 = icmp eq i32 %t214, 20
-  %t278 = select i1 %t277, i8* %t276, i8* %t275
-  %t279 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.ExpressionStatement.variant, i32 0, i32 0
-  %t280 = icmp eq i32 %t214, 21
-  %t281 = select i1 %t280, i8* %t279, i8* %t278
-  %t282 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
-  %t283 = icmp eq i32 %t214, 22
-  %t284 = select i1 %t283, i8* %t282, i8* %t281
-  %s285 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h689147423, i32 0, i32 0
-  %t286 = call i1 @strings_equal(i8* %t284, i8* %s285)
-  br label %logical_or_entry_212
-
-logical_or_entry_212:
-  br i1 %t286, label %logical_or_merge_212, label %logical_or_right_212
-
-logical_or_right_212:
-  %t287 = load %Statement, %Statement* %l5
-  %t288 = extractvalue %Statement %t287, 0
-  %t289 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Statement.variant.default, i32 0, i32 0
-  %t290 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ImportDeclaration.variant, i32 0, i32 0
-  %t291 = icmp eq i32 %t288, 0
-  %t292 = select i1 %t291, i8* %t290, i8* %t289
-  %t293 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ExportDeclaration.variant, i32 0, i32 0
-  %t294 = icmp eq i32 %t288, 1
-  %t295 = select i1 %t294, i8* %t293, i8* %t292
-  %t296 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.VariableDeclaration.variant, i32 0, i32 0
-  %t297 = icmp eq i32 %t288, 2
-  %t298 = select i1 %t297, i8* %t296, i8* %t295
-  %t299 = getelementptr inbounds [17 x i8], [17 x i8]* @.enum.Statement.ModelDeclaration.variant, i32 0, i32 0
-  %t300 = icmp eq i32 %t288, 3
-  %t301 = select i1 %t300, i8* %t299, i8* %t298
-  %t302 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.PipelineDeclaration.variant, i32 0, i32 0
-  %t303 = icmp eq i32 %t288, 4
-  %t304 = select i1 %t303, i8* %t302, i8* %t301
-  %t305 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ToolDeclaration.variant, i32 0, i32 0
-  %t306 = icmp eq i32 %t288, 5
-  %t307 = select i1 %t306, i8* %t305, i8* %t304
-  %t308 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.TestDeclaration.variant, i32 0, i32 0
-  %t309 = icmp eq i32 %t288, 6
-  %t310 = select i1 %t309, i8* %t308, i8* %t307
-  %t311 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.FunctionDeclaration.variant, i32 0, i32 0
-  %t312 = icmp eq i32 %t288, 7
-  %t313 = select i1 %t312, i8* %t311, i8* %t310
-  %t314 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.StructDeclaration.variant, i32 0, i32 0
-  %t315 = icmp eq i32 %t288, 8
-  %t316 = select i1 %t315, i8* %t314, i8* %t313
-  %t317 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.TypeAliasDeclaration.variant, i32 0, i32 0
-  %t318 = icmp eq i32 %t288, 9
-  %t319 = select i1 %t318, i8* %t317, i8* %t316
-  %t320 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.InterfaceDeclaration.variant, i32 0, i32 0
-  %t321 = icmp eq i32 %t288, 10
-  %t322 = select i1 %t321, i8* %t320, i8* %t319
-  %t323 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.EnumDeclaration.variant, i32 0, i32 0
-  %t324 = icmp eq i32 %t288, 11
-  %t325 = select i1 %t324, i8* %t323, i8* %t322
-  %t326 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.PromptStatement.variant, i32 0, i32 0
-  %t327 = icmp eq i32 %t288, 12
-  %t328 = select i1 %t327, i8* %t326, i8* %t325
-  %t329 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.WithStatement.variant, i32 0, i32 0
-  %t330 = icmp eq i32 %t288, 13
-  %t331 = select i1 %t330, i8* %t329, i8* %t328
-  %t332 = getelementptr inbounds [13 x i8], [13 x i8]* @.enum.Statement.ForStatement.variant, i32 0, i32 0
-  %t333 = icmp eq i32 %t288, 14
-  %t334 = select i1 %t333, i8* %t332, i8* %t331
-  %t335 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.LoopStatement.variant, i32 0, i32 0
-  %t336 = icmp eq i32 %t288, 15
-  %t337 = select i1 %t336, i8* %t335, i8* %t334
-  %t338 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.BreakStatement.variant, i32 0, i32 0
-  %t339 = icmp eq i32 %t288, 16
-  %t340 = select i1 %t339, i8* %t338, i8* %t337
-  %t341 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ContinueStatement.variant, i32 0, i32 0
-  %t342 = icmp eq i32 %t288, 17
-  %t343 = select i1 %t342, i8* %t341, i8* %t340
-  %t344 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.MatchStatement.variant, i32 0, i32 0
-  %t345 = icmp eq i32 %t288, 18
-  %t346 = select i1 %t345, i8* %t344, i8* %t343
-  %t347 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Statement.IfStatement.variant, i32 0, i32 0
-  %t348 = icmp eq i32 %t288, 19
-  %t349 = select i1 %t348, i8* %t347, i8* %t346
-  %t350 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ReturnStatement.variant, i32 0, i32 0
-  %t351 = icmp eq i32 %t288, 20
-  %t352 = select i1 %t351, i8* %t350, i8* %t349
-  %t353 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.ExpressionStatement.variant, i32 0, i32 0
-  %t354 = icmp eq i32 %t288, 21
-  %t355 = select i1 %t354, i8* %t353, i8* %t352
-  %t356 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
-  %t357 = icmp eq i32 %t288, 22
-  %t358 = select i1 %t357, i8* %t356, i8* %t355
-  %s359 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1813262795, i32 0, i32 0
-  %t360 = call i1 @strings_equal(i8* %t358, i8* %s359)
-  br label %logical_or_right_end_212
-
-logical_or_right_end_212:
-  br label %logical_or_merge_212
-
-logical_or_merge_212:
-  %t361 = phi i1 [ true, %logical_or_entry_212 ], [ %t360, %logical_or_right_end_212 ]
-  store i1 %t361, i1* %l7
-  %t363 = load %Statement, %Statement* %l6
-  %t364 = extractvalue %Statement %t363, 0
-  %t365 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Statement.variant.default, i32 0, i32 0
-  %t366 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ImportDeclaration.variant, i32 0, i32 0
-  %t367 = icmp eq i32 %t364, 0
-  %t368 = select i1 %t367, i8* %t366, i8* %t365
-  %t369 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ExportDeclaration.variant, i32 0, i32 0
-  %t370 = icmp eq i32 %t364, 1
-  %t371 = select i1 %t370, i8* %t369, i8* %t368
-  %t372 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.VariableDeclaration.variant, i32 0, i32 0
-  %t373 = icmp eq i32 %t364, 2
-  %t374 = select i1 %t373, i8* %t372, i8* %t371
-  %t375 = getelementptr inbounds [17 x i8], [17 x i8]* @.enum.Statement.ModelDeclaration.variant, i32 0, i32 0
-  %t376 = icmp eq i32 %t364, 3
-  %t377 = select i1 %t376, i8* %t375, i8* %t374
-  %t378 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.PipelineDeclaration.variant, i32 0, i32 0
-  %t379 = icmp eq i32 %t364, 4
-  %t380 = select i1 %t379, i8* %t378, i8* %t377
-  %t381 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ToolDeclaration.variant, i32 0, i32 0
-  %t382 = icmp eq i32 %t364, 5
-  %t383 = select i1 %t382, i8* %t381, i8* %t380
-  %t384 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.TestDeclaration.variant, i32 0, i32 0
-  %t385 = icmp eq i32 %t364, 6
-  %t386 = select i1 %t385, i8* %t384, i8* %t383
-  %t387 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.FunctionDeclaration.variant, i32 0, i32 0
-  %t388 = icmp eq i32 %t364, 7
-  %t389 = select i1 %t388, i8* %t387, i8* %t386
-  %t390 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.StructDeclaration.variant, i32 0, i32 0
-  %t391 = icmp eq i32 %t364, 8
-  %t392 = select i1 %t391, i8* %t390, i8* %t389
-  %t393 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.TypeAliasDeclaration.variant, i32 0, i32 0
-  %t394 = icmp eq i32 %t364, 9
-  %t395 = select i1 %t394, i8* %t393, i8* %t392
-  %t396 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.InterfaceDeclaration.variant, i32 0, i32 0
-  %t397 = icmp eq i32 %t364, 10
-  %t398 = select i1 %t397, i8* %t396, i8* %t395
-  %t399 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.EnumDeclaration.variant, i32 0, i32 0
-  %t400 = icmp eq i32 %t364, 11
-  %t401 = select i1 %t400, i8* %t399, i8* %t398
-  %t402 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.PromptStatement.variant, i32 0, i32 0
-  %t403 = icmp eq i32 %t364, 12
-  %t404 = select i1 %t403, i8* %t402, i8* %t401
-  %t405 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.WithStatement.variant, i32 0, i32 0
-  %t406 = icmp eq i32 %t364, 13
-  %t407 = select i1 %t406, i8* %t405, i8* %t404
-  %t408 = getelementptr inbounds [13 x i8], [13 x i8]* @.enum.Statement.ForStatement.variant, i32 0, i32 0
-  %t409 = icmp eq i32 %t364, 14
-  %t410 = select i1 %t409, i8* %t408, i8* %t407
-  %t411 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.LoopStatement.variant, i32 0, i32 0
-  %t412 = icmp eq i32 %t364, 15
-  %t413 = select i1 %t412, i8* %t411, i8* %t410
-  %t414 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.BreakStatement.variant, i32 0, i32 0
-  %t415 = icmp eq i32 %t364, 16
-  %t416 = select i1 %t415, i8* %t414, i8* %t413
-  %t417 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ContinueStatement.variant, i32 0, i32 0
-  %t418 = icmp eq i32 %t364, 17
-  %t419 = select i1 %t418, i8* %t417, i8* %t416
-  %t420 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.MatchStatement.variant, i32 0, i32 0
-  %t421 = icmp eq i32 %t364, 18
-  %t422 = select i1 %t421, i8* %t420, i8* %t419
-  %t423 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Statement.IfStatement.variant, i32 0, i32 0
-  %t424 = icmp eq i32 %t364, 19
-  %t425 = select i1 %t424, i8* %t423, i8* %t422
-  %t426 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ReturnStatement.variant, i32 0, i32 0
-  %t427 = icmp eq i32 %t364, 20
-  %t428 = select i1 %t427, i8* %t426, i8* %t425
-  %t429 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.ExpressionStatement.variant, i32 0, i32 0
-  %t430 = icmp eq i32 %t364, 21
-  %t431 = select i1 %t430, i8* %t429, i8* %t428
-  %t432 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
-  %t433 = icmp eq i32 %t364, 22
-  %t434 = select i1 %t433, i8* %t432, i8* %t431
-  %s435 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h689147423, i32 0, i32 0
-  %t436 = call i1 @strings_equal(i8* %t434, i8* %s435)
-  br label %logical_or_entry_362
-
-logical_or_entry_362:
-  br i1 %t436, label %logical_or_merge_362, label %logical_or_right_362
-
-logical_or_right_362:
-  %t437 = load %Statement, %Statement* %l6
-  %t438 = extractvalue %Statement %t437, 0
-  %t439 = getelementptr inbounds [1 x i8], [1 x i8]* @.enum.Statement.variant.default, i32 0, i32 0
-  %t440 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ImportDeclaration.variant, i32 0, i32 0
-  %t441 = icmp eq i32 %t438, 0
-  %t442 = select i1 %t441, i8* %t440, i8* %t439
-  %t443 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ExportDeclaration.variant, i32 0, i32 0
-  %t444 = icmp eq i32 %t438, 1
-  %t445 = select i1 %t444, i8* %t443, i8* %t442
-  %t446 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.VariableDeclaration.variant, i32 0, i32 0
-  %t447 = icmp eq i32 %t438, 2
-  %t448 = select i1 %t447, i8* %t446, i8* %t445
-  %t449 = getelementptr inbounds [17 x i8], [17 x i8]* @.enum.Statement.ModelDeclaration.variant, i32 0, i32 0
-  %t450 = icmp eq i32 %t438, 3
-  %t451 = select i1 %t450, i8* %t449, i8* %t448
-  %t452 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.PipelineDeclaration.variant, i32 0, i32 0
-  %t453 = icmp eq i32 %t438, 4
-  %t454 = select i1 %t453, i8* %t452, i8* %t451
-  %t455 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ToolDeclaration.variant, i32 0, i32 0
-  %t456 = icmp eq i32 %t438, 5
-  %t457 = select i1 %t456, i8* %t455, i8* %t454
-  %t458 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.TestDeclaration.variant, i32 0, i32 0
-  %t459 = icmp eq i32 %t438, 6
-  %t460 = select i1 %t459, i8* %t458, i8* %t457
-  %t461 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.FunctionDeclaration.variant, i32 0, i32 0
-  %t462 = icmp eq i32 %t438, 7
-  %t463 = select i1 %t462, i8* %t461, i8* %t460
-  %t464 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.StructDeclaration.variant, i32 0, i32 0
-  %t465 = icmp eq i32 %t438, 8
-  %t466 = select i1 %t465, i8* %t464, i8* %t463
-  %t467 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.TypeAliasDeclaration.variant, i32 0, i32 0
-  %t468 = icmp eq i32 %t438, 9
-  %t469 = select i1 %t468, i8* %t467, i8* %t466
-  %t470 = getelementptr inbounds [21 x i8], [21 x i8]* @.enum.Statement.InterfaceDeclaration.variant, i32 0, i32 0
-  %t471 = icmp eq i32 %t438, 10
-  %t472 = select i1 %t471, i8* %t470, i8* %t469
-  %t473 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.EnumDeclaration.variant, i32 0, i32 0
-  %t474 = icmp eq i32 %t438, 11
-  %t475 = select i1 %t474, i8* %t473, i8* %t472
-  %t476 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.PromptStatement.variant, i32 0, i32 0
-  %t477 = icmp eq i32 %t438, 12
-  %t478 = select i1 %t477, i8* %t476, i8* %t475
-  %t479 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.WithStatement.variant, i32 0, i32 0
-  %t480 = icmp eq i32 %t438, 13
-  %t481 = select i1 %t480, i8* %t479, i8* %t478
-  %t482 = getelementptr inbounds [13 x i8], [13 x i8]* @.enum.Statement.ForStatement.variant, i32 0, i32 0
-  %t483 = icmp eq i32 %t438, 14
-  %t484 = select i1 %t483, i8* %t482, i8* %t481
-  %t485 = getelementptr inbounds [14 x i8], [14 x i8]* @.enum.Statement.LoopStatement.variant, i32 0, i32 0
-  %t486 = icmp eq i32 %t438, 15
-  %t487 = select i1 %t486, i8* %t485, i8* %t484
-  %t488 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.BreakStatement.variant, i32 0, i32 0
-  %t489 = icmp eq i32 %t438, 16
-  %t490 = select i1 %t489, i8* %t488, i8* %t487
-  %t491 = getelementptr inbounds [18 x i8], [18 x i8]* @.enum.Statement.ContinueStatement.variant, i32 0, i32 0
-  %t492 = icmp eq i32 %t438, 17
-  %t493 = select i1 %t492, i8* %t491, i8* %t490
-  %t494 = getelementptr inbounds [15 x i8], [15 x i8]* @.enum.Statement.MatchStatement.variant, i32 0, i32 0
-  %t495 = icmp eq i32 %t438, 18
-  %t496 = select i1 %t495, i8* %t494, i8* %t493
-  %t497 = getelementptr inbounds [12 x i8], [12 x i8]* @.enum.Statement.IfStatement.variant, i32 0, i32 0
-  %t498 = icmp eq i32 %t438, 19
-  %t499 = select i1 %t498, i8* %t497, i8* %t496
-  %t500 = getelementptr inbounds [16 x i8], [16 x i8]* @.enum.Statement.ReturnStatement.variant, i32 0, i32 0
-  %t501 = icmp eq i32 %t438, 20
-  %t502 = select i1 %t501, i8* %t500, i8* %t499
-  %t503 = getelementptr inbounds [20 x i8], [20 x i8]* @.enum.Statement.ExpressionStatement.variant, i32 0, i32 0
-  %t504 = icmp eq i32 %t438, 21
-  %t505 = select i1 %t504, i8* %t503, i8* %t502
-  %t506 = getelementptr inbounds [8 x i8], [8 x i8]* @.enum.Statement.Unknown.variant, i32 0, i32 0
-  %t507 = icmp eq i32 %t438, 22
-  %t508 = select i1 %t507, i8* %t506, i8* %t505
-  %s509 = getelementptr inbounds [18 x i8], [18 x i8]* @.str.len17.h1813262795, i32 0, i32 0
-  %t510 = call i1 @strings_equal(i8* %t508, i8* %s509)
-  br label %logical_or_right_end_362
-
-logical_or_right_end_362:
-  br label %logical_or_merge_362
-
-logical_or_merge_362:
-  %t511 = phi i1 [ true, %logical_or_entry_362 ], [ %t510, %logical_or_right_end_362 ]
-  store i1 %t511, i1* %l8
-  %t513 = load i1, i1* %l7
-  %t514 = xor i1 %t513, 1
-  br label %logical_and_entry_512
-
-logical_and_entry_512:
-  br i1 %t514, label %logical_and_right_512, label %logical_and_merge_512
-
-logical_and_right_512:
-  %t515 = load i1, i1* %l8
-  br label %logical_and_right_end_512
-
-logical_and_right_end_512:
-  br label %logical_and_merge_512
-
-logical_and_merge_512:
-  %t516 = phi i1 [ false, %logical_and_entry_512 ], [ %t515, %logical_and_right_end_512 ]
-  %t517 = load %TextBuilder, %TextBuilder* %l0
-  %t518 = load i1, i1* %l1
-  %t519 = load double, double* %l2
-  %t520 = load double, double* %l4
-  %t521 = load %Statement, %Statement* %l5
-  %t522 = load %Statement, %Statement* %l6
-  %t523 = load i1, i1* %l7
-  %t524 = load i1, i1* %l8
-  br i1 %t516, label %then20, label %merge21
-then20:
-  %t525 = load %TextBuilder, %TextBuilder* %l0
-  %t526 = call %TextBuilder @builder_emit_blank(%TextBuilder %t525)
-  store %TextBuilder %t526, %TextBuilder* %l0
-  %t527 = load %TextBuilder, %TextBuilder* %l0
-  br label %merge21
-merge21:
-  %t528 = phi %TextBuilder [ %t527, %then20 ], [ %t517, %logical_and_merge_512 ]
-  store %TextBuilder %t528, %TextBuilder* %l0
-  %t529 = load %TextBuilder, %TextBuilder* %l0
+  %t195 = load %TextBuilder, %TextBuilder* %l0
+  %t196 = call %TextBuilder @builder_emit_blank(%TextBuilder %t195)
+  store %TextBuilder %t196, %TextBuilder* %l0
+  %t197 = load %TextBuilder, %TextBuilder* %l0
   br label %merge19
 merge19:
-  %t530 = phi %TextBuilder [ %t529, %merge21 ], [ %t186, %merge17 ]
-  store %TextBuilder %t530, %TextBuilder* %l0
-  %t531 = load double, double* %l4
-  %t532 = sitofp i64 1 to double
-  %t533 = fadd double %t531, %t532
-  store double %t533, double* %l4
+  %t198 = phi %TextBuilder [ %t197, %then18 ], [ %t188, %logical_and_merge_183 ]
+  store %TextBuilder %t198, %TextBuilder* %l0
+  %t199 = load %TextBuilder, %TextBuilder* %l0
+  %t200 = load %Statement, %Statement* %l6
+  %t201 = call %TextBuilder @emit_statement(%TextBuilder %t199, %Statement %t200)
+  store %TextBuilder %t201, %TextBuilder* %l0
+  %t202 = load i1, i1* %l7
+  store i1 %t202, i1* %l4
+  %t203 = load double, double* %l5
+  %t204 = sitofp i64 1 to double
+  %t205 = fadd double %t203, %t204
+  %t206 = extractvalue %Program %program, 0
+  %t207 = load { %Statement*, i64 }, { %Statement*, i64 }* %t206
+  %t208 = extractvalue { %Statement*, i64 } %t207, 1
+  %t209 = sitofp i64 %t208 to double
+  %t210 = fcmp olt double %t205, %t209
+  %t211 = load %TextBuilder, %TextBuilder* %l0
+  %t212 = load i1, i1* %l1
+  %t213 = load double, double* %l2
+  %t214 = load i1, i1* %l4
+  %t215 = load double, double* %l5
+  %t216 = load %Statement, %Statement* %l6
+  %t217 = load i1, i1* %l7
+  br i1 %t210, label %then20, label %merge21
+then20:
+  %t218 = extractvalue %Program %program, 0
+  %t219 = load double, double* %l5
+  %t220 = sitofp i64 1 to double
+  %t221 = fadd double %t219, %t220
+  %t222 = call double @llvm.round.f64(double %t221)
+  %t223 = fptosi double %t222 to i64
+  %t224 = load { %Statement*, i64 }, { %Statement*, i64 }* %t218
+  %t225 = extractvalue { %Statement*, i64 } %t224, 0
+  %t226 = extractvalue { %Statement*, i64 } %t224, 1
+  %t227 = icmp uge i64 %t223, %t226
+  ; bounds check: %t227 (if true, out of bounds)
+  call void @sailfin_runtime_bounds_check(i64 %t223, i64 %t226)
+  %t228 = getelementptr %Statement, %Statement* %t225, i64 %t223
+  %t229 = load %Statement, %Statement* %t228
+  store %Statement %t229, %Statement* %l8
+  %t230 = load %Statement, %Statement* %l8
+  %t231 = call i1 @is_import_like(%Statement %t230)
+  store i1 %t231, i1* %l9
+  %t233 = load i1, i1* %l7
+  %t234 = xor i1 %t233, 1
+  br label %logical_and_entry_232
+
+logical_and_entry_232:
+  br i1 %t234, label %logical_and_right_232, label %logical_and_merge_232
+
+logical_and_right_232:
+  %t235 = load i1, i1* %l9
+  br label %logical_and_right_end_232
+
+logical_and_right_end_232:
+  br label %logical_and_merge_232
+
+logical_and_merge_232:
+  %t236 = phi i1 [ false, %logical_and_entry_232 ], [ %t235, %logical_and_right_end_232 ]
+  %t237 = load %TextBuilder, %TextBuilder* %l0
+  %t238 = load i1, i1* %l1
+  %t239 = load double, double* %l2
+  %t240 = load i1, i1* %l4
+  %t241 = load double, double* %l5
+  %t242 = load %Statement, %Statement* %l6
+  %t243 = load i1, i1* %l7
+  %t244 = load %Statement, %Statement* %l8
+  %t245 = load i1, i1* %l9
+  br i1 %t236, label %then22, label %merge23
+then22:
+  %t246 = load %TextBuilder, %TextBuilder* %l0
+  %t247 = call %TextBuilder @builder_emit_blank(%TextBuilder %t246)
+  store %TextBuilder %t247, %TextBuilder* %l0
+  %t248 = load %TextBuilder, %TextBuilder* %l0
+  br label %merge23
+merge23:
+  %t249 = phi %TextBuilder [ %t248, %then22 ], [ %t237, %logical_and_merge_232 ]
+  store %TextBuilder %t249, %TextBuilder* %l0
+  %t250 = load %TextBuilder, %TextBuilder* %l0
+  br label %merge21
+merge21:
+  %t251 = phi %TextBuilder [ %t250, %merge23 ], [ %t211, %merge19 ]
+  store %TextBuilder %t251, %TextBuilder* %l0
+  %t252 = load double, double* %l5
+  %t253 = sitofp i64 1 to double
+  %t254 = fadd double %t252, %t253
+  store double %t254, double* %l5
   br label %loop.latch14
 loop.latch14:
-  %t534 = load %TextBuilder, %TextBuilder* %l0
-  %t535 = load double, double* %l4
+  %t255 = load %TextBuilder, %TextBuilder* %l0
+  %t256 = load i1, i1* %l4
+  %t257 = load double, double* %l5
   br label %loop.header12
 afterloop15:
-  %t538 = load %TextBuilder, %TextBuilder* %l0
-  %t539 = load double, double* %l4
-  %t540 = load %TextBuilder, %TextBuilder* %l0
-  %t541 = call i8* @builder_to_string(%TextBuilder %t540)
-  call void @sailfin_runtime_mark_persistent(i8* %t541)
-  ret i8* %t541
+  %t261 = load %TextBuilder, %TextBuilder* %l0
+  %t262 = load i1, i1* %l4
+  %t263 = load double, double* %l5
+  %t264 = load %TextBuilder, %TextBuilder* %l0
+  %t265 = call i8* @builder_to_string(%TextBuilder %t264)
+  call void @sailfin_runtime_mark_persistent(i8* %t265)
+  ret i8* %t265
 }
 
 define %TextBuilder @emit_statement(%TextBuilder %builder, %Statement %statement) {
@@ -12812,88 +12694,88 @@ entry:
   %t0 = fadd double %a, %b
   ret double %t0
 }
-@.str.len13.h1882501715 = private unnamed_addr constant [14 x i8] c"// original: \00"
-@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
-@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
-@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
-@.str.len34.h160552901 = private unnamed_addr constant [35 x i8] c"import { } from \22sailfin/runtime\22;\00"
-@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
-@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
-@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len17.h760387478 = private unnamed_addr constant [18 x i8] c"import { } from \22\00"
-@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
-@.str.len13.h1678412334 = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
-@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
-@.str.len17.h1884502850 = private unnamed_addr constant [18 x i8] c"export { } from \22\00"
-@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
-@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
-@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
-@.str.len15.h306395716 = private unnamed_addr constant [16 x i8] c"// empty struct\00"
-@.str.len17.h1813262795 = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
-@.str.len19.h965279776 = private unnamed_addr constant [20 x i8] c"// empty model body\00"
-@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
-@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.str.len5.h1459000260 = private unnamed_addr constant [6 x i8] c" => {\00"
-@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
-@.str.len9.h255636415 = private unnamed_addr constant [10 x i8] c"continue;\00"
-@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
-@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
-@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len4.h275832617 = private unnamed_addr constant [5 x i8] c"tool\00"
-@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
-@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
-@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
-@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
-@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
-@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
-@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
-@.str.len13.h1853304565 = private unnamed_addr constant [14 x i8] c"// empty body\00"
-@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
-@.str.len8.h476784883 = private unnamed_addr constant [9 x i8] c"else if \00"
-@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
-@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
-@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
-@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
-@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
-@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
-@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
-@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
-@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
-@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
-@.str.len7.h655349763 = private unnamed_addr constant [8 x i8] c"return;\00"
-@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
-@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
-@.str.len15.h1316378935 = private unnamed_addr constant [16 x i8] c"sailfin/runtime\00"
-@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
-@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
-@.str.len2.h193478309 = private unnamed_addr constant [3 x i8] c"\5C\22\00"
-@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
-@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
-@.str.len15.h571715647 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
-@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
-@.str.len4.h175987322 = private unnamed_addr constant [5 x i8] c" if \00"
-@.str.len14.h88846349 = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
-@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
-@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
-@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
-@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len4.h266345381 = private unnamed_addr constant [5 x i8] c"loop\00"
-@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
-@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
-@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
-@.str.len19.h868168677 = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
 @.str.len4.h267749729 = private unnamed_addr constant [5 x i8] c"mut \00"
-@.str.len17.h1998778048 = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
-@.str.len8.h2003786807 = private unnamed_addr constant [9 x i8] c"pipeline\00"
+@.str.len11.h1566780570 = private unnamed_addr constant [12 x i8] c"IfStatement\00"
+@.enum.Expression.Range.variant = private unnamed_addr constant [6 x i8] c"Range\00"
+@.str.len20.h666604742 = private unnamed_addr constant [21 x i8] c"InterfaceDeclaration\00"
+@.str.len13.h590768815 = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Expression.BooleanLiteral.variant = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.str.len4.h217216103 = private unnamed_addr constant [5 x i8] c"Call\00"
+@.str.len12.h2084565287 = private unnamed_addr constant [13 x i8] c" implements \00"
 @.enum.Expression.Index.variant = private unnamed_addr constant [6 x i8] c"Index\00"
-@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.str.len15.h571715647 = private unnamed_addr constant [16 x i8] c"ToolDeclaration\00"
+@.str.len4.h275832617 = private unnamed_addr constant [5 x i8] c"tool\00"
+@.str.len4.h173287691 = private unnamed_addr constant [5 x i8] c"    \00"
+@.str.len16.h2043328844 = private unnamed_addr constant [17 x i8] c"ModelDeclaration\00"
+@.enum.Expression.StringLiteral.variant = private unnamed_addr constant [14 x i8] c"StringLiteral\00"
+@.enum.Expression.Member.variant = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len19.h1204027478 = private unnamed_addr constant [20 x i8] c"VariableDeclaration\00"
+@.str.len15.h579804543 = private unnamed_addr constant [16 x i8] c"EnumDeclaration\00"
+@.str.len5.h667777838 = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len19.h479148896 = private unnamed_addr constant [20 x i8] c"PipelineDeclaration\00"
+@.str.len15.h306395716 = private unnamed_addr constant [16 x i8] c"// empty struct\00"
+@.str.len2.h193480223 = private unnamed_addr constant [3 x i8] c"\5C\5C\00"
+@.enum.Expression.Call.variant = private unnamed_addr constant [5 x i8] c"Call\00"
+@.str.len17.h1842783069 = private unnamed_addr constant [18 x i8] c"StructDeclaration\00"
+@.str.len13.h1925822000 = private unnamed_addr constant [14 x i8] c"WithStatement\00"
+@.str.len7.h655348872 = private unnamed_addr constant [8 x i8] c"return \00"
+@.enum.Expression.NumberLiteral.variant = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len14.h196308685 = private unnamed_addr constant [15 x i8] c"MatchStatement\00"
 @.str.len17.h689147423 = private unnamed_addr constant [18 x i8] c"ImportDeclaration\00"
+@.enum.Expression.variant.default = private unnamed_addr constant [1 x i8] c"\00"
+@.str.len5.h1459000260 = private unnamed_addr constant [6 x i8] c" => {\00"
+@.str.len4.h266345381 = private unnamed_addr constant [5 x i8] c"loop\00"
+@.str.len15.h1613933868 = private unnamed_addr constant [16 x i8] c"ReturnStatement\00"
+@.str.len7.h655349763 = private unnamed_addr constant [8 x i8] c"return;\00"
+@.str.len19.h965279776 = private unnamed_addr constant [20 x i8] c"// empty model body\00"
+@.str.len15.h1067284810 = private unnamed_addr constant [16 x i8] c"PromptStatement\00"
+@.enum.Expression.Lambda.variant = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len5.h975618503 = private unnamed_addr constant [6 x i8] c"Index\00"
+@.str.len7.h48777630 = private unnamed_addr constant [8 x i8] c"Unknown\00"
+@.str.len5.h1312780988 = private unnamed_addr constant [6 x i8] c"Range\00"
+@.str.len2.h193480817 = private unnamed_addr constant [3 x i8] c"\5Cn\00"
+@.str.len17.h760387478 = private unnamed_addr constant [18 x i8] c"import { } from \22\00"
+@.str.len6.h264904746 = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.str.len19.h486335986 = private unnamed_addr constant [20 x i8] c"FunctionDeclaration\00"
+@.enum.Expression.NullLiteral.variant = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.enum.Expression.Struct.variant = private unnamed_addr constant [7 x i8] c"Struct\00"
+@.str.len34.h160552901 = private unnamed_addr constant [35 x i8] c"import { } from \22sailfin/runtime\22;\00"
+@.str.len15.h889179835 = private unnamed_addr constant [16 x i8] c"TestDeclaration\00"
+@.str.len17.h1998778048 = private unnamed_addr constant [18 x i8] c"ContinueStatement\00"
+@.str.len13.h1570408460 = private unnamed_addr constant [14 x i8] c"NumberLiteral\00"
+@.str.len6.h826984377 = private unnamed_addr constant [7 x i8] c"Object\00"
+@.enum.Expression.Raw.variant = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.str.len6.h512390329 = private unnamed_addr constant [7 x i8] c"Member\00"
+@.str.len4.h175987322 = private unnamed_addr constant [5 x i8] c" if \00"
+@.str.len6.h1496334143 = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.str.len15.h1316378935 = private unnamed_addr constant [16 x i8] c"sailfin/runtime\00"
+@.str.len20.h1496093543 = private unnamed_addr constant [21 x i8] c"TypeAliasDeclaration\00"
+@.str.len5.h1445149598 = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.enum.Expression.Binary.variant = private unnamed_addr constant [7 x i8] c"Binary\00"
+@.str.len17.h1813262795 = private unnamed_addr constant [18 x i8] c"ExportDeclaration\00"
+@.str.len17.h1884502850 = private unnamed_addr constant [18 x i8] c"export { } from \22\00"
+@.str.len8.h476784883 = private unnamed_addr constant [9 x i8] c"else if \00"
+@.str.len13.h1853304565 = private unnamed_addr constant [14 x i8] c"// empty body\00"
+@.str.len2.h193478309 = private unnamed_addr constant [3 x i8] c"\5C\22\00"
+@.str.len6.h1211862785 = private unnamed_addr constant [7 x i8] c"Lambda\00"
+@.str.len6.h1134498859 = private unnamed_addr constant [7 x i8] c"async \00"
+@.str.len3.h2089530004 = private unnamed_addr constant [4 x i8] c"Raw\00"
+@.enum.Expression.Object.variant = private unnamed_addr constant [7 x i8] c"Object\00"
+@.str.len8.h2003786807 = private unnamed_addr constant [9 x i8] c"pipeline\00"
+@.str.len11.h1571993816 = private unnamed_addr constant [12 x i8] c"NullLiteral\00"
+@.str.len14.h88846349 = private unnamed_addr constant [15 x i8] c"BreakStatement\00"
+@.str.len12.h84042670 = private unnamed_addr constant [13 x i8] c"ForStatement\00"
+@.str.len4.h268929446 = private unnamed_addr constant [5 x i8] c"null\00"
+@.str.len19.h868168677 = private unnamed_addr constant [20 x i8] c"ExpressionStatement\00"
+@.str.len2.h193481015 = private unnamed_addr constant [3 x i8] c"\5Ct\00"
 @.str.len6.h215171790 = private unnamed_addr constant [7 x i8] c"break;\00"
+@.str.len13.h1882501715 = private unnamed_addr constant [14 x i8] c"// original: \00"
+@.str.len14.h1318614710 = private unnamed_addr constant [15 x i8] c"BooleanLiteral\00"
+@.enum.Expression.Unary.variant = private unnamed_addr constant [6 x i8] c"Unary\00"
+@.str.len10.h1576352120 = private unnamed_addr constant [11 x i8] c"Identifier\00"
+@.str.len2.h193480949 = private unnamed_addr constant [3 x i8] c"\5Cr\00"
+@.str.len13.h1678412334 = private unnamed_addr constant [14 x i8] c"LoopStatement\00"
+@.str.len9.h255636415 = private unnamed_addr constant [10 x i8] c"continue;\00"
+@.enum.Expression.Array.variant = private unnamed_addr constant [6 x i8] c"Array\00"
+@.str.len2.h193428611 = private unnamed_addr constant [3 x i8] c"..\00"
+@.enum.Expression.Identifier.variant = private unnamed_addr constant [11 x i8] c"Identifier\00"
