@@ -87,6 +87,28 @@ The installer downloads the newest release (override with `--version` or
 `sailfin-stage1` launcher into `~/.local/bin`. Use `--install-dir`, `--bin-dir`,
 or `--no-link` to customize these paths.
 
+## Installing the stage2 native compiler (preview)
+
+Stage2 is published as per-OS/arch release assets and can be installed via the
+curlable `install.sh` script. The repository is currently private, so you need a
+token with `repo` scope.
+
+```sh
+export GITHUB_TOKEN=<your-token>
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
+```
+
+To pin a version:
+
+```sh
+export GITHUB_TOKEN=<your-token>
+VERSION=0.1.1-alpha.64 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
+```
+
+Notes:
+- Windows is supported for the published Stage2 binary. Run the installer from WSL or Git Bash (MSYS2/Cygwin environments are detected as `windows`).
+- Release assets are expected to be named `sailfin-stage2_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin-stage2` (or `bin/sailfin-stage2.exe` on Windows).
+
 ## Architecture Overview
 
 Sailfin targets a capsule-based architecture with fleets coordinating compiler,

@@ -1,0 +1,162 @@
+name: Stage2 Native Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g., v0.1.2-alpha.1). If empty, uses the triggering release tag."
+        required: false
+        type: string
+
+concurrency:
+  group: stage2-native-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-native:
+    name: Build native (${{ matrix.package_label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            package_label: linux-x86_64
+            asset_os: linux
+            asset_arch: x86_64
+            exe_ext: ""
+          - os: macos-14
+            package_label: macos-arm64
+            asset_os: macos
+            asset_arch: arm64
+            exe_ext: ""
+          - os: macos-13
+            package_label: macos-x86_64
+            asset_os: macos
+            asset_arch: x86_64
+            exe_ext: ""
+          - os: windows-2022
+            package_label: windows-x86_64
+            asset_os: windows
+            asset_arch: x86_64
+            exe_ext: ".exe"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: rel
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_INPUT="${{ inputs.tag }}"
+          if [ -n "$TAG_INPUT" ]; then
+            TAG="$TAG_INPUT"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "Tag could not be resolved" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: sailfin
+          environment-file: environment.yml
+          auto-update-conda: false
+          use-mamba: true
+
+      - name: Install clang (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang
+
+      - name: Install clang (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y llvm
+          clang --version
+
+      - name: Build Stage2 artifacts
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          conda run -n sailfin python tools/compile_with_stage1.py
+          conda run -n sailfin python scripts/bootstrap_stage2.py --no-validate
+          conda run -n sailfin python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
+
+      - name: Build native Stage2 binary
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+
+          mkdir -p build/native/obj
+          rm -f build/native/obj/* || true
+
+          OBJ_EXT="o"
+          EXE_EXT="${{ matrix.exe_ext }}"
+          LM_FLAGS=""
+          if [ "${{ matrix.asset_os }}" = "linux" ]; then
+            LM_FLAGS="-lm"
+          fi
+
+          clang -O2 -Wno-override-module -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.${OBJ_EXT}
+          clang -O2 -Wno-override-module -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.${OBJ_EXT}
+          clang -O2 -Wno-override-module -c runtime/native/ir/runtime_globals.ll -o build/native/obj/runtime_globals.${OBJ_EXT}
+
+          while IFS= read -r m ; do
+            [ -z "$m" ] && continue
+            clang -O2 -Wno-override-module -fPIC -c "build/stage2/aot/${m}.ll" -o "build/native/obj/${m}.${OBJ_EXT}"
+          done < build/stage2/aot/modules.txt
+
+          # Link
+          objs=$(sed 's|^|build/native/obj/|; s|$|.'"${OBJ_EXT}"'|' build/stage2/aot/modules.txt | tr '\n' ' ')
+          clang -O2 -Wno-override-module -o "build/native/sailfin-stage2${EXE_EXT}" \
+            build/native/obj/sailfin_runtime.${OBJ_EXT} \
+            build/native/obj/stage2_driver.${OBJ_EXT} \
+            build/native/obj/runtime_globals.${OBJ_EXT} \
+            $objs \
+            $LM_FLAGS
+
+          ls -la build/native | sed -n '1,200p'
+
+      - name: Package release asset
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.rel.outputs.version }}"
+          OS="${{ matrix.asset_os }}"
+          ARCH="${{ matrix.asset_arch }}"
+          EXE_EXT="${{ matrix.exe_ext }}"
+
+          mkdir -p dist
+          STAGE_DIR="$(mktemp -d)"
+          mkdir -p "${STAGE_DIR}/bin"
+          cp "build/native/sailfin-stage2${EXE_EXT}" "${STAGE_DIR}/bin/sailfin-stage2${EXE_EXT}"
+
+          ASSET="sailfin-stage2_${VERSION}_${OS}_${ARCH}.tar.gz"
+          tar -czf "dist/${ASSET}" -C "${STAGE_DIR}" .
+          echo "asset=${ASSET}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload asset to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          files: |
+            dist/sailfin-stage2_${{ steps.rel.outputs.version }}_${{ matrix.asset_os }}_${{ matrix.asset_arch }}.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
