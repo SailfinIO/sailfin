@@ -1,6 +1,7 @@
 import ctypes
 import importlib
 import pathlib
+import platform
 import subprocess
 
 import pytest
@@ -108,10 +109,43 @@ def _repo_root() -> pathlib.Path:
 @pytest.fixture(scope="module")
 def native_stage2_binary() -> pathlib.Path:
     repo_root = _repo_root()
-    binary = repo_root / "build" / "native" / "sailfin-stage2"
-    if not binary.exists():
+    exe_name = "sailfin-stage2.exe" if platform.system() == "Windows" else "sailfin-stage2"
+    binary = repo_root / "build" / "native" / exe_name
+
+    def _looks_compatible(path: pathlib.Path) -> bool:
+        try:
+            header = path.read_bytes()[:4]
+        except OSError:
+            return False
+        system = platform.system()
+        if system == "Linux":
+            return header == b"\x7fELF"
+        if system == "Darwin":
+            # Mach-O (32/64) or fat/universal.
+            return header in {
+                b"\xfe\xed\xfa\xce",
+                b"\xfe\xed\xfa\xcf",
+                b"\xcf\xfa\xed\xfe",
+                b"\xce\xfa\xed\xfe",
+                b"\xca\xfe\xba\xbe",
+                b"\xbe\xba\xfe\xca",
+            }
+        if system == "Windows":
+            return header[:2] == b"MZ"
+        return False
+
+    needs_build = (not binary.exists()) or (not _looks_compatible(binary))
+
+    if needs_build:
+        if platform.system() == "Windows":
+            pytest.skip("native stage2 binary build is not supported on Windows runners yet")
         subprocess.run(["make", "native-stage2"], cwd=repo_root, check=True)
+
     assert binary.exists(), "expected native stage2 binary to be built"
+    try:
+        binary.chmod(binary.stat().st_mode | 0o111)
+    except OSError:
+        pass
     return binary
 
 

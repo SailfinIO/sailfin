@@ -19,9 +19,9 @@ jobs:
             fail-fast: false
             matrix:
                 include:
-                    - os: macos-14
+                    - os: macos-latest
                       package_label: macos-arm64
-                    - os: macos-13
+                    - os: macos-15-intel
                       package_label: macos-x86_64
                     - os: ubuntu-22.04
                       package_label: linux-x86_64
@@ -44,8 +44,10 @@ jobs:
                   sudo apt-get update
                   sudo apt-get install -y clang
 
-            - name: Build Stage1/Stage2 artifacts
-              run: conda run -n sailfin python tools/compile_with_stage1.py --stage2 --stage2-quiet
+            - name: Build native Stage2 compiler
+              shell: bash -l {0}
+              run: |
+                  CONDA=$(which conda) make native-stage2
 
             - name: Run Stage2 test suite
               run: conda run -n sailfin pytest -m stage2
