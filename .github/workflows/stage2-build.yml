@@ -9,11 +9,18 @@ on:
 
 concurrency:
   group: stage2-build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   stage2:
     name: Stage2 (${{ matrix.package_label }})
+    if: >-
+      github.event_name != 'push' ||
+      (
+        github.event.head_commit.author.name != 'semantic-release' &&
+        github.event.head_commit.author.name != 'Sailfin Release Bot' &&
+        !contains(github.event.head_commit.author.email, 'semantic-release')
+      )
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
