@@ -42,12 +42,12 @@ jobs:
               if: matrix.os == 'ubuntu-22.04'
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y clang
+                  sudo apt-get install -y clang-15
 
             - name: Build native Stage2 compiler
               shell: bash -l {0}
               run: |
-                  CONDA=$(which conda) make native-stage2
+                  CONDA=$(which conda) CLANG=clang-15 make native-stage2
 
             - name: Run Stage2 test suite
               run: conda run -n sailfin pytest -m stage2

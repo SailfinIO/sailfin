@@ -80,7 +80,7 @@ fn emit_program(program -> Program) -> string {
     // relying on mutating booleans inside conditional branches.
     let mut last_emitted_was_import -> boolean = !has_runtime_import;
     if !has_runtime_import {
-        builder = builder_emit_line(builder, "import { } from \"sailfin/runtime\";");
+        builder = builder_emit_line(builder, "import() from \"sailfin/runtime\";");
     }
 
     let mut index -> number = 0;
@@ -154,7 +154,7 @@ fn emit_statement(builder -> TextBuilder, statement -> Statement) -> TextBuilder
 fn emit_import(builder -> TextBuilder, specifiers -> ImportSpecifier[], source -> string) -> TextBuilder {
     let list = format_import_specifiers(specifiers);
     if list.length == 0 {
-        return builder_emit_line(builder, "import { } from \"" + source + "\";");
+        return builder_emit_line(builder, "import() from \"" + source + "\";");
     }
     let line = "import { " + list + " } from \"" + source + "\";";
     return builder_emit_line(builder, line);
@@ -163,7 +163,7 @@ fn emit_import(builder -> TextBuilder, specifiers -> ImportSpecifier[], source -
 fn emit_export(builder -> TextBuilder, specifiers -> ExportSpecifier[], source -> string) -> TextBuilder {
     let list = format_export_specifiers(specifiers);
     if list.length == 0 {
-        return builder_emit_line(builder, "export { } from \"" + source + "\";");
+        return builder_emit_line(builder, "export() from \"" + source + "\";");
     }
     let line = "export { " + list + " } from \"" + source + "\";";
     return builder_emit_line(builder, line);

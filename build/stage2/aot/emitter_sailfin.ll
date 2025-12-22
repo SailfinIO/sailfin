@@ -483,9 +483,9 @@ afterloop3:
   br i1 %t150, label %then10, label %merge11
 then10:
   %t155 = load %TextBuilder, %TextBuilder* %l0
-  %t156 = call i8* @malloc(i64 35)
-  %t157 = bitcast i8* %t156 to [35 x i8]*
-  store [35 x i8] c"import { } from \22sailfin/runtime\22;\00", [35 x i8]* %t157
+  %t156 = call i8* @malloc(i64 33)
+  %t157 = bitcast i8* %t156 to [33 x i8]*
+  store [33 x i8] c"import() from \22sailfin/runtime\22;\00", [33 x i8]* %t157
   %t158 = call %TextBuilder @builder_emit_line__emitter_sailfin(%TextBuilder %t155, i8* %t156)
   store %TextBuilder %t158, %TextBuilder* %l0
   %t159 = load %TextBuilder, %TextBuilder* %l0
@@ -2451,9 +2451,9 @@ block.entry:
   %t4 = load i8*, i8** %l0
   br i1 %t3, label %then0, label %merge1
 then0:
-  %t5 = call i8* @malloc(i64 18)
-  %t6 = bitcast i8* %t5 to [18 x i8]*
-  store [18 x i8] c"import { } from \22\00", [18 x i8]* %t6
+  %t5 = call i8* @malloc(i64 16)
+  %t6 = bitcast i8* %t5 to [16 x i8]*
+  store [16 x i8] c"import() from \22\00", [16 x i8]* %t6
   %t7 = call i8* @sailfin_runtime_string_concat(i8* %t5, i8* %source)
   %t8 = call i8* @malloc(i64 3)
   %t9 = bitcast i8* %t8 to [3 x i8]*
@@ -2494,9 +2494,9 @@ block.entry:
   %t4 = load i8*, i8** %l0
   br i1 %t3, label %then0, label %merge1
 then0:
-  %t5 = call i8* @malloc(i64 18)
-  %t6 = bitcast i8* %t5 to [18 x i8]*
-  store [18 x i8] c"export { } from \22\00", [18 x i8]* %t6
+  %t5 = call i8* @malloc(i64 16)
+  %t6 = bitcast i8* %t5 to [16 x i8]*
+  store [16 x i8] c"export() from \22\00", [16 x i8]* %t6
   %t7 = call i8* @sailfin_runtime_string_concat(i8* %t5, i8* %source)
   %t8 = call i8* @malloc(i64 3)
   %t9 = bitcast i8* %t8 to [3 x i8]*

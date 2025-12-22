@@ -82,7 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang
+          sudo apt-get install -y clang-15
 
       - name: Install clang (Windows)
         if: runner.os == 'Windows'
@@ -108,24 +108,26 @@ jobs:
           rm -f build/native/obj/* || true
 
           OBJ_EXT="o"
+          CLANG_BIN="clang"
           EXE_EXT="${{ matrix.exe_ext }}"
           LM_FLAGS=""
           if [ "${{ matrix.asset_os }}" = "linux" ]; then
             LM_FLAGS="-lm"
+            CLANG_BIN="clang-15"
           fi
 
-          clang -O2 -Wno-override-module -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.${OBJ_EXT}
-          clang -O2 -Wno-override-module -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.${OBJ_EXT}
-          clang -O2 -Wno-override-module -c runtime/native/ir/runtime_globals.ll -o build/native/obj/runtime_globals.${OBJ_EXT}
+          ${CLANG_BIN} -O2 -Wno-override-module -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.${OBJ_EXT}
+          ${CLANG_BIN} -O2 -Wno-override-module -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.${OBJ_EXT}
+          ${CLANG_BIN} -O2 -Wno-override-module -c runtime/native/ir/runtime_globals.ll -o build/native/obj/runtime_globals.${OBJ_EXT}
 
           while IFS= read -r m ; do
             [ -z "$m" ] && continue
-            clang -O2 -Wno-override-module -fPIC -c "build/stage2/aot/${m}.ll" -o "build/native/obj/${m}.${OBJ_EXT}"
+            ${CLANG_BIN} -O2 -Wno-override-module -fPIC -c "build/stage2/aot/${m}.ll" -o "build/native/obj/${m}.${OBJ_EXT}"
           done < build/stage2/aot/modules.txt
 
           # Link
           objs=$(sed 's|^|build/native/obj/|; s|$|.'"${OBJ_EXT}"'|' build/stage2/aot/modules.txt | tr '\n' ' ')
-          clang -O2 -Wno-override-module -o "build/native/sailfin-stage2${EXE_EXT}" \
+          ${CLANG_BIN} -O2 -Wno-override-module -o "build/native/sailfin-stage2${EXE_EXT}" \
             build/native/obj/sailfin_runtime.${OBJ_EXT} \
             build/native/obj/stage2_driver.${OBJ_EXT} \
             build/native/obj/runtime_globals.${OBJ_EXT} \
