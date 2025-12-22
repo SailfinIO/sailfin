@@ -1,4 +1,4 @@
-// examples/basics/native-if.sfn
+// examples/basics/if-else.sfn
 
 fn main() ![io] {
     if 1 > 0 {

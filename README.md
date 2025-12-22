@@ -104,8 +104,10 @@ VERSION=0.1.1-alpha.66 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sa
 ```
 
 Notes:
+
 - Windows is supported for the published Stage2 binary. Run the installer from WSL or Git Bash (MSYS2/Cygwin environments are detected as `windows`).
 - Release assets are expected to be named `sailfin-stage2_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin-stage2` (or `bin/sailfin-stage2.exe` on Windows).
+- The installer also links `~/.local/bin/sailfin` to the Stage2 binary so users can run `sailfin …` as the main compiler CLI.
 
 ## Architecture Overview
 

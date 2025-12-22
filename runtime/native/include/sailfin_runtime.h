@@ -42,6 +42,10 @@ extern "C"
     SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b);
     SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text);
 
+    // ---- Process helpers ----
+    // Execute a command (argv[0] is program). Returns the exit code.
+    double sailfin_runtime_process_run(SailfinPtrArray *argv);
+
     // Additional prelude/runtime helpers (currently minimal implementations).
     void sailfin_runtime_copy_bytes(char *dest, char *src, int64_t length);
     char *sailfin_runtime_log_execution(char *value);

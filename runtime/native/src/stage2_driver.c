@@ -2,9 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sailfin_runtime.h"
+
 // Entry point exported by the stage2 compiler IR.
 extern char *compile_to_sailfin(char *source);
 extern char *compile_to_llvm(char *source);
+extern double stage2_cli_main(SailfinPtrArray *argv);
 
 static void _print_usage(FILE *stream)
 {
@@ -49,6 +52,37 @@ static char *_read_file(const char *path)
 
 int main(int argc, char **argv)
 {
+    // If invoked with an explicit subcommand/flag, delegate to the Sailfin-native CLI.
+    // Otherwise, preserve the legacy interface: `sailfin-stage2 [--emit MODE] file.sfn`.
+    if (argc >= 2)
+    {
+        const char *first = argv[1];
+        bool is_cli = false;
+
+        if (strcmp(first, "emit") == 0 || strcmp(first, "build") == 0 || strcmp(first, "run") == 0)
+        {
+            is_cli = true;
+        }
+        else if (strcmp(first, "-h") == 0 || strcmp(first, "--help") == 0)
+        {
+            is_cli = true;
+        }
+        else if (strcmp(first, "--emit") == 0)
+        {
+            // Support `sailfin-stage2 --emit llvm file.sfn` through the Sailfin CLI layer as well.
+            is_cli = true;
+        }
+
+        if (is_cli)
+        {
+            SailfinPtrArray args;
+            args.data = argv + 1;
+            args.len = (int64_t)(argc - 1);
+            double rc = stage2_cli_main(&args);
+            return (int)rc;
+        }
+    }
+
     const char *emit = "sailfin";
     const char *path = NULL;
 

@@ -1,8 +1,0 @@
-// compiler/src/cli_emit.sfn
-//
-// Deprecated: `compile_to_llvm` is implemented in `main.sfn` so it can safely
-// access `LoweredLLVMResult` without crossing module ABI boundaries.
-
-fn cli_emit_stub() -> number {
-    return 0;
-}

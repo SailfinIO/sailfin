@@ -3351,6 +3351,15 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         parameter_types: ["i8*"],
         effects: [],
     });
+
+    // Process helpers
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run",
+        symbol: "sailfin_runtime_process_run",
+        return_type: "double",
+        parameter_types: ["{ i8**, i64 }*"],
+        effects: ["io"],
+    });
     
     // Filesystem adapters
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {

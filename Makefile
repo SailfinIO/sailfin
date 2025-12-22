@@ -38,7 +38,7 @@ help:
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
 	@echo "  make clean-stage1 # Remove compiler/build (requires installed stage1 to rebuild)"
 	@echo "  make bootstrap-stage2 # Bootstrap Stage2 self-hosted compiler (compile to LLVM)"
-	@echo "  make native-stage2 # Build a native Stage2 driver from rewritten LLVM IR (WIP)"
+	@echo "  make native-stage2 # Build native stage2 toolchain CLI (emit/build/run)"
 	@echo "  make native-stage2-debug # Same, but with -O0/-g for lldb"
 	@echo "  make native-stage2-asan # Same, but with AddressSanitizer for memory bugs"
 	@echo "  make stage2-native-sanity # Bootstrap + build native stage2 + compile hello-world"
@@ -83,7 +83,7 @@ native-stage2: bootstrap-stage2
 	@rm -f build/native/obj/*.o
 	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.o
-	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.o
+	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.o
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
@@ -96,7 +96,7 @@ native-stage2-debug: bootstrap-stage2
 	@rm -f build/native/debug-obj/*.o
 	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
 	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/debug-obj/sailfin_runtime.o
-	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -c runtime/native/src/stage2_driver.c -o build/native/debug-obj/stage2_driver.o
+	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/debug-obj/stage2_driver.o
 	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/debug-obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
@@ -109,7 +109,7 @@ native-stage2-asan: bootstrap-stage2
 	@rm -f build/native/asan-obj/*.o
 	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
 	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/asan-obj/sailfin_runtime.o
-	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -c runtime/native/src/stage2_driver.c -o build/native/asan-obj/stage2_driver.o
+	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/asan-obj/stage2_driver.o
 	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/asan-obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
@@ -142,7 +142,7 @@ stage2-native-run-examples: native-stage2
 	@for ex in \
 		examples/basics/hello-world.sfn \
 		examples/basics/conditionals.sfn \
-		examples/basics/native-if.sfn \
+		examples/basics/if-else.sfn \
 		examples/basics/borrowing.sfn ; do \
 		name=$$(basename $$ex .sfn); \
 		out_ll=scratch/native-examples/$$name.ll; \

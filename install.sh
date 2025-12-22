@@ -192,6 +192,25 @@ if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$LINK_PATH" 2>/dev/null
   $MAYBE_SUDO chmod 0755 "$LINK_PATH" || true
 fi
 
+# Also install a stable `sailfin` entrypoint when installing `sailfin-stage2`.
+if [ "$BINARY" = "sailfin-stage2" ]; then
+  ALIAS_BASENAME="sailfin"
+  if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
+    ALIAS_BASENAME="sailfin.exe"
+  fi
+
+  ALIAS_PATH="${GLOBAL_BIN_DIR}/${ALIAS_BASENAME}"
+  if [ -L "$ALIAS_PATH" ] || [ -f "$ALIAS_PATH" ]; then
+    $MAYBE_SUDO rm -f "$ALIAS_PATH"
+  fi
+  if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$ALIAS_PATH" 2>/dev/null; then
+    log "Symlink failed for ${ALIAS_BASENAME}; copying binary instead."
+    $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$ALIAS_PATH"
+    $MAYBE_SUDO chmod 0755 "$ALIAS_PATH" || true
+  fi
+  log "Linked: ${ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
+fi
+
 log "Installed: ${TARGET_DIR}/${DEST_BASENAME}"
 log "Linked: ${LINK_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
 

@@ -1,0 +1,189 @@
+// compiler/src/cli_main.sfn
+//
+// Sailfin-native CLI entrypoint invoked by the stage2 C shim.
+
+import { compile_to_llvm, compile_to_sailfin, number_to_string } from "./main";
+
+fn _usage() -> string {
+    return "usage:\n" +
+        "  sailfin emit llvm|sailfin <file.sfn>\n" +
+        "  sailfin build [-o OUTPUT] <file.sfn>\n" +
+        "  sailfin run <file.sfn>\n" +
+        "  sailfin run <exe>\n" +
+        "\n" +
+        "examples:\n" +
+        "  sailfin emit llvm examples/basics/hello-world.sfn\n" +
+        "  sailfin build -o build/native/examples/hello examples/basics/hello-world.sfn\n" +
+        "  sailfin run examples/basics/hello-world.sfn\n" +
+        "  sailfin run build/native/examples/hello\n";
+}
+
+fn _ends_with(value -> string, suffix -> string) -> boolean {
+    if suffix.length == 0 {
+        return true;
+    }
+    if value.length < suffix.length {
+        return false;
+    }
+    let start = value.length - suffix.length;
+    return substring(value, start, value.length) == suffix;
+}
+
+fn _is_flag(value -> string, flag -> string) -> boolean {
+    return value == flag;
+}
+
+fn _write_text(path -> string, text -> string) ![io] {
+    fs.writeFile(path, text);
+}
+
+fn _ensure_dir(path -> string) ![io] {
+    // best-effort; ignore false.
+    fs.createDirectory(path, true);
+}
+
+fn _clang_link(ll_path -> string, out_path -> string) -> number ![io] {
+    // NOTE: this is intentionally repo-local for now.
+    let args -> string[] = [
+        "clang",
+        "-O2",
+        "-Wno-override-module",
+        "-Iruntime/native/include",
+        "runtime/native/src/sailfin_runtime.c",
+        "runtime/native/ir/runtime_globals.ll",
+        ll_path,
+        "-o",
+        out_path,
+    ];
+    return process.run(args);
+}
+
+fn sailfin_cli_main(argv -> string[]) -> number ![io] {
+    if argv.length == 0 {
+        print.error(_usage());
+        return 2;
+    }
+
+    // Back-compat with existing stage2 driver UX: --emit MODE file
+    if argv.length == 3 && _is_flag(argv[0], "--emit") {
+        let mode = argv[1];
+        let path = argv[2];
+        let source = fs.readFile(path);
+        if mode == "llvm" {
+            print.info(compile_to_llvm(source));
+            return 0;
+        }
+        if mode == "sailfin" {
+            print.info(compile_to_sailfin(source));
+            return 0;
+        }
+        print.error("unknown --emit mode: " + mode);
+        print.error(_usage());
+        return 2;
+    }
+
+    let cmd = argv[0];
+
+    if cmd == "emit" {
+        if argv.length != 3 {
+            print.error(_usage());
+            return 2;
+        }
+        let mode = argv[1];
+        let path = argv[2];
+        let source = fs.readFile(path);
+        if mode == "llvm" {
+            print.info(compile_to_llvm(source));
+            return 0;
+        }
+        if mode == "sailfin" {
+            print.info(compile_to_sailfin(source));
+            return 0;
+        }
+        print.error("unknown emit mode: " + mode);
+        return 2;
+    }
+
+    if cmd == "build" {
+        // build [-o OUTPUT] file
+        let mut out_path -> string = "";
+        let mut input_path -> string = "";
+
+        if argv.length == 2 {
+            input_path = argv[1];
+            out_path = "build/sailfin/program";
+        } else if argv.length == 4 && argv[1] == "-o" {
+            out_path = argv[2];
+            input_path = argv[3];
+        } else {
+            print.error(_usage());
+            return 2;
+        }
+
+        let source = fs.readFile(input_path);
+        let llvm = compile_to_llvm(source);
+
+        _ensure_dir("build");
+        _ensure_dir("build/sailfin");
+
+        let ll_path = "build/sailfin/program.ll";
+        _write_text(ll_path, llvm);
+
+        let exe_path = out_path;
+        let rc = _clang_link(ll_path, exe_path);
+        if rc != 0 {
+            print.error("link failed (clang exit=" + number_to_string(rc) + ")");
+            return rc;
+        }
+        print.info("built: " + exe_path);
+        return 0;
+    }
+
+    if cmd == "run" {
+        if argv.length != 2 {
+            print.error(_usage());
+            return 2;
+        }
+        let input_path = argv[1];
+
+        // If the argument doesn't look like Sailfin source, treat it as an executable.
+        if !_ends_with(input_path, ".sfn") {
+            return process.run([input_path]);
+        }
+
+        // compile + link into build/sailfin/run then execute
+        let source = fs.readFile(input_path);
+        let llvm = compile_to_llvm(source);
+
+        _ensure_dir("build");
+        _ensure_dir("build/sailfin");
+
+        let ll_path = "build/sailfin/run.ll";
+        let exe_path = "build/sailfin/run";
+
+        _write_text(ll_path, llvm);
+
+        let link_rc = _clang_link(ll_path, exe_path);
+        if link_rc != 0 {
+            print.error("link failed (clang exit=" + number_to_string(link_rc) + ")");
+            return link_rc;
+        }
+
+        let run_rc = process.run([exe_path]);
+        return run_rc;
+    }
+
+    if cmd == "-h" || cmd == "--help" {
+        print.info(_usage());
+        return 0;
+    }
+
+    print.error("unknown command: " + cmd);
+    print.error(_usage());
+    return 2;
+}
+
+// Exported entrypoint for the native stage2 argv shim.
+fn stage2_cli_main(argv -> string[]) -> number ![io] {
+    return sailfin_cli_main(argv);
+}

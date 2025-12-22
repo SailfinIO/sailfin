@@ -6,10 +6,16 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <errno.h>
+#include <sys/stat.h>
 
 #if defined(__APPLE__)
 #include <execinfo.h>
 #endif
+
+extern char **environ;
 
 #if defined(__clang__)
 #define SAILFIN_NOINLINE __attribute__((noinline))
@@ -834,6 +840,61 @@ bool sailfin_runtime_is_array(char *value)
     return false;
 }
 
+double sailfin_runtime_process_run(SailfinPtrArray *argv)
+{
+    if (!argv || argv->len <= 0 || !argv->data || !argv->data[0])
+    {
+        return 127.0;
+    }
+
+    int64_t len = argv->len;
+    if (len < 0)
+    {
+        len = 0;
+    }
+
+    // posix_spawnp expects a NULL-terminated argv.
+    size_t n = (size_t)len;
+    char **child_argv = (char **)calloc(n + 1, sizeof(char *));
+    if (!child_argv)
+    {
+        return 127.0;
+    }
+
+    for (size_t i = 0; i < n; i++)
+    {
+        child_argv[i] = argv->data[i];
+    }
+    child_argv[n] = NULL;
+
+    pid_t pid;
+    int spawn_err = posix_spawnp(&pid, child_argv[0], NULL, NULL, child_argv, environ);
+    if (spawn_err != 0)
+    {
+        free(child_argv);
+        return 127.0;
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0)
+    {
+        free(child_argv);
+        return 127.0;
+    }
+
+    free(child_argv);
+
+    if (WIFEXITED(status))
+    {
+        return (double)WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status))
+    {
+        return (double)(128 + WTERMSIG(status));
+    }
+    return 127.0;
+}
+
 bool sailfin_runtime_is_callable(char *value)
 {
     (void)value;
@@ -895,14 +956,68 @@ void *sailfin_runtime_create_model_bridge(void *config)
 
 void *sailfin_adapter_fs_read_file(void *path)
 {
-    (void)path;
-    return NULL;
+    const char *path_str = (const char *)path;
+    if (!path_str)
+    {
+        return NULL;
+    }
+
+    FILE *f = fopen(path_str, "rb");
+    if (!f)
+    {
+        return NULL;
+    }
+    if (fseek(f, 0, SEEK_END) != 0)
+    {
+        fclose(f);
+        return NULL;
+    }
+    long n = ftell(f);
+    if (n < 0)
+    {
+        fclose(f);
+        return NULL;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0)
+    {
+        fclose(f);
+        return NULL;
+    }
+
+    char *buf = (char *)malloc((size_t)n + 1);
+    if (!buf)
+    {
+        fclose(f);
+        return NULL;
+    }
+    size_t read_n = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    buf[read_n] = '\0';
+    return buf;
 }
 
 void sailfin_adapter_fs_write_file(void *path, void *contents)
 {
-    (void)path;
-    (void)contents;
+    const char *path_str = (const char *)path;
+    const char *contents_str = (const char *)contents;
+    if (!path_str || !contents_str)
+    {
+        return;
+    }
+
+    FILE *f = fopen(path_str, "wb");
+    if (!f)
+    {
+        _print_line("[stage2-native] fs.writeFile failed", path_str);
+        return;
+    }
+
+    size_t len = strlen(contents_str);
+    if (len > 0)
+    {
+        (void)fwrite(contents_str, 1, len, f);
+    }
+    fclose(f);
 }
 
 void *sailfin_adapter_fs_list_directory(void *path)
@@ -913,21 +1028,73 @@ void *sailfin_adapter_fs_list_directory(void *path)
 
 bool sailfin_adapter_fs_delete_file(void *path)
 {
-    (void)path;
-    return false;
+    const char *path_str = (const char *)path;
+    if (!path_str)
+    {
+        return false;
+    }
+    return unlink(path_str) == 0;
 }
 
 bool sailfin_adapter_fs_create_directory(void *path, bool recursive)
 {
-    (void)path;
-    (void)recursive;
-    return false;
+    const char *path_str = (const char *)path;
+    if (!path_str || path_str[0] == '\0')
+    {
+        return false;
+    }
+
+    if (!recursive)
+    {
+        if (mkdir(path_str, 0777) == 0)
+        {
+            return true;
+        }
+        return errno == EEXIST;
+    }
+
+    size_t len = strlen(path_str);
+    char *scratch = (char *)malloc(len + 1);
+    if (!scratch)
+    {
+        return false;
+    }
+    memcpy(scratch, path_str, len + 1);
+
+    // Iterate path components and mkdir as we go.
+    // Handles relative paths and absolute paths.
+    for (size_t i = 1; i <= len; i++)
+    {
+        if (scratch[i] == '/' || scratch[i] == '\0')
+        {
+            char saved = scratch[i];
+            scratch[i] = '\0';
+            if (scratch[0] != '\0')
+            {
+                if (mkdir(scratch, 0777) != 0 && errno != EEXIST)
+                {
+                    scratch[i] = saved;
+                    free(scratch);
+                    return false;
+                }
+            }
+            scratch[i] = saved;
+        }
+    }
+
+    free(scratch);
+    return true;
 }
 
 bool sailfin_intrinsic_fs_exists(void *path)
 {
-    (void)path;
-    return false;
+    const char *path_str = (const char *)path;
+    if (!path_str)
+    {
+        return false;
+    }
+    struct stat st;
+    return stat(path_str, &st) == 0;
 }
 
 void *sailfin_adapter_http_get(void *request)
