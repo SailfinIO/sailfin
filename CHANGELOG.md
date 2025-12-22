@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.68 (2025-12-22)
+
+### Bug Fixes
+
+- Native cli and example naming
+  ([`c551fc5`](https://github.com/SailfinIO/sailfin/commit/c551fc5bf375ebedc581be8cc606cb9d1cd3a6ac))
+
+
 ## v0.1.1-alpha.67 (2025-12-22)
 
 ### Bug Fixes
