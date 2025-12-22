@@ -1,7 +1,0 @@
-; Sailfin Layout Manifest
-.manifest version=1
-
-.layout struct name=TextBuilder size=16 align=8
-.layout field lines type=string[] offset=0 size=8 align=8
-.layout field indent type=number offset=8 size=8 align=8
-

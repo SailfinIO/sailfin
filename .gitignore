@@ -87,5 +87,9 @@ bootstrap/parsetab.py
 scratch/
 runtime/build/
 
+# Build outputs (Stage2 bootstrap/native artifacts). These are generated and
+# should never be committed; use dist/ for release packaging instead.
+build/
+
 # Generated native example binaries (produced by stage2-native-run-examples)
 build/native/examples/
