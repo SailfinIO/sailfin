@@ -68,8 +68,6 @@ compiler is the production toolchain today; the Python bootstrap lives under
 - `docs/spec.md` — bootstrap language reference with design-preview callouts.
 - `docs/enbf.md` — grammar sketch aligned to the stage1 parser (with notes on legacy stage0 behaviour where it still matters).
 - `docs/keywords.md` — reserved words and runtime notes.
-- `docs/runtime_audit.md` — tracker for the remaining Python bridge helpers while
-  capability shims and async primitives move into Sailfin.
 
 ## Installing the stage1 artifact (preview)
 
@@ -102,7 +100,7 @@ To pin a version:
 
 ```sh
 export GITHUB_TOKEN=<your-token>
-VERSION=0.1.1-alpha.64 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
+VERSION=0.1.1-alpha.66 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
 ```
 
 Notes:
