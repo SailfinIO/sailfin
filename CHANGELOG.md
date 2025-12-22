@@ -1,6 +1,62 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.65 (2025-12-22)
+
+### Bug Fixes
+
+- Borrow expression
+  ([`d23f2f0`](https://github.com/SailfinIO/sailfin/commit/d23f2f06c66d5dfdb2dfb9f20a137450557526d1))
+
+- Checksums
+  ([`aa66344`](https://github.com/SailfinIO/sailfin/commit/aa66344ed9da76fe4d17ef225d40886f28b31046))
+
+- Diagnostics missing local bindings
+  ([`20c9446`](https://github.com/SailfinIO/sailfin/commit/20c94464e350f00adf8fa8196b1ab5f148240fd4))
+
+- Inlining to reduce
+  ([`d88ae32`](https://github.com/SailfinIO/sailfin/commit/d88ae321ce6bb00d75a518eecd500e1de2c49c11))
+
+- Package stage2 and build
+  ([`8aafe97`](https://github.com/SailfinIO/sailfin/commit/8aafe9713916e2edcb46d4fcaae884a09620cf41))
+
+- Prelude warnings
+  ([`7fecb52`](https://github.com/SailfinIO/sailfin/commit/7fecb52e1bbde197066134765841ed18248a2288))
+
+- Retarget recent mutations
+  ([`699e27d`](https://github.com/SailfinIO/sailfin/commit/699e27df5652a0b55107ed8a152119319496a12e))
+
+- Slicing to bracket
+  ([`ae67639`](https://github.com/SailfinIO/sailfin/commit/ae676398213935a2e126eaa98ca2e8596fbe811b))
+
+- String handling
+  ([`a492dbd`](https://github.com/SailfinIO/sailfin/commit/a492dbd9eefe1ed65bfa64bd0c82103c114b8c86))
+
+- Stubb suspension
+  ([`964490f`](https://github.com/SailfinIO/sailfin/commit/964490f747c83e9a840b6b6ed54c7c2d3871d746))
+
+- Work on effects list
+  ([`49b4dfb`](https://github.com/SailfinIO/sailfin/commit/49b4dfb7bcf5c917249cc00a120c11ba7d51a13d))
+
+- **stage2**: Align emitter import/export syntax with Stage1 and update test expectations
+  ([`0351ece`](https://github.com/SailfinIO/sailfin/commit/0351ece54e9b06ab372c9b67bfeb49c0018ed6a8))
+
+- Update compiler/src/emitter_sailfin.sfn to emit `import() from "..."` and `export() from "..."`
+  for empty specifier lists, matching Stage1 canonical output - Rebuild stage2 artifacts to include
+  the emitter fix - Update stage2 string literal tests to expect malloc-based lowering (Stage2
+  approach) instead of @.str. global constants - Fix metadata.ll golden snapshot to include
+  sailfin_runtime_number_to_string declare - Skip test_stage2_emits_native_artifacts (known issue
+  with JIT artifact marshaling) - All 132 stage2 tests now pass (previously 6 failures)
+
+- **stage2**: Improve clang/AOT compatibility
+  ([`dd8e9ef`](https://github.com/SailfinIO/sailfin/commit/dd8e9efffef055ab45dd7e1b9a362785765ebb80))
+
+### Chores
+
+- **repo**: Stop tracking build outputs
+  ([`9532992`](https://github.com/SailfinIO/sailfin/commit/9532992be92c19b7738e2ec4d42116764be7d682))
+
+
 ## v0.1.1-alpha.64 (2025-10-21)
 
 ### Bug Fixes
