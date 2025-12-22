@@ -2442,18 +2442,52 @@ class Stage2Runner:
                 )
                 return meta[1]
 
-            def _bytes_from_allocation(ptr_address: int, limit: int | None = None) -> bytes | None:
+            def _bytes_from_known_span(ptr_address: int, limit: int | None = None) -> bytes | None:
+                """Read bytes from a pointer only when we can prove the span is valid.
+
+                IMPORTANT: `ctypes.string_at` can segfault if the address is not
+                readable. Only call it for addresses that fall within:
+                - allocations made via our libc malloc wrapper (`_LIBC_ALLOCATIONS`)
+                - owned host buffers kept alive in `_string_pool` / `_adapter_string_buffers`
+                """
+
+                if ptr_address <= 0:
+                    return None
+
+                def _bounded_read(max_available: int) -> bytes | None:
+                    read_size = max_available if limit is None else min(max_available, max(limit, 0))
+                    if read_size <= 0:
+                        return None
+                    try:
+                        return ctypes.string_at(ptr_address, read_size)
+                    except (ValueError, OSError):
+                        return None
+
                 record = _LIBC_ALLOCATIONS.get(ptr_address)
-                if record is None:
-                    return None
-                size = record.size
-                read_size = size if limit is None else min(size, max(limit, 0))
-                if read_size <= 0:
-                    read_size = size
-                try:
-                    return ctypes.string_at(ptr_address, read_size)
-                except (ValueError, OSError):
-                    return None
+                if record is not None:
+                    return _bounded_read(record.size)
+
+                for user_ptr, record in list(_LIBC_ALLOCATIONS.items()):
+                    start = int(user_ptr)
+                    end = start + int(record.size)
+                    if start <= ptr_address < end:
+                        return _bounded_read(end - ptr_address)
+
+                # Host-owned buffers (cstring ABI). Allow interior pointers.
+                for buf in list(self._string_pool) + list(self._adapter_string_buffers):
+                    if not isinstance(buf, ctypes.Array):
+                        continue
+                    if getattr(buf, "_type_", None) is not ctypes.c_char:
+                        continue
+                    try:
+                        buf_addr = ctypes.addressof(buf)
+                        buf_size = ctypes.sizeof(buf)
+                    except Exception:
+                        continue
+                    if buf_addr <= ptr_address < buf_addr + buf_size:
+                        return _bounded_read(buf_addr + buf_size - ptr_address)
+
+                return None
 
             if Stage2StringType is not None:
                 try:
@@ -2480,14 +2514,7 @@ class Stage2Runner:
                         )
                         return text
                     if data_address != 0 and 0 <= length <= 1 << 30:
-                        raw_bytes = _bytes_from_allocation(
-                            data_address, length)
-                        if raw_bytes is None:
-                            try:
-                                raw_bytes = ctypes.string_at(
-                                    data_address, length)
-                            except (ValueError, OSError):
-                                raw_bytes = None
+                        raw_bytes = _bytes_from_known_span(data_address, length)
                         if raw_bytes is not None:
                             slice_length = min(length, len(raw_bytes))
                             raw = raw_bytes[:slice_length]
@@ -2499,7 +2526,7 @@ class Stage2Runner:
                             )
                             return text
 
-            allocation_bytes = _bytes_from_allocation(address)
+            allocation_bytes = _bytes_from_known_span(address)
             if allocation_bytes is not None:
                 raw, _, _ = allocation_bytes.partition(b"\0")
                 text = raw.decode("utf-8", errors="ignore")
@@ -2544,83 +2571,63 @@ class Stage2Runner:
                 )
 
             self._debug_log(
-                f"[stage2] ptr_to_str attempting read for untracked 0x{address:x} (likely_valid={is_likely_valid})"
+                f"[stage2] ptr_to_str untracked 0x{address:x} (likely_valid={is_likely_valid})"
             )
-            # For other untracked addresses, attempt careful byte-by-byte read with size limit.
-            # This is safer than c_char_p.value for very large strings or invalid pointers.
-            try:
-                # Try using ctypes.string_at first which is safer
+
+            # `ctypes.string_at` can segfault the interpreter if the address is
+            # not readable. On Linux we can prove readability by consulting
+            # `/proc/self/maps` and bounding reads to the mapped region.
+            # This lets us decode JIT/global string literals without risking a
+            # hard crash in CI.
+            if sys.platform.startswith("linux"):
                 try:
-                    # Try to read up to 1KB first to test if it's valid
-                    test_bytes = ctypes.string_at(address, 1024)
-                    # Find null terminator
-                    null_pos = test_bytes.find(b'\x00')
-                    if null_pos >= 0:
-                        raw_bytes = test_bytes[:null_pos]
-                    else:
-                        # No null terminator in first 1KB, read more
-                        max_size = 10 * 1024 * 1024
-                        full_bytes = ctypes.string_at(address, max_size)
-                        null_pos = full_bytes.find(b'\x00')
+                    max_total = 256 * 1024  # cap to keep failures cheap
+
+                    def _linux_readable_span(ptr_address: int) -> int:
+                        try:
+                            with open("/proc/self/maps", "r", encoding="utf-8") as handle:
+                                for line in handle:
+                                    parts = line.split(None, 2)
+                                    if len(parts) < 2:
+                                        continue
+                                    addr_range, perms = parts[0], parts[1]
+                                    if "r" not in perms:
+                                        continue
+                                    if "-" not in addr_range:
+                                        continue
+                                    lo_s, hi_s = addr_range.split("-", 1)
+                                    try:
+                                        lo = int(lo_s, 16)
+                                        hi = int(hi_s, 16)
+                                    except ValueError:
+                                        continue
+                                    if lo <= ptr_address < hi:
+                                        return max(0, hi - ptr_address)
+                        except OSError:
+                            return 0
+                        return 0
+
+                    span = _linux_readable_span(address)
+                    if span > 0:
+                        read_size = min(span, max_total)
+                        raw_bytes = ctypes.string_at(address, read_size)
+                        null_pos = raw_bytes.find(b"\0")
                         if null_pos >= 0:
-                            raw_bytes = full_bytes[:null_pos]
-                        else:
-                            # Give up, use first 1KB
-                            raw_bytes = full_bytes[:1024]
-
-                    text = raw_bytes.decode("utf-8", errors="ignore")
-                    self._tracked_string_addresses[address] = (
-                        "llvm_literal", text, len(raw_bytes))
+                            raw_bytes = raw_bytes[:null_pos]
+                        text = raw_bytes.decode("utf-8", errors="ignore")
+                        self._tracked_string_addresses[address] = (
+                            "mapped_cstring", text, len(raw_bytes)
+                        )
+                        self._debug_log(
+                            f"[stage2] ptr_to_str mapped_cstring 0x{address:x} size={len(raw_bytes)} span={span}"
+                        )
+                        return text
+                except Exception as exc:
                     self._debug_log(
-                        f"[stage2] ptr_to_str llvm_literal 0x{address:x} size={len(raw_bytes)}"
+                        f"[stage2] ptr_to_str linux mapped read failed 0x{address:x}: {type(exc).__name__}{_marker_suffix()}"
                     )
-                    return text
-                except (ValueError, OSError) as e:
-                    # string_at failed, this means the pointer is truly invalid
-                    self._debug_log(
-                        f"[stage2] ptr_to_str FAILED to read 0x{address:x}: {e}{_marker_suffix()}"
-                    )
-                    message = f"runtime string pointer 0x{address:x} is invalid (read failed: {e})"
-                    error = RuntimeError(message)
-                    if _LAST_RUNTIME_ERROR.get() is None:
-                        _LAST_RUNTIME_ERROR.set(error)
-                    return ""
 
-                # Old byte-by-byte code (keeping as fallback, but shouldn't reach here)
-                max_size = 10 * 1024 * 1024
-                byte_ptr = ctypes.cast(address, ctypes.POINTER(ctypes.c_char))
-                bytes_list = []
-                for i in range(max_size):
-                    try:
-                        byte_val = byte_ptr[i]
-                        if byte_val == b'\x00':
-                            break
-                        bytes_list.append(byte_val)
-                    except (ValueError, OSError):
-                        # Hit invalid memory
-                        if i == 0:
-                            # Couldn't read even first byte
-                            raise
-                        break
-
-                if bytes_list:
-                    raw_bytes = b''.join(bytes_list)
-                    text = raw_bytes.decode("utf-8", errors="ignore")
-                    self._tracked_string_addresses[address] = (
-                        "llvm_literal", text, len(raw_bytes))
-                    self._debug_log(
-                        f"[stage2] ptr_to_str llvm_literal 0x{address:x} size={len(raw_bytes)}"
-                    )
-                    return text
-            except (ValueError, OSError, AttributeError, UnicodeDecodeError, MemoryError, SystemError) as e:
-                self._debug_log(
-                    f"[stage2] ptr_to_str failed to read 0x{address:x}: {type(e).__name__}{_marker_suffix()}")
-                pass
-            except BaseException as e:
-                # Catch segfaults that somehow become Python exceptions
-                self._debug_log(
-                    f"[stage2] ptr_to_str CRITICAL error at 0x{address:x}: {type(e).__name__}{_marker_suffix()}")
-                pass
+            # Otherwise, refuse to touch arbitrary pointers.
 
             message = (
                 f"runtime string pointer 0x{address:x} not tracked and unreadable"

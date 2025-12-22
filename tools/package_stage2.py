@@ -254,18 +254,21 @@ runtime shim is still required to execute the resulting modules.
 
 def _create_archive(source_dir: pathlib.Path, output_path: pathlib.Path) -> pathlib.Path:
     output_path = output_path.resolve()
-    base = output_path
-    if base.suffix == ".gz" and base.with_suffix("").suffix == ".tar":
-        base = base.with_suffix("")  # remove .gz
-        base = base.with_suffix("")  # remove .tar
-    else:
-        base = base.with_suffix("")
+    name = output_path.name
 
-    if base.exists():
+    # `Path.with_suffix()` only understands the last suffix, which breaks for
+    # version strings containing dots (e.g. `0.1.1-alpha.tar.gz` would be
+    # treated as having suffix `.gz`, then `.tar`, then `.1-alpha`). We want to
+    # strip ONLY the trailing `.tar.gz`.
+    if name.endswith(".tar.gz"):
+        base = output_path.with_name(name[: -len(".tar.gz")])
+    else:
+        base = output_path.with_suffix("")
+
+    if output_path.exists() or base.exists():
         raise Stage2PackageError(f"output path already exists: {output_path}")
 
-    parent = base.parent
-    parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     shutil.make_archive(
         str(base),
@@ -273,7 +276,7 @@ def _create_archive(source_dir: pathlib.Path, output_path: pathlib.Path) -> path
         root_dir=source_dir.parent,
         base_dir=source_dir.name,
     )
-    return base.with_suffix(".tar.gz")
+    return output_path
 
 
 def package_stage2(
