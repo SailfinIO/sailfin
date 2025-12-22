@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.66 (2025-12-22)
+
+### Bug Fixes
+
+- **stage2**: Avoid CI segfaults and fix packaging
+  ([`192b22f`](https://github.com/SailfinIO/sailfin/commit/192b22fc2045c746b613d8906fea27a1e0587d67))
+
+
 ## v0.1.1-alpha.65 (2025-12-22)
 
 ### Bug Fixes
