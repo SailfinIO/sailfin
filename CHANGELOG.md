@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.67 (2025-12-22)
+
+### Bug Fixes
+
+- **ci**: Stop canceling stage2 builds
+  ([`551ecd0`](https://github.com/SailfinIO/sailfin/commit/551ecd0f9efd9dbce17263bd829ed481d9233325))
+
+
 ## v0.1.1-alpha.66 (2025-12-22)
 
 ### Bug Fixes
