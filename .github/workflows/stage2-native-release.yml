@@ -82,7 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang-15
+          sudo apt-get install -y clang
 
       - name: Install clang (Windows)
         if: runner.os == 'Windows'
@@ -113,7 +113,6 @@ jobs:
           LM_FLAGS=""
           if [ "${{ matrix.asset_os }}" = "linux" ]; then
             LM_FLAGS="-lm"
-            CLANG_BIN="clang-15"
           fi
 
           ${CLANG_BIN} -O2 -Wno-override-module -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.${OBJ_EXT}

@@ -40,6 +40,39 @@ _DEFINE_RE = re.compile(
 _GLOBAL_RE = re.compile(r"^\s*@(?P<name>" + _SYMBOL_CHARS +
                         r"+)\s*=\s*(?:external\s+)?(?:global|constant)\b", re.MULTILINE)
 
+_LLVM_ROUND_F64 = "@llvm.round.f64"
+_LLVM_ROUND_F64_DECL_RE = re.compile(r"^\s*declare\s+double\s+@llvm\.round\.f64\(double\)\b", re.MULTILINE)
+
+
+def _ensure_intrinsic_decls(ir: str) -> str:
+    """Ensure per-module intrinsic declarations exist for AOT compilation.
+
+    We compile each module independently with clang; some toolchains (notably
+    clang-15) reject calls to intrinsics that lack an explicit `declare` in the
+    same module.
+    """
+
+    updated = ir
+    if _LLVM_ROUND_F64 in updated and not _LLVM_ROUND_F64_DECL_RE.search(updated):
+        decl = "declare double @llvm.round.f64(double)\n"
+
+        # Insert after `source_filename` (or after the module ID line) to keep
+        # declarations near the top while preserving leading comments.
+        insert_at = 0
+        source_at = updated.find("source_filename")
+        if source_at != -1:
+            line_end = updated.find("\n", source_at)
+            insert_at = len(updated) if line_end == -1 else line_end + 1
+        else:
+            module_id_at = updated.find("; ModuleID")
+            if module_id_at != -1:
+                line_end = updated.find("\n", module_id_at)
+                insert_at = len(updated) if line_end == -1 else line_end + 1
+
+        updated = updated[:insert_at] + decl + updated[insert_at:]
+
+    return updated
+
 
 def _load_modules(input_dir: pathlib.Path) -> list[ModuleIR]:
     artifacts = sorted(input_dir.glob("*.ll"))
@@ -112,6 +145,9 @@ def _rewrite_module(
     """Return rewritten IR, plus lists of renames applied."""
 
     ir = module.text
+
+    # Keep per-module IR compilable for clang AOT.
+    ir = _ensure_intrinsic_decls(ir)
 
     # Avoid C driver `main` collision.
     if module.name == "main":

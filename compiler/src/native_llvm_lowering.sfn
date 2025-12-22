@@ -327,6 +327,7 @@ struct EnumTypeInfo {
     tag_type -> string;
     tag_size -> number;
     tag_align -> number;
+    max_payload_size -> number;
     size -> number;
     align -> number;
     variants -> EnumVariantInfo[];
@@ -1387,12 +1388,25 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         if enum_align_value <= 0 {
             enum_align_value = 1;
         }
+        let mut max_payload_size -> number = 0;
+        let mut payload_scan -> number = 0;
+        loop {
+            if payload_scan >= variants.length {
+                break;
+            }
+            let variant = variants[payload_scan];
+            if variant.size > max_payload_size {
+                max_payload_size = variant.size;
+            }
+            payload_scan += 1;
+        }
         enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo {
             name: enum_def.name,
             llvm_name: llvm_enum_name,
             tag_type: enum_layout.tag_type,
             tag_size: enum_layout.tag_size,
             tag_align: enum_layout.tag_align,
+            max_payload_size: max_payload_size,
             size: enum_layout.size,
             align: enum_align_value,
             variants: variants,
@@ -6040,7 +6054,7 @@ fn lower_match_instruction(
                 // 2. Cast to i8*
                 let byte_ptr_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(variant_info_val.size) + " x i8]* " + payload_ptr_temp + " to i8*");
+                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(enum_info_val.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*");
 
                 // 3. Offset to field position
                 // Field offset is relative to the enum start, but payload starts at variant offset
@@ -10772,7 +10786,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         current_temp += 1;
 
         let byte_ptr_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*");
+        current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(enum_info.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*");
         current_temp += 1;
 
         let field_offset_in_payload = field_info.offset - variant_info.offset;
@@ -11954,7 +11968,7 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                         // Cast payload byte array pointer to i8*
                         let byte_array_ptr_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*");
+                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(enum_info.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*");
 
                         // Use field offset from variant layout metadata, relative to the variant start
                         // Since the payload byte array starts at variant_info.offset, subtract that to get payload-relative offset

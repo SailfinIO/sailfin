@@ -310,18 +310,19 @@ class EnumVariantInfo:
         return runtime.struct_repr('EnumVariantInfo', [runtime.struct_field('name', self.name), runtime.struct_field('tag', self.tag), runtime.struct_field('offset', self.offset), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('fields', self.fields)])
 
 class EnumTypeInfo:
-    def __init__(self, name, llvm_name, tag_type, tag_size, tag_align, size, align, variants):
+    def __init__(self, name, llvm_name, tag_type, tag_size, tag_align, max_payload_size, size, align, variants):
         self.name = name
         self.llvm_name = llvm_name
         self.tag_type = tag_type
         self.tag_size = tag_size
         self.tag_align = tag_align
+        self.max_payload_size = max_payload_size
         self.size = size
         self.align = align
         self.variants = variants
 
     def __repr__(self):
-        return runtime.struct_repr('EnumTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('tag_type', self.tag_type), runtime.struct_field('tag_size', self.tag_size), runtime.struct_field('tag_align', self.tag_align), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('variants', self.variants)])
+        return runtime.struct_repr('EnumTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('tag_type', self.tag_type), runtime.struct_field('tag_size', self.tag_size), runtime.struct_field('tag_align', self.tag_align), runtime.struct_field('max_payload_size', self.max_payload_size), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('variants', self.variants)])
 
 class VTableEntry:
     def __init__(self, method_name, interface_method_name, function_pointer_type):
@@ -1384,7 +1385,16 @@ def build_type_context(structs, enums, interfaces):
         enum_align_value = enum_layout.align
         if enum_align_value <= 0:
             enum_align_value = 1
-        enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo(name=enum_def.name, llvm_name=llvm_enum_name, tag_type=enum_layout.tag_type, tag_size=enum_layout.tag_size, tag_align=enum_layout.tag_align, size=enum_layout.size, align=enum_align_value, variants=variants))
+        max_payload_size = 0
+        payload_scan = 0
+        while True:
+            if payload_scan >= len(variants):
+                break
+            variant = variants[payload_scan]
+            if variant.size > max_payload_size:
+                max_payload_size = variant.size
+            payload_scan += 1
+        enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo(name=enum_def.name, llvm_name=llvm_enum_name, tag_type=enum_layout.tag_type, tag_size=enum_layout.tag_size, tag_align=enum_layout.tag_align, max_payload_size=max_payload_size, size=enum_layout.size, align=enum_align_value, variants=variants))
         enum_index += 1
     interface_entries = []
     interface_index = 0
@@ -4188,7 +4198,7 @@ context
                 current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 1")
                 byte_ptr_temp = format_temp_name(current_temp)
                 current_temp += 1
-                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(variant_info_val.size) + " x i8]* " + payload_ptr_temp + " to i8*")
+                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(enum_info_val.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*")
                 field_offset_in_payload = field_binding.field_offset - variant_info_val.offset
                 field_ptr_temp = byte_ptr_temp
                 if field_offset_in_payload > 0:
@@ -7328,7 +7338,7 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + enum_pointer_value + ", i32 0, i32 1")
         current_temp += 1
         byte_ptr_temp = format_temp_name(current_temp)
-        current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*")
+        current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(enum_info.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*")
         current_temp += 1
         field_offset_in_payload = field_info.offset - variant_info.offset
         field_ptr_temp = byte_ptr_temp
@@ -8227,7 +8237,7 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
                         current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 1")
                         byte_array_ptr_temp = format_temp_name(current_temp)
                         current_temp += 1
-                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(variant_info.size) + " x i8]* " + payload_ptr_temp + " to i8*")
+                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(enum_info.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*")
                         field_absolute_offset = variant_info.fields[field_index].offset
                         field_offset_in_payload = field_absolute_offset - variant_info.offset
                         field_byte_ptr_temp = byte_array_ptr_temp
