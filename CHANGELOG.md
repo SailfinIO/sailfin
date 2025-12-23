@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.70 (2025-12-23)
+
+### Bug Fixes
+
+- Testing and assertion
+  ([`8f5849f`](https://github.com/SailfinIO/sailfin/commit/8f5849f806a4fb47a54f040a45466a08c8056eaa))
+
+
 ## v0.1.1-alpha.69 (2025-12-23)
 
 ### Bug Fixes
