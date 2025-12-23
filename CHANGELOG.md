@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.74 (2025-12-23)
+
+### Bug Fixes
+
+- Decorators
+  ([`66707a9`](https://github.com/SailfinIO/sailfin/commit/66707a9c804e599c20e16f786da00510b80e26fd))
+
+- Decorators
+  ([`950b996`](https://github.com/SailfinIO/sailfin/commit/950b996bbc1978b21577661f2744d35ec00f4803))
+
+
 ## v0.1.1-alpha.73 (2025-12-23)
 
 ### Bug Fixes
