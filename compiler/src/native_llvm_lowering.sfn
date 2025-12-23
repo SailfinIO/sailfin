@@ -300,6 +300,7 @@ struct ScopeMetadata {
 struct StructFieldInfo {
     name -> string;
     llvm_type -> string;
+    type_annotation -> string;
     index -> number;
     offset -> number;
 }
@@ -1401,7 +1402,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                     }
                 }
             }
-            fields = append_struct_field_info(fields, StructFieldInfo { name: layout_field.name, llvm_type: llvm_field_type, index: field_index, offset: layout_field.offset });
+            fields = append_struct_field_info(fields, StructFieldInfo { name: layout_field.name, llvm_type: llvm_field_type, type_annotation: layout_field.type_annotation, index: field_index, offset: layout_field.offset });
             field_index += 1;
         }
         let mut align_value -> number = layout.align;
@@ -1456,7 +1457,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                         }
                     }
                 }
-                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo { name: variant_field.name, llvm_type: llvm_variant_field_type, index: variant_field_index, offset: variant_field.offset });
+                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo { name: variant_field.name, llvm_type: llvm_variant_field_type, type_annotation: variant_field.type_annotation, index: variant_field_index, offset: variant_field.offset });
                 variant_field_index += 1;
             }
             variants = append_enum_variant_info(variants, EnumVariantInfo {
@@ -10603,13 +10604,61 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
         let load_name = format_temp_name(current_temp);
         current_lines = append_string(current_lines, "  " + load_name + " = load " + field_info.llvm_type + ", " + field_info.llvm_type + "* " + gep_name);
         current_temp += 1;
+
+        // If the field is represented as an opaque pointer (`i8*`) but we know
+        // the original type annotation, preserve that as a typed pointer.
+        if field_info.llvm_type == "i8*" && field_info.type_annotation.length > 0 {
+            let base_type = layout_annotation_base_type(field_info.type_annotation);
+            let enum_info = resolve_enum_info_for_literal(context, base_type);
+            if enum_info != null {
+                let cast_name = format_temp_name(current_temp);
+                current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + load_name + " to " + enum_info.llvm_name + "*");
+                current_temp += 1;
+                let typed_operand = LLVMOperand { llvm_type: enum_info.llvm_name + "*", value: cast_name };
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+
+            let struct_info_candidate = find_struct_info_by_name(context, base_type);
+            if struct_info_candidate != null {
+                let cast_name = format_temp_name(current_temp);
+                current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + load_name + " to " + struct_info_candidate.llvm_name + "*");
+                current_temp += 1;
+                let typed_operand = LLVMOperand { llvm_type: struct_info_candidate.llvm_name + "*", value: cast_name };
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+        }
+
         let operand = LLVMOperand { llvm_type: field_info.llvm_type, value: load_name };
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let extract_name = format_temp_name(current_temp);
     current_lines = append_string(current_lines, "  " + extract_name + " = extractvalue " + info.llvm_name + " " + base_operand.value + ", " + number_to_string(field_info.index));
     current_temp += 1;
+
+    // If the field is represented as an opaque pointer (`i8*`) but we know
+    // the original type annotation, preserve that as a typed pointer.
+    if field_info.llvm_type == "i8*" && field_info.type_annotation.length > 0 {
+        let base_type = layout_annotation_base_type(field_info.type_annotation);
+        let enum_info = resolve_enum_info_for_literal(context, base_type);
+        if enum_info != null {
+            let cast_name = format_temp_name(current_temp);
+            current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + extract_name + " to " + enum_info.llvm_name + "*");
+            current_temp += 1;
+            let typed_operand = LLVMOperand { llvm_type: enum_info.llvm_name + "*", value: cast_name };
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+
+        let struct_info_candidate = find_struct_info_by_name(context, base_type);
+        if struct_info_candidate != null {
+            let cast_name = format_temp_name(current_temp);
+            current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + extract_name + " to " + struct_info_candidate.llvm_name + "*");
+            current_temp += 1;
+            let typed_operand = LLVMOperand { llvm_type: struct_info_candidate.llvm_name + "*", value: cast_name };
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+    }
+
     let operand = LLVMOperand { llvm_type: field_info.llvm_type, value: extract_name };
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
@@ -11710,12 +11759,104 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
     }
 
     // If no opening brace found, this might be a unit variant (no payload)
-    // like Color.Red instead of Shape.Circle { radius: 5.0 }
+    // like Color.Red or Color.Red() instead of Shape.Circle { radius: 5.0 }
     if open_index < 0 {
-        let variant_name_part = trim_text(substring(trimmed, dot_index + 1, trimmed.length));
+        let mut variant_name_part = trim_text(substring(trimmed, dot_index + 1, trimmed.length));
         if variant_name_part.length == 0 {
             return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
         }
+
+        // Reject member-access chains like Enum.Variant().field so they can be
+        // handled by parse_member_access instead of being mis-parsed here.
+        let mut paren_depth -> number = 0;
+        let mut bracket_depth -> number = 0;
+        let mut angle_depth -> number = 0;
+        let mut in_single -> boolean = false;
+        let mut in_double -> boolean = false;
+        let mut escape -> boolean = false;
+        let mut dot_seen -> boolean = false;
+        let mut scan_index -> number = 0;
+        loop {
+            if scan_index >= variant_name_part.length {
+                break;
+            }
+            let ch = variant_name_part[scan_index];
+            if in_double {
+                if escape {
+                    escape = false;
+                } else if ch == "\\" {
+                    escape = true;
+                } else if ch == "\"" {
+                    in_double = false;
+                }
+                scan_index += 1;
+                continue;
+            }
+            if in_single {
+                if escape {
+                    escape = false;
+                } else if ch == "\\" {
+                    escape = true;
+                } else if ch == "'" {
+                    in_single = false;
+                }
+                scan_index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_double = true;
+                scan_index += 1;
+                continue;
+            }
+            if ch == "'" {
+                in_single = true;
+                scan_index += 1;
+                continue;
+            }
+            if ch == "(" {
+                paren_depth += 1;
+            } else if ch == ")" {
+                if paren_depth > 0 {
+                    paren_depth -= 1;
+                }
+            } else if ch == "[" {
+                bracket_depth += 1;
+            } else if ch == "]" {
+                if bracket_depth > 0 {
+                    bracket_depth -= 1;
+                }
+            } else if ch == "<" {
+                angle_depth += 1;
+            } else if ch == ">" {
+                if angle_depth > 0 {
+                    angle_depth -= 1;
+                }
+            } else if ch == "." {
+                if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+                    dot_seen = true;
+                    break;
+                }
+            }
+            scan_index += 1;
+        }
+
+        if dot_seen {
+            return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+        }
+
+        // Accept empty-argument unit-variant constructors like Enum.Variant()
+        if ends_with(variant_name_part, "()") {
+            variant_name_part = trim_text(substring(variant_name_part, 0, variant_name_part.length - 2));
+        }
+
+        if variant_name_part.length == 0 {
+            return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+        }
+
+        if !is_simple_identifier(variant_name_part) {
+            return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+        }
+
         // This is a unit variant - no payload fields
         return EnumLiteralParse { recognized: true, success: true, enum_name: enum_name_part, variant_name: variant_name_part, fields: [], diagnostics: diagnostics };
     }
@@ -13464,6 +13605,18 @@ fn starts_with(value -> string, prefix -> string) -> boolean {
     }
     let head = substring(value, 0, prefix.length);
     return head == prefix;
+}
+
+fn ends_with(value -> string, suffix -> string) -> boolean {
+    if suffix.length == 0 {
+        return true;
+    }
+    if value.length < suffix.length {
+        return false;
+    }
+    let start_index = value.length - suffix.length;
+    let tail = substring(value, start_index, value.length);
+    return tail == suffix;
 }
 
 fn contains_text(haystack -> string, needle -> string) -> boolean {

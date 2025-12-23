@@ -277,14 +277,15 @@ class ScopeMetadata:
         return runtime.struct_repr('ScopeMetadata', [runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth)])
 
 class StructFieldInfo:
-    def __init__(self, name, llvm_type, index, offset):
+    def __init__(self, name, llvm_type, type_annotation, index, offset):
         self.name = name
         self.llvm_type = llvm_type
+        self.type_annotation = type_annotation
         self.index = index
         self.offset = offset
 
     def __repr__(self):
-        return runtime.struct_repr('StructFieldInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('index', self.index), runtime.struct_field('offset', self.offset)])
+        return runtime.struct_repr('StructFieldInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('index', self.index), runtime.struct_field('offset', self.offset)])
 
 class StructTypeInfo:
     def __init__(self, name, llvm_name, fields, size, align):
@@ -1388,7 +1389,7 @@ def build_type_context(structs, enums, interfaces):
                         stripped = strip_pointer_suffix(llvm_field_type)
                         if len(stripped) > 0:
                             llvm_field_type = stripped
-            fields = append_struct_field_info(fields, StructFieldInfo(name=layout_field.name, llvm_type=llvm_field_type, index=field_index, offset=layout_field.offset))
+            fields = append_struct_field_info(fields, StructFieldInfo(name=layout_field.name, llvm_type=llvm_field_type, type_annotation=layout_field.type_annotation, index=field_index, offset=layout_field.offset))
             field_index += 1
         align_value = layout.align
         if align_value <= 0:
@@ -1433,7 +1434,7 @@ def build_type_context(structs, enums, interfaces):
                             stripped_variant = strip_pointer_suffix(llvm_variant_field_type)
                             if len(stripped_variant) > 0:
                                 llvm_variant_field_type = stripped_variant
-                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo(name=variant_field.name, llvm_type=llvm_variant_field_type, index=variant_field_index, offset=variant_field.offset))
+                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo(name=variant_field.name, llvm_type=llvm_variant_field_type, type_annotation=variant_field.type_annotation, index=variant_field_index, offset=variant_field.offset))
                 variant_field_index += 1
             variants = append_enum_variant_info(variants, EnumVariantInfo(name=variant_layout.name, tag=variant_layout.tag, offset=variant_layout.offset, size=variant_layout.size, align=variant_layout.align, fields=variant_fields))
             variant_index += 1
@@ -7189,11 +7190,43 @@ def lower_member_access(parse, bindings, locals, temp_index, lines, functions, c
         load_name = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + load_name + " = load " + field_info.llvm_type + ", " + field_info.llvm_type + "* " + gep_name)
         current_temp += 1
+        if field_info.llvm_type == "i8*"  and  len(field_info.type_annotation) > 0:
+            base_type = layout_annotation_base_type(field_info.type_annotation)
+            enum_info = resolve_enum_info_for_literal(context, base_type)
+            if enum_info != None:
+                cast_name = format_temp_name(current_temp)
+                current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + load_name + " to " + enum_info.llvm_name + "*")
+                current_temp += 1
+                typed_operand = LLVMOperand(llvm_type=enum_info.llvm_name + "*", value=cast_name)
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=typed_operand, diagnostics=diagnostics, string_constants=collected_string_constants)
+            struct_info_candidate = find_struct_info_by_name(context, base_type)
+            if struct_info_candidate != None:
+                cast_name = format_temp_name(current_temp)
+                current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + load_name + " to " + struct_info_candidate.llvm_name + "*")
+                current_temp += 1
+                typed_operand = LLVMOperand(llvm_type=struct_info_candidate.llvm_name + "*", value=cast_name)
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=typed_operand, diagnostics=diagnostics, string_constants=collected_string_constants)
         operand = LLVMOperand(llvm_type=field_info.llvm_type, value=load_name)
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     extract_name = format_temp_name(current_temp)
     current_lines = append_string(current_lines, "  " + extract_name + " = extractvalue " + info.llvm_name + " " + base_operand.value + ", " + number_to_string(field_info.index))
     current_temp += 1
+    if field_info.llvm_type == "i8*"  and  len(field_info.type_annotation) > 0:
+        base_type = layout_annotation_base_type(field_info.type_annotation)
+        enum_info = resolve_enum_info_for_literal(context, base_type)
+        if enum_info != None:
+            cast_name = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + extract_name + " to " + enum_info.llvm_name + "*")
+            current_temp += 1
+            typed_operand = LLVMOperand(llvm_type=enum_info.llvm_name + "*", value=cast_name)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=typed_operand, diagnostics=diagnostics, string_constants=collected_string_constants)
+        struct_info_candidate = find_struct_info_by_name(context, base_type)
+        if struct_info_candidate != None:
+            cast_name = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + extract_name + " to " + struct_info_candidate.llvm_name + "*")
+            current_temp += 1
+            typed_operand = LLVMOperand(llvm_type=struct_info_candidate.llvm_name + "*", value=cast_name)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=typed_operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     operand = LLVMOperand(llvm_type=field_info.llvm_type, value=extract_name)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
 
@@ -8049,6 +8082,82 @@ def parse_enum_literal(text):
     if open_index < 0:
         variant_name_part = trim_text(substring(trimmed, dot_index + 1, len(trimmed)))
         if len(variant_name_part) == 0:
+            return EnumLiteralParse(recognized=False, success=False, enum_name="", variant_name="", fields=[], diagnostics=diagnostics)
+        paren_depth = 0
+        bracket_depth = 0
+        angle_depth = 0
+        in_single = False
+        in_double = False
+        escape = False
+        dot_seen = False
+        scan_index = 0
+        while True:
+            if scan_index >= len(variant_name_part):
+                break
+            ch = variant_name_part[scan_index]
+            if in_double:
+                if escape:
+                    escape = False
+                else:
+                    if ch == "\\":
+                        escape = True
+                    else:
+                        if ch == "\"":
+                            in_double = False
+                scan_index += 1
+                continue
+            if in_single:
+                if escape:
+                    escape = False
+                else:
+                    if ch == "\\":
+                        escape = True
+                    else:
+                        if ch == "'":
+                            in_single = False
+                scan_index += 1
+                continue
+            if ch == "\"":
+                in_double = True
+                scan_index += 1
+                continue
+            if ch == "'":
+                in_single = True
+                scan_index += 1
+                continue
+            if ch == "(":
+                paren_depth += 1
+            else:
+                if ch == ")":
+                    if paren_depth > 0:
+                        paren_depth -= 1
+                else:
+                    if ch == "[":
+                        bracket_depth += 1
+                    else:
+                        if ch == "]":
+                            if bracket_depth > 0:
+                                bracket_depth -= 1
+                        else:
+                            if ch == "<":
+                                angle_depth += 1
+                            else:
+                                if ch == ">":
+                                    if angle_depth > 0:
+                                        angle_depth -= 1
+                                else:
+                                    if ch == ".":
+                                        if paren_depth == 0  and  bracket_depth == 0  and  angle_depth == 0:
+                                            dot_seen = True
+                                            break
+            scan_index += 1
+        if dot_seen:
+            return EnumLiteralParse(recognized=False, success=False, enum_name="", variant_name="", fields=[], diagnostics=diagnostics)
+        if ends_with(variant_name_part, "()"):
+            variant_name_part = trim_text(substring(variant_name_part, 0, len(variant_name_part) - 2))
+        if len(variant_name_part) == 0:
+            return EnumLiteralParse(recognized=False, success=False, enum_name="", variant_name="", fields=[], diagnostics=diagnostics)
+        if not is_simple_identifier(variant_name_part):
             return EnumLiteralParse(recognized=False, success=False, enum_name="", variant_name="", fields=[], diagnostics=diagnostics)
         return EnumLiteralParse(recognized=True, success=True, enum_name=enum_name_part, variant_name=variant_name_part, fields=[], diagnostics=diagnostics)
     fatal = False
@@ -9316,6 +9425,15 @@ def starts_with(value, prefix):
         return False
     head = substring(value, 0, len(prefix))
     return head == prefix
+
+def ends_with(value, suffix):
+    if len(suffix) == 0:
+        return True
+    if len(value) < len(suffix):
+        return False
+    start_index = len(value) - len(suffix)
+    tail = substring(value, start_index, len(value))
+    return tail == suffix
 
 def contains_text(haystack, needle):
     if len(needle) == 0:
