@@ -1,0 +1,33 @@
+import { Token, TokenKind, eof_token } from "../src/token";
+
+test "token: eof_token populates fields" {
+    let tok = eof_token(12, 34);
+    assert tok.kind.variant == "EndOfFile";
+    assert tok.lexeme == "";
+    assert tok.line == 12;
+    assert tok.column == 34;
+}
+
+test "token: TokenKind variants expose names" {
+    assert TokenKind.Identifier().variant == "Identifier";
+    assert TokenKind.NumberLiteral().variant == "NumberLiteral";
+    assert TokenKind.StringLiteral().variant == "StringLiteral";
+    assert TokenKind.BooleanLiteral().variant == "BooleanLiteral";
+    assert TokenKind.Symbol().variant == "Symbol";
+    assert TokenKind.Whitespace().variant == "Whitespace";
+    assert TokenKind.Comment().variant == "Comment";
+    assert TokenKind.EndOfFile().variant == "EndOfFile";
+}
+
+test "token: Token struct literal" {
+    let tok = Token {
+        kind: TokenKind.Identifier(),
+        lexeme: "hello",
+        line: 1,
+        column: 5,
+    };
+    assert tok.kind.variant == "Identifier";
+    assert tok.lexeme == "hello";
+    assert tok.line == 1;
+    assert tok.column == 5;
+}

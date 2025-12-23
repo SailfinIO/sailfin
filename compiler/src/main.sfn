@@ -8,7 +8,7 @@ import { Program } from "./ast";
 import { emit_program } from "./emitter_sailfin";
 import { emit_native, EmitNativeResult, NativeModule } from "./emit_native";
 import { lower_to_python, LoweredPythonResult } from "./native_lowering";
-import { lower_to_llvm, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult } from "./native_llvm_lowering";
+import { lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult } from "./native_llvm_lowering";
 import { LayoutManifest, parse_layout_manifest } from "./native_ir";
 import { substring } from "./string_utils";
 import { Token } from "./token";
@@ -120,6 +120,14 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
 // `LoweredLLVMResult` internally.
 fn compile_to_llvm(source -> string) -> string ![io] {
     let lowered = compile_to_native_llvm(source);
+    return lowered.ir;
+}
+
+// Emit LLVM IR that runs all `test ... {}` declarations in the module.
+// Used by the `sailfin test` CLI subcommand.
+fn compile_tests_to_llvm(source -> string) -> string ![io] {
+    let native_result = compile_to_native(source);
+    let lowered = lower_to_llvm_for_tests(native_result.module);
     return lowered.ir;
 }
 

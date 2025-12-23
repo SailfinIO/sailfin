@@ -685,6 +685,12 @@ Test runners support:
 - **Replay** – use generation cards to re-run model calls exactly as captured
   during production incidents.
 
+Current (self-hosted) CLI note: the Stage2 CLI now exposes `sailfin test [path]`.
+Today it discovers Sailfin test files by filename convention (`*_test.sfn`) under
+`path` (recursively), compiles each file with a synthesized test harness `main`,
+and executes it. This is an initial bridge while the native test runner grows;
+it does not yet implement golden/adversarial/replay workflows.
+
 ## 9. String Interpolation
 
 String literals support inline expressions using `{{ expression }}` with

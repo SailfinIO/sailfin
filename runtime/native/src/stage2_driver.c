@@ -59,7 +59,7 @@ int main(int argc, char **argv)
         const char *first = argv[1];
         bool is_cli = false;
 
-        if (strcmp(first, "emit") == 0 || strcmp(first, "build") == 0 || strcmp(first, "run") == 0)
+        if (strcmp(first, "emit") == 0 || strcmp(first, "build") == 0 || strcmp(first, "run") == 0 || strcmp(first, "test") == 0)
         {
             is_cli = true;
         }

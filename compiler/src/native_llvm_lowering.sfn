@@ -811,8 +811,93 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
 }
 
+fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        return lower_to_llvm_with_context_for_tests(native_module, [], [], []);
+    }
+    let parse = parse_native_artifact(artifact.contents);
+    let import_context = collect_imported_module_context(parse.imports);
+    return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+}
+
 fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifests -> LayoutManifest[]) -> LoweredLLVMResult {
     return lower_to_llvm_with_context(native_module, imported_manifests, [], []);
+}
+
+fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+    let base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
+    if base.ir.length == 0 {
+        return base;
+    }
+
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        return base;
+    }
+
+    let parse = parse_native_artifact(artifact.contents);
+    let mut tests -> NativeFunction[] = [];
+    let mut has_main -> boolean = false;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= parse.functions.length {
+            break;
+        }
+        let fun = parse.functions[index];
+        if fun.name == "main" {
+            has_main = true;
+        }
+        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
+            tests = tests.concat([fun]);
+        }
+        index += 1;
+    }
+
+    if tests.length == 0 {
+        return base;
+    }
+
+    // For now we only synthesize `main` when no user-provided `main` exists.
+    if has_main {
+        let mut updated = base;
+        updated.diagnostics = updated.diagnostics.concat([
+            "llvm lowering (test): module defines `main`; skipping synthesized test harness",
+        ]);
+        return updated;
+    }
+
+    let harness = render_test_harness_main(tests);
+    let mut updated = base;
+    if updated.ir.length > 0 {
+        updated.ir = updated.ir + "\n";
+    }
+    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
+    return updated;
+}
+
+fn render_test_harness_main(tests -> NativeFunction[]) -> string[] {
+    let mut lines -> string[] = [];
+    lines = lines.concat([
+        "define i32 @main() {",
+        "entry:",
+    ]);
+
+    let mut index -> number = 0;
+    loop {
+        if index >= tests.length {
+            break;
+        }
+        let sym = sanitize_symbol(tests[index].name);
+        lines = append_string(lines, "  call void @" + sym + "()");
+        index += 1;
+    }
+    lines = lines.concat([
+        "  ret i32 0",
+        "}",
+    ]);
+    return lines;
 }
 
 fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
@@ -3393,14 +3478,14 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_list_directory",
         symbol: "sailfin_adapter_fs_list_directory",
-        return_type: "i8*",
+        return_type: "{ i8**, i64 }*",
         parameter_types: ["i8*"],
         effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.listDirectory",
         symbol: "sailfin_adapter_fs_list_directory",
-        return_type: "i8*",
+        return_type: "{ i8**, i64 }*",
         parameter_types: ["i8*"],
         effects: ["io"],
     });

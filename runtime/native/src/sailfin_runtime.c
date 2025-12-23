@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 #if defined(__APPLE__)
 #include <execinfo.h>
@@ -72,6 +73,21 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
         *out_codepoint = codepoint;
     }
     return true;
+}
+
+static int _cmp_cstr_ptr(const void *a, const void *b)
+{
+    const char *sa = *(const char *const *)a;
+    const char *sb = *(const char *const *)b;
+    if (!sa)
+    {
+        return sb ? -1 : 0;
+    }
+    if (!sb)
+    {
+        return 1;
+    }
+    return strcmp(sa, sb);
 }
 
 static size_t _utf8_encode(uint32_t codepoint, unsigned char out[5])
@@ -1020,10 +1036,102 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
     fclose(f);
 }
 
-void *sailfin_adapter_fs_list_directory(void *path)
+SailfinPtrArray *sailfin_adapter_fs_list_directory(void *path)
 {
-    (void)path;
-    return NULL;
+    const char *path_str = (const char *)path;
+    if (!path_str || path_str[0] == '\0')
+    {
+        path_str = ".";
+    }
+
+    DIR *dir = opendir(path_str);
+    if (!dir)
+    {
+        // Mirror the bootstrap/JIT behaviour: tolerate missing/unreadable directories.
+        return _alloc_array(0);
+    }
+
+    size_t cap = 32;
+    size_t len = 0;
+    char **names = (char **)calloc(cap, sizeof(char *));
+    if (!names)
+    {
+        closedir(dir);
+        return NULL;
+    }
+
+    struct dirent *entry = NULL;
+    while ((entry = readdir(dir)) != NULL)
+    {
+        const char *name = entry->d_name;
+        if (!name)
+        {
+            continue;
+        }
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        {
+            continue;
+        }
+
+        if (len >= cap)
+        {
+            size_t next_cap = cap * 2;
+            char **next = (char **)realloc(names, next_cap * sizeof(char *));
+            if (!next)
+            {
+                // Best-effort cleanup.
+                for (size_t i = 0; i < len; i++)
+                {
+                    free(names[i]);
+                }
+                free(names);
+                closedir(dir);
+                return NULL;
+            }
+            // Ensure new slots are null.
+            memset(next + cap, 0, (next_cap - cap) * sizeof(char *));
+            names = next;
+            cap = next_cap;
+        }
+
+        char *copy = strdup(name);
+        if (!copy)
+        {
+            for (size_t i = 0; i < len; i++)
+            {
+                free(names[i]);
+            }
+            free(names);
+            closedir(dir);
+            return NULL;
+        }
+        names[len++] = copy;
+    }
+    closedir(dir);
+
+    if (len > 1)
+    {
+        qsort(names, len, sizeof(char *), _cmp_cstr_ptr);
+    }
+
+    SailfinPtrArray *out = _alloc_array((int64_t)len);
+    if (!out)
+    {
+        for (size_t i = 0; i < len; i++)
+        {
+            free(names[i]);
+        }
+        free(names);
+        return NULL;
+    }
+
+    for (size_t i = 0; i < len; i++)
+    {
+        out->data[i] = names[i];
+    }
+    out->len = (int64_t)len;
+    free(names);
+    return out;
 }
 
 bool sailfin_adapter_fs_delete_file(void *path)

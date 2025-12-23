@@ -91,7 +91,7 @@ extern "C"
     // Filesystem adapter stubs.
     void *sailfin_adapter_fs_read_file(void *path);
     void sailfin_adapter_fs_write_file(void *path, void *contents);
-    void *sailfin_adapter_fs_list_directory(void *path);
+    SailfinPtrArray *sailfin_adapter_fs_list_directory(void *path);
     bool sailfin_adapter_fs_delete_file(void *path);
     bool sailfin_adapter_fs_create_directory(void *path, bool recursive);
     bool sailfin_intrinsic_fs_exists(void *path);

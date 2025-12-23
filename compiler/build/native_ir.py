@@ -509,9 +509,61 @@ def parse_native_artifact(text):
             current = NativeFunction(name=parse_function_name(strip_prefix(line, ".fn ")), parameters=[], return_type="void", effects=[], instructions=[])
             index += 1
             continue
+        if starts_with(line, ".test "):
+            if current != None:
+                diagnostics = append_string(diagnostics, "encountered nested .test while previous function still open")
+            header = strip_prefix(line, ".test ")
+            trimmed = trim_text(header)
+            if len(trimmed) == 0:
+                diagnostics = append_string(diagnostics, "unable to parse test header: " + line)
+                index += 1
+                continue
+            raw_name = ""
+            if trimmed[0] == "\""  or  trimmed[0] == "'":
+                quote = trimmed[0]
+                scan = 1
+                escaping = False
+                while True:
+                    if scan >= len(trimmed):
+                        break
+                    ch = trimmed[scan]
+                    if escaping:
+                        escaping = False
+                        scan += 1
+                        continue
+                    if ch == "\\":
+                        escaping = True
+                        scan += 1
+                        continue
+                    if ch == quote:
+                        raw_name = substring(trimmed, 0, scan + 1)
+                        break
+                    scan += 1
+            else:
+                space_index = index_of(trimmed, " ")
+                if space_index < 0:
+                    raw_name = trimmed
+                else:
+                    raw_name = trim_text(substring(trimmed, 0, space_index))
+            name = strip_quotes(trim_text(raw_name))
+            if len(name) == 0:
+                diagnostics = append_string(diagnostics, "unable to parse test header: " + line)
+                index += 1
+                continue
+            current = NativeFunction(name="test:" + name, parameters=[], return_type="void", effects=[], instructions=[])
+            index += 1
+            continue
         if starts_with(line, ".endfn"):
             if current == None:
                 diagnostics = append_string(diagnostics, "encountered .endfn without active function")
+            else:
+                functions = append_function(functions, current)
+                current = None
+            index += 1
+            continue
+        if starts_with(line, ".endtest"):
+            if current == None:
+                diagnostics = append_string(diagnostics, "encountered .endtest without active test")
             else:
                 functions = append_function(functions, current)
                 current = None

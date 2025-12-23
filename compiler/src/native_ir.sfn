@@ -434,9 +434,84 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             index += 1;
             continue;
         }
+        if starts_with(line, ".test ") {
+            if current != null {
+                diagnostics = append_string(diagnostics, "encountered nested .test while previous function still open");
+            }
+
+            let header = strip_prefix(line, ".test ");
+            let trimmed = trim_text(header);
+            if trimmed.length == 0 {
+                diagnostics = append_string(diagnostics, "unable to parse test header: " + line);
+                index += 1;
+                continue;
+            }
+
+            let mut raw_name -> string = "";
+            if trimmed[0] == "\"" || trimmed[0] == "'" {
+                let quote = trimmed[0];
+                let mut scan -> number = 1;
+                let mut escaping -> boolean = false;
+                loop {
+                    if scan >= trimmed.length {
+                        break;
+                    }
+                    let ch = trimmed[scan];
+                    if escaping {
+                        escaping = false;
+                        scan += 1;
+                        continue;
+                    }
+                    if ch == "\\" {
+                        escaping = true;
+                        scan += 1;
+                        continue;
+                    }
+                    if ch == quote {
+                        raw_name = substring(trimmed, 0, scan + 1);
+                        break;
+                    }
+                    scan += 1;
+                }
+            } else {
+                let space_index = index_of(trimmed, " ");
+                if space_index < 0 {
+                    raw_name = trimmed;
+                } else {
+                    raw_name = trim_text(substring(trimmed, 0, space_index));
+                }
+            }
+
+            let name = strip_quotes(trim_text(raw_name));
+            if name.length == 0 {
+                diagnostics = append_string(diagnostics, "unable to parse test header: " + line);
+                index += 1;
+                continue;
+            }
+
+            current = NativeFunction {
+                name: "test:" + name,
+                parameters: [],
+                return_type: "void",
+                effects: [],
+                instructions: [],
+            };
+            index += 1;
+            continue;
+        }
         if starts_with(line, ".endfn") {
             if current == null {
                 diagnostics = append_string(diagnostics, "encountered .endfn without active function");
+            } else {
+                functions = append_function(functions, current);
+                current = null;
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".endtest") {
+            if current == null {
+                diagnostics = append_string(diagnostics, "encountered .endtest without active test");
             } else {
                 functions = append_function(functions, current);
                 current = null;

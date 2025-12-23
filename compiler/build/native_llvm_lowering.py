@@ -984,8 +984,63 @@ def lower_to_llvm(native_module):
     import_context = collect_imported_module_context(parse.imports)
     return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
+def lower_to_llvm_for_tests(native_module):
+    # effects: io
+    artifact = select_text_artifact(native_module.artifacts)
+    if artifact == None:
+        return lower_to_llvm_with_context_for_tests(native_module, [], [], [])
+    parse = parse_native_artifact(artifact.contents)
+    import_context = collect_imported_module_context(parse.imports)
+    return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
+
 def lower_to_llvm_with_manifests(native_module, imported_manifests):
     return lower_to_llvm_with_context(native_module, imported_manifests, [], [])
+
+def lower_to_llvm_with_context_for_tests(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
+    base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics)
+    if len(base.ir) == 0:
+        return base
+    artifact = select_text_artifact(native_module.artifacts)
+    if artifact == None:
+        return base
+    parse = parse_native_artifact(artifact.contents)
+    tests = []
+    has_main = False
+    index = 0
+    while True:
+        if index >= len(parse.functions):
+            break
+        fun = parse.functions[index]
+        if fun.name == "main":
+            has_main = True
+        if len(fun.name) >= 5  and  substring(fun.name, 0, 5) == "test:":
+            tests = (tests) + ([fun])
+        index += 1
+    if len(tests) == 0:
+        return base
+    if has_main:
+        updated = base
+        updated.diagnostics = (updated.diagnostics) + (["llvm lowering (test): module defines `main`; skipping synthesized test harness"])
+        return updated
+    harness = render_test_harness_main(tests)
+    updated = base
+    if len(updated.ir) > 0:
+        updated.ir = updated.ir + "\n"
+    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n"
+    return updated
+
+def render_test_harness_main(tests):
+    lines = []
+    lines = (lines) + (["define i32 @main() {", "entry:"])
+    index = 0
+    while True:
+        if index >= len(tests):
+            break
+        sym = sanitize_symbol(tests[index].name)
+        lines = append_string(lines, "  call void @" + sym + "()")
+        index += 1
+    lines = (lines) + (["  ret i32 0", "}"])
+    return lines
 
 def lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
     diagnostics = []
@@ -2627,8 +2682,8 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.readFile", symbol="sailfin_adapter_fs_read_file", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_write_file", symbol="sailfin_adapter_fs_write_file", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.writeFile", symbol="sailfin_adapter_fs_write_file", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_list_directory", symbol="sailfin_adapter_fs_list_directory", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.listDirectory", symbol="sailfin_adapter_fs_list_directory", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_list_directory", symbol="sailfin_adapter_fs_list_directory", return_type="{ i8**, i64 }*", parameter_types=["i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.listDirectory", symbol="sailfin_adapter_fs_list_directory", return_type="{ i8**, i64 }*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_delete_file", symbol="sailfin_adapter_fs_delete_file", return_type="i1", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.deleteFile", symbol="sailfin_adapter_fs_delete_file", return_type="i1", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_create_directory", symbol="sailfin_adapter_fs_create_directory", return_type="i1", parameter_types=["i8*", "i1"], effects=["io"]))

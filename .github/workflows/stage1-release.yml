@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+      - rc
+      - beta
       - alpha
   workflow_dispatch:
 

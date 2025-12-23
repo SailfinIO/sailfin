@@ -2455,7 +2455,8 @@ class Stage2Runner:
                     return None
 
                 def _bounded_read(max_available: int) -> bytes | None:
-                    read_size = max_available if limit is None else min(max_available, max(limit, 0))
+                    read_size = max_available if limit is None else min(
+                        max_available, max(limit, 0))
                     if read_size <= 0:
                         return None
                     try:
@@ -2514,7 +2515,8 @@ class Stage2Runner:
                         )
                         return text
                     if data_address != 0 and 0 <= length <= 1 << 30:
-                        raw_bytes = _bytes_from_known_span(data_address, length)
+                        raw_bytes = _bytes_from_known_span(
+                            data_address, length)
                         if raw_bytes is not None:
                             slice_length = min(length, len(raw_bytes))
                             raw = raw_bytes[:slice_length]
@@ -2901,16 +2903,10 @@ class Stage2Runner:
                     _require_effects()
                     path = _ptr_to_str(path_ptr)
                     entries = runtime.fs.listDirectory(path or None)
-                    try:
-                        import json
-                        result = json.dumps(entries)
-                    except Exception:  # pragma: no cover - fall back to comma join on JSON issues.
-                        result = "[" + ", ".join(
-                            f'\"{name}\"' for name in entries) + "]"
-                    return _str_to_ptr(result)
+                    return _list_to_array(list(entries or []))
                 except Exception as exc:
                     _record_adapter_exception("fs.list_directory", exc)
-                    return _str_to_ptr("")
+                    return _list_to_array([])
 
             return cfunc_type(_fs_list_directory)
 

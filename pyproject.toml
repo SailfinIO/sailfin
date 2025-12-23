@@ -22,6 +22,16 @@ assets = ["dist/*.zip"]
 match = "main"
 prerelease = false
 
+[tool.semantic_release.branches.rc]
+match = "rc"
+prerelease = true
+prerelease_token = "rc"
+
+[tool.semantic_release.branches.beta]
+match = "beta"
+prerelease = true
+prerelease_token = "beta"
+
 [tool.semantic_release.branches.alpha]
 match = "alpha"
 prerelease = true
