@@ -1578,10 +1578,48 @@ def parse_block_statement(parser):
         if len(decorators) > 0:
             return BlockStatementParseResult(parser=original, statement=None, success=False)
         return parse_return_statement(after_decorators)
+    if identifier_matches(token, "assert"):
+        if len(decorators) > 0:
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
+        return parse_assert_statement(after_decorators)
     expression_result = parse_expression_statement(after_decorators, decorators)
     if expression_result.success:
         return expression_result
     return BlockStatementParseResult(parser=original, statement=None, success=False)
+
+def parse_assert_statement(parser):
+    original = parser
+    current = skip_trivia(parser)
+    if not identifier_matches(parser_peek_raw(current), "assert"):
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    statement_tokens = []
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current))
+    current = consume_keyword(current, "assert")
+    capture = collect_until(skip_trivia(current), [";"])
+    current = capture.parser
+    trimmed = trim_token_edges(capture.tokens)
+    if len(trimmed) == 0:
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    index = 0
+    while True:
+        if index >= len(capture.tokens):
+            break
+        statement_tokens = append_token(statement_tokens, capture.tokens[index])
+        index += 1
+    current = skip_trivia(current)
+    terminator = parser_peek_raw(current)
+    if not symbol_matches(terminator, ";"):
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    statement_tokens = append_token(statement_tokens, terminator)
+    current = parser_advance_raw(current)
+    condition = expression_from_tokens(trimmed)
+    fail_call = runtime.enum_instantiate(Expression, 'Call', [runtime.enum_field('callee', runtime.enum_instantiate(Expression, 'Identifier', [runtime.enum_field('name', "runtime_raise_value_error_fn")])), runtime.enum_field('arguments', [runtime.enum_instantiate(Expression, 'StringLiteral', [runtime.enum_field('value', "assertion failed")])])])
+    fail_statement = runtime.enum_instantiate(Statement, 'ExpressionStatement', [runtime.enum_field('expression', fail_call), runtime.enum_field('span', None)])
+    then_block = Block(tokens=[], text="", statements=[])
+    else_block = Block(tokens=[], text="", statements=[fail_statement])
+    else_branch = ElseBranch(statement=None, body=else_block)
+    statement = runtime.enum_instantiate(Statement, 'IfStatement', [runtime.enum_field('condition', condition), runtime.enum_field('then_block', then_block), runtime.enum_field('else_branch', else_branch), runtime.enum_field('decorators', [])])
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_for_statement(parser, decorators):
     original = parser

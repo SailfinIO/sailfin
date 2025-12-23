@@ -252,6 +252,7 @@ fn _clang_link(ll_path -> string, out_path -> string) -> number ![io] {
         "-Iruntime/native/include",
         "runtime/native/src/sailfin_runtime.c",
         "runtime/native/ir/runtime_globals.ll",
+        "build/native/obj/prelude.o",
         ll_path,
         "-o",
         out_path,
