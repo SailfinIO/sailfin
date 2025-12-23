@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.69 (2025-12-23)
+
+### Bug Fixes
+
+- Testing and assertion no longer crashing
+  ([`d4ac35d`](https://github.com/SailfinIO/sailfin/commit/d4ac35d98ab7abf93ad03b1905c1873ace506067))
+
+### Chores
+
+- Doc updates
+  ([`3f67d50`](https://github.com/SailfinIO/sailfin/commit/3f67d505314b4e591ae794f1ad16771bf254edca))
+
+
 ## v0.1.1-alpha.68 (2025-12-22)
 
 ### Bug Fixes
