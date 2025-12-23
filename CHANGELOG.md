@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.72 (2025-12-23)
+
+### Bug Fixes
+
+- Error handling example w/ union types
+  ([`2338f74`](https://github.com/SailfinIO/sailfin/commit/2338f74f21a986b89b5f4c89698791ed84b2cd23))
+
+
 ## v0.1.1-alpha.71 (2025-12-23)
 
 ### Bug Fixes
