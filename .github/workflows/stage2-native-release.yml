@@ -37,11 +37,6 @@ jobs:
             asset_os: macos
             asset_arch: x86_64
             exe_ext: ""
-          - os: windows-2022
-            package_label: windows-x86_64
-            asset_os: windows
-            asset_arch: x86_64
-            exe_ext: ".exe"
 
     steps:
       - name: Checkout repository
@@ -83,13 +78,6 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y clang
-
-      - name: Install clang (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install -y llvm
-          clang --version
 
       - name: Build Stage2 artifacts
         shell: bash -l {0}
