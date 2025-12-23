@@ -640,6 +640,10 @@ def parse_native_artifact(text):
                 diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + line)
                 pending_value_span = None
         if current == None:
+            trimmed_line = trim_text(line)
+            if starts_with(trimmed_line, ".decorator"):
+                index += 1
+                continue
             if len(instructions) == 1  and  instructions[0].variant == "Let":
                 bindings = append_binding(bindings, binding_from_instruction(instructions[0]))
             else:

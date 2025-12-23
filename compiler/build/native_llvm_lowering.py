@@ -5636,6 +5636,7 @@ def prepare_parameters(function, context):
             break
         parameter = function.parameters[index]
         llvm_type = map_parameter_type(context, parameter.type_annotation)
+        inferred_self_type = False
         if len(parameter.type_annotation) == 0  and  parameter.name == "self"  and  index == 0:
             double_colon_pos = find_last_index_of_char(function.name, ":")
             if double_colon_pos > 0  and  substring(function.name, double_colon_pos - 1, double_colon_pos + 1) == "::":
@@ -5643,7 +5644,8 @@ def prepare_parameters(function, context):
                 struct_type = map_struct_type_annotation(context, struct_name)
                 if len(struct_type) > 0:
                     llvm_type = struct_type + "*"
-        if len(parameter.type_annotation) == 0:
+                    inferred_self_type = True
+        if len(parameter.type_annotation) == 0  and  not inferred_self_type:
             diagnostics = append_string(diagnostics, "llvm lowering: parameter `" + parameter.name + "` missing type annotation; defaulting to `" + llvm_type + "`")
         sanitized = sanitize_symbol(parameter.name)
         llvm_name = "%" + sanitized
@@ -7382,9 +7384,16 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                                     updated_operand = LLVMOperand(llvm_type=expected_self_type, value=parameter_pointer.llvm_name)
                                     operands = replace_llvm_operand(operands, 0, updated_operand)
                                 else:
-                                    diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
+                                    if parameter_pointer != None  and  parameter_pointer.llvm_type == strip_pointer_suffix(expected_self_type):
+                                        pass
+                                    else:
+                                        diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
                         else:
-                            diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
+                            receiver_base = strip_pointer_suffix(expected_self_type)
+                            if self_operand.llvm_type == receiver_base  and  starts_with(receiver_base, "%")  or  starts_with(receiver_base, "{"):
+                                pass
+                            else:
+                                diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
                     else:
                         diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
     coerced_operands = []
@@ -9103,6 +9112,22 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
         return CoercionResult(lines=current_lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
     if operand_type == target_type:
         return CoercionResult(lines=current_lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+    if ends_with_pointer_suffix(target_type)  and  not ends_with_pointer_suffix(operand_type):
+        expected_value_type = strip_pointer_suffix(target_type)
+        if expected_value_type == operand_type:
+            if starts_with(operand_type, "%")  or  starts_with(operand_type, "{"):
+                size_ptr_temp = format_temp_name(temp_index)
+                size_temp = format_temp_name(temp_index + 1)
+                malloc_temp = format_temp_name(temp_index + 2)
+                typed_ptr_temp = format_temp_name(temp_index + 3)
+                current_lines = append_string(current_lines, "  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1")
+                current_lines = append_string(current_lines, "  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64")
+                current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")")
+                current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*")
+                current_lines = append_string(current_lines, "  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp)
+                current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")")
+                boxed = LLVMOperand(llvm_type=target_type, value=typed_ptr_temp)
+                return CoercionResult(lines=current_lines, temp_index=temp_index + 4, operand=boxed, diagnostics=diagnostics)
     if is_union_llvm_type(target_type):
         variants = parse_union_payload_types(target_type)
         variant_index = 0

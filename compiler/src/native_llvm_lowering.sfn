@@ -8368,6 +8368,7 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
         }
         let parameter = function.parameters[index];
         let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
+        let mut inferred_self_type -> boolean = false;
         // Infer `self` parameter type from struct name in method qualified names (e.g., Person::format -> Person)
         if parameter.type_annotation.length == 0 && parameter.name == "self" && index == 0 {
             let double_colon_pos = find_last_index_of_char(function.name, ":");
@@ -8376,10 +8377,11 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
                 let struct_type = map_struct_type_annotation(context, struct_name);
                 if struct_type.length > 0 {
                     llvm_type = struct_type + "*";
+                    inferred_self_type = true;
                 }
             }
         }
-        if parameter.type_annotation.length == 0 {
+        if parameter.type_annotation.length == 0 && !inferred_self_type {
             diagnostics = append_string(diagnostics, "llvm lowering: parameter `" + parameter.name + "` missing type annotation; defaulting to `" + llvm_type + "`");
         }
         let sanitized = sanitize_symbol(parameter.name);
@@ -10864,12 +10866,21 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                             if parameter_pointer != null && parameter_pointer.llvm_type == expected_self_type {
                                 let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: parameter_pointer.llvm_name };
                                 operands = replace_llvm_operand(operands, 0, updated_operand);
+                            } else if parameter_pointer != null && parameter_pointer.llvm_type == strip_pointer_suffix(expected_self_type) {
+                                // Passing a value receiver where a pointer is expected is supported via boxing
+                                // in `coerce_operand_to_type` (T -> T*). Avoid warning here.
                             } else {
                                 diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
                             }
                         }
                     } else {
-                        diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                        // If the receiver is an aggregate value, coercion can box it into a pointer.
+                        let receiver_base = strip_pointer_suffix(expected_self_type);
+                        if self_operand.llvm_type == receiver_base && (starts_with(receiver_base, "%") || starts_with(receiver_base, "{")) {
+                            // no warning
+                        } else {
+                            diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                        }
                     }
                 } else {
                     diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
@@ -13194,6 +13205,29 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     }
     if operand_type == target_type {
         return CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+
+    // General boxing: allow passing a by-value aggregate where a pointer-to-aggregate is expected.
+    if ends_with_pointer_suffix(target_type) && !ends_with_pointer_suffix(operand_type) {
+        let expected_value_type = strip_pointer_suffix(target_type);
+        if expected_value_type == operand_type {
+            if starts_with(operand_type, "%") || starts_with(operand_type, "{") {
+                let size_ptr_temp = format_temp_name(temp_index);
+                let size_temp = format_temp_name(temp_index + 1);
+                let malloc_temp = format_temp_name(temp_index + 2);
+                let typed_ptr_temp = format_temp_name(temp_index + 3);
+
+                current_lines = append_string(current_lines, "  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
+                current_lines = append_string(current_lines, "  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
+                current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
+                current_lines = append_string(current_lines, "  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
+                current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+
+                let boxed = LLVMOperand { llvm_type: target_type, value: typed_ptr_temp };
+                return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: boxed, diagnostics: diagnostics };
+            }
+        }
     }
 
     // Union construction: wrap a concrete value into an inline tagged union.

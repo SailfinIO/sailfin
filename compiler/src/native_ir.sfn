@@ -607,6 +607,14 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
         }
 
         if current == null {
+            let trimmed_line = trim_text(line);
+            if starts_with(trimmed_line, ".decorator") {
+                // Decorators are currently represented as top-level directives in `.sfn-asm`.
+                // The native lowering pipeline does not yet apply decorator semantics, but
+                // these directives should not cause warnings (warnings are treated as failures).
+                index += 1;
+                continue;
+            }
             if instructions.length == 1 && instructions[0].variant == "Let" {
                 bindings = append_binding(bindings, binding_from_instruction(instructions[0]));
             } else {
