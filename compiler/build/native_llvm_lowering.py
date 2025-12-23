@@ -1599,7 +1599,7 @@ def flatten_struct_methods(structs):
                 break
             method = definition.methods[method_index]
             qualified_name = definition.name + "::" + method.name
-            qualified = NativeFunction(name=qualified_name, parameters=method.parameters, return_type=method.return_type, effects=method.effects, instructions=method.instructions)
+            qualified = NativeFunction(name=qualified_name, parameters=method.parameters, return_type=method.return_type, effects=method.effects, decorators=method.decorators, instructions=method.instructions)
             result = append_native_function(result, qualified)
             method_index += 1
         index += 1
@@ -2291,6 +2291,14 @@ def collect_runtime_helper_targets(functions):
 
 def collect_function_runtime_helper_targets(function):
     used = []
+    decorator_index = 0
+    while True:
+        if decorator_index >= len(function.decorators):
+            break
+        decorator_name = function.decorators[decorator_index]
+        if matches_case_insensitive(decorator_name, "logExecution")  or  matches_case_insensitive(decorator_name, "logexecution")  or  matches_case_insensitive(decorator_name, "trace"):
+            used = append_unique_effect(used, "runtime_log_execution_fn")
+        decorator_index += 1
     index = 0
     while True:
         if index >= len(function.instructions):
@@ -3032,13 +3040,30 @@ def emit_function(function, functions, effects, context):
     entry_label = "block.entry"
     lines = append_string(lines, "define " + llvm_return + " @" + sanitized + "(" + signature + ") {")
     lines = append_string(lines, entry_label + ":")
+    decorator_string_constants = empty_string_constant_set()
+    decorator_index = 0
+    while True:
+        if decorator_index >= len(function.decorators):
+            break
+        decorator_name = function.decorators[decorator_index]
+        if matches_case_insensitive(decorator_name, "logExecution")  or  matches_case_insensitive(decorator_name, "logexecution")  or  matches_case_insensitive(decorator_name, "trace"):
+            content = function.name
+            constant_name = make_string_constant_name(content)
+            constant = StringConstant(name=constant_name, content=content, byte_count=len(content))
+            decorator_string_constants = append_string_constant(decorator_string_constants, constant)
+            array_length = len(content) + 1
+            array_type = "[" + number_to_string(array_length) + " x i8]"
+            call_line = "  call i8* @sailfin_runtime_log_execution(i8* getelementptr inbounds (" + array_type + ", " + array_type + "* " + constant_name + ", i32 0, i32 0))"
+            lines = append_string(lines, call_line)
+        decorator_index += 1
     body = emit_body(function, llvm_return, preparation.bindings, functions, context, entry_label)
     lines = (lines) + (body.lines)
     diagnostics = (diagnostics) + (body.diagnostics)
     lifetime_diagnostics = validate_borrow_lifetimes(function, body.lifetime_regions)
     diagnostics = (diagnostics) + (lifetime_diagnostics)
     lines = append_string(lines, "}")
-    return LoweredLLVMFunction(lines=lines, diagnostics=diagnostics, lifetime_regions=body.lifetime_regions, string_constants=body.string_constants)
+    merged_constants = merge_string_constants(body.string_constants, decorator_string_constants)
+    return LoweredLLVMFunction(lines=lines, diagnostics=diagnostics, lifetime_regions=body.lifetime_regions, string_constants=merged_constants)
 
 def emit_body(function, llvm_return, bindings, functions, context, entry_label):
     lowered = lower_instruction_range(

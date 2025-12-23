@@ -851,6 +851,10 @@ void sailfin_runtime_copy_bytes(char *dest, char *src, int64_t length)
 
 char *sailfin_runtime_log_execution(char *value)
 {
+    if (value)
+    {
+        sailfin_runtime_print_info(value);
+    }
     return value;
 }
 
