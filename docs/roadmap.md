@@ -16,14 +16,14 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 - [ ] Self-hosted release pipeline
 
   - [ ] Promote the Stage2 bootstrap job to the primary release workflow so every merge runs the Stage2->Stage2 rebuild and archives the native artifacts.
-  - [ ] Add a `stage2-build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the Stage2 smoke suite, and uploads artifacts for downstream jobs.
+  - [x] Add a `stage2-build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the Stage2 smoke suite, and uploads artifacts for downstream jobs.
     - [x] Initial workflow scaffolds Stage2 bootstrap/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged LLVM artifacts via `tools/package_stage2.py`.
-  - [ ] Wire the workflow into `semantic-release` so version bumps publish Stage2 binaries, provenance metadata, and changelog entries in one pass.
+  - [x] Wire the workflow into `semantic-release` so version bumps publish Stage2 binaries, provenance metadata, and changelog entries in one pass.
   - [ ] Keep pytest-driven harnesses in CI while the Stage2 native test harness is rewritten; document the temporary dual-runtime strategy in `docs/status.md`.
 
 - [ ] Installer and distribution hardening
 
-  - [ ] Replace `scripts/install_stage1.py` with a curl-able `scripts/install.sh` that detects OS/arch, downloads the matching Stage2 binary, verifies checksums, and installs to `/usr/local/bin` (with override support).
+  - [x] Replace `scripts/install_stage1.py` with a curl-able `scripts/install.sh` that detects OS/arch, downloads the matching Stage2 binary, verifies checksums, and installs to `/usr/local/bin` (with override support).
   - [ ] Publish signed checksums alongside release artifacts and add a CI job that runs the installer against staging builds.
   - [ ] Update `README.md` and `docs/status.md` with new install flow, fallback guidance for contributors, and troubleshooting for unsupported platforms.
 

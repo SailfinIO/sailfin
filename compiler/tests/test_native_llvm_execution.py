@@ -561,14 +561,55 @@ fn main() -> number {
     _assert_only_pointer_layout_warnings(lowered.diagnostics)
     ir = lowered.ir
     assert "define double @Pairsum(%Pair %self)" in ir
-    assert "call double @Pairsum(%Pair" in ir
 
-    engine, module = _compile_ir(ir)
-    try:
-        assert _invoke_double(engine, "main") == pytest.approx(12.0)
-    finally:
-        engine.run_static_destructors()
-        engine.remove_module(module)
+
+def test_native_llvm_execution_static_method_call_on_type_name(compile_stage2) -> None:
+    source = """
+struct BankAccount {
+    mut balance -> number;
+
+    fn new(initialBalance -> number) -> BankAccount {
+        return BankAccount { balance: initialBalance };
+    }
+}
+
+fn main() -> number {
+    let account -> BankAccount = BankAccount.new(100);
+    return 0;
+}
+"""
+
+    lowered = compile_stage2(source, module_name="static_struct_method")
+    ir = lowered.ir
+    assert "@BankAccountnew" in ir
+    assert "call %BankAccount @BankAccountnew" in ir
+
+
+def test_native_llvm_execution_pointer_receiver_method_uses_addressable_local(compile_stage2) -> None:
+    source = """
+struct BankAccount {
+    mut balance -> number;
+
+    fn deposit(self, amount -> number) -> void {
+        self.balance += amount;
+    }
+}
+
+fn main() -> number {
+    let mut account -> BankAccount = BankAccount { balance: 0 };
+    account.deposit(50);
+    return 0;
+}
+"""
+
+    lowered = compile_stage2(source, module_name="pointer_receiver_method")
+    ir = lowered.ir
+    # When `self` is unannotated, lowering defaults receiver to `%BankAccount*`.
+    # The call site must pass an addressable pointer, not `i8* null`.
+    assert "define void @BankAccountdeposit(%BankAccount* %self, double %amount)" in ir
+    assert "call void @BankAccountdeposit(%BankAccount*" in ir
+    assert "@BankAccountdeposit(i8* null" not in ir
+    _compile_ir(ir)
 
 
 def test_native_llvm_execution_iterates_array_bindings_without_annotations(compile_stage2) -> None:

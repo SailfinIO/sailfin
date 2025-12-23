@@ -565,6 +565,12 @@ struct MatchFieldBinding {
     field_offset -> number;
 }
 
+struct MatchStructFieldBinding {
+    field_name -> string;
+    field_type -> string;
+    field_index -> number;
+}
+
 struct MatchCaseCondition {
     lines -> string[];
     temp_index -> number;
@@ -574,6 +580,9 @@ struct MatchCaseCondition {
     field_bindings -> MatchFieldBinding[];
     enum_info -> EnumTypeInfo?;
     variant_info -> EnumVariantInfo?;
+    union_variant_index -> number;
+    union_struct_info -> StructTypeInfo?;
+    union_struct_bindings -> MatchStructFieldBinding[];
     string_constants -> StringConstant[];
 }
 
@@ -1350,7 +1359,7 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
         }
         emitted_declarations = append_string(emitted_declarations, sanitized_name);
         let return_type = map_return_type(context, function.return_type);
-        let param_types = collect_parameter_types(context, function.parameters);
+        let param_types = collect_parameter_types(context, function.parameters, function.name);
         let param_text = join_with_separator(param_types, ", ");
         let line = "declare " + return_type + " @" + sanitized_name + "(" + param_text + ")";
         lines = append_string(lines, line);
@@ -2025,7 +2034,8 @@ fn is_ascii_uppercase(ch -> string) -> boolean {
     if ch.length == 0 {
         return false;
     }
-    return ch >= "A" && ch <= "Z";
+    let code = char_code(ch);
+    return code >= char_code("A") && code <= char_code("Z");
 }
 
 fn looks_like_user_type(annotation -> string) -> boolean {
@@ -2415,6 +2425,13 @@ fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBi
                 return info;
             }
         }
+    }
+    // Allow static method calls on a struct type (e.g. `BankAccount.new(123)`).
+    // The base identifier has no runtime value, but its name can still resolve
+    // to a known struct type in the module context.
+    let by_name = find_struct_info_by_name(context, trimmed);
+    if by_name != null {
+        return by_name;
     }
     return null;
 }
@@ -5986,6 +6003,7 @@ fn lower_match_instruction(
     diagnostics = diagnostics.concat(structure.diagnostics);
 
     let subject_instruction = function.instructions[start_index];
+    let subject_name = extract_simple_identifier(subject_instruction.expression);
     let subject_result = lower_expression(subject_instruction.expression, bindings, current_locals, current_temp, current_lines, functions, context, "");
     diagnostics = diagnostics.concat(subject_result.diagnostics);
     current_lines = subject_result.lines;
@@ -6012,6 +6030,9 @@ fn lower_match_instruction(
     }
 
     let subject_operand = subject_result.operand;
+
+    let union_payload_types = parse_union_payload_types(subject_operand.llvm_type);
+    let mut matched_union_variants -> number[] = [];
 
     if structure.cases.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: match without cases in `" + function.name + "`");
@@ -6106,6 +6127,24 @@ fn lower_match_instruction(
         current_temp = lowered_condition.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, lowered_condition.string_constants);
 
+        if lowered_condition.union_variant_index >= 0 {
+            let mut seen -> boolean = false;
+            let mut seen_index -> number = 0;
+            loop {
+                if seen_index >= matched_union_variants.length {
+                    break;
+                }
+                if matched_union_variants[seen_index] == lowered_condition.union_variant_index {
+                    seen = true;
+                    break;
+                }
+                seen_index += 1;
+            }
+            if !seen {
+                matched_union_variants = matched_union_variants.concat([lowered_condition.union_variant_index]);
+            }
+        }
+
         if lowered_condition.is_default {
             has_unconditional_default = true;
             current_lines = append_string(current_lines, "  br label %" + body_labels[index]);
@@ -6196,6 +6235,118 @@ fn lower_match_instruction(
 
                 base_local_id += 1;
                 binding_idx += 1;
+            }
+        }
+
+        // Extract and bind fields if this is a union-variant struct pattern with bindings.
+        if lowered_condition.union_variant_index >= 0 && lowered_condition.union_struct_info != null && lowered_condition.union_struct_bindings.length > 0 {
+            let struct_info_val = lowered_condition.union_struct_info;
+            let variant_index = lowered_condition.union_variant_index;
+            let payload_index = variant_index + 1;
+
+            // Extract the variant payload (a struct pointer) from the union.
+            let payload_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            let payload_type = union_payload_types[variant_index];
+            current_lines = append_string(current_lines, "  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
+
+            let typed_payload_ptr = payload_temp;
+            // If the payload is an opaque pointer, try to preserve the expected struct pointer type.
+            let expected_ptr_type = struct_info_val.llvm_name + "*";
+            if payload_type == "i8*" {
+                let cast_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + payload_temp + " to " + expected_ptr_type);
+                typed_payload_ptr = cast_temp;
+            }
+
+            let mut binding_idx -> number = 0;
+            loop {
+                if binding_idx >= lowered_condition.union_struct_bindings.length {
+                    break;
+                }
+                let binding = lowered_condition.union_struct_bindings[binding_idx];
+
+                // Compute field pointer and load.
+                let gep_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + gep_temp + " = getelementptr " + struct_info_val.llvm_name + ", " + expected_ptr_type + " " + typed_payload_ptr + ", i32 0, i32 " + number_to_string(binding.field_index));
+                let load_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + load_temp + " = load " + binding.field_type + ", " + binding.field_type + "* " + gep_temp);
+
+                // Allocate a local for this binding.
+                let local_alloca_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + binding.field_type);
+                current_lines = append_string(current_lines, "  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp);
+
+                base_locals = base_locals.concat([LocalBinding {
+                    name: binding.field_name,
+                    pointer: local_alloca_temp,
+                    llvm_type: binding.field_type,
+                    type_annotation: "",
+                    ownership: null,
+                    consumed: false,
+                    scope_id: make_child_scope_id(scope_id, body_labels[index]),
+                    scope_depth: scope_depth + 1,
+                }]);
+                base_local_id += 1;
+                binding_idx += 1;
+            }
+        }
+
+        // Union narrowing for default arm: if all non-default patterns matched a strict subset
+        // of union variants, and exactly one variant remains, bind the subject identifier to
+        // that remaining payload type in the arm scope.
+        if lowered_condition.is_default && union_payload_types.length > 0 && subject_name.length > 0 {
+            let mut remaining -> number[] = [];
+            let mut v -> number = 0;
+            loop {
+                if v >= union_payload_types.length {
+                    break;
+                }
+                let mut is_matched -> boolean = false;
+                let mut mi -> number = 0;
+                loop {
+                    if mi >= matched_union_variants.length {
+                        break;
+                    }
+                    if matched_union_variants[mi] == v {
+                        is_matched = true;
+                        break;
+                    }
+                    mi += 1;
+                }
+                if !is_matched {
+                    remaining = remaining.concat([v]);
+                }
+                v += 1;
+            }
+            if remaining.length == 1 {
+                let remaining_index = remaining[0];
+                let payload_index = remaining_index + 1;
+                let payload_type = union_payload_types[remaining_index];
+                let payload_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
+
+                let local_alloca_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + payload_type);
+                current_lines = append_string(current_lines, "  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp);
+
+                base_locals = base_locals.concat([LocalBinding {
+                    name: subject_name,
+                    pointer: local_alloca_temp,
+                    llvm_type: payload_type,
+                    type_annotation: "",
+                    ownership: null,
+                    consumed: false,
+                    scope_id: make_child_scope_id(scope_id, body_labels[index]),
+                    scope_depth: scope_depth + 1,
+                }]);
+                base_local_id += 1;
             }
         }
 
@@ -6306,6 +6457,9 @@ fn lower_match_case_condition(
     let mut field_bindings -> MatchFieldBinding[] = [];
     let mut matched_enum_info -> EnumTypeInfo? = null;
     let mut matched_variant_info -> EnumVariantInfo? = null;
+    let mut union_variant_index -> number = -1;
+    let mut union_struct_info -> StructTypeInfo? = null;
+    let mut union_struct_bindings -> MatchStructFieldBinding[] = [];
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     if !case.is_default {
@@ -6397,29 +6551,111 @@ fn lower_match_case_condition(
                 }
             }
         } else {
-            // Fallback to existing expression-based pattern matching
-            let pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context, "");
-            diagnostics = diagnostics.concat(pattern_result.diagnostics);
-            current_lines = pattern_result.lines;
-            current_temp = pattern_result.temp_index;
-            collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants);
-            if pattern_result.operand != null {
-                let harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines);
-                diagnostics = diagnostics.concat(harmonised.diagnostics);
-                if harmonised.left != null && harmonised.right != null {
-                    current_lines = harmonised.lines;
-                    current_temp = harmonised.temp_index;
-                    let comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines);
-                    diagnostics = diagnostics.concat(comparison.diagnostics);
-                    current_lines = comparison.lines;
-                    current_temp = comparison.temp_index;
-                    condition_operand = comparison.operand;
-                } else {
-                    current_lines = harmonised.lines;
-                    current_temp = harmonised.temp_index;
+            // Union/struct pattern matching: allow `TypeName { field }` against inline unions.
+            if is_union_llvm_type(subject_operand.llvm_type) {
+                let union_parts = parse_union_payload_types(subject_operand.llvm_type);
+                let struct_parse = parse_struct_pattern(case.pattern);
+                if struct_parse.recognized && struct_parse.success {
+                    let info = find_struct_info_by_name(context, struct_parse.type_name);
+                    if info != null {
+                        // Find which union variant corresponds to this struct.
+                        let mut idx -> number = 0;
+                        let mut found_index -> number = -1;
+                        loop {
+                            if idx >= union_parts.length {
+                                break;
+                            }
+                            let part = union_parts[idx];
+                            if part == info.llvm_name + "*" || part == info.llvm_name {
+                                found_index = idx;
+                                break;
+                            }
+                            idx += 1;
+                        }
+                        if found_index >= 0 {
+                            // Extract and compare tag.
+                            let tag_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines = append_string(current_lines, "  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0");
+                            let tag_operand = LLVMOperand { llvm_type: "i32", value: tag_temp };
+                            let expected_tag = LLVMOperand { llvm_type: "i32", value: number_to_string(found_index) };
+                            let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
+                            diagnostics = diagnostics.concat(comparison.diagnostics);
+                            current_lines = comparison.lines;
+                            current_temp = comparison.temp_index;
+                            condition_operand = comparison.operand;
+
+                            // Collect binding info for any `{ field }` bindings.
+                            let mut fidx -> number = 0;
+                            loop {
+                                if fidx >= struct_parse.fields.length {
+                                    break;
+                                }
+                                let pattern_field = struct_parse.fields[fidx];
+                                if pattern_field.value.length == 0 {
+                                    let mut sfi -> number = 0;
+                                    let mut field_info -> StructFieldInfo? = null;
+                                    loop {
+                                        if sfi >= info.fields.length {
+                                            break;
+                                        }
+                                        if info.fields[sfi].name == pattern_field.name {
+                                            field_info = info.fields[sfi];
+                                            break;
+                                        }
+                                        sfi += 1;
+                                    }
+                                    if field_info != null {
+                                        union_struct_bindings = union_struct_bindings.concat([MatchStructFieldBinding {
+                                            field_name: pattern_field.name,
+                                            field_type: field_info.llvm_type,
+                                            field_index: field_info.index,
+                                        }]);
+                                    } else {
+                                        diagnostics = append_string(diagnostics, "llvm lowering: match pattern field `" + pattern_field.name + "` not found in struct `" + struct_parse.type_name + "`");
+                                    }
+                                } else {
+                                    diagnostics = append_string(diagnostics, "llvm lowering: match struct field literal patterns are not supported for `" + pattern_field.name + "`");
+                                }
+                                fidx += 1;
+                            }
+
+                            union_variant_index = found_index;
+                            union_struct_info = info;
+                        } else {
+                            diagnostics = append_string(diagnostics, "llvm lowering: match struct pattern `" + struct_parse.type_name + "` does not match union type `" + subject_operand.llvm_type + "`");
+                        }
+                    } else {
+                        diagnostics = append_string(diagnostics, "llvm lowering: match pattern references unknown struct `" + struct_parse.type_name + "`");
+                    }
                 }
-            } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`");
+            }
+
+            if condition_operand == null {
+                // Fallback to existing expression-based pattern matching
+                let pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context, "");
+                diagnostics = diagnostics.concat(pattern_result.diagnostics);
+                current_lines = pattern_result.lines;
+                current_temp = pattern_result.temp_index;
+                collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants);
+                if pattern_result.operand != null {
+                    let harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines);
+                    diagnostics = diagnostics.concat(harmonised.diagnostics);
+                    if harmonised.left != null && harmonised.right != null {
+                        current_lines = harmonised.lines;
+                        current_temp = harmonised.temp_index;
+                        let comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines);
+                        diagnostics = diagnostics.concat(comparison.diagnostics);
+                        current_lines = comparison.lines;
+                        current_temp = comparison.temp_index;
+                        condition_operand = comparison.operand;
+                    } else {
+                        current_lines = harmonised.lines;
+                        current_temp = harmonised.temp_index;
+                    }
+                } else {
+                    diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`");
+                }
             }
         }
     }
@@ -6469,6 +6705,9 @@ fn lower_match_case_condition(
         field_bindings: field_bindings,
         enum_info: matched_enum_info,
         variant_info: matched_variant_info,
+        union_variant_index: union_variant_index,
+        union_struct_info: union_struct_info,
+        union_struct_bindings: union_struct_bindings,
     string_constants: collected_string_constants,
     };
 }
@@ -8720,12 +8959,251 @@ fn detect_suspension_conflicts(expression -> string?, locals -> LocalBinding[], 
     return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span);
 }
 
+fn find_top_level_union_separator(text -> string) -> number {
+    let mut paren_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = substring(text, index, index + 1);
+        if in_double {
+            if escape {
+                escape = false;
+            } else {
+                if ch == "\\" {
+                    escape = true;
+                } else {
+                    if ch == "\"" {
+                        in_double = false;
+                    }
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else {
+                if ch == "\\" {
+                    escape = true;
+                } else {
+                    if ch == "'" {
+                        in_single = false;
+                    }
+                }
+            }
+            index += 1;
+            continue;
+        }
+
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "<" {
+            angle_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+
+        if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+            if ch == "|" {
+                return index;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn split_union_annotations(text -> string) -> string[] {
+    let mut result -> string[] = [];
+    let mut remaining = text;
+    loop {
+        let index = find_top_level_union_separator(remaining);
+        if index < 0 {
+            let tail = trim_text(remaining);
+            if tail.length > 0 {
+                result = append_string(result, tail);
+            }
+            break;
+        }
+        let left = trim_text(substring(remaining, 0, index));
+        if left.length > 0 {
+            result = append_string(result, left);
+        }
+        remaining = trim_text(substring(remaining, index + 1, remaining.length));
+    }
+    return result;
+}
+
+fn is_union_annotation(annotation -> string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return false;
+    }
+    return find_top_level_union_separator(trimmed) >= 0;
+}
+
+fn map_union_type(context -> TypeContext, annotation -> string) -> string {
+    let normalized = unwrap_move_wrapper(trim_text(annotation));
+    if !is_union_annotation(normalized) {
+        return "";
+    }
+    let parts = split_union_annotations(normalized);
+    if parts.length < 2 {
+        return "";
+    }
+    let mut llvm_parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parts.length {
+            break;
+        }
+        let part = trim_text(parts[index]);
+        if part.length == 0 {
+            return "";
+        }
+        let mapped = map_type_annotation(part);
+        if mapped.length == 0 || mapped == "void" {
+            return "";
+        }
+        llvm_parts = append_string(llvm_parts, mapped);
+        index += 1;
+    }
+    // Represent unions as an inline tagged struct: { i32, <variant0>, <variant1>, ... }
+    // Tag values correspond to the variant index in the union annotation.
+    return "{ i32, " + join_with_separator(llvm_parts, ", ") + " }";
+}
+
+fn is_union_llvm_type(llvm_type -> string) -> boolean {
+    let trimmed = trim_text(llvm_type);
+    if !starts_with(trimmed, "{") {
+        return false;
+    }
+    if find_substring_from(trimmed, "i32", 0) < 0 {
+        return false;
+    }
+    // Heuristic: our union layout always starts with an i32 tag.
+    // (Arrays are "{ T*, i64 }*" and won't match.)
+    return starts_with(trim_text(trimmed), "{ i32,");
+}
+
+fn parse_union_payload_types(union_llvm_type -> string) -> string[] {
+    let trimmed = trim_text(union_llvm_type);
+    if !is_union_llvm_type(trimmed) {
+        return [];
+    }
+    // Remove outer braces.
+    let inner = trim_text(substring(trimmed, 1, trimmed.length - 1));
+    let fields = split_array_elements(inner);
+    // Expect first entry to be i32 tag.
+    if fields.length < 2 {
+        return [];
+    }
+    let mut result -> string[] = [];
+    let mut index -> number = 1;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        result = append_string(result, trim_text(fields[index]));
+        index += 1;
+    }
+    return result;
+}
+
+fn extract_simple_identifier(text -> string) -> string {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let first = trimmed[0];
+    if !is_identifier_start_char(first) {
+        return "";
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if !is_identifier_part_char(ch) {
+            return "";
+        }
+        index += 1;
+    }
+    return trimmed;
+}
+
 fn map_return_type(context -> TypeContext, return_type -> string) -> string {
     let trimmed = trim_text(return_type);
     if trimmed.length == 0 || trimmed == "void" {
         return "void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
+    let union_type = map_union_type(context, normalized);
+    if union_type.length > 0 {
+        return union_type;
+    }
     // Try optional type first
     let optional_type = map_optional_type(context, normalized);
     if optional_type.length > 0 {
@@ -8753,6 +9231,10 @@ fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> strin
         return "double";
     }
     let normalized = unwrap_move_wrapper(trimmed);
+    let union_type = map_union_type(context, normalized);
+    if union_type.length > 0 {
+        return union_type;
+    }
     // Try optional type first
     let optional_type = map_optional_type(context, normalized);
     if optional_type.length > 0 {
@@ -8780,6 +9262,10 @@ fn map_local_type(context -> TypeContext, type_annotation -> string) -> string {
         return "double";
     }
     let normalized = unwrap_move_wrapper(trimmed);
+    let union_type = map_union_type(context, normalized);
+    if union_type.length > 0 {
+        return union_type;
+    }
     // Try optional type first
     let optional_type = map_optional_type(context, normalized);
     if optional_type.length > 0 {
@@ -10112,18 +10598,45 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         let interface_info = resolve_interface_info_for_method_target(method_parse.base, bindings, locals, context);
         
         if method_info != null {
-            let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
-            diagnostics = diagnostics.concat(lowered_self.diagnostics);
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
-            current_lines = lowered_self.lines;
-            current_temp = lowered_self.temp_index;
-            if lowered_self.operand != null {
-                method_operand = lowered_self.operand;
-                trimmed_target = method_info.name + "::" + method_parse.field;
-                injected_argument_count = 1;
+            let base_name = trim_text(method_parse.base);
+
+            // If the base is not a bound local/parameter, treat this as a static
+            // call on the type (e.g. `BankAccount.new(...)`).
+            if is_simple_identifier(base_name) {
+                let bound_local = find_local_binding(locals, base_name);
+                let bound_param = find_parameter_binding(bindings, base_name);
+                if bound_local == null && bound_param == null {
+                    trimmed_target = method_info.name + "::" + method_parse.field;
+                    injected_argument_count = 0;
+                } else {
+                    let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+                    diagnostics = diagnostics.concat(lowered_self.diagnostics);
+                    collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+                    current_lines = lowered_self.lines;
+                    current_temp = lowered_self.temp_index;
+                    if lowered_self.operand != null {
+                        method_operand = lowered_self.operand;
+                        trimmed_target = method_info.name + "::" + method_parse.field;
+                        injected_argument_count = 1;
+                    } else {
+                        diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                    }
+                }
             } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+                diagnostics = diagnostics.concat(lowered_self.diagnostics);
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+                current_lines = lowered_self.lines;
+                current_temp = lowered_self.temp_index;
+                if lowered_self.operand != null {
+                    method_operand = lowered_self.operand;
+                    trimmed_target = method_info.name + "::" + method_parse.field;
+                    injected_argument_count = 1;
+                } else {
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                }
             }
         } else if interface_info != null {
             // This is a dynamic dispatch through a trait object
@@ -10237,7 +10750,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                 diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
                 llvm_return = "double";
             }
-            expected_params = collect_parameter_types(context, function_entry.parameters);
+            expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target);
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
         }
@@ -10291,6 +10804,36 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
+    // Fill omitted trailing arguments using defaults from the callee signature.
+    // Supports common cases like `fn greet(name -> string = \"Sail\")` then `greet()`.
+    if function_entry != null && operands.length < expected_params.length {
+        let mut param_index -> number = operands.length;
+        loop {
+            if param_index >= expected_params.length {
+                break;
+            }
+            if param_index >= function_entry.parameters.length {
+                break;
+            }
+            let param = function_entry.parameters[param_index];
+            if param.default_value == null {
+                break;
+            }
+            let expected_type = expected_params[param_index];
+            let lowered_default = lower_expression(param.default_value, bindings, locals, current_temp, current_lines, functions, context, expected_type);
+            diagnostics = diagnostics.concat(lowered_default.diagnostics);
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered_default.string_constants);
+            current_lines = lowered_default.lines;
+            current_temp = lowered_default.temp_index;
+            if lowered_default.operand == null {
+                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower default argument for parameter `" + param.name + "` in call to `" + trimmed_target + "`");
+                break;
+            }
+            operands = append_llvm_operand(operands, lowered_default.operand);
+            param_index += 1;
+        }
+    }
+
     if function_entry != null && injected_argument_count == 1 {
         if operands.length > 0 && expected_params.length > 0 {
             let expected_self_type = expected_params[0];
@@ -10304,6 +10847,27 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                         current_temp += 1;
                         let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: load_name };
                         operands = replace_llvm_operand(operands, 0, updated_operand);
+                    } else {
+                        diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                    }
+                } else if ends_with_pointer_suffix(expected_self_type) {
+                    // If the method expects a pointer receiver (common when `self` is unannotated),
+                    // prefer passing the address of an addressable local/parameter.
+                    let base_name = trim_text(method_parse.base);
+                    if is_simple_identifier(base_name) {
+                        let local_pointer = find_local_binding(locals, base_name);
+                        if local_pointer != null && (local_pointer.llvm_type + "*") == expected_self_type {
+                            let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: local_pointer.pointer };
+                            operands = replace_llvm_operand(operands, 0, updated_operand);
+                        } else {
+                            let parameter_pointer = find_parameter_binding(bindings, base_name);
+                            if parameter_pointer != null && parameter_pointer.llvm_type == expected_self_type {
+                                let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: parameter_pointer.llvm_name };
+                                operands = replace_llvm_operand(operands, 0, updated_operand);
+                            } else {
+                                diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                            }
+                        }
                     } else {
                         diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
                     }
@@ -11663,6 +12227,157 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
     return StructLiteralParse { recognized: true, success: !fatal, type_name: type_name, fields: fields, diagnostics: diagnostics };
 }
 
+fn parse_struct_pattern(text -> string) -> StructLiteralParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let first = trimmed[0];
+    if !is_identifier_start_char(first) {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut index -> number = 0;
+    let mut open_index -> number = -1;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+        } else if ch == "[" {
+            bracket_depth += 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+        } else if ch == "<" {
+            angle_depth += 1;
+        } else if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+        } else if ch == "{" {
+            if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+                open_index = index;
+                break;
+            }
+        }
+        index += 1;
+    }
+
+    if open_index < 0 {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut fatal -> boolean = false;
+    let close_index = find_matching_closing_brace(trimmed, open_index);
+    if close_index < 0 {
+        fatal = true;
+    }
+
+    let mut type_name -> string = trim_text(substring(trimmed, 0, open_index));
+    if type_name.length == 0 {
+        fatal = true;
+    }
+
+    let mut fields -> StructLiteralField[] = [];
+    if !fatal && close_index >= 0 {
+        let body = substring(trimmed, open_index + 1, close_index);
+        let entries = split_array_elements(body);
+        let mut seen -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= entries.length {
+                break;
+            }
+            let entry = trim_text(entries[entry_index]);
+            entry_index += 1;
+            if entry.length == 0 {
+                continue;
+            }
+            let colon_index = find_top_level_colon(entry);
+            if colon_index < 0 {
+                let field_name = trim_text(entry);
+                if field_name.length == 0 {
+                    continue;
+                }
+                if string_array_contains(seen, field_name) {
+                    continue;
+                }
+                seen = append_string(seen, field_name);
+                // Empty value indicates a binding pattern.
+                fields = fields.concat([StructLiteralField { name: field_name, value: "" }]);
+                continue;
+            }
+            let field_name = trim_text(substring(entry, 0, colon_index));
+            let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
+            if field_name.length == 0 {
+                continue;
+            }
+            if string_array_contains(seen, field_name) {
+                continue;
+            }
+            if value_text.length == 0 {
+                continue;
+            }
+            seen = append_string(seen, field_name);
+            fields = fields.concat([StructLiteralField { name: field_name, value: value_text }]);
+        }
+    }
+
+    if fatal {
+        fields = [];
+    }
+
+    return StructLiteralParse { recognized: true, success: !fatal, type_name: type_name, fields: fields, diagnostics: diagnostics };
+}
+
 fn parse_enum_literal(text -> string) -> EnumLiteralParse {
     let trimmed = trim_text(text);
     let mut diagnostics -> string[] = [];
@@ -12423,14 +13138,27 @@ fn is_string_pointer_type(llvm_type -> string) -> boolean {
     return false;
 }
 
-fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[]) -> string[] {
+fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[], function_name -> string) -> string[] {
     let mut types -> string[] = [];
     let mut index -> number = 0;
     loop {
         if index >= parameters.length {
             break;
         }
-        let llvm_type = map_parameter_type(context, parameters[index].type_annotation);
+        let parameter = parameters[index];
+        let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
+
+        // Mirror `prepare_parameters`: infer method receiver type when `self` is unannotated.
+        if parameter.type_annotation.length == 0 && parameter.name == "self" && index == 0 {
+            let double_colon_pos = find_last_index_of_char(function_name, ":");
+            if double_colon_pos > 0 && substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+                let struct_name = substring(function_name, 0, double_colon_pos - 1);
+                let struct_type = map_struct_type_annotation(context, struct_name);
+                if struct_type.length > 0 {
+                    llvm_type = struct_type + "*";
+                }
+            }
+        }
         if llvm_type.length == 0 {
             types = append_string(types, "double");
         } else {
@@ -12460,11 +13188,100 @@ fn load_local_operand(local -> LocalBinding, temp_index -> number, lines -> stri
 fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_index -> number, lines -> string[]) -> CoercionResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
+    let operand_type = trim_text(operand.llvm_type);
     if target_type.length == 0 {
         return CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
     }
-    if operand.llvm_type == target_type {
+    if operand_type == target_type {
         return CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+
+    // Union construction: wrap a concrete value into an inline tagged union.
+    // Union layout is `{ i32, <variant0>, <variant1>, ... }` with tag at index 0.
+    if is_union_llvm_type(target_type) {
+        let variants = parse_union_payload_types(target_type);
+        let mut variant_index -> number = 0;
+        loop {
+            if variant_index >= variants.length {
+                break;
+            }
+            let variant_type = variants[variant_index];
+            let mut has_value -> boolean = false;
+            let mut value_text -> string = "";
+            let mut local_lines -> string[] = current_lines;
+            let mut local_temp -> number = temp_index;
+
+            if operand_type == variant_type {
+                has_value = true;
+                value_text = operand.value;
+            } else if !ends_with_pointer_suffix(operand_type) && ends_with_pointer_suffix(variant_type) {
+                let expected_value_type = strip_pointer_suffix(variant_type);
+                if expected_value_type == operand_type {
+                    let size_ptr_temp = format_temp_name(local_temp);
+                    let size_temp = format_temp_name(local_temp + 1);
+                    let malloc_temp = format_temp_name(local_temp + 2);
+                    let typed_ptr_temp = format_temp_name(local_temp + 3);
+
+                    local_lines = append_string(local_lines, "  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
+                    local_lines = append_string(local_lines, "  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
+                    local_lines = append_string(local_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                    local_lines = append_string(local_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
+                    local_lines = append_string(local_lines, "  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
+                    local_lines = append_string(local_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+
+                    has_value = true;
+                    value_text = typed_ptr_temp;
+                    local_temp += 4;
+                }
+            } else if variant_type == "i8*" && !ends_with_pointer_suffix(operand_type) {
+                if starts_with(operand_type, "%") || starts_with(operand_type, "{") {
+                    let size_ptr_temp = format_temp_name(local_temp);
+                    let size_temp = format_temp_name(local_temp + 1);
+                    let malloc_temp = format_temp_name(local_temp + 2);
+                    let typed_ptr_temp = format_temp_name(local_temp + 3);
+
+                    local_lines = append_string(local_lines, "  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
+                    local_lines = append_string(local_lines, "  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
+                    local_lines = append_string(local_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                    local_lines = append_string(local_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
+                    local_lines = append_string(local_lines, "  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
+                    local_lines = append_string(local_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+
+                    has_value = true;
+                    value_text = malloc_temp;
+                    local_temp += 4;
+                }
+            }
+
+            if has_value {
+                let tag_temp = format_temp_name(local_temp);
+                let union_temp = format_temp_name(local_temp + 1);
+                local_lines = append_string(local_lines, "  " + tag_temp + " = insertvalue " + target_type + " undef, i32 " + number_to_string(variant_index) + ", 0");
+                local_lines = append_string(local_lines, "  " + union_temp + " = insertvalue " + target_type + " " + tag_temp + ", " + variant_type + " " + value_text + ", " + number_to_string(variant_index + 1));
+                let coerced = LLVMOperand { llvm_type: target_type, value: union_temp };
+                return CoercionResult { lines: local_lines, temp_index: local_temp + 2, operand: coerced, diagnostics: diagnostics };
+            }
+            variant_index += 1;
+        }
+    }
+
+    // Convenience stringification: allow passing numbers where a string is expected.
+    // (e.g. `print.info(8)` instead of `print.info(number.to_string(8))`).
+    if target_type == "i8*" {
+        if operand.llvm_type == "double" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")");
+            let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+        if operand.llvm_type == "i64" {
+            let as_double = format_temp_name(temp_index);
+            let as_string = format_temp_name(temp_index + 1);
+            current_lines = append_string(current_lines, "  " + as_double + " = sitofp i64 " + operand.value + " to double");
+            current_lines = append_string(current_lines, "  " + as_string + " = call i8* @sailfin_runtime_number_to_string(double " + as_double + ")");
+            let coerced = LLVMOperand { llvm_type: "i8*", value: as_string };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+        }
     }
     // Allow implicit loads when a pointer-to-T is passed where T is expected.
     if !ends_with_pointer_suffix(target_type) && ends_with_pointer_suffix(operand.llvm_type) {
@@ -13995,16 +14812,16 @@ fn parse_range_iterable(iterable -> string) -> RangeIterableParse {
 }
 
 fn find_local_binding(locals -> LocalBinding[], name -> string) -> LocalBinding? {
-    let mut index -> number = 0;
+    let mut index -> number = locals.length;
     loop {
-        if index >= locals.length {
+        if index <= 0 {
             break;
         }
+        index -= 1;
         let entry = locals[index];
         if entry.name == name {
             return entry;
         }
-        index += 1;
     }
     return null;
 }

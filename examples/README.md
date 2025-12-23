@@ -87,6 +87,9 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 | `parametric-polymorphism.sfn` | `io` | Generic identity function with logged values. |
 | `type-guards.sfn` | `io` | Runtime type refinement and guarded matches within `main`. |
 | `unions.sfn` | `io` | Union + intersection typing with runtime checks. |
+| `pointer-arithmetic.sfn` | `io`, `unsafe` | **Design-stage** pointer arithmetic with malloc/free. |
+| `raw-pointers.sfn` | `io`, `unsafe` | **Design-stage** raw pointer creation and dereference with `&raw`. |
+| `unsafe-extern-interop.sfn` | `io`, `unsafe` | **Design-stage** extern function declarations and unsafe blocks. |
 | `web-server-with-concurrency.sfn` | `clock`, `io`, `net` | HTTP handler spawning routines and throttled background work. |
 
 ### `ai/`
@@ -118,6 +121,9 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 
 - **Stage1-friendly**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs covered by the stage1 pipeline.
 - **Effect-sensitive**: `advanced`, `concurrency`, `ai`, `io`, and `web` rely on mocked helpers (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`, `model` prompts). Declare the exact effects listed above before running them through the bootstrap compiler.
+- **Design-stage examples**: Some examples demonstrate planned features that parse but aren't fully enforced yet. These are marked with **Design-stage** in the notes column. Examples include:
+  - `unsafe-extern-interop.sfn` — FFI interop with raw pointers and `unsafe` blocks. Parser accepts the syntax but unsafe semantics are not yet enforced. See `docs/spec.md` §6.1.5.
+  - `borrowing.sfn` — Ownership and borrowing syntax. Parser accepts but Stage1 does not enforce exclusivity. Stage2 LLVM backend enforces borrow conflicts.
 - **Forward-looking commentary**: Any future syntax remains inside comments—runnable code in this directory sticks to the shipped bootstrap grammar. Update the index whenever you add new examples or adjust their effects.
 
 > Tip: Browse examples alongside the grammar (`docs/enbf.md`) and spec (`docs/spec.md`) to see how planned features map onto the implemented subset.

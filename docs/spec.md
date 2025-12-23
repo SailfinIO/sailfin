@@ -552,11 +552,47 @@ Async safety: borrow effects cannot cross suspension points unless the reference
 
 #### 6.1.5 Unsafe capability and extern interop
 
-Low-level interop lives behind an explicit `unsafe` capability. Unsafe declarations surface the risk while keeping safe code pointer-free:
+Low-level interop lives behind an explicit `unsafe` capability. Unsafe declarations surface the risk while keeping safe code pointer-free.
 
-```
+**Bootstrap status**: The parser accepts `unsafe`, `extern`, and raw pointer syntax (`*T`, `*mut T`). The bootstrap compiler does not enforce unsafe semantics. Stage2 will enforce all rules described below.
+
+##### 6.1.5.1 Foreign Function Declarations
+
+External functions from C libraries are declared using `unsafe extern fn`:
+
+```sfn
 unsafe extern fn malloc(size -> usize) -> *u8;
+unsafe extern fn free(ptr -> *u8) -> void;
+unsafe extern fn memcpy(dest -> *u8, src -> *u8, n -> usize) -> *u8;
+```
 
+Key properties:
+- Follows the C ABI calling convention by default
+- Cannot be called without an active `![unsafe]` capability
+- May accept and return raw pointer types
+- Must be linked against the appropriate native library at build time
+
+##### 6.1.5.2 Raw Pointer Types
+
+Sailfin provides two raw pointer types for FFI:
+
+| Type | Description |
+|------|-------------|
+| `*T` | Read-only raw pointer to type `T` |
+| `*mut T` | Mutable raw pointer to type `T` |
+| `*opaque` | Opaque pointer to foreign-managed memory |
+
+Raw pointers differ from references:
+- No lifetime tracking or borrow checking
+- No automatic null safety
+- May be cast between compatible types
+- Support pointer arithmetic via `ptr + offset`
+
+##### 6.1.5.3 Unsafe Blocks
+
+The `unsafe { ... }` block is a lexical scope where raw pointer operations are legal:
+
+```sfn
 fn allocate_buffer(bytes -> usize) ![unsafe] -> *u8 {
   unsafe {
     let ptr = malloc(bytes);
@@ -566,7 +602,176 @@ fn allocate_buffer(bytes -> usize) ![unsafe] -> *u8 {
 }
 ```
 
-Inside an `unsafe` block you may dereference raw pointers (`*ptr`) or call other unsafe routines; outside, only reference-typed values (`&T`, `&mut T`) are available. Capability manifests must opt into `unsafe` before such code can run.
+Operations restricted to unsafe blocks:
+- **Pointer dereference**: `*ptr` to read, `*ptr = value` to write
+- **Pointer arithmetic**: `ptr + offset`, `ptr - offset`
+- **Pointer casting**: `ptr as *OtherType`
+- **Calling unsafe extern functions**: Direct calls to FFI bindings
+- **Taking raw pointers**: `&raw value` to obtain a raw pointer from a value
+
+The unsafe effect propagates: any function containing an unsafe block must declare `![unsafe]`.
+
+##### 6.1.5.4 Safe Wrappers Pattern
+
+The recommended pattern is to encapsulate unsafe operations behind safe abstractions:
+
+```sfn
+// Unsafe internals wrapped in a safe API
+struct ManagedBuffer {
+    ptr -> *u8;
+    capacity -> usize;
+    length -> usize;
+}
+
+// Safe allocation with Linear wrapper for cleanup enforcement
+fn allocate_buffer(size -> usize) ![unsafe] -> UnsafeResult<Linear<ManagedBuffer>> {
+    unsafe {
+        let ptr = malloc(size);
+        if ptr == null {
+            return UnsafeResult.Err { code: -1, message: "allocation failed" };
+        }
+        memset(ptr, 0, size);
+        return UnsafeResult.Ok {
+            value: Linear(ManagedBuffer { ptr: ptr, capacity: size, length: 0 })
+        };
+    }
+}
+
+// Safe deallocation consuming the Linear wrapper
+fn free_buffer(buffer -> Linear<ManagedBuffer>) ![unsafe] -> void {
+    unsafe {
+        let inner = consume(buffer);
+        if inner.ptr != null {
+            free(inner.ptr);
+        }
+    }
+}
+```
+
+The `Linear<T>` wrapper ensures the buffer is consumed exactly once, preventing leaks.
+
+##### 6.1.5.5 Capability Manifest Requirements
+
+The `unsafe` capability must be declared in the capsule manifest before any unsafe code can compile:
+
+```toml
+# sail.toml
+[package]
+name = "my-native-lib"
+version = "0.1.0"
+
+[capabilities]
+required = ["io", "unsafe"]
+```
+
+Fleet-level policies can restrict which capsules may request `unsafe`:
+
+```toml
+# fleet.toml
+[policies.unsafe]
+# Only allow unsafe in specific capsules
+allowed_capsules = ["runtime-adapters", "native-bindings"]
+# Require security review annotation
+require_annotation = "@security-reviewed"
+```
+
+##### 6.1.5.6 Pointer Arithmetic and Casting
+
+Inside unsafe blocks, pointer arithmetic follows C semantics:
+
+```sfn
+fn pointer_example() ![unsafe] -> void {
+    unsafe {
+        let arr = malloc(10 * 4) as *i32;  // Cast to typed pointer
+
+        for i in 0..10 {
+            let element_ptr = arr + i;  // Pointer + offset (scaled by element size)
+            *element_ptr = i * i;       // Write through pointer
+        }
+
+        let third = *(arr + 2);  // Read third element
+
+        free(arr as *u8);  // Cast back for free
+    }
+}
+```
+
+Supported operations:
+- `ptr + n` — Advance by `n` elements (not bytes)
+- `ptr - n` — Retreat by `n` elements
+- `ptr as *OtherType` — Reinterpret pointer type
+- `ptr == null` / `ptr != null` — Null checks
+
+##### 6.1.5.7 FFI Type Mappings
+
+Sailfin types map to C types as follows:
+
+| Sailfin | C | LLVM |
+|---------|---|------|
+| `i8` | `int8_t` / `char` | `i8` |
+| `i16` | `int16_t` | `i16` |
+| `i32` | `int32_t` | `i32` |
+| `i64` | `int64_t` | `i64` |
+| `u8` | `uint8_t` | `i8` |
+| `u16` | `uint16_t` | `i16` |
+| `u32` | `uint32_t` | `i32` |
+| `u64` | `uint64_t` | `i64` |
+| `usize` | `size_t` | `i64` (platform-dependent) |
+| `isize` | `ssize_t` | `i64` (platform-dependent) |
+| `f32` | `float` | `float` |
+| `f64` | `double` | `double` |
+| `bool` | `_Bool` / `bool` | `i1` |
+| `*T` | `const T*` | `T*` |
+| `*mut T` | `T*` | `T*` |
+| `*opaque` | `void*` | `i8*` |
+
+##### 6.1.5.8 Struct Layout for FFI
+
+When passing structs across FFI boundaries, layout must match C expectations:
+
+```sfn
+// Explicit layout annotation for C ABI compatibility
+@repr(C)
+struct Point {
+    x -> f64;
+    y -> f64;
+}
+
+unsafe extern fn distance(p1 -> *Point, p2 -> *Point) -> f64;
+```
+
+The `@repr(C)` decorator ensures C-compatible field ordering and alignment.
+
+##### 6.1.5.9 Error Handling Across FFI
+
+Foreign functions typically signal errors via return codes or errno. Safe wrappers should translate these:
+
+```sfn
+enum PosixResult<T> {
+    Ok { value -> T },
+    Err { errno -> i32 },
+}
+
+unsafe extern fn c_open(path -> *u8, flags -> i32) -> i32;
+unsafe extern fn c_errno() -> i32;
+
+fn open_file(path -> string, flags -> i32) ![unsafe, io] -> PosixResult<i32> {
+    unsafe {
+        let fd = c_open(path.as_c_str(), flags);
+        if fd < 0 {
+            return PosixResult.Err { errno: c_errno() };
+        }
+        return PosixResult.Ok { value: fd };
+    }
+}
+```
+
+##### 6.1.5.10 Example Reference
+
+See `examples/advanced/` for unsafe/extern examples:
+- `unsafe-extern-interop.sfn` — External function declarations and unsafe blocks
+- `pointer-arithmetic.sfn` — Pointer arithmetic with malloc/free
+- `raw-pointers.sfn` — Raw pointer creation with `&raw` and dereference
 
 ## 7. Capability-Based Security
 

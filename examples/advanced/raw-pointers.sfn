@@ -1,0 +1,20 @@
+// examples/advanced/raw-pointers.sfn
+
+fn main() ![unsafe, io] {
+    let mut value -> i32 = 42;
+
+    // Take a raw pointer to the value
+    let ptr -> *i32 = &raw value;
+
+    unsafe {
+        // Read through the pointer
+        let read_value = *ptr;
+        print.info("Read value: {{ read_value }}");
+
+        // Write through the pointer
+        *ptr = 100;
+    }
+
+    // Value was modified through the pointer
+    print.info("Modified value: {{ value }}");
+}

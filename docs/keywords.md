@@ -45,10 +45,18 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
 - `import`
 - `export`
 - `from`
+- `as` — Type casting operator (e.g., `ptr as *i32`)
 - `model`
 - `tool`
 - `pipeline`
 - `test`
+
+### Unsafe & FFI
+
+- `unsafe` — Marks functions or blocks that perform low-level operations
+- `extern` — Declares external C ABI functions
+- `raw` — Raw pointer creation expression (`&raw value`)
+- `opaque` — Target type for opaque foreign pointers (`*opaque`)
 
 ### Concurrency & Utilities
 

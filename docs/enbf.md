@@ -57,9 +57,19 @@ TypeParameter      = Identifier [ ":" Type ] ;
 FunctionDeclaration = { Decorator } { FunctionModifier }
                       "fn" Identifier [ TypeParameters ]
                       "(" [ Parameters ] ")"
-                      [ TypeSep Type ] [ EffectList ] Block ;
+                      [ TypeSep Type ] [ EffectList ] ( Block | ";" ) ;
 
 FunctionModifier    = "async" | "unsafe" | "extern" ;
+
+// Extern function declarations (FFI bindings to C libraries)
+// When both "unsafe" and "extern" modifiers are present, the function
+// declares an external C symbol. These declarations end with ";" instead
+// of a block body.
+//
+// Examples:
+//   unsafe extern fn malloc(size -> usize) -> *u8;
+//   unsafe extern fn free(ptr -> *u8) -> void;
+//   unsafe extern fn strlen(s -> *u8) -> usize;
 
 PipelineDeclaration = "pipeline" Identifier "(" [ Parameters ] ")"
                       [ TypeSep Type ] [ EffectList ] Block ;
@@ -160,15 +170,29 @@ Comparison         = Term { ("<" | "<=" | ">" | ">=") Term } ;
 Term               = Factor { ("+" | "-") Factor } ;
 Factor             = Unary { ("*" | "/") Unary } ;
 Unary              = ("!" | "-" | "+" | "await") Unary
-                   | "&" [ "mut" ] Unary
-                   | "borrow" "(" Expression ")"
-                   | "*" Unary   // raw pointer deref (only legal inside unsafe blocks)
+                   | "&" [ "mut" ] Unary           // Reference creation (&x, &mut x)
+                   | "&" "raw" Unary               // Raw pointer creation (only in unsafe)
+                   | "borrow" "(" Expression ")"   // Explicit borrow expression
+                   | "*" Unary                     // Pointer dereference (only in unsafe)
                    | Postfix ;
 
-Postfix            = Primary { PostfixOp } ;
+// Pointer/Reference Expressions:
+//   &x       — Create shared borrow (safe)
+//   &mut x   — Create mutable borrow (safe)
+//   &raw x   — Create raw pointer from value (requires unsafe)
+//   *ptr     — Dereference raw pointer (requires unsafe)
+//   borrow(x) — Explicit borrow expression (safe)
+
+Postfix            = Primary { PostfixOp } [ "as" Type ] ;
 PostfixOp          = "(" [ Arguments ] ")"
                    | "." Identifier
                    | "[" Expression "]" ;
+
+// The "as" operator performs type casting. Inside unsafe blocks, it can
+// cast between pointer types:
+//   ptr as *i32       — Cast raw pointer to different element type
+//   ptr as *u8        — Cast to byte pointer (for free, etc.)
+//   value as f64      — Safe numeric conversion
 
 Argument           = [ Identifier ":" ] Expression ;
 Arguments          = Argument { "," Argument } ;
@@ -197,10 +221,24 @@ UnionType          = OptionalType { "|" OptionalType } ;
 OptionalType       = SimpleType [ "?" ] ;
 SimpleType         = ReferencePrefix PointerType ;
 ReferencePrefix    = { "&" [ "mut" ] } ;
-PointerType        = { "*" } BaseType ;
-BaseType           = QualifiedName [ "<" Type { "," Type } ">" ] ;
+PointerType        = { "*" [ "mut" ] } BaseType ;
+BaseType           = QualifiedName [ "<" Type { "," Type } ">" ]
+                   | "opaque" ;  // Opaque pointer target for foreign-managed memory
 NominalType        = SimpleType ;
 QualifiedName      = Identifier { "." Identifier } ;
+
+// Pointer Types:
+//   *T       — Read-only raw pointer to type T
+//   *mut T   — Mutable raw pointer to type T
+//   *opaque  — Opaque pointer to foreign-managed memory (equivalent to void*)
+//
+// Reference Types (safe, lifetime-tracked):
+//   &T       — Shared borrow (read-only reference)
+//   &mut T   — Exclusive mutable borrow
+//
+// Raw pointers (*T, *mut T) are only usable inside `unsafe` blocks.
+// References (&T, &mut T) are the safe alternative with compile-time
+// lifetime enforcement.
 
 Pattern            = "_"
                    | LiteralPattern

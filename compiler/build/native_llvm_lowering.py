@@ -649,8 +649,17 @@ class MatchFieldBinding:
     def __repr__(self):
         return runtime.struct_repr('MatchFieldBinding', [runtime.struct_field('field_name', self.field_name), runtime.struct_field('field_type', self.field_type), runtime.struct_field('field_offset', self.field_offset)])
 
+class MatchStructFieldBinding:
+    def __init__(self, field_name, field_type, field_index):
+        self.field_name = field_name
+        self.field_type = field_type
+        self.field_index = field_index
+
+    def __repr__(self):
+        return runtime.struct_repr('MatchStructFieldBinding', [runtime.struct_field('field_name', self.field_name), runtime.struct_field('field_type', self.field_type), runtime.struct_field('field_index', self.field_index)])
+
 class MatchCaseCondition:
-    def __init__(self, lines, temp_index, diagnostics, is_default, field_bindings, string_constants, operand=None, enum_info=None, variant_info=None):
+    def __init__(self, lines, temp_index, diagnostics, is_default, field_bindings, union_variant_index, union_struct_bindings, string_constants, operand=None, enum_info=None, variant_info=None, union_struct_info=None):
         self.lines = lines
         self.temp_index = temp_index
         self.operand = operand
@@ -659,10 +668,13 @@ class MatchCaseCondition:
         self.field_bindings = field_bindings
         self.enum_info = enum_info
         self.variant_info = variant_info
+        self.union_variant_index = union_variant_index
+        self.union_struct_info = union_struct_info
+        self.union_struct_bindings = union_struct_bindings
         self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('MatchCaseCondition', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('is_default', self.is_default), runtime.struct_field('field_bindings', self.field_bindings), runtime.struct_field('enum_info', self.enum_info), runtime.struct_field('variant_info', self.variant_info), runtime.struct_field('string_constants', self.string_constants)])
+        return runtime.struct_repr('MatchCaseCondition', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('is_default', self.is_default), runtime.struct_field('field_bindings', self.field_bindings), runtime.struct_field('enum_info', self.enum_info), runtime.struct_field('variant_info', self.variant_info), runtime.struct_field('union_variant_index', self.union_variant_index), runtime.struct_field('union_struct_info', self.union_struct_info), runtime.struct_field('union_struct_bindings', self.union_struct_bindings), runtime.struct_field('string_constants', self.string_constants)])
 
 class ConditionConversion:
     def __init__(self, lines, temp_index, diagnostics, string_constants, operand=None):
@@ -1345,7 +1357,7 @@ def render_imported_function_declarations(imported_functions, local_functions, c
             continue
         emitted_declarations = append_string(emitted_declarations, sanitized_name)
         return_type = map_return_type(context, function.return_type)
-        param_types = collect_parameter_types(context, function.parameters)
+        param_types = collect_parameter_types(context, function.parameters, function.name)
         param_text = join_with_separator(param_types, ", ")
         line = "declare " + return_type + " @" + sanitized_name + "(" + param_text + ")"
         lines = append_string(lines, line)
@@ -1807,7 +1819,8 @@ def render_vtable_constants(context):
 def is_ascii_uppercase(ch):
     if len(ch) == 0:
         return False
-    return ch >= "A"  and  ch <= "Z"
+    code = char_code(ch)
+    return code >= char_code("A")  and  code <= char_code("Z")
 
 def looks_like_user_type(annotation):
     trimmed = trim_text(annotation)
@@ -2088,6 +2101,9 @@ def resolve_struct_info_for_method_target(base, bindings, locals, context):
             info = resolve_struct_info_from_llvm_type(context, local.llvm_type)
             if info != None:
                 return info
+    by_name = find_struct_info_by_name(context, trimmed)
+    if by_name != None:
+        return by_name
     return None
 
 def resolve_interface_info_for_method_target(base, bindings, locals, context):
@@ -4154,6 +4170,7 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
     structure = collect_match_structure(function.instructions, start_index, end, function.name)
     diagnostics = (diagnostics) + (structure.diagnostics)
     subject_instruction = function.instructions[start_index]
+    subject_name = extract_simple_identifier(subject_instruction.expression)
     subject_result = lower_expression(subject_instruction.expression, bindings, current_locals, current_temp, current_lines, functions, context, "")
     diagnostics = (diagnostics) + (subject_result.diagnostics)
     current_lines = subject_result.lines
@@ -4163,6 +4180,8 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match subject in `" + function.name + "`")
         return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=base_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.end_index + 1, mutations=collected_mutations, string_constants=collected_string_constants)
     subject_operand = subject_result.operand
+    union_payload_types = parse_union_payload_types(subject_operand.llvm_type)
+    matched_union_variants = []
     if len(structure.cases) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: match without cases in `" + function.name + "`")
         merge_alloc = allocate_block_label("matchmerge", current_block_counter)
@@ -4226,6 +4245,18 @@ context
         current_lines = lowered_condition.lines
         current_temp = lowered_condition.temp_index
         collected_string_constants = merge_string_constants(collected_string_constants, lowered_condition.string_constants)
+        if lowered_condition.union_variant_index >= 0:
+            seen = False
+            seen_index = 0
+            while True:
+                if seen_index >= len(matched_union_variants):
+                    break
+                if matched_union_variants[seen_index] == lowered_condition.union_variant_index:
+                    seen = True
+                    break
+                seen_index += 1
+            if not seen:
+                matched_union_variants = (matched_union_variants) + ([lowered_condition.union_variant_index])
         if lowered_condition.is_default:
             has_unconditional_default = True
             current_lines = append_string(current_lines, "  br label %" + body_labels[index])
@@ -4276,6 +4307,70 @@ context
                 base_locals = (base_locals) + ([LocalBinding(name=field_binding.field_name, pointer=local_alloca_temp, llvm_type=field_binding.field_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1)])
                 base_local_id += 1
                 binding_idx += 1
+        if lowered_condition.union_variant_index >= 0  and  lowered_condition.union_struct_info != None  and  len(lowered_condition.union_struct_bindings) > 0:
+            struct_info_val = lowered_condition.union_struct_info
+            variant_index = lowered_condition.union_variant_index
+            payload_index = variant_index + 1
+            payload_temp = format_temp_name(current_temp)
+            current_temp += 1
+            payload_type = union_payload_types[variant_index]
+            current_lines = append_string(current_lines, "  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index))
+            typed_payload_ptr = payload_temp
+            expected_ptr_type = struct_info_val.llvm_name + "*"
+            if payload_type == "i8*":
+                cast_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + payload_temp + " to " + expected_ptr_type)
+                typed_payload_ptr = cast_temp
+            binding_idx = 0
+            while True:
+                if binding_idx >= len(lowered_condition.union_struct_bindings):
+                    break
+                binding = lowered_condition.union_struct_bindings[binding_idx]
+                gep_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + gep_temp + " = getelementptr " + struct_info_val.llvm_name + ", " + expected_ptr_type + " " + typed_payload_ptr + ", i32 0, i32 " + number_to_string(binding.field_index))
+                load_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + load_temp + " = load " + binding.field_type + ", " + binding.field_type + "* " + gep_temp)
+                local_alloca_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + binding.field_type)
+                current_lines = append_string(current_lines, "  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp)
+                base_locals = (base_locals) + ([LocalBinding(name=binding.field_name, pointer=local_alloca_temp, llvm_type=binding.field_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1)])
+                base_local_id += 1
+                binding_idx += 1
+        if lowered_condition.is_default  and  len(union_payload_types) > 0  and  len(subject_name) > 0:
+            remaining = []
+            v = 0
+            while True:
+                if v >= len(union_payload_types):
+                    break
+                is_matched = False
+                mi = 0
+                while True:
+                    if mi >= len(matched_union_variants):
+                        break
+                    if matched_union_variants[mi] == v:
+                        is_matched = True
+                        break
+                    mi += 1
+                if not is_matched:
+                    remaining = (remaining) + ([v])
+                v += 1
+            if len(remaining) == 1:
+                remaining_index = remaining[0]
+                payload_index = remaining_index + 1
+                payload_type = union_payload_types[remaining_index]
+                payload_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index))
+                local_alloca_temp = format_temp_name(current_temp)
+                current_temp += 1
+                current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + payload_type)
+                current_lines = append_string(current_lines, "  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp)
+                base_locals = (base_locals) + ([LocalBinding(name=subject_name, pointer=local_alloca_temp, llvm_type=payload_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1)])
+                base_local_id += 1
         body_result = lower_instruction_range(
 function,
 case.body_start,
@@ -4341,6 +4436,9 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
     field_bindings = []
     matched_enum_info = None
     matched_variant_info = None
+    union_variant_index = -1
+    union_struct_info = None
+    union_struct_bindings = []
     collected_string_constants = empty_string_constant_set()
     if not case.is_default:
         enum_parse = parse_enum_literal(case.pattern)
@@ -4395,27 +4493,83 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
                         matched_enum_info = enum_info
                         matched_variant_info = variant_info
         else:
-            pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context, "")
-            diagnostics = (diagnostics) + (pattern_result.diagnostics)
-            current_lines = pattern_result.lines
-            current_temp = pattern_result.temp_index
-            collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants)
-            if pattern_result.operand != None:
-                harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines)
-                diagnostics = (diagnostics) + (harmonised.diagnostics)
-                if harmonised.left != None  and  harmonised.right != None:
-                    current_lines = harmonised.lines
-                    current_temp = harmonised.temp_index
-                    comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines)
-                    diagnostics = (diagnostics) + (comparison.diagnostics)
-                    current_lines = comparison.lines
-                    current_temp = comparison.temp_index
-                    condition_operand = comparison.operand
+            if is_union_llvm_type(subject_operand.llvm_type):
+                union_parts = parse_union_payload_types(subject_operand.llvm_type)
+                struct_parse = parse_struct_pattern(case.pattern)
+                if struct_parse.recognized  and  struct_parse.success:
+                    info = find_struct_info_by_name(context, struct_parse.type_name)
+                    if info != None:
+                        idx = 0
+                        found_index = -1
+                        while True:
+                            if idx >= len(union_parts):
+                                break
+                            part = union_parts[idx]
+                            if part == info.llvm_name + "*"  or  part == info.llvm_name:
+                                found_index = idx
+                                break
+                            idx += 1
+                        if found_index >= 0:
+                            tag_temp = format_temp_name(current_temp)
+                            current_temp += 1
+                            current_lines = append_string(current_lines, "  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0")
+                            tag_operand = LLVMOperand(llvm_type="i32", value=tag_temp)
+                            expected_tag = LLVMOperand(llvm_type="i32", value=number_to_string(found_index))
+                            comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines)
+                            diagnostics = (diagnostics) + (comparison.diagnostics)
+                            current_lines = comparison.lines
+                            current_temp = comparison.temp_index
+                            condition_operand = comparison.operand
+                            fidx = 0
+                            while True:
+                                if fidx >= len(struct_parse.fields):
+                                    break
+                                pattern_field = struct_parse.fields[fidx]
+                                if len(pattern_field.value) == 0:
+                                    sfi = 0
+                                    field_info = None
+                                    while True:
+                                        if sfi >= len(info.fields):
+                                            break
+                                        if info.fields[sfi].name == pattern_field.name:
+                                            field_info = info.fields[sfi]
+                                            break
+                                        sfi += 1
+                                    if field_info != None:
+                                        union_struct_bindings = (union_struct_bindings) + ([MatchStructFieldBinding(field_name=pattern_field.name, field_type=field_info.llvm_type, field_index=field_info.index)])
+                                    else:
+                                        diagnostics = append_string(diagnostics, "llvm lowering: match pattern field `" + pattern_field.name + "` not found in struct `" + struct_parse.type_name + "`")
+                                else:
+                                    diagnostics = append_string(diagnostics, "llvm lowering: match struct field literal patterns are not supported for `" + pattern_field.name + "`")
+                                fidx += 1
+                            union_variant_index = found_index
+                            union_struct_info = info
+                        else:
+                            diagnostics = append_string(diagnostics, "llvm lowering: match struct pattern `" + struct_parse.type_name + "` does not match union type `" + subject_operand.llvm_type + "`")
+                    else:
+                        diagnostics = append_string(diagnostics, "llvm lowering: match pattern references unknown struct `" + struct_parse.type_name + "`")
+            if condition_operand == None:
+                pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context, "")
+                diagnostics = (diagnostics) + (pattern_result.diagnostics)
+                current_lines = pattern_result.lines
+                current_temp = pattern_result.temp_index
+                collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants)
+                if pattern_result.operand != None:
+                    harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines)
+                    diagnostics = (diagnostics) + (harmonised.diagnostics)
+                    if harmonised.left != None  and  harmonised.right != None:
+                        current_lines = harmonised.lines
+                        current_temp = harmonised.temp_index
+                        comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines)
+                        diagnostics = (diagnostics) + (comparison.diagnostics)
+                        current_lines = comparison.lines
+                        current_temp = comparison.temp_index
+                        condition_operand = comparison.operand
+                    else:
+                        current_lines = harmonised.lines
+                        current_temp = harmonised.temp_index
                 else:
-                    current_lines = harmonised.lines
-                    current_temp = harmonised.temp_index
-            else:
-                diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`")
+                    diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`")
     if case.guard != None:
         guard_text = trim_text(case.guard)
         if len(guard_text) > 0:
@@ -4443,7 +4597,7 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
             guard_trimmed = trim_text(case.guard)
             if len(guard_trimmed) == 0:
                 is_unconditional_default = True
-    return MatchCaseCondition(lines=current_lines, temp_index=current_temp, operand=condition_operand, diagnostics=diagnostics, is_default=is_unconditional_default, field_bindings=field_bindings, enum_info=matched_enum_info, variant_info=matched_variant_info, string_constants=collected_string_constants)
+    return MatchCaseCondition(lines=current_lines, temp_index=current_temp, operand=condition_operand, diagnostics=diagnostics, is_default=is_unconditional_default, field_bindings=field_bindings, enum_info=matched_enum_info, variant_info=matched_variant_info, union_variant_index=union_variant_index, union_struct_info=union_struct_info, union_struct_bindings=union_struct_bindings, string_constants=collected_string_constants)
 
 def allocate_block_label(prefix, counter):
     return BlockLabelResult(label=prefix + number_to_string(counter), next_counter=counter + 1)
@@ -5922,11 +6076,185 @@ def detect_suspension_conflicts(expression, locals, bindings, function_name, sus
         return []
     return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span)
 
+def find_top_level_union_separator(text):
+    paren_depth = 0
+    brace_depth = 0
+    bracket_depth = 0
+    angle_depth = 0
+    in_single = False
+    in_double = False
+    escape = False
+    index = 0
+    while True:
+        if index >= len(text):
+            break
+        ch = substring(text, index, index + 1)
+        if in_double:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if in_single:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            index += 1
+            continue
+        if ch == "(":
+            paren_depth += 1
+            index += 1
+            continue
+        if ch == ")":
+            if paren_depth > 0:
+                paren_depth -= 1
+            index += 1
+            continue
+        if ch == "{":
+            brace_depth += 1
+            index += 1
+            continue
+        if ch == "}":
+            if brace_depth > 0:
+                brace_depth -= 1
+            index += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            index += 1
+            continue
+        if ch == "]":
+            if bracket_depth > 0:
+                bracket_depth -= 1
+            index += 1
+            continue
+        if ch == "<":
+            angle_depth += 1
+            index += 1
+            continue
+        if ch == ">":
+            if angle_depth > 0:
+                angle_depth -= 1
+            index += 1
+            continue
+        if paren_depth == 0  and  brace_depth == 0  and  bracket_depth == 0  and  angle_depth == 0:
+            if ch == "|":
+                return index
+        index += 1
+    return -1
+
+def split_union_annotations(text):
+    result = []
+    remaining = text
+    while True:
+        index = find_top_level_union_separator(remaining)
+        if index < 0:
+            tail = trim_text(remaining)
+            if len(tail) > 0:
+                result = append_string(result, tail)
+            break
+        left = trim_text(substring(remaining, 0, index))
+        if len(left) > 0:
+            result = append_string(result, left)
+        remaining = trim_text(substring(remaining, index + 1, len(remaining)))
+    return result
+
+def is_union_annotation(annotation):
+    trimmed = trim_text(annotation)
+    if len(trimmed) == 0:
+        return False
+    return find_top_level_union_separator(trimmed) >= 0
+
+def map_union_type(context, annotation):
+    normalized = unwrap_move_wrapper(trim_text(annotation))
+    if not is_union_annotation(normalized):
+        return ""
+    parts = split_union_annotations(normalized)
+    if len(parts) < 2:
+        return ""
+    llvm_parts = []
+    index = 0
+    while True:
+        if index >= len(parts):
+            break
+        part = trim_text(parts[index])
+        if len(part) == 0:
+            return ""
+        mapped = map_type_annotation(part)
+        if len(mapped) == 0  or  mapped == "void":
+            return ""
+        llvm_parts = append_string(llvm_parts, mapped)
+        index += 1
+    return "{ i32, " + join_with_separator(llvm_parts, ", ") + " }"
+
+def is_union_llvm_type(llvm_type):
+    trimmed = trim_text(llvm_type)
+    if not starts_with(trimmed, "{"):
+        return False
+    if find_substring_from(trimmed, "i32", 0) < 0:
+        return False
+    return starts_with(trim_text(trimmed), "{ i32,")
+
+def parse_union_payload_types(union_llvm_type):
+    trimmed = trim_text(union_llvm_type)
+    if not is_union_llvm_type(trimmed):
+        return []
+    inner = trim_text(substring(trimmed, 1, len(trimmed) - 1))
+    fields = split_array_elements(inner)
+    if len(fields) < 2:
+        return []
+    result = []
+    index = 1
+    while True:
+        if index >= len(fields):
+            break
+        result = append_string(result, trim_text(fields[index]))
+        index += 1
+    return result
+
+def extract_simple_identifier(text):
+    trimmed = trim_text(text)
+    if len(trimmed) == 0:
+        return ""
+    first = trimmed[0]
+    if not is_identifier_start_char(first):
+        return ""
+    index = 0
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if not is_identifier_part_char(ch):
+            return ""
+        index += 1
+    return trimmed
+
 def map_return_type(context, return_type):
     trimmed = trim_text(return_type)
     if len(trimmed) == 0  or  trimmed == "void":
         return "void"
     normalized = unwrap_move_wrapper(trimmed)
+    union_type = map_union_type(context, normalized)
+    if len(union_type) > 0:
+        return union_type
     optional_type = map_optional_type(context, normalized)
     if len(optional_type) > 0:
         return optional_type
@@ -5946,6 +6274,9 @@ def map_parameter_type(context, parameter_type):
     if len(trimmed) == 0:
         return "double"
     normalized = unwrap_move_wrapper(trimmed)
+    union_type = map_union_type(context, normalized)
+    if len(union_type) > 0:
+        return union_type
     optional_type = map_optional_type(context, normalized)
     if len(optional_type) > 0:
         return optional_type
@@ -5965,6 +6296,9 @@ def map_local_type(context, type_annotation):
     if len(trimmed) == 0:
         return "double"
     normalized = unwrap_move_wrapper(trimmed)
+    union_type = map_union_type(context, normalized)
+    if len(union_type) > 0:
+        return union_type
     optional_type = map_optional_type(context, normalized)
     if len(optional_type) > 0:
         return optional_type
@@ -6848,18 +7182,39 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context)
         interface_info = resolve_interface_info_for_method_target(method_parse.base, bindings, locals, context)
         if method_info != None:
-            lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
-            diagnostics = (diagnostics) + (lowered_self.diagnostics)
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
-            current_lines = lowered_self.lines
-            current_temp = lowered_self.temp_index
-            if lowered_self.operand != None:
-                method_operand = lowered_self.operand
-                trimmed_target = method_info.name + "::" + method_parse.field
-                injected_argument_count = 1
+            base_name = trim_text(method_parse.base)
+            if is_simple_identifier(base_name):
+                bound_local = find_local_binding(locals, base_name)
+                bound_param = find_parameter_binding(bindings, base_name)
+                if bound_local == None  and  bound_param == None:
+                    trimmed_target = method_info.name + "::" + method_parse.field
+                    injected_argument_count = 0
+                else:
+                    lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
+                    diagnostics = (diagnostics) + (lowered_self.diagnostics)
+                    collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
+                    current_lines = lowered_self.lines
+                    current_temp = lowered_self.temp_index
+                    if lowered_self.operand != None:
+                        method_operand = lowered_self.operand
+                        trimmed_target = method_info.name + "::" + method_parse.field
+                        injected_argument_count = 1
+                    else:
+                        diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
+                        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
             else:
-                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
-                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+                lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
+                diagnostics = (diagnostics) + (lowered_self.diagnostics)
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
+                current_lines = lowered_self.lines
+                current_temp = lowered_self.temp_index
+                if lowered_self.operand != None:
+                    method_operand = lowered_self.operand
+                    trimmed_target = method_info.name + "::" + method_parse.field
+                    injected_argument_count = 1
+                else:
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
+                    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
         else:
             if interface_info != None:
                 lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
@@ -6938,7 +7293,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                 if len(llvm_return) == 0:
                     diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`")
                     llvm_return = "double"
-                expected_params = collect_parameter_types(context, function_entry.parameters)
+                expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target)
             else:
                 diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
     index = 0
@@ -6977,6 +7332,27 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     if len(operands) != expected_operand_count:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors")
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+    if function_entry != None  and  len(operands) < len(expected_params):
+        param_index = len(operands)
+        while True:
+            if param_index >= len(expected_params):
+                break
+            if param_index >= len(function_entry.parameters):
+                break
+            param = function_entry.parameters[param_index]
+            if param.default_value == None:
+                break
+            expected_type = expected_params[param_index]
+            lowered_default = lower_expression(param.default_value, bindings, locals, current_temp, current_lines, functions, context, expected_type)
+            diagnostics = (diagnostics) + (lowered_default.diagnostics)
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered_default.string_constants)
+            current_lines = lowered_default.lines
+            current_temp = lowered_default.temp_index
+            if lowered_default.operand == None:
+                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower default argument for parameter `" + param.name + "` in call to `" + trimmed_target + "`")
+                break
+            operands = append_llvm_operand(operands, lowered_default.operand)
+            param_index += 1
     if function_entry != None  and  injected_argument_count == 1:
         if len(operands) > 0  and  len(expected_params) > 0:
             expected_self_type = expected_params[0]
@@ -6993,7 +7369,24 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                     else:
                         diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
                 else:
-                    diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
+                    if ends_with_pointer_suffix(expected_self_type):
+                        base_name = trim_text(method_parse.base)
+                        if is_simple_identifier(base_name):
+                            local_pointer = find_local_binding(locals, base_name)
+                            if local_pointer != None  and  local_pointer.llvm_type + "*" == expected_self_type:
+                                updated_operand = LLVMOperand(llvm_type=expected_self_type, value=local_pointer.pointer)
+                                operands = replace_llvm_operand(operands, 0, updated_operand)
+                            else:
+                                parameter_pointer = find_parameter_binding(bindings, base_name)
+                                if parameter_pointer != None  and  parameter_pointer.llvm_type == expected_self_type:
+                                    updated_operand = LLVMOperand(llvm_type=expected_self_type, value=parameter_pointer.llvm_name)
+                                    operands = replace_llvm_operand(operands, 0, updated_operand)
+                                else:
+                                    diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
+                        else:
+                            diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
+                    else:
+                        diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible")
     coerced_operands = []
     index = 0
     while True:
@@ -7997,6 +8390,128 @@ def parse_struct_literal(text):
         fields = []
     return StructLiteralParse(recognized=True, success=not fatal, type_name=type_name, fields=fields, diagnostics=diagnostics)
 
+def parse_struct_pattern(text):
+    trimmed = trim_text(text)
+    diagnostics = []
+    if len(trimmed) == 0:
+        return StructLiteralParse(recognized=False, success=False, type_name="", fields=[], diagnostics=diagnostics)
+    first = trimmed[0]
+    if not is_identifier_start_char(first):
+        return StructLiteralParse(recognized=False, success=False, type_name="", fields=[], diagnostics=diagnostics)
+    paren_depth = 0
+    bracket_depth = 0
+    angle_depth = 0
+    index = 0
+    open_index = -1
+    in_single = False
+    in_double = False
+    escape = False
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = trimmed[index]
+        if in_double:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "\"":
+                        in_double = False
+            index += 1
+            continue
+        if in_single:
+            if escape:
+                escape = False
+            else:
+                if ch == "\\":
+                    escape = True
+                else:
+                    if ch == "'":
+                        in_single = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_double = True
+            index += 1
+            continue
+        if ch == "'":
+            in_single = True
+            index += 1
+            continue
+        if ch == "(":
+            paren_depth += 1
+        else:
+            if ch == ")":
+                if paren_depth > 0:
+                    paren_depth -= 1
+            else:
+                if ch == "[":
+                    bracket_depth += 1
+                else:
+                    if ch == "]":
+                        if bracket_depth > 0:
+                            bracket_depth -= 1
+                    else:
+                        if ch == "<":
+                            angle_depth += 1
+                        else:
+                            if ch == ">":
+                                if angle_depth > 0:
+                                    angle_depth -= 1
+                            else:
+                                if ch == "{":
+                                    if paren_depth == 0  and  bracket_depth == 0  and  angle_depth == 0:
+                                        open_index = index
+                                        break
+        index += 1
+    if open_index < 0:
+        return StructLiteralParse(recognized=False, success=False, type_name="", fields=[], diagnostics=diagnostics)
+    fatal = False
+    close_index = find_matching_closing_brace(trimmed, open_index)
+    if close_index < 0:
+        fatal = True
+    type_name = trim_text(substring(trimmed, 0, open_index))
+    if len(type_name) == 0:
+        fatal = True
+    fields = []
+    if not fatal  and  close_index >= 0:
+        body = substring(trimmed, open_index + 1, close_index)
+        entries = split_array_elements(body)
+        seen = []
+        entry_index = 0
+        while True:
+            if entry_index >= len(entries):
+                break
+            entry = trim_text(entries[entry_index])
+            entry_index += 1
+            if len(entry) == 0:
+                continue
+            colon_index = find_top_level_colon(entry)
+            if colon_index < 0:
+                field_name = trim_text(entry)
+                if len(field_name) == 0:
+                    continue
+                if string_array_contains(seen, field_name):
+                    continue
+                seen = append_string(seen, field_name)
+                fields = (fields) + ([StructLiteralField(name=field_name, value="")])
+                continue
+            field_name = trim_text(substring(entry, 0, colon_index))
+            value_text = trim_text(substring(entry, colon_index + 1, len(entry)))
+            if len(field_name) == 0:
+                continue
+            if string_array_contains(seen, field_name):
+                continue
+            if len(value_text) == 0:
+                continue
+            seen = append_string(seen, field_name)
+            fields = (fields) + ([StructLiteralField(name=field_name, value=value_text)])
+    if fatal:
+        fields = []
+    return StructLiteralParse(recognized=True, success=not fatal, type_name=type_name, fields=fields, diagnostics=diagnostics)
+
 def parse_enum_literal(text):
     trimmed = trim_text(text)
     diagnostics = []
@@ -8550,13 +9065,21 @@ def is_string_pointer_type(llvm_type):
         return True
     return False
 
-def collect_parameter_types(context, parameters):
+def collect_parameter_types(context, parameters, function_name):
     types = []
     index = 0
     while True:
         if index >= len(parameters):
             break
-        llvm_type = map_parameter_type(context, parameters[index].type_annotation)
+        parameter = parameters[index]
+        llvm_type = map_parameter_type(context, parameter.type_annotation)
+        if len(parameter.type_annotation) == 0  and  parameter.name == "self"  and  index == 0:
+            double_colon_pos = find_last_index_of_char(function_name, ":")
+            if double_colon_pos > 0  and  substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::":
+                struct_name = substring(function_name, 0, double_colon_pos - 1)
+                struct_type = map_struct_type_annotation(context, struct_name)
+                if len(struct_type) > 0:
+                    llvm_type = struct_type + "*"
         if len(llvm_type) == 0:
             types = append_string(types, "double")
         else:
@@ -8575,10 +9098,79 @@ def load_local_operand(local, temp_index, lines):
 def coerce_operand_to_type(operand, target_type, temp_index, lines):
     diagnostics = []
     current_lines = lines
+    operand_type = trim_text(operand.llvm_type)
     if len(target_type) == 0:
         return CoercionResult(lines=current_lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
-    if operand.llvm_type == target_type:
+    if operand_type == target_type:
         return CoercionResult(lines=current_lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics)
+    if is_union_llvm_type(target_type):
+        variants = parse_union_payload_types(target_type)
+        variant_index = 0
+        while True:
+            if variant_index >= len(variants):
+                break
+            variant_type = variants[variant_index]
+            has_value = False
+            value_text = ""
+            local_lines = current_lines
+            local_temp = temp_index
+            if operand_type == variant_type:
+                has_value = True
+                value_text = operand.value
+            else:
+                if not ends_with_pointer_suffix(operand_type)  and  ends_with_pointer_suffix(variant_type):
+                    expected_value_type = strip_pointer_suffix(variant_type)
+                    if expected_value_type == operand_type:
+                        size_ptr_temp = format_temp_name(local_temp)
+                        size_temp = format_temp_name(local_temp + 1)
+                        malloc_temp = format_temp_name(local_temp + 2)
+                        typed_ptr_temp = format_temp_name(local_temp + 3)
+                        local_lines = append_string(local_lines, "  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1")
+                        local_lines = append_string(local_lines, "  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64")
+                        local_lines = append_string(local_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")")
+                        local_lines = append_string(local_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*")
+                        local_lines = append_string(local_lines, "  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp)
+                        local_lines = append_string(local_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")")
+                        has_value = True
+                        value_text = typed_ptr_temp
+                        local_temp += 4
+                else:
+                    if variant_type == "i8*"  and  not ends_with_pointer_suffix(operand_type):
+                        if starts_with(operand_type, "%")  or  starts_with(operand_type, "{"):
+                            size_ptr_temp = format_temp_name(local_temp)
+                            size_temp = format_temp_name(local_temp + 1)
+                            malloc_temp = format_temp_name(local_temp + 2)
+                            typed_ptr_temp = format_temp_name(local_temp + 3)
+                            local_lines = append_string(local_lines, "  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1")
+                            local_lines = append_string(local_lines, "  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64")
+                            local_lines = append_string(local_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")")
+                            local_lines = append_string(local_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*")
+                            local_lines = append_string(local_lines, "  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp)
+                            local_lines = append_string(local_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")")
+                            has_value = True
+                            value_text = malloc_temp
+                            local_temp += 4
+            if has_value:
+                tag_temp = format_temp_name(local_temp)
+                union_temp = format_temp_name(local_temp + 1)
+                local_lines = append_string(local_lines, "  " + tag_temp + " = insertvalue " + target_type + " undef, i32 " + number_to_string(variant_index) + ", 0")
+                local_lines = append_string(local_lines, "  " + union_temp + " = insertvalue " + target_type + " " + tag_temp + ", " + variant_type + " " + value_text + ", " + number_to_string(variant_index + 1))
+                coerced = LLVMOperand(llvm_type=target_type, value=union_temp)
+                return CoercionResult(lines=local_lines, temp_index=local_temp + 2, operand=coerced, diagnostics=diagnostics)
+            variant_index += 1
+    if target_type == "i8*":
+        if operand.llvm_type == "double":
+            temp_name = format_temp_name(temp_index)
+            current_lines = append_string(current_lines, "  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")")
+            coerced = LLVMOperand(llvm_type="i8*", value=temp_name)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 1, operand=coerced, diagnostics=diagnostics)
+        if operand.llvm_type == "i64":
+            as_double = format_temp_name(temp_index)
+            as_string = format_temp_name(temp_index + 1)
+            current_lines = append_string(current_lines, "  " + as_double + " = sitofp i64 " + operand.value + " to double")
+            current_lines = append_string(current_lines, "  " + as_string + " = call i8* @sailfin_runtime_number_to_string(double " + as_double + ")")
+            coerced = LLVMOperand(llvm_type="i8*", value=as_string)
+            return CoercionResult(lines=current_lines, temp_index=temp_index + 2, operand=coerced, diagnostics=diagnostics)
     if not ends_with_pointer_suffix(target_type)  and  ends_with_pointer_suffix(operand.llvm_type):
         source_base = strip_pointer_suffix(operand.llvm_type)
         if source_base == target_type:
@@ -9720,14 +10312,14 @@ def parse_range_iterable(iterable):
     return RangeIterableParse(success=success, start=start_text, end=end_text, stride=stride_text, diagnostics=diagnostics)
 
 def find_local_binding(locals, name):
-    index = 0
+    index = len(locals)
     while True:
-        if index >= len(locals):
+        if index <= 0:
             break
+        index -= 1
         entry = locals[index]
         if entry.name == name:
             return entry
-        index += 1
     return None
 
 def infer_borrow_base_scope(base, locals, bindings, function_name):
