@@ -2098,6 +2098,18 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
         }
         return parse_return_statement(after_decorators);
     }
+    if identifier_matches(token, "throw") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_throw_statement(after_decorators);
+    }
+    if identifier_matches(token, "try") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_try_statement(after_decorators);
+    }
     if identifier_matches(token, "assert") {
         if decorators.length > 0 {
             return BlockStatementParseResult { parser: original, statement: null, success: false };
@@ -2111,6 +2123,110 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
     }
 
     return BlockStatementParseResult { parser: original, statement: null, success: false };
+}
+
+fn parse_throw_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "throw") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let mut statement_tokens -> Token[] = [];
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
+    current = consume_keyword(current, "throw");
+
+    let capture = collect_until(skip_trivia(current), [";", "}"]);
+    current = capture.parser;
+    let trimmed = trim_token_edges(capture.tokens);
+    if trimmed.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= capture.tokens.length {
+            break;
+        }
+        statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+        index += 1;
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        statement_tokens = append_token(statement_tokens, terminator);
+        current = parser_advance_raw(current);
+    }
+
+    let span = source_span_from_tokens(statement_tokens);
+    let expression = expression_from_tokens(trimmed);
+    let statement = Statement.ThrowStatement { expression: expression, span: span };
+
+    return BlockStatementParseResult { parser: current, statement: statement, success: true };
+}
+
+fn parse_try_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "try") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    current = consume_keyword(current, "try");
+
+    let try_result = parse_block(current);
+    if try_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = try_result.parser;
+
+    current = skip_trivia(current);
+    if !identifier_matches(parser_peek_raw(current), "catch") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "catch");
+
+    current = skip_trivia(current);
+    if !symbol_matches(parser_peek_raw(current), "(") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = parser_advance_raw(current);
+
+    current = skip_trivia(current);
+    let name_token = parser_peek_raw(current);
+    if name_token.kind.variant != "Identifier" {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    let catch_name = name_token.lexeme;
+    current = parser_advance_raw(current);
+
+    current = skip_trivia(current);
+    if !symbol_matches(parser_peek_raw(current), ")") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = parser_advance_raw(current);
+
+    let catch_result = parse_block(current);
+    if catch_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = catch_result.parser;
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.TryStatement {
+        try_block: try_result.block,
+        catch_name: catch_name,
+        catch_name_token: name_token,
+        catch_block: catch_result.block,
+    };
+
+    return BlockStatementParseResult { parser: current, statement: statement, success: true };
 }
 
 fn parse_assert_statement(parser -> Parser) -> BlockStatementParseResult {

@@ -108,6 +108,23 @@ extern "C"
     void *sailfin_runtime_to_debug_string(void *value);
     void sailfin_runtime_raise_value_error(void *message);
 
+    // ---- Exceptions (stage2-native minimal) ----
+
+    // Exception state helpers (used by stage2-native lowering).
+    void sailfin_runtime_set_exception(char *message);
+    void sailfin_runtime_clear_exception(void);
+    bool sailfin_runtime_has_exception(void);
+
+    // Enter a try region. Writes an opaque handle into `out_handle` and returns
+    // 0 on first entry, non-zero when returning from a throw.
+    int32_t sailfin_runtime_try_enter(char **out_handle);
+    // Leave a try region previously entered with `sailfin_runtime_try_enter`.
+    void sailfin_runtime_try_leave(char *handle);
+    // Raise an exception and transfer control to the nearest enclosing try/catch.
+    void sailfin_runtime_throw(char *message);
+    // Retrieve the most recent exception message (clears the stored message).
+    char *sailfin_runtime_take_exception(void);
+
 #ifdef __cplusplus
 }
 #endif

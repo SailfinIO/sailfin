@@ -11,12 +11,114 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <setjmp.h>
 
 #if defined(__APPLE__)
 #include <execinfo.h>
 #endif
 
 extern char **environ;
+
+static void _print_line(const char *prefix, const char *msg);
+
+typedef struct SailfinTryContext
+{
+    jmp_buf env;
+    struct SailfinTryContext *prev;
+} SailfinTryContext;
+
+static _Thread_local SailfinTryContext *_sailfin_try_stack = NULL;
+static _Thread_local char *_sailfin_exception_message = NULL;
+
+void sailfin_runtime_set_exception(char *message)
+{
+    _sailfin_exception_message = message ? message : "";
+}
+
+void sailfin_runtime_clear_exception(void)
+{
+    _sailfin_exception_message = NULL;
+}
+
+bool sailfin_runtime_has_exception(void)
+{
+    return _sailfin_exception_message != NULL;
+}
+
+int32_t sailfin_runtime_try_enter(char **out_handle)
+{
+    SailfinTryContext *ctx = (SailfinTryContext *)malloc(sizeof(SailfinTryContext));
+    if (!ctx)
+    {
+        _print_line("[stage2-native] ", "out of memory entering try");
+        abort();
+    }
+    ctx->prev = _sailfin_try_stack;
+    _sailfin_try_stack = ctx;
+    if (out_handle)
+    {
+        *out_handle = (char *)ctx;
+    }
+    return (int32_t)setjmp(ctx->env);
+}
+
+void sailfin_runtime_try_leave(char *handle)
+{
+    SailfinTryContext *ctx = (SailfinTryContext *)handle;
+    if (!ctx)
+    {
+        return;
+    }
+
+    if (_sailfin_try_stack == ctx)
+    {
+        _sailfin_try_stack = ctx->prev;
+    }
+    else
+    {
+        // Defensive unlink in case of mismatched leaves.
+        SailfinTryContext *prev = NULL;
+        SailfinTryContext *cur = _sailfin_try_stack;
+        while (cur)
+        {
+            if (cur == ctx)
+            {
+                if (prev)
+                {
+                    prev->prev = cur->prev;
+                }
+                else
+                {
+                    _sailfin_try_stack = cur->prev;
+                }
+                break;
+            }
+            prev = cur;
+            cur = cur->prev;
+        }
+    }
+
+    free(ctx);
+}
+
+void sailfin_runtime_throw(char *message)
+{
+    _sailfin_exception_message = message ? message : "";
+    if (!_sailfin_try_stack)
+    {
+        _print_line("[stage2-native] uncaught exception: ", _sailfin_exception_message);
+        abort();
+    }
+    SailfinTryContext *ctx = _sailfin_try_stack;
+    longjmp(ctx->env, 1);
+}
+
+char *sailfin_runtime_take_exception(void)
+{
+    char *msg = _sailfin_exception_message;
+    _sailfin_exception_message = NULL;
+    return msg ? msg : "";
+}
 
 #if defined(__clang__)
 #define SAILFIN_NOINLINE __attribute__((noinline))

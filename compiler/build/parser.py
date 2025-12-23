@@ -1578,6 +1578,14 @@ def parse_block_statement(parser):
         if len(decorators) > 0:
             return BlockStatementParseResult(parser=original, statement=None, success=False)
         return parse_return_statement(after_decorators)
+    if identifier_matches(token, "throw"):
+        if len(decorators) > 0:
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
+        return parse_throw_statement(after_decorators)
+    if identifier_matches(token, "try"):
+        if len(decorators) > 0:
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
+        return parse_try_statement(after_decorators)
     if identifier_matches(token, "assert"):
         if len(decorators) > 0:
             return BlockStatementParseResult(parser=original, statement=None, success=False)
@@ -1586,6 +1594,74 @@ def parse_block_statement(parser):
     if expression_result.success:
         return expression_result
     return BlockStatementParseResult(parser=original, statement=None, success=False)
+
+def parse_throw_statement(parser):
+    original = parser
+    current = skip_trivia(parser)
+    if not identifier_matches(parser_peek_raw(current), "throw"):
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    statement_tokens = []
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current))
+    current = consume_keyword(current, "throw")
+    capture = collect_until(skip_trivia(current), [";", "}"])
+    current = capture.parser
+    trimmed = trim_token_edges(capture.tokens)
+    if len(trimmed) == 0:
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    index = 0
+    while True:
+        if index >= len(capture.tokens):
+            break
+        statement_tokens = append_token(statement_tokens, capture.tokens[index])
+        index += 1
+    current = skip_trivia(current)
+    terminator = parser_peek_raw(current)
+    if symbol_matches(terminator, ";"):
+        statement_tokens = append_token(statement_tokens, terminator)
+        current = parser_advance_raw(current)
+    span = source_span_from_tokens(statement_tokens)
+    expression = expression_from_tokens(trimmed)
+    statement = runtime.enum_instantiate(Statement, 'ThrowStatement', [runtime.enum_field('expression', expression), runtime.enum_field('span', span)])
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
+
+def parse_try_statement(parser):
+    original = parser
+    current = skip_trivia(parser)
+    if not identifier_matches(parser_peek_raw(current), "try"):
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    current = consume_keyword(current, "try")
+    try_result = parse_block(current)
+    if len(try_result.block.tokens) == 0:
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    current = try_result.parser
+    current = skip_trivia(current)
+    if not identifier_matches(parser_peek_raw(current), "catch"):
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    current = consume_keyword(current, "catch")
+    current = skip_trivia(current)
+    if not symbol_matches(parser_peek_raw(current), "("):
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    current = parser_advance_raw(current)
+    current = skip_trivia(current)
+    name_token = parser_peek_raw(current)
+    if name_token.kind.variant != "Identifier":
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    catch_name = name_token.lexeme
+    current = parser_advance_raw(current)
+    current = skip_trivia(current)
+    if not symbol_matches(parser_peek_raw(current), ")"):
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    current = parser_advance_raw(current)
+    catch_result = parse_block(current)
+    if len(catch_result.block.tokens) == 0:
+        return BlockStatementParseResult(parser=original, statement=None, success=False)
+    current = catch_result.parser
+    current = skip_trivia(current)
+    terminator = parser_peek_raw(current)
+    if symbol_matches(terminator, ";"):
+        current = parser_advance_raw(current)
+    statement = runtime.enum_instantiate(Statement, 'TryStatement', [runtime.enum_field('try_block', try_result.block), runtime.enum_field('catch_name', catch_name), runtime.enum_field('catch_name_token', name_token), runtime.enum_field('catch_block', catch_result.block)])
+    return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_assert_statement(parser):
     original = parser

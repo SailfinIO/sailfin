@@ -609,6 +609,21 @@ class LoopStructure:
     def __repr__(self):
         return runtime.struct_repr('LoopStructure', [runtime.struct_field('body_start', self.body_start), runtime.struct_field('body_end', self.body_end), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
 
+class TryStructure:
+    def __init__(self, try_start, try_end, catch_index, catch_name, catch_start, catch_end, end_index, next_index, diagnostics):
+        self.try_start = try_start
+        self.try_end = try_end
+        self.catch_index = catch_index
+        self.catch_name = catch_name
+        self.catch_start = catch_start
+        self.catch_end = catch_end
+        self.end_index = end_index
+        self.next_index = next_index
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('TryStructure', [runtime.struct_field('try_start', self.try_start), runtime.struct_field('try_end', self.try_end), runtime.struct_field('catch_index', self.catch_index), runtime.struct_field('catch_name', self.catch_name), runtime.struct_field('catch_start', self.catch_start), runtime.struct_field('catch_end', self.catch_end), runtime.struct_field('end_index', self.end_index), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class RangeIterableParse:
     def __init__(self, success, start, end, stride, diagnostics):
         self.success = success
@@ -738,6 +753,16 @@ class BlockLoweringResult:
 
     def __repr__(self):
         return runtime.struct_repr('BlockLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('allocas', self.allocas), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('block_counter', self.block_counter), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('terminated', self.terminated), runtime.struct_field('next_local_id', self.next_local_id), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('next_lifetime_region_id', self.next_lifetime_region_id), runtime.struct_field('next_index', self.next_index), runtime.struct_field('mutations', self.mutations), runtime.struct_field('string_constants', self.string_constants)])
+
+class ThrowLoweringResult:
+    def __init__(self, lines, temp_index, diagnostics, string_constants):
+        self.lines = lines
+        self.temp_index = temp_index
+        self.diagnostics = diagnostics
+        self.string_constants = string_constants
+
+    def __repr__(self):
+        return runtime.struct_repr('ThrowLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('string_constants', self.string_constants)])
 
 class PhiMergeResult:
     def __init__(self, lines, temp_index):
@@ -2315,6 +2340,10 @@ def collect_instruction_runtime_helper_targets(instruction):
             combined = merge_effect_lists(combined, collect_runtime_property_targets(instruction.guard))
             return combined
         return helpers
+    if instruction.variant == "Try":
+        return ["clear_exception", "has_exception", "take_exception"]
+    if instruction.variant == "Throw":
+        return ["set_exception"]
     return []
 
 def collect_instruction_calls(instruction, function_names):
@@ -2733,6 +2762,13 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="copy_bytes", symbol="sailfin_runtime_copy_bytes", return_type="void", parameter_types=["i8*", "i8*", "i64"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="get_field", symbol="sailfin_runtime_get_field", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="mark_persistent", symbol="sailfin_runtime_mark_persistent", return_type="void", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="set_exception", symbol="sailfin_runtime_set_exception", return_type="void", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="clear_exception", symbol="sailfin_runtime_clear_exception", return_type="void", parameter_types=[], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="has_exception", symbol="sailfin_runtime_has_exception", return_type="i1", parameter_types=[], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="try_enter", symbol="sailfin_runtime_try_enter", return_type="i32", parameter_types=["i8**"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="try_leave", symbol="sailfin_runtime_try_leave", return_type="void", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="throw", symbol="sailfin_runtime_throw", return_type="void", parameter_types=["i8*"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="take_exception", symbol="sailfin_runtime_take_exception", return_type="i8*", parameter_types=[], effects=[]))
     return descriptors
 
 def append_runtime_helper(values, value):
@@ -3289,38 +3325,8 @@ active_label
                                     break
                                 continue
                             else:
-                                if instruction.variant == "Else"  or  instruction.variant == "EndIf":
-                                    break
-                                else:
-                                    if instruction.variant == "EndLoop"  or  instruction.variant == "EndMatch"  or  instruction.variant == "EndFor":
-                                        break
-                                    else:
-                                        if instruction.variant == "Break":
-                                            if len(current_loop_stack) == 0:
-                                                diagnostics = append_string(diagnostics, "llvm lowering: `break` outside loop in `" + function.name + "`")
-                                            else:
-                                                loop_context = last_loop_context(current_loop_stack)
-                                                current_lines = append_string(current_lines, "  br label %" + loop_context.break_label)
-                                                terminated = True
-                                            index += 1
-                                            if index < end  and  terminated:
-                                                diagnostics = append_string(diagnostics, "llvm lowering: instructions after break ignored in `" + function.name + "`")
-                                            break
-                                        else:
-                                            if instruction.variant == "Continue":
-                                                if len(current_loop_stack) == 0:
-                                                    diagnostics = append_string(diagnostics, "llvm lowering: `continue` outside loop in `" + function.name + "`")
-                                                else:
-                                                    loop_context = last_loop_context(current_loop_stack)
-                                                    current_lines = append_string(current_lines, "  br label %" + loop_context.continue_label)
-                                                    terminated = True
-                                                index += 1
-                                                if index < end  and  terminated:
-                                                    diagnostics = append_string(diagnostics, "llvm lowering: instructions after continue ignored in `" + function.name + "`")
-                                                break
-                                            else:
-                                                if instruction.variant == "For":
-                                                    lowered = lower_for_instruction(
+                                if instruction.variant == "Try":
+                                    lowered = lower_try_instruction(
 function,
 index,
 llvm_return,
@@ -3340,30 +3346,124 @@ scope_id,
 scope_depth,
 active_label
 )
-                                                    diagnostics = (diagnostics) + (lowered.diagnostics)
-                                                    collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
-                                                    current_lines = lowered.lines
-                                                    current_allocas = lowered.allocas
-                                                    current_locals = lowered.locals
-                                                    current_bindings = lowered.bindings
-                                                    current_temp = lowered.temp_index
-                                                    current_block_counter = lowered.block_counter
-                                                    current_next_local = lowered.next_local_id
-                                                    current_next_region = lowered.next_lifetime_region_id
-                                                    current_mutations = (current_mutations) + (lowered.mutations)
-                                                    temp_constants = collected_string_constants
-                                                    collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
-                                                    terminated = lowered.terminated
-                                                    index = lowered.next_index
-                                                    active_label = find_last_label(current_lines, active_label)
-                                                    if terminated:
-                                                        break
-                                                    continue
-                                                else:
-                                                    if instruction.variant == "Noop":
-                                                        pass
+                                    diagnostics = (diagnostics) + (lowered.diagnostics)
+                                    collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
+                                    current_lines = lowered.lines
+                                    current_allocas = lowered.allocas
+                                    current_locals = lowered.locals
+                                    current_bindings = lowered.bindings
+                                    current_temp = lowered.temp_index
+                                    current_block_counter = lowered.block_counter
+                                    current_next_local = lowered.next_local_id
+                                    current_next_region = lowered.next_lifetime_region_id
+                                    current_mutations = (current_mutations) + (lowered.mutations)
+                                    temp_constants = collected_string_constants
+                                    collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
+                                    terminated = lowered.terminated
+                                    index = lowered.next_index
+                                    active_label = find_last_label(current_lines, active_label)
+                                    if terminated:
+                                        break
+                                    continue
+                                else:
+                                    if instruction.variant == "Throw":
+                                        lowered = lower_throw_instruction(
+function.name,
+instruction,
+llvm_return,
+current_bindings,
+current_locals,
+current_temp,
+current_lines,
+functions,
+context
+)
+                                        diagnostics = (diagnostics) + (lowered.diagnostics)
+                                        current_lines = lowered.lines
+                                        current_temp = lowered.temp_index
+                                        temp_constants = collected_string_constants
+                                        collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
+                                        terminated = True
+                                        index += 1
+                                        if index < end:
+                                            diagnostics = append_string(diagnostics, "llvm lowering: instructions after throw ignored in `" + function.name + "`")
+                                        break
+                                    else:
+                                        if instruction.variant == "Else"  or  instruction.variant == "EndIf":
+                                            break
+                                        else:
+                                            if instruction.variant == "EndLoop"  or  instruction.variant == "EndMatch"  or  instruction.variant == "EndFor":
+                                                break
+                                            else:
+                                                if instruction.variant == "Break":
+                                                    if len(current_loop_stack) == 0:
+                                                        diagnostics = append_string(diagnostics, "llvm lowering: `break` outside loop in `" + function.name + "`")
                                                     else:
-                                                        diagnostics = append_string(diagnostics, "llvm lowering: unsupported instruction `" + instruction.variant + "` in `" + function.name + "`")
+                                                        loop_context = last_loop_context(current_loop_stack)
+                                                        current_lines = append_string(current_lines, "  br label %" + loop_context.break_label)
+                                                        terminated = True
+                                                    index += 1
+                                                    if index < end  and  terminated:
+                                                        diagnostics = append_string(diagnostics, "llvm lowering: instructions after break ignored in `" + function.name + "`")
+                                                    break
+                                                else:
+                                                    if instruction.variant == "Continue":
+                                                        if len(current_loop_stack) == 0:
+                                                            diagnostics = append_string(diagnostics, "llvm lowering: `continue` outside loop in `" + function.name + "`")
+                                                        else:
+                                                            loop_context = last_loop_context(current_loop_stack)
+                                                            current_lines = append_string(current_lines, "  br label %" + loop_context.continue_label)
+                                                            terminated = True
+                                                        index += 1
+                                                        if index < end  and  terminated:
+                                                            diagnostics = append_string(diagnostics, "llvm lowering: instructions after continue ignored in `" + function.name + "`")
+                                                        break
+                                                    else:
+                                                        if instruction.variant == "For":
+                                                            lowered = lower_for_instruction(
+function,
+index,
+llvm_return,
+current_bindings,
+current_locals,
+current_allocas,
+current_lines,
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+current_loop_stack,
+end,
+context,
+scope_id,
+scope_depth,
+active_label
+)
+                                                            diagnostics = (diagnostics) + (lowered.diagnostics)
+                                                            collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
+                                                            current_lines = lowered.lines
+                                                            current_allocas = lowered.allocas
+                                                            current_locals = lowered.locals
+                                                            current_bindings = lowered.bindings
+                                                            current_temp = lowered.temp_index
+                                                            current_block_counter = lowered.block_counter
+                                                            current_next_local = lowered.next_local_id
+                                                            current_next_region = lowered.next_lifetime_region_id
+                                                            current_mutations = (current_mutations) + (lowered.mutations)
+                                                            temp_constants = collected_string_constants
+                                                            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants)
+                                                            terminated = lowered.terminated
+                                                            index = lowered.next_index
+                                                            active_label = find_last_label(current_lines, active_label)
+                                                            if terminated:
+                                                                break
+                                                            continue
+                                                        else:
+                                                            if instruction.variant == "Noop":
+                                                                pass
+                                                            else:
+                                                                diagnostics = append_string(diagnostics, "llvm lowering: unsupported instruction `" + instruction.variant + "` in `" + function.name + "`")
         index += 1
     return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=collected_lifetime_regions, next_lifetime_region_id=current_next_region, next_index=index, mutations=current_mutations, string_constants=collected_string_constants)
 
@@ -3410,6 +3510,189 @@ def collect_if_structure(instructions, start_index, end, function_name):
             continue
         index += 1
     return IfStructure(then_start=then_start, then_end=then_end, else_start=else_start, else_end=else_end, has_else=has_else, next_index=limit, diagnostics=diagnostics)
+
+def lower_throw_instruction(function_name, instruction, llvm_return, bindings, locals, temp_index, lines, functions, context):
+    diagnostics = []
+    current_lines = lines
+    current_temp = temp_index
+    collected_string_constants = empty_string_constant_set()
+    lowered_expr = lower_expression(
+instruction.expression,
+bindings,
+locals,
+current_temp,
+current_lines,
+functions,
+context,
+"i8*"
+)
+    diagnostics = (diagnostics) + (lowered_expr.diagnostics)
+    current_lines = lowered_expr.lines
+    current_temp = lowered_expr.temp_index
+    collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants)
+    if lowered_expr.operand == None:
+        diagnostics = append_string(diagnostics, "llvm lowering: unsupported throw expression in `" + function_name + "`")
+        current_lines = append_string(current_lines, "  unreachable")
+        return ThrowLoweringResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics, string_constants=collected_string_constants)
+    coerced = coerce_operand_to_type(lowered_expr.operand, "i8*", current_temp, current_lines)
+    diagnostics = (diagnostics) + (coerced.diagnostics)
+    current_lines = coerced.lines
+    current_temp = coerced.temp_index
+    if coerced.operand == None:
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce throw value to string in `" + function_name + "`")
+        current_lines = append_string(current_lines, "  unreachable")
+        return ThrowLoweringResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics, string_constants=collected_string_constants)
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_set_exception(i8* " + coerced.operand.value + ")")
+    if llvm_return == "void":
+        current_lines = append_string(current_lines, "  ret void")
+    else:
+        current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
+    return ThrowLoweringResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics, string_constants=collected_string_constants)
+
+def collect_try_structure(instructions, start_index, end, function_name):
+    diagnostics = []
+    depth = 1
+    index = start_index + 1
+    catch_index = -1
+    catch_name = ""
+    end_index = -1
+    while True:
+        if index >= end:
+            break
+        instruction = instructions[index]
+        if instruction.variant == "Try":
+            depth += 1
+        else:
+            if instruction.variant == "EndTry":
+                depth -= 1
+                if depth == 0:
+                    end_index = index
+                    break
+            else:
+                if instruction.variant == "Catch":
+                    if depth == 1  and  catch_index == -1:
+                        catch_index = index
+                        catch_name = instruction.name
+        index += 1
+    if catch_index == -1:
+        diagnostics = append_string(diagnostics, "llvm lowering: try without catch in `" + function_name + "`")
+    if end_index == -1:
+        diagnostics = append_string(diagnostics, "llvm lowering: try without endtry in `" + function_name + "`")
+        end_index = end - 1
+    try_start = start_index + 1
+    try_end = end_index
+    if catch_index != -1:
+        try_end = catch_index
+    catch_start = end_index
+    if catch_index != -1:
+        catch_start = catch_index + 1
+    catch_end = end_index
+    return TryStructure(try_start=try_start, try_end=try_end, catch_index=catch_index, catch_name=catch_name, catch_start=catch_start, catch_end=catch_end, end_index=end_index, next_index=end_index + 1, diagnostics=diagnostics)
+
+def lower_try_instruction(function, start_index, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, end, context, scope_id, scope_depth, current_label):
+    diagnostics = []
+    structure = collect_try_structure(function.instructions, start_index, end, function.name)
+    diagnostics = (diagnostics) + (structure.diagnostics)
+    current_lines = lines
+    current_allocas = allocas
+    current_locals = locals
+    current_bindings = bindings
+    current_temp = temp_index
+    current_block_counter = block_counter
+    current_next_local = next_local_id
+    current_next_region = next_region_id
+    lifetime_regions = []
+    collected_string_constants = empty_string_constant_set()
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_clear_exception()")
+    try_label_alloc = allocate_block_label("try", current_block_counter)
+    try_label = try_label_alloc.label
+    current_block_counter = try_label_alloc.next_counter
+    catch_label_alloc = allocate_block_label("catch", current_block_counter)
+    catch_label = catch_label_alloc.label
+    current_block_counter = catch_label_alloc.next_counter
+    merge_label_alloc = allocate_block_label("merge", current_block_counter)
+    merge_label = merge_label_alloc.label
+    current_block_counter = merge_label_alloc.next_counter
+    current_lines = append_string(current_lines, "  br label %" + try_label)
+    current_lines = append_string(current_lines, try_label + ":")
+    try_scope_id = make_child_scope_id(scope_id, try_label)
+    try_result = lower_instruction_range(
+function,
+structure.try_start,
+structure.try_end,
+llvm_return,
+current_bindings,
+current_locals,
+current_allocas,
+[],
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+loop_stack,
+context,
+try_scope_id,
+scope_depth + 1,
+try_label
+)
+    diagnostics = (diagnostics) + (try_result.diagnostics)
+    lifetime_regions = (lifetime_regions) + (try_result.lifetime_regions)
+    current_allocas = try_result.allocas
+    current_temp = try_result.temp_index
+    current_block_counter = try_result.block_counter
+    current_next_local = try_result.next_local_id
+    current_next_region = try_result.next_lifetime_region_id
+    current_lines = (current_lines) + (try_result.lines)
+    collected_string_constants = merge_string_constants(collected_string_constants, try_result.string_constants)
+    if not try_result.terminated:
+        has_exc = format_temp_name(current_temp)
+        current_temp += 1
+        current_lines = append_string(current_lines, "  " + has_exc + " = call i1 @sailfin_runtime_has_exception()")
+        current_lines = append_string(current_lines, "  br i1 " + has_exc + ", label %" + catch_label + ", label %" + merge_label)
+    current_lines = append_string(current_lines, catch_label + ":")
+    catch_scope_id = make_child_scope_id(scope_id, catch_label)
+    exception_temp = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + exception_temp + " = call i8* @sailfin_runtime_take_exception()")
+    err_slot = format_local_pointer_name(current_next_local)
+    current_next_local += 1
+    current_allocas = append_string(current_allocas, "  " + err_slot + " = alloca i8*")
+    current_lines = append_string(current_lines, "  store i8* " + exception_temp + ", i8** " + err_slot)
+    catch_locals = (current_locals) + ([LocalBinding(name=structure.catch_name, pointer=err_slot, llvm_type="i8*", type_annotation="string", ownership=None, consumed=False, scope_id=catch_scope_id, scope_depth=scope_depth + 1)])
+    catch_result = lower_instruction_range(
+function,
+structure.catch_start,
+structure.catch_end,
+llvm_return,
+current_bindings,
+catch_locals,
+current_allocas,
+[],
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+loop_stack,
+context,
+catch_scope_id,
+scope_depth + 1,
+catch_label
+)
+    diagnostics = (diagnostics) + (catch_result.diagnostics)
+    lifetime_regions = (lifetime_regions) + (catch_result.lifetime_regions)
+    current_allocas = catch_result.allocas
+    current_temp = catch_result.temp_index
+    current_block_counter = catch_result.block_counter
+    current_next_local = catch_result.next_local_id
+    current_next_region = catch_result.next_lifetime_region_id
+    current_lines = (current_lines) + (catch_result.lines)
+    collected_string_constants = merge_string_constants(collected_string_constants, catch_result.string_constants)
+    if not catch_result.terminated:
+        current_lines = append_string(current_lines, "  br label %" + merge_label)
+    current_lines = append_string(current_lines, merge_label + ":")
+    return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index, mutations=[], string_constants=collected_string_constants)
 
 def collect_loop_structure(instructions, start_index, end, function_name):
     diagnostics = []
@@ -6416,6 +6699,19 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     stripped = strip_enclosing_parentheses(trimmed)
     if stripped != trimmed:
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type)
+    if starts_with(stripped, "await"):
+        if len(stripped) == 5:
+            diagnostics = append_string(diagnostics, "llvm lowering: await expression missing operand")
+            return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
+        next = char_at(stripped, 5)
+        if next == " "  or  next == "\t"  or  next == "(":
+            remainder = trim_text(substring(stripped, 5, len(stripped)))
+            if len(remainder) == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: await expression missing operand")
+                return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
+            lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type)
+            combined = (diagnostics) + (lowered.diagnostics)
+            return ExpressionResult(lines=lowered.lines, temp_index=lowered.temp_index, operand=lowered.operand, diagnostics=combined, string_constants=lowered.string_constants)
     ternary_parse = parse_ternary_expression(stripped)
     if ternary_parse.success:
         return lower_ternary_expression(ternary_parse, bindings, locals, temp_index, lines, functions, context, expected_type)

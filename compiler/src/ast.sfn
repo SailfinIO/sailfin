@@ -286,6 +286,16 @@ enum Statement {
         expression -> Expression?;
         span -> SourceSpan?;
     },
+    ThrowStatement {
+        expression -> Expression;
+        span -> SourceSpan?;
+    },
+    TryStatement {
+        try_block -> Block;
+        catch_name -> string;
+        catch_name_token -> Token;
+        catch_block -> Block;
+    },
     ExpressionStatement {
         expression -> Expression;
         span -> SourceSpan?;

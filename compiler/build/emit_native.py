@@ -276,10 +276,29 @@ def emit_statement(state, statement):
         return state_emit_line(current, ".endif")
     if statement.variant == "ReturnStatement":
         return emit_return(state, statement)
+    if statement.variant == "ThrowStatement":
+        return emit_throw(state, statement)
+    if statement.variant == "TryStatement":
+        return emit_try(state, statement)
     if statement.variant == "ExpressionStatement":
         return emit_expression_statement(state, statement)
     message = "native backend: unsupported statement `" + statement.variant + "`"
     return state_add_diagnostic(state, message)
+
+def emit_throw(state, statement):
+    current = emit_span_if_present(state, statement.span)
+    return state_emit_line(current, "throw " + format_expression(statement.expression))
+
+def emit_try(state, statement):
+    current = state_emit_line(state, ".try")
+    current = state_push_indent(current)
+    current = emit_block(current, statement.try_block)
+    current = state_pop_indent(current)
+    current = state_emit_line(current, ".catch " + statement.catch_name)
+    current = state_push_indent(current)
+    current = emit_block(current, statement.catch_block)
+    current = state_pop_indent(current)
+    return state_emit_line(current, ".endtry")
 
 def render_native_specifiers(specifiers):
     parts = []

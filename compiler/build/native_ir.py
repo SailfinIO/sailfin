@@ -36,6 +36,10 @@ NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Continue', [
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Match', ['expression'])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Case', ['pattern', 'guard'])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'EndMatch', [])
+NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Try', [])
+NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Catch', ['name'])
+NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'EndTry', [])
+NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Throw', ['expression', 'span'])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Noop', [])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Unknown', ['text'])
 
@@ -909,6 +913,16 @@ def parse_instruction(line, span, value_span):
         return InstructionParseResult(instructions=[parse_case_instruction(line)], span_consumed=False, value_span_consumed=False)
     if line == ".endmatch":
         return InstructionParseResult(instructions=[NativeInstruction.EndMatch()], span_consumed=False, value_span_consumed=False)
+    if line == ".try":
+        return InstructionParseResult(instructions=[NativeInstruction.Try()], span_consumed=False, value_span_consumed=False)
+    if starts_with(line, ".catch "):
+        name = trim_text(strip_prefix(line, ".catch "))
+        return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Catch', [runtime.enum_field('name', name)])], span_consumed=False, value_span_consumed=False)
+    if line == ".endtry":
+        return InstructionParseResult(instructions=[NativeInstruction.EndTry()], span_consumed=False, value_span_consumed=False)
+    if starts_with(line, "throw "):
+        expression = trim_trailing_delimiters(trim_text(strip_prefix(line, "throw ")))
+        return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Throw', [runtime.enum_field('expression', expression), runtime.enum_field('span', span)])], span_consumed=True, value_span_consumed=False)
     if starts_with(line, ".let "):
         return InstructionParseResult(instructions=[parse_let_instruction(line, span, value_span)], span_consumed=True, value_span_consumed=True)
     if starts_with(line, ".return"):

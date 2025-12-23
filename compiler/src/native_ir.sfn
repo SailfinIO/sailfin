@@ -42,6 +42,15 @@ enum NativeInstruction {
         guard -> string?;
     },
     EndMatch,
+    Try,
+    Catch {
+        name -> string;
+    },
+    EndTry,
+    Throw {
+        expression -> string;
+        span -> NativeSourceSpan?;
+    },
     Noop,
     Unknown { text -> string },
 }
@@ -1017,6 +1026,20 @@ fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> Na
     }
     if line == ".endmatch" {
         return InstructionParseResult { instructions: [NativeInstruction.EndMatch()], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".try" {
+        return InstructionParseResult { instructions: [NativeInstruction.Try()], span_consumed: false, value_span_consumed: false };
+    }
+    if starts_with(line, ".catch ") {
+        let name = trim_text(strip_prefix(line, ".catch "));
+        return InstructionParseResult { instructions: [NativeInstruction.Catch { name: name }], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".endtry" {
+        return InstructionParseResult { instructions: [NativeInstruction.EndTry()], span_consumed: false, value_span_consumed: false };
+    }
+    if starts_with(line, "throw ") {
+        let expression = trim_trailing_delimiters(trim_text(strip_prefix(line, "throw ")));
+        return InstructionParseResult { instructions: [NativeInstruction.Throw { expression: expression, span: span }], span_consumed: true, value_span_consumed: false };
     }
     if starts_with(line, ".let ") {
         return InstructionParseResult {

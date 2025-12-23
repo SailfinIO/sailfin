@@ -537,6 +537,18 @@ struct LoopStructure {
     diagnostics -> string[];
 }
 
+struct TryStructure {
+    try_start -> number;
+    try_end -> number;
+    catch_index -> number;
+    catch_name -> string;
+    catch_start -> number;
+    catch_end -> number;
+    end_index -> number;
+    next_index -> number;
+    diagnostics -> string[];
+}
+
 struct RangeIterableParse {
     success -> boolean;
     start -> string;
@@ -2723,6 +2735,12 @@ fn collect_instruction_runtime_helper_targets(instruction -> NativeInstruction) 
         }
         return helpers;
     }
+    if instruction.variant == "Try" {
+        return ["clear_exception", "has_exception", "take_exception"];
+    }
+    if instruction.variant == "Throw" {
+        return ["set_exception"];
+    }
     return [];
 }
 
@@ -3752,6 +3770,57 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
 
+    // Exceptions (stage2-native minimal)
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "set_exception",
+        symbol: "sailfin_runtime_set_exception",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "clear_exception",
+        symbol: "sailfin_runtime_clear_exception",
+        return_type: "void",
+        parameter_types: [],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "has_exception",
+        symbol: "sailfin_runtime_has_exception",
+        return_type: "i1",
+        parameter_types: [],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "try_enter",
+        symbol: "sailfin_runtime_try_enter",
+        return_type: "i32",
+        parameter_types: ["i8**"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "try_leave",
+        symbol: "sailfin_runtime_try_leave",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "throw",
+        symbol: "sailfin_runtime_throw",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "take_exception",
+        symbol: "sailfin_runtime_take_exception",
+        return_type: "i8*",
+        parameter_types: [],
+        effects: [],
+    });
+
     return descriptors;
 }
 
@@ -4448,6 +4517,70 @@ fn lower_instruction_range(
                 break;
             }
             continue;
+        } else if instruction.variant == "Try" {
+            let lowered = lower_try_instruction(
+                function,
+                index,
+                llvm_return,
+                current_bindings,
+                current_locals,
+                current_allocas,
+                current_lines,
+                current_temp,
+                current_block_counter,
+                current_next_local,
+                current_next_region,
+                functions,
+                current_loop_stack,
+                end,
+                context,
+                scope_id,
+                scope_depth,
+                active_label
+            );
+            diagnostics = diagnostics.concat(lowered.diagnostics);
+            collected_lifetime_regions = collected_lifetime_regions.concat(lowered.lifetime_regions);
+            current_lines = lowered.lines;
+            current_allocas = lowered.allocas;
+            current_locals = lowered.locals;
+            current_bindings = lowered.bindings;
+            current_temp = lowered.temp_index;
+            current_block_counter = lowered.block_counter;
+            current_next_local = lowered.next_local_id;
+            current_next_region = lowered.next_lifetime_region_id;
+            current_mutations = current_mutations.concat(lowered.mutations);
+            let temp_constants = collected_string_constants;
+            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+            terminated = lowered.terminated;
+            index = lowered.next_index;
+            active_label = find_last_label(current_lines, active_label);
+            if terminated {
+                break;
+            }
+            continue;
+        } else if instruction.variant == "Throw" {
+            let lowered = lower_throw_instruction(
+                function.name,
+                instruction,
+                llvm_return,
+                current_bindings,
+                current_locals,
+                current_temp,
+                current_lines,
+                functions,
+                context
+            );
+            diagnostics = diagnostics.concat(lowered.diagnostics);
+            current_lines = lowered.lines;
+            current_temp = lowered.temp_index;
+            let temp_constants = collected_string_constants;
+            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+            terminated = true;
+            index += 1;
+            if index < end {
+                diagnostics = append_string(diagnostics, "llvm lowering: instructions after throw ignored in `" + function.name + "`");
+            }
+            break;
         } else if instruction.variant == "Else" || instruction.variant == "EndIf" {
             break;
         } else if instruction.variant == "EndLoop" || instruction.variant == "EndMatch" || instruction.variant == "EndFor" {
@@ -4627,6 +4760,300 @@ fn collect_if_structure(
         has_else: has_else,
         next_index: limit,
         diagnostics: diagnostics,
+    };
+}
+
+struct ThrowLoweringResult {
+    lines -> string[];
+    temp_index -> number;
+    diagnostics -> string[];
+    string_constants -> StringConstant[];
+}
+
+fn lower_throw_instruction(
+    function_name -> string,
+    instruction -> NativeInstruction,
+    llvm_return -> string,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    temp_index -> number,
+    lines -> string[],
+    functions -> NativeFunction[],
+    context -> TypeContext
+) -> ThrowLoweringResult {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+
+    let lowered_expr = lower_expression(
+        instruction.expression,
+        bindings,
+        locals,
+        current_temp,
+        current_lines,
+        functions,
+        context,
+        "i8*"
+    );
+    diagnostics = diagnostics.concat(lowered_expr.diagnostics);
+    current_lines = lowered_expr.lines;
+    current_temp = lowered_expr.temp_index;
+    collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants);
+
+    if lowered_expr.operand == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: unsupported throw expression in `" + function_name + "`");
+        current_lines = append_string(current_lines, "  unreachable");
+        return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+
+    let coerced = coerce_operand_to_type(lowered_expr.operand, "i8*", current_temp, current_lines);
+    diagnostics = diagnostics.concat(coerced.diagnostics);
+    current_lines = coerced.lines;
+    current_temp = coerced.temp_index;
+    if coerced.operand == null {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce throw value to string in `" + function_name + "`");
+        current_lines = append_string(current_lines, "  unreachable");
+        return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_set_exception(i8* " + coerced.operand.value + ")");
+    if llvm_return == "void" {
+        current_lines = append_string(current_lines, "  ret void");
+    } else {
+        current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+    }
+    return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, string_constants: collected_string_constants };
+}
+
+fn collect_try_structure(instructions -> NativeInstruction[], start_index -> number, end -> number, function_name -> string) -> TryStructure {
+    let mut diagnostics -> string[] = [];
+    let mut depth -> number = 1;
+    let mut index -> number = start_index + 1;
+    let mut catch_index -> number = -1;
+    let mut catch_name -> string = "";
+    let mut end_index -> number = -1;
+
+    loop {
+        if index >= end {
+            break;
+        }
+        let instruction = instructions[index];
+        if instruction.variant == "Try" {
+            depth += 1;
+        } else if instruction.variant == "EndTry" {
+            depth -= 1;
+            if depth == 0 {
+                end_index = index;
+                break;
+            }
+        } else if instruction.variant == "Catch" {
+            if depth == 1 && catch_index == -1 {
+                catch_index = index;
+                catch_name = instruction.name;
+            }
+        }
+        index += 1;
+    }
+
+    if catch_index == -1 {
+        diagnostics = append_string(diagnostics, "llvm lowering: try without catch in `" + function_name + "`");
+    }
+    if end_index == -1 {
+        diagnostics = append_string(diagnostics, "llvm lowering: try without endtry in `" + function_name + "`");
+        end_index = end - 1;
+    }
+
+    let try_start = start_index + 1;
+    let mut try_end -> number = end_index;
+    if catch_index != -1 {
+        try_end = catch_index;
+    }
+    let mut catch_start -> number = end_index;
+    if catch_index != -1 {
+        catch_start = catch_index + 1;
+    }
+    let catch_end = end_index;
+
+    return TryStructure {
+        try_start: try_start,
+        try_end: try_end,
+        catch_index: catch_index,
+        catch_name: catch_name,
+        catch_start: catch_start,
+        catch_end: catch_end,
+        end_index: end_index,
+        next_index: end_index + 1,
+        diagnostics: diagnostics,
+    };
+}
+
+fn lower_try_instruction(
+    function -> NativeFunction,
+    start_index -> number,
+    llvm_return -> string,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    allocas -> string[],
+    lines -> string[],
+    temp_index -> number,
+    block_counter -> number,
+    next_local_id -> number,
+    next_region_id -> number,
+    functions -> NativeFunction[],
+    loop_stack -> LoopContext[],
+    end -> number,
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number,
+    current_label -> string
+) -> BlockLoweringResult {
+    let mut diagnostics -> string[] = [];
+    let structure = collect_try_structure(function.instructions, start_index, end, function.name);
+    diagnostics = diagnostics.concat(structure.diagnostics);
+
+    let mut current_lines -> string[] = lines;
+    let mut current_allocas -> string[] = allocas;
+    let mut current_locals -> LocalBinding[] = locals;
+    let mut current_bindings -> ParameterBinding[] = bindings;
+    let mut current_temp -> number = temp_index;
+    let mut current_block_counter -> number = block_counter;
+    let mut current_next_local -> number = next_local_id;
+    let mut current_next_region -> number = next_region_id;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+
+    // Reset exception state at start of try.
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_clear_exception()");
+
+    let try_label_alloc = allocate_block_label("try", current_block_counter);
+    let try_label = try_label_alloc.label;
+    current_block_counter = try_label_alloc.next_counter;
+
+    let catch_label_alloc = allocate_block_label("catch", current_block_counter);
+    let catch_label = catch_label_alloc.label;
+    current_block_counter = catch_label_alloc.next_counter;
+
+    let merge_label_alloc = allocate_block_label("merge", current_block_counter);
+    let merge_label = merge_label_alloc.label;
+    current_block_counter = merge_label_alloc.next_counter;
+
+    current_lines = append_string(current_lines, "  br label %" + try_label);
+
+    // Try block
+    current_lines = append_string(current_lines, try_label + ":");
+    let try_scope_id = make_child_scope_id(scope_id, try_label);
+    let try_result = lower_instruction_range(
+        function,
+        structure.try_start,
+        structure.try_end,
+        llvm_return,
+        current_bindings,
+        current_locals,
+        current_allocas,
+        [],
+        current_temp,
+        current_block_counter,
+        current_next_local,
+        current_next_region,
+        functions,
+        loop_stack,
+        context,
+        try_scope_id,
+        scope_depth + 1,
+        try_label
+    );
+    diagnostics = diagnostics.concat(try_result.diagnostics);
+    lifetime_regions = lifetime_regions.concat(try_result.lifetime_regions);
+    current_allocas = try_result.allocas;
+    current_temp = try_result.temp_index;
+    current_block_counter = try_result.block_counter;
+    current_next_local = try_result.next_local_id;
+    current_next_region = try_result.next_lifetime_region_id;
+    current_lines = current_lines.concat(try_result.lines);
+    collected_string_constants = merge_string_constants(collected_string_constants, try_result.string_constants);
+
+    if !try_result.terminated {
+        let has_exc = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines = append_string(current_lines, "  " + has_exc + " = call i1 @sailfin_runtime_has_exception()");
+        current_lines = append_string(current_lines, "  br i1 " + has_exc + ", label %" + catch_label + ", label %" + merge_label);
+    }
+
+    // Catch block
+    current_lines = append_string(current_lines, catch_label + ":");
+    let catch_scope_id = make_child_scope_id(scope_id, catch_label);
+    let exception_temp = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + exception_temp + " = call i8* @sailfin_runtime_take_exception()");
+
+    // Bind catch variable as a local `i8*`.
+    let err_slot = format_local_pointer_name(current_next_local);
+    current_next_local += 1;
+    current_allocas = append_string(current_allocas, "  " + err_slot + " = alloca i8*");
+    current_lines = append_string(current_lines, "  store i8* " + exception_temp + ", i8** " + err_slot);
+    let catch_locals = current_locals.concat([LocalBinding {
+        name: structure.catch_name,
+        pointer: err_slot,
+        llvm_type: "i8*",
+        type_annotation: "string",
+        ownership: null,
+        consumed: false,
+        scope_id: catch_scope_id,
+        scope_depth: scope_depth + 1,
+    }]);
+
+    let catch_result = lower_instruction_range(
+        function,
+        structure.catch_start,
+        structure.catch_end,
+        llvm_return,
+        current_bindings,
+        catch_locals,
+        current_allocas,
+        [],
+        current_temp,
+        current_block_counter,
+        current_next_local,
+        current_next_region,
+        functions,
+        loop_stack,
+        context,
+        catch_scope_id,
+        scope_depth + 1,
+        catch_label
+    );
+    diagnostics = diagnostics.concat(catch_result.diagnostics);
+    lifetime_regions = lifetime_regions.concat(catch_result.lifetime_regions);
+    current_allocas = catch_result.allocas;
+    current_temp = catch_result.temp_index;
+    current_block_counter = catch_result.block_counter;
+    current_next_local = catch_result.next_local_id;
+    current_next_region = catch_result.next_lifetime_region_id;
+    current_lines = current_lines.concat(catch_result.lines);
+    collected_string_constants = merge_string_constants(collected_string_constants, catch_result.string_constants);
+
+    if !catch_result.terminated {
+        current_lines = append_string(current_lines, "  br label %" + merge_label);
+    }
+
+    current_lines = append_string(current_lines, merge_label + ":");
+
+    return BlockLoweringResult {
+        lines: current_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        bindings: current_bindings,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        terminated: false,
+        next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
+        next_index: structure.next_index,
+        mutations: [],
+        string_constants: collected_string_constants,
     };
 }
 
@@ -9451,6 +9878,27 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     let stripped = strip_enclosing_parentheses(trimmed);
     if stripped != trimmed {
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    // `await <expr>` currently lowers as a synchronous identity.
+    // This unblocks examples that use async/await while the native runtime
+    // does not yet provide a scheduler.
+    if starts_with(stripped, "await") {
+        if stripped.length == 5 {
+            diagnostics = append_string(diagnostics, "llvm lowering: await expression missing operand");
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        }
+        let next = char_at(stripped, 5);
+        if next == " " || next == "\t" || next == "(" {
+            let remainder = trim_text(substring(stripped, 5, stripped.length));
+            if remainder.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: await expression missing operand");
+                return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+            }
+            let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
+            let combined = diagnostics.concat(lowered.diagnostics);
+            return ExpressionResult { lines: lowered.lines, temp_index: lowered.temp_index, operand: lowered.operand, diagnostics: combined, string_constants: lowered.string_constants };
+        }
     }
 
     // Check for ternary operator first (lowest precedence)

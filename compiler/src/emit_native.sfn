@@ -287,11 +287,36 @@ fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     if statement.variant == "ReturnStatement" {
         return emit_return(state, statement);
     }
+    if statement.variant == "ThrowStatement" {
+        return emit_throw(state, statement);
+    }
+    if statement.variant == "TryStatement" {
+        return emit_try(state, statement);
+    }
     if statement.variant == "ExpressionStatement" {
         return emit_expression_statement(state, statement);
     }
     let message = "native backend: unsupported statement `" + statement.variant + "`";
     return state_add_diagnostic(state, message);
+}
+
+fn emit_throw(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = emit_span_if_present(state, statement.span);
+    return state_emit_line(current, "throw " + format_expression(statement.expression));
+}
+
+fn emit_try(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = state_emit_line(state, ".try");
+    current = state_push_indent(current);
+    current = emit_block(current, statement.try_block);
+    current = state_pop_indent(current);
+
+    current = state_emit_line(current, ".catch " + statement.catch_name);
+    current = state_push_indent(current);
+    current = emit_block(current, statement.catch_block);
+    current = state_pop_indent(current);
+
+    return state_emit_line(current, ".endtry");
 }
 
 fn render_native_specifiers(specifiers -> ImportSpecifier[]) -> string {
