@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.77 (2025-12-24)
+
+### Bug Fixes
+
+- Tagged enums
+  ([`3f81844`](https://github.com/SailfinIO/sailfin/commit/3f818448667ffac8d6edeead33d29e970c8ad7d9))
+
+- Try catch finally
+  ([`c429eec`](https://github.com/SailfinIO/sailfin/commit/c429eecbd38a59c539494168f4911eee4ab06371))
+
+
 ## v0.1.1-alpha.76 (2025-12-24)
 
 ### Bug Fixes
