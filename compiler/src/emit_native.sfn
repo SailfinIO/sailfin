@@ -333,10 +333,23 @@ fn emit_try(state -> NativeState, statement -> Statement) -> NativeState {
     current = emit_block(current, statement.try_block);
     current = state_pop_indent(current);
 
-    current = state_emit_line(current, ".catch " + statement.catch_name);
-    current = state_push_indent(current);
-    current = emit_block(current, statement.catch_block);
-    current = state_pop_indent(current);
+    if statement.catch_block != null {
+        let mut catch_name -> string = "_";
+        if statement.catch_name != null && statement.catch_name.length > 0 {
+            catch_name = statement.catch_name;
+        }
+        current = state_emit_line(current, ".catch " + catch_name);
+        current = state_push_indent(current);
+        current = emit_block(current, statement.catch_block);
+        current = state_pop_indent(current);
+    }
+
+    if statement.finally_block != null {
+        current = state_emit_line(current, ".finally");
+        current = state_push_indent(current);
+        current = emit_block(current, statement.finally_block);
+        current = state_pop_indent(current);
+    }
 
     return state_emit_line(current, ".endtry");
 }

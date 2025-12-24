@@ -1702,33 +1702,45 @@ def parse_try_statement(parser):
     if len(try_result.block.tokens) == 0:
         return BlockStatementParseResult(parser=original, statement=None, success=False)
     current = try_result.parser
+    catch_name = None
+    catch_name_token = None
+    catch_block = None
     current = skip_trivia(current)
-    if not identifier_matches(parser_peek_raw(current), "catch"):
-        return BlockStatementParseResult(parser=original, statement=None, success=False)
-    current = consume_keyword(current, "catch")
+    if identifier_matches(parser_peek_raw(current), "catch"):
+        current = consume_keyword(current, "catch")
+        current = skip_trivia(current)
+        if symbol_matches(parser_peek_raw(current), "("):
+            current = parser_advance_raw(current)
+            current = skip_trivia(current)
+            name_token = parser_peek_raw(current)
+            if name_token.kind.variant != "Identifier":
+                return BlockStatementParseResult(parser=original, statement=None, success=False)
+            catch_name = name_token.lexeme
+            catch_name_token = name_token
+            current = parser_advance_raw(current)
+            current = skip_trivia(current)
+            if not symbol_matches(parser_peek_raw(current), ")"):
+                return BlockStatementParseResult(parser=original, statement=None, success=False)
+            current = parser_advance_raw(current)
+        catch_result = parse_block(current)
+        if len(catch_result.block.tokens) == 0:
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
+        catch_block = catch_result.block
+        current = catch_result.parser
+    finally_block = None
     current = skip_trivia(current)
-    if not symbol_matches(parser_peek_raw(current), "("):
-        return BlockStatementParseResult(parser=original, statement=None, success=False)
-    current = parser_advance_raw(current)
-    current = skip_trivia(current)
-    name_token = parser_peek_raw(current)
-    if name_token.kind.variant != "Identifier":
-        return BlockStatementParseResult(parser=original, statement=None, success=False)
-    catch_name = name_token.lexeme
-    current = parser_advance_raw(current)
-    current = skip_trivia(current)
-    if not symbol_matches(parser_peek_raw(current), ")"):
-        return BlockStatementParseResult(parser=original, statement=None, success=False)
-    current = parser_advance_raw(current)
-    catch_result = parse_block(current)
-    if len(catch_result.block.tokens) == 0:
-        return BlockStatementParseResult(parser=original, statement=None, success=False)
-    current = catch_result.parser
+    if identifier_matches(parser_peek_raw(current), "finally"):
+        current = consume_keyword(current, "finally")
+        finally_result = parse_block(current)
+        if len(finally_result.block.tokens) == 0:
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
+        finally_block = finally_result.block
+        current = finally_result.parser
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
     if symbol_matches(terminator, ";"):
         current = parser_advance_raw(current)
-    statement = runtime.enum_instantiate(Statement, 'TryStatement', [runtime.enum_field('try_block', try_result.block), runtime.enum_field('catch_name', catch_name), runtime.enum_field('catch_name_token', name_token), runtime.enum_field('catch_block', catch_result.block)])
+    statement = runtime.enum_instantiate(Statement, 'TryStatement', [runtime.enum_field('try_block', try_result.block), runtime.enum_field('catch_name', catch_name), runtime.enum_field('catch_name_token', catch_name_token), runtime.enum_field('catch_block', catch_block), runtime.enum_field('finally_block', finally_block)])
     return BlockStatementParseResult(parser=current, statement=statement, success=True)
 
 def parse_assert_statement(parser):

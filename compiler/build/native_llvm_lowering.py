@@ -631,19 +631,22 @@ class LoopStructure:
         return runtime.struct_repr('LoopStructure', [runtime.struct_field('body_start', self.body_start), runtime.struct_field('body_end', self.body_end), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class TryStructure:
-    def __init__(self, try_start, try_end, catch_index, catch_name, catch_start, catch_end, end_index, next_index, diagnostics):
+    def __init__(self, try_start, try_end, catch_index, catch_name, catch_start, catch_end, finally_index, finally_start, finally_end, end_index, next_index, diagnostics):
         self.try_start = try_start
         self.try_end = try_end
         self.catch_index = catch_index
         self.catch_name = catch_name
         self.catch_start = catch_start
         self.catch_end = catch_end
+        self.finally_index = finally_index
+        self.finally_start = finally_start
+        self.finally_end = finally_end
         self.end_index = end_index
         self.next_index = next_index
         self.diagnostics = diagnostics
 
     def __repr__(self):
-        return runtime.struct_repr('TryStructure', [runtime.struct_field('try_start', self.try_start), runtime.struct_field('try_end', self.try_end), runtime.struct_field('catch_index', self.catch_index), runtime.struct_field('catch_name', self.catch_name), runtime.struct_field('catch_start', self.catch_start), runtime.struct_field('catch_end', self.catch_end), runtime.struct_field('end_index', self.end_index), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
+        return runtime.struct_repr('TryStructure', [runtime.struct_field('try_start', self.try_start), runtime.struct_field('try_end', self.try_end), runtime.struct_field('catch_index', self.catch_index), runtime.struct_field('catch_name', self.catch_name), runtime.struct_field('catch_start', self.catch_start), runtime.struct_field('catch_end', self.catch_end), runtime.struct_field('finally_index', self.finally_index), runtime.struct_field('finally_start', self.finally_start), runtime.struct_field('finally_end', self.finally_end), runtime.struct_field('end_index', self.end_index), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
 
 class RangeIterableParse:
     def __init__(self, success, start, end, stride, diagnostics):
@@ -3711,6 +3714,7 @@ def collect_try_structure(instructions, start_index, end, function_name):
     index = start_index + 1
     catch_index = -1
     catch_name = ""
+    finally_index = -1
     end_index = -1
     while True:
         if index >= end:
@@ -3729,9 +3733,11 @@ def collect_try_structure(instructions, start_index, end, function_name):
                     if depth == 1  and  catch_index == -1:
                         catch_index = index
                         catch_name = instruction.name
+                else:
+                    if instruction.variant == "Finally":
+                        if depth == 1  and  finally_index == -1:
+                            finally_index = index
         index += 1
-    if catch_index == -1:
-        diagnostics = append_string(diagnostics, "llvm lowering: try without catch in `" + function_name + "`")
     if end_index == -1:
         diagnostics = append_string(diagnostics, "llvm lowering: try without endtry in `" + function_name + "`")
         end_index = end - 1
@@ -3739,11 +3745,22 @@ def collect_try_structure(instructions, start_index, end, function_name):
     try_end = end_index
     if catch_index != -1:
         try_end = catch_index
-    catch_start = end_index
+    else:
+        if finally_index != -1:
+            try_end = finally_index
+    catch_start = -1
+    catch_end = -1
     if catch_index != -1:
         catch_start = catch_index + 1
-    catch_end = end_index
-    return TryStructure(try_start=try_start, try_end=try_end, catch_index=catch_index, catch_name=catch_name, catch_start=catch_start, catch_end=catch_end, end_index=end_index, next_index=end_index + 1, diagnostics=diagnostics)
+        catch_end = end_index
+        if finally_index != -1:
+            catch_end = finally_index
+    finally_start = -1
+    finally_end = -1
+    if finally_index != -1:
+        finally_start = finally_index + 1
+        finally_end = end_index
+    return TryStructure(try_start=try_start, try_end=try_end, catch_index=catch_index, catch_name=catch_name, catch_start=catch_start, catch_end=catch_end, finally_index=finally_index, finally_start=finally_start, finally_end=finally_end, end_index=end_index, next_index=end_index + 1, diagnostics=diagnostics)
 
 def lower_try_instruction(function, start_index, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, end, context, scope_id, scope_depth, current_label):
     diagnostics = []
@@ -3763,9 +3780,16 @@ def lower_try_instruction(function, start_index, llvm_return, bindings, locals, 
     try_label_alloc = allocate_block_label("try", current_block_counter)
     try_label = try_label_alloc.label
     current_block_counter = try_label_alloc.next_counter
-    catch_label_alloc = allocate_block_label("catch", current_block_counter)
-    catch_label = catch_label_alloc.label
-    current_block_counter = catch_label_alloc.next_counter
+    catch_label = ""
+    if structure.catch_index != -1:
+        catch_label_alloc = allocate_block_label("catch", current_block_counter)
+        catch_label = catch_label_alloc.label
+        current_block_counter = catch_label_alloc.next_counter
+    finally_label = ""
+    if structure.finally_index != -1:
+        finally_label_alloc = allocate_block_label("finally", current_block_counter)
+        finally_label = finally_label_alloc.label
+        current_block_counter = finally_label_alloc.next_counter
     merge_label_alloc = allocate_block_label("merge", current_block_counter)
     merge_label = merge_label_alloc.label
     current_block_counter = merge_label_alloc.next_counter
@@ -3805,18 +3829,28 @@ try_label
         has_exc = format_temp_name(current_temp)
         current_temp += 1
         current_lines = append_string(current_lines, "  " + has_exc + " = call i1 @sailfin_runtime_has_exception()")
-        current_lines = append_string(current_lines, "  br i1 " + has_exc + ", label %" + catch_label + ", label %" + merge_label)
-    current_lines = append_string(current_lines, catch_label + ":")
-    catch_scope_id = make_child_scope_id(scope_id, catch_label)
-    exception_temp = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + exception_temp + " = call i8* @sailfin_runtime_take_exception()")
-    err_slot = format_local_pointer_name(current_next_local)
-    current_next_local += 1
-    current_allocas = append_string(current_allocas, "  " + err_slot + " = alloca i8*")
-    current_lines = append_string(current_lines, "  store i8* " + exception_temp + ", i8** " + err_slot)
-    catch_locals = (current_locals) + ([LocalBinding(name=structure.catch_name, pointer=err_slot, llvm_type="i8*", type_annotation="string", ownership=None, consumed=False, scope_id=catch_scope_id, scope_depth=scope_depth + 1)])
-    catch_result = lower_instruction_range(
+        normal_target = merge_label
+        if structure.finally_index != -1:
+            normal_target = finally_label
+        if structure.catch_index != -1:
+            current_lines = append_string(current_lines, "  br i1 " + has_exc + ", label %" + catch_label + ", label %" + normal_target)
+        else:
+            current_lines = append_string(current_lines, "  br label %" + normal_target)
+    if structure.catch_index != -1:
+        current_lines = append_string(current_lines, catch_label + ":")
+        catch_scope_id = make_child_scope_id(scope_id, catch_label)
+        exception_temp = format_temp_name(current_temp)
+        current_temp += 1
+        current_lines = append_string(current_lines, "  " + exception_temp + " = call i8* @sailfin_runtime_take_exception()")
+        catch_locals = current_locals
+        trimmed_name = trim_text(structure.catch_name)
+        if len(trimmed_name) > 0  and  trimmed_name != "_":
+            err_slot = format_local_pointer_name(current_next_local)
+            current_next_local += 1
+            current_allocas = append_string(current_allocas, "  " + err_slot + " = alloca i8*")
+            current_lines = append_string(current_lines, "  store i8* " + exception_temp + ", i8** " + err_slot)
+            catch_locals = (catch_locals) + ([LocalBinding(name=trimmed_name, pointer=err_slot, llvm_type="i8*", type_annotation="string", ownership=None, consumed=False, scope_id=catch_scope_id, scope_depth=scope_depth + 1)])
+        catch_result = lower_instruction_range(
 function,
 structure.catch_start,
 structure.catch_end,
@@ -3836,18 +3870,71 @@ catch_scope_id,
 scope_depth + 1,
 catch_label
 )
-    diagnostics = (diagnostics) + (catch_result.diagnostics)
-    lifetime_regions = (lifetime_regions) + (catch_result.lifetime_regions)
-    current_allocas = catch_result.allocas
-    current_temp = catch_result.temp_index
-    current_block_counter = catch_result.block_counter
-    current_next_local = catch_result.next_local_id
-    current_next_region = catch_result.next_lifetime_region_id
-    current_lines = (current_lines) + (catch_result.lines)
-    collected_string_constants = merge_string_constants(collected_string_constants, catch_result.string_constants)
-    if not catch_result.terminated:
-        current_lines = append_string(current_lines, "  br label %" + merge_label)
+        diagnostics = (diagnostics) + (catch_result.diagnostics)
+        lifetime_regions = (lifetime_regions) + (catch_result.lifetime_regions)
+        current_allocas = catch_result.allocas
+        current_temp = catch_result.temp_index
+        current_block_counter = catch_result.block_counter
+        current_next_local = catch_result.next_local_id
+        current_next_region = catch_result.next_lifetime_region_id
+        current_lines = (current_lines) + (catch_result.lines)
+        collected_string_constants = merge_string_constants(collected_string_constants, catch_result.string_constants)
+        if not catch_result.terminated:
+            target = merge_label
+            if structure.finally_index != -1:
+                target = finally_label
+            current_lines = append_string(current_lines, "  br label %" + target)
+    if structure.finally_index != -1:
+        current_lines = append_string(current_lines, finally_label + ":")
+        finally_scope_id = make_child_scope_id(scope_id, finally_label)
+        finally_result = lower_instruction_range(
+function,
+structure.finally_start,
+structure.finally_end,
+llvm_return,
+current_bindings,
+current_locals,
+current_allocas,
+[],
+current_temp,
+current_block_counter,
+current_next_local,
+current_next_region,
+functions,
+loop_stack,
+context,
+finally_scope_id,
+scope_depth + 1,
+finally_label
+)
+        diagnostics = (diagnostics) + (finally_result.diagnostics)
+        lifetime_regions = (lifetime_regions) + (finally_result.lifetime_regions)
+        current_allocas = finally_result.allocas
+        current_temp = finally_result.temp_index
+        current_block_counter = finally_result.block_counter
+        current_next_local = finally_result.next_local_id
+        current_next_region = finally_result.next_lifetime_region_id
+        current_lines = (current_lines) + (finally_result.lines)
+        collected_string_constants = merge_string_constants(collected_string_constants, finally_result.string_constants)
+        if not finally_result.terminated:
+            current_lines = append_string(current_lines, "  br label %" + merge_label)
     current_lines = append_string(current_lines, merge_label + ":")
+    has_exc_after = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + has_exc_after + " = call i1 @sailfin_runtime_has_exception()")
+    propagate_label_alloc = allocate_block_label("try.propagate", current_block_counter)
+    propagate_label = propagate_label_alloc.label
+    current_block_counter = propagate_label_alloc.next_counter
+    continue_label_alloc = allocate_block_label("try.continue", current_block_counter)
+    continue_label = continue_label_alloc.label
+    current_block_counter = continue_label_alloc.next_counter
+    current_lines = append_string(current_lines, "  br i1 " + has_exc_after + ", label %" + propagate_label + ", label %" + continue_label)
+    current_lines = append_string(current_lines, propagate_label + ":")
+    if llvm_return == "void":
+        current_lines = append_string(current_lines, "  ret void")
+    else:
+        current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
+    current_lines = append_string(current_lines, continue_label + ":")
     return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index, mutations=[], string_constants=collected_string_constants)
 
 def collect_loop_structure(instructions, start_index, end, function_name):

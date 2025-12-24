@@ -62,7 +62,7 @@ Statement = runtime.enum_define_variant(Statement, 'IfStatement', ['condition', 
 Statement = runtime.enum_define_variant(Statement, 'BlockStatement', ['body'])
 Statement = runtime.enum_define_variant(Statement, 'ReturnStatement', ['expression', 'span'])
 Statement = runtime.enum_define_variant(Statement, 'ThrowStatement', ['expression', 'span'])
-Statement = runtime.enum_define_variant(Statement, 'TryStatement', ['try_block', 'catch_name', 'catch_name_token', 'catch_block'])
+Statement = runtime.enum_define_variant(Statement, 'TryStatement', ['try_block', 'catch_name', 'catch_name_token', 'catch_block', 'finally_block'])
 Statement = runtime.enum_define_variant(Statement, 'ExpressionStatement', ['expression', 'span'])
 Statement = runtime.enum_define_variant(Statement, 'Unknown', ['tokens', 'text'])
 

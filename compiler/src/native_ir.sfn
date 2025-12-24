@@ -46,6 +46,7 @@ enum NativeInstruction {
     Catch {
         name -> string;
     },
+    Finally,
     EndTry,
     Throw {
         expression -> string;
@@ -1089,6 +1090,9 @@ fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> Na
     if starts_with(line, ".catch ") {
         let name = trim_text(strip_prefix(line, ".catch "));
         return InstructionParseResult { instructions: [NativeInstruction.Catch { name: name }], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".finally" {
+        return InstructionParseResult { instructions: [NativeInstruction.Finally()], span_consumed: false, value_span_consumed: false };
     }
     if line == ".endtry" {
         return InstructionParseResult { instructions: [NativeInstruction.EndTry()], span_consumed: false, value_span_consumed: false };

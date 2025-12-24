@@ -297,9 +297,10 @@ enum Statement {
     },
     TryStatement {
         try_block -> Block;
-        catch_name -> string;
-        catch_name_token -> Token;
-        catch_block -> Block;
+        catch_name -> string?;
+        catch_name_token -> Token?;
+        catch_block -> Block?;
+        finally_block -> Block?;
     },
     ExpressionStatement {
         expression -> Expression;

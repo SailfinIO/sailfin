@@ -308,10 +308,19 @@ def emit_try(state, statement):
     current = state_push_indent(current)
     current = emit_block(current, statement.try_block)
     current = state_pop_indent(current)
-    current = state_emit_line(current, ".catch " + statement.catch_name)
-    current = state_push_indent(current)
-    current = emit_block(current, statement.catch_block)
-    current = state_pop_indent(current)
+    if statement.catch_block != None:
+        catch_name = "_"
+        if statement.catch_name != None  and  len(statement.catch_name) > 0:
+            catch_name = statement.catch_name
+        current = state_emit_line(current, ".catch " + catch_name)
+        current = state_push_indent(current)
+        current = emit_block(current, statement.catch_block)
+        current = state_pop_indent(current)
+    if statement.finally_block != None:
+        current = state_emit_line(current, ".finally")
+        current = state_push_indent(current)
+        current = emit_block(current, statement.finally_block)
+        current = state_pop_indent(current)
     return state_emit_line(current, ".endtry")
 
 def render_native_specifiers(specifiers):

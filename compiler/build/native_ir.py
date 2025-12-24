@@ -38,6 +38,7 @@ NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Case', ['pat
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'EndMatch', [])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Try', [])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Catch', ['name'])
+NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Finally', [])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'EndTry', [])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Throw', ['expression', 'span'])
 NativeInstruction = runtime.enum_define_variant(NativeInstruction, 'Noop', [])
@@ -947,6 +948,8 @@ def parse_instruction(line, span, value_span):
     if starts_with(line, ".catch "):
         name = trim_text(strip_prefix(line, ".catch "))
         return InstructionParseResult(instructions=[runtime.enum_instantiate(NativeInstruction, 'Catch', [runtime.enum_field('name', name)])], span_consumed=False, value_span_consumed=False)
+    if line == ".finally":
+        return InstructionParseResult(instructions=[NativeInstruction.Finally()], span_consumed=False, value_span_consumed=False)
     if line == ".endtry":
         return InstructionParseResult(instructions=[NativeInstruction.EndTry()], span_consumed=False, value_span_consumed=False)
     if starts_with(line, "throw "):

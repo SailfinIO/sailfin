@@ -559,6 +559,9 @@ struct TryStructure {
     catch_name -> string;
     catch_start -> number;
     catch_end -> number;
+    finally_index -> number;
+    finally_start -> number;
+    finally_end -> number;
     end_index -> number;
     next_index -> number;
     diagnostics -> string[];
@@ -5061,6 +5064,7 @@ fn collect_try_structure(instructions -> NativeInstruction[], start_index -> num
     let mut index -> number = start_index + 1;
     let mut catch_index -> number = -1;
     let mut catch_name -> string = "";
+    let mut finally_index -> number = -1;
     let mut end_index -> number = -1;
 
     loop {
@@ -5081,13 +5085,14 @@ fn collect_try_structure(instructions -> NativeInstruction[], start_index -> num
                 catch_index = index;
                 catch_name = instruction.name;
             }
+        } else if instruction.variant == "Finally" {
+            if depth == 1 && finally_index == -1 {
+                finally_index = index;
+            }
         }
         index += 1;
     }
 
-    if catch_index == -1 {
-        diagnostics = append_string(diagnostics, "llvm lowering: try without catch in `" + function_name + "`");
-    }
     if end_index == -1 {
         diagnostics = append_string(diagnostics, "llvm lowering: try without endtry in `" + function_name + "`");
         end_index = end - 1;
@@ -5097,12 +5102,26 @@ fn collect_try_structure(instructions -> NativeInstruction[], start_index -> num
     let mut try_end -> number = end_index;
     if catch_index != -1 {
         try_end = catch_index;
+    } else if finally_index != -1 {
+        try_end = finally_index;
     }
-    let mut catch_start -> number = end_index;
+
+    let mut catch_start -> number = -1;
+    let mut catch_end -> number = -1;
     if catch_index != -1 {
         catch_start = catch_index + 1;
+        catch_end = end_index;
+        if finally_index != -1 {
+            catch_end = finally_index;
+        }
     }
-    let catch_end = end_index;
+
+    let mut finally_start -> number = -1;
+    let mut finally_end -> number = -1;
+    if finally_index != -1 {
+        finally_start = finally_index + 1;
+        finally_end = end_index;
+    }
 
     return TryStructure {
         try_start: try_start,
@@ -5111,6 +5130,9 @@ fn collect_try_structure(instructions -> NativeInstruction[], start_index -> num
         catch_name: catch_name,
         catch_start: catch_start,
         catch_end: catch_end,
+        finally_index: finally_index,
+        finally_start: finally_start,
+        finally_end: finally_end,
         end_index: end_index,
         next_index: end_index + 1,
         diagnostics: diagnostics,
@@ -5159,9 +5181,19 @@ fn lower_try_instruction(
     let try_label = try_label_alloc.label;
     current_block_counter = try_label_alloc.next_counter;
 
-    let catch_label_alloc = allocate_block_label("catch", current_block_counter);
-    let catch_label = catch_label_alloc.label;
-    current_block_counter = catch_label_alloc.next_counter;
+    let mut catch_label -> string = "";
+    if structure.catch_index != -1 {
+        let catch_label_alloc = allocate_block_label("catch", current_block_counter);
+        catch_label = catch_label_alloc.label;
+        current_block_counter = catch_label_alloc.next_counter;
+    }
+
+    let mut finally_label -> string = "";
+    if structure.finally_index != -1 {
+        let finally_label_alloc = allocate_block_label("finally", current_block_counter);
+        finally_label = finally_label_alloc.label;
+        current_block_counter = finally_label_alloc.next_counter;
+    }
 
     let merge_label_alloc = allocate_block_label("merge", current_block_counter);
     let merge_label = merge_label_alloc.label;
@@ -5206,67 +5238,143 @@ fn lower_try_instruction(
         let has_exc = format_temp_name(current_temp);
         current_temp += 1;
         current_lines = append_string(current_lines, "  " + has_exc + " = call i1 @sailfin_runtime_has_exception()");
-        current_lines = append_string(current_lines, "  br i1 " + has_exc + ", label %" + catch_label + ", label %" + merge_label);
+        let normal_target = merge_label;
+        if structure.finally_index != -1 {
+            normal_target = finally_label;
+        }
+        if structure.catch_index != -1 {
+            current_lines = append_string(current_lines, "  br i1 " + has_exc + ", label %" + catch_label + ", label %" + normal_target);
+        } else {
+            // No catch: proceed to normal target; any pending exception will be propagated after finally/merge.
+            current_lines = append_string(current_lines, "  br label %" + normal_target);
+        }
     }
 
-    // Catch block
-    current_lines = append_string(current_lines, catch_label + ":");
-    let catch_scope_id = make_child_scope_id(scope_id, catch_label);
-    let exception_temp = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + exception_temp + " = call i8* @sailfin_runtime_take_exception()");
+    if structure.catch_index != -1 {
+        // Catch block
+        current_lines = append_string(current_lines, catch_label + ":");
+        let catch_scope_id = make_child_scope_id(scope_id, catch_label);
+        let exception_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines = append_string(current_lines, "  " + exception_temp + " = call i8* @sailfin_runtime_take_exception()");
 
-    // Bind catch variable as a local `i8*`.
-    let err_slot = format_local_pointer_name(current_next_local);
-    current_next_local += 1;
-    current_allocas = append_string(current_allocas, "  " + err_slot + " = alloca i8*");
-    current_lines = append_string(current_lines, "  store i8* " + exception_temp + ", i8** " + err_slot);
-    let catch_locals = current_locals.concat([LocalBinding {
-        name: structure.catch_name,
-        pointer: err_slot,
-        llvm_type: "i8*",
-        type_annotation: "string",
-        ownership: null,
-        consumed: false,
-        scope_id: catch_scope_id,
-        scope_depth: scope_depth + 1,
-    }]);
+        let mut catch_locals -> LocalBinding[] = current_locals;
+        let trimmed_name = trim_text(structure.catch_name);
+        if trimmed_name.length > 0 && trimmed_name != "_" {
+            // Bind catch variable as a local `i8*`.
+            let err_slot = format_local_pointer_name(current_next_local);
+            current_next_local += 1;
+            current_allocas = append_string(current_allocas, "  " + err_slot + " = alloca i8*");
+            current_lines = append_string(current_lines, "  store i8* " + exception_temp + ", i8** " + err_slot);
+            catch_locals = catch_locals.concat([LocalBinding {
+                name: trimmed_name,
+                pointer: err_slot,
+                llvm_type: "i8*",
+                type_annotation: "string",
+                ownership: null,
+                consumed: false,
+                scope_id: catch_scope_id,
+                scope_depth: scope_depth + 1,
+            }]);
+        }
 
-    let catch_result = lower_instruction_range(
-        function,
-        structure.catch_start,
-        structure.catch_end,
-        llvm_return,
-        current_bindings,
-        catch_locals,
-        current_allocas,
-        [],
-        current_temp,
-        current_block_counter,
-        current_next_local,
-        current_next_region,
-        functions,
-        loop_stack,
-        context,
-        catch_scope_id,
-        scope_depth + 1,
-        catch_label
-    );
-    diagnostics = diagnostics.concat(catch_result.diagnostics);
-    lifetime_regions = lifetime_regions.concat(catch_result.lifetime_regions);
-    current_allocas = catch_result.allocas;
-    current_temp = catch_result.temp_index;
-    current_block_counter = catch_result.block_counter;
-    current_next_local = catch_result.next_local_id;
-    current_next_region = catch_result.next_lifetime_region_id;
-    current_lines = current_lines.concat(catch_result.lines);
-    collected_string_constants = merge_string_constants(collected_string_constants, catch_result.string_constants);
+        let catch_result = lower_instruction_range(
+            function,
+            structure.catch_start,
+            structure.catch_end,
+            llvm_return,
+            current_bindings,
+            catch_locals,
+            current_allocas,
+            [],
+            current_temp,
+            current_block_counter,
+            current_next_local,
+            current_next_region,
+            functions,
+            loop_stack,
+            context,
+            catch_scope_id,
+            scope_depth + 1,
+            catch_label
+        );
+        diagnostics = diagnostics.concat(catch_result.diagnostics);
+        lifetime_regions = lifetime_regions.concat(catch_result.lifetime_regions);
+        current_allocas = catch_result.allocas;
+        current_temp = catch_result.temp_index;
+        current_block_counter = catch_result.block_counter;
+        current_next_local = catch_result.next_local_id;
+        current_next_region = catch_result.next_lifetime_region_id;
+        current_lines = current_lines.concat(catch_result.lines);
+        collected_string_constants = merge_string_constants(collected_string_constants, catch_result.string_constants);
 
-    if !catch_result.terminated {
-        current_lines = append_string(current_lines, "  br label %" + merge_label);
+        if !catch_result.terminated {
+            let target = merge_label;
+            if structure.finally_index != -1 {
+                target = finally_label;
+            }
+            current_lines = append_string(current_lines, "  br label %" + target);
+        }
+    }
+
+    if structure.finally_index != -1 {
+        current_lines = append_string(current_lines, finally_label + ":");
+        let finally_scope_id = make_child_scope_id(scope_id, finally_label);
+        let finally_result = lower_instruction_range(
+            function,
+            structure.finally_start,
+            structure.finally_end,
+            llvm_return,
+            current_bindings,
+            current_locals,
+            current_allocas,
+            [],
+            current_temp,
+            current_block_counter,
+            current_next_local,
+            current_next_region,
+            functions,
+            loop_stack,
+            context,
+            finally_scope_id,
+            scope_depth + 1,
+            finally_label
+        );
+        diagnostics = diagnostics.concat(finally_result.diagnostics);
+        lifetime_regions = lifetime_regions.concat(finally_result.lifetime_regions);
+        current_allocas = finally_result.allocas;
+        current_temp = finally_result.temp_index;
+        current_block_counter = finally_result.block_counter;
+        current_next_local = finally_result.next_local_id;
+        current_next_region = finally_result.next_lifetime_region_id;
+        current_lines = current_lines.concat(finally_result.lines);
+        collected_string_constants = merge_string_constants(collected_string_constants, finally_result.string_constants);
+
+        if !finally_result.terminated {
+            current_lines = append_string(current_lines, "  br label %" + merge_label);
+        }
     }
 
     current_lines = append_string(current_lines, merge_label + ":");
+
+    // If an exception is still pending after try/catch/finally, propagate it.
+    let has_exc_after = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + has_exc_after + " = call i1 @sailfin_runtime_has_exception()");
+    let propagate_label_alloc = allocate_block_label("try.propagate", current_block_counter);
+    let propagate_label = propagate_label_alloc.label;
+    current_block_counter = propagate_label_alloc.next_counter;
+    let continue_label_alloc = allocate_block_label("try.continue", current_block_counter);
+    let continue_label = continue_label_alloc.label;
+    current_block_counter = continue_label_alloc.next_counter;
+    current_lines = append_string(current_lines, "  br i1 " + has_exc_after + ", label %" + propagate_label + ", label %" + continue_label);
+    current_lines = append_string(current_lines, propagate_label + ":");
+    if llvm_return == "void" {
+        current_lines = append_string(current_lines, "  ret void");
+    } else {
+        current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+    }
+    current_lines = append_string(current_lines, continue_label + ":");
 
     return BlockLoweringResult {
         lines: current_lines,
