@@ -1246,7 +1246,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
         if aggregated_entry != None:
             effective_effects = aggregated_entry.effects
         function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry(name=current_function.name, effects=effective_effects))
-        lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name)
+        lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, imported_functions)
         if sanitize_symbol(current_function.name) == "add":
             has_add_function = True
         diagnostics = (diagnostics) + (lowered.diagnostics)
@@ -1987,9 +1987,31 @@ def render_vtable_constants(context):
             body = "zeroinitializer"
         else:
             body = "{ " + join_with_separator(entry_values, ", ") + " }"
-        lines = append_string(lines, vtable.llvm_global_name + " = global " + vtable.llvm_type_name + " " + body)
+        lines = append_string(lines, vtable.llvm_global_name + " = internal constant " + vtable.llvm_type_name + " " + body)
         index += 1
     return lines
+
+def is_entry_point(entry_points, function_name):
+    index = 0
+    while True:
+        if index >= len(entry_points):
+            break
+        if entry_points[index] == function_name:
+            return True
+        index += 1
+    return False
+
+def should_internalize_function(function, entry_points, imported_functions):
+    if function.is_extern:
+        return False
+    if is_entry_point(entry_points, function.name):
+        return False
+    sanitized = sanitize_symbol(function.name)
+    if len(sanitized) > 0  and  sanitized[0] == "_":
+        return True
+    if find_function_by_name(imported_functions, function.name) != None:
+        return True
+    return False
 
 def is_ascii_uppercase(ch):
     if len(ch) == 0:
@@ -3189,7 +3211,7 @@ def render_interface_parameters(parameters):
         index += 1
     return join_with_separator(rendered, ", ")
 
-def emit_function(function, functions, effects, context, module_name):
+def emit_function(function, functions, effects, context, module_name, entry_points, imported_functions):
     diagnostics = []
     sanitized = sanitize_symbol(function.name)
     llvm_return = map_return_type(context, function.return_type)
@@ -3213,7 +3235,10 @@ def emit_function(function, functions, effects, context, module_name):
     if len(signature) == 0:
         signature = ""
     entry_label = "block.entry"
-    lines = append_string(lines, "define " + llvm_return + " @" + sanitized + "(" + signature + ") {")
+    linkage = ""
+    if should_internalize_function(function, entry_points, imported_functions):
+        linkage = "internal "
+    lines = append_string(lines, "define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {")
     lines = append_string(lines, entry_label + ":")
     decorator_string_constants = empty_string_constant_set()
     decorator_index = 0

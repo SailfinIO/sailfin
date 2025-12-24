@@ -7,7 +7,7 @@ It is intended as a transition tool while moving Stage2 execution away from
 llvmlite/Python and toward a fully native runtime + AOT compilation pipeline.
 
 Usage:
-  python tools/prepare_stage2_aot.py --input build/stage2 --output build/stage2/aot
+  python Legacy/tools/prepare_stage2_aot.py --input build/stage2 --output build/stage2/aot
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ import pathlib
 import sys
 from dataclasses import dataclass
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 

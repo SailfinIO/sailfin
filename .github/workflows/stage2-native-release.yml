@@ -85,7 +85,6 @@ jobs:
           set -euo pipefail
           conda run -n sailfin python tools/compile_with_stage1.py
           conda run -n sailfin python scripts/bootstrap_stage2.py --no-validate
-          conda run -n sailfin python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
 
       - name: Build native Stage2 binary
         shell: bash -l {0}

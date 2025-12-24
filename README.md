@@ -93,7 +93,6 @@ Notes:
 
 - Windows is supported for the published sailfin binary. Run the installer from WSL or Git Bash (MSYS2/Cygwin environments are detected as `windows`).
 - Release assets are expected to be named `sailfin-stage2_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin-stage2` (or `bin/sailfin-stage2.exe` on Windows).
-- The installer also links `~/.local/bin/sailfin` to the sailfin binary so users can run `sailfin …` as the main compiler CLI.
 
 ## Architecture Overview
 

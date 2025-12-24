@@ -2,8 +2,10 @@
 """Prepare Stage2 LLVM IR for AOT compilation without llvmlite.
 
 This tool rewrites a directory of stage2-produced *.ll modules into an AOT-safe
-form for clang/ld, similar to `tools/prepare_stage2_aot.py`, but without
-importing `llvmlite` (or `runtime.stage2_runner`).
+form for clang/ld.
+
+It is intended as a transition tool while moving Stage2 execution away from
+llvmlite/Python and toward a fully native runtime + AOT compilation pipeline.
 
 Currently it performs:
 - Rename IR entrypoint `@main` -> `@stage2_compiler_main` (to avoid colliding
@@ -12,7 +14,7 @@ Currently it performs:
   later definitions and rewriting their intra-module references.
 
 Usage:
-  python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
+  python Legacy/tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ import pathlib
 import re
 from dataclasses import dataclass
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 _SYMBOL_CHARS = r"[A-Za-z0-9_.$]"
@@ -36,9 +38,13 @@ class ModuleIR:
 
 
 _DEFINE_RE = re.compile(
-    r"^\s*define\b[^@]*@(?P<name>" + _SYMBOL_CHARS + r"+)\b", re.MULTILINE)
-_GLOBAL_RE = re.compile(r"^\s*@(?P<name>" + _SYMBOL_CHARS +
-                        r"+)\s*=\s*(?:external\s+)?(?:global|constant)\b", re.MULTILINE)
+    r"^\s*define\b[^@]*@(?P<name>" + _SYMBOL_CHARS + r"+)\b", re.MULTILINE
+)
+_GLOBAL_RE = re.compile(
+    r"^\s*@(?P<name>" + _SYMBOL_CHARS +
+    r"+)\s*=\s*(?:external\s+)?(?:global|constant)\b",
+    re.MULTILINE,
+)
 
 _LLVM_ROUND_F64 = "@llvm.round.f64"
 _LLVM_ROUND_F64_DECL_RE = re.compile(
@@ -84,8 +90,11 @@ def _load_modules(input_dir: pathlib.Path) -> list[ModuleIR]:
     modules: list[ModuleIR] = []
     for artifact in artifacts:
         modules.append(
-            ModuleIR(name=artifact.stem, path=artifact,
-                     text=artifact.read_text(encoding="utf-8"))
+            ModuleIR(
+                name=artifact.stem,
+                path=artifact,
+                text=artifact.read_text(encoding="utf-8"),
+            )
         )
     return modules
 

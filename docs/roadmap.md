@@ -1,6 +1,6 @@
 # Sailfin Roadmap
 
-Updated: October 22, 2025  
+Updated: December 24, 2025  
 Owners: Sailfin Core Team
 
 This roadmap pairs with `docs/status.md`. Update status first, then record
@@ -18,18 +18,18 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [ ] Promote the Stage2 bootstrap job to the primary release workflow so every merge runs the Stage2->Stage2 rebuild and archives the native artifacts.
   - [x] Add a `stage2-build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the Stage2 smoke suite, and uploads artifacts for downstream jobs.
     - [x] Initial workflow scaffolds Stage2 bootstrap/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged LLVM artifacts via `tools/package_stage2.py`.
-  - [x] Wire the workflow into `semantic-release` so version bumps publish Stage2 binaries, provenance metadata, and changelog entries in one pass.
+  - [x] Add a `stage2-native-release.yml` workflow that builds native Stage2 binaries on release publish (macOS arm64/x86_64, Linux x86_64) and uploads release assets.
+  - [x] Wire the workflow into `semantic-release` so version bumps publish Stage2 binaries and changelog entries in one pass.
   - [ ] Keep pytest-driven harnesses in CI while the Stage2 native test harness is rewritten; document the temporary dual-runtime strategy in `docs/status.md`.
 
 - [ ] Installer and distribution hardening
 
-  - [x] Replace `scripts/install_stage1.py` with a curl-able `scripts/install.sh` that detects OS/arch, downloads the matching Stage2 binary, verifies checksums, and installs to `/usr/local/bin` (with override support).
+  - [x] Add a curl-able `install.sh` (repo root) that detects OS/arch, downloads the matching Stage2 binary, validates the archive, and installs to `/usr/local/bin` (with override support).
   - [ ] Publish signed checksums alongside release artifacts and add a CI job that runs the installer against staging builds.
-  - [ ] Update `README.md` and `docs/status.md` with new install flow, fallback guidance for contributors, and troubleshooting for unsupported platforms.
+  - [x] Update `README.md` and `docs/status.md` with the new install flow and installer defaults.
 
 - [ ] Stage1 sunset guardrails
 
-  - [ ] Keep `make compile-stage1` and the existing stage1 bootstrap only for bisecting until two consecutive Stage2 releases ship green; gate all other workflows on Stage2 self-host completion.
   - [ ] Add telemetry in CI to assert no release job invokes Stage1 binaries; fail the pipeline if Python codegen executes.
   - [ ] Once guardrails stay green for two release cycles, remove Stage1 workflows, archive docs to `Legacy/stage0/`, and update `docs/spec.md` + `docs/roadmap.md` to mark Stage1 deprecated.
 
@@ -46,7 +46,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [x] Emit checksum and manifest sidecars (SHA256 + JSON) for Stage2 tarballs so release automation can verify downloads.
   - [ ] Extend packaging tooling to emit Stage2-native release bundles per platform (macOS arm64/x86_64, Linux x86_64) with runtime adapters and prelude modules.
   - [ ] Update the release workflow to build Stage2 artifacts, run full regression suites, generate signed SHA256 checksums, and attach provenance metadata.
-  - [ ] Ensure the curl-able installer consumes the new artifact layout and fails fast when unsupported platforms request binaries.
+  - [x] Ensure the curl-able installer consumes the new artifact layout and fails fast when unsupported platforms request binaries.
   - [ ] Document artifact structure, supported platforms, and upgrade expectations in `docs/README.md` and `docs/status.md`.
 
 - [ ] **Extend suspension-conflict tracking to coroutines** — Once `async fn` and generator support lands, extend borrow lifetime checks to reject mutable borrows held across `yield`/resume boundaries in coroutine frames.
@@ -60,19 +60,21 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
     - [ ] `test_native_llvm_allows_yield_without_mutable_borrow` — generator yielding after borrow release compiles successfully.
   - [ ] Document coroutine borrow rules and suspension lattice (`!mut ⊄ !async` extended to generators) in `docs/spec.md` and update `docs/status.md` with coverage.
 
-- [x] **Bootstrap Stage2 self-hosting** — Compile the Sailfin compiler with Stage2 native backend, execute the resulting binary end-to-end, and lock self-hosted compilation as a CI gate.
-
-  - [x] Create self-hosting compilation script in `scripts/bootstrap_stage2.py` that compiles all `compiler/src/*.sfn` modules using Stage2 LLVM backend with full capability grants.
-  - [x] Add `make bootstrap-stage2` Makefile target that runs the full self-hosting pipeline and reports success/failure.
-  - [x] Add smoke tests in `compiler/tests/test_stage2_bootstrap.py` that validate the self-hosted compiler modules are generated correctly with valid LLVM IR.
-  - [x] Document self-hosting compilation flow, capability requirements, and validation steps in `docs/self-hosting.md`.
-  - [x] Extend `tools/compile_with_stage1.py` to optionally target Stage2 executable output and link all compiler modules into a standalone binary.
-  - [x] Add execution validation tests that run self-hosted compiler on simple inputs (e.g., `examples/basics/hello-world.sfn`).
-    - [x] `compiler/tests/test_stage2_self_hosted_compiler.py::test_stage2_compile_to_sailfin_roundtrip` boots the Stage2-generated compiler in-process via `Stage2Runner`, compiles the hello-world example, and asserts the output matches the Stage1 reference implementation.
-  - [x] Validate the self-hosted compiler binary can parse and compile a minimal Sailfin program and generate valid `.sfn-asm` IR and LLVM modules.
-  - [x] Execute compiled programs through Stage2Runner with matching output to Stage1.
-
 2. **Runtime & FFI Foundations**
+
+- [ ] **Native runtime self-hosting plan** — Execute the C removal plan in `docs/runtime_audit.md`.
+
+  - [ ] Adopt the Sailfin-native ABI (versioned) and document layouts + migration steps in `docs/runtime_audit.md`.
+  - [ ] Implement a legacy ABI shim (C-string compatibility) to bridge existing Stage2 intrinsics during migration.
+  - [ ] Implement a Sailfin-native core runtime module covering:
+    - [ ] String helpers (`string_length`, `substring`, `concat`, `grapheme_*`, `char_code`).
+    - [ ] Array helpers (`concat`, `append_string`, `map/filter/reduce`).
+    - [ ] Exceptions (`try_enter`, `try_leave`, `throw`, `take_exception`).
+    - [ ] Type metadata (`is_*`, `resolve_type`, `instance_of`, `get_field`).
+    - [ ] Logging + bounds checks + process execution.
+  - [ ] Wire Stage2 lowering to the native runtime symbols and add regression coverage for each intrinsic.
+  - [ ] Add native tests that validate runtime helper parity with the current C runtime (string/array/exception/type helpers).
+  - [ ] Remove C runtime dependencies from the Stage2 build once parity is confirmed.
 
 - [ ] **Native capability adapter implementation** — Replace `runtime_support.py` Python implementations with native Sailfin modules for filesystem, HTTP, and model adapters.
 
@@ -310,6 +312,18 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 ## Completed Items
 
 Move checked tasks here with links to PRs / status updates for traceability.
+
+- [x] **Bootstrap Stage2 self-hosting** — Compile the Sailfin compiler with Stage2 native backend and execute the resulting binary end-to-end; CI gating is tracked under "CI gating and signals".
+
+  - [x] Create self-hosting compilation script in `scripts/bootstrap_stage2.py` that compiles all `compiler/src/*.sfn` modules using Stage2 LLVM backend with full capability grants.
+  - [x] Add Makefile targets for Stage2 native validation (`stage2-native-sanity`, `stage2-native-roundtrip`, `stage2-native-fixed-point`).
+  - [x] Add smoke tests in `compiler/tests/test_stage2_bootstrap.py` that validate the self-hosted compiler modules are generated correctly with valid LLVM IR.
+  - [x] Document self-hosting status and validation findings in `docs/investigations/stage2-self-hosting-status.md`.
+  - [x] Extend `tools/compile_with_stage1.py` to optionally target Stage2 executable output and link all compiler modules into a standalone binary.
+  - [x] Add execution validation tests that run self-hosted compiler on simple inputs (e.g., `examples/basics/hello-world.sfn`).
+    - [x] `compiler/tests/test_stage2_self_hosted_compiler.py::test_stage2_compile_to_sailfin_roundtrip` boots the Stage2-generated compiler in-process via `Stage2Runner`, compiles the hello-world example, and asserts the output matches the Stage1 reference implementation.
+  - [x] Validate the self-hosted compiler binary can parse and compile a minimal Sailfin program and generate valid `.sfn-asm` IR and LLVM modules.
+  - [x] Execute compiled programs through Stage2Runner with matching output to Stage1.
 
 - [x] Stage2 enum array metadata — Array literals containing enum variants now emit `#element:EnumName` metadata during stage1 compilation. Updated `compiler/src/emit_native.sfn::infer_expression_type` to recognize both `Struct` (for payload variants like `Color.Red { ... }`) and `Member` (for unit variants like `Color.Red`) expression variants, extracting the enum type name for metadata tagging. LLVM lowering already supported enum type resolution via the existing `map_primitive_type` → `map_enum_type_annotation` chain, so enum array metadata flows through without additional changes. Stage2 `.for` loops can now iterate over enum arrays and match on variant tags without Python fallbacks. Validation: `compiler/tests/test_stage1_pipeline.py::test_native_backend_tags_enum_array_literals_with_metadata`, `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_iterates_enum_arrays`, and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_iterates_mixed_enum_arrays`; behaviour documented in `docs/status.md`.
 - [x] Extend `.layout` inference to cover optional fields, nested enums, and recursive aggregates so Stage2 no longer defaults compiler AST structs to pointer layouts (silencing the `defaulting to pointer layout` warnings). Regression coverage: `compiler/tests/test_stage1_pipeline.py::test_native_backend_infers_recursive_layouts`.

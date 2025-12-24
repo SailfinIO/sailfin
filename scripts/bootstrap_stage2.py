@@ -360,7 +360,10 @@ def compile_compiler_to_stage2(
             f"runtime source directory not found: {runtime_src}")
 
     # Collect all Sailfin source files
-    sources = sorted(compiler_src.rglob("*.sfn"))
+    # Note: compiler/src/aot_prepare.sfn is a stage1-only helper (used to rewrite
+    # LLVM text for AOT); it is intentionally excluded from stage2 LLVM output.
+    sources = [p for p in sorted(compiler_src.rglob(
+        "*.sfn")) if p.name != "aot_prepare.sfn"]
     runtime_sources = sorted(runtime_src.rglob("*.sfn"))
     all_sources = sources + runtime_sources
 
@@ -595,6 +598,38 @@ def compile_compiler_to_stage2(
         raise Stage2BootstrapError(
             f"compilation failed with {aggregator.fatal_count} fatal diagnostic(s)"
         )
+
+    # Produce AOT-safe rewritten modules for clang/ld without relying on a
+    # separate Python text-rewrite tool.
+    try:
+        aot_tool = importlib.import_module("compiler.build.aot_prepare")
+    except Exception:
+        aot_tool = None
+
+    if aot_tool is not None and hasattr(aot_tool, "prepare_stage2_aot_modules"):
+        aot_dir = output_dir / "aot"
+        aot_dir.mkdir(parents=True, exist_ok=True)
+
+        module_paths = sorted(compiled_modules, key=lambda p: p.stem)
+        module_names = [p.stem for p in module_paths]
+        module_texts = [p.read_text(encoding="utf-8") for p in module_paths]
+
+        rewritten_texts = aot_tool.prepare_stage2_aot_modules(
+            module_names, module_texts)
+        if len(rewritten_texts) != len(module_names):
+            raise Stage2BootstrapError(
+                f"prepare_stage2_aot_modules returned {len(rewritten_texts)} module(s), expected {len(module_names)}"
+            )
+
+        for name, text in zip(module_names, rewritten_texts):
+            (aot_dir / f"{name}.ll").write_text(str(text), encoding="utf-8")
+
+        (aot_dir / "modules.txt").write_text(
+            "\n".join(module_names) + "\n", encoding="utf-8"
+        )
+        if debug:
+            rel = aot_dir.relative_to(REPO_ROOT)
+            print(f"[stage2-bootstrap] wrote AOT modules to {rel}")
 
     if debug and aggregator.total_count > 0:
         print(

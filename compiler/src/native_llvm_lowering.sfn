@@ -1146,7 +1146,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
             name: current_function.name,
             effects: effective_effects,
         });
-        let lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name);
+        let lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, imported_functions);
         if sanitize_symbol(current_function.name) == "add" {
             has_add_function = true;
         }
@@ -2250,10 +2250,54 @@ fn render_vtable_constants(context -> TypeContext) -> string[] {
         } else {
             body = "{ " + join_with_separator(entry_values, ", ") + " }";
         }
-        lines = append_string(lines, vtable.llvm_global_name + " = global " + vtable.llvm_type_name + " " + body);
+        // Vtable globals are safe to keep module-local.
+        // Marking them internal avoids duplicate symbol collisions when linking
+        // multiple LLVM modules that share the same type context.
+        lines = append_string(lines, vtable.llvm_global_name + " = internal constant " + vtable.llvm_type_name + " " + body);
         index += 1;
     }
     return lines;
+}
+
+fn is_entry_point(entry_points -> string[], function_name -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= entry_points.length {
+            break;
+        }
+        if entry_points[index] == function_name {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn should_internalize_function(function -> NativeFunction, entry_points -> string[], imported_functions -> NativeFunction[]) -> boolean {
+    // Externs are emitted as declarations.
+    if function.is_extern {
+        return false;
+    }
+
+    // Keep declared entry points externally visible.
+    if is_entry_point(entry_points, function.name) {
+        return false;
+    }
+
+    // Treat leading-underscore helpers as module-local.
+    let sanitized = sanitize_symbol(function.name);
+    if sanitized.length > 0 && sanitized[0] == "_" {
+        return true;
+    }
+
+    // If another imported module already defines a function with this name,
+    // keep our copy module-local to avoid link-time collisions.
+    if find_function_by_name(imported_functions, function.name) != null {
+        return true;
+    }
+
+    // Default: keep externally visible.
+    return false;
 }
 
 fn is_ascii_uppercase(ch -> string) -> boolean {
@@ -4413,7 +4457,7 @@ fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
     return join_with_separator(rendered, ", ");
 }
 
-fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[], context -> TypeContext, module_name -> string) -> LoweredLLVMFunction {
+fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[], context -> TypeContext, module_name -> string, entry_points -> string[], imported_functions -> NativeFunction[]) -> LoweredLLVMFunction {
     let mut diagnostics -> string[] = [];
     let sanitized = sanitize_symbol(function.name);
     let llvm_return = map_return_type(context, function.return_type);
@@ -4446,7 +4490,11 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     }
 
     let entry_label -> string = "block.entry";
-    lines = append_string(lines, "define " + llvm_return + " @" + sanitized + "(" + signature + ") {");
+    let mut linkage -> string = "";
+    if should_internalize_function(function, entry_points, imported_functions) {
+        linkage = "internal ";
+    }
+    lines = append_string(lines, "define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {");
     lines = append_string(lines, entry_label + ":");
 
     // Apply minimal decorator semantics at entry.
