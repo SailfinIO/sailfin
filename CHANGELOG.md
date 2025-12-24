@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.76 (2025-12-24)
+
+### Bug Fixes
+
+- Strcut composition
+  ([`c6c2eac`](https://github.com/SailfinIO/sailfin/commit/c6c2eacc7b7b9cf5d643b6c5e4cfde243b360370))
+
+
 ## v0.1.1-alpha.75 (2025-12-24)
 
 ### Bug Fixes
