@@ -4,7 +4,7 @@ from runtime import runtime_support as runtime
 from compiler.build.parser import parse_program
 from compiler.build.ast import Program
 from compiler.build.emitter_sailfin import emit_program
-from compiler.build.emit_native import emit_native, EmitNativeResult, NativeModule
+from compiler.build.emit_native import emit_native, emit_native_with_module_name, EmitNativeResult, NativeModule
 from compiler.build.native_lowering import lower_to_python, LoweredPythonResult
 from compiler.build.native_llvm_lowering import lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult
 from compiler.build.native_ir import LayoutManifest, parse_layout_manifest
@@ -87,6 +87,34 @@ def compile_to_native(source):
         return EmitNativeResult(module=empty_native_module(), diagnostics=format_typecheck_diagnostics(analysis_result.diagnostics, source))
     return emit_native(program)
 
+def module_name_from_path(source_path):
+    if len(source_path) == 0:
+        return "main"
+    start = 0
+    index = len(source_path)
+    while True:
+        if index <= 0:
+            break
+        index -= 1
+        if source_path[index] == "/":
+            start = index + 1
+            break
+    end = len(source_path)
+    index = len(source_path)
+    while True:
+        if index <= start:
+            break
+        index -= 1
+        if source_path[index] == ".":
+            end = index
+            break
+    if end <= start:
+        return "main"
+    base = substring(source_path, start, end)
+    if len(base) == 0:
+        return "main"
+    return base
+
 def compile_to_native_python(source):
     # effects: io
     native_result = compile_to_native(source)
@@ -122,6 +150,17 @@ def compile_to_native_llvm(source):
 def compile_to_llvm(source):
     # effects: io
     lowered = compile_to_native_llvm(source)
+    return lowered.ir
+
+def compile_to_llvm_with_module(source, module_name):
+    # effects: io
+    program = parse_program(source)
+    analysis_result = typecheck_program(program)
+    if len(analysis_result.diagnostics) > 0:
+        report_typecheck_errors(analysis_result.diagnostics, source)
+        return ""
+    native_result = emit_native_with_module_name(program, module_name)
+    lowered = lower_to_llvm(native_result.module)
     return lowered.ir
 
 def compile_tests_to_llvm(source):
@@ -178,7 +217,7 @@ def compile_to_native_llvm_with_manifests(source, manifest_contents):
     # effects: io
     return compile_to_native_llvm_with_context(source, manifest_contents, [])
 
-def main():
+def stage2_compiler_main():
     # effects: io
     print.info("Sailfin compiler")
 
@@ -201,7 +240,8 @@ def compile_source_at_path(source_path):
     analysis = typecheck_program(program)
     if len(analysis.diagnostics) > 0:
         return ModuleCompilationResult(module=None, diagnostics=[ModuleDiagnostics(source_path=source_path, messages=format_typecheck_diagnostics(analysis.diagnostics, source), fatal=True)])
-    native_result = emit_native(program)
+    module_name = module_name_from_path(source_path)
+    native_result = emit_native_with_module_name(program, module_name)
     lowered = lower_to_python(native_result.module)
     messages = (native_result.diagnostics) + (lowered.diagnostics)
     python_source = lowered.source
@@ -392,7 +432,7 @@ def number_to_string(value):
     return output
 
 def empty_native_module():
-    return NativeModule(artifacts=[], entry_points=[], symbol_count=0)
+    return NativeModule(module_name="main", artifacts=[], entry_points=[], symbol_count=0)
 
 def has_prefix(value, prefix):
     if len(prefix) > len(value):

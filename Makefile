@@ -13,7 +13,7 @@ else
 STAGE2_NATIVE_LIBS ?= -lm
 endif
 
-.PHONY: help install test test-unit test-integration test-stage2 compile clean clean-stage1 package native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-sanity
+.PHONY: help install test test-unit test-integration test-stage2 compile clean package native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-sanity
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)

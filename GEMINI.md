@@ -8,6 +8,8 @@ Sailfin is an AI-native, systems-friendly programming language designed for prec
 
 For a comprehensive overview of the project, please refer to the [README.md](README.md).
 
+The primary compiler is the native stage2 toolchain; stage1 and bootstrap steps still exist for now but are slated for removal by the 1.0 release. The runtime currently ships in C and is planned to move into Sailfin for 1.0.
+
 ## Getting Started
 
 To get started with the Sailfin project, please refer to the [README.md](README.md) for a project overview and the [docs/README.md](docs/README.md) for the documentation navigation map.
@@ -36,12 +38,15 @@ The primary workflow for development is as follows:
 
 The following commands are available for development:
 
-*   `make install`: Create or update the Conda environment used for the compiler.
-*   `make test`: Run the full pytest suite. You can pass `PYTEST_ARGS` to filter the tests (e.g., `make test PYTEST_ARGS="-m unit"`).
-*   `make compile`: Emit Python modules from `compiler/src` via the stage1 pipeline.
-*   `make package`: Build the stage1 release artifact (`dist/sailfin-stage1-<version>.zip`).
-*   `make clean`: Remove packaged artifacts (`dist/`).
-*   `make clean-stage1`: Remove `compiler/build` (requires an installed stage1 to rebuild).
+- `make install`: Create or update the Conda environment used for the compiler.
+- `make test`: Run the full pytest suite. You can pass `PYTEST_ARGS` to filter the tests (e.g., `make test PYTEST_ARGS="-m unit"`).
+- `make compile`: Build the native sailfin-stage2 compiler via the current stage1 → stage2 bootstrap pipeline.
+- `make clean`: Remove packaged artifacts (`dist/`).
+- `make native-stage2-debug`: Build native stage2 with debug symbols for lldb.
+- `make native-stage2-asan`: Build native stage2 with AddressSanitizer.
+- `make stage2-native-sanity`: Build + compile hello-world as a smoke test.
+- `make stage2-native-roundtrip`: Build + run on `compiler/src/main.sfn`.
+- `make stage2-native-fixed-point`: Ensure Stage3→Stage4 is a stable fixed-point.
 
 ## Documentation
 
@@ -49,9 +54,9 @@ The `docs` folder is a critical part of the Sailfin project. It contains the pro
 
 Key documents include:
 
-*   [docs/roadmap.md](docs/roadmap.md): The project's roadmap, which tracks tasks and future development.
-*   [docs/status.md](docs/status.md): The source of truth for what the bootstrap compiler enforces versus what exists only in prototypes.
-*   [docs/spec.md](docs/spec.md): The bootstrap language reference with design-preview callouts.
+- [docs/roadmap.md](docs/roadmap.md): The project's roadmap, which tracks tasks and future development.
+- [docs/status.md](docs/status.md): The source of truth for what ships today (stage2 primary) versus what is still in progress.
+- [docs/spec.md](docs/spec.md): The bootstrap language reference with design-preview callouts.
 
 ## Testing
 
@@ -63,9 +68,9 @@ make test
 
 You can also run specific test suites:
 
-*   `make test-unit`: Run fast Sailfin-focused unit coverage.
-*   `make test-integration`: Run integration tests (stage1 artifact, self-host checks, etc.).
-*   `make test-stage2`: Run LLVM/native backend coverage.
+- `make test-unit`: Run fast Sailfin-focused unit coverage.
+- `make test-integration`: Run integration tests (stage1 artifact, self-host checks, etc.).
+- `make test-stage2`: Run LLVM/native backend coverage.
 
 Before submitting any changes, please ensure that all tests pass.
 
@@ -73,10 +78,10 @@ Before submitting any changes, please ensure that all tests pass.
 
 We welcome contributions to the Sailfin project. Please follow these guidelines when contributing:
 
-*   **Branch & scope**: Keep work focused; reference open issues or roadmap items when possible.
-*   **Testing**: Add or update unit tests under `compiler/tests/` for stage1 changes.
-*   **Documentation**: Reflect behavior updates in `docs/status.md` and the relevant module docs.
-*   **Commits**: Use clear, atomic commits. Conventional prefixes (`feat(compiler):`, `fix(bootstrap):`) are encouraged but not mandatory.
-*   **Pull Requests**: Each PR should include a summary of the change, verification commands, and notes on documentation updates.
+- **Branch & scope**: Keep work focused; reference open issues or roadmap items when possible.
+- **Testing**: Add or update unit tests under `compiler/tests/` for stage1 changes.
+- **Documentation**: Reflect behavior updates in `docs/status.md` and the relevant module docs.
+- **Commits**: Use clear, atomic commits. Conventional prefixes (`feat(compiler):`, `fix(bootstrap):`) are encouraged but not mandatory.
+- **Pull Requests**: Each PR should include a summary of the change, verification commands, and notes on documentation updates.
 
 For more detailed information on contributing, please refer to the [CONTRIBUTING.md](CONTRIBUTING.md) file.

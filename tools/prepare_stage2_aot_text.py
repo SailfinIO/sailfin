@@ -41,7 +41,10 @@ _GLOBAL_RE = re.compile(r"^\s*@(?P<name>" + _SYMBOL_CHARS +
                         r"+)\s*=\s*(?:external\s+)?(?:global|constant)\b", re.MULTILINE)
 
 _LLVM_ROUND_F64 = "@llvm.round.f64"
-_LLVM_ROUND_F64_DECL_RE = re.compile(r"^\s*declare\s+double\s+@llvm\.round\.f64\(double\)\b", re.MULTILINE)
+_LLVM_ROUND_F64_DECL_RE = re.compile(
+    r"^\s*declare\s+double\s+@llvm\.round\.f64\(double\)\s*$",
+    re.MULTILINE,
+)
 
 
 def _ensure_intrinsic_decls(ir: str) -> str:

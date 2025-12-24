@@ -4,12 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Sailfin is an AI-native, systems-friendly programming language designed for precision, safety, and introspection. The repository hosts the **self-hosted Stage1 compiler** (written in Sailfin itself) alongside runtime experiments and a legacy Python bootstrap (Stage0, now archived).
+Sailfin is an AI-native, systems-friendly programming language designed for precision, safety, and introspection. The repository hosts the **native Stage2 compiler** (primary toolchain today), the Stage1 bootstrap compiler, and a legacy Python bootstrap (Stage0, now archived).
 
 **Current architecture:**
-- **Stage1 (production)**: Sailfin-written compiler that compiles itself. Located in `compiler/src/*.sfn`, emits Python code targeting `runtime/runtime_support.py`.
+- **Stage1 (bootstrap)**: Sailfin-written compiler used to bootstrap Stage2. Located in `compiler/src/*.sfn`, emits Python code targeting `runtime/runtime_support.py`.
 - **Stage0 (legacy)**: Python bootstrap compiler archived under `Legacy/stage0/` for reference only.
-- **Stage2 (in design)**: Native backend targeting LLVM/WASM with `.sfn-asm` intermediate representation.
+- **Stage2 (primary)**: Native backend targeting LLVM with `.sfn-asm` intermediate representation, producing the `sailfin-stage2` binary.
+
+The runtime currently ships as C under `runtime/native/` and is planned to move into Sailfin for the 1.0 release.
 
 The language features effect types (`![io, net, model, gpu, rand, clock]`), ownership-aware linear/affine types, capability-based security, and first-class AI constructs (models, prompts, pipelines, tools).
 
@@ -22,10 +24,10 @@ make install          # Create/update the 'sailfin' Conda environment
 
 ### Development Workflow
 ```bash
-make compile          # Compile compiler/src/*.sfn → compiler/build/*.py via Stage1
-make test             # Run full pytest suite (~82s with cache)
-make test-unit        # Run fast unit tests (exclude Stage2/integration)
-make test-integration # Run artifact packaging and self-host checks
+make compile          # Build the native sailfin-stage2 compiler (bootstraps through Stage1)
+make test             # Run full pytest suite
+make test-unit        # Run fast unit tests (exclude Stage2)
+make test-integration # Run integration tests (stage1 artifact, self-host checks, etc.)
 make test-stage2      # Run LLVM/native backend tests
 
 # Scoped test runs
@@ -34,26 +36,21 @@ make test PYTEST_ARGS="-m unit"          # Run tests with 'unit' marker
 make test PYTEST_ARGS="compiler/tests/test_stage1_pipeline.py"  # Single file
 ```
 
-### Packaging & Distribution
+### Build Artifacts
 ```bash
-make package          # Build dist/sailfin-stage1-<version>.zip release artifact
 make clean            # Remove dist/ artifacts
 make clean-stage1     # Remove compiler/build/ (requires stage1 to rebuild)
-```
-
-### Stage1 Cache Management
-The test suite caches Stage1 builds under `.pytest-stage1/` for ~10x speedup.
-```bash
-make warm-stage1-cache               # Pre-populate cache
-PYTEST_STAGE1_NO_CACHE=1 make test  # Disable cache
-PYTEST_STAGE1_DEBUG=1 make test     # Log cache hits/misses
-rm -rf .pytest-stage1/               # Force full rebuild
+make native-stage2-debug # Build native stage2 with -O0/-g for lldb
+make native-stage2-asan  # Build native stage2 with AddressSanitizer
+make stage2-native-sanity # Build + compile hello-world as smoke test
+make stage2-native-roundtrip # Build + run on compiler/src/main.sfn
+make stage2-native-fixed-point # Ensure Stage3→Stage4 is a stable fixed-point
 ```
 
 ## Architecture & Key Concepts
 
-### Stage1 Compiler Pipeline
-The self-hosted compiler (`compiler/src/`) follows this flow:
+### Stage1 Bootstrap Compiler Pipeline
+The bootstrap compiler (`compiler/src/`) follows this flow:
 1. **Lexer** (`lexer.sfn`) → tokens
 2. **Parser** (`parser.sfn`) → AST (`ast.sfn`)
 3. **Type Checker** (`typecheck.sfn`) → duplicate symbols, interface conformance
@@ -95,7 +92,7 @@ Sailfin uses move-by-default semantics with explicit borrows:
 **Bootstrap status:** Parsed but not enforced. Stage2 LLVM backend tracks ownership metadata, rejects conflicting borrows, and flags use-after-move.
 
 ### Capability Bridges (Hybrid Stage)
-Runtime helpers in `runtime/prelude.sfn` bridge effects to Python:
+Bootstrap helpers in `runtime/prelude.sfn` bridge effects to Python:
 - **Sailfin-native:** `substring`, `find_char`, `array_map`, `array_filter`, `check_type`, `format_interpolated`
 - **Python bridges:** `sleep`, `channel`, `spawn`, `serve`, `console`, `fs_bridge`, `http_bridge`, `model_bridge`
 
@@ -177,10 +174,10 @@ Before declaring a feature "shipped in Stage1":
 7. Documented in `docs/status.md` and `docs/spec.md` Part A
 
 ### Do Not Use Python Bootstrap (Stage0)
-The `Legacy/stage0/` directory is **frozen**. All development goes through Stage1:
+The `Legacy/stage0/` directory is **frozen**. All development goes through the Stage1 bootstrap compiler and Stage2 primary toolchain:
 - To modify the compiler: edit `compiler/src/*.sfn`
-- To run tests: `make test` (uses Stage1)
-- To package: `make package` (uses Stage1)
+- To run tests: `make test` (bootstraps Stage2 as needed)
+- To build a native compiler: `make compile`
 
 ## Testing Guidance
 
@@ -220,7 +217,7 @@ The compiler must always compile itself. Breaking changes require:
 - **Semantic versioning:** `v0.1.1-alpha.32` (alpha branch), `v0.x.y` (main branch)
 - **Version source:** `runtime/__init__.py:__version__`
 - **Release automation:** GitHub Actions + `python-semantic-release`
-- **Artifacts:** `dist/sailfin-stage1-<version>.zip` uploaded to GitHub releases
+- **Artifacts:** `dist/` is used for packaged artifacts as part of release tooling
 
 ## Current Branch Strategy
 

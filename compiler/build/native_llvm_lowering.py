@@ -1191,7 +1191,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     function_effects = []
     lifetime_regions = []
     lines = []
-    lines = append_string(lines, "source_filename = \"sailfin\"")
+    lines = append_string(lines, "source_filename = \"" + module_source_filename(native_module.module_name) + "\"")
     lines = append_string(lines, "")
     trait_lines = render_trait_metadata_comments(trait_metadata)
     if len(trait_lines) > 0:
@@ -1246,7 +1246,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
         if aggregated_entry != None:
             effective_effects = aggregated_entry.effects
         function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry(name=current_function.name, effects=effective_effects))
-        lowered = emit_function(current_function, context_functions, effective_effects, type_context)
+        lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name)
         if sanitize_symbol(current_function.name) == "add":
             has_add_function = True
         diagnostics = (diagnostics) + (lowered.diagnostics)
@@ -1260,19 +1260,60 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if not has_add_function:
         if len(function_lines) > 0:
             function_lines = append_string(function_lines, "")
-        function_lines = (function_lines) + (["define double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
+        function_lines = (function_lines) + (["define internal double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
     string_constant_lines = render_string_constants(all_string_constants)
     final_lines = preamble_lines
     if len(string_constant_lines) > 0:
         final_lines = (final_lines) + (string_constant_lines)
         final_lines = append_string(final_lines, "")
     final_lines = (final_lines) + (function_lines)
+    final_lines = ensure_intrinsic_declarations(final_lines)
     ir = join_with_separator(final_lines, "\n")
     manifest = build_capability_manifest(native_module.entry_points, function_effects)
     output = ir
     if len(output) > 0:
         output = output + "\n"
     return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects, lifetime_regions=lifetime_regions, capability_manifest=manifest, string_constants=all_string_constants)
+
+def module_source_filename(module_name):
+    if len(module_name) == 0:
+        return "sailfin"
+    if len(module_name) >= 4:
+        suffix = substring(module_name, len(module_name) - 4, len(module_name))
+        if suffix == ".sfn":
+            return module_name
+    return module_name + ".sfn"
+
+def ensure_intrinsic_declarations(lines):
+    uses_round = False
+    has_round_decl = False
+    index = 0
+    while True:
+        if index >= len(lines):
+            break
+        line = lines[index]
+        if index_of(line, "@llvm.round.f64") >= 0:
+            uses_round = True
+        if index_of(line, "declare double @llvm.round.f64(double)") >= 0:
+            has_round_decl = True
+        index += 1
+    if not uses_round  or  has_round_decl:
+        return lines
+    return insert_string_at(lines, 1, "declare double @llvm.round.f64(double)")
+
+def insert_string_at(values, insert_index, value):
+    out = []
+    index = 0
+    while True:
+        if index >= len(values):
+            break
+        if index == insert_index:
+            out = append_string(out, value)
+        out = append_string(out, values[index])
+        index += 1
+    if insert_index >= len(values):
+        out = append_string(out, value)
+    return out
 
 def empty_trait_metadata():
     return TraitMetadata(interfaces=[], implementations=[])
@@ -3148,7 +3189,7 @@ def render_interface_parameters(parameters):
         index += 1
     return join_with_separator(rendered, ", ")
 
-def emit_function(function, functions, effects, context):
+def emit_function(function, functions, effects, context, module_name):
     diagnostics = []
     sanitized = sanitize_symbol(function.name)
     llvm_return = map_return_type(context, function.return_type)
@@ -3182,7 +3223,7 @@ def emit_function(function, functions, effects, context):
         decorator_name = function.decorators[decorator_index]
         if matches_case_insensitive(decorator_name, "logExecution")  or  matches_case_insensitive(decorator_name, "logexecution")  or  matches_case_insensitive(decorator_name, "trace"):
             content = function.name
-            constant_name = make_string_constant_name(content)
+            constant_name = make_string_constant_name_for_module(module_name, content)
             constant = StringConstant(name=constant_name, content=content, byte_count=len(content))
             decorator_string_constants = append_string_constant(decorator_string_constants, constant)
             array_length = len(content) + 1
@@ -11669,6 +11710,13 @@ def make_string_constant_name(content):
     length_part = number_to_string(len(content))
     hash_part = number_to_string(hash_value)
     return "@.str.len" + length_part + ".h" + hash_part
+
+def make_string_constant_name_for_module(module_name, content):
+    base = make_string_constant_name(content)
+    tag = sanitize_symbol(module_name)
+    if len(tag) == 0  or  tag == "_":
+        return base
+    return "@.str." + tag + substring(base, 5, len(base))
 
 def compute_string_constant_hash(content):
     hash = 5381

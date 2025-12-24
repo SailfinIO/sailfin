@@ -159,7 +159,15 @@ else
 fi
 
 INSTALL_BASE="${INSTALL_BASE:-$HOME/.local/share/${BINARY}/versions}"
-GLOBAL_BIN_DIR="${GLOBAL_BIN_DIR:-$HOME/.local/bin}"
+if [ -z "${GLOBAL_BIN_DIR:-}" ]; then
+  if [ "$OS" = "macos" ]; then
+    GLOBAL_BIN_DIR="/usr/local/bin"
+  else
+    GLOBAL_BIN_DIR="$HOME/.local/bin"
+  fi
+else
+  GLOBAL_BIN_DIR="${GLOBAL_BIN_DIR}"
+fi
 TARGET_DIR="${INSTALL_BASE}/${VERSION}"
 
 MAYBE_SUDO=""
@@ -209,6 +217,12 @@ if [ "$BINARY" = "sailfin-stage2" ]; then
     $MAYBE_SUDO chmod 0755 "$ALIAS_PATH" || true
   fi
   log "Linked: ${ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
+
+  RESOLVED_SFN="$(command -v sfn 2>/dev/null || true)"
+  if [ -n "$RESOLVED_SFN" ] && [ "$RESOLVED_SFN" != "$ALIAS_PATH" ]; then
+    log "Warning: 'sfn' resolves to ${RESOLVED_SFN} (not ${ALIAS_PATH})."
+    log "If you previously installed Stage0, remove that binary or ensure ${GLOBAL_BIN_DIR} comes first in PATH."
+  fi
 fi
 
 log "Installed: ${TARGET_DIR}/${DEST_BASENAME}"

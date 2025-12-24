@@ -30,13 +30,14 @@ class NativeArtifact:
         return runtime.struct_repr('NativeArtifact', [runtime.struct_field('name', self.name), runtime.struct_field('format', self.format), runtime.struct_field('contents', self.contents)])
 
 class NativeModule:
-    def __init__(self, artifacts, entry_points, symbol_count):
+    def __init__(self, module_name, artifacts, entry_points, symbol_count):
+        self.module_name = module_name
         self.artifacts = artifacts
         self.entry_points = entry_points
         self.symbol_count = symbol_count
 
     def __repr__(self):
-        return runtime.struct_repr('NativeModule', [runtime.struct_field('artifacts', self.artifacts), runtime.struct_field('entry_points', self.entry_points), runtime.struct_field('symbol_count', self.symbol_count)])
+        return runtime.struct_repr('NativeModule', [runtime.struct_field('module_name', self.module_name), runtime.struct_field('artifacts', self.artifacts), runtime.struct_field('entry_points', self.entry_points), runtime.struct_field('symbol_count', self.symbol_count)])
 
 class EmitNativeResult:
     def __init__(self, module, diagnostics):
@@ -200,10 +201,18 @@ def build_layout_context(program):
     return LayoutContext(structs=structs, enums=enums)
 
 def emit_native(program):
+    return emit_native_with_module_name(program, "main")
+
+def emit_native_with_module_name(program, module_name):
     layout_context = build_layout_context(program)
     state = state_new(layout_context)
     state = state_emit_line(state, "; Sailfin Native Prototype")
-    state = state_emit_line(state, ".module main")
+    module_line = ".module "
+    if len(module_name) == 0:
+        module_line = module_line + "main"
+    else:
+        module_line = module_line + module_name
+    state = state_emit_line(state, module_line)
     if len(program.statements) > 0:
         state = state_emit_blank(state)
     index = 0
@@ -216,7 +225,7 @@ def emit_native(program):
         index += 1
     artifact = NativeArtifact(name="module.sfn-asm", format="sailfin-native-text", contents=builder_to_string(state.builder))
     manifest_artifact = generate_layout_manifest(program, layout_context)
-    module = NativeModule(artifacts=[artifact, manifest_artifact], entry_points=collect_entry_points(program), symbol_count=count_exported_symbols(program))
+    module = NativeModule(module_name=module_name, artifacts=[artifact, manifest_artifact], entry_points=collect_entry_points(program), symbol_count=count_exported_symbols(program))
     return EmitNativeResult(module=module, diagnostics=state.diagnostics)
 
 def emit_statement(state, statement):

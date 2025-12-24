@@ -59,9 +59,11 @@ pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
 
 ## Current Status
 
-Sailfin is under active design and bootstrapping. The Sailfin-written stage1
-compiler is the production toolchain today; the Python bootstrap lives under
-`Legacy/stage0` for archaeology and regression hunting.
+Sailfin is under active design and bootstrapping. The native stage2 compiler is
+the primary toolchain today; the Stage1 bootstrap compiler remains in the build
+pipeline for now, while the Python bootstrap lives under `Legacy/stage0` for
+archaeology and regression hunting. The runtime currently ships as C and is
+planned to move into Sailfin for the 1.0 release.
 
 - `docs/status.md` — source of truth for what the bootstrap compiler enforces
   versus what exists only in prototypes.
@@ -69,25 +71,9 @@ compiler is the production toolchain today; the Python bootstrap lives under
 - `docs/enbf.md` — grammar sketch aligned to the stage1 parser (with notes on legacy stage0 behaviour where it still matters).
 - `docs/keywords.md` — reserved words and runtime notes.
 
-## Installing the stage1 artifact (preview)
+## Installing the compiler
 
-We publish the Sailfin stage1 compiler as a private GitHub release asset while
-the language is in alpha. With a personal access token that has `repo` scope,
-you can install the latest build via:
-
-```
-export GITHUB_TOKEN=<your-token>
-python scripts/install_stage1.py
-```
-
-The installer downloads the newest release (override with `--version` or
-`--tag`), extracts it to `~/.local/share/sailfin-stage1/<tag>/`, and symlinks the
-`sailfin-stage1` launcher into `~/.local/bin`. Use `--install-dir`, `--bin-dir`,
-or `--no-link` to customize these paths.
-
-## Installing the stage2 native compiler (preview)
-
-Stage2 is published as per-OS/arch release assets and can be installed via the
+The compiler is published as per-OS/arch release assets and can be installed via the
 curlable `install.sh` script. The repository is currently private, so you need a
 token with `repo` scope.
 
@@ -105,18 +91,18 @@ VERSION=0.1.1-alpha.66 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sa
 
 Notes:
 
-- Windows is supported for the published Stage2 binary. Run the installer from WSL or Git Bash (MSYS2/Cygwin environments are detected as `windows`).
+- Windows is supported for the published sailfin binary. Run the installer from WSL or Git Bash (MSYS2/Cygwin environments are detected as `windows`).
 - Release assets are expected to be named `sailfin-stage2_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin-stage2` (or `bin/sailfin-stage2.exe` on Windows).
-- The installer also links `~/.local/bin/sailfin` to the Stage2 binary so users can run `sailfin …` as the main compiler CLI.
+- The installer also links `~/.local/bin/sailfin` to the sailfin binary so users can run `sailfin …` as the main compiler CLI.
 
 ## Architecture Overview
 
 Sailfin targets a capsule-based architecture with fleets coordinating compiler,
-runtime, and tooling capsules. The current repository hosts the stage1
-self-hosted pipeline (`compiler/src` + `compiler/build`) alongside the Sailfin
-runtime experiments (`runtime/`). The historical Python bootstrap is archived in
-`Legacy/stage0`. Future capsule manifests and fleet layout are tracked in
-`docs/roadmap.md`.
+runtime, and tooling capsules. The current repository hosts the stage2 native
+compiler (`build/native`) and the stage1 bootstrap pipeline (`compiler/src` +
+`compiler/build`) alongside the Sailfin runtime (`runtime/`). The historical
+Python bootstrap is archived in `Legacy/stage0`. Future capsule manifests and
+fleet layout are tracked in `docs/roadmap.md`.
 
 ## Roadmap Highlights
 
@@ -132,7 +118,7 @@ For now, experiment, record findings, and propose ideas through pull requests.
 ### Local Development
 
 - `make install` — create or update the `sailfin` Conda environment defined in `environment.yml`.
-- `make test` — run the stage1 pytest suite; pass `PYTEST_ARGS=...` to scope the run.
+- `make test` — run the pytest suite; pass `PYTEST_ARGS=...` to scope the run.
 - `make package` — build the stage1 release artifact (`dist/sailfin-stage1-<version>.zip`).
 - `sailfin-stage1 <paths> --out <dir>` — compile Sailfin sources using the installed stage1 bundle.
 

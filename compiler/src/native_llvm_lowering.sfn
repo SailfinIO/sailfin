@@ -1060,7 +1060,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let mut function_effects -> FunctionEffectEntry[] = [];
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut lines -> string[] = [];
-    lines = append_string(lines, "source_filename = \"sailfin\"");
+    lines = append_string(lines, "source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
     lines = append_string(lines, "");
 
     let trait_lines = render_trait_metadata_comments(trait_metadata);
@@ -1146,7 +1146,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
             name: current_function.name,
             effects: effective_effects,
         });
-        let lowered = emit_function(current_function, context_functions, effective_effects, type_context);
+        let lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name);
         if sanitize_symbol(current_function.name) == "add" {
             has_add_function = true;
         }
@@ -1167,7 +1167,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
             function_lines = append_string(function_lines, "");
         }
         function_lines = function_lines.concat([
-            "define double @add(double %a, double %b) {",
+            "define internal double @add(double %a, double %b) {",
             "entry:",
             "  %t0 = fadd double %a, %b",
             "  ret double %t0",
@@ -1182,6 +1182,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
         final_lines = append_string(final_lines, "");
     }
     final_lines = final_lines.concat(function_lines);
+    final_lines = ensure_intrinsic_declarations(final_lines);
 
     let ir = join_with_separator(final_lines, "\n");
     let manifest = build_capability_manifest(native_module.entry_points, function_effects);
@@ -1198,6 +1199,66 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
         capability_manifest: manifest,
         string_constants: all_string_constants,
     };
+}
+
+fn module_source_filename(module_name -> string) -> string {
+    if module_name.length == 0 {
+        return "sailfin";
+    }
+    // Avoid appending twice.
+    if module_name.length >= 4 {
+        let suffix = substring(module_name, module_name.length - 4, module_name.length);
+        if suffix == ".sfn" {
+            return module_name;
+        }
+    }
+    return module_name + ".sfn";
+}
+
+fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
+    // Some toolchains reject calls to intrinsics without an explicit declare.
+    let mut uses_round -> boolean = false;
+    let mut has_round_decl -> boolean = false;
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = lines[index];
+        if index_of(line, "@llvm.round.f64") >= 0 {
+            uses_round = true;
+        }
+        if index_of(line, "declare double @llvm.round.f64(double)") >= 0 {
+            has_round_decl = true;
+        }
+        index += 1;
+    }
+
+    if !uses_round || has_round_decl {
+        return lines;
+    }
+
+    // Insert right after source_filename, preserving the existing blank line.
+    return insert_string_at(lines, 1, "declare double @llvm.round.f64(double)");
+}
+
+fn insert_string_at(values -> string[], insert_index -> number, value -> string) -> string[] {
+    let mut out -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        if index == insert_index {
+            out = append_string(out, value);
+        }
+        out = append_string(out, values[index]);
+        index += 1;
+    }
+    if insert_index >= values.length {
+        out = append_string(out, value);
+    }
+    return out;
 }
 fn empty_trait_metadata() -> TraitMetadata {
     return TraitMetadata { interfaces: [], implementations: [] };
@@ -4352,7 +4413,7 @@ fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
     return join_with_separator(rendered, ", ");
 }
 
-fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[], context -> TypeContext) -> LoweredLLVMFunction {
+fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[], context -> TypeContext, module_name -> string) -> LoweredLLVMFunction {
     let mut diagnostics -> string[] = [];
     let sanitized = sanitize_symbol(function.name);
     let llvm_return = map_return_type(context, function.return_type);
@@ -4399,7 +4460,7 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
         let decorator_name = function.decorators[decorator_index];
         if matches_case_insensitive(decorator_name, "logExecution") || matches_case_insensitive(decorator_name, "logexecution") || matches_case_insensitive(decorator_name, "trace") {
             let content = function.name;
-            let constant_name = make_string_constant_name(content);
+            let constant_name = make_string_constant_name_for_module(module_name, content);
             let constant = StringConstant { name: constant_name, content: content, byte_count: content.length };
             decorator_string_constants = append_string_constant(decorator_string_constants, constant);
             let array_length = content.length + 1;
@@ -16751,6 +16812,16 @@ fn make_string_constant_name(content -> string) -> string {
     let length_part = number_to_string(content.length);
     let hash_part = number_to_string(hash_value);
     return "@.str.len" + length_part + ".h" + hash_part;
+}
+
+fn make_string_constant_name_for_module(module_name -> string, content -> string) -> string {
+    let base = make_string_constant_name(content);
+    let tag = sanitize_symbol(module_name);
+    if tag.length == 0 || tag == "_" {
+        return base;
+    }
+    // base is @.str.len<LEN>.h<HASH>
+    return "@.str." + tag + substring(base, 5, base.length);
 }
 
 fn compute_string_constant_hash(content -> string) -> number {

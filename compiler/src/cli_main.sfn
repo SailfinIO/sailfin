@@ -2,7 +2,7 @@
 //
 // Sailfin-native CLI entrypoint invoked by the stage2 C shim.
 
-import { compile_to_llvm, compile_tests_to_llvm, compile_to_sailfin, number_to_string } from "./main";
+import { compile_to_llvm, compile_to_llvm_with_module, compile_tests_to_llvm, compile_to_sailfin, number_to_string, module_name_from_path } from "./main";
 
 fn _usage() -> string {
     return "usage:\n" +
@@ -271,8 +271,9 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let mode = argv[1];
         let path = argv[2];
         let source = fs.readFile(path);
+        let module_name = module_name_from_path(path);
         if mode == "llvm" {
-            print.info(compile_to_llvm(source));
+            print.info(compile_to_llvm_with_module(source, module_name));
             return 0;
         }
         if mode == "sailfin" {
@@ -294,8 +295,9 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let mode = argv[1];
         let path = argv[2];
         let source = fs.readFile(path);
+        let module_name = module_name_from_path(path);
         if mode == "llvm" {
-            print.info(compile_to_llvm(source));
+            print.info(compile_to_llvm_with_module(source, module_name));
             return 0;
         }
         if mode == "sailfin" {
@@ -323,7 +325,8 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
 
         let source = fs.readFile(input_path);
-        let llvm = compile_to_llvm(source);
+        let module_name = module_name_from_path(input_path);
+        let llvm = compile_to_llvm_with_module(source, module_name);
 
         _ensure_dir("build");
         _ensure_dir("build/sailfin");
@@ -355,7 +358,8 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
         // compile + link into build/sailfin/run then execute
         let source = fs.readFile(input_path);
-        let llvm = compile_to_llvm(source);
+        let module_name = module_name_from_path(input_path);
+        let llvm = compile_to_llvm_with_module(source, module_name);
 
         _ensure_dir("build");
         _ensure_dir("build/sailfin");

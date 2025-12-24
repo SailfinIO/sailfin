@@ -37,6 +37,7 @@ struct NativeArtifact {
 }
 
 struct NativeModule {
+    module_name -> string;
     artifacts -> NativeArtifact[];
     entry_points -> string[];
     symbol_count -> number;
@@ -166,10 +167,20 @@ fn build_layout_context(program -> Program) -> LayoutContext {
 }
 
 fn emit_native(program -> Program) -> EmitNativeResult {
+    return emit_native_with_module_name(program, "main");
+}
+
+fn emit_native_with_module_name(program -> Program, module_name -> string) -> EmitNativeResult {
     let layout_context = build_layout_context(program);
     let mut state -> NativeState = state_new(layout_context);
     state = state_emit_line(state, "; Sailfin Native Prototype");
-    state = state_emit_line(state, ".module main");
+    let mut module_line = ".module ";
+    if module_name.length == 0 {
+        module_line = module_line + "main";
+    } else {
+        module_line = module_line + module_name;
+    }
+    state = state_emit_line(state, module_line);
     if program.statements.length > 0 {
         state = state_emit_blank(state);
     }
@@ -195,6 +206,7 @@ fn emit_native(program -> Program) -> EmitNativeResult {
     let manifest_artifact = generate_layout_manifest(program, layout_context);
 
     let module = NativeModule {
+        module_name: module_name,
         artifacts: [artifact, manifest_artifact],
         entry_points: collect_entry_points(program),
         symbol_count: count_exported_symbols(program),
