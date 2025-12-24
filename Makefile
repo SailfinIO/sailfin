@@ -13,7 +13,7 @@ else
 STAGE2_NATIVE_LIBS ?= -lm
 endif
 
-.PHONY: help install test test-unit test-integration test-stage2 warm-stage1-cache compile clean clean-stage1 package bootstrap-stage2 native-stage2 native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-emit-llvm stage2-native-sanity stage2-native-run-examples
+.PHONY: help install test test-unit test-integration test-stage2 compile clean clean-stage1 package native-stage2-debug native-stage2-asan stage2-native-roundtrip stage2-native-fixed-point stage2-native-sanity
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -33,18 +33,14 @@ help:
 	@echo "  make test-unit    # Run fast Sailfin-focused unit coverage"
 	@echo "  make test-integration # Run integration tests (stage1 artifact, self-host checks, etc.)"
 	@echo "  make test-stage2  # Run LLVM/native backend coverage"
-	@echo "  make warm-stage1-cache # Pre-populate the pytest stage1 build cache"
-	@echo "  make compile      # Emit Python modules from compiler/src via the stage1 pipeline"
+	@echo "  make compile      # Build the native sailfin-stage2 compiler (full pipeline)"
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
-	@echo "  make clean-stage1 # Remove compiler/build (requires installed stage1 to rebuild)"
-	@echo "  make bootstrap-stage2 # Bootstrap Stage2 self-hosted compiler (compile to LLVM)"
-	@echo "  make native-stage2 # Build native stage2 toolchain CLI (emit/build/run)"
-	@echo "  make native-stage2-debug # Same, but with -O0/-g for lldb"
-	@echo "  make native-stage2-asan # Same, but with AddressSanitizer for memory bugs"
-	@echo "  make stage2-native-sanity # Bootstrap + build native stage2 + compile hello-world"
-	@echo "  make stage2-native-roundtrip # Bootstrap + build native stage2 + run it on compiler/src/main.sfn"
+	@echo "  make clean-stage1 # Remove compiler/build (requires stage1 to rebuild)"
+	@echo "  make native-stage2-debug # Build native stage2 with -O0/-g for lldb"
+	@echo "  make native-stage2-asan # Build native stage2 with AddressSanitizer"
+	@echo "  make stage2-native-sanity # Build + compile hello-world as smoke test"
+	@echo "  make stage2-native-roundtrip # Build + run on compiler/src/main.sfn"
 	@echo "  make stage2-native-fixed-point # Ensure Stage3→Stage4 is a stable fixed-point"
-	@echo "  make stage2-native-emit-llvm # Emit LLVM IR for compiler/src/main.sfn via stage2-native"
 
 install:
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
@@ -64,14 +60,10 @@ test-stage2:
 clean:
 	rm -rf dist
 
+# Full compilation pipeline: Stage1 (sfn→Python) → Stage2 bootstrap (→LLVM IR) → native binary
 compile:
 	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
-
-# Stage2 bootstrap requires the latest stage1-generated Python modules.
-bootstrap-stage2: compile
 	$(CONDA) run -n $(CONDA_ENV) python scripts/bootstrap_stage2.py --no-validate
-
-native-stage2: bootstrap-stage2
 	@mkdir -p build/stage2/aot build/native/obj
 	@rm -f build/native/obj/*.o
 	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
@@ -83,8 +75,9 @@ native-stage2: bootstrap-stage2
 	  $(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2 build/native/obj/sailfin_runtime.o build/native/obj/stage2_driver.o build/native/obj/runtime_globals.o $$(sed 's|^|build/native/obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
+	@echo "[compile] built build/native/sailfin-stage2"
 
-native-stage2-debug: bootstrap-stage2
+native-stage2-debug: compile
 	@mkdir -p build/stage2/aot build/native/debug-obj
 	@rm -f build/native/debug-obj/*.o
 	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
@@ -97,7 +90,7 @@ native-stage2-debug: bootstrap-stage2
 	done < build/stage2/aot/modules.txt
 	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/stage2_driver.o build/native/debug-obj/runtime_globals.o $$(sed 's|^|build/native/debug-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
 
-native-stage2-asan: bootstrap-stage2
+native-stage2-asan: compile
 	@mkdir -p build/stage2/aot build/native/asan-obj
 	@rm -f build/native/asan-obj/*.o
 	$(CONDA) run -n $(CONDA_ENV) python tools/prepare_stage2_aot_text.py --input build/stage2 --output build/stage2/aot
@@ -110,11 +103,11 @@ native-stage2-asan: bootstrap-stage2
 	done < build/stage2/aot/modules.txt
 	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/stage2_driver.o build/native/asan-obj/runtime_globals.o $$(sed 's|^|build/native/asan-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
 
-stage2-native-sanity: native-stage2
+stage2-native-sanity: compile
 	build/native/sailfin-stage2 --emit sailfin examples/basics/hello-world.sfn > /dev/null
 	@echo "[stage2-native] sanity ok"
 
-stage2-native-roundtrip: native-stage2
+stage2-native-roundtrip: compile
 	@mkdir -p build/stage3
 	build/native/sailfin-stage2 --emit sailfin compiler/src/main.sfn > build/stage3/compiler-from-stage2.sfn
 	@echo "[stage2-native] wrote build/stage3/compiler-from-stage2.sfn"
@@ -124,24 +117,3 @@ stage2-native-fixed-point: stage2-native-roundtrip
 	build/native/sailfin-stage2 --emit sailfin build/stage3/compiler-from-stage2.sfn > build/stage4/compiler-from-stage3.sfn
 	@diff -q build/stage3/compiler-from-stage2.sfn build/stage4/compiler-from-stage3.sfn > /dev/null
 	@echo "[stage2-native] fixed-point ok (Stage3 == Stage4)"
-
-stage2-native-emit-llvm: native-stage2
-	@mkdir -p build/stage3
-	build/native/sailfin-stage2 --emit llvm compiler/src/main.sfn > build/stage3/main-from-stage2.ll
-	@echo "[stage2-native] wrote build/stage3/main-from-stage2.ll"
-
-stage2-native-run-examples: native-stage2
-	@mkdir -p scratch/native-examples build/native/examples
-	@for ex in \
-		examples/basics/hello-world.sfn \
-		examples/basics/conditionals.sfn \
-		examples/basics/if-else.sfn \
-		examples/basics/borrowing.sfn ; do \
-		name=$$(basename $$ex .sfn); \
-		out_ll=scratch/native-examples/$$name.ll; \
-		out_bin=build/native/examples/$$name; \
-		echo "[stage2-native] llvm $$ex -> $$out_bin"; \
-		build/native/sailfin-stage2 --emit llvm $$ex > $$out_ll; \
-		$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include runtime/native/src/sailfin_runtime.c runtime/native/ir/runtime_globals.ll $$out_ll -o $$out_bin $(STAGE2_NATIVE_LIBS); \
-		$$out_bin; \
-	done
