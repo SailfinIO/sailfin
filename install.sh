@@ -192,11 +192,11 @@ if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$LINK_PATH" 2>/dev/null
   $MAYBE_SUDO chmod 0755 "$LINK_PATH" || true
 fi
 
-# Also install a stable `sailfin` entrypoint when installing `sailfin-stage2`.
+# Also install a stable `sfn` entrypoint when installing `sailfin-stage2`.
 if [ "$BINARY" = "sailfin-stage2" ]; then
-  ALIAS_BASENAME="sailfin"
+  ALIAS_BASENAME="sfn"
   if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
-    ALIAS_BASENAME="sailfin.exe"
+    ALIAS_BASENAME="sfn.exe"
   fi
 
   ALIAS_PATH="${GLOBAL_BIN_DIR}/${ALIAS_BASENAME}"

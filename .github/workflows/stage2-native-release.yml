@@ -136,7 +136,7 @@ jobs:
           STAGE_DIR="$(mktemp -d)"
           mkdir -p "${STAGE_DIR}/bin"
           cp "build/native/sailfin-stage2${EXE_EXT}" "${STAGE_DIR}/bin/sailfin-stage2${EXE_EXT}"
-          cp "build/native/sailfin-stage2${EXE_EXT}" "${STAGE_DIR}/bin/sailfin${EXE_EXT}"
+          cp "build/native/sailfin-stage2${EXE_EXT}" "${STAGE_DIR}/bin/sfn${EXE_EXT}"
 
           ASSET="sailfin-stage2_${VERSION}_${OS}_${ARCH}.tar.gz"
           tar -czf "dist/${ASSET}" -C "${STAGE_DIR}" .
