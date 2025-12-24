@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.75 (2025-12-24)
+
+### Bug Fixes
+
+- Unsafe and extern interop
+  ([`eee8ac5`](https://github.com/SailfinIO/sailfin/commit/eee8ac52f4157115c694878fbef42f401945a413))
+
+
 ## v0.1.1-alpha.74 (2025-12-23)
 
 ### Bug Fixes
