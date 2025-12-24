@@ -455,6 +455,19 @@ class LocalBinding:
     def __repr__(self):
         return runtime.struct_repr('LocalBinding', [runtime.struct_field('name', self.name), runtime.struct_field('pointer', self.pointer), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('ownership', self.ownership), runtime.struct_field('consumed', self.consumed), runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth)])
 
+class ModuleGlobalLoweringResult:
+    def __init__(self, preamble_lines, init_function_lines, init_function_symbol, needs_init_call, locals, string_constants, diagnostics):
+        self.preamble_lines = preamble_lines
+        self.init_function_lines = init_function_lines
+        self.init_function_symbol = init_function_symbol
+        self.needs_init_call = needs_init_call
+        self.locals = locals
+        self.string_constants = string_constants
+        self.diagnostics = diagnostics
+
+    def __repr__(self):
+        return runtime.struct_repr('ModuleGlobalLoweringResult', [runtime.struct_field('preamble_lines', self.preamble_lines), runtime.struct_field('init_function_lines', self.init_function_lines), runtime.struct_field('init_function_symbol', self.init_function_symbol), runtime.struct_field('needs_init_call', self.needs_init_call), runtime.struct_field('locals', self.locals), runtime.struct_field('string_constants', self.string_constants), runtime.struct_field('diagnostics', self.diagnostics)])
+
 class LocalMutation:
     def __init__(self, name, llvm_type, value_name, originating_label, span=None):
         self.name = name
@@ -1093,7 +1106,7 @@ def lower_to_llvm_with_context_for_tests(native_module, imported_manifests, impo
 
 def render_test_harness_main(tests):
     lines = []
-    lines = (lines) + (["define i32 @main() {", "entry:"])
+    lines = (lines) + (["define i32 @main(i32 %argc, i8** %argv) {", "entry:"])
     index = 0
     while True:
         if index >= len(tests):
@@ -1103,6 +1116,131 @@ def render_test_harness_main(tests):
         index += 1
     lines = (lines) + (["  ret i32 0", "}"])
     return lines
+
+def module_global_symbol(name):
+    return "@global." + sanitize_symbol(name)
+
+def module_init_symbol(module_name):
+    return "@sailfin_module_init__" + sanitize_symbol(module_name)
+
+def module_user_main_symbol(module_name):
+    return "sailfin_user_main__" + sanitize_symbol(module_name)
+
+def lower_module_bindings_to_globals(bindings, context, module_name):
+    diagnostics = []
+    preamble_lines = []
+    init_lines = []
+    locals = []
+    collected_string_constants = empty_string_constant_set()
+    init_symbol = module_init_symbol(module_name)
+    needs_init = False
+    if len(bindings) == 0:
+        return ModuleGlobalLoweringResult(preamble_lines=[], init_function_lines=[], init_function_symbol=init_symbol, needs_init_call=False, locals=[], string_constants=collected_string_constants, diagnostics=[])
+    scope_id = format_root_scope_id("module")
+    scope_depth = 0
+    index = 0
+    while True:
+        if index >= len(bindings):
+            break
+        binding = bindings[index]
+        if len(trim_text(binding.type_annotation)) == 0:
+            index += 1
+            continue
+        name = binding.name
+        global_name = module_global_symbol(name)
+        llvm_type = ""
+        if len(trim_text(binding.type_annotation)) > 0:
+            llvm_type = map_local_type(context, binding.type_annotation)
+        if len(llvm_type) == 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: module binding `" + name + "` has unsupported type annotation `" + binding.type_annotation + "`")
+            llvm_type = "double"
+        if llvm_type == "i8*":
+            preamble_lines = append_string(preamble_lines, global_name + " = global i8* null")
+            if binding.value != None:
+                needs_init = True
+        else:
+            initializer_text = default_return_literal(llvm_type)
+            if binding.value != None:
+                init_expr = trim_text(binding.value)
+                if llvm_type == "double"  and  is_number_literal(init_expr):
+                    initializer_text = normalise_number_literal(init_expr)
+                else:
+                    if llvm_type == "i64"  and  is_integer_literal(init_expr):
+                        initializer_text = init_expr
+                    else:
+                        if llvm_type == "i32"  and  is_integer_literal(init_expr):
+                            initializer_text = init_expr
+                        else:
+                            if llvm_type == "i1"  and  is_boolean_literal(init_expr):
+                                initializer_text = "0"
+                                if matches_case_insensitive(init_expr, "true"):
+                                    initializer_text = "1"
+                            else:
+                                needs_init = True
+            preamble_lines = append_string(preamble_lines, global_name + " = global " + llvm_type + " " + initializer_text)
+        locals = append_local_binding(locals, LocalBinding(name=name, pointer=global_name, llvm_type=llvm_type, type_annotation=binding.type_annotation, ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
+        index += 1
+    if not needs_init:
+        return ModuleGlobalLoweringResult(preamble_lines=preamble_lines, init_function_lines=[], init_function_symbol=init_symbol, needs_init_call=False, locals=locals, string_constants=collected_string_constants, diagnostics=diagnostics)
+    init_lines = (init_lines) + (["define internal void " + init_symbol + "() {", "block.entry:"])
+    init_index = 0
+    current_temp = 0
+    current_lines = init_lines
+    while True:
+        if init_index >= len(bindings):
+            break
+        binding = bindings[init_index]
+        if len(trim_text(binding.type_annotation)) == 0:
+            init_index += 1
+            continue
+        if binding.value == None:
+            init_index += 1
+            continue
+        name = binding.name
+        global_name = module_global_symbol(name)
+        local = find_local_binding(locals, name)
+        if local == None:
+            init_index += 1
+            continue
+        llvm_type = local.llvm_type
+        init_expr = trim_text(binding.value)
+        if llvm_type == "i8*":
+            lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type)
+            diagnostics = (diagnostics) + (lowered.diagnostics)
+            current_lines = lowered.lines
+            current_temp = lowered.temp_index
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+            if lowered.operand != None:
+                current_lines = append_string(current_lines, "  store i8* " + lowered.operand.value + ", i8** " + global_name)
+            else:
+                diagnostics = append_string(diagnostics, "llvm lowering: failed to initialize module string binding `" + name + "`")
+        else:
+            should_store = True
+            if llvm_type == "double"  and  is_number_literal(init_expr):
+                should_store = False
+            if llvm_type == "i64"  and  is_integer_literal(init_expr):
+                should_store = False
+            if llvm_type == "i32"  and  is_integer_literal(init_expr):
+                should_store = False
+            if llvm_type == "i1"  and  is_boolean_literal(init_expr):
+                should_store = False
+            if should_store:
+                lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type)
+                diagnostics = (diagnostics) + (lowered.diagnostics)
+                current_lines = lowered.lines
+                current_temp = lowered.temp_index
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+                if lowered.operand != None:
+                    coerced = coerce_operand_to_type(lowered.operand, llvm_type, current_temp, current_lines)
+                    diagnostics = (diagnostics) + (coerced.diagnostics)
+                    current_lines = coerced.lines
+                    current_temp = coerced.temp_index
+                    if coerced.operand != None:
+                        current_lines = append_string(current_lines, "  store " + llvm_type + " " + coerced.operand.value + ", " + llvm_type + "* " + global_name)
+        init_index += 1
+    current_lines = append_string(current_lines, "  ret void")
+    current_lines = append_string(current_lines, "}")
+    return ModuleGlobalLoweringResult(preamble_lines=preamble_lines, init_function_lines=current_lines, init_function_symbol=init_symbol, needs_init_call=True, locals=locals, string_constants=collected_string_constants, diagnostics=diagnostics)
 
 def lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
     diagnostics = []
@@ -1233,11 +1371,19 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     lines = append_string(lines, "")
     lines = append_string(lines, "@runtime = external global i8**")
     lines = append_string(lines, "")
+    module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name)
+    diagnostics = (diagnostics) + (module_globals.diagnostics)
+    if len(module_globals.preamble_lines) > 0:
+        lines = (lines) + (module_globals.preamble_lines)
+        lines = append_string(lines, "")
     preamble_lines = lines
     function_lines = []
+    if len(module_globals.init_function_lines) > 0:
+        function_lines = (function_lines) + (module_globals.init_function_lines)
+        function_lines = append_string(function_lines, "")
     index = 0
     has_add_function = False
-    all_string_constants = empty_string_constant_set()
+    all_string_constants = module_globals.string_constants
     while True:
         if index >= len(local_functions):
             break
@@ -1247,7 +1393,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
         if aggregated_entry != None:
             effective_effects = aggregated_entry.effects
         function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry(name=current_function.name, effects=effective_effects))
-        lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, exported_symbols, imported_functions)
+        lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, exported_symbols, imported_functions, module_globals.locals, module_globals.init_function_symbol, module_globals.needs_init_call)
         if sanitize_symbol(current_function.name) == "add":
             has_add_function = True
         diagnostics = (diagnostics) + (lowered.diagnostics)
@@ -3244,14 +3390,18 @@ def render_interface_parameters(parameters):
         index += 1
     return join_with_separator(rendered, ", ")
 
-def emit_function(function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions):
+def emit_function(function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call):
     diagnostics = []
     sanitized = sanitize_symbol(function.name)
+    emit_main_wrapper = False
     llvm_return = map_return_type(context, function.return_type)
     if len(llvm_return) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type `" + function.return_type + "` in " + function.name)
         empty_constants = empty_string_constant_set()
         return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[], string_constants=empty_constants)
+    if not function.is_extern  and  function.name == "main":
+        sanitized = module_user_main_symbol(module_name)
+        emit_main_wrapper = True
     preparation = prepare_parameters(function, context)
     diagnostics = (diagnostics) + (preparation.diagnostics)
     if function.is_extern:
@@ -3273,6 +3423,8 @@ def emit_function(function, functions, effects, context, module_name, entry_poin
         linkage = "internal "
     lines = append_string(lines, "define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {")
     lines = append_string(lines, entry_label + ":")
+    if emit_main_wrapper  and  needs_module_init_call:
+        lines = append_string(lines, "  call void " + module_init_symbol + "()")
     decorator_string_constants = empty_string_constant_set()
     decorator_index = 0
     while True:
@@ -3289,23 +3441,25 @@ def emit_function(function, functions, effects, context, module_name, entry_poin
             call_line = "  call i8* @sailfin_runtime_log_execution(i8* getelementptr inbounds (" + array_type + ", " + array_type + "* " + constant_name + ", i32 0, i32 0))"
             lines = append_string(lines, call_line)
         decorator_index += 1
-    body = emit_body(function, llvm_return, preparation.bindings, functions, context, entry_label)
+    body = emit_body(function, llvm_return, preparation.bindings, module_globals, functions, context, entry_label)
     lines = (lines) + (body.lines)
     diagnostics = (diagnostics) + (body.diagnostics)
     lifetime_diagnostics = validate_borrow_lifetimes(function, body.lifetime_regions)
     diagnostics = (diagnostics) + (lifetime_diagnostics)
     lines = append_string(lines, "}")
+    if emit_main_wrapper:
+        lines = (lines) + (["", "define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  call void @" + sanitized + "()", "  ret i32 0", "}"])
     merged_constants = merge_string_constants(body.string_constants, decorator_string_constants)
     return LoweredLLVMFunction(lines=lines, diagnostics=diagnostics, lifetime_regions=body.lifetime_regions, string_constants=merged_constants)
 
-def emit_body(function, llvm_return, bindings, functions, context, entry_label):
+def emit_body(function, llvm_return, bindings, module_globals, functions, context, entry_label):
     lowered = lower_instruction_range(
 function,
 0,
 len(function.instructions),
 llvm_return,
 bindings,
-[],
+module_globals,
 [],
 [],
 0,

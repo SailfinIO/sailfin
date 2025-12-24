@@ -6,18 +6,18 @@ import { compile_to_llvm, compile_to_llvm_with_module, compile_tests_to_llvm, co
 
 fn _usage() -> string {
     return "usage:\n" +
-        "  sailfin emit llvm|sailfin <file.sfn>\n" +
-        "  sailfin build [-o OUTPUT] <file.sfn>\n" +
-        "  sailfin run <file.sfn>\n" +
-        "  sailfin run <exe>\n" +
-    "  sailfin test [path]\n" +
+        "  sfn emit llvm|sailfin <file.sfn>\n" +
+        "  sfn build [-o OUTPUT] <file.sfn>\n" +
+        "  sfn run <file.sfn>\n" +
+        "  sfn run <exe>\n" +
+    "  sfn test [path]\n" +
         "\n" +
         "examples:\n" +
-        "  sailfin emit llvm examples/basics/hello-world.sfn\n" +
-        "  sailfin build -o build/native/examples/hello examples/basics/hello-world.sfn\n" +
-        "  sailfin run examples/basics/hello-world.sfn\n" +
-    "  sailfin run build/native/examples/hello\n" +
-    "  sailfin test .\n";
+        "  sfn emit llvm examples/basics/hello-world.sfn\n" +
+        "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" +
+        "  sfn run examples/basics/hello-world.sfn\n" +
+    "  sfn run build/native/examples/hello\n" +
+    "  sfn test .\n";
 }
 
 fn _ends_with(value -> string, suffix -> string) -> boolean {
