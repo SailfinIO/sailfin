@@ -76,6 +76,7 @@ struct NativeFunction {
     return_type -> string;
     effects -> string[];
     decorators -> string[];
+    is_extern -> boolean;
     instructions -> NativeInstruction[];
 }
 
@@ -467,6 +468,7 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
                 return_type: "void",
                 effects: [],
                 decorators: pending_decorators,
+                is_extern: false,
                 instructions: [],
             };
             pending_decorators = [];
@@ -539,6 +541,7 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
                 return_type: "void",
                 effects: [],
                 decorators: [],
+                is_extern: false,
                 instructions: [],
             };
             index += 1;
@@ -652,7 +655,6 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
         }
 
         if current == null {
-            let trimmed_line = trim_text(line);
             if instructions.length == 1 && instructions[0].variant == "Let" {
                 bindings = append_binding(bindings, binding_from_instruction(instructions[0]));
             } else {
@@ -808,6 +810,7 @@ fn append_parameter(function -> NativeFunction, parameter -> NativeParameter) ->
         return_type: function.return_type,
         effects: function.effects,
         decorators: function.decorators,
+        is_extern: function.is_extern,
         instructions: function.instructions,
     };
 }
@@ -820,6 +823,7 @@ fn append_instruction(function -> NativeFunction, instruction -> NativeInstructi
         return_type: function.return_type,
         effects: function.effects,
         decorators: function.decorators,
+        is_extern: function.is_extern,
         instructions: instructions,
     };
 }
@@ -835,6 +839,21 @@ fn binding_from_instruction(instruction -> NativeInstruction) -> NativeBinding {
 
 fn apply_meta(function -> NativeFunction, entry -> string) -> NativeFunction {
     let trimmed = trim_text(entry);
+    if trimmed == "extern" {
+        return NativeFunction {
+            name: function.name,
+            parameters: function.parameters,
+            return_type: function.return_type,
+            effects: function.effects,
+            decorators: function.decorators,
+            is_extern: true,
+            instructions: function.instructions,
+        };
+    }
+    // `unsafe` is currently informational only.
+    if trimmed == "unsafe" {
+        return function;
+    }
     if starts_with(trimmed, "return ") {
         let return_type = trim_text(strip_prefix(trimmed, "return "));
         return update_function_meta(function, return_type, function.effects);
@@ -854,6 +873,7 @@ fn update_function_meta(function -> NativeFunction, return_type -> string, effec
         return_type: return_type,
         effects: effects,
         decorators: function.decorators,
+        is_extern: function.is_extern,
         instructions: function.instructions,
     };
 }
@@ -1503,6 +1523,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
                 return_type: "void",
                 effects: [],
                 decorators: method_pending_decorators,
+                is_extern: false,
                 instructions: [],
             };
             method_pending_decorators = [];

@@ -215,6 +215,11 @@ enum Statement {
         body -> Block;
         decorators -> Decorator[];
     },
+    ExternFunctionDeclaration {
+        signature -> FunctionSignature;
+        unsafe -> boolean;
+        decorators -> Decorator[];
+    },
     StructDeclaration {
         name -> string;
         name_span -> SourceSpan?;

@@ -61,18 +61,11 @@ test-integration:
 test-stage2:
 	$(CONDA) run -n $(CONDA_ENV) pytest -m stage2 $(PYTEST_ARGS)
 
-warm-stage1-cache:
-	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py --warm-cache
-
 clean:
 	rm -rf dist
 
 compile:
 	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
-
-package:
-	$(CONDA) run -n $(CONDA_ENV) python tools/package_stage1.py
-
 
 # Stage2 bootstrap requires the latest stage1-generated Python modules.
 bootstrap-stage2: compile

@@ -236,6 +236,8 @@ def emit_statement(state, statement):
         return emit_variable(state, statement)
     if statement.variant == "FunctionDeclaration":
         return emit_function(state, statement.signature, statement.body, statement.decorators)
+    if statement.variant == "ExternFunctionDeclaration":
+        return emit_extern_function(state, statement.signature, statement.unsafe, statement.decorators)
     if statement.variant == "StructDeclaration":
         return emit_struct(state, statement)
     if statement.variant == "PipelineDeclaration":
@@ -284,6 +286,18 @@ def emit_statement(state, statement):
         return emit_expression_statement(state, statement)
     message = "native backend: unsupported statement `" + statement.variant + "`"
     return state_add_diagnostic(state, message)
+
+def emit_extern_function(state, signature, unsafe_flag, decorators):
+    current = emit_decorators(state, decorators)
+    current = state_emit_line(current, ".fn " + format_function_signature(signature))
+    if unsafe_flag:
+        current = state_emit_line(current, ".meta unsafe")
+    current = state_emit_line(current, ".meta extern")
+    current = emit_signature_metadata(current, signature)
+    current = state_push_indent(current)
+    current = emit_parameter_metadata(current, signature.parameters)
+    current = state_pop_indent(current)
+    return state_emit_line(current, ".endfn")
 
 def emit_throw(state, statement):
     current = emit_span_if_present(state, statement.span)

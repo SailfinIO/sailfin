@@ -46,6 +46,7 @@ Statement = runtime.enum_define_variant(Statement, 'PipelineDeclaration', ['sign
 Statement = runtime.enum_define_variant(Statement, 'ToolDeclaration', ['signature', 'body', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'TestDeclaration', ['name', 'name_span', 'body', 'effects', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'FunctionDeclaration', ['signature', 'body', 'decorators'])
+Statement = runtime.enum_define_variant(Statement, 'ExternFunctionDeclaration', ['signature', 'unsafe', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'StructDeclaration', ['name', 'name_span', 'type_parameters', 'implements_types', 'fields', 'methods', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'TypeAliasDeclaration', ['name', 'name_span', 'type_parameters', 'aliased_type', 'decorators'])
 Statement = runtime.enum_define_variant(Statement, 'InterfaceDeclaration', ['name', 'name_span', 'type_parameters', 'members', 'decorators'])

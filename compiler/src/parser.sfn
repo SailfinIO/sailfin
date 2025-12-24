@@ -315,6 +315,15 @@ fn parse_statement(initial_parser -> Parser) -> StatementParseResult {
             return parse_function(parser, true, decorators);
         }
     }
+    if identifier_matches(token, "extern") {
+        return parse_extern_function(parser, false, decorators);
+    }
+    if identifier_matches(token, "unsafe") {
+        let lookahead = skip_trivia(parser_advance_raw(parser));
+        if identifier_matches(parser_peek_raw(lookahead), "extern") {
+            return parse_extern_function(parser, true, decorators);
+        }
+    }
     if identifier_matches(token, "struct") {
         return parse_struct(parser, decorators);
     }
@@ -333,6 +342,92 @@ fn parse_statement(initial_parser -> Parser) -> StatementParseResult {
     }
 
     return parse_unknown(parser);
+}
+
+fn parse_extern_function(initial_parser -> Parser, starts_with_unsafe -> boolean, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let mut is_unsafe = false;
+    if starts_with_unsafe {
+        parser = consume_keyword(parser, "unsafe");
+        is_unsafe = true;
+    }
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "extern");
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "fn");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    let type_param_result = parse_type_parameter_clause(parser);
+    parser = type_param_result.parser;
+    let type_parameters = type_param_result.parameters;
+
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, "(");
+    let parameter_result = parse_parameter_list(parser);
+    parser = parameter_result.parser;
+    let parameters = parameter_result.parameters;
+
+    parser = skip_trivia(parser);
+    let mut return_type -> TypeAnnotation? = null;
+    let sep_result = consume_type_separator(parser);
+    if sep_result.found {
+        parser = sep_result.parser;
+        let capture = collect_until(skip_trivia(parser), ["!", ";"]);
+        parser = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            return_type = TypeAnnotation { text: text };
+        }
+    }
+
+    let effect_result = parse_effect_list(parser);
+    parser = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let decorator_info = evaluate_decorators(decorators);
+    let inferred_effects = infer_effects(parsed_effects, decorator_info);
+
+    // Allow `extern fn foo() ![effects] -> T;` ordering.
+    if return_type == null {
+        parser = skip_trivia(parser);
+        let late_sep = consume_type_separator(parser);
+        if late_sep.found {
+            parser = late_sep.parser;
+            let capture = collect_until(skip_trivia(parser), [";"]);
+            parser = capture.parser;
+            let text = trim_text(tokens_to_text(capture.tokens));
+            if text.length > 0 {
+                return_type = TypeAnnotation { text: text };
+            }
+        }
+    }
+
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, ";");
+
+    let signature = FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: parameters,
+        return_type: return_type,
+        effects: inferred_effects,
+        type_parameters: type_parameters,
+        name_span: name_span,
+    };
+
+    let statement = Statement.ExternFunctionDeclaration {
+        signature: signature,
+        unsafe: is_unsafe,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
 }
 
 fn parse_import(initial_parser -> Parser) -> StatementParseResult {
@@ -2091,6 +2186,19 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
     }
     if identifier_matches(token, "with") {
         return parse_with_statement(after_decorators, decorators);
+    }
+    if identifier_matches(token, "unsafe") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        let mut current = consume_keyword(after_decorators, "unsafe");
+        current = skip_trivia(current);
+        let body_result = parse_block(current);
+        return BlockStatementParseResult {
+            parser: body_result.parser,
+            statement: Statement.BlockStatement { body: body_result.block },
+            success: true,
+        };
     }
     if identifier_matches(token, "return") {
         if decorators.length > 0 {

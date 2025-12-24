@@ -390,6 +390,12 @@ def parse_statement(initial_parser):
         lookahead = skip_trivia(parser_advance_raw(parser))
         if identifier_matches(parser_peek_raw(lookahead), "fn"):
             return parse_function(parser, True, decorators)
+    if identifier_matches(token, "extern"):
+        return parse_extern_function(parser, False, decorators)
+    if identifier_matches(token, "unsafe"):
+        lookahead = skip_trivia(parser_advance_raw(parser))
+        if identifier_matches(parser_peek_raw(lookahead), "extern"):
+            return parse_extern_function(parser, True, decorators)
     if identifier_matches(token, "struct"):
         return parse_struct(parser, decorators)
     if identifier_matches(token, "type"):
@@ -401,6 +407,61 @@ def parse_statement(initial_parser):
     if len(decorators) > 0:
         return parse_unknown(original)
     return parse_unknown(parser)
+
+def parse_extern_function(initial_parser, starts_with_unsafe, decorators):
+    parser = initial_parser
+    parser = skip_trivia(parser)
+    is_unsafe = False
+    if starts_with_unsafe:
+        parser = consume_keyword(parser, "unsafe")
+        is_unsafe = True
+    parser = skip_trivia(parser)
+    parser = consume_keyword(parser, "extern")
+    parser = skip_trivia(parser)
+    parser = consume_keyword(parser, "fn")
+    parser = skip_trivia(parser)
+    name_token = parser_peek_raw(parser)
+    name = identifier_text(name_token)
+    name_span = source_span_from_tokens([name_token])
+    parser = parser_advance_raw(parser)
+    type_param_result = parse_type_parameter_clause(parser)
+    parser = type_param_result.parser
+    type_parameters = type_param_result.parameters
+    parser = skip_trivia(parser)
+    parser = consume_symbol(parser, "(")
+    parameter_result = parse_parameter_list(parser)
+    parser = parameter_result.parser
+    parameters = parameter_result.parameters
+    parser = skip_trivia(parser)
+    return_type = None
+    sep_result = consume_type_separator(parser)
+    if sep_result.found:
+        parser = sep_result.parser
+        capture = collect_until(skip_trivia(parser), ["!", ";"])
+        parser = capture.parser
+        text = trim_text(tokens_to_text(capture.tokens))
+        if len(text) > 0:
+            return_type = TypeAnnotation(text=text)
+    effect_result = parse_effect_list(parser)
+    parser = effect_result.parser
+    parsed_effects = effect_result.effects
+    decorator_info = evaluate_decorators(decorators)
+    inferred_effects = infer_effects(parsed_effects, decorator_info)
+    if return_type == None:
+        parser = skip_trivia(parser)
+        late_sep = consume_type_separator(parser)
+        if late_sep.found:
+            parser = late_sep.parser
+            capture = collect_until(skip_trivia(parser), [";"])
+            parser = capture.parser
+            text = trim_text(tokens_to_text(capture.tokens))
+            if len(text) > 0:
+                return_type = TypeAnnotation(text=text)
+    parser = skip_trivia(parser)
+    parser = consume_symbol(parser, ";")
+    signature = FunctionSignature(name=name, is_async=False, parameters=parameters, return_type=return_type, effects=inferred_effects, type_parameters=type_parameters, name_span=name_span)
+    statement = runtime.enum_instantiate(Statement, 'ExternFunctionDeclaration', [runtime.enum_field('signature', signature), runtime.enum_field('unsafe', is_unsafe), runtime.enum_field('decorators', decorators)])
+    return StatementParseResult(parser=parser, statement=statement)
 
 def parse_import(initial_parser):
     parser = initial_parser
@@ -1574,6 +1635,13 @@ def parse_block_statement(parser):
         return parse_prompt_statement(after_decorators, decorators)
     if identifier_matches(token, "with"):
         return parse_with_statement(after_decorators, decorators)
+    if identifier_matches(token, "unsafe"):
+        if len(decorators) > 0:
+            return BlockStatementParseResult(parser=original, statement=None, success=False)
+        current = consume_keyword(after_decorators, "unsafe")
+        current = skip_trivia(current)
+        body_result = parse_block(current)
+        return BlockStatementParseResult(parser=body_result.parser, statement=runtime.enum_instantiate(Statement, 'BlockStatement', [runtime.enum_field('body', body_result.block)]), success=True)
     if identifier_matches(token, "return"):
         if len(decorators) > 0:
             return BlockStatementParseResult(parser=original, statement=None, success=False)
