@@ -55,7 +55,7 @@ jobs:
       - name: Build native Stage2 compiler
         shell: bash -l {0}
         run: |
-          CONDA=$(which conda) make native-stage2
+          CONDA=$(which conda) make compile
 
       - name: Run Stage2 test suite
         env:
