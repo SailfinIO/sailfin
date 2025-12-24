@@ -4621,6 +4621,8 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
     subject_operand = subject_result.operand
     union_payload_types = parse_union_payload_types(subject_operand.llvm_type)
     matched_union_variants = []
+    subject_enum_info = find_enum_info_by_llvm_type(context, subject_operand.llvm_type)
+    matched_enum_tags = []
     if len(structure.cases) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: match without cases in `" + function.name + "`")
         merge_alloc = allocate_block_label("matchmerge", current_block_counter)
@@ -4659,12 +4661,19 @@ def lower_match_instruction(function, start_index, llvm_return, bindings, locals
     current_lines = append_string(current_lines, "  br label %" + test_labels[0])
     all_terminated = True
     has_unconditional_default = False
+    has_guarded_cases = False
     arm_mutations_list = []
     index = 0
     while True:
         if index >= len(structure.cases):
             break
         case = structure.cases[index]
+        guard_has_text = False
+        if case.guard != None:
+            guard_trimmed = trim_text(case.guard)
+            if len(guard_trimmed) > 0:
+                guard_has_text = True
+                has_guarded_cases = True
         failure_target = merge_label
         if index + 1 < len(structure.cases):
             failure_target = test_labels[index + 1]
@@ -4684,7 +4693,7 @@ context
         current_lines = lowered_condition.lines
         current_temp = lowered_condition.temp_index
         collected_string_constants = merge_string_constants(collected_string_constants, lowered_condition.string_constants)
-        if lowered_condition.union_variant_index >= 0:
+        if lowered_condition.union_variant_index >= 0  and  not guard_has_text:
             seen = False
             seen_index = 0
             while True:
@@ -4696,6 +4705,22 @@ context
                 seen_index += 1
             if not seen:
                 matched_union_variants = (matched_union_variants) + ([lowered_condition.union_variant_index])
+        if subject_enum_info != None  and  lowered_condition.enum_info != None  and  lowered_condition.variant_info != None  and  not guard_has_text:
+            enum_info_val = lowered_condition.enum_info
+            variant_info_val = lowered_condition.variant_info
+            if enum_info_val.llvm_name == subject_enum_info.llvm_name:
+                tag_value = variant_info_val.tag
+                seen_tag = False
+                tag_index = 0
+                while True:
+                    if tag_index >= len(matched_enum_tags):
+                        break
+                    if matched_enum_tags[tag_index] == tag_value:
+                        seen_tag = True
+                        break
+                    tag_index += 1
+                if not seen_tag:
+                    matched_enum_tags = (matched_enum_tags) + ([tag_value])
         if lowered_condition.is_default:
             has_unconditional_default = True
             current_lines = append_string(current_lines, "  br label %" + body_labels[index])
@@ -4852,9 +4877,18 @@ MatchArmMutations(mutations=body_result.mutations, label=body_labels[index], ter
         else:
             all_terminated = all_terminated  and  True
         index += 1
-    terminated = all_terminated  and  has_unconditional_default
-    if not terminated:
-        current_lines = append_string(current_lines, merge_label + ":")
+    match_exhaustive = has_unconditional_default
+    if not match_exhaustive  and  not has_guarded_cases:
+        if subject_enum_info != None:
+            match_exhaustive = len(matched_enum_tags) == len(subject_enum_info.variants)
+        else:
+            if len(union_payload_types) > 0:
+                match_exhaustive = len(matched_union_variants) == len(union_payload_types)
+    terminated = all_terminated  and  match_exhaustive
+    current_lines = append_string(current_lines, merge_label + ":")
+    if terminated:
+        current_lines = append_string(current_lines, "  unreachable")
+    else:
         phi_result = emit_phi_merges_for_match(
 arm_mutations_list,
 current_locals,

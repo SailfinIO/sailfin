@@ -6689,6 +6689,8 @@ fn lower_match_instruction(
 
     let union_payload_types = parse_union_payload_types(subject_operand.llvm_type);
     let mut matched_union_variants -> number[] = [];
+    let subject_enum_info = find_enum_info_by_llvm_type(context, subject_operand.llvm_type);
+    let mut matched_enum_tags -> number[] = [];
 
     if structure.cases.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: match without cases in `" + function.name + "`");
@@ -6753,6 +6755,7 @@ fn lower_match_instruction(
 
     let mut all_terminated -> boolean = true;
     let mut has_unconditional_default -> boolean = false;
+    let mut has_guarded_cases -> boolean = false;
     let mut arm_mutations_list -> MatchArmMutations[] = [];
 
     index = 0;
@@ -6761,6 +6764,16 @@ fn lower_match_instruction(
             break;
         }
         let case = structure.cases[index];
+
+        let mut guard_has_text -> boolean = false;
+        if case.guard != null {
+            let guard_trimmed = trim_text(case.guard);
+            if guard_trimmed.length > 0 {
+                guard_has_text = true;
+                has_guarded_cases = true;
+            }
+        }
+
         let mut failure_target -> string = merge_label;
         if index + 1 < structure.cases.length {
             failure_target = test_labels[index + 1];
@@ -6783,7 +6796,7 @@ fn lower_match_instruction(
         current_temp = lowered_condition.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, lowered_condition.string_constants);
 
-        if lowered_condition.union_variant_index >= 0 {
+        if lowered_condition.union_variant_index >= 0 && !guard_has_text {
             let mut seen -> boolean = false;
             let mut seen_index -> number = 0;
             loop {
@@ -6798,6 +6811,29 @@ fn lower_match_instruction(
             }
             if !seen {
                 matched_union_variants = matched_union_variants.concat([lowered_condition.union_variant_index]);
+            }
+        }
+
+        if subject_enum_info != null && lowered_condition.enum_info != null && lowered_condition.variant_info != null && !guard_has_text {
+            let enum_info_val = lowered_condition.enum_info;
+            let variant_info_val = lowered_condition.variant_info;
+            if enum_info_val.llvm_name == subject_enum_info.llvm_name {
+                let tag_value = variant_info_val.tag;
+                let mut seen_tag -> boolean = false;
+                let mut tag_index -> number = 0;
+                loop {
+                    if tag_index >= matched_enum_tags.length {
+                        break;
+                    }
+                    if matched_enum_tags[tag_index] == tag_value {
+                        seen_tag = true;
+                        break;
+                    }
+                    tag_index += 1;
+                }
+                if !seen_tag {
+                    matched_enum_tags = matched_enum_tags.concat([tag_value]);
+                }
             }
         }
 
@@ -7060,11 +7096,22 @@ fn lower_match_instruction(
         index += 1;
     }
 
-    let terminated = all_terminated && has_unconditional_default;
+    let mut match_exhaustive -> boolean = has_unconditional_default;
+    if !match_exhaustive && !has_guarded_cases {
+        if subject_enum_info != null {
+            match_exhaustive = matched_enum_tags.length == subject_enum_info.variants.length;
+        } else if union_payload_types.length > 0 {
+            match_exhaustive = matched_union_variants.length == union_payload_types.length;
+        }
+    }
 
-    if !terminated {
-        current_lines = append_string(current_lines, merge_label + ":");
+    let terminated = all_terminated && match_exhaustive;
 
+    // Always emit the merge label so any generated failure branches have a target.
+    current_lines = append_string(current_lines, merge_label + ":");
+    if terminated {
+        current_lines = append_string(current_lines, "  unreachable");
+    } else {
         // Emit phi nodes for all mutated locals across all arms
         let phi_result = emit_phi_merges_for_match(
             arm_mutations_list,
