@@ -1572,6 +1572,39 @@ def build_type_context(structs, enums, interfaces):
                 sig_index += 1
             vtable_entries = append_vtable_info(vtable_entries, VTableInfo(struct_name=struct_def.name, interface_name=interface_name, llvm_type_name=vtable_type_name, llvm_global_name=vtable_global_name, entries=vtable_method_entries))
             implements_index += 1
+        interface_scan = 0
+        while True:
+            if interface_scan >= len(interfaces):
+                break
+            interface_def = interfaces[interface_scan]
+            if not struct_declares_interface(struct_def, interface_def.name):
+                if struct_satisfies_interface_structurally(struct_def, interface_def):
+                    interface_name = interface_def.name
+                    sanitized_struct = sanitize_symbol(struct_def.name)
+                    sanitized_iface = sanitize_symbol(interface_name)
+                    vtable_type_name = "%vtable." + sanitized_struct + "." + sanitized_iface
+                    vtable_global_name = "@vtable." + sanitized_struct + "." + sanitized_iface + ".const"
+                    vtable_method_entries = []
+                    sig_index = 0
+                    while True:
+                        if sig_index >= len(interface_def.signatures):
+                            break
+                        signature = interface_def.signatures[sig_index]
+                        param_types = ["i8*"]
+                        param_idx = 1
+                        while True:
+                            if param_idx >= len(signature.parameters):
+                                break
+                            param = signature.parameters[param_idx]
+                            mapped_type = map_type_annotation(param.type_annotation)
+                            param_types = append_string(param_types, mapped_type)
+                            param_idx += 1
+                        return_type = map_type_annotation(signature.return_type)
+                        func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*"
+                        vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry(method_name=struct_def.name + "::" + signature.name, interface_method_name=signature.name, function_pointer_type=func_ptr_type))
+                        sig_index += 1
+                    vtable_entries = append_vtable_info(vtable_entries, VTableInfo(struct_name=struct_def.name, interface_name=interface_name, llvm_type_name=vtable_type_name, llvm_global_name=vtable_global_name, entries=vtable_method_entries))
+            interface_scan += 1
         struct_vtable_index += 1
     return TypeContextBuild(context=TypeContext(structs=struct_entries, enums=enum_entries, interfaces=interface_entries, vtables=vtable_entries), diagnostics=diagnostics)
 
@@ -1595,6 +1628,56 @@ def append_vtable_info(values, value):
 
 def append_vtable_entry(values, value):
     return (values) + ([value])
+
+def struct_declares_interface(struct_def, interface_name):
+    index = 0
+    while True:
+        if index >= len(struct_def.implements):
+            break
+        if struct_def.implements[index] == interface_name:
+            return True
+        index += 1
+    return False
+
+def find_struct_method(struct_def, method_name):
+    index = 0
+    while True:
+        if index >= len(struct_def.methods):
+            break
+        method = struct_def.methods[index]
+        if method.name == method_name:
+            return method
+        index += 1
+    return None
+
+def struct_satisfies_interface_structurally(struct_def, interface_def):
+    sig_index = 0
+    while True:
+        if sig_index >= len(interface_def.signatures):
+            break
+        signature = interface_def.signatures[sig_index]
+        method = find_struct_method(struct_def, signature.name)
+        if method == None:
+            return False
+        if len(method.parameters) != len(signature.parameters):
+            return False
+        sig_return = map_type_annotation(signature.return_type)
+        method_return = map_type_annotation(method.return_type)
+        if sig_return != method_return:
+            return False
+        param_index = 1
+        while True:
+            if param_index >= len(signature.parameters):
+                break
+            sig_param = signature.parameters[param_index]
+            method_param = method.parameters[param_index]
+            sig_ty = map_type_annotation(sig_param.type_annotation)
+            method_ty = map_type_annotation(method_param.type_annotation)
+            if sig_ty != method_ty:
+                return False
+            param_index += 1
+        sig_index += 1
+    return True
 
 def append_native_function(values, value):
     return (values) + ([value])
@@ -8000,12 +8083,18 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                             arg_idx += 1
                         fp_params = join_with_separator(fp_param_types, ", ")
                         function_type = llvm_return + " (" + fp_params + ")*"
-                        vtable_cast_temp = "%t" + number_to_string(current_temp)
+                        vtable_slots_temp = "%t" + number_to_string(current_temp)
                         current_temp += 1
-                        current_lines = append_string(current_lines, "  " + vtable_cast_temp + " = bitcast i8* " + vtable_ptr_temp + " to " + function_type + "*")
+                        current_lines = append_string(current_lines, "  " + vtable_slots_temp + " = bitcast i8* " + vtable_ptr_temp + " to i8**")
+                        slot_ptr_temp = "%t" + number_to_string(current_temp)
+                        current_temp += 1
+                        current_lines = append_string(current_lines, "  " + slot_ptr_temp + " = getelementptr i8*, i8** " + vtable_slots_temp + ", i64 " + number_to_string(method_index))
+                        raw_ptr_temp = "%t" + number_to_string(current_temp)
+                        current_temp += 1
+                        current_lines = append_string(current_lines, "  " + raw_ptr_temp + " = load i8*, i8** " + slot_ptr_temp)
                         method_ptr_temp = "%t" + number_to_string(current_temp)
                         current_temp += 1
-                        current_lines = append_string(current_lines, "  " + method_ptr_temp + " = load " + function_type + ", " + function_type + "* " + vtable_cast_temp)
+                        current_lines = append_string(current_lines, "  " + method_ptr_temp + " = bitcast i8* " + raw_ptr_temp + " to " + function_type)
                         call_args = ["i8* " + data_ptr_temp]
                         arg_idx = 1
                         while True:
