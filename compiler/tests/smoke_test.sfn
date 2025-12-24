@@ -1,3 +1,0 @@
-test "smoke: arithmetic" {
-    assert 1 + 1 == 2;
-}

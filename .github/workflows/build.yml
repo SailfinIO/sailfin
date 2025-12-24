@@ -1,14 +1,17 @@
-name: Stage2 Build
+name: Build
 
 on:
   push:
     branches:
+      - main
+      - rc
+      - beta
       - alpha
   pull_request:
   workflow_dispatch:
 
 concurrency:
-  group: stage2-build-${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -57,7 +60,12 @@ jobs:
         run: |
           CONDA=$(which conda) make compile
 
-      - name: Run Stage2 test suite
+      - name: Run Stage2 self-hosted unit tests
+        shell: bash -l {0}
+        run: |
+          CONDA=$(which conda) make test-unit
+
+      - name: Run Stage2 test suite (pytest)
         env:
           PYTHONFAULTHANDLER: "1"
           PYTHONUNBUFFERED: "1"
@@ -75,3 +83,49 @@ jobs:
             dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz.sha256
             dist/sailfin-stage2-${{ matrix.package_label }}-*.manifest.json
           if-no-files-found: error
+
+  semantic-release:
+    needs: stage2
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure git credentials
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          git config user.name "Sailfin Release Bot"
+          git config user.email "releases@sailfin.io"
+          git remote set-url origin "https://mcereal:${RELEASE_PAT}@github.com/SailfinIO/sailfin.git"
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: sailfin
+          environment-file: environment.yml
+          auto-activate-base: false
+          use-mamba: true
+
+      - name: Semantic release version
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        shell: bash -l {0}
+        run: |
+          CONDA=$(which conda) semantic-release version
+
+      - name: Run semantic release
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        shell: bash -l {0}
+        run: |
+          CONDA=$(which conda) semantic-release publish

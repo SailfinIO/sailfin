@@ -24,6 +24,8 @@ if str(REPO_ROOT) not in sys.path:
 
 _STAGE1_LOWERING = None
 
+_STAGE1_AOT_PREPARE = None
+
 
 def _stage1_lowering_module():
     global _STAGE1_LOWERING
@@ -32,6 +34,53 @@ def _stage1_lowering_module():
             "compiler.build.native_llvm_lowering"
         )
     return _STAGE1_LOWERING
+
+
+def _stage1_aot_prepare_module():
+    global _STAGE1_AOT_PREPARE
+    if _STAGE1_AOT_PREPARE is None:
+        _STAGE1_AOT_PREPARE = importlib.import_module(
+            "compiler.build.aot_prepare")
+    return _STAGE1_AOT_PREPARE
+
+
+def prepare_stage2_aot_modules(
+    module_paths: List[pathlib.Path],
+    *,
+    output_dir: pathlib.Path,
+    debug: bool = False,
+) -> pathlib.Path:
+    """Rewrite stage2 *.ll modules into an AOT-safe, collision-free set.
+
+    Uses the stage1-generated implementation from compiler/src/aot_prepare.sfn.
+    Writes rewritten IR modules to build/stage2/aot and returns that directory.
+    """
+
+    aot_dir = output_dir / "aot"
+    aot_dir.mkdir(parents=True, exist_ok=True)
+
+    module_names = [p.stem for p in module_paths]
+    module_texts = [p.read_text(encoding="utf-8") for p in module_paths]
+
+    aot_prepare = _stage1_aot_prepare_module()
+    rewritten = aot_prepare.prepare_stage2_aot_modules(
+        module_names, module_texts)
+    if len(rewritten) != len(module_names):
+        raise Stage2BootstrapError(
+            "stage1 aot_prepare returned unexpected module count: "
+            f"{len(rewritten)} (expected {len(module_names)})"
+        )
+
+    for name, ir in zip(module_names, rewritten):
+        (aot_dir / f"{name}.ll").write_text(ir, encoding="utf-8")
+
+    (aot_dir / "modules.txt").write_text("\n".join(module_names) + "\n", encoding="utf-8")
+
+    if debug:
+        rel = aot_dir.relative_to(REPO_ROOT)
+        print(f"[stage2-bootstrap] wrote AOT-rewritten modules to {rel}")
+
+    return aot_dir
 
 
 class Stage2BootstrapError(RuntimeError):
@@ -599,37 +648,15 @@ def compile_compiler_to_stage2(
             f"compilation failed with {aggregator.fatal_count} fatal diagnostic(s)"
         )
 
-    # Produce AOT-safe rewritten modules for clang/ld without relying on a
-    # separate Python text-rewrite tool.
-    try:
-        aot_tool = importlib.import_module("compiler.build.aot_prepare")
-    except Exception:
-        aot_tool = None
+    # Persist a deterministic module list to drive native AOT compilation.
+    module_paths = sorted(compiled_modules, key=lambda p: p.stem)
+    (output_dir / "modules.txt").write_text(
+        "\n".join(p.stem for p in module_paths) + "\n", encoding="utf-8"
+    )
 
-    if aot_tool is not None and hasattr(aot_tool, "prepare_stage2_aot_modules"):
-        aot_dir = output_dir / "aot"
-        aot_dir.mkdir(parents=True, exist_ok=True)
-
-        module_paths = sorted(compiled_modules, key=lambda p: p.stem)
-        module_names = [p.stem for p in module_paths]
-        module_texts = [p.read_text(encoding="utf-8") for p in module_paths]
-
-        rewritten_texts = aot_tool.prepare_stage2_aot_modules(
-            module_names, module_texts)
-        if len(rewritten_texts) != len(module_names):
-            raise Stage2BootstrapError(
-                f"prepare_stage2_aot_modules returned {len(rewritten_texts)} module(s), expected {len(module_names)}"
-            )
-
-        for name, text in zip(module_names, rewritten_texts):
-            (aot_dir / f"{name}.ll").write_text(str(text), encoding="utf-8")
-
-        (aot_dir / "modules.txt").write_text(
-            "\n".join(module_names) + "\n", encoding="utf-8"
-        )
-        if debug:
-            rel = aot_dir.relative_to(REPO_ROOT)
-            print(f"[stage2-bootstrap] wrote AOT modules to {rel}")
+    # Prepare collision-free modules for AOT linking.
+    prepare_stage2_aot_modules(
+        module_paths, output_dir=output_dir, debug=debug)
 
     if debug and aggregator.total_count > 0:
         print(

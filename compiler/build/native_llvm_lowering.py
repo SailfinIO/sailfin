@@ -1115,6 +1115,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
         return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=empty_constants)
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
+    exported_symbols = collect_exported_symbol_names(parse.imports)
     manifest_artifact = select_layout_manifest_artifact(native_module.artifacts)
     module_manifest = None
     if manifest_artifact != None:
@@ -1246,7 +1247,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
         if aggregated_entry != None:
             effective_effects = aggregated_entry.effects
         function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry(name=current_function.name, effects=effective_effects))
-        lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, imported_functions)
+        lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, exported_symbols, imported_functions)
         if sanitize_symbol(current_function.name) == "add":
             has_add_function = True
         diagnostics = (diagnostics) + (lowered.diagnostics)
@@ -2001,17 +2002,49 @@ def is_entry_point(entry_points, function_name):
         index += 1
     return False
 
-def should_internalize_function(function, entry_points, imported_functions):
+def collect_exported_symbol_names(imports):
+    names = []
+    index = 0
+    while True:
+        if index >= len(imports):
+            break
+        entry = imports[index]
+        if entry.kind == "export":
+            specifiers = entry.specifiers
+            spec_index = 0
+            while True:
+                if spec_index >= len(specifiers):
+                    break
+                exported = specifiers[spec_index].name
+                if len(exported) > 0  and  not string_array_contains(names, exported):
+                    names = append_string(names, exported)
+                spec_index += 1
+        index += 1
+    return names
+
+def is_exported_symbol(exported_symbols, function_name):
+    index = 0
+    while True:
+        if index >= len(exported_symbols):
+            break
+        if exported_symbols[index] == function_name:
+            return True
+        index += 1
+    return False
+
+def should_internalize_function(function, entry_points, exported_symbols, imported_functions):
     if function.is_extern:
         return False
     if is_entry_point(entry_points, function.name):
+        return False
+    if is_exported_symbol(exported_symbols, function.name):
         return False
     sanitized = sanitize_symbol(function.name)
     if len(sanitized) > 0  and  sanitized[0] == "_":
         return True
     if find_function_by_name(imported_functions, function.name) != None:
         return True
-    return False
+    return True
 
 def is_ascii_uppercase(ch):
     if len(ch) == 0:
@@ -3211,7 +3244,7 @@ def render_interface_parameters(parameters):
         index += 1
     return join_with_separator(rendered, ", ")
 
-def emit_function(function, functions, effects, context, module_name, entry_points, imported_functions):
+def emit_function(function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions):
     diagnostics = []
     sanitized = sanitize_symbol(function.name)
     llvm_return = map_return_type(context, function.return_type)
@@ -3236,7 +3269,7 @@ def emit_function(function, functions, effects, context, module_name, entry_poin
         signature = ""
     entry_label = "block.entry"
     linkage = ""
-    if should_internalize_function(function, entry_points, imported_functions):
+    if should_internalize_function(function, entry_points, exported_symbols, imported_functions):
         linkage = "internal "
     lines = append_string(lines, "define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {")
     lines = append_string(lines, entry_label + ":")

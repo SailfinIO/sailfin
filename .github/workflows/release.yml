@@ -1,4 +1,4 @@
-name: Stage2 Native Release
+name: Release
 
 on:
   release:
@@ -11,7 +11,7 @@ on:
         type: string
 
 concurrency:
-  group: stage2-native-release-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -136,6 +136,10 @@ jobs:
           mkdir -p "${STAGE_DIR}/bin"
           cp "build/native/sailfin-stage2${EXE_EXT}" "${STAGE_DIR}/bin/sailfin-stage2${EXE_EXT}"
           cp "build/native/sailfin-stage2${EXE_EXT}" "${STAGE_DIR}/bin/sfn${EXE_EXT}"
+          mkdir -p "${STAGE_DIR}/runtime"
+          cp -R runtime/native "${STAGE_DIR}/runtime/native"
+          mkdir -p "${STAGE_DIR}/runtime/native/obj"
+          cp "build/native/obj/prelude.o" "${STAGE_DIR}/runtime/native/obj/prelude.o"
 
           ASSET="sailfin-stage2_${VERSION}_${OS}_${ARCH}.tar.gz"
           tar -czf "dist/${ASSET}" -C "${STAGE_DIR}" .

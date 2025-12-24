@@ -243,13 +243,34 @@ This archive contains the raw Stage2 LLVM outputs generated from the Sailfin
 compiler sources. The bundle includes:
 
 - `artifacts/` – `.ll`, `.sfn-asm`, and `.layout-manifest` files for each compiled module.
+- `bin/` – optional Stage2 native compiler binary (when built with `--link-binary`).
 - `metadata.json` – build metadata (version, commit, timestamp, diagnostics summary).
+- `runtime/native/` – runtime sources plus the prelude object used for native linking.
 
-These artifacts are intended for downstream packaging and validation workflows
-while the Sailfin runtime finishes its migration away from Python. A native
-runtime shim is still required to execute the resulting modules.
+This bundle also ships the native runtime sources plus a compiled prelude
+object so the Stage2 CLI can link standalone executables without a repo
+checkout. A native runtime shim is still required to execute the resulting
+modules.
 """
     destination.write_text(contents, encoding="utf-8")
+
+
+def _copy_runtime_bundle(archive_root: pathlib.Path) -> None:
+    runtime_src = REPO_ROOT / "runtime" / "native"
+    if not runtime_src.exists():
+        raise Stage2PackageError(
+            f"runtime bundle not found at {runtime_src}")
+
+    runtime_dst = archive_root / "runtime" / "native"
+    shutil.copytree(runtime_src, runtime_dst)
+
+    prelude_obj = REPO_ROOT / "build" / "native" / "obj" / "prelude.o"
+    if not prelude_obj.exists():
+        raise Stage2PackageError(
+            f"missing prelude object; expected {prelude_obj}")
+    obj_dir = runtime_dst / "obj"
+    obj_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(prelude_obj, obj_dir / "prelude.o")
 
 
 def _create_archive(source_dir: pathlib.Path, output_path: pathlib.Path) -> pathlib.Path:
@@ -321,6 +342,7 @@ def package_stage2(
             artifacts=inventory,
         )
         _write_readme(archive_root / "README.md", target_label=target_label)
+        _copy_runtime_bundle(archive_root)
 
         if link_binary:
             if not stage2_modules:

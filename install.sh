@@ -135,24 +135,32 @@ mkdir -p "$EXTRACT_DIR"
 log "Extracting ${ASSET}…"
 tar -xzf "$ARCHIVE_PATH" -C "$EXTRACT_DIR"
 
+ROOT_DIR="$EXTRACT_DIR"
+if [ ! -d "${EXTRACT_DIR}/bin" ] && [ ! -f "${EXTRACT_DIR}/${BINARY}" ] && [ ! -f "${EXTRACT_DIR}/${BINARY}.exe" ]; then
+  FIRST_DIR="$(find "${EXTRACT_DIR}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  if [ -n "$FIRST_DIR" ]; then
+    ROOT_DIR="$FIRST_DIR"
+  fi
+fi
+
 SRC_BINARY=""
 if [ "$OS" = "windows" ]; then
-  if [ -f "${EXTRACT_DIR}/${BINARY}.exe" ]; then
-    SRC_BINARY="${EXTRACT_DIR}/${BINARY}.exe"
-  elif [ -f "${EXTRACT_DIR}/bin/${BINARY}.exe" ]; then
-    SRC_BINARY="${EXTRACT_DIR}/bin/${BINARY}.exe"
-  elif [ -f "${EXTRACT_DIR}/${BINARY}" ]; then
-    SRC_BINARY="${EXTRACT_DIR}/${BINARY}"
-  elif [ -f "${EXTRACT_DIR}/bin/${BINARY}" ]; then
-    SRC_BINARY="${EXTRACT_DIR}/bin/${BINARY}"
+  if [ -f "${ROOT_DIR}/${BINARY}.exe" ]; then
+    SRC_BINARY="${ROOT_DIR}/${BINARY}.exe"
+  elif [ -f "${ROOT_DIR}/bin/${BINARY}.exe" ]; then
+    SRC_BINARY="${ROOT_DIR}/bin/${BINARY}.exe"
+  elif [ -f "${ROOT_DIR}/${BINARY}" ]; then
+    SRC_BINARY="${ROOT_DIR}/${BINARY}"
+  elif [ -f "${ROOT_DIR}/bin/${BINARY}" ]; then
+    SRC_BINARY="${ROOT_DIR}/bin/${BINARY}"
   else
     die "Binary '${BINARY}.exe' not found in archive."
   fi
 else
-  if [ -f "${EXTRACT_DIR}/${BINARY}" ]; then
-    SRC_BINARY="${EXTRACT_DIR}/${BINARY}"
-  elif [ -f "${EXTRACT_DIR}/bin/${BINARY}" ]; then
-    SRC_BINARY="${EXTRACT_DIR}/bin/${BINARY}"
+  if [ -f "${ROOT_DIR}/${BINARY}" ]; then
+    SRC_BINARY="${ROOT_DIR}/${BINARY}"
+  elif [ -f "${ROOT_DIR}/bin/${BINARY}" ]; then
+    SRC_BINARY="${ROOT_DIR}/bin/${BINARY}"
   else
     die "Binary '${BINARY}' not found in archive."
   fi
@@ -187,6 +195,14 @@ if [ "$OS" = "windows" ] && [[ "$SRC_BINARY" == *.exe ]]; then
 fi
 
 $MAYBE_SUDO install -m 0755 "$SRC_BINARY" "${TARGET_DIR}/${DEST_BASENAME}"
+
+if [ -d "${ROOT_DIR}/runtime" ]; then
+  log "Installing runtime bundle to ${TARGET_DIR}/runtime…"
+  $MAYBE_SUDO rm -rf "${TARGET_DIR}/runtime" 2>/dev/null || true
+  $MAYBE_SUDO cp -R "${ROOT_DIR}/runtime" "${TARGET_DIR}/runtime"
+else
+  log "Warning: runtime bundle not found in archive; sfn run/build will fail without it."
+fi
 
 log "Ensuring global symlink in ${GLOBAL_BIN_DIR}…"
 $MAYBE_SUDO mkdir -p "${GLOBAL_BIN_DIR}"

@@ -963,6 +963,9 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
 
+    // Only exported symbols should keep external linkage across modules.
+    let exported_symbols = collect_exported_symbol_names(parse.imports);
+
     let manifest_artifact = select_layout_manifest_artifact(native_module.artifacts);
     let mut module_manifest -> LayoutManifest? = null;
     if manifest_artifact != null {
@@ -1146,7 +1149,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
             name: current_function.name,
             effects: effective_effects,
         });
-        let lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, imported_functions);
+        let lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, exported_symbols, imported_functions);
         if sanitize_symbol(current_function.name) == "add" {
             has_add_function = true;
         }
@@ -2273,7 +2276,48 @@ fn is_entry_point(entry_points -> string[], function_name -> string) -> boolean 
     return false;
 }
 
-fn should_internalize_function(function -> NativeFunction, entry_points -> string[], imported_functions -> NativeFunction[]) -> boolean {
+fn collect_exported_symbol_names(imports -> NativeImport[]) -> string[] {
+    let mut names -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= imports.length {
+            break;
+        }
+        let entry = imports[index];
+        if entry.kind == "export" {
+            let specifiers = entry.specifiers;
+            let mut spec_index -> number = 0;
+            loop {
+                if spec_index >= specifiers.length {
+                    break;
+                }
+                let exported = specifiers[spec_index].name;
+                if exported.length > 0 && !string_array_contains(names, exported) {
+                    names = append_string(names, exported);
+                }
+                spec_index += 1;
+            }
+        }
+        index += 1;
+    }
+    return names;
+}
+
+fn is_exported_symbol(exported_symbols -> string[], function_name -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= exported_symbols.length {
+            break;
+        }
+        if exported_symbols[index] == function_name {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn should_internalize_function(function -> NativeFunction, entry_points -> string[], exported_symbols -> string[], imported_functions -> NativeFunction[]) -> boolean {
     // Externs are emitted as declarations.
     if function.is_extern {
         return false;
@@ -2281,6 +2325,11 @@ fn should_internalize_function(function -> NativeFunction, entry_points -> strin
 
     // Keep declared entry points externally visible.
     if is_entry_point(entry_points, function.name) {
+        return false;
+    }
+
+    // Preserve explicitly exported symbols for cross-module linkage.
+    if is_exported_symbol(exported_symbols, function.name) {
         return false;
     }
 
@@ -2296,8 +2345,8 @@ fn should_internalize_function(function -> NativeFunction, entry_points -> strin
         return true;
     }
 
-    // Default: keep externally visible.
-    return false;
+    // Default: keep module-local to prevent duplicate symbol collisions.
+    return true;
 }
 
 fn is_ascii_uppercase(ch -> string) -> boolean {
@@ -4457,7 +4506,7 @@ fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
     return join_with_separator(rendered, ", ");
 }
 
-fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[], context -> TypeContext, module_name -> string, entry_points -> string[], imported_functions -> NativeFunction[]) -> LoweredLLVMFunction {
+fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[], context -> TypeContext, module_name -> string, entry_points -> string[], exported_symbols -> string[], imported_functions -> NativeFunction[]) -> LoweredLLVMFunction {
     let mut diagnostics -> string[] = [];
     let sanitized = sanitize_symbol(function.name);
     let llvm_return = map_return_type(context, function.return_type);
@@ -4491,7 +4540,7 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
 
     let entry_label -> string = "block.entry";
     let mut linkage -> string = "";
-    if should_internalize_function(function, entry_points, imported_functions) {
+    if should_internalize_function(function, entry_points, exported_symbols, imported_functions) {
         linkage = "internal ";
     }
     lines = append_string(lines, "define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {");

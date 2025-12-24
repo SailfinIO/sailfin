@@ -16,9 +16,9 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 - [ ] Self-hosted release pipeline
 
   - [ ] Promote the Stage2 bootstrap job to the primary release workflow so every merge runs the Stage2->Stage2 rebuild and archives the native artifacts.
-  - [x] Add a `stage2-build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the Stage2 smoke suite, and uploads artifacts for downstream jobs.
+  - [x] Add a `build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the Stage2 smoke suite, and uploads artifacts for downstream jobs.
     - [x] Initial workflow scaffolds Stage2 bootstrap/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged LLVM artifacts via `tools/package_stage2.py`.
-  - [x] Add a `stage2-native-release.yml` workflow that builds native Stage2 binaries on release publish (macOS arm64/x86_64, Linux x86_64) and uploads release assets.
+  - [x] Add a `release.yml` workflow that builds native Stage2 binaries on release publish (macOS arm64/x86_64, Linux x86_64) and uploads release assets.
   - [x] Wire the workflow into `semantic-release` so version bumps publish Stage2 binaries and changelog entries in one pass.
   - [ ] Keep pytest-driven harnesses in CI while the Stage2 native test harness is rewritten; document the temporary dual-runtime strategy in `docs/status.md`.
 
@@ -31,7 +31,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 - [ ] Stage1 sunset guardrails
 
   - [ ] Add telemetry in CI to assert no release job invokes Stage1 binaries; fail the pipeline if Python codegen executes.
-  - [ ] Once guardrails stay green for two release cycles, remove Stage1 workflows, archive docs to `Legacy/stage0/`, and update `docs/spec.md` + `docs/roadmap.md` to mark Stage1 deprecated.
+  - [ ] Once guardrails stay green for two release cycles, remove remaining Stage1 workflows, archive docs to `Legacy/stage0/`, and update `docs/spec.md` + `docs/roadmap.md` to mark Stage1 deprecated.
 
 - [ ] CI gating and signals
 
@@ -44,7 +44,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
   - [x] Introduce `tools/package_stage2.py` to package Stage2 LLVM artifacts with per-target metadata (tarballs for macOS arm64/x86_64 and Linux x86_64).
   - [x] Emit checksum and manifest sidecars (SHA256 + JSON) for Stage2 tarballs so release automation can verify downloads.
-  - [ ] Extend packaging tooling to emit Stage2-native release bundles per platform (macOS arm64/x86_64, Linux x86_64) with runtime adapters and prelude modules.
+  - [x] Extend packaging tooling to emit Stage2-native release bundles per platform (macOS arm64/x86_64, Linux x86_64) with runtime adapters and prelude modules.
   - [ ] Update the release workflow to build Stage2 artifacts, run full regression suites, generate signed SHA256 checksums, and attach provenance metadata.
   - [x] Ensure the curl-able installer consumes the new artifact layout and fails fast when unsupported platforms request binaries.
   - [ ] Document artifact structure, supported platforms, and upgrade expectations in `docs/README.md` and `docs/status.md`.
@@ -377,7 +377,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Postfix foundations — Indexing (`values[i]`) and range (`start..end`) expressions round-trip through the Sailfin parser and emitter. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` covers bracket access and `start..end` ranges.
 - [x] Postfix expressions — Chained member/call/index sequences now round-trip through the Sailfin parser and emitter, and code generation rewrites `.map`, `.filter`, `.reduce`, `.concat`, and `.length` into runtime helpers. Validation: `bootstrap/tests/test_compiler_sources.py::test_compile_compiler_source` asserts Sailfin emission and Python lowering for the helper chain.
 - [x] Example hardening — Annotated every runnable example with declared effects, wrapped ad-hoc top-level statements in `main`, and removed undefined helper stubs. Validation: `examples/README.md` capability index plus `make test` ensures samples compile and execute under the stage1 suite.
-- [x] Stage1 closed loop — Stage1 now recompiles the compiler end-to-end, replaces stage0 in CI, and ships as the release artifact. Validation: `compiler/tests/test_stage1_artifact.py`, `.github/workflows/stage1-release.yml`.
+- [x] Stage1 closed loop — Stage1 now recompiles the compiler end-to-end, replaces stage0 in CI, and ships as the release artifact. Validation: `compiler/tests/test_stage1_artifact.py` (legacy Stage1 release workflow removed).
 - [x] Stage1 installer — Added `scripts/install_stage1.py` and README docs so releases can be fetched with a PAT and installed system-wide.
 - [x] Runtime string helpers — Promoted `compiler/src/string_utils.sfn` into the shared runtime prelude so downstream projects and the stage1 compiler reference a single implementation. Validation: `compiler/tests/test_runtime_prelude.py`, `compiler/tests/test_string_utils.py`.
 - [x] Module re-export support — Parser, emitter, native lowering, and Python bridge now preserve aliased `import`/`export` specifiers so runtime helpers can be re-exported directly. Validation: `compiler/tests/test_stage1_pipeline.py::test_import_export_alias_round_trip`.

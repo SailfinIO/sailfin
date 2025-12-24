@@ -8,10 +8,13 @@ This document tracks what works today and what is in progress.
 - Stage1 (Python) compile pipeline is still part of the build and test flow to bootstrap stage2, but it is no longer the primary developer path.
 - Stage2 (llvmlite JIT) self-host execution remains experimental and is used for targeted backend coverage.
 - Stage1 Python lowering no longer blocks compilation on heuristic fallback checks; diagnostics still surface.
+- CI uses the Stage2 build/release workflows (`.github/workflows/build.yml`, `.github/workflows/release.yml`); Stage1 release workflow has been retired.
+- Stage2 self-hosted unit tests live in `compiler/tests` and run via `sailfin-stage2 test` (`make test-unit`).
 
 ## Runtime (Current)
 
 - The runtime is implemented in C under `runtime/native/` and linked into the native stage2 binary.
+- The Stage2 CLI locates a bundled runtime next to the executable (override with `SAILFIN_RUNTIME_ROOT`) when building or running programs.
 - The runtime is planned to be reimplemented in Sailfin for the 1.0 release.
 
 ## Installer (Current)

@@ -245,10 +245,6 @@ def compile_source_at_path(source_path):
     lowered = lower_to_python(native_result.module)
     messages = (native_result.diagnostics) + (lowered.diagnostics)
     python_source = lowered.source
-    fallback_needed = needs_python_fallback(python_source)
-    if fallback_needed:
-        messages = (messages) + (["native backend: lowering produced unsupported python output; stage0 fallback disabled"])
-        return ModuleCompilationResult(module=None, diagnostics=[ModuleDiagnostics(source_path=source_path, messages=messages, fatal=True)])
     entry_list = []
     if len(messages) > 0:
         entry_list = [ModuleDiagnostics(source_path=source_path, messages=messages, fatal=False)]
@@ -446,149 +442,6 @@ def has_prefix(value, prefix):
         index += 1
     return True
 
-def needs_python_fallback(source):
-    if len(source) == 0:
-        return True
-    sanitized = strip_needs_python_fallback_literals(source)
-    cleaned = strip_python_string_literals(sanitized)
-    analysis_target = cleaned
-    if len(analysis_target) == 0:
-        analysis_target = sanitized
-    target = analysis_target
-    if len(target) == 0:
-        return True
-    if string_contains(target, "\nlet "):
-        return True
-    if string_contains(target, " let "):
-        return True
-    if string_contains(target, " mut "):
-        return True
-    if string_contains(target, "TokenKind.variant('Identifier', [])"):
-        return True
-    if string_contains(target, "TokenKind.variant('NumberLiteral', [])"):
-        return True
-    if string_contains(target, "TokenKind.variant('StringLiteral', [])"):
-        return True
-    if string_contains(target, "TokenKind.variant('BooleanLiteral', [])"):
-        return True
-    if string_contains(target, "TokenKind.variant('Symbol', [])"):
-        return True
-    if string_contains(target, "Expression.Identifier()"):
-        return True
-    if string_contains(target, "Expression.Raw()"):
-        return True
-    if string_contains(target, "ExpressionIdentifier("):
-        return True
-    if string_contains(target, "ExpressionRaw("):
-        return True
-    return False
-
-def string_contains(value, pattern):
-    if len(pattern) == 0:
-        return True
-    if len(value) < len(pattern):
-        return False
-    index = 0
-    while True:
-        if index + len(pattern) > len(value):
-            break
-        match_flag = True
-        offset = 0
-        while True:
-            if offset >= len(pattern):
-                break
-            if value[index + offset] != pattern[offset]:
-                match_flag = False
-                break
-            offset += 1
-        if match_flag:
-            return True
-        index += 1
-    return False
-
-def strip_needs_python_fallback_literals(source):
-    marker = "def needs_python_fallback"
-    start = find_substring(source, marker)
-    if start < 0:
-        return source
-    tail_marker = "return False"
-    tail_index = find_substring_from(source, tail_marker, start)
-    if tail_index < 0:
-        return source
-    tail_end = tail_index + len(tail_marker)
-    tail_end = advance_to_line_end(source, tail_end)
-    prefix = substring(source, 0, start)
-    suffix = substring(source, tail_end, len(source))
-    return prefix + suffix
-
-def strip_python_string_literals(value):
-    index = 0
-    result = ""
-    while True:
-        if index >= len(value):
-            break
-        ch = substring(value, index, index + 1)
-        if ch == "'":
-            quote_length = python_quote_length(value, index, "'")
-            quotes = repeat_character("'", quote_length)
-            result = result + quotes
-            index = skip_python_string_literal(value, index + quote_length, "'", quote_length)
-            result = result + quotes
-            continue
-        if ch == "\"":
-            quote_length = python_quote_length(value, index, "\"")
-            quotes = repeat_character("\"", quote_length)
-            result = result + quotes
-            index = skip_python_string_literal(value, index + quote_length, "\"", quote_length)
-            result = result + quotes
-            continue
-        result = result + ch
-        index += 1
-    return result
-
-def python_quote_length(value, start, delimiter):
-    if start + 2 < len(value):
-        if substring(value, start + 1, start + 2) == delimiter:
-            if substring(value, start + 2, start + 3) == delimiter:
-                return 3
-    return 1
-
-def skip_python_string_literal(value, position, delimiter, quote_length):
-    if quote_length == 1:
-        index = position
-        escaped = False
-        while True:
-            if index >= len(value):
-                return index
-            current = substring(value, index, index + 1)
-            index += 1
-            if escaped:
-                escaped = False
-                continue
-            if current == "\\":
-                escaped = True
-                continue
-            if current == delimiter:
-                return index
-    search_index = position
-    while True:
-        if search_index + quote_length > len(value):
-            return len(value)
-        matches = True
-        offset = 0
-        while True:
-            if offset >= quote_length:
-                break
-            current = substring(value, search_index + offset, search_index + offset + 1)
-            if current != delimiter:
-                matches = False
-                break
-            offset += 1
-        if matches:
-            return search_index + quote_length
-        search_index += 1
-    return len(value)
-
 def repeat_character(ch, count):
     if count <= 0:
         return ""
@@ -646,14 +499,3 @@ def find_substring_from(value, pattern, start):
             return index
         index += 1
     return -1
-
-def advance_to_line_end(value, position):
-    index = position
-    while True:
-        if index >= len(value):
-            break
-        ch = substring(value, index, index + 1)
-        index += 1
-        if ch == "\n":
-            break
-    return index
