@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <setjmp.h>
+#include <pthread.h>
 
 #if defined(__APPLE__)
 #include <execinfo.h>
@@ -874,6 +875,143 @@ void sailfin_runtime_spawn(char *thunk, char *name)
 {
     (void)thunk;
     (void)name;
+}
+
+// ---- Futures (stage2-native) ----
+
+struct SailfinFutureNumber
+{
+    pthread_t thread;
+    double (*fn)(void);
+    double result;
+};
+
+static void *sailfin_future_number_entry(void *arg)
+{
+    struct SailfinFutureNumber *future = (struct SailfinFutureNumber *)arg;
+    future->result = future->fn();
+    return NULL;
+}
+
+struct SailfinFutureNumber *sailfin_runtime_spawn_number(double (*fn)(void))
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureNumber *future = (struct SailfinFutureNumber *)calloc(1, sizeof(struct SailfinFutureNumber));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn = fn;
+    if (pthread_create(&future->thread, NULL, sailfin_future_number_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+double sailfin_runtime_await_number(struct SailfinFutureNumber *future)
+{
+    if (!future)
+    {
+        return 0.0;
+    }
+    pthread_join(future->thread, NULL);
+    double result = future->result;
+    free(future);
+    return result;
+}
+
+struct SailfinFutureVoid
+{
+    pthread_t thread;
+    void (*fn)(void);
+};
+
+static void *sailfin_future_void_entry(void *arg)
+{
+    struct SailfinFutureVoid *future = (struct SailfinFutureVoid *)arg;
+    future->fn();
+    return NULL;
+}
+
+struct SailfinFutureVoid *sailfin_runtime_spawn_void(void (*fn)(void))
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureVoid *future = (struct SailfinFutureVoid *)calloc(1, sizeof(struct SailfinFutureVoid));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn = fn;
+    if (pthread_create(&future->thread, NULL, sailfin_future_void_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+void sailfin_runtime_await_void(struct SailfinFutureVoid *future)
+{
+    if (!future)
+    {
+        return;
+    }
+    pthread_join(future->thread, NULL);
+    free(future);
+}
+
+struct SailfinFutureString
+{
+    pthread_t thread;
+    char *(*fn)(void);
+    char *result;
+};
+
+static void *sailfin_future_string_entry(void *arg)
+{
+    struct SailfinFutureString *future = (struct SailfinFutureString *)arg;
+    future->result = future->fn();
+    return NULL;
+}
+
+struct SailfinFutureString *sailfin_runtime_spawn_string(char *(*fn)(void))
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureString *future = (struct SailfinFutureString *)calloc(1, sizeof(struct SailfinFutureString));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn = fn;
+    if (pthread_create(&future->thread, NULL, sailfin_future_string_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+char *sailfin_runtime_await_string(struct SailfinFutureString *future)
+{
+    if (!future)
+    {
+        return NULL;
+    }
+    pthread_join(future->thread, NULL);
+    char *result = future->result;
+    free(future);
+    return result;
 }
 
 void sailfin_runtime_serve(char *handler, char *config)

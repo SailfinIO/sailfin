@@ -57,6 +57,21 @@ extern "C"
     void sailfin_runtime_spawn(char *thunk, char *name);
     void sailfin_runtime_serve(char *handler, char *config);
 
+    // ---- Futures (stage2-native) ----
+
+    typedef struct SailfinFutureNumber SailfinFutureNumber;
+    typedef struct SailfinFutureVoid SailfinFutureVoid;
+    typedef struct SailfinFutureString SailfinFutureString;
+
+    SailfinFutureNumber *sailfin_runtime_spawn_number(double (*fn)(void));
+    double sailfin_runtime_await_number(SailfinFutureNumber *future);
+
+    SailfinFutureVoid *sailfin_runtime_spawn_void(void (*fn)(void));
+    void sailfin_runtime_await_void(SailfinFutureVoid *future);
+
+    SailfinFutureString *sailfin_runtime_spawn_string(char *(*fn)(void));
+    char *sailfin_runtime_await_string(SailfinFutureString *future);
+
     char *sailfin_runtime_array_map(char *array, char *fn);
     char *sailfin_runtime_array_filter(char *array, char *fn);
     char *sailfin_runtime_array_reduce(char *array, char *fn, char *initial);

@@ -11,7 +11,7 @@ ifeq ($(UNAME_S),Darwin)
 STAGE2_NATIVE_LIBS ?=
 NATIVE_LINK_DETERMINISTIC_FLAGS ?= -Wl,-no_uuid
 else
-STAGE2_NATIVE_LIBS ?= -lm
+STAGE2_NATIVE_LIBS ?= -lm -pthread
 NATIVE_LINK_DETERMINISTIC_FLAGS ?= -Wl,--build-id=none
 endif
 

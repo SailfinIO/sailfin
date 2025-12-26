@@ -73,6 +73,7 @@ struct NativeParameter {
 
 struct NativeFunction {
     name -> string;
+    is_async -> boolean;
     parameters -> NativeParameter[];
     return_type -> string;
     effects -> string[];
@@ -463,8 +464,15 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             if current != null {
                 diagnostics = append_string(diagnostics, "encountered nested .fn while previous function still open");
             }
+            let header = strip_prefix(line, ".fn ");
+            let mut is_async -> boolean = false;
+            let trimmed_header = trim_text(header);
+            if starts_with(trimmed_header, "async ") {
+                is_async = true;
+            }
             current = NativeFunction {
-                name: parse_function_name(strip_prefix(line, ".fn ")),
+                name: parse_function_name(header),
+                is_async: is_async,
                 parameters: [],
                 return_type: "void",
                 effects: [],
@@ -538,6 +546,7 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
 
             current = NativeFunction {
                 name: "test:" + name,
+                is_async: false,
                 parameters: [],
                 return_type: "void",
                 effects: [],
@@ -807,6 +816,7 @@ fn append_parameter(function -> NativeFunction, parameter -> NativeParameter) ->
     let parameters = append_parameter_array(function.parameters, parameter);
     return NativeFunction {
         name: function.name,
+        is_async: function.is_async,
         parameters: parameters,
         return_type: function.return_type,
         effects: function.effects,
@@ -820,6 +830,7 @@ fn append_instruction(function -> NativeFunction, instruction -> NativeInstructi
     let instructions = function.instructions.concat([instruction]);
     return NativeFunction {
         name: function.name,
+        is_async: function.is_async,
         parameters: function.parameters,
         return_type: function.return_type,
         effects: function.effects,
@@ -843,6 +854,7 @@ fn apply_meta(function -> NativeFunction, entry -> string) -> NativeFunction {
     if trimmed == "extern" {
         return NativeFunction {
             name: function.name,
+            is_async: function.is_async,
             parameters: function.parameters,
             return_type: function.return_type,
             effects: function.effects,
@@ -870,6 +882,7 @@ fn apply_meta(function -> NativeFunction, entry -> string) -> NativeFunction {
 fn update_function_meta(function -> NativeFunction, return_type -> string, effects -> string[]) -> NativeFunction {
     return NativeFunction {
         name: function.name,
+        is_async: function.is_async,
         parameters: function.parameters,
         return_type: return_type,
         effects: effects,
@@ -1552,9 +1565,16 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
             if current_method != null {
                 diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name);
             }
-            let method_name = parse_function_name(strip_prefix(raw_line, ".method "));
+            let header = strip_prefix(raw_line, ".method ");
+            let trimmed = trim_text(header);
+            let mut is_async -> boolean = false;
+            if starts_with(trimmed, "async ") {
+                is_async = true;
+            }
+            let method_name = parse_function_name(header);
             current_method = NativeFunction {
                 name: method_name,
+                is_async: is_async,
                 parameters: [],
                 return_type: "void",
                 effects: [],

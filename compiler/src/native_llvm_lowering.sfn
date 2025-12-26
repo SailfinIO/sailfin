@@ -1304,6 +1304,21 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
         lines = append_string(lines, "");
     }
 
+    // Async/future runtime types (opaque in LLVM; implemented by the native runtime).
+    lines = lines.concat([
+        "%SailfinFutureNumber = type opaque",
+        "%SailfinFutureVoid = type opaque",
+        "%SailfinFutureString = type opaque",
+        "",
+        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)",
+        "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)",
+        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)",
+        "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)",
+        "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)",
+        "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)",
+        "",
+    ]);
+
     let vtable_type_lines = render_vtable_type_definitions(type_context);
     if vtable_type_lines.length > 0 {
         lines = lines.concat(vtable_type_lines);
@@ -2130,6 +2145,7 @@ fn flatten_struct_methods(structs -> NativeStruct[]) -> NativeFunction[] {
             let qualified_name = definition.name + "::" + method.name;
             let qualified = NativeFunction {
                 name: qualified_name,
+                is_async: method.is_async,
                 parameters: method.parameters,
                 return_type: method.return_type,
                 effects: method.effects,
@@ -4735,6 +4751,84 @@ fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
 
 fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effects -> string[], context -> TypeContext, module_name -> string, entry_points -> string[], exported_symbols -> string[], imported_functions -> NativeFunction[], module_globals -> LocalBinding[], module_init_symbol -> string, needs_module_init_call -> boolean) -> LoweredLLVMFunction {
     let mut diagnostics -> string[] = [];
+
+    // Async lowering (minimal): async functions spawn a background thread and return
+    // an opaque Future pointer. Await joins and extracts the value.
+    //
+    // Current restriction: async functions must take zero parameters.
+    if function.is_async && !function.is_extern && function.name != "main" {
+        if function.parameters.length > 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` with parameters is not supported yet");
+            let empty_constants = empty_string_constant_set();
+            return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+        }
+
+        let future_return = future_pointer_type_for_return_type(function.return_type);
+        let spawn_symbol = spawn_symbol_for_return_type(function.return_type);
+        let impl_return = map_return_type(context, function.return_type);
+        if future_return.length == 0 || spawn_symbol.length == 0 || impl_return.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` has unsupported return type `" + function.return_type + "`");
+            let empty_constants = empty_string_constant_set();
+            return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+        }
+
+        let impl_name = function.name + "__async_impl";
+        let impl_function = NativeFunction {
+            name: impl_name,
+            is_async: false,
+            parameters: function.parameters,
+            return_type: function.return_type,
+            effects: function.effects,
+            decorators: function.decorators,
+            is_extern: function.is_extern,
+            instructions: function.instructions,
+        };
+
+        let impl_lowered = emit_function(
+            impl_function,
+            functions,
+            effects,
+            context,
+            module_name,
+            entry_points,
+            exported_symbols,
+            imported_functions,
+            module_globals,
+            module_init_symbol,
+            needs_module_init_call
+        );
+
+        diagnostics = diagnostics.concat(impl_lowered.diagnostics);
+
+        let mut wrapper_lines -> string[] = [];
+        let mut linkage -> string = "";
+        if should_internalize_function(function, entry_points, exported_symbols, imported_functions) {
+            linkage = "internal ";
+        }
+
+        let wrapper_symbol = sanitize_symbol(function.name);
+        let impl_symbol = sanitize_symbol(impl_name);
+        wrapper_lines = append_string(wrapper_lines, "define " + linkage + future_return + " @" + wrapper_symbol + "() {");
+        wrapper_lines = append_string(wrapper_lines, "block.entry:");
+        let t0 = format_temp_name(0);
+        wrapper_lines = append_string(wrapper_lines, "  " + t0 + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " ()* @" + impl_symbol + ")");
+        wrapper_lines = append_string(wrapper_lines, "  ret " + future_return + " " + t0);
+        wrapper_lines = append_string(wrapper_lines, "}");
+
+        let mut merged_lines -> string[] = wrapper_lines;
+        if impl_lowered.lines.length > 0 {
+            let with_spacer = impl_lowered.lines.concat([""]);
+            merged_lines = with_spacer.concat(wrapper_lines);
+        }
+        let merged_constants = merge_string_constants(impl_lowered.string_constants, empty_string_constant_set());
+        return LoweredLLVMFunction {
+            lines: merged_lines,
+            diagnostics: diagnostics,
+            lifetime_regions: impl_lowered.lifetime_regions,
+            string_constants: merged_constants,
+        };
+    }
+
     let mut sanitized = sanitize_symbol(function.name);
     let mut emit_main_wrapper -> boolean = false;
     let llvm_return = map_return_type(context, function.return_type);
@@ -10525,6 +10619,50 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
     return "i8*";
 }
 
+fn future_pointer_type_for_return_type(return_type -> string) -> string {
+    let trimmed = trim_text(return_type);
+    if trimmed.length == 0 || trimmed == "void" {
+        return "%SailfinFutureVoid*";
+    }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized == "number" {
+        return "%SailfinFutureNumber*";
+    }
+    if normalized == "string" {
+        return "%SailfinFutureString*";
+    }
+    // Conservative for now: only support primitives we can await.
+    return "";
+}
+
+fn spawn_symbol_for_return_type(return_type -> string) -> string {
+    let trimmed = trim_text(return_type);
+    if trimmed.length == 0 || trimmed == "void" {
+        return "sailfin_runtime_spawn_void";
+    }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized == "number" {
+        return "sailfin_runtime_spawn_number";
+    }
+    if normalized == "string" {
+        return "sailfin_runtime_spawn_string";
+    }
+    return "";
+}
+
+fn await_symbol_for_future_pointer_type(future_ptr_type -> string) -> string {
+    if future_ptr_type == "%SailfinFutureNumber*" {
+        return "sailfin_runtime_await_number";
+    }
+    if future_ptr_type == "%SailfinFutureVoid*" {
+        return "sailfin_runtime_await_void";
+    }
+    if future_ptr_type == "%SailfinFutureString*" {
+        return "sailfin_runtime_await_string";
+    }
+    return "";
+}
+
 fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> string {
     let trimmed = trim_text(parameter_type);
     if trimmed.length == 0 {
@@ -10791,9 +10929,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
     }
 
-    // `await <expr>` currently lowers as a synchronous identity.
-    // This unblocks examples that use async/await while the native runtime
-    // does not yet provide a scheduler.
+    // `await <expr>` joins a thread-backed future and extracts its value.
     if starts_with(stripped, "await") {
         if stripped.length == 5 {
             diagnostics = append_string(diagnostics, "llvm lowering: await expression missing operand");
@@ -10808,7 +10944,33 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             }
             let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
             let combined = diagnostics.concat(lowered.diagnostics);
-            return ExpressionResult { lines: lowered.lines, temp_index: lowered.temp_index, operand: lowered.operand, diagnostics: combined, string_constants: lowered.string_constants };
+            if lowered.operand == null {
+                return ExpressionResult { lines: lowered.lines, temp_index: lowered.temp_index, operand: null, diagnostics: combined, string_constants: lowered.string_constants };
+            }
+
+            let future_operand = lowered.operand;
+            let await_symbol = await_symbol_for_future_pointer_type(future_operand.llvm_type);
+            if await_symbol.length == 0 {
+                let with_issue = append_string(combined, "llvm lowering: await expects a Future pointer, got `" + future_operand.llvm_type + "`");
+                return ExpressionResult { lines: lowered.lines, temp_index: lowered.temp_index, operand: null, diagnostics: with_issue, string_constants: lowered.string_constants };
+            }
+
+            // Await returns a value whose type depends on the future kind.
+            if future_operand.llvm_type == "%SailfinFutureVoid*" {
+                let mut awaited_lines = append_string(lowered.lines, "  call void @" + await_symbol + "(%SailfinFutureVoid* " + future_operand.value + ")");
+                let out_operand = LLVMOperand { llvm_type: "void", value: "" };
+                return ExpressionResult { lines: awaited_lines, temp_index: lowered.temp_index, operand: out_operand, diagnostics: combined, string_constants: lowered.string_constants };
+            }
+
+            let mut result_type -> string = "i8*";
+            if future_operand.llvm_type == "%SailfinFutureNumber*" {
+                result_type = "double";
+            }
+            let result_temp = format_temp_name(lowered.temp_index);
+            let awaited_call = "  " + result_temp + " = call " + result_type + " @" + await_symbol + "(" + future_operand.llvm_type + " " + future_operand.value + ")";
+            let awaited_lines2 = append_string(lowered.lines, awaited_call);
+            let out_operand2 = LLVMOperand { llvm_type: result_type, value: result_temp };
+            return ExpressionResult { lines: awaited_lines2, temp_index: lowered.temp_index + 1, operand: out_operand2, diagnostics: combined, string_constants: lowered.string_constants };
         }
     }
 
@@ -12271,12 +12433,26 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             expected_params = descriptor.parameter_types;
             function_entry = null;
         } else if function_entry != null {
-            llvm_return = map_return_type(context, function_entry.return_type);
-            if llvm_return.length == 0 {
-                diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
-                llvm_return = "double";
+            if function_entry.is_async {
+                if function_entry.parameters.length > 0 {
+                    diagnostics = append_string(diagnostics, "llvm lowering: async function `" + trimmed_target + "` parameters not supported yet");
+                }
+                let future_return = future_pointer_type_for_return_type(function_entry.return_type);
+                if future_return.length == 0 {
+                    diagnostics = append_string(diagnostics, "llvm lowering: async function `" + trimmed_target + "` has unsupported return type `" + function_entry.return_type + "`");
+                    llvm_return = "i8*";
+                } else {
+                    llvm_return = future_return;
+                }
+                expected_params = [];
+            } else {
+                llvm_return = map_return_type(context, function_entry.return_type);
+                if llvm_return.length == 0 {
+                    diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
+                    llvm_return = "double";
+                }
+                expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target);
             }
-            expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target);
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
         }

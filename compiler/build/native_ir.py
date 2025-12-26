@@ -66,8 +66,9 @@ class NativeParameter:
         return runtime.struct_repr('NativeParameter', [runtime.struct_field('name', self.name), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('mutable', self.mutable), runtime.struct_field('default_value', self.default_value), runtime.struct_field('span', self.span)])
 
 class NativeFunction:
-    def __init__(self, name, parameters, return_type, effects, decorators, is_extern, instructions):
+    def __init__(self, name, is_async, parameters, return_type, effects, decorators, is_extern, instructions):
         self.name = name
+        self.is_async = is_async
         self.parameters = parameters
         self.return_type = return_type
         self.effects = effects
@@ -76,7 +77,7 @@ class NativeFunction:
         self.instructions = instructions
 
     def __repr__(self):
-        return runtime.struct_repr('NativeFunction', [runtime.struct_field('name', self.name), runtime.struct_field('parameters', self.parameters), runtime.struct_field('return_type', self.return_type), runtime.struct_field('effects', self.effects), runtime.struct_field('decorators', self.decorators), runtime.struct_field('is_extern', self.is_extern), runtime.struct_field('instructions', self.instructions)])
+        return runtime.struct_repr('NativeFunction', [runtime.struct_field('name', self.name), runtime.struct_field('is_async', self.is_async), runtime.struct_field('parameters', self.parameters), runtime.struct_field('return_type', self.return_type), runtime.struct_field('effects', self.effects), runtime.struct_field('decorators', self.decorators), runtime.struct_field('is_extern', self.is_extern), runtime.struct_field('instructions', self.instructions)])
 
 class NativeImportSpecifier:
     def __init__(self, name, alias=None):
@@ -534,7 +535,12 @@ def parse_native_artifact(text):
         if starts_with(line, ".fn "):
             if current != None:
                 diagnostics = append_string(diagnostics, "encountered nested .fn while previous function still open")
-            current = NativeFunction(name=parse_function_name(strip_prefix(line, ".fn ")), parameters=[], return_type="void", effects=[], decorators=pending_decorators, is_extern=False, instructions=[])
+            header = strip_prefix(line, ".fn ")
+            is_async = False
+            trimmed_header = trim_text(header)
+            if starts_with(trimmed_header, "async "):
+                is_async = True
+            current = NativeFunction(name=parse_function_name(header), is_async=is_async, parameters=[], return_type="void", effects=[], decorators=pending_decorators, is_extern=False, instructions=[])
             pending_decorators = []
             index += 1
             continue
@@ -582,7 +588,7 @@ def parse_native_artifact(text):
                 diagnostics = append_string(diagnostics, "unable to parse test header: " + line)
                 index += 1
                 continue
-            current = NativeFunction(name="test:" + name, parameters=[], return_type="void", effects=[], decorators=[], is_extern=False, instructions=[])
+            current = NativeFunction(name="test:" + name, is_async=False, parameters=[], return_type="void", effects=[], decorators=[], is_extern=False, instructions=[])
             index += 1
             continue
         if starts_with(line, ".endfn"):
@@ -772,11 +778,11 @@ def update_enum_variant_fields(variants, index, field):
 
 def append_parameter(function, parameter):
     parameters = append_parameter_array(function.parameters, parameter)
-    return NativeFunction(name=function.name, parameters=parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=function.is_extern, instructions=function.instructions)
+    return NativeFunction(name=function.name, is_async=function.is_async, parameters=parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=function.is_extern, instructions=function.instructions)
 
 def append_instruction(function, instruction):
     instructions = (function.instructions) + ([instruction])
-    return NativeFunction(name=function.name, parameters=function.parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=function.is_extern, instructions=instructions)
+    return NativeFunction(name=function.name, is_async=function.is_async, parameters=function.parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=function.is_extern, instructions=instructions)
 
 def binding_from_instruction(instruction):
     return NativeBinding(name=instruction.name, mutable=instruction.mutable, type_annotation=instruction.type_annotation, value=instruction.value)
@@ -784,7 +790,7 @@ def binding_from_instruction(instruction):
 def apply_meta(function, entry):
     trimmed = trim_text(entry)
     if trimmed == "extern":
-        return NativeFunction(name=function.name, parameters=function.parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=True, instructions=function.instructions)
+        return NativeFunction(name=function.name, is_async=function.is_async, parameters=function.parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=True, instructions=function.instructions)
     if trimmed == "unsafe":
         return function
     if starts_with(trimmed, "return "):
@@ -797,7 +803,7 @@ def apply_meta(function, entry):
     return function
 
 def update_function_meta(function, return_type, effects):
-    return NativeFunction(name=function.name, parameters=function.parameters, return_type=return_type, effects=effects, decorators=function.decorators, is_extern=function.is_extern, instructions=function.instructions)
+    return NativeFunction(name=function.name, is_async=function.is_async, parameters=function.parameters, return_type=return_type, effects=effects, decorators=function.decorators, is_extern=function.is_extern, instructions=function.instructions)
 
 def gather_instruction(lines, start_index):
     if start_index >= len(lines):
@@ -1278,8 +1284,13 @@ def parse_struct_definition(lines, start_index):
         if starts_with(raw_line, ".method "):
             if current_method != None:
                 diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name)
-            method_name = parse_function_name(strip_prefix(raw_line, ".method "))
-            current_method = NativeFunction(name=method_name, parameters=[], return_type="void", effects=[], decorators=method_pending_decorators, is_extern=False, instructions=[])
+            header = strip_prefix(raw_line, ".method ")
+            trimmed = trim_text(header)
+            is_async = False
+            if starts_with(trimmed, "async "):
+                is_async = True
+            method_name = parse_function_name(header)
+            current_method = NativeFunction(name=method_name, is_async=is_async, parameters=[], return_type="void", effects=[], decorators=method_pending_decorators, is_extern=False, instructions=[])
             method_pending_decorators = []
             method_pending_span = None
             method_pending_value_span = None

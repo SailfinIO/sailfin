@@ -1348,6 +1348,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if len(interface_type_lines) > 0:
         lines = (lines) + (interface_type_lines)
         lines = append_string(lines, "")
+    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
     vtable_type_lines = render_vtable_type_definitions(type_context)
     if len(vtable_type_lines) > 0:
         lines = (lines) + (vtable_type_lines)
@@ -1896,7 +1897,7 @@ def flatten_struct_methods(structs):
                 break
             method = definition.methods[method_index]
             qualified_name = definition.name + "::" + method.name
-            qualified = NativeFunction(name=qualified_name, parameters=method.parameters, return_type=method.return_type, effects=method.effects, decorators=method.decorators, instructions=method.instructions, is_extern=False)
+            qualified = NativeFunction(name=qualified_name, is_async=method.is_async, parameters=method.parameters, return_type=method.return_type, effects=method.effects, decorators=method.decorators, instructions=method.instructions, is_extern=False)
             result = append_native_function(result, qualified)
             method_index += 1
         index += 1
@@ -3392,6 +3393,52 @@ def render_interface_parameters(parameters):
 
 def emit_function(function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call):
     diagnostics = []
+    if function.is_async  and  not function.is_extern  and  function.name != "main":
+        if len(function.parameters) > 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` with parameters is not supported yet")
+            empty_constants = empty_string_constant_set()
+            return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[], string_constants=empty_constants)
+        future_return = future_pointer_type_for_return_type(function.return_type)
+        spawn_symbol = spawn_symbol_for_return_type(function.return_type)
+        impl_return = map_return_type(context, function.return_type)
+        if len(future_return) == 0  or  len(spawn_symbol) == 0  or  len(impl_return) == 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` has unsupported return type `" + function.return_type + "`")
+            empty_constants = empty_string_constant_set()
+            return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[], string_constants=empty_constants)
+        impl_name = function.name + "__async_impl"
+        impl_function = NativeFunction(name=impl_name, is_async=False, parameters=function.parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=function.is_extern, instructions=function.instructions)
+        impl_lowered = emit_function(
+impl_function,
+functions,
+effects,
+context,
+module_name,
+entry_points,
+exported_symbols,
+imported_functions,
+module_globals,
+module_init_symbol,
+needs_module_init_call
+)
+        diagnostics = (diagnostics) + (impl_lowered.diagnostics)
+        wrapper_lines = []
+        linkage = ""
+        if should_internalize_function(function, entry_points, exported_symbols, imported_functions):
+            linkage = "internal "
+        wrapper_symbol = sanitize_symbol(function.name)
+        impl_symbol = sanitize_symbol(impl_name)
+        wrapper_lines = append_string(wrapper_lines, "define " + linkage + future_return + " @" + wrapper_symbol + "() {")
+        wrapper_lines = append_string(wrapper_lines, "block.entry:")
+        t0 = format_temp_name(0)
+        wrapper_lines = append_string(wrapper_lines, "  " + t0 + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " ()* @" + impl_symbol + ")")
+        wrapper_lines = append_string(wrapper_lines, "  ret " + future_return + " " + t0)
+        wrapper_lines = append_string(wrapper_lines, "}")
+        merged_lines = wrapper_lines
+        if len(impl_lowered.lines) > 0:
+            with_spacer = (impl_lowered.lines) + ([""])
+            merged_lines = (with_spacer) + (wrapper_lines)
+        merged_constants = merge_string_constants(impl_lowered.string_constants, empty_string_constant_set())
+        return LoweredLLVMFunction(lines=merged_lines, diagnostics=diagnostics, lifetime_regions=impl_lowered.lifetime_regions, string_constants=merged_constants)
     sanitized = sanitize_symbol(function.name)
     emit_main_wrapper = False
     llvm_return = map_return_type(context, function.return_type)
@@ -7137,6 +7184,37 @@ def map_return_type(context, return_type):
         return primitive_type
     return "i8*"
 
+def future_pointer_type_for_return_type(return_type):
+    trimmed = trim_text(return_type)
+    if len(trimmed) == 0  or  trimmed == "void":
+        return "%SailfinFutureVoid*"
+    normalized = unwrap_move_wrapper(trimmed)
+    if normalized == "number":
+        return "%SailfinFutureNumber*"
+    if normalized == "string":
+        return "%SailfinFutureString*"
+    return ""
+
+def spawn_symbol_for_return_type(return_type):
+    trimmed = trim_text(return_type)
+    if len(trimmed) == 0  or  trimmed == "void":
+        return "sailfin_runtime_spawn_void"
+    normalized = unwrap_move_wrapper(trimmed)
+    if normalized == "number":
+        return "sailfin_runtime_spawn_number"
+    if normalized == "string":
+        return "sailfin_runtime_spawn_string"
+    return ""
+
+def await_symbol_for_future_pointer_type(future_ptr_type):
+    if future_ptr_type == "%SailfinFutureNumber*":
+        return "sailfin_runtime_await_number"
+    if future_ptr_type == "%SailfinFutureVoid*":
+        return "sailfin_runtime_await_void"
+    if future_ptr_type == "%SailfinFutureString*":
+        return "sailfin_runtime_await_string"
+    return ""
+
 def map_parameter_type(context, parameter_type):
     trimmed = trim_text(parameter_type)
     if len(trimmed) == 0:
@@ -7318,7 +7396,25 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
                 return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
             lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type)
             combined = (diagnostics) + (lowered.diagnostics)
-            return ExpressionResult(lines=lowered.lines, temp_index=lowered.temp_index, operand=lowered.operand, diagnostics=combined, string_constants=lowered.string_constants)
+            if lowered.operand == None:
+                return ExpressionResult(lines=lowered.lines, temp_index=lowered.temp_index, operand=None, diagnostics=combined, string_constants=lowered.string_constants)
+            future_operand = lowered.operand
+            await_symbol = await_symbol_for_future_pointer_type(future_operand.llvm_type)
+            if len(await_symbol) == 0:
+                with_issue = append_string(combined, "llvm lowering: await expects a Future pointer, got `" + future_operand.llvm_type + "`")
+                return ExpressionResult(lines=lowered.lines, temp_index=lowered.temp_index, operand=None, diagnostics=with_issue, string_constants=lowered.string_constants)
+            if future_operand.llvm_type == "%SailfinFutureVoid*":
+                awaited_lines = append_string(lowered.lines, "  call void @" + await_symbol + "(%SailfinFutureVoid* " + future_operand.value + ")")
+                out_operand = LLVMOperand(llvm_type="void", value="")
+                return ExpressionResult(lines=awaited_lines, temp_index=lowered.temp_index, operand=out_operand, diagnostics=combined, string_constants=lowered.string_constants)
+            result_type = "i8*"
+            if future_operand.llvm_type == "%SailfinFutureNumber*":
+                result_type = "double"
+            result_temp = format_temp_name(lowered.temp_index)
+            awaited_call = "  " + result_temp + " = call " + result_type + " @" + await_symbol + "(" + future_operand.llvm_type + " " + future_operand.value + ")"
+            awaited_lines2 = append_string(lowered.lines, awaited_call)
+            out_operand2 = LLVMOperand(llvm_type=result_type, value=result_temp)
+            return ExpressionResult(lines=awaited_lines2, temp_index=lowered.temp_index + 1, operand=out_operand2, diagnostics=combined, string_constants=lowered.string_constants)
     ternary_parse = parse_ternary_expression(stripped)
     if ternary_parse.success:
         return lower_ternary_expression(ternary_parse, bindings, locals, temp_index, lines, functions, context, expected_type)
@@ -8305,11 +8401,22 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
             function_entry = None
         else:
             if function_entry != None:
-                llvm_return = map_return_type(context, function_entry.return_type)
-                if len(llvm_return) == 0:
-                    diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`")
-                    llvm_return = "double"
-                expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target)
+                if function_entry.is_async:
+                    if len(function_entry.parameters) > 0:
+                        diagnostics = append_string(diagnostics, "llvm lowering: async function `" + trimmed_target + "` parameters not supported yet")
+                    future_return = future_pointer_type_for_return_type(function_entry.return_type)
+                    if len(future_return) == 0:
+                        diagnostics = append_string(diagnostics, "llvm lowering: async function `" + trimmed_target + "` has unsupported return type `" + function_entry.return_type + "`")
+                        llvm_return = "i8*"
+                    else:
+                        llvm_return = future_return
+                    expected_params = []
+                else:
+                    llvm_return = map_return_type(context, function_entry.return_type)
+                    if len(llvm_return) == 0:
+                        diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`")
+                        llvm_return = "double"
+                    expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target)
             else:
                 diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`")
     index = 0
