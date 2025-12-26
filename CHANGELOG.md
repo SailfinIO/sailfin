@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.78 (2025-12-26)
+
+### Bug Fixes
+
+- Async futures boolean
+  ([`6c70efa`](https://github.com/SailfinIO/sailfin/commit/6c70efabed56939053ddbef1f89ff43b6086574a))
+
+- Gh worfklow naming, native aot, install
+  ([`c611794`](https://github.com/SailfinIO/sailfin/commit/c61179467b5eef21d90bd782d461ec2c62af1e2e))
+
+- Llvm rounding
+  ([`015810b`](https://github.com/SailfinIO/sailfin/commit/015810ba17fb79bf8cec270d01fbe8f170cbd12b))
+
+- Parameters for async
+  ([`5765b83`](https://github.com/SailfinIO/sailfin/commit/5765b83cf5231269acad8408ffb6b4cb06c6e721))
+
+- String interpolation with literal insiade
+  ([`a075b16`](https://github.com/SailfinIO/sailfin/commit/a075b166183fff7c31486c86c74d21439268b770))
+
+
 ## v0.1.1-alpha.77 (2025-12-24)
 
 ### Bug Fixes
