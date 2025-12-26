@@ -32,11 +32,6 @@ jobs:
             asset_os: macos
             asset_arch: arm64
             exe_ext: ""
-          - os: macos-15-intel
-            package_label: macos-x86_64
-            asset_os: macos
-            asset_arch: x86_64
-            exe_ext: ""
 
     steps:
       - name: Checkout repository

@@ -61,6 +61,7 @@ extern "C"
 
     typedef struct SailfinFutureNumber SailfinFutureNumber;
     typedef struct SailfinFutureBool SailfinFutureBool;
+    typedef struct SailfinFuturePtr SailfinFuturePtr;
     typedef struct SailfinFutureVoid SailfinFutureVoid;
     typedef struct SailfinFutureString SailfinFutureString;
 
@@ -71,6 +72,10 @@ extern "C"
     SailfinFutureBool *sailfin_runtime_spawn_bool(bool (*fn)(void));
     SailfinFutureBool *sailfin_runtime_spawn_bool_ctx(bool (*fn)(void *), void *ctx);
     bool sailfin_runtime_await_bool(SailfinFutureBool *future);
+
+    SailfinFuturePtr *sailfin_runtime_spawn_ptr(void *(*fn)(void));
+    SailfinFuturePtr *sailfin_runtime_spawn_ptr_ctx(void *(*fn)(void *), void *ctx);
+    void *sailfin_runtime_await_ptr(SailfinFuturePtr *future);
 
     SailfinFutureVoid *sailfin_runtime_spawn_void(void (*fn)(void));
     SailfinFutureVoid *sailfin_runtime_spawn_void_ctx(void (*fn)(void *), void *ctx);

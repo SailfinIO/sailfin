@@ -1198,6 +1198,85 @@ bool sailfin_runtime_await_bool(struct SailfinFutureBool *future)
     return result;
 }
 
+struct SailfinFuturePtr
+{
+    pthread_t thread;
+    void *(*fn0)(void);
+    void *(*fn1)(void *);
+    void *ctx;
+    bool has_ctx;
+    void *result;
+};
+
+static void *sailfin_future_ptr_entry(void *arg)
+{
+    struct SailfinFuturePtr *future = (struct SailfinFuturePtr *)arg;
+    if (future->has_ctx)
+    {
+        future->result = future->fn1 ? future->fn1(future->ctx) : NULL;
+    }
+    else
+    {
+        future->result = future->fn0 ? future->fn0() : NULL;
+    }
+    return NULL;
+}
+
+struct SailfinFuturePtr *sailfin_runtime_spawn_ptr(void *(*fn)(void))
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFuturePtr *future = (struct SailfinFuturePtr *)calloc(1, sizeof(struct SailfinFuturePtr));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn0 = fn;
+    future->has_ctx = false;
+    if (pthread_create(&future->thread, NULL, sailfin_future_ptr_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+struct SailfinFuturePtr *sailfin_runtime_spawn_ptr_ctx(void *(*fn)(void *), void *ctx)
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFuturePtr *future = (struct SailfinFuturePtr *)calloc(1, sizeof(struct SailfinFuturePtr));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn1 = fn;
+    future->ctx = ctx;
+    future->has_ctx = true;
+    if (pthread_create(&future->thread, NULL, sailfin_future_ptr_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+void *sailfin_runtime_await_ptr(struct SailfinFuturePtr *future)
+{
+    if (!future)
+    {
+        return NULL;
+    }
+    pthread_join(future->thread, NULL);
+    void *result = future->result;
+    free(future);
+    return result;
+}
+
 void sailfin_runtime_serve(char *handler, char *config)
 {
     (void)handler;

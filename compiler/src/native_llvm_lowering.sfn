@@ -1308,6 +1308,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     lines = lines.concat([
         "%SailfinFutureNumber = type opaque",
         "%SailfinFutureBool = type opaque",
+        "%SailfinFuturePtr = type opaque",
         "%SailfinFutureVoid = type opaque",
         "%SailfinFutureString = type opaque",
         "",
@@ -1317,6 +1318,9 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
         "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)",
         "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)",
         "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)",
+        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)",
+        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)",
+        "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)",
         "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)",
         "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)",
         "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)",
@@ -4767,11 +4771,19 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
     // an opaque Future pointer. Await joins and extracts the value.
     if function.is_async && !function.is_extern && function.name != "main" {
         let future_return = future_pointer_type_for_return_type(function.return_type);
-        let impl_return = map_return_type(context, function.return_type);
+        let mut impl_return = map_return_type(context, function.return_type);
         if future_return.length == 0 || impl_return.length == 0 {
             diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` has unsupported return type `" + function.return_type + "`");
             let empty_constants = empty_string_constant_set();
             return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+        }
+
+        // FuturePtr is an opaque pointer future. For non-pointer/aggregate returns (e.g. structs),
+        // we force the async implementation to box the value and return `i8*`.
+        let mut impl_return_type_annotation -> string = function.return_type;
+        if future_return == "%SailfinFuturePtr*" {
+            impl_return = "i8*";
+            impl_return_type_annotation = "any";
         }
 
         let impl_name = function.name + "__async_impl";
@@ -4779,7 +4791,7 @@ fn emit_function(function -> NativeFunction, functions -> NativeFunction[], effe
             name: impl_name,
             is_async: false,
             parameters: function.parameters,
-            return_type: function.return_type,
+            return_type: impl_return_type_annotation,
             effects: function.effects,
             decorators: function.decorators,
             is_extern: function.is_extern,
@@ -10766,8 +10778,8 @@ fn future_pointer_type_for_return_type(return_type -> string) -> string {
     if normalized == "string" {
         return "%SailfinFutureString*";
     }
-    // Conservative for now: only support primitives we can await.
-    return "";
+    // Default: treat unknown/user types as an opaque pointer.
+    return "%SailfinFuturePtr*";
 }
 
 fn spawn_symbol_for_return_type(return_type -> string) -> string {
@@ -10785,7 +10797,7 @@ fn spawn_symbol_for_return_type(return_type -> string) -> string {
     if normalized == "string" {
         return "sailfin_runtime_spawn_string";
     }
-    return "";
+    return "sailfin_runtime_spawn_ptr";
 }
 
 fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
@@ -10803,7 +10815,7 @@ fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
     if normalized == "string" {
         return "sailfin_runtime_spawn_string_ctx";
     }
-    return "";
+    return "sailfin_runtime_spawn_ptr_ctx";
 }
 
 fn await_symbol_for_future_pointer_type(future_ptr_type -> string) -> string {
@@ -10818,6 +10830,9 @@ fn await_symbol_for_future_pointer_type(future_ptr_type -> string) -> string {
     }
     if future_ptr_type == "%SailfinFutureString*" {
         return "sailfin_runtime_await_string";
+    }
+    if future_ptr_type == "%SailfinFuturePtr*" {
+        return "sailfin_runtime_await_ptr";
     }
     return "";
 }

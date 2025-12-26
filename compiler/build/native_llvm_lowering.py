@@ -1348,7 +1348,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if len(interface_type_lines) > 0:
         lines = (lines) + (interface_type_lines)
         lines = append_string(lines, "")
-    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)", "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
+    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFuturePtr = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)", "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
     vtable_type_lines = render_vtable_type_definitions(type_context)
     if len(vtable_type_lines) > 0:
         lines = (lines) + (vtable_type_lines)
@@ -3401,8 +3401,12 @@ def emit_function(function, functions, effects, context, module_name, entry_poin
             diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` has unsupported return type `" + function.return_type + "`")
             empty_constants = empty_string_constant_set()
             return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[], string_constants=empty_constants)
+        impl_return_type_annotation = function.return_type
+        if future_return == "%SailfinFuturePtr*":
+            impl_return = "i8*"
+            impl_return_type_annotation = "any"
         impl_name = function.name + "__async_impl"
-        impl_function = NativeFunction(name=impl_name, is_async=False, parameters=function.parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=function.is_extern, instructions=function.instructions)
+        impl_function = NativeFunction(name=impl_name, is_async=False, parameters=function.parameters, return_type=impl_return_type_annotation, effects=function.effects, decorators=function.decorators, is_extern=function.is_extern, instructions=function.instructions)
         impl_lowered = emit_function(
 impl_function,
 functions,
@@ -7291,7 +7295,7 @@ def future_pointer_type_for_return_type(return_type):
         return "%SailfinFutureBool*"
     if normalized == "string":
         return "%SailfinFutureString*"
-    return ""
+    return "%SailfinFuturePtr*"
 
 def spawn_symbol_for_return_type(return_type):
     trimmed = trim_text(return_type)
@@ -7304,7 +7308,7 @@ def spawn_symbol_for_return_type(return_type):
         return "sailfin_runtime_spawn_bool"
     if normalized == "string":
         return "sailfin_runtime_spawn_string"
-    return ""
+    return "sailfin_runtime_spawn_ptr"
 
 def spawn_ctx_symbol_for_return_type(return_type):
     trimmed = trim_text(return_type)
@@ -7317,7 +7321,7 @@ def spawn_ctx_symbol_for_return_type(return_type):
         return "sailfin_runtime_spawn_bool_ctx"
     if normalized == "string":
         return "sailfin_runtime_spawn_string_ctx"
-    return ""
+    return "sailfin_runtime_spawn_ptr_ctx"
 
 def await_symbol_for_future_pointer_type(future_ptr_type):
     if future_ptr_type == "%SailfinFutureNumber*":
@@ -7328,6 +7332,8 @@ def await_symbol_for_future_pointer_type(future_ptr_type):
         return "sailfin_runtime_await_void"
     if future_ptr_type == "%SailfinFutureString*":
         return "sailfin_runtime_await_string"
+    if future_ptr_type == "%SailfinFuturePtr*":
+        return "sailfin_runtime_await_ptr"
     return ""
 
 def map_parameter_type(context, parameter_type):
