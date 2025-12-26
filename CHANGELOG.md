@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.79 (2025-12-26)
+
+### Bug Fixes
+
+- Async return support and legacy tests removal
+  ([`d7e72bd`](https://github.com/SailfinIO/sailfin/commit/d7e72bdd26de06c468288f78630d972d72183dfc))
+
+
 ## v0.1.1-alpha.78 (2025-12-26)
 
 ### Bug Fixes
