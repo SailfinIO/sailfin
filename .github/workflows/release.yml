@@ -117,6 +117,15 @@ jobs:
 
           ls -la build/native | sed -n '1,200p'
 
+      - name: Verify embedded CLI version matches release tag
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.rel.outputs.version }}"
+          OUT="$(build/native/sailfin-stage2 --version | tr -d '\r' | head -n 1)"
+          echo "$OUT"
+          echo "$OUT" | grep -F "sfn ${VERSION}" >/dev/null
+
       - name: Package release asset
         shell: bash -l {0}
         run: |

@@ -25,7 +25,9 @@ NATIVE_LINK_EXTRA ?=
 .PHONY: help install test test-unit test-integration compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism
 
 ifeq ($(origin CONDA_EXE), undefined)
-CONDA_EXE := $(shell command -v conda 2>/dev/null)
+# `conda` is often a shell function (e.g. in zsh/bash init). We need the actual
+# executable path for Makefile recipes.
+CONDA_EXE := $(shell { type -P conda 2>/dev/null || /usr/bin/which conda 2>/dev/null; } | head -n 1)
 endif
 ifeq ($(strip $(CONDA_EXE)),)
 $(error "conda" executable not found. Export CONDA_EXE or install Conda.)

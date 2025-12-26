@@ -4,9 +4,12 @@
 
 import { compile_to_llvm, compile_to_llvm_with_module, compile_tests_to_llvm, compile_to_sailfin, number_to_string, module_name_from_path } from "./main";
 import { compile_to_native_text } from "./main";
+import { sailfin_stage2_version } from "./version";
 
 fn _usage() -> string {
     return "usage:\n" +
+        "  sfn --version\n" +
+        "  sfn version\n" +
         "  sfn emit llvm|sailfin|native <file.sfn>\n" +
         "  sfn build [-o OUTPUT] <file.sfn>\n" +
         "  sfn run <file.sfn>\n" +
@@ -330,6 +333,11 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         return 2;
     }
 
+    if args.length == 1 && (_is_flag(args[0], "--version") || _is_flag(args[0], "-V")) {
+        print.info("sfn " + sailfin_stage2_version());
+        return 0;
+    }
+
     // Back-compat with existing stage2 driver UX: --emit MODE file
     if args.length == 3 && _is_flag(args[0], "--emit") {
         let mode = args[1];
@@ -354,6 +362,15 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     }
 
     let cmd = args[0];
+
+    if cmd == "version" {
+        if args.length != 1 {
+            print.error(_usage());
+            return 2;
+        }
+        print.info("sfn " + sailfin_stage2_version());
+        return 0;
+    }
 
     if cmd == "emit" {
         if args.length != 3 {

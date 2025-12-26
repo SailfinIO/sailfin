@@ -181,11 +181,15 @@ int main(int argc, char **argv)
         const char *first = argv[1];
         bool is_cli = false;
 
-        if (strcmp(first, "emit") == 0 || strcmp(first, "build") == 0 || strcmp(first, "run") == 0 || strcmp(first, "test") == 0)
+        if (strcmp(first, "emit") == 0 || strcmp(first, "build") == 0 || strcmp(first, "run") == 0 || strcmp(first, "test") == 0 || strcmp(first, "version") == 0)
         {
             is_cli = true;
         }
         else if (strcmp(first, "-h") == 0 || strcmp(first, "--help") == 0)
+        {
+            is_cli = true;
+        }
+        else if (strcmp(first, "--version") == 0 || strcmp(first, "-V") == 0)
         {
             is_cli = true;
         }

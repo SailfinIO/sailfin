@@ -1,6 +1,6 @@
 [tool.semantic_release]
 version_source = "file"
-version_variables = ["runtime/__init__.py:__version__"]
+version_variables = ["runtime/__init__.py:__version__", "compiler/src/version.sfn:__version__"]
 upload_to_pypi = false
 build_command = "make package"
 commit_parser = "conventional"

@@ -180,7 +180,7 @@ sfn add sailfin/http
 Write code using Sailfin syntax:
 
 ```sailfin
-import { serve } from "sailfin/http"
+import { serve } from "sfn/http"
 
 fn main() {
     serve(fn(req, res) {

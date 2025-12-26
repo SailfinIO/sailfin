@@ -248,7 +248,7 @@ The compiler must always compile itself. Breaking changes require:
 ## Versioning & Releases
 
 - **Semantic versioning:** `v0.1.1-alpha.32` (alpha branch), `v0.x.y` (main branch)
-- **Version source:** `runtime/__init__.py:__version__`
+- **Version source:** `compiler/src/version.sfn:__version__` (drives `sfn --version`)
 - **Release automation:** GitHub Actions + `python-semantic-release`
 - **Artifacts:** `dist/` is used for packaged artifacts as part of release tooling
 

@@ -69,7 +69,7 @@ Source files compile independently. Imports use ES-module style syntax and
 canonical Sailfin-branded paths:
 
 ```sfn
-import { Channel, channel } from "sailfin/async";
+import { Channel, channel } from "sfn/async";
 ```
 
 Modules may re-export their own declarations or items from other modules via
@@ -567,6 +567,7 @@ unsafe extern fn memcpy(dest -> *u8, src -> *u8, n -> usize) -> *u8;
 ```
 
 Key properties:
+
 - Follows the C ABI calling convention by default
 - Cannot be called without an active `![unsafe]` capability
 - May accept and return raw pointer types
@@ -576,13 +577,14 @@ Key properties:
 
 Sailfin provides two raw pointer types for FFI:
 
-| Type | Description |
-|------|-------------|
-| `*T` | Read-only raw pointer to type `T` |
-| `*mut T` | Mutable raw pointer to type `T` |
+| Type      | Description                              |
+| --------- | ---------------------------------------- |
+| `*T`      | Read-only raw pointer to type `T`        |
+| `*mut T`  | Mutable raw pointer to type `T`          |
 | `*opaque` | Opaque pointer to foreign-managed memory |
 
 Raw pointers differ from references:
+
 - No lifetime tracking or borrow checking
 - No automatic null safety
 - May be cast between compatible types
@@ -603,6 +605,7 @@ fn allocate_buffer(bytes -> usize) ![unsafe] -> *u8 {
 ```
 
 Operations restricted to unsafe blocks:
+
 - **Pointer dereference**: `*ptr` to read, `*ptr = value` to write
 - **Pointer arithmetic**: `ptr + offset`, `ptr - offset`
 - **Pointer casting**: `ptr as *OtherType`
@@ -697,6 +700,7 @@ fn pointer_example() ![unsafe] -> void {
 ```
 
 Supported operations:
+
 - `ptr + n` — Advance by `n` elements (not bytes)
 - `ptr - n` — Retreat by `n` elements
 - `ptr as *OtherType` — Reinterpret pointer type
@@ -706,24 +710,24 @@ Supported operations:
 
 Sailfin types map to C types as follows:
 
-| Sailfin | C | LLVM |
-|---------|---|------|
-| `i8` | `int8_t` / `char` | `i8` |
-| `i16` | `int16_t` | `i16` |
-| `i32` | `int32_t` | `i32` |
-| `i64` | `int64_t` | `i64` |
-| `u8` | `uint8_t` | `i8` |
-| `u16` | `uint16_t` | `i16` |
-| `u32` | `uint32_t` | `i32` |
-| `u64` | `uint64_t` | `i64` |
-| `usize` | `size_t` | `i64` (platform-dependent) |
-| `isize` | `ssize_t` | `i64` (platform-dependent) |
-| `f32` | `float` | `float` |
-| `f64` | `double` | `double` |
-| `bool` | `_Bool` / `bool` | `i1` |
-| `*T` | `const T*` | `T*` |
-| `*mut T` | `T*` | `T*` |
-| `*opaque` | `void*` | `i8*` |
+| Sailfin   | C                 | LLVM                       |
+| --------- | ----------------- | -------------------------- |
+| `i8`      | `int8_t` / `char` | `i8`                       |
+| `i16`     | `int16_t`         | `i16`                      |
+| `i32`     | `int32_t`         | `i32`                      |
+| `i64`     | `int64_t`         | `i64`                      |
+| `u8`      | `uint8_t`         | `i8`                       |
+| `u16`     | `uint16_t`        | `i16`                      |
+| `u32`     | `uint32_t`        | `i32`                      |
+| `u64`     | `uint64_t`        | `i64`                      |
+| `usize`   | `size_t`          | `i64` (platform-dependent) |
+| `isize`   | `ssize_t`         | `i64` (platform-dependent) |
+| `f32`     | `float`           | `float`                    |
+| `f64`     | `double`          | `double`                   |
+| `bool`    | `_Bool` / `bool`  | `i1`                       |
+| `*T`      | `const T*`        | `T*`                       |
+| `*mut T`  | `T*`              | `T*`                       |
+| `*opaque` | `void*`           | `i8*`                      |
 
 ##### 6.1.5.8 Struct Layout for FFI
 
@@ -769,6 +773,7 @@ fn open_file(path -> string, flags -> i32) ![unsafe, io] -> PosixResult<i32> {
 ##### 6.1.5.10 Example Reference
 
 See `examples/advanced/` for unsafe/extern examples:
+
 - `unsafe-extern-interop.sfn` — External function declarations and unsafe blocks
 - `pointer-arithmetic.sfn` — Pointer arithmetic with malloc/free
 - `raw-pointers.sfn` — Raw pointer creation with `&raw` and dereference

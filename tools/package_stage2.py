@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -78,12 +79,11 @@ def target_label_for_host(system: str | None = None, machine: str | None = None)
 
 def _infer_version() -> str:
     try:
-        import importlib
-
-        runtime = importlib.import_module("runtime")
-        version = getattr(runtime, "__version__", None)
-        if version:
-            return str(version)
+        version_path = REPO_ROOT / "compiler" / "src" / "version.sfn"
+        text = version_path.read_text(encoding="utf-8")
+        match = re.search(r'\b__version__\s*=\s*"(?P<version>[^"]+)"', text)
+        if match:
+            return match.group("version")
     except Exception:
         pass
 
@@ -232,7 +232,8 @@ def _write_manifest_sidecar(
         "artifacts": metadata.get("artifacts", []),
     }
     manifest_path = output_dir / f"{archive_stem}.manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    manifest_path.write_text(json.dumps(
+        manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest_path
 
 
@@ -367,7 +368,8 @@ def package_stage2(
         archive_path = _create_archive(archive_root, output_dir / archive_name)
         archive_sha = _compute_sha256(archive_path)
         _write_sha256_sidecar(archive_path, archive_sha)
-        archive_stem = archive_name[:-len(".tar.gz")] if archive_name.endswith(".tar.gz") else archive_path.stem
+        archive_stem = archive_name[:-len(".tar.gz")] if archive_name.endswith(
+            ".tar.gz") else archive_path.stem
         _write_manifest_sidecar(output_dir, archive_stem,
                                 archive_name, archive_sha, metadata)
         return archive_path

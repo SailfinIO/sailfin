@@ -1,6 +1,6 @@
 // examples/advanced/multithreaded-task.sfn
 
-import { sleep } from "sail/time";
+import { sleep } from "sfn/time";
 
 fn computeTask(id -> number) -> string ![clock, io] {
     print.info("Task {{id}} started");
