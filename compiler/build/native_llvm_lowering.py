@@ -7537,6 +7537,15 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
             result_temp = format_temp_name(lowered.temp_index)
             awaited_call = "  " + result_temp + " = call " + result_type + " @" + await_symbol + "(" + future_operand.llvm_type + " " + future_operand.value + ")"
             awaited_lines2 = append_string(lowered.lines, awaited_call)
+            trimmed_expected = trim_text(expected_type)
+            if future_operand.llvm_type == "%SailfinFuturePtr*"  and  len(trimmed_expected) > 0  and  trimmed_expected != "i8*"  and  not ends_with_pointer_suffix(trimmed_expected):
+                typed_ptr_temp = format_temp_name(lowered.temp_index + 1)
+                load_temp = format_temp_name(lowered.temp_index + 2)
+                awaited_lines2 = append_string(awaited_lines2, "  " + typed_ptr_temp + " = bitcast i8* " + result_temp + " to " + trimmed_expected + "*")
+                awaited_lines2 = append_string(awaited_lines2, "  " + load_temp + " = load " + trimmed_expected + ", " + trimmed_expected + "* " + typed_ptr_temp)
+                awaited_lines2 = append_string(awaited_lines2, "  call void @free(i8* " + result_temp + ")")
+                out_operand_unboxed = LLVMOperand(llvm_type=trimmed_expected, value=load_temp)
+                return ExpressionResult(lines=awaited_lines2, temp_index=lowered.temp_index + 3, operand=out_operand_unboxed, diagnostics=combined, string_constants=lowered.string_constants)
             out_operand2 = LLVMOperand(llvm_type=result_type, value=result_temp)
             return ExpressionResult(lines=awaited_lines2, temp_index=lowered.temp_index + 1, operand=out_operand2, diagnostics=combined, string_constants=lowered.string_constants)
     ternary_parse = parse_ternary_expression(stripped)
@@ -12672,14 +12681,25 @@ def append_parameter_binding(bindings, binding):
 def join_with_separator(values, separator):
     if len(values) == 0:
         return ""
-    result = values[0]
-    index = 1
+    if len(values) == 1:
+        return values[0]
+    parts = values
     while True:
-        if index >= len(values):
+        if len(parts) <= 1:
             break
-        result = result + separator + values[index]
-        index += 1
-    return result
+        next = []
+        index = 0
+        while True:
+            if index >= len(parts):
+                break
+            if index + 1 < len(parts):
+                next = (next) + ([parts[index] + separator + parts[index + 1]])
+                index += 2
+                continue
+            next = (next) + ([parts[index]])
+            index += 1
+        parts = next
+    return parts[0]
 
 def empty_string_constant_set():
     return []
