@@ -2,7 +2,6 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.token import Token, TokenKind, eof_token
-from compiler.build.string_utils import substring, char_code, char_at
 
 print = runtime.console
 sleep = runtime.sleep
@@ -17,36 +16,42 @@ logExecution = runtime.logExecution
 array_map = runtime.array_map
 array_filter = runtime.array_filter
 array_reduce = runtime.array_reduce
+substring_unchecked = runtime.substring_unchecked
+is_decimal_digit = runtime.is_decimal_digit
+is_whitespace_char = runtime.is_whitespace_char
+is_alpha_char = runtime.is_alpha_char
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
 class LexerState:
-    def __init__(self, source, index, line, column):
+    def __init__(self, source, source_len, index, line, column):
         self.source = source
+        self.source_len = source_len
         self.index = index
         self.line = line
         self.column = column
 
     def __repr__(self):
-        return runtime.struct_repr('LexerState', [runtime.struct_field('source', self.source), runtime.struct_field('index', self.index), runtime.struct_field('line', self.line), runtime.struct_field('column', self.column)])
+        return runtime.struct_repr('LexerState', [runtime.struct_field('source', self.source), runtime.struct_field('source_len', self.source_len), runtime.struct_field('index', self.index), runtime.struct_field('line', self.line), runtime.struct_field('column', self.column)])
 
 def lex(source):
-    state = LexerState(source=source, index=0, line=1, column=1)
+    length = len(source)
+    state = LexerState(source=source, source_len=length, index=0, line=1, column=1)
     tokens = []
     while True:
-        if state.index >= len(state.source):
+        if state.index >= state.source_len:
             break
-        ch = char_at(state.source, state.index)
+        ch = state.source[state.index]
         if is_whitespace(ch):
             start_index = state.index
             start_line = state.line
             start_column = state.column
             while True:
-                if state.index >= len(state.source):
+                if state.index >= state.source_len:
                     break
-                if not is_whitespace(char_at(state.source, state.index)):
+                if not is_whitespace(state.source[state.index]):
                     break
-                if char_at(state.source, state.index) == "\n":
+                if state.source[state.index] == "\n":
                     state.index += 1
                     state.line += 1
                     state.column = 1
@@ -57,64 +62,65 @@ def lex(source):
             tokens = append(tokens, Token(kind=TokenKind.Whitespace(), lexeme=lexeme, line=start_line, column=start_column))
             continue
         if ch == "/":
-            next = peek_next_char(state)
-            if next == "/":
-                start_index = state.index
-                start_line = state.line
-                start_column = state.column
-                state.index += 2
-                state.column += 2
-                comment_end = len(state.source)
-                scan_index = state.index
-                while True:
-                    if scan_index >= len(state.source):
-                        break
-                    scan_character = char_at(state.source, scan_index)
-                    if scan_character == "\n"  or  scan_character == "\r":
-                        comment_end = scan_index
-                        break
-                    scan_index += 1
-                lexeme = slice(state.source, start_index, comment_end)
-                consumed_columns = comment_end - state.index
-                state.index = comment_end
-                state.column += consumed_columns
-                tokens = append(tokens, Token(kind=TokenKind.Comment(), lexeme=lexeme, line=start_line, column=start_column))
-                continue
-            if next == "*":
-                start_index = state.index
-                start_line = state.line
-                start_column = state.column
-                state.index += 2
-                state.column += 2
-                while True:
-                    if state.index >= len(state.source):
-                        break
-                    if char_at(state.source, state.index) == "*"  and  peek_next_char(state) == "/":
-                        state.index += 2
-                        state.column += 2
-                        break
-                    if char_at(state.source, state.index) == "\n":
-                        state.index += 1
-                        state.line += 1
-                        state.column = 1
-                    else:
-                        state.index += 1
-                        state.column += 1
-                lexeme = slice(state.source, start_index, state.index)
-                tokens = append(tokens, Token(kind=TokenKind.Comment(), lexeme=lexeme, line=start_line, column=start_column))
-                continue
+            has_next = state.index + 1 < state.source_len
+            if has_next:
+                next = state.source[state.index + 1]
+                if next == "/":
+                    start_index = state.index
+                    start_line = state.line
+                    start_column = state.column
+                    state.index += 2
+                    state.column += 2
+                    comment_end = state.source_len
+                    scan_index = state.index
+                    while True:
+                        if scan_index >= state.source_len:
+                            break
+                        scan_character = state.source[scan_index]
+                        if scan_character == "\n"  or  scan_character == "\r":
+                            comment_end = scan_index
+                            break
+                        scan_index += 1
+                    lexeme = slice(state.source, start_index, comment_end)
+                    consumed_columns = comment_end - state.index
+                    state.index = comment_end
+                    state.column += consumed_columns
+                    tokens = append(tokens, Token(kind=TokenKind.Comment(), lexeme=lexeme, line=start_line, column=start_column))
+                    continue
+                if next == "*":
+                    start_index = state.index
+                    start_line = state.line
+                    start_column = state.column
+                    state.index += 2
+                    state.column += 2
+                    while True:
+                        if state.index >= state.source_len:
+                            break
+                        if state.source[state.index] == "*"  and  state.index + 1 < state.source_len  and  state.source[state.index + 1] == "/":
+                            state.index += 2
+                            state.column += 2
+                            break
+                        if state.source[state.index] == "\n":
+                            state.index += 1
+                            state.line += 1
+                            state.column = 1
+                        else:
+                            state.index += 1
+                            state.column += 1
+                    lexeme = slice(state.source, start_index, state.index)
+                    tokens = append(tokens, Token(kind=TokenKind.Comment(), lexeme=lexeme, line=start_line, column=start_column))
+                    continue
         if is_double_quote(ch):
             start_index = state.index
             start_line = state.line
             start_column = state.column
             state.index += 1
             state.column += 1
-            literal = ""
             escaped = False
             while True:
-                if state.index >= len(state.source):
+                if state.index >= state.source_len:
                     break
-                current = char_at(state.source, state.index)
+                current = state.source[state.index]
                 if not escaped  and  is_double_quote(current):
                     state.index += 1
                     state.column += 1
@@ -125,10 +131,7 @@ def lex(source):
                     state.column += 1
                     continue
                 if escaped:
-                    literal = literal + interpret_escape(current)
                     escaped = False
-                else:
-                    literal = literal + current
                 if current == "\n":
                     state.index += 1
                     state.line += 1
@@ -146,21 +149,21 @@ def lex(source):
             state.index += 1
             state.column += 1
             while True:
-                if state.index >= len(state.source):
+                if state.index >= state.source_len:
                     break
-                if not is_digit(char_at(state.source, state.index)):
+                if not is_digit(state.source[state.index]):
                     break
                 state.index += 1
                 state.column += 1
-            if state.index < len(state.source)  and  char_at(state.source, state.index) == ".":
-                next_is_digit = state.index + 1 < len(state.source)  and  is_digit(char_at(state.source, state.index + 1))
+            if state.index < state.source_len  and  state.source[state.index] == ".":
+                next_is_digit = state.index + 1 < state.source_len  and  is_digit(state.source[state.index + 1])
                 if next_is_digit:
                     state.index += 1
                     state.column += 1
                     while True:
-                        if state.index >= len(state.source):
+                        if state.index >= state.source_len:
                             break
-                        if not is_digit(char_at(state.source, state.index)):
+                        if not is_digit(state.source[state.index]):
                             break
                         state.index += 1
                         state.column += 1
@@ -174,9 +177,9 @@ def lex(source):
             state.index += 1
             state.column += 1
             while True:
-                if state.index >= len(state.source):
+                if state.index >= state.source_len:
                     break
-                if not is_identifier_part(char_at(state.source, state.index)):
+                if not is_identifier_part(state.source[state.index]):
                     break
                 state.index += 1
                 state.column += 1
@@ -188,10 +191,9 @@ def lex(source):
             continue
         start_line = state.line
         start_column = state.column
-        lexeme = ch
-        next_symbol = peek_next_char(state)
-        if next_symbol != "":
-            pair = ch + next_symbol
+        lexeme = slice(state.source, state.index, state.index + 1)
+        if state.index + 1 < state.source_len:
+            pair = slice(state.source, state.index, state.index + 2)
             if pair == "<="  or  pair == ">=":
                 lexeme = pair
                 state.index += 2
@@ -215,7 +217,7 @@ def lex(source):
     return tokens
 
 def is_whitespace(ch):
-    return ch == " "  or  ch == "\t"  or  ch == "\n"  or  ch == "\r"
+    return is_whitespace_char(ch)
 
 def is_identifier_start(ch):
     return is_letter(ch)  or  ch == "_"
@@ -224,43 +226,22 @@ def is_identifier_part(ch):
     return is_identifier_start(ch)  or  is_digit(ch)
 
 def is_letter(ch):
-    code = char_code(ch)
-    return code >= char_code("a")  and  code <= char_code("z")  or  code >= char_code("A")  and  code <= char_code("Z")
+    return is_alpha_char(ch)
 
 def is_digit(ch):
-    code = char_code(ch)
-    return code >= char_code("0")  and  code <= char_code("9")
+    return is_decimal_digit(ch)
 
 def is_double_quote(ch):
-    return char_code(ch) == 34
+    return ch == "\""
 
 def is_backslash(ch):
-    return char_code(ch) == 92
+    return ch == "\\"
 
 def slice(text, start, end):
-    return substring(text, start, end)
+    return substring_unchecked(text, start, end)
 
 def append(tokens, token):
     return (tokens) + ([token])
-
-def peek_next_char(state):
-    next_index = state.index + 1
-    if next_index >= len(state.source):
-        return ""
-    return char_at(state.source, next_index)
-
-def interpret_escape(ch):
-    if ch == "n":
-        return "\n"
-    if ch == "t":
-        return "\t"
-    if ch == "r":
-        return "\r"
-    if is_double_quote(ch):
-        return "\""
-    if is_backslash(ch):
-        return "\\"
-    return ch
 
 def is_two_char_symbol(value):
     if value == "->":

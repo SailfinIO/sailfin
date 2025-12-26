@@ -18,6 +18,10 @@ logExecution = runtime.logExecution
 array_map = runtime.array_map
 array_filter = runtime.array_filter
 array_reduce = runtime.array_reduce
+substring_unchecked = runtime.substring_unchecked
+is_decimal_digit = runtime.is_decimal_digit
+is_whitespace_char = runtime.is_whitespace_char
+is_alpha_char = runtime.is_alpha_char
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
@@ -183,6 +187,10 @@ def emit_runtime_aliases(builder):
     current = builder_emit(current, "array_map = runtime.array_map")
     current = builder_emit(current, "array_filter = runtime.array_filter")
     current = builder_emit(current, "array_reduce = runtime.array_reduce")
+    current = builder_emit(current, "substring_unchecked = runtime.substring_unchecked")
+    current = builder_emit(current, "is_decimal_digit = runtime.is_decimal_digit")
+    current = builder_emit(current, "is_whitespace_char = runtime.is_whitespace_char")
+    current = builder_emit(current, "is_alpha_char = runtime.is_alpha_char")
     current = builder_emit(current, "globals()['t' + 'rue'] = True")
     current = builder_emit(current, "globals()['f' + 'alse'] = False")
     return current

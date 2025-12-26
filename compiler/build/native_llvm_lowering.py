@@ -18,6 +18,10 @@ logExecution = runtime.logExecution
 array_map = runtime.array_map
 array_filter = runtime.array_filter
 array_reduce = runtime.array_reduce
+substring_unchecked = runtime.substring_unchecked
+is_decimal_digit = runtime.is_decimal_digit
+is_whitespace_char = runtime.is_whitespace_char
+is_alpha_char = runtime.is_alpha_char
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
@@ -3126,6 +3130,7 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_array_filter_fn", symbol="sailfin_runtime_array_filter", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_array_reduce_fn", symbol="sailfin_runtime_array_reduce", return_type="i8*", parameter_types=["i8*", "i8*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="substring", symbol="sailfin_runtime_substring", return_type="i8*", parameter_types=["i8*", "i64", "i64"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="substring_unchecked", symbol="sailfin_runtime_substring_unchecked", return_type="i8*", parameter_types=["i8*", "i64", "i64"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="len(string)", symbol="sailfin_runtime_string_length", return_type="i64", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="string.concat", symbol="sailfin_runtime_string_concat", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="number.to_string", symbol="sailfin_runtime_number_to_string", return_type="i8*", parameter_types=["double"], effects=[]))

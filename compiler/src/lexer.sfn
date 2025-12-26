@@ -6,18 +6,20 @@
 // parser can decide what to ignore.
 
 import { Token, TokenKind, eof_token } from "./token";
-import { substring, char_code, char_at } from "./string_utils";
 
 struct LexerState {
     source -> string;
+    source_len -> number;
     index -> number;
     line -> number;
     column -> number;
 }
 
 fn lex(source -> string) -> Token[] {
+    let length = source.length;
     let state -> LexerState = LexerState {
         source: source,
+        source_len: length,
         index: 0,
         line: 1,
         column: 1,
@@ -26,24 +28,24 @@ fn lex(source -> string) -> Token[] {
     let tokens -> Token[] = [];
 
     loop {
-        if state.index >= state.source.length {
+        if state.index >= state.source_len {
             break;
         }
 
-        let ch = char_at(state.source, state.index);
+        let ch = state.source[state.index];
 
         if is_whitespace(ch) {
             let start_index = state.index;
             let start_line = state.line;
             let start_column = state.column;
             loop {
-                if state.index >= state.source.length {
+                if state.index >= state.source_len {
                     break;
                 }
-                if !is_whitespace(char_at(state.source, state.index)) {
+                if !is_whitespace(state.source[state.index]) {
                     break;
                 }
-                if char_at(state.source, state.index) == "\n" {
+                if state.source[state.index] == "\n" {
                     state.index += 1;
                     state.line += 1;
                     state.column = 1;
@@ -63,8 +65,10 @@ fn lex(source -> string) -> Token[] {
         }
 
         if ch == "/" {
-            let next = peek_next_char(state);
-            if next == "/" {
+            let has_next = state.index + 1 < state.source_len;
+            if has_next {
+                let next = state.source[state.index + 1];
+                if next == "/" {
                 let start_index = state.index;
                 let start_line = state.line;
                 let start_column = state.column;
@@ -72,13 +76,13 @@ fn lex(source -> string) -> Token[] {
                 state.index += 2;
                 state.column += 2;
 
-                let mut comment_end -> number = state.source.length;
+                let mut comment_end -> number = state.source_len;
                 let mut scan_index -> number = state.index;
                 loop {
-                    if scan_index >= state.source.length {
+                    if scan_index >= state.source_len {
                         break;
                     }
-                    let scan_character = char_at(state.source, scan_index);
+                    let scan_character = state.source[scan_index];
                     if scan_character == "\n" || scan_character == "\r" {
                         comment_end = scan_index;
                         break;
@@ -97,8 +101,8 @@ fn lex(source -> string) -> Token[] {
                     column: start_column,
                 });
                 continue;
-            }
-            if next == "*" {
+                }
+                if next == "*" {
                 let start_index = state.index;
                 let start_line = state.line;
                 let start_column = state.column;
@@ -107,15 +111,15 @@ fn lex(source -> string) -> Token[] {
                 state.column += 2;
 
                 loop {
-                    if state.index >= state.source.length {
+                    if state.index >= state.source_len {
                         break;
                     }
-                    if char_at(state.source, state.index) == "*" && peek_next_char(state) == "/" {
+                    if state.source[state.index] == "*" && state.index + 1 < state.source_len && state.source[state.index + 1] == "/" {
                         state.index += 2;
                         state.column += 2;
                         break;
                     }
-                    if char_at(state.source, state.index) == "\n" {
+                    if state.source[state.index] == "\n" {
                         state.index += 1;
                         state.line += 1;
                         state.column = 1;
@@ -133,6 +137,7 @@ fn lex(source -> string) -> Token[] {
                     column: start_column,
                 });
                 continue;
+                }
             }
         }
 
@@ -144,14 +149,16 @@ fn lex(source -> string) -> Token[] {
             state.index += 1;
             state.column += 1;
 
-            let literal -> string = "";
+            // Note: we only need to advance to the closing quote.
+            // The token stores the raw lexeme slice; we do not build an
+            // unescaped string here.
             let escaped -> boolean = false;
 
             loop {
-                if state.index >= state.source.length {
+                if state.index >= state.source_len {
                     break;
                 }
-                let current = char_at(state.source, state.index);
+                let current = state.source[state.index];
                 if !escaped && is_double_quote(current) {
                     state.index += 1;
                     state.column += 1;
@@ -164,10 +171,7 @@ fn lex(source -> string) -> Token[] {
                     continue;
                 }
                 if escaped {
-                    literal = literal + interpret_escape(current);
                     escaped = false;
-                } else {
-                    literal = literal + current;
                 }
 
                 if current == "\n" {
@@ -199,26 +203,26 @@ fn lex(source -> string) -> Token[] {
             state.column += 1;
 
             loop {
-                if state.index >= state.source.length {
+                if state.index >= state.source_len {
                     break;
                 }
-                if !is_digit(char_at(state.source, state.index)) {
+                if !is_digit(state.source[state.index]) {
                     break;
                 }
                 state.index += 1;
                 state.column += 1;
             }
 
-            if state.index < state.source.length && char_at(state.source, state.index) == "." {
-                let next_is_digit = state.index + 1 < state.source.length && is_digit(char_at(state.source, state.index + 1));
+            if state.index < state.source_len && state.source[state.index] == "." {
+                let next_is_digit = state.index + 1 < state.source_len && is_digit(state.source[state.index + 1]);
                 if next_is_digit {
                     state.index += 1;
                     state.column += 1;
                     loop {
-                        if state.index >= state.source.length {
+                        if state.index >= state.source_len {
                             break;
                         }
-                        if !is_digit(char_at(state.source, state.index)) {
+                        if !is_digit(state.source[state.index]) {
                             break;
                         }
                         state.index += 1;
@@ -244,10 +248,10 @@ fn lex(source -> string) -> Token[] {
             state.index += 1;
             state.column += 1;
             loop {
-                if state.index >= state.source.length {
+                if state.index >= state.source_len {
                     break;
                 }
-                if !is_identifier_part(char_at(state.source, state.index)) {
+                if !is_identifier_part(state.source[state.index]) {
                     break;
                 }
                 state.index += 1;
@@ -274,10 +278,9 @@ fn lex(source -> string) -> Token[] {
 
         let start_line = state.line;
         let start_column = state.column;
-        let mut lexeme = ch;
-        let next_symbol = peek_next_char(state);
-        if next_symbol != "" {
-            let pair = ch + next_symbol;
+        let mut lexeme = slice(state.source, state.index, state.index + 1);
+        if state.index + 1 < state.source_len {
+            let pair = slice(state.source, state.index, state.index + 2);
             // Fast-path: keep <= / >= stable.
             if pair == "<=" || pair == ">=" {
                 lexeme = pair;
@@ -325,70 +328,40 @@ fn lex(source -> string) -> Token[] {
     return tokens;
 }
 
-fn is_whitespace(ch -> string) -> boolean {
-    return ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
+fn is_whitespace(ch -> i8) -> boolean {
+    return is_whitespace_char(ch);
 }
 
-fn is_identifier_start(ch -> string) -> boolean {
+fn is_identifier_start(ch -> i8) -> boolean {
     return is_letter(ch) || ch == "_";
 }
 
-fn is_identifier_part(ch -> string) -> boolean {
+fn is_identifier_part(ch -> i8) -> boolean {
     return is_identifier_start(ch) || is_digit(ch);
 }
 
-fn is_letter(ch -> string) -> boolean {
-    let code = char_code(ch);
-    return (code >= char_code("a") && code <= char_code("z"))
-        || (code >= char_code("A") && code <= char_code("Z"));
+fn is_letter(ch -> i8) -> boolean {
+    return is_alpha_char(ch);
 }
 
-fn is_digit(ch -> string) -> boolean {
-    let code = char_code(ch);
-    return code >= char_code("0") && code <= char_code("9");
+fn is_digit(ch -> i8) -> boolean {
+    return is_decimal_digit(ch);
 }
 
-fn is_double_quote(ch -> string) -> boolean {
-    return char_code(ch) == 34;
+fn is_double_quote(ch -> i8) -> boolean {
+    return ch == "\"";
 }
 
-fn is_backslash(ch -> string) -> boolean {
-    return char_code(ch) == 92;
+fn is_backslash(ch -> i8) -> boolean {
+    return ch == "\\";
 }
 
 fn slice(text -> string, start -> number, end -> number) -> string {
-    return substring(text, start, end);
+    return substring_unchecked(text, start, end);
 }
 
 fn append(tokens -> Token[], token -> Token) -> Token[] {
     return tokens.concat([token]);
-}
-
-fn peek_next_char(state -> LexerState) -> string {
-    let next_index = state.index + 1;
-    if next_index >= state.source.length {
-        return "";
-    }
-    return char_at(state.source, next_index);
-}
-
-fn interpret_escape(ch -> string) -> string {
-    if ch == "n" {
-        return "\n";
-    }
-    if ch == "t" {
-        return "\t";
-    }
-    if ch == "r" {
-        return "\r";
-    }
-    if is_double_quote(ch) {
-        return "\"";
-    }
-    if is_backslash(ch) {
-        return "\\";
-    }
-    return ch;
 }
 
 fn is_two_char_symbol(value -> string) -> boolean {

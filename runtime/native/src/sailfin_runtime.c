@@ -582,6 +582,78 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
     return out;
 }
 
+char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end)
+{
+    if (!text)
+    {
+        char *out = (char *)malloc(1);
+        if (out)
+        {
+            out[0] = '\0';
+        }
+        return out;
+    }
+
+    // Preserve immediate-codepoint strings without dereferencing.
+    uint32_t codepoint = 0;
+    if (_is_immediate_codepoint_string(text, &codepoint))
+    {
+        unsigned char buf[5] = {0};
+        int64_t n = (int64_t)_utf8_encode(codepoint, buf);
+        if (start < 0)
+        {
+            start = 0;
+        }
+        if (end < start)
+        {
+            end = start;
+        }
+        if (start > n)
+        {
+            start = n;
+        }
+        if (end > n)
+        {
+            end = n;
+        }
+
+        int64_t length = end - start;
+        char *out = (char *)malloc((size_t)length + 1);
+        if (!out)
+        {
+            return NULL;
+        }
+        if (length > 0)
+        {
+            memcpy(out, buf + start, (size_t)length);
+        }
+        out[length] = '\0';
+        return out;
+    }
+
+    if (start < 0)
+    {
+        start = 0;
+    }
+    if (end < start)
+    {
+        end = start;
+    }
+
+    int64_t length = end - start;
+    char *out = (char *)malloc((size_t)length + 1);
+    if (!out)
+    {
+        return NULL;
+    }
+    if (length > 0)
+    {
+        memcpy(out, text + start, (size_t)length);
+    }
+    out[length] = '\0';
+    return out;
+}
+
 char *sailfin_runtime_string_concat(char *a, char *b)
 {
     if (!a)
@@ -829,6 +901,11 @@ bool sailfin_runtime_is_decimal_digit(int8_t ch)
 bool sailfin_runtime_is_whitespace_char(int8_t ch)
 {
     return (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r');
+}
+
+bool sailfin_runtime_is_alpha_char(int8_t ch)
+{
+    return ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'));
 }
 
 void sailfin_runtime_bounds_check(int64_t index, int64_t length)

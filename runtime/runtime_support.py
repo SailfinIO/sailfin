@@ -1062,6 +1062,37 @@ def substring(text: str, start: int, end: int) -> str:
     return text[start:end]
 
 
+# Stage1 (Python) bootstrap helpers. These mirror the stage2 runtime helpers and
+# are relied on by generated Python compiler artifacts.
+def substring_unchecked(text: str, start: int, end: int) -> str:
+    return text[start:end]
+
+
+def _as_single_char(value: object) -> str:
+    if isinstance(value, int):
+        return chr(value & 0xFF)
+    if isinstance(value, bytes):
+        return value[:1].decode("latin-1") if value else ""
+    if isinstance(value, str):
+        return value[:1]
+    return ""
+
+
+def is_decimal_digit(ch: object) -> bool:
+    c = _as_single_char(ch)
+    return bool(c) and ("0" <= c <= "9")
+
+
+def is_whitespace_char(ch: object) -> bool:
+    c = _as_single_char(ch)
+    return c in (" ", "\t", "\n", "\r")
+
+
+def is_alpha_char(ch: object) -> bool:
+    c = _as_single_char(ch)
+    return bool(c) and (("a" <= c <= "z") or ("A" <= c <= "Z"))
+
+
 def find_char(text: str, character: str, start: int = 0) -> int:
     if len(character) != 1:
         if character == "\\n":

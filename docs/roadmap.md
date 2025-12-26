@@ -20,25 +20,12 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
     - [x] Initial workflow scaffolds Stage2 bootstrap/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged LLVM artifacts via `tools/package_stage2.py`.
   - [x] Add a `release.yml` workflow that builds native Stage2 binaries on release publish (macOS arm64/x86_64, Linux x86_64) and uploads release assets.
   - [x] Wire the workflow into `semantic-release` so version bumps publish Stage2 binaries and changelog entries in one pass.
-  - [ ] Keep pytest-driven harnesses in CI while the Stage2 native test harness is rewritten; document the temporary dual-runtime strategy in `docs/status.md`.
 
 - [ ] Installer and distribution hardening
 
   - [x] Add a curl-able `install.sh` (repo root) that detects OS/arch, downloads the matching Stage2 binary, validates the archive, and installs to `/usr/local/bin` (with override support).
   - [ ] Publish signed checksums alongside release artifacts and add a CI job that runs the installer against staging builds.
   - [x] Update `README.md` and `docs/status.md` with the new install flow and installer defaults.
-
-- [ ] Stage1 sunset guardrails
-
-  - [ ] Add telemetry in CI to assert no release job invokes Stage1 binaries; fail the pipeline if Python codegen executes.
-  - [ ] Once guardrails stay green for two release cycles, remove remaining Stage1 workflows, archive docs to `Legacy/stage0/`, and update `docs/spec.md` + `docs/roadmap.md` to mark Stage1 deprecated.
-
-- [ ] CI gating and signals
-
-  - [ ] Add `.github/workflows/stage2-self-hosted.yml` that rebuilds the compiler with Stage2, runs the Stage2 smoke suite on every PR, and blocks merge on failure while Stage1 stays informational.
-  - [ ] Update `.github/workflows/test.yml` (or successor) to fan out Stage1 + Stage2 jobs during transition, promoting Stage2 to required once parity holds for two release cycles.
-  - [ ] Publish CI status badges in `README.md` that distinguish Stage2 self-hosting from legacy Stage1 coverage.
-  - [ ] Configure branch protection to require the Stage2 self-hosted job and release workflow before tagging versions.
 
 - [ ] Distribution packaging
 

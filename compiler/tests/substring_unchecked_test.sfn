@@ -1,0 +1,10 @@
+test "string: substring_unchecked returns expected slice" {
+    let text = "hello";
+    let result = substring_unchecked(text, 1, 4);
+    assert result == "ell";
+}
+
+test "string: substring_unchecked handles empty spans" {
+    let text = "hello";
+    assert substring_unchecked(text, 2, 2) == "";
+}

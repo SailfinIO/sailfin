@@ -181,6 +181,27 @@ void *sailfin_runtime_substring(SailfinString value, int64_t start, int64_t end)
     return string_from_span(data ? data + start : NULL, span);
 }
 
+void *sailfin_runtime_substring_unchecked(SailfinString value, int64_t start, int64_t end)
+{
+    if (start < 0)
+    {
+        start = 0;
+    }
+    if (end < start)
+    {
+        end = start;
+    }
+
+    const char *data = string_data(value);
+    int64_t span = end - start;
+    if (!data || span <= 0)
+    {
+        return alloc_string(0);
+    }
+
+    return string_from_span(data + start, span);
+}
+
 double sailfin_runtime_grapheme_count(SailfinString value)
 {
     return (double)string_length(value);
@@ -208,6 +229,11 @@ bool sailfin_runtime_is_decimal_digit(int8_t ch)
 bool sailfin_runtime_is_whitespace_char(int8_t ch)
 {
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
+}
+
+bool sailfin_runtime_is_alpha_char(int8_t ch)
+{
+    return ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'));
 }
 
 bool sailfin_runtime_is_number(SailfinString value)

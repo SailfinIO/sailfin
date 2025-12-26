@@ -7,6 +7,7 @@ let __version__ = "0.1.1-alpha.81";
 
 fn sailfin_stage2_version() -> string {
     // Avoid relying on module-top-level string initialization (not yet reliable
-    // in the self-hosted pipeline). Keep this literal in sync with __version__.
+    // in the self-hosted pipeline). This literal is synced automatically by CI
+    // (see .github/workflows/build.yml semantic-release step).
     return "0.1.1-alpha.80";
 }
