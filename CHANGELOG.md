@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.80 (2025-12-26)
+
+### Bug Fixes
+
+- Invallid llvm emission during testing
+  ([`cda8833`](https://github.com/SailfinIO/sailfin/commit/cda88331a0a034716659e1870ac434e02183f17f))
+
+
 ## v0.1.1-alpha.79 (2025-12-26)
 
 ### Bug Fixes
