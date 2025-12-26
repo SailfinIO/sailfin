@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.81 (2025-12-26)
+
+### Bug Fixes
+
+- Trigger semantic release
+  ([`94ba0bf`](https://github.com/SailfinIO/sailfin/commit/94ba0bfc0d95842f5c1e9c1f650641786af050ef))
+
+
 ## v0.1.1-alpha.80 (2025-12-26)
 
 ### Bug Fixes
