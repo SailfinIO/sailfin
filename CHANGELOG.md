@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.82 (2025-12-26)
+
+### Bug Fixes
+
+- Version check and work on compilation speed
+  ([`4772bfd`](https://github.com/SailfinIO/sailfin/commit/4772bfd79ee63f8579a6fb18e0bf55231f32f283))
+
+
 ## v0.1.1-alpha.81 (2025-12-26)
 
 ### Bug Fixes
