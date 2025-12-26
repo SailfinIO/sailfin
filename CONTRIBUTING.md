@@ -48,7 +48,11 @@ Please reference the updated documents in your pull request description.
 ## 4. Commit & Review Style
 
 - Use clear, atomic commits. Conventional prefixes (`feat(compiler):`, `fix(bootstrap):`)
-  are encouraged but not mandatory.
+  are encouraged.
+- Note: automated GitHub releases are driven by `python-semantic-release`, which relies on
+  Conventional Commit-style prefixes to decide whether to cut a new version. If you expect
+  a new prerelease (e.g., on the `alpha` branch), use a release-worthy prefix like `fix:`
+  or `feat:` in the commit subject.
 - Document how you validated the change (commands, tests, screenshots).
 - When behaviour shifts, include reproduction steps and link to the relevant
   roadmap/status entries.
@@ -84,4 +88,4 @@ For questions about design direction or roadmap priorities, start with
 `docs/status.md` and `docs/roadmap.md`. If additional context is required, open
 an issue referencing the relevant section or proposal.
 
-Welcome aboard, and thanks for advancing Sailfin! ***!
+Welcome aboard, and thanks for advancing Sailfin! \*\*\*!

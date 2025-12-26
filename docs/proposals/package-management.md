@@ -18,14 +18,14 @@ deterministic, AI-native projects.
 ### Installing Capsules
 
 ```bash
-sfn add sailfin/http
+sfn add sfn/http
 ```
 
-This fetches the `sailfin/http` capsule from the Sailfin registry and records it
+This fetches the `sfn/http` capsule from the Sailfin registry and records it
 in your `sail.toml` manifest. Multiple capsules can be added at once:
 
 ```bash
-sfn add sailfin/http sailfin/io sailfin/net
+sfn add sfn/http sfn/io sfn/net
 ```
 
 ### The `sail.toml` Manifest
