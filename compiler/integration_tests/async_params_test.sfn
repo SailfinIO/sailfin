@@ -1,0 +1,9 @@
+async fn add(x -> number, y -> number) -> number {
+    return x + y;
+}
+
+test "integration: async params" {
+    let fut = add(20, 22);
+    let out = await fut;
+    assert out == 42;
+}

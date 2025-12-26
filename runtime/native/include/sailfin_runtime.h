@@ -64,12 +64,15 @@ extern "C"
     typedef struct SailfinFutureString SailfinFutureString;
 
     SailfinFutureNumber *sailfin_runtime_spawn_number(double (*fn)(void));
+    SailfinFutureNumber *sailfin_runtime_spawn_number_ctx(double (*fn)(void *), void *ctx);
     double sailfin_runtime_await_number(SailfinFutureNumber *future);
 
     SailfinFutureVoid *sailfin_runtime_spawn_void(void (*fn)(void));
+    SailfinFutureVoid *sailfin_runtime_spawn_void_ctx(void (*fn)(void *), void *ctx);
     void sailfin_runtime_await_void(SailfinFutureVoid *future);
 
     SailfinFutureString *sailfin_runtime_spawn_string(char *(*fn)(void));
+    SailfinFutureString *sailfin_runtime_spawn_string_ctx(char *(*fn)(void *), void *ctx);
     char *sailfin_runtime_await_string(SailfinFutureString *future);
 
     char *sailfin_runtime_array_map(char *array, char *fn);

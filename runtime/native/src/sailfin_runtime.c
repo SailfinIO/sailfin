@@ -882,14 +882,24 @@ void sailfin_runtime_spawn(char *thunk, char *name)
 struct SailfinFutureNumber
 {
     pthread_t thread;
-    double (*fn)(void);
+    double (*fn0)(void);
+    double (*fn1)(void *);
+    void *ctx;
+    bool has_ctx;
     double result;
 };
 
 static void *sailfin_future_number_entry(void *arg)
 {
     struct SailfinFutureNumber *future = (struct SailfinFutureNumber *)arg;
-    future->result = future->fn();
+    if (future->has_ctx)
+    {
+        future->result = future->fn1 ? future->fn1(future->ctx) : 0.0;
+    }
+    else
+    {
+        future->result = future->fn0 ? future->fn0() : 0.0;
+    }
     return NULL;
 }
 
@@ -904,7 +914,30 @@ struct SailfinFutureNumber *sailfin_runtime_spawn_number(double (*fn)(void))
     {
         return NULL;
     }
-    future->fn = fn;
+    future->fn0 = fn;
+    future->has_ctx = false;
+    if (pthread_create(&future->thread, NULL, sailfin_future_number_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+struct SailfinFutureNumber *sailfin_runtime_spawn_number_ctx(double (*fn)(void *), void *ctx)
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureNumber *future = (struct SailfinFutureNumber *)calloc(1, sizeof(struct SailfinFutureNumber));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn1 = fn;
+    future->ctx = ctx;
+    future->has_ctx = true;
     if (pthread_create(&future->thread, NULL, sailfin_future_number_entry, future) != 0)
     {
         free(future);
@@ -928,13 +961,29 @@ double sailfin_runtime_await_number(struct SailfinFutureNumber *future)
 struct SailfinFutureVoid
 {
     pthread_t thread;
-    void (*fn)(void);
+    void (*fn0)(void);
+    void (*fn1)(void *);
+    void *ctx;
+    bool has_ctx;
 };
 
 static void *sailfin_future_void_entry(void *arg)
 {
     struct SailfinFutureVoid *future = (struct SailfinFutureVoid *)arg;
-    future->fn();
+    if (future->has_ctx)
+    {
+        if (future->fn1)
+        {
+            future->fn1(future->ctx);
+        }
+    }
+    else
+    {
+        if (future->fn0)
+        {
+            future->fn0();
+        }
+    }
     return NULL;
 }
 
@@ -949,7 +998,30 @@ struct SailfinFutureVoid *sailfin_runtime_spawn_void(void (*fn)(void))
     {
         return NULL;
     }
-    future->fn = fn;
+    future->fn0 = fn;
+    future->has_ctx = false;
+    if (pthread_create(&future->thread, NULL, sailfin_future_void_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+struct SailfinFutureVoid *sailfin_runtime_spawn_void_ctx(void (*fn)(void *), void *ctx)
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureVoid *future = (struct SailfinFutureVoid *)calloc(1, sizeof(struct SailfinFutureVoid));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn1 = fn;
+    future->ctx = ctx;
+    future->has_ctx = true;
     if (pthread_create(&future->thread, NULL, sailfin_future_void_entry, future) != 0)
     {
         free(future);
@@ -971,14 +1043,24 @@ void sailfin_runtime_await_void(struct SailfinFutureVoid *future)
 struct SailfinFutureString
 {
     pthread_t thread;
-    char *(*fn)(void);
+    char *(*fn0)(void);
+    char *(*fn1)(void *);
+    void *ctx;
+    bool has_ctx;
     char *result;
 };
 
 static void *sailfin_future_string_entry(void *arg)
 {
     struct SailfinFutureString *future = (struct SailfinFutureString *)arg;
-    future->result = future->fn();
+    if (future->has_ctx)
+    {
+        future->result = future->fn1 ? future->fn1(future->ctx) : NULL;
+    }
+    else
+    {
+        future->result = future->fn0 ? future->fn0() : NULL;
+    }
     return NULL;
 }
 
@@ -993,7 +1075,30 @@ struct SailfinFutureString *sailfin_runtime_spawn_string(char *(*fn)(void))
     {
         return NULL;
     }
-    future->fn = fn;
+    future->fn0 = fn;
+    future->has_ctx = false;
+    if (pthread_create(&future->thread, NULL, sailfin_future_string_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+struct SailfinFutureString *sailfin_runtime_spawn_string_ctx(char *(*fn)(void *), void *ctx)
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureString *future = (struct SailfinFutureString *)calloc(1, sizeof(struct SailfinFutureString));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn1 = fn;
+    future->ctx = ctx;
+    future->has_ctx = true;
     if (pthread_create(&future->thread, NULL, sailfin_future_string_entry, future) != 0)
     {
         free(future);

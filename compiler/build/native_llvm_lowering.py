@@ -1348,7 +1348,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if len(interface_type_lines) > 0:
         lines = (lines) + (interface_type_lines)
         lines = append_string(lines, "")
-    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
+    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
     vtable_type_lines = render_vtable_type_definitions(type_context)
     if len(vtable_type_lines) > 0:
         lines = (lines) + (vtable_type_lines)
@@ -3395,14 +3395,9 @@ def render_interface_parameters(parameters):
 def emit_function(function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call):
     diagnostics = []
     if function.is_async  and  not function.is_extern  and  function.name != "main":
-        if len(function.parameters) > 0:
-            diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` with parameters is not supported yet")
-            empty_constants = empty_string_constant_set()
-            return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[], string_constants=empty_constants)
         future_return = future_pointer_type_for_return_type(function.return_type)
-        spawn_symbol = spawn_symbol_for_return_type(function.return_type)
         impl_return = map_return_type(context, function.return_type)
-        if len(future_return) == 0  or  len(spawn_symbol) == 0  or  len(impl_return) == 0:
+        if len(future_return) == 0  or  len(impl_return) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` has unsupported return type `" + function.return_type + "`")
             empty_constants = empty_string_constant_set()
             return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[], string_constants=empty_constants)
@@ -3422,18 +3417,118 @@ module_init_symbol,
 needs_module_init_call
 )
         diagnostics = (diagnostics) + (impl_lowered.diagnostics)
+        preparation = prepare_parameters(function, context)
+        diagnostics = (diagnostics) + (preparation.diagnostics)
         wrapper_lines = []
         linkage = ""
         if should_internalize_function(function, entry_points, exported_symbols, imported_functions):
             linkage = "internal "
         wrapper_symbol = sanitize_symbol(function.name)
         impl_symbol = sanitize_symbol(impl_name)
-        wrapper_lines = append_string(wrapper_lines, "define " + linkage + future_return + " @" + wrapper_symbol + "() {")
-        wrapper_lines = append_string(wrapper_lines, "block.entry:")
-        t0 = format_temp_name(0)
-        wrapper_lines = append_string(wrapper_lines, "  " + t0 + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " ()* @" + impl_symbol + ")")
-        wrapper_lines = append_string(wrapper_lines, "  ret " + future_return + " " + t0)
-        wrapper_lines = append_string(wrapper_lines, "}")
+        signature = join_with_separator(preparation.signature, ", ")
+        if len(signature) == 0:
+            signature = ""
+        if len(function.parameters) == 0:
+            spawn_symbol = spawn_symbol_for_return_type(function.return_type)
+            if len(spawn_symbol) == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` has unsupported return type `" + function.return_type + "`")
+                empty_constants = empty_string_constant_set()
+                return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[], string_constants=empty_constants)
+            wrapper_lines = append_string(wrapper_lines, "define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {")
+            wrapper_lines = append_string(wrapper_lines, "block.entry:")
+            t0 = format_temp_name(0)
+            wrapper_lines = append_string(wrapper_lines, "  " + t0 + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " ()* @" + impl_symbol + ")")
+            wrapper_lines = append_string(wrapper_lines, "  ret " + future_return + " " + t0)
+            wrapper_lines = append_string(wrapper_lines, "}")
+        else:
+            spawn_symbol = spawn_ctx_symbol_for_return_type(function.return_type)
+            if len(spawn_symbol) == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: async fn `" + function.name + "` has unsupported return type `" + function.return_type + "`")
+                empty_constants = empty_string_constant_set()
+                return LoweredLLVMFunction(lines=[], diagnostics=diagnostics, lifetime_regions=[], string_constants=empty_constants)
+            ctx_type = "%SailfinAsyncCtx." + wrapper_symbol
+            ctx_ptr_type = ctx_type + "*"
+            trampoline_symbol = wrapper_symbol + "__async_trampoline"
+            param_llvm_types = []
+            param_index = 0
+            while True:
+                if param_index >= len(preparation.bindings):
+                    break
+                param_llvm_types = append_string(param_llvm_types, preparation.bindings[param_index].llvm_type)
+                param_index += 1
+            wrapper_lines = append_string(wrapper_lines, ctx_type + " = type()")
+            wrapper_lines = append_string(wrapper_lines, "")
+            wrapper_lines = append_string(wrapper_lines, "define internal " + impl_return + " @" + trampoline_symbol + "(i8* %ctx_raw) {")
+            wrapper_lines = append_string(wrapper_lines, "block.entry:")
+            tramp_temp = 0
+            tramp_ctx = format_temp_name(tramp_temp)
+            tramp_temp += 1
+            wrapper_lines = append_string(wrapper_lines, "  " + tramp_ctx + " = bitcast i8* %ctx_raw to " + ctx_ptr_type)
+            loaded_args = []
+            load_index = 0
+            while True:
+                if load_index >= len(preparation.bindings):
+                    break
+                binding = preparation.bindings[load_index]
+                field_ptr = format_temp_name(tramp_temp)
+                tramp_temp += 1
+                wrapper_lines = append_string(wrapper_lines, "  " + field_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " " + tramp_ctx + ", i32 0, i32 " + number_to_string(load_index))
+                loaded = format_temp_name(tramp_temp)
+                tramp_temp += 1
+                wrapper_lines = append_string(wrapper_lines, "  " + loaded + " = load " + binding.llvm_type + ", " + binding.llvm_type + "* " + field_ptr)
+                loaded_args = append_llvm_operand(loaded_args, LLVMOperand(llvm_type=binding.llvm_type, value=loaded))
+                load_index += 1
+            call_args = ""
+            arg_texts = []
+            arg_i = 0
+            while True:
+                if arg_i >= len(loaded_args):
+                    break
+                arg_texts = append_string(arg_texts, loaded_args[arg_i].llvm_type + " " + loaded_args[arg_i].value)
+                arg_i += 1
+            call_args = join_with_separator(arg_texts, ", ")
+            if impl_return == "void":
+                wrapper_lines = append_string(wrapper_lines, "  call void @" + impl_symbol + "(" + call_args + ")")
+                wrapper_lines = append_string(wrapper_lines, "  call void @free(i8* %ctx_raw)")
+                wrapper_lines = append_string(wrapper_lines, "  ret void")
+            else:
+                tramp_result = format_temp_name(tramp_temp)
+                tramp_temp += 1
+                wrapper_lines = append_string(wrapper_lines, "  " + tramp_result + " = call " + impl_return + " @" + impl_symbol + "(" + call_args + ")")
+                wrapper_lines = append_string(wrapper_lines, "  call void @free(i8* %ctx_raw)")
+                wrapper_lines = append_string(wrapper_lines, "  ret " + impl_return + " " + tramp_result)
+            wrapper_lines = append_string(wrapper_lines, "}")
+            wrapper_lines = append_string(wrapper_lines, "")
+            wrapper_lines = append_string(wrapper_lines, "define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {")
+            wrapper_lines = append_string(wrapper_lines, "block.entry:")
+            wrap_temp = 0
+            size_ptr = format_temp_name(wrap_temp)
+            wrap_temp += 1
+            wrapper_lines = append_string(wrapper_lines, "  " + size_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " null, i32 1")
+            size_i64 = format_temp_name(wrap_temp)
+            wrap_temp += 1
+            wrapper_lines = append_string(wrapper_lines, "  " + size_i64 + " = ptrtoint " + ctx_ptr_type + " " + size_ptr + " to i64")
+            ctx_raw = format_temp_name(wrap_temp)
+            wrap_temp += 1
+            wrapper_lines = append_string(wrapper_lines, "  " + ctx_raw + " = call noalias i8* @malloc(i64 " + size_i64 + ")")
+            ctx_typed = format_temp_name(wrap_temp)
+            wrap_temp += 1
+            wrapper_lines = append_string(wrapper_lines, "  " + ctx_typed + " = bitcast i8* " + ctx_raw + " to " + ctx_ptr_type)
+            store_index = 0
+            while True:
+                if store_index >= len(preparation.bindings):
+                    break
+                binding = preparation.bindings[store_index]
+                field_ptr = format_temp_name(wrap_temp)
+                wrap_temp += 1
+                wrapper_lines = append_string(wrapper_lines, "  " + field_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " " + ctx_typed + ", i32 0, i32 " + number_to_string(store_index))
+                wrapper_lines = append_string(wrapper_lines, "  store " + binding.llvm_type + " " + binding.llvm_name + ", " + binding.llvm_type + "* " + field_ptr)
+                store_index += 1
+            out_future = format_temp_name(wrap_temp)
+            wrap_temp += 1
+            wrapper_lines = append_string(wrapper_lines, "  " + out_future + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " (i8*)* @" + trampoline_symbol + ", i8* " + ctx_raw + ")")
+            wrapper_lines = append_string(wrapper_lines, "  ret " + future_return + " " + out_future)
+            wrapper_lines = append_string(wrapper_lines, "}")
         merged_lines = wrapper_lines
         if len(impl_lowered.lines) > 0:
             with_spacer = (impl_lowered.lines) + ([""])
@@ -7207,6 +7302,17 @@ def spawn_symbol_for_return_type(return_type):
         return "sailfin_runtime_spawn_string"
     return ""
 
+def spawn_ctx_symbol_for_return_type(return_type):
+    trimmed = trim_text(return_type)
+    if len(trimmed) == 0  or  trimmed == "void":
+        return "sailfin_runtime_spawn_void_ctx"
+    normalized = unwrap_move_wrapper(trimmed)
+    if normalized == "number":
+        return "sailfin_runtime_spawn_number_ctx"
+    if normalized == "string":
+        return "sailfin_runtime_spawn_string_ctx"
+    return ""
+
 def await_symbol_for_future_pointer_type(future_ptr_type):
     if future_ptr_type == "%SailfinFutureNumber*":
         return "sailfin_runtime_await_number"
@@ -8403,15 +8509,13 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         else:
             if function_entry != None:
                 if function_entry.is_async:
-                    if len(function_entry.parameters) > 0:
-                        diagnostics = append_string(diagnostics, "llvm lowering: async function `" + trimmed_target + "` parameters not supported yet")
                     future_return = future_pointer_type_for_return_type(function_entry.return_type)
                     if len(future_return) == 0:
                         diagnostics = append_string(diagnostics, "llvm lowering: async function `" + trimmed_target + "` has unsupported return type `" + function_entry.return_type + "`")
                         llvm_return = "i8*"
                     else:
                         llvm_return = future_return
-                    expected_params = []
+                    expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target)
                 else:
                     llvm_return = map_return_type(context, function_entry.return_type)
                     if len(llvm_return) == 0:
