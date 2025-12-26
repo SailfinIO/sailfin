@@ -1440,14 +1440,15 @@ def ensure_intrinsic_declarations(lines):
         if index >= len(lines):
             break
         line = lines[index]
-        if index_of(line, "@llvm.round.f64") >= 0:
+        if index_of(line, "call double @round(") >= 0:
             uses_round = True
-        if index_of(line, "declare double @llvm.round.f64(double)") >= 0:
+        trimmed = trim_text(line)
+        if starts_with(trimmed, "declare double @round(double)"):
             has_round_decl = True
         index += 1
     if not uses_round  or  has_round_decl:
         return lines
-    return insert_string_at(lines, 1, "declare double @llvm.round.f64(double)")
+    return insert_string_at(lines, 1, "declare double @round(double)")
 
 def insert_string_at(values, insert_index, value):
     out = []
@@ -10426,7 +10427,7 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
         if operand.llvm_type == "double":
             round_temp = format_temp_name(temp_index)
             convert_temp = format_temp_name(temp_index + 1)
-            current_lines = append_string(current_lines, "  " + round_temp + " = call double @llvm.round.f64(double " + operand.value + ")")
+            current_lines = append_string(current_lines, "  " + round_temp + " = call double @round(double " + operand.value + ")")
             current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i64")
             coerced = LLVMOperand(llvm_type="i64", value=convert_temp)
             return CoercionResult(lines=current_lines, temp_index=temp_index + 2, operand=coerced, diagnostics=diagnostics)
@@ -10464,7 +10465,7 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
         if operand.llvm_type == "double":
             round_temp = format_temp_name(temp_index)
             convert_temp = format_temp_name(temp_index + 1)
-            current_lines = append_string(current_lines, "  " + round_temp + " = call double @llvm.round.f64(double " + operand.value + ")")
+            current_lines = append_string(current_lines, "  " + round_temp + " = call double @round(double " + operand.value + ")")
             current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i32")
             coerced = LLVMOperand(llvm_type="i32", value=convert_temp)
             return CoercionResult(lines=current_lines, temp_index=temp_index + 2, operand=coerced, diagnostics=diagnostics)
@@ -10487,7 +10488,7 @@ def coerce_operand_to_type(operand, target_type, temp_index, lines):
         if operand.llvm_type == "double":
             round_temp = format_temp_name(temp_index)
             convert_temp = format_temp_name(temp_index + 1)
-            current_lines = append_string(current_lines, "  " + round_temp + " = call double @llvm.round.f64(double " + operand.value + ")")
+            current_lines = append_string(current_lines, "  " + round_temp + " = call double @round(double " + operand.value + ")")
             current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i8")
             coerced = LLVMOperand(llvm_type="i8", value=convert_temp)
             return CoercionResult(lines=current_lines, temp_index=temp_index + 2, operand=coerced, diagnostics=diagnostics)

@@ -1462,6 +1462,9 @@ fn module_source_filename(module_name -> string) -> string {
 
 fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
     // Some toolchains reject calls to intrinsics without an explicit declare.
+    // Use libm round() instead of @llvm.round.f64 for cross-platform compatibility.
+    // Match "call double @round" to detect uses (avoids matching string constants).
+    // Match lines starting with "declare" to find real declarations.
     let mut uses_round -> boolean = false;
     let mut has_round_decl -> boolean = false;
     let mut index -> number = 0;
@@ -1470,10 +1473,11 @@ fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
             break;
         }
         let line = lines[index];
-        if index_of(line, "@llvm.round.f64") >= 0 {
+        if index_of(line, "call double @round(") >= 0 {
             uses_round = true;
         }
-        if index_of(line, "declare double @llvm.round.f64(double)") >= 0 {
+        let trimmed = trim_text(line);
+        if starts_with(trimmed, "declare double @round(double)") {
             has_round_decl = true;
         }
         index += 1;
@@ -1484,7 +1488,7 @@ fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
     }
 
     // Insert right after source_filename, preserving the existing blank line.
-    return insert_string_at(lines, 1, "declare double @llvm.round.f64(double)");
+    return insert_string_at(lines, 1, "declare double @round(double)");
 }
 
 fn insert_string_at(values -> string[], insert_index -> number, value -> string) -> string[] {
@@ -15167,7 +15171,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             // floating-point accumulation errors from loop counters (e.g., 1000.00000001 → 1000.0)
             let round_temp = format_temp_name(temp_index);
             let convert_temp = format_temp_name(temp_index + 1);
-            current_lines = append_string(current_lines, "  " + round_temp + " = call double @llvm.round.f64(double " + operand.value + ")");
+            current_lines = append_string(current_lines, "  " + round_temp + " = call double @round(double " + operand.value + ")");
             current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i64");
             let coerced = LLVMOperand { llvm_type: "i64", value: convert_temp };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
@@ -15214,7 +15218,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
         if operand.llvm_type == "double" {
             let round_temp = format_temp_name(temp_index);
             let convert_temp = format_temp_name(temp_index + 1);
-            current_lines = append_string(current_lines, "  " + round_temp + " = call double @llvm.round.f64(double " + operand.value + ")");
+            current_lines = append_string(current_lines, "  " + round_temp + " = call double @round(double " + operand.value + ")");
             current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i32");
             let coerced = LLVMOperand { llvm_type: "i32", value: convert_temp };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
@@ -15243,7 +15247,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
         if operand.llvm_type == "double" {
             let round_temp = format_temp_name(temp_index);
             let convert_temp = format_temp_name(temp_index + 1);
-            current_lines = append_string(current_lines, "  " + round_temp + " = call double @llvm.round.f64(double " + operand.value + ")");
+            current_lines = append_string(current_lines, "  " + round_temp + " = call double @round(double " + operand.value + ")");
             current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i8");
             let coerced = LLVMOperand { llvm_type: "i8", value: convert_temp };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };

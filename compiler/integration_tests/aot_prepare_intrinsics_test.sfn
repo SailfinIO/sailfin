@@ -36,12 +36,12 @@ fn _contains(haystack -> string, needle -> string) -> boolean {
     return _index_of(haystack, needle) >= 0;
 }
 
-test "integration: aot_prepare injects llvm.round.f64 declare" {
+test "integration: aot_prepare injects round declare" {
     // Multi-line concatenation exercises native-text instruction gathering.
     let ir = "source_filename = \"m1.ll\"\n\n" +
         "define double @foo(double %x) {\n" +
         "entry:\n" +
-        "  %y = call double @llvm.round.f64(double %x)\n" +
+        "  %y = call double @round(double %x)\n" +
         "  ret double %y\n" +
         "}\n";
 
@@ -51,9 +51,9 @@ test "integration: aot_prepare injects llvm.round.f64 declare" {
     }
     let rewritten = out[0];
 
-    let decl = "declare double @llvm.round.f64(double)";
+    let decl = "declare double @round(double)";
     if !_contains(rewritten, decl) {
-        runtime_raise_value_error_fn("missing llvm.round.f64 decl");
+        runtime_raise_value_error_fn("missing round decl");
     }
 
     // Insert after the source_filename line.

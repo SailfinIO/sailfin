@@ -74,8 +74,8 @@ fn _aot_ensure_intrinsic_decls(ir -> string) -> string {
 	// Mirror Legacy/tools/prepare_stage2_aot_text.py behaviour.
 	// Important: do not match inside LLVM IR string literals (c"...").
 
-	let round_marker = "@llvm.round.f64";
-	let round_decl = "declare double @llvm.round.f64(double)";
+	let round_marker = "@round(double";
+	let round_decl = "declare double @round(double)";
 	if _aot_find_substring_outside_quotes(ir, round_marker) < 0 {
 		return ir;
 	}

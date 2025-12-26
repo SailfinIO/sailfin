@@ -52,11 +52,11 @@ test "string: multiline + continuation" {
     let ir = "source_filename = \"m1.ll\"\n\n" +
         "define double @foo(double %x) {\n" +
         "entry:\n" +
-        "  %y = call double @llvm.round.f64(double %x)\n" +
+        "  %y = call double @round(double %x)\n" +
         "  ret double %y\n" +
         "}\n";
 
-    assert _contains(ir, "@llvm.round.f64");
+    assert _contains(ir, "@round");
     assert _contains(ir, "source_filename");
     assert ir[0] == "s";
 }
