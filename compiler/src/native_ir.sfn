@@ -892,13 +892,14 @@ fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGa
     }
 
     let mut state = update_instruction_depth_state(initial_instruction_depth_state(), first_line);
-    if !instruction_requires_continuation(state) {
+    if !instruction_requires_continuation(state) && !instruction_line_requires_operator_continuation(first_line) {
         return InstructionGatherResult { text: first_line, lines_consumed: 0 };
     }
 
     let mut combined -> string = first_line;
     let mut consumed -> number = 0;
     let mut index = start_index + 1;
+    let mut last_nonempty = first_line;
     loop {
         if index >= lines.length {
             break;
@@ -910,15 +911,46 @@ fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGa
         } else {
             combined = combined + "\n" + continuation;
             state = update_instruction_depth_state(state, continuation);
+            last_nonempty = continuation;
         }
         consumed += 1;
         index += 1;
-        if !instruction_requires_continuation(state) {
+        if !instruction_requires_continuation(state) && !instruction_line_requires_operator_continuation(last_nonempty) {
             break;
         }
     }
     let normalized = trim_text(combined);
     return InstructionGatherResult { text: normalized, lines_consumed: consumed };
+}
+
+fn instruction_line_requires_operator_continuation(line -> string) -> boolean {
+    // The native text emitter may split long expressions across multiple lines
+    // using a trailing operator (most commonly `+`) rather than parentheses.
+    // If we don't gather these lines, downstream lowering sees only the first
+    // line (often ending in `+`) and can silently miscompile.
+    let trimmed = trim_text(line);
+    if trimmed.length == 0 {
+        return false;
+    }
+    // Find last non-whitespace character.
+    let mut index = trimmed.length - 1;
+    loop {
+        if index < 0 {
+            return false;
+        }
+        let ch = trimmed[index];
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            index -= 1;
+            continue;
+        }
+        // Only enable the smallest, known-safe set.
+        if ch == "+" {
+            return true;
+        }
+        return false;
+    }
+
+    return false;
 }
 
 fn instruction_supports_multiline(line -> string) -> boolean {

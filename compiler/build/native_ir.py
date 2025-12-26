@@ -808,11 +808,12 @@ def gather_instruction(lines, start_index):
     if not instruction_supports_multiline(first_line):
         return InstructionGatherResult(text=first_line, lines_consumed=0)
     state = update_instruction_depth_state(initial_instruction_depth_state(), first_line)
-    if not instruction_requires_continuation(state):
+    if not instruction_requires_continuation(state)  and  not instruction_line_requires_operator_continuation(first_line):
         return InstructionGatherResult(text=first_line, lines_consumed=0)
     combined = first_line
     consumed = 0
     index = start_index + 1
+    last_nonempty = first_line
     while True:
         if index >= len(lines):
             break
@@ -822,12 +823,30 @@ def gather_instruction(lines, start_index):
         else:
             combined = combined + "\n" + continuation
             state = update_instruction_depth_state(state, continuation)
+            last_nonempty = continuation
         consumed += 1
         index += 1
-        if not instruction_requires_continuation(state):
+        if not instruction_requires_continuation(state)  and  not instruction_line_requires_operator_continuation(last_nonempty):
             break
     normalized = trim_text(combined)
     return InstructionGatherResult(text=normalized, lines_consumed=consumed)
+
+def instruction_line_requires_operator_continuation(line):
+    trimmed = trim_text(line)
+    if len(trimmed) == 0:
+        return False
+    index = len(trimmed) - 1
+    while True:
+        if index < 0:
+            return False
+        ch = trimmed[index]
+        if ch == " "  or  ch == "\t"  or  ch == "\n"  or  ch == "\r":
+            index -= 1
+            continue
+        if ch == "+":
+            return True
+        return False
+    return False
 
 def instruction_supports_multiline(line):
     if starts_with(line, "eval "):

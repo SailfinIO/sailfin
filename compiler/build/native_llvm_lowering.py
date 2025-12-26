@@ -7893,6 +7893,26 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
             current_lines = append_string(current_lines, "  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + coerced.operand.value + ", i8* " + rhs.value + ")")
             operand = LLVMOperand(llvm_type="i8*", value=concat_name)
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
+        if lhs.llvm_type == "i8"  and  rhs.llvm_type == "i8":
+            current_lines = right_result.lines
+            current_temp = right_result.temp_index
+            lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines)
+            diagnostics = (diagnostics) + (lhs_coerced.diagnostics)
+            current_lines = lhs_coerced.lines
+            current_temp = lhs_coerced.temp_index
+            if lhs_coerced.operand == None:
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+            rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines)
+            diagnostics = (diagnostics) + (rhs_coerced.diagnostics)
+            current_lines = rhs_coerced.lines
+            current_temp = rhs_coerced.temp_index
+            if rhs_coerced.operand == None:
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+            concat_name = format_temp_name(current_temp)
+            current_temp += 1
+            current_lines = append_string(current_lines, "  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs_coerced.operand.value + ", i8* " + rhs_coerced.operand.value + ")")
+            operand = LLVMOperand(llvm_type="i8*", value=concat_name)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
     if match.symbol == "+"  or  match.symbol == "-":
         left_type = left_result.operand.llvm_type
         if ends_with_pointer_suffix(left_type):

@@ -11658,6 +11658,39 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
             let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
         }
+
+
+        // Character + character concatenation.
+        // One-character string literals often lower to `i8` codepoints; treat
+        // `i8 + i8` as string concatenation by allocating both as NUL-terminated
+        // heap strings and invoking the runtime concat helper.
+        if lhs.llvm_type == "i8" && rhs.llvm_type == "i8" {
+            let mut current_lines = right_result.lines;
+            let mut current_temp = right_result.temp_index;
+
+            let lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines);
+            diagnostics = diagnostics.concat(lhs_coerced.diagnostics);
+            current_lines = lhs_coerced.lines;
+            current_temp = lhs_coerced.temp_index;
+            if lhs_coerced.operand == null {
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+            }
+
+            let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
+            diagnostics = diagnostics.concat(rhs_coerced.diagnostics);
+            current_lines = rhs_coerced.lines;
+            current_temp = rhs_coerced.temp_index;
+            if rhs_coerced.operand == null {
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+            }
+
+            let concat_name = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines = append_string(current_lines, "  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs_coerced.operand.value + ", i8* " + rhs_coerced.operand.value + ")");
+
+            let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+        }
     }
 
     // Pointer arithmetic: `ptr + idx` (and `ptr - idx`) becomes a typed GEP.

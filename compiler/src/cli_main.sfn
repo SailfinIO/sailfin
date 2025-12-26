@@ -295,6 +295,7 @@ fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) ->
         ll_path,
         "-o",
         out_path,
+        "-lm",
     ];
     return process.run(args);
 }

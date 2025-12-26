@@ -37,8 +37,13 @@ fn _contains(haystack -> string, needle -> string) -> boolean {
 }
 
 test "integration: aot_prepare injects llvm.round.f64 declare" {
-    // NOTE: single literal (no `+`) while string concat is being stabilized.
-    let ir = "source_filename = \"m1.ll\"\n\ndefine double @foo(double %x) {\nentry:\n  %y = call double @llvm.round.f64(double %x)\n  ret double %y\n}\n";
+    // Multi-line concatenation exercises native-text instruction gathering.
+    let ir = "source_filename = \"m1.ll\"\n\n" +
+        "define double @foo(double %x) {\n" +
+        "entry:\n" +
+        "  %y = call double @llvm.round.f64(double %x)\n" +
+        "  ret double %y\n" +
+        "}\n";
 
     let out = prepare_stage2_aot_modules(["m1"], [ir]);
     if out.length != 1 {
