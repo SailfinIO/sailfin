@@ -7868,18 +7868,29 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
         if lhs.llvm_type == "i8*"  and  rhs.llvm_type == "i8":
             current_lines = right_result.lines
             current_temp = right_result.temp_index
-            zext_name = format_temp_name(current_temp)
-            current_temp += 1
-            current_lines = append_string(current_lines, "  " + zext_name + " = zext i8 " + rhs.value + " to i64")
-            shift_name = format_temp_name(current_temp)
-            current_temp += 1
-            current_lines = append_string(current_lines, "  " + shift_name + " = shl i64 " + zext_name + ", 32")
-            imm_name = format_temp_name(current_temp)
-            current_temp += 1
-            current_lines = append_string(current_lines, "  " + imm_name + " = inttoptr i64 " + shift_name + " to i8*")
+            coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines)
+            diagnostics = (diagnostics) + (coerced.diagnostics)
+            current_lines = coerced.lines
+            current_temp = coerced.temp_index
+            if coerced.operand == None:
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=string_constants)
             concat_name = format_temp_name(current_temp)
             current_temp += 1
-            current_lines = append_string(current_lines, "  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs.value + ", i8* " + imm_name + ")")
+            current_lines = append_string(current_lines, "  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs.value + ", i8* " + coerced.operand.value + ")")
+            operand = LLVMOperand(llvm_type="i8*", value=concat_name)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
+        if lhs.llvm_type == "i8"  and  rhs.llvm_type == "i8*":
+            current_lines = right_result.lines
+            current_temp = right_result.temp_index
+            coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines)
+            diagnostics = (diagnostics) + (coerced.diagnostics)
+            current_lines = coerced.lines
+            current_temp = coerced.temp_index
+            if coerced.operand == None:
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+            concat_name = format_temp_name(current_temp)
+            current_temp += 1
+            current_lines = append_string(current_lines, "  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + coerced.operand.value + ", i8* " + rhs.value + ")")
             operand = LLVMOperand(llvm_type="i8*", value=concat_name)
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
     if match.symbol == "+"  or  match.symbol == "-":
@@ -7953,7 +7964,12 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
     alignment_temp = right_result.temp_index
     left_operand = left_result.operand
     right_operand = right_result.operand
-    is_equality = match.symbol == "=="  or  match.symbol == "!="
+    is_equality = False
+    if len(match.symbol) == 2:
+        c0 = char_code_at_text(match.symbol, 0)
+        c1 = char_code_at_text(match.symbol, 1)
+        if c0 == char_code("=")  and  c1 == char_code("=")  or  c0 == char_code("!")  and  c1 == char_code("="):
+            is_equality = True
     if is_equality  and  left_operand != None  and  right_operand != None:
         if left_operand.llvm_type == right_operand.llvm_type:
             enum_info = find_enum_info_by_llvm_type(context, left_operand.llvm_type)
@@ -7976,8 +7992,10 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
                 compare_temp = format_temp_name(alignment_temp)
                 alignment_temp += 1
                 predicate = "icmp eq"
-                if match.symbol == "!=":
-                    predicate = "icmp ne"
+                if len(match.symbol) == 2:
+                    c0 = char_code_at_text(match.symbol, 0)
+                    if c0 == char_code("!"):
+                        predicate = "icmp ne"
                 alignment_lines = append_string(alignment_lines, "  " + compare_temp + " = " + predicate + " " + tag_llvm_type + " " + left_tag_temp + ", " + right_tag_temp)
                 operand = LLVMOperand(llvm_type="i1", value=compare_temp)
                 return ExpressionResult(lines=alignment_lines, temp_index=alignment_temp, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
@@ -9947,7 +9965,12 @@ def emit_comparison_instruction(symbol, left_operand, right_operand, temp_index,
     current_lines = lines
     if left_operand.llvm_type != right_operand.llvm_type:
         diagnostics = append_string(diagnostics, "llvm lowering: comparison operands have mismatched types `" + left_operand.llvm_type + "` and `" + right_operand.llvm_type + "`")
-    symbol_is_equality = symbol == "=="  or  symbol == "!="
+    symbol_is_equality = False
+    if len(symbol) == 2:
+        c0 = char_code_at_text(symbol, 0)
+        c1 = char_code_at_text(symbol, 1)
+        if c0 == char_code("=")  and  c1 == char_code("=")  or  c0 == char_code("!")  and  c1 == char_code("="):
+            symbol_is_equality = True
     left_is_string = is_string_pointer_type(left_operand.llvm_type)
     right_is_string = is_string_pointer_type(right_operand.llvm_type)
     left_is_null = left_operand.value == "null"
@@ -9957,11 +9980,13 @@ def emit_comparison_instruction(symbol, left_operand, right_operand, temp_index,
         current_lines = append_string(current_lines, "  " + compare_temp + " = call i1 @strings_equal(i8* " + left_operand.value + ", i8* " + right_operand.value + ")")
         next_index = temp_index + 1
         operand = LLVMOperand(llvm_type="i1", value=compare_temp)
-        if symbol == "!=":
-            inverted_temp = format_temp_name(next_index)
-            current_lines = append_string(current_lines, "  " + inverted_temp + " = xor i1 " + compare_temp + ", true")
-            operand = LLVMOperand(llvm_type="i1", value=inverted_temp)
-            next_index += 1
+        if len(symbol) == 2:
+            c0 = char_code_at_text(symbol, 0)
+            if c0 == char_code("!"):
+                inverted_temp = format_temp_name(next_index)
+                current_lines = append_string(current_lines, "  " + inverted_temp + " = xor i1 " + compare_temp + ", true")
+                operand = LLVMOperand(llvm_type="i1", value=inverted_temp)
+                next_index += 1
         return ComparisonEmission(lines=current_lines, temp_index=next_index, operand=operand, diagnostics=diagnostics)
     llvm_type = left_operand.llvm_type
     predicate = comparison_predicate_for_symbol(symbol, llvm_type)
@@ -9986,67 +10011,74 @@ def emit_boolean_and(left_operand, right_operand, temp_index, lines):
     return ComparisonEmission(lines=current_lines, temp_index=temp_index + 1, operand=operand, diagnostics=diagnostics)
 
 def comparison_predicate_for_symbol(symbol, llvm_type):
+    symbol_len = len(symbol)
+    c0 = -1
+    c1 = -1
+    if symbol_len >= 1:
+        c0 = char_code_at_text(symbol, 0)
+    if symbol_len >= 2:
+        c1 = char_code_at_text(symbol, 1)
     if llvm_type == "double":
-        if symbol == "==":
+        if symbol_len == 2  and  c0 == char_code("=")  and  c1 == char_code("="):
             return "fcmp oeq"
-        if symbol == "!=":
+        if symbol_len == 2  and  c0 == char_code("!")  and  c1 == char_code("="):
             return "fcmp une"
-        if symbol == "<":
+        if symbol_len == 1  and  c0 == char_code("<"):
             return "fcmp olt"
-        if symbol == "<=":
+        if symbol_len == 2  and  c0 == char_code("<")  and  c1 == char_code("="):
             return "fcmp ole"
-        if symbol == ">":
+        if symbol_len == 1  and  c0 == char_code(">"):
             return "fcmp ogt"
-        if symbol == ">=":
+        if symbol_len == 2  and  c0 == char_code(">")  and  c1 == char_code("="):
             return "fcmp oge"
         return ""
     if llvm_type == "i32"  or  llvm_type == "i64":
-        if symbol == "==":
+        if symbol_len == 2  and  c0 == char_code("=")  and  c1 == char_code("="):
             return "icmp eq"
-        if symbol == "!=":
+        if symbol_len == 2  and  c0 == char_code("!")  and  c1 == char_code("="):
             return "icmp ne"
-        if symbol == "<":
+        if symbol_len == 1  and  c0 == char_code("<"):
             return "icmp slt"
-        if symbol == "<=":
+        if symbol_len == 2  and  c0 == char_code("<")  and  c1 == char_code("="):
             return "icmp sle"
-        if symbol == ">":
+        if symbol_len == 1  and  c0 == char_code(">"):
             return "icmp sgt"
-        if symbol == ">=":
+        if symbol_len == 2  and  c0 == char_code(">")  and  c1 == char_code("="):
             return "icmp sge"
         return ""
     if llvm_type == "i1":
-        if symbol == "==":
+        if symbol_len == 2  and  c0 == char_code("=")  and  c1 == char_code("="):
             return "icmp eq"
-        if symbol == "!=":
+        if symbol_len == 2  and  c0 == char_code("!")  and  c1 == char_code("="):
             return "icmp ne"
         return ""
     if llvm_type == "i8":
-        if symbol == "==":
+        if symbol_len == 2  and  c0 == char_code("=")  and  c1 == char_code("="):
             return "icmp eq"
-        if symbol == "!=":
+        if symbol_len == 2  and  c0 == char_code("!")  and  c1 == char_code("="):
             return "icmp ne"
-        if symbol == "<":
+        if symbol_len == 1  and  c0 == char_code("<"):
             return "icmp slt"
-        if symbol == "<=":
+        if symbol_len == 2  and  c0 == char_code("<")  and  c1 == char_code("="):
             return "icmp sle"
-        if symbol == ">":
+        if symbol_len == 1  and  c0 == char_code(">"):
             return "icmp sgt"
-        if symbol == ">=":
+        if symbol_len == 2  and  c0 == char_code(">")  and  c1 == char_code("="):
             return "icmp sge"
         return ""
     if ends_with_pointer_suffix(llvm_type):
-        if symbol == "==":
+        if symbol_len == 2  and  c0 == char_code("=")  and  c1 == char_code("="):
             return "icmp eq"
-        if symbol == "!=":
+        if symbol_len == 2  and  c0 == char_code("!")  and  c1 == char_code("="):
             return "icmp ne"
         if llvm_type == "i8*":
-            if symbol == "<":
+            if symbol_len == 1  and  c0 == char_code("<"):
                 return "icmp ult"
-            if symbol == "<=":
+            if symbol_len == 2  and  c0 == char_code("<")  and  c1 == char_code("="):
                 return "icmp ule"
-            if symbol == ">":
+            if symbol_len == 1  and  c0 == char_code(">"):
                 return "icmp ugt"
-            if symbol == ">=":
+            if symbol_len == 2  and  c0 == char_code(">")  and  c1 == char_code("="):
                 return "icmp uge"
         return ""
     return ""
@@ -10588,29 +10620,29 @@ def find_comparison_operator(expression):
     while True:
         if index >= len(expression):
             break
-        ch = expression[index]
+        code = char_code_at_text(expression, index)
         if in_string:
             if escape_next:
                 escape_next = False
                 index += 1
                 continue
-            if ch == "\\":
+            if code == char_code("\\"):
                 escape_next = True
                 index += 1
                 continue
-            if ch == "\"":
+            if code == char_code("\""):
                 in_string = False
             index += 1
             continue
-        if ch == "\"":
+        if code == char_code("\""):
             in_string = True
             index += 1
             continue
-        if ch == "(":
+        if code == char_code("("):
             depth += 1
             index += 1
             continue
-        if ch == ")":
+        if code == char_code(")"):
             if depth > 0:
                 depth -= 1
             index += 1
@@ -10619,11 +10651,20 @@ def find_comparison_operator(expression):
             index += 1
             continue
         if index + 1 < len(expression):
-            two = substring(expression, index, index + 2)
-            if two == "=="  or  two == "!="  or  two == "<="  or  two == ">=":
-                return OperatorMatch(index=index, symbol=two, success=True)
-        if ch == "<"  or  ch == ">":
-            return OperatorMatch(index=index, symbol=substring(expression, index, index + 1), success=True)
+            next_code = char_code_at_text(expression, index + 1)
+            if next_code == char_code("="):
+                if code == char_code("="):
+                    return OperatorMatch(index=index, symbol="==", success=True)
+                if code == char_code("!"):
+                    return OperatorMatch(index=index, symbol="!=", success=True)
+                if code == char_code("<"):
+                    return OperatorMatch(index=index, symbol="<=", success=True)
+                if code == char_code(">"):
+                    return OperatorMatch(index=index, symbol=">=", success=True)
+        if code == char_code("<"):
+            return OperatorMatch(index=index, symbol="<", success=True)
+        if code == char_code(">"):
+            return OperatorMatch(index=index, symbol=">", success=True)
         index += 1
     return OperatorMatch(index=-1, symbol="", success=False)
 

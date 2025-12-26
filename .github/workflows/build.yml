@@ -60,16 +60,10 @@ jobs:
         run: |
           CONDA=$(which conda) make compile
 
-      - name: Run Stage2 self-hosted unit tests
+      - name: Run Sailfin-native tests
         shell: bash -l {0}
         run: |
-          CONDA=$(which conda) make test-unit
-
-      - name: Run Stage2 test suite (pytest)
-        env:
-          PYTHONFAULTHANDLER: "1"
-          PYTHONUNBUFFERED: "1"
-        run: conda run -n sailfin pytest -m stage2 -vv --durations=20
+          CONDA=$(which conda) make test
 
       - name: Package Stage2 artifacts
         run: conda run -n sailfin python tools/package_stage2.py --skip-build --target ${{ matrix.package_label }} --out dist

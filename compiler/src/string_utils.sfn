@@ -3,7 +3,7 @@
 // Shared string helpers surfaced via the runtime prelude. The compiler and
 // downstream projects import from here to keep a single implementation.
 
-import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code } from "runtime/prelude";
+import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, strings_equal } from "runtime/prelude";
 
 fn char_at(value -> string, index -> number) -> string {
 	if value.length == 0 {
@@ -71,25 +71,6 @@ fn sanitize_symbol(name -> string) -> string {
 		result = "_" + result;
 	}
 	return result;
-}
-
-fn strings_equal(left -> string, right -> string) -> boolean {
-	if left.length != right.length {
-		return false;
-	}
-	let mut index -> number = 0;
-	loop {
-		if index >= left.length {
-			break;
-		}
-		let left_char = char_at(left, index);
-		let right_char = char_at(right, index);
-		if char_code(left_char) != char_code(right_char) {
-			return false;
-		}
-		index += 1;
-	}
-	return true;
 }
 
 export { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at, sanitize_symbol, strings_equal };

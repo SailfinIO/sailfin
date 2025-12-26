@@ -192,6 +192,12 @@ def lex(source):
         next_symbol = peek_next_char(state)
         if next_symbol != "":
             pair = ch + next_symbol
+            if pair == "<="  or  pair == ">=":
+                lexeme = pair
+                state.index += 2
+                state.column += 2
+                tokens = append(tokens, Token(kind=TokenKind.Symbol(), lexeme=lexeme, line=start_line, column=start_column))
+                continue
             if is_two_char_symbol(pair):
                 lexeme = pair
                 state.index += 2
@@ -257,4 +263,22 @@ def interpret_escape(ch):
     return ch
 
 def is_two_char_symbol(value):
-    return value == "->"  or  value == "=>"  or  value == "=="  or  value == "!="  or  value == "<="  or  value == ">="  or  value == "&&"  or  value == "||"  or  value == ".."
+    if value == "->":
+        return True
+    if value == "=>":
+        return True
+    if value == "==":
+        return True
+    if value == "!=":
+        return True
+    if value == "<=":
+        return True
+    if value == ">=":
+        return True
+    if value == "&&":
+        return True
+    if value == "||":
+        return True
+    if value == "..":
+        return True
+    return False

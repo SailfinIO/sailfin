@@ -274,10 +274,23 @@ fn lex(source -> string) -> Token[] {
 
         let start_line = state.line;
         let start_column = state.column;
-        let lexeme = ch;
+        let mut lexeme = ch;
         let next_symbol = peek_next_char(state);
         if next_symbol != "" {
             let pair = ch + next_symbol;
+            // Fast-path: keep <= / >= stable.
+            if pair == "<=" || pair == ">=" {
+                lexeme = pair;
+                state.index += 2;
+                state.column += 2;
+                tokens = append(tokens, Token {
+                    kind: TokenKind.Symbol(),
+                    lexeme: lexeme,
+                    line: start_line,
+                    column: start_column,
+                });
+                continue;
+            }
             if is_two_char_symbol(pair) {
                 lexeme = pair;
                 state.index += 2;
@@ -379,13 +392,32 @@ fn interpret_escape(ch -> string) -> string {
 }
 
 fn is_two_char_symbol(value -> string) -> boolean {
-    return value == "->"
-        || value == "=>"
-        || value == "=="
-        || value == "!="
-        || value == "<="
-        || value == ">="
-        || value == "&&"
-    || value == "||"
-    || value == "..";
+    if value == "->" {
+        return true;
+    }
+    if value == "=>" {
+        return true;
+    }
+    if value == "==" {
+        return true;
+    }
+    if value == "!=" {
+        return true;
+    }
+    if value == "<=" {
+        return true;
+    }
+    if value == ">=" {
+        return true;
+    }
+    if value == "&&" {
+        return true;
+    }
+    if value == "||" {
+        return true;
+    }
+    if value == ".." {
+        return true;
+    }
+    return false;
 }

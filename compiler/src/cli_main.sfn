@@ -3,10 +3,11 @@
 // Sailfin-native CLI entrypoint invoked by the stage2 C shim.
 
 import { compile_to_llvm, compile_to_llvm_with_module, compile_tests_to_llvm, compile_to_sailfin, number_to_string, module_name_from_path } from "./main";
+import { compile_to_native_text } from "./main";
 
 fn _usage() -> string {
     return "usage:\n" +
-        "  sfn emit llvm|sailfin <file.sfn>\n" +
+        "  sfn emit llvm|sailfin|native <file.sfn>\n" +
         "  sfn build [-o OUTPUT] <file.sfn>\n" +
         "  sfn run <file.sfn>\n" +
         "  sfn run <exe>\n" +
@@ -342,6 +343,10 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             print.info(compile_to_sailfin(source));
             return 0;
         }
+        if mode == "native" {
+            print.info(compile_to_native_text(source));
+            return 0;
+        }
         print.error("unknown --emit mode: " + mode);
         print.error(_usage());
         return 2;
@@ -364,6 +369,10 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         if mode == "sailfin" {
             print.info(compile_to_sailfin(source));
+            return 0;
+        }
+        if mode == "native" {
+            print.info(compile_to_native_text(source));
             return 0;
         }
         print.error("unknown emit mode: " + mode);

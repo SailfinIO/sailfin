@@ -11616,31 +11616,44 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
     }
 
     // String + character (i8) concatenation.
-    // Some call sites (notably join_with_separator("\n")) lower one-character string
-    // literals to `i8` codepoints. Treat `i8* + i8` as string concatenation by
-    // encoding the codepoint into the runtime's immediate-string representation.
+    // Some call sites lower one-character string literals to `i8` codepoints.
+    // Treat `i8* + i8` (and `i8 + i8*`) as string concatenation by coercing
+    // the `i8` into a heap-allocated NUL-terminated string.
     if match.symbol == "+" {
         let lhs = left_result.operand;
         let rhs = right_result.operand;
         if lhs.llvm_type == "i8*" && rhs.llvm_type == "i8" {
             let mut current_lines = right_result.lines;
             let mut current_temp = right_result.temp_index;
-
-            let zext_name = format_temp_name(current_temp);
-            current_temp += 1;
-            current_lines = append_string(current_lines, "  " + zext_name + " = zext i8 " + rhs.value + " to i64");
-
-            let shift_name = format_temp_name(current_temp);
-            current_temp += 1;
-            current_lines = append_string(current_lines, "  " + shift_name + " = shl i64 " + zext_name + ", 32");
-
-            let imm_name = format_temp_name(current_temp);
-            current_temp += 1;
-            current_lines = append_string(current_lines, "  " + imm_name + " = inttoptr i64 " + shift_name + " to i8*");
+            let coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
+            diagnostics = diagnostics.concat(coerced.diagnostics);
+            current_lines = coerced.lines;
+            current_temp = coerced.temp_index;
+            if coerced.operand == null {
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+            }
 
             let concat_name = format_temp_name(current_temp);
             current_temp += 1;
-            current_lines = append_string(current_lines, "  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs.value + ", i8* " + imm_name + ")");
+            current_lines = append_string(current_lines, "  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs.value + ", i8* " + coerced.operand.value + ")");
+
+            let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+        }
+        if lhs.llvm_type == "i8" && rhs.llvm_type == "i8*" {
+            let mut current_lines = right_result.lines;
+            let mut current_temp = right_result.temp_index;
+            let coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines);
+            diagnostics = diagnostics.concat(coerced.diagnostics);
+            current_lines = coerced.lines;
+            current_temp = coerced.temp_index;
+            if coerced.operand == null {
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+            }
+
+            let concat_name = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines = append_string(current_lines, "  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + coerced.operand.value + ", i8* " + rhs.value + ")");
 
             let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
@@ -11744,7 +11757,14 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
     let mut alignment_temp -> number = right_result.temp_index;
     let mut left_operand = left_result.operand;
     let mut right_operand = right_result.operand;
-    let is_equality = match.symbol == "==" || match.symbol == "!=";
+    let mut is_equality -> boolean = false;
+    if match.symbol.length == 2 {
+        let c0 = char_code_at_text(match.symbol, 0);
+        let c1 = char_code_at_text(match.symbol, 1);
+        if (c0 == char_code("=") && c1 == char_code("=")) || (c0 == char_code("!") && c1 == char_code("=")) {
+            is_equality = true;
+        }
+    }
     if is_equality && left_operand != null && right_operand != null {
         // Enum equality compares tags (unit enums and as a conservative default).
         if left_operand.llvm_type == right_operand.llvm_type {
@@ -11775,8 +11795,11 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
                 let compare_temp = format_temp_name(alignment_temp);
                 alignment_temp += 1;
                 let mut predicate -> string = "icmp eq";
-                if match.symbol == "!=" {
-                    predicate = "icmp ne";
+                if match.symbol.length == 2 {
+                    let c0 = char_code_at_text(match.symbol, 0);
+                    if c0 == char_code("!") {
+                        predicate = "icmp ne";
+                    }
                 }
                 alignment_lines = append_string(alignment_lines, "  " + compare_temp + " = " + predicate + " " + tag_llvm_type + " " + left_tag_temp + ", " + right_tag_temp);
                 let operand = LLVMOperand { llvm_type: "i1", value: compare_temp };
@@ -14466,7 +14489,14 @@ fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, ri
     if left_operand.llvm_type != right_operand.llvm_type {
         diagnostics = append_string(diagnostics, "llvm lowering: comparison operands have mismatched types `" + left_operand.llvm_type + "` and `" + right_operand.llvm_type + "`");
     }
-    let symbol_is_equality = symbol == "==" || symbol == "!=";
+    let mut symbol_is_equality -> boolean = false;
+    if symbol.length == 2 {
+        let c0 = char_code_at_text(symbol, 0);
+        let c1 = char_code_at_text(symbol, 1);
+        if (c0 == char_code("=") && c1 == char_code("=")) || (c0 == char_code("!") && c1 == char_code("=")) {
+            symbol_is_equality = true;
+        }
+    }
     let left_is_string = is_string_pointer_type(left_operand.llvm_type);
     let right_is_string = is_string_pointer_type(right_operand.llvm_type);
     let left_is_null = left_operand.value == "null";
@@ -14476,11 +14506,14 @@ fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, ri
         current_lines = append_string(current_lines, "  " + compare_temp + " = call i1 @strings_equal(i8* " + left_operand.value + ", i8* " + right_operand.value + ")");
         let mut next_index = temp_index + 1;
         let mut operand = LLVMOperand { llvm_type: "i1", value: compare_temp };
-        if symbol == "!=" {
-            let inverted_temp = format_temp_name(next_index);
-            current_lines = append_string(current_lines, "  " + inverted_temp + " = xor i1 " + compare_temp + ", true");
-            operand = LLVMOperand { llvm_type: "i1", value: inverted_temp };
-            next_index += 1;
+        if symbol.length == 2 {
+            let c0 = char_code_at_text(symbol, 0);
+            if c0 == char_code("!") {
+                let inverted_temp = format_temp_name(next_index);
+                current_lines = append_string(current_lines, "  " + inverted_temp + " = xor i1 " + compare_temp + ", true");
+                operand = LLVMOperand { llvm_type: "i1", value: inverted_temp };
+                next_index += 1;
+            }
         }
         return ComparisonEmission { lines: current_lines, temp_index: next_index, operand: operand, diagnostics: diagnostics };
     }
@@ -14512,101 +14545,111 @@ fn emit_boolean_and(left_operand -> LLVMOperand, right_operand -> LLVMOperand, t
 }
 
 fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> string {
+    let symbol_len = symbol.length;
+    let mut c0 -> number = -1;
+    let mut c1 -> number = -1;
+    if symbol_len >= 1 {
+        c0 = char_code_at_text(symbol, 0);
+    }
+    if symbol_len >= 2 {
+        c1 = char_code_at_text(symbol, 1);
+    }
+
     if llvm_type == "double" {
-        if symbol == "==" {
+        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
             return "fcmp oeq";
         }
-        if symbol == "!=" {
+        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
             return "fcmp une";
         }
-        if symbol == "<" {
+        if symbol_len == 1 && c0 == char_code("<") {
             return "fcmp olt";
         }
-        if symbol == "<=" {
+        if symbol_len == 2 && c0 == char_code("<") && c1 == char_code("=") {
             return "fcmp ole";
         }
-        if symbol == ">" {
+        if symbol_len == 1 && c0 == char_code(">") {
             return "fcmp ogt";
         }
-        if symbol == ">=" {
+        if symbol_len == 2 && c0 == char_code(">") && c1 == char_code("=") {
             return "fcmp oge";
         }
         return "";
     }
     if llvm_type == "i32" || llvm_type == "i64" {
-        if symbol == "==" {
+        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
             return "icmp eq";
         }
-        if symbol == "!=" {
+        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
             return "icmp ne";
         }
-        if symbol == "<" {
+        if symbol_len == 1 && c0 == char_code("<") {
             return "icmp slt";
         }
-        if symbol == "<=" {
+        if symbol_len == 2 && c0 == char_code("<") && c1 == char_code("=") {
             return "icmp sle";
         }
-        if symbol == ">" {
+        if symbol_len == 1 && c0 == char_code(">") {
             return "icmp sgt";
         }
-        if symbol == ">=" {
+        if symbol_len == 2 && c0 == char_code(">") && c1 == char_code("=") {
             return "icmp sge";
         }
         return "";
     }
     if llvm_type == "i1" {
-        if symbol == "==" {
+        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
             return "icmp eq";
         }
-        if symbol == "!=" {
+        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
             return "icmp ne";
         }
         return "";
     }
     // Support character (i8) comparisons for lexer/parser string utilities
     if llvm_type == "i8" {
-        if symbol == "==" {
+        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
             return "icmp eq";
         }
-        if symbol == "!=" {
+        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
             return "icmp ne";
         }
-        if symbol == "<" {
+        if symbol_len == 1 && c0 == char_code("<") {
             return "icmp slt";
         }
-        if symbol == "<=" {
+        if symbol_len == 2 && c0 == char_code("<") && c1 == char_code("=") {
             return "icmp sle";
         }
-        if symbol == ">" {
+        if symbol_len == 1 && c0 == char_code(">") {
             return "icmp sgt";
         }
-        if symbol == ">=" {
+        if symbol_len == 2 && c0 == char_code(">") && c1 == char_code("=") {
             return "icmp sge";
         }
         return "";
     }
     // Support pointer comparisons for equality checks (i8*, struct pointers, etc.)
     if ends_with_pointer_suffix(llvm_type) {
-        if symbol == "==" {
+        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
             return "icmp eq";
         }
-        if symbol == "!=" {
+        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
             return "icmp ne";
         }
         // For string pointers (i8*), support ordering for single-char comparisons
         // Note: This performs pointer value comparison, suitable for comparing
         // string literals that are stored at predictable addresses
         if llvm_type == "i8*" {
-            if symbol == "<" {
+            if symbol_len == 1 && c0 == char_code("<") {
                 return "icmp ult";
             }
-            if symbol == "<=" {
+            if symbol_len == 2 && c0 == char_code("<") && c1 == char_code("=") {
                 return "icmp ule";
             }
-            if symbol == ">" {
+            if symbol_len == 1 && c0 == char_code(">") {
                 return "icmp ugt";
             }
-            if symbol == ">=" {
+            if symbol_len == 2 && c0 == char_code(">") && c1 == char_code("=") {
                 return "icmp uge";
             }
         }
@@ -15372,35 +15415,35 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
         if index >= expression.length {
             break;
         }
-        let ch = expression[index];
+        let code = char_code_at_text(expression, index);
         if in_string {
             if escape_next {
                 escape_next = false;
                 index += 1;
                 continue;
             }
-            if ch == "\\" {
+            if code == char_code("\\") {
                 escape_next = true;
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
+            if code == char_code("\"") {
                 in_string = false;
             }
             index += 1;
             continue;
         }
-        if ch == "\"" {
+        if code == char_code("\"") {
             in_string = true;
             index += 1;
             continue;
         }
-        if ch == "(" {
+        if code == char_code("(") {
             depth += 1;
             index += 1;
             continue;
         }
-        if ch == ")" {
+        if code == char_code(")") {
             if depth > 0 {
                 depth -= 1;
             }
@@ -15411,14 +15454,31 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
             index += 1;
             continue;
         }
+
+        // Compare operators without substring/string-equality.
+        // This keeps the lowering resilient even if string helpers are broken.
         if index + 1 < expression.length {
-            let two = substring(expression, index, index + 2);
-            if two == "==" || two == "!=" || two == "<=" || two == ">=" {
-                return OperatorMatch { index: index, symbol: two, success: true };
+            let next_code = char_code_at_text(expression, index + 1);
+            if next_code == char_code("=") {
+                if code == char_code("=") {
+                    return OperatorMatch { index: index, symbol: "==", success: true };
+                }
+                if code == char_code("!") {
+                    return OperatorMatch { index: index, symbol: "!=", success: true };
+                }
+                if code == char_code("<") {
+                    return OperatorMatch { index: index, symbol: "<=", success: true };
+                }
+                if code == char_code(">") {
+                    return OperatorMatch { index: index, symbol: ">=", success: true };
+                }
             }
         }
-        if ch == "<" || ch == ">" {
-            return OperatorMatch { index: index, symbol: substring(expression, index, index + 1), success: true };
+        if code == char_code("<") {
+            return OperatorMatch { index: index, symbol: "<", success: true };
+        }
+        if code == char_code(">") {
+            return OperatorMatch { index: index, symbol: ">", success: true };
         }
         index += 1;
     }

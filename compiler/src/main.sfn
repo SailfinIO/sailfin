@@ -183,6 +183,22 @@ fn compile_tests_to_llvm(source -> string) -> string ![io] {
     return lowered.ir;
 }
 
+fn compile_to_native_text(source -> string) -> string ![io] {
+    let native_result = compile_to_native(source);
+    let mut index -> number = 0;
+    loop {
+        if index >= native_result.module.artifacts.length {
+            break;
+        }
+        let artifact = native_result.module.artifacts[index];
+        if artifact.format == "sailfin-native-text" {
+            return artifact.contents;
+        }
+        index += 1;
+    }
+    return "";
+}
+
 fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] {
     let native_result = compile_to_native(source);
     let lowered = lower_to_llvm(native_result.module);

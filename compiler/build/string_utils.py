@@ -1,7 +1,7 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.runtime.prelude import clamp, substring, find_char, grapheme_count, grapheme_at, char_code
+from compiler.build.runtime.prelude import clamp, substring, find_char, grapheme_count, grapheme_at, char_code, strings_equal
 
 print = runtime.console
 sleep = runtime.sleep
@@ -69,19 +69,5 @@ def sanitize_symbol(name):
     if first_code >= zero  and  first_code <= nine:
         result = "_" + result
     return result
-
-def strings_equal(left, right):
-    if len(left) != len(right):
-        return False
-    index = 0
-    while True:
-        if index >= len(left):
-            break
-        left_char = char_at(left, index)
-        right_char = char_at(right, index)
-        if char_code(left_char) != char_code(right_char):
-            return False
-        index += 1
-    return True
 
 __all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "char_at", "sanitize_symbol", "strings_equal"]

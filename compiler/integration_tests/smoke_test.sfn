@@ -1,0 +1,4 @@
+test "integration: smoke" {
+    assert 1 + 1 == 2;
+    assert "hi" + "" == "hi";
+}

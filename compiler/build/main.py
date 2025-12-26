@@ -169,6 +169,19 @@ def compile_tests_to_llvm(source):
     lowered = lower_to_llvm_for_tests(native_result.module)
     return lowered.ir
 
+def compile_to_native_text(source):
+    # effects: io
+    native_result = compile_to_native(source)
+    index = 0
+    while True:
+        if index >= len(native_result.module.artifacts):
+            break
+        artifact = native_result.module.artifacts[index]
+        if artifact.format == "sailfin-native-text":
+            return artifact.contents
+        index += 1
+    return ""
+
 def compile_to_native_llvm_full(source):
     # effects: io
     native_result = compile_to_native(source)

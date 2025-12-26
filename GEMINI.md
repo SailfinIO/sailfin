@@ -69,7 +69,7 @@ make test
 You can also run specific test suites:
 
 - `make test-unit`: Run fast Sailfin-focused unit coverage.
-- `make test-integration`: Run integration tests (stage1 artifact, self-host checks, etc.).
+- `make test-integration`: Run Sailfin-native integration tests.
 - `make test-stage2`: Run LLVM/native backend coverage.
 
 Before submitting any changes, please ensure that all tests pass.

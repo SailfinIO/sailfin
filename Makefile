@@ -13,7 +13,7 @@ else
 STAGE2_NATIVE_LIBS ?= -lm
 endif
 
-.PHONY: help install test test-unit test-integration test-stage2 compile clean package native-stage2-debug native-stage2-asan
+.PHONY: help install test test-unit test-integration compile clean package native-stage2-debug native-stage2-asan
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -29,10 +29,9 @@ PYTEST_ARGS ?=
 help:
 	@echo "Common Sailfin tasks"
 	@echo "  make install      # Create or update the Conda env used for the compiler"
-	@echo "  make test         # Run the full pytest suite (pass PYTEST_ARGS=... to filter)"
+	@echo "  make test         # Run Sailfin-native unit + integration tests"
 	@echo "  make test-unit    # Run Stage2 self-hosted Sailfin unit tests"
-	@echo "  make test-integration # Run integration tests (stage1 artifact, self-host checks, etc.)"
-	@echo "  make test-stage2  # Run LLVM/native backend coverage"
+	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make compile      # Build the native sailfin-stage2 compiler (full pipeline)"
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
 	@echo "  make native-stage2-debug # Build native stage2 with -O0/-g for lldb"
@@ -41,21 +40,21 @@ help:
 install:
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
 
-test:
-	$(CONDA) run -n $(CONDA_ENV) pytest $(PYTEST_ARGS)
+test: test-unit test-integration
 
 test-unit:
 	@if [ ! -x build/native/sailfin-stage2 ]; then \
 		echo "[test-unit] missing build/native/sailfin-stage2; running make compile"; \
 		$(MAKE) compile; \
 	fi
-	$(CONDA) run -n $(CONDA_ENV) build/native/sailfin-stage2 test compiler/tests
+	build/native/sailfin-stage2 test compiler/tests
 
 test-integration:
-	$(CONDA) run -n $(CONDA_ENV) pytest -m integration $(PYTEST_ARGS)
-
-test-stage2:
-	$(CONDA) run -n $(CONDA_ENV) pytest -m stage2 $(PYTEST_ARGS)
+	@if [ ! -x build/native/sailfin-stage2 ]; then \
+		echo "[test-integration] missing build/native/sailfin-stage2; running make compile"; \
+		$(MAKE) compile; \
+	fi
+	build/native/sailfin-stage2 test compiler/integration_tests
 
 clean:
 	rm -rf dist

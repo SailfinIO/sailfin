@@ -138,7 +138,8 @@ def native_stage2_binary() -> pathlib.Path:
 
     if needs_build:
         if platform.system() == "Windows":
-            pytest.skip("native stage2 binary build is not supported on Windows runners yet")
+            pytest.skip(
+                "native stage2 binary build is not supported on Windows runners yet")
         subprocess.run(["make", "native-stage2"], cwd=repo_root, check=True)
 
     assert binary.exists(), "expected native stage2 binary to be built"
