@@ -1307,12 +1307,16 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     // Async/future runtime types (opaque in LLVM; implemented by the native runtime).
     lines = lines.concat([
         "%SailfinFutureNumber = type opaque",
+        "%SailfinFutureBool = type opaque",
         "%SailfinFutureVoid = type opaque",
         "%SailfinFutureString = type opaque",
         "",
         "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)",
         "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)",
         "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)",
+        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)",
+        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)",
+        "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)",
         "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)",
         "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)",
         "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)",
@@ -10756,6 +10760,9 @@ fn future_pointer_type_for_return_type(return_type -> string) -> string {
     if normalized == "number" {
         return "%SailfinFutureNumber*";
     }
+    if normalized == "boolean" || normalized == "bool" {
+        return "%SailfinFutureBool*";
+    }
     if normalized == "string" {
         return "%SailfinFutureString*";
     }
@@ -10772,6 +10779,9 @@ fn spawn_symbol_for_return_type(return_type -> string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number";
     }
+    if normalized == "boolean" || normalized == "bool" {
+        return "sailfin_runtime_spawn_bool";
+    }
     if normalized == "string" {
         return "sailfin_runtime_spawn_string";
     }
@@ -10787,6 +10797,9 @@ fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number_ctx";
     }
+    if normalized == "boolean" || normalized == "bool" {
+        return "sailfin_runtime_spawn_bool_ctx";
+    }
     if normalized == "string" {
         return "sailfin_runtime_spawn_string_ctx";
     }
@@ -10796,6 +10809,9 @@ fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
 fn await_symbol_for_future_pointer_type(future_ptr_type -> string) -> string {
     if future_ptr_type == "%SailfinFutureNumber*" {
         return "sailfin_runtime_await_number";
+    }
+    if future_ptr_type == "%SailfinFutureBool*" {
+        return "sailfin_runtime_await_bool";
     }
     if future_ptr_type == "%SailfinFutureVoid*" {
         return "sailfin_runtime_await_void";
@@ -11108,6 +11124,8 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             let mut result_type -> string = "i8*";
             if future_operand.llvm_type == "%SailfinFutureNumber*" {
                 result_type = "double";
+            } else if future_operand.llvm_type == "%SailfinFutureBool*" {
+                result_type = "i1";
             }
             let result_temp = format_temp_name(lowered.temp_index);
             let awaited_call = "  " + result_temp + " = call " + result_type + " @" + await_symbol + "(" + future_operand.llvm_type + " " + future_operand.value + ")";

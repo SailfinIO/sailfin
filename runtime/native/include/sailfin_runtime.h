@@ -60,12 +60,17 @@ extern "C"
     // ---- Futures (stage2-native) ----
 
     typedef struct SailfinFutureNumber SailfinFutureNumber;
+    typedef struct SailfinFutureBool SailfinFutureBool;
     typedef struct SailfinFutureVoid SailfinFutureVoid;
     typedef struct SailfinFutureString SailfinFutureString;
 
     SailfinFutureNumber *sailfin_runtime_spawn_number(double (*fn)(void));
     SailfinFutureNumber *sailfin_runtime_spawn_number_ctx(double (*fn)(void *), void *ctx);
     double sailfin_runtime_await_number(SailfinFutureNumber *future);
+
+    SailfinFutureBool *sailfin_runtime_spawn_bool(bool (*fn)(void));
+    SailfinFutureBool *sailfin_runtime_spawn_bool_ctx(bool (*fn)(void *), void *ctx);
+    bool sailfin_runtime_await_bool(SailfinFutureBool *future);
 
     SailfinFutureVoid *sailfin_runtime_spawn_void(void (*fn)(void));
     SailfinFutureVoid *sailfin_runtime_spawn_void_ctx(void (*fn)(void *), void *ctx);

@@ -1,0 +1,9 @@
+async fn flip(x -> boolean) -> boolean {
+    return !x;
+}
+
+test "integration: async bool" {
+    let fut = flip(true);
+    let out = await fut;
+    assert out == false;
+}

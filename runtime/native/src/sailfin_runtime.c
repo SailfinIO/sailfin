@@ -1119,6 +1119,85 @@ char *sailfin_runtime_await_string(struct SailfinFutureString *future)
     return result;
 }
 
+struct SailfinFutureBool
+{
+    pthread_t thread;
+    bool (*fn0)(void);
+    bool (*fn1)(void *);
+    void *ctx;
+    bool has_ctx;
+    bool result;
+};
+
+static void *sailfin_future_bool_entry(void *arg)
+{
+    struct SailfinFutureBool *future = (struct SailfinFutureBool *)arg;
+    if (future->has_ctx)
+    {
+        future->result = future->fn1 ? future->fn1(future->ctx) : false;
+    }
+    else
+    {
+        future->result = future->fn0 ? future->fn0() : false;
+    }
+    return NULL;
+}
+
+struct SailfinFutureBool *sailfin_runtime_spawn_bool(bool (*fn)(void))
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureBool *future = (struct SailfinFutureBool *)calloc(1, sizeof(struct SailfinFutureBool));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn0 = fn;
+    future->has_ctx = false;
+    if (pthread_create(&future->thread, NULL, sailfin_future_bool_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+struct SailfinFutureBool *sailfin_runtime_spawn_bool_ctx(bool (*fn)(void *), void *ctx)
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureBool *future = (struct SailfinFutureBool *)calloc(1, sizeof(struct SailfinFutureBool));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn1 = fn;
+    future->ctx = ctx;
+    future->has_ctx = true;
+    if (pthread_create(&future->thread, NULL, sailfin_future_bool_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+bool sailfin_runtime_await_bool(struct SailfinFutureBool *future)
+{
+    if (!future)
+    {
+        return false;
+    }
+    pthread_join(future->thread, NULL);
+    bool result = future->result;
+    free(future);
+    return result;
+}
+
 void sailfin_runtime_serve(char *handler, char *config)
 {
     (void)handler;

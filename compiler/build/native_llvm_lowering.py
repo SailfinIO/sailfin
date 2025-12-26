@@ -1348,7 +1348,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if len(interface_type_lines) > 0:
         lines = (lines) + (interface_type_lines)
         lines = append_string(lines, "")
-    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
+    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)", "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
     vtable_type_lines = render_vtable_type_definitions(type_context)
     if len(vtable_type_lines) > 0:
         lines = (lines) + (vtable_type_lines)
@@ -7287,6 +7287,8 @@ def future_pointer_type_for_return_type(return_type):
     normalized = unwrap_move_wrapper(trimmed)
     if normalized == "number":
         return "%SailfinFutureNumber*"
+    if normalized == "boolean"  or  normalized == "bool":
+        return "%SailfinFutureBool*"
     if normalized == "string":
         return "%SailfinFutureString*"
     return ""
@@ -7298,6 +7300,8 @@ def spawn_symbol_for_return_type(return_type):
     normalized = unwrap_move_wrapper(trimmed)
     if normalized == "number":
         return "sailfin_runtime_spawn_number"
+    if normalized == "boolean"  or  normalized == "bool":
+        return "sailfin_runtime_spawn_bool"
     if normalized == "string":
         return "sailfin_runtime_spawn_string"
     return ""
@@ -7309,6 +7313,8 @@ def spawn_ctx_symbol_for_return_type(return_type):
     normalized = unwrap_move_wrapper(trimmed)
     if normalized == "number":
         return "sailfin_runtime_spawn_number_ctx"
+    if normalized == "boolean"  or  normalized == "bool":
+        return "sailfin_runtime_spawn_bool_ctx"
     if normalized == "string":
         return "sailfin_runtime_spawn_string_ctx"
     return ""
@@ -7316,6 +7322,8 @@ def spawn_ctx_symbol_for_return_type(return_type):
 def await_symbol_for_future_pointer_type(future_ptr_type):
     if future_ptr_type == "%SailfinFutureNumber*":
         return "sailfin_runtime_await_number"
+    if future_ptr_type == "%SailfinFutureBool*":
+        return "sailfin_runtime_await_bool"
     if future_ptr_type == "%SailfinFutureVoid*":
         return "sailfin_runtime_await_void"
     if future_ptr_type == "%SailfinFutureString*":
@@ -7517,6 +7525,9 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
             result_type = "i8*"
             if future_operand.llvm_type == "%SailfinFutureNumber*":
                 result_type = "double"
+            else:
+                if future_operand.llvm_type == "%SailfinFutureBool*":
+                    result_type = "i1"
             result_temp = format_temp_name(lowered.temp_index)
             awaited_call = "  " + result_temp + " = call " + result_type + " @" + await_symbol + "(" + future_operand.llvm_type + " " + future_operand.value + ")"
             awaited_lines2 = append_string(lowered.lines, awaited_call)
