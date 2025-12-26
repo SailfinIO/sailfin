@@ -203,6 +203,23 @@ fn main() -> number {
     assert call_count["value"] == 1
 
 
+def test_native_llvm_lowering_prints_interpolated_list_literal(compile_stage2) -> None:
+    source = """
+fn main() ![io] {
+    let a = 21;
+    let b = 21;
+    print.info("Results: {{[a, b]}}");
+}
+"""
+
+    lowered = compile_stage2(source, module_name="interpolated_list_literal")
+    _assert_only_pointer_layout_warnings(lowered.diagnostics)
+
+    # Previously this compiled to a partial array literal allocation and then
+    # quietly omitted the print call, yielding no output.
+    assert "call void @sailfin_runtime_print_info" in lowered.ir
+
+
 @pytest.mark.parametrize(
     "source, expected",
     [

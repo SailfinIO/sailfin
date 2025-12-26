@@ -9027,6 +9027,73 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
     current_temp = temp_index
     collected_string_constants = empty_string_constant_set()
     trimmed_expected = trim_text(expected_type)
+    if trimmed_expected == "i8*":
+        inner = trim_text(substring(text, 1, len(text) - 1))
+        elements = []
+        if len(inner) > 0:
+            elements = split_array_elements(inner)
+        open = lower_string_literal("\"[\"", current_temp, current_lines)
+        current_lines = open.lines
+        current_temp = open.temp_index
+        if open.operand == None:
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+        current_operand = open.operand
+        index = 0
+        while True:
+            if index >= len(elements):
+                break
+            element_text = trim_text(elements[index])
+            if len(element_text) == 0:
+                diagnostics = append_string(diagnostics, "llvm lowering: empty element in array literal")
+                index += 1
+                continue
+            if index > 0:
+                sep = lower_string_literal("\", \"", current_temp, current_lines)
+                current_lines = sep.lines
+                current_temp = sep.temp_index
+                if sep.operand == None:
+                    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+                with_sep = emit_string_concat(current_operand, sep.operand, current_temp, current_lines)
+                diagnostics = (diagnostics) + (with_sep.diagnostics)
+                current_lines = with_sep.lines
+                current_temp = with_sep.temp_index
+                if with_sep.operand == None:
+                    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+                current_operand = with_sep.operand
+            lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, "")
+            diagnostics = (diagnostics) + (lowered.diagnostics)
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+            current_lines = lowered.lines
+            current_temp = lowered.temp_index
+            if lowered.operand == None:
+                diagnostics = append_string(diagnostics, "llvm lowering: array literal element produced no value")
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+            as_string = coerce_operand_to_string(lowered.operand, current_temp, current_lines)
+            diagnostics = (diagnostics) + (as_string.diagnostics)
+            collected_string_constants = merge_string_constants(collected_string_constants, as_string.string_constants)
+            current_lines = as_string.lines
+            current_temp = as_string.temp_index
+            if as_string.operand == None:
+                diagnostics = append_string(diagnostics, "llvm lowering: unable to stringify array literal element")
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+            appended = emit_string_concat(current_operand, as_string.operand, current_temp, current_lines)
+            diagnostics = (diagnostics) + (appended.diagnostics)
+            current_lines = appended.lines
+            current_temp = appended.temp_index
+            if appended.operand == None:
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+            current_operand = appended.operand
+            index += 1
+        close = lower_string_literal("\"]\"", current_temp, current_lines)
+        current_lines = close.lines
+        current_temp = close.temp_index
+        if close.operand == None:
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+        finished = emit_string_concat(current_operand, close.operand, current_temp, current_lines)
+        diagnostics = (diagnostics) + (finished.diagnostics)
+        current_lines = finished.lines
+        current_temp = finished.temp_index
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=finished.operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     expected_element_type = ""
     if len(trimmed_expected) > 0:
         expected_element_type = array_pointer_element_type(trimmed_expected)
@@ -12056,7 +12123,7 @@ def try_lower_interpolated_string_literal(literal, bindings, locals, temp_index,
         if index >= len(parsed.expressions):
             break
         expr_text = parsed.expressions[index]
-        lowered_expr = lower_expression(expr_text, bindings, locals, current_temp, current_lines, functions, context, "")
+        lowered_expr = lower_expression(expr_text, bindings, locals, current_temp, current_lines, functions, context, "i8*")
         diagnostics = (diagnostics) + (lowered_expr.diagnostics)
         current_lines = lowered_expr.lines
         current_temp = lowered_expr.temp_index
