@@ -1,0 +1,62 @@
+fn _index_of(haystack -> string, needle -> string) -> number {
+    if needle.length == 0 {
+        return 0;
+    }
+    if haystack.length < needle.length {
+        return -1;
+    }
+    let mut i -> number = 0;
+    loop {
+        if i + needle.length > haystack.length {
+            break;
+        }
+        let mut j -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if j >= needle.length {
+                break;
+            }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _contains(haystack -> string, needle -> string) -> boolean {
+    return _index_of(haystack, needle) >= 0;
+}
+
+test "string: concat two single-char literals" {
+    let s = "a" + "b";
+    assert s == "ab";
+}
+
+test "string: concat string + newline" {
+    let s = "hello" + "\n";
+    assert s.length == 6;
+    assert s[0] == "h";
+    assert s[4] == "o";
+    assert s[5] == "\n";
+}
+
+test "string: multiline + continuation" {
+    // Regression test for native-text parsing: multi-line eval using trailing `+`.
+    let ir = "source_filename = \"m1.ll\"\n\n" +
+        "define double @foo(double %x) {\n" +
+        "entry:\n" +
+        "  %y = call double @llvm.round.f64(double %x)\n" +
+        "  ret double %y\n" +
+        "}\n";
+
+    assert _contains(ir, "@llvm.round.f64");
+    assert _contains(ir, "source_filename");
+    assert ir[0] == "s";
+}

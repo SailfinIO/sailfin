@@ -1,0 +1,5 @@
+import { helper_answer } from "./fixtures/inlining_helper";
+
+test "test runner: relative import inlining" {
+    assert helper_answer() == 42;
+}

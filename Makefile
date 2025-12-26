@@ -9,11 +9,20 @@ CLANG ?= clang
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 STAGE2_NATIVE_LIBS ?=
+NATIVE_LINK_DETERMINISTIC_FLAGS ?= -Wl,-no_uuid
 else
 STAGE2_NATIVE_LIBS ?= -lm
+NATIVE_LINK_DETERMINISTIC_FLAGS ?= -Wl,--build-id=none
 endif
 
-.PHONY: help install test test-unit test-integration compile clean package native-stage2-debug native-stage2-asan
+STAGE2_AOT_DIR ?= build/stage2/aot
+STAGE2_AOT_MODULES_FILE ?= $(STAGE2_AOT_DIR)/modules.txt
+
+NATIVE_OBJ_DIR ?= build/native/obj
+NATIVE_OUT ?= build/native/sailfin-stage2
+NATIVE_LINK_EXTRA ?=
+
+.PHONY: help install test test-unit test-integration compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism
 
 ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell command -v conda 2>/dev/null)
@@ -33,6 +42,8 @@ help:
 	@echo "  make test-unit    # Run Stage2 self-hosted Sailfin unit tests"
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make compile      # Build the native sailfin-stage2 compiler (full pipeline)"
+	@echo "  make check-stage2-determinism # Bootstrap stage2 twice and diff outputs"
+	@echo "  make check-native-stage2-determinism # Rebuild native stage2 twice and diff the binaries"
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
 	@echo "  make native-stage2-debug # Build native stage2 with -O0/-g for lldb"
 	@echo "  make native-stage2-asan # Build native stage2 with AddressSanitizer"
@@ -62,17 +73,65 @@ clean:
 compile:
 	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
 	$(CONDA) run -n $(CONDA_ENV) python scripts/bootstrap_stage2.py --no-validate
-	@mkdir -p build/native/obj
-	@rm -f build/native/obj/*.o
-	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.o
-	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.o
-	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/obj/runtime_globals.o
+	$(MAKE) _build-native-stage2
+	@echo "[compile] built $(NATIVE_OUT)"
+
+_build-native-stage2:
+	@if [ ! -f $(STAGE2_AOT_MODULES_FILE) ]; then \
+		echo "[_build-native-stage2] missing $(STAGE2_AOT_MODULES_FILE); run make compile first"; \
+		exit 1; \
+	fi
+	@mkdir -p $(NATIVE_OBJ_DIR)
+	@rm -f $(NATIVE_OBJ_DIR)/*.o
+	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o $(NATIVE_OBJ_DIR)/sailfin_runtime.o
+	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o $(NATIVE_OBJ_DIR)/stage2_driver.o
+	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o $(NATIVE_OBJ_DIR)/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
-	  $(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/obj/$$m.o; \
-	done < build/stage2/aot/modules.txt
-	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2 build/native/obj/sailfin_runtime.o build/native/obj/stage2_driver.o build/native/obj/runtime_globals.o $$(sed 's|^|build/native/obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
-	@echo "[compile] built build/native/sailfin-stage2"
+	  $(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -fPIC -c $(STAGE2_AOT_DIR)/$$m.ll -o $(NATIVE_OBJ_DIR)/$$m.o; \
+	done < $(STAGE2_AOT_MODULES_FILE)
+	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -o $(NATIVE_OUT) \
+		$(NATIVE_OBJ_DIR)/sailfin_runtime.o \
+		$(NATIVE_OBJ_DIR)/stage2_driver.o \
+		$(NATIVE_OBJ_DIR)/runtime_globals.o \
+		$$(sed 's|^|$(NATIVE_OBJ_DIR)/|; s|$$|.o|' $(STAGE2_AOT_MODULES_FILE) | tr '\n' ' ') \
+		$(NATIVE_LINK_EXTRA) $(STAGE2_NATIVE_LIBS)
+
+check-stage2-determinism:
+	@echo "[check-stage2-determinism] bootstrapping twice and diffing outputs"
+	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
+	@rm -rf build/stage2-diff-a build/stage2-diff-b build/stage2-diff.patch
+	$(CONDA) run -n $(CONDA_ENV) python scripts/bootstrap_stage2.py --no-validate --out build/stage2-diff-a
+	$(CONDA) run -n $(CONDA_ENV) python scripts/bootstrap_stage2.py --no-validate --out build/stage2-diff-b
+	@diff -ru build/stage2-diff-a build/stage2-diff-b > build/stage2-diff.patch || (\
+		echo "[check-stage2-determinism] NON-DETERMINISTIC output; showing first 200 diff lines"; \
+		head -n 200 build/stage2-diff.patch; \
+		echo "[check-stage2-determinism] full diff: build/stage2-diff.patch"; \
+		exit 1)
+	@echo "[check-stage2-determinism] OK (no diffs)"
+
+check-native-stage2-determinism:
+	@if [ ! -f $(STAGE2_AOT_MODULES_FILE) ]; then \
+		echo "[check-native-stage2-determinism] missing $(STAGE2_AOT_MODULES_FILE); run make compile first"; \
+		exit 1; \
+	fi
+	@echo "[check-native-stage2-determinism] rebuilding native stage2 twice and comparing binaries"
+	@rm -rf build/native-diff-a build/native-diff-b
+	@mkdir -p build/native-diff-a build/native-diff-b
+	$(MAKE) _build-native-stage2 \
+		NATIVE_OBJ_DIR=build/native-diff-a/obj \
+		NATIVE_OUT=build/native-diff-a/sailfin-stage2 \
+		NATIVE_LINK_EXTRA='$(NATIVE_LINK_DETERMINISTIC_FLAGS)'
+	$(MAKE) _build-native-stage2 \
+		NATIVE_OBJ_DIR=build/native-diff-b/obj \
+		NATIVE_OUT=build/native-diff-b/sailfin-stage2 \
+		NATIVE_LINK_EXTRA='$(NATIVE_LINK_DETERMINISTIC_FLAGS)'
+	@cmp -s build/native-diff-a/sailfin-stage2 build/native-diff-b/sailfin-stage2 || (\
+		echo "[check-native-stage2-determinism] NON-DETERMINISTIC binary output"; \
+		echo "[check-native-stage2-determinism] sha256:"; \
+		shasum -a 256 build/native-diff-a/sailfin-stage2 build/native-diff-b/sailfin-stage2; \
+		exit 1)
+	@echo "[check-native-stage2-determinism] OK (byte-identical)"
 
 native-stage2-debug: compile
 	@mkdir -p build/native/debug-obj
