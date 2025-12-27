@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.83 (2025-12-27)
+
+### Bug Fixes
+
+- Linking
+  ([`27794e2`](https://github.com/SailfinIO/sailfin/commit/27794e24b22a0643dcb19d1adc6cd650d29f060a))
+
+
 ## v0.1.1-alpha.82 (2025-12-26)
 
 ### Bug Fixes
