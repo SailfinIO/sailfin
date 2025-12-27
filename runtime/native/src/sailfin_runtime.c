@@ -893,19 +893,71 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
     out->data[alen] = text;
     return out;
 }
-bool sailfin_runtime_is_decimal_digit(int8_t ch)
+
+SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
 {
-    return (ch >= '0' && ch <= '9');
+    int64_t len = array ? array->len : 0;
+    if (len < 0)
+    {
+        len = 0;
+    }
+
+    SailfinPtrArray *out = _alloc_array(len + 1);
+    if (!out)
+    {
+        return NULL;
+    }
+
+    for (int64_t i = 0; i < len; i++)
+    {
+        out->data[i] = (array && array->data) ? array->data[i] : NULL;
+    }
+    out->data[len] = value;
+    return out;
 }
 
-bool sailfin_runtime_is_whitespace_char(int8_t ch)
+double sailfin_runtime_byte_at(char *text, int64_t index)
 {
-    return (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r');
+    if (!text || index < 0)
+    {
+        return -1.0;
+    }
+
+    unsigned char byte = (unsigned char)text[index];
+    return (double)byte;
 }
 
-bool sailfin_runtime_is_alpha_char(int8_t ch)
+bool sailfin_runtime_is_decimal_digit(double ch)
 {
-    return ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'));
+    int64_t v = (int64_t)ch;
+    if ((double)v != ch)
+    {
+        return false;
+    }
+    unsigned char c = (unsigned char)(v & 0xff);
+    return (c >= (unsigned char)'0' && c <= (unsigned char)'9');
+}
+
+bool sailfin_runtime_is_whitespace_char(double ch)
+{
+    int64_t v = (int64_t)ch;
+    if ((double)v != ch)
+    {
+        return false;
+    }
+    unsigned char c = (unsigned char)(v & 0xff);
+    return (c == (unsigned char)' ' || c == (unsigned char)'\t' || c == (unsigned char)'\n' || c == (unsigned char)'\r');
+}
+
+bool sailfin_runtime_is_alpha_char(double ch)
+{
+    int64_t v = (int64_t)ch;
+    if ((double)v != ch)
+    {
+        return false;
+    }
+    unsigned char c = (unsigned char)(v & 0xff);
+    return ((c >= (unsigned char)'a' && c <= (unsigned char)'z') || (c >= (unsigned char)'A' && c <= (unsigned char)'Z'));
 }
 
 void sailfin_runtime_bounds_check(int64_t index, int64_t length)

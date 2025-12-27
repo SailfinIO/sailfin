@@ -2140,7 +2140,7 @@ def parse_expression_statement(parser, decorators):
         sym = start.lexeme
         if strings_equal(sym, "}")  or  strings_equal(sym, "{"):
             return BlockStatementParseResult(parser=parser, statement=None, success=False)
-    capture = collect_until(current, [";"])
+    capture = collect_until(current, [";", "}"])
     if len(capture.tokens) == 0:
         return BlockStatementParseResult(parser=parser, statement=None, success=False)
     statement_tokens = []
@@ -2156,10 +2156,12 @@ def parse_expression_statement(parser, decorators):
     current = capture.parser
     current = skip_trivia(current)
     terminator = parser_peek_raw(current)
-    if not symbol_matches(terminator, ";"):
-        return BlockStatementParseResult(parser=parser, statement=None, success=False)
-    statement_tokens = append_token(statement_tokens, terminator)
-    current = parser_advance_raw(current)
+    if symbol_matches(terminator, ";"):
+        statement_tokens = append_token(statement_tokens, terminator)
+        current = parser_advance_raw(current)
+    else:
+        if not symbol_matches(terminator, "}"):
+            return BlockStatementParseResult(parser=parser, statement=None, success=False)
     expression = expression_from_tokens(trimmed)
     span = source_span_from_tokens(statement_tokens)
     statement = runtime.enum_instantiate(Statement, 'ExpressionStatement', [runtime.enum_field('expression', expression), runtime.enum_field('span', span)])

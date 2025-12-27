@@ -2990,7 +2990,10 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
         }
     }
 
-    let capture = collect_until(current, [";"]);
+    // Expression statements are usually terminated with ';'.
+    // As a convenience, allow a trailing expression statement right before a
+    // block close '}' to omit the semicolon.
+    let capture = collect_until(current, [";", "}"]);
     if capture.tokens.length == 0 {
         return BlockStatementParseResult { parser: parser, statement: null, success: false };
     }
@@ -3013,11 +3016,14 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
     current = capture.parser;
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
-    if !symbol_matches(terminator, ";") {
+
+    // Consume ';' if present; otherwise allow '}' (handled by outer block parser).
+    if symbol_matches(terminator, ";") {
+        statement_tokens = append_token(statement_tokens, terminator);
+        current = parser_advance_raw(current);
+    } else if !symbol_matches(terminator, "}") {
         return BlockStatementParseResult { parser: parser, statement: null, success: false };
     }
-    statement_tokens = append_token(statement_tokens, terminator);
-    current = parser_advance_raw(current);
 
     let expression = expression_from_tokens(trimmed);
     let span = source_span_from_tokens(statement_tokens);

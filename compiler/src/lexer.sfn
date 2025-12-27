@@ -6,6 +6,7 @@
 // parser can decide what to ignore.
 
 import { Token, TokenKind, eof_token } from "./token";
+import { char_code } from "./string_utils";
 
 struct LexerState {
     source -> string;
@@ -328,31 +329,33 @@ fn lex(source -> string) -> Token[] {
     return tokens;
 }
 
-fn is_whitespace(ch -> i8) -> boolean {
-    return is_whitespace_char(ch);
+fn is_whitespace(ch -> string) -> boolean {
+    return ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
 }
 
-fn is_identifier_start(ch -> i8) -> boolean {
+fn is_identifier_start(ch -> string) -> boolean {
     return is_letter(ch) || ch == "_";
 }
 
-fn is_identifier_part(ch -> i8) -> boolean {
+fn is_identifier_part(ch -> string) -> boolean {
     return is_identifier_start(ch) || is_digit(ch);
 }
 
-fn is_letter(ch -> i8) -> boolean {
-    return is_alpha_char(ch);
+fn is_letter(ch -> string) -> boolean {
+    let c = char_code(ch);
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
 }
 
-fn is_digit(ch -> i8) -> boolean {
-    return is_decimal_digit(ch);
+fn is_digit(ch -> string) -> boolean {
+    let c = char_code(ch);
+    return c >= 48 && c <= 57;
 }
 
-fn is_double_quote(ch -> i8) -> boolean {
+fn is_double_quote(ch -> string) -> boolean {
     return ch == "\"";
 }
 
-fn is_backslash(ch -> i8) -> boolean {
+fn is_backslash(ch -> string) -> boolean {
     return ch == "\\";
 }
 

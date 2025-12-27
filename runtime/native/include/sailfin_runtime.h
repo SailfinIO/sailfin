@@ -44,6 +44,12 @@ extern "C"
     // For `{ i8**, i64 }*` concatenation, stage2 uses `@sailfin_runtime_concat({i8**,i64}*,{i8**,i64}*)`.
     SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b);
     SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text);
+    SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value);
+
+    // ---- Byte helpers ----
+
+    // Returns the raw byte at `index` as a `number` (double) for stage2.
+    double sailfin_runtime_byte_at(char *text, int64_t index);
 
     // ---- Process helpers ----
     // Execute a command (argv[0] is program). Returns the exit code.
@@ -105,9 +111,10 @@ extern "C"
 
     // ---- Character helpers (runtime-provided) ----
 
-    bool sailfin_runtime_is_decimal_digit(int8_t ch);
-    bool sailfin_runtime_is_whitespace_char(int8_t ch);
-    bool sailfin_runtime_is_alpha_char(int8_t ch);
+    // Stage2 represents characters/bytes as `number` (double) at the ABI.
+    bool sailfin_runtime_is_decimal_digit(double ch);
+    bool sailfin_runtime_is_whitespace_char(double ch);
+    bool sailfin_runtime_is_alpha_char(double ch);
 
     // ---- Fast string helpers (unchecked) ----
 

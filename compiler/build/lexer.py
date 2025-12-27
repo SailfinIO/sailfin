@@ -2,6 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.token import Token, TokenKind, eof_token
+from compiler.build.string_utils import char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -217,7 +218,7 @@ def lex(source):
     return tokens
 
 def is_whitespace(ch):
-    return is_whitespace_char(ch)
+    return ch == " "  or  ch == "\t"  or  ch == "\n"  or  ch == "\r"
 
 def is_identifier_start(ch):
     return is_letter(ch)  or  ch == "_"
@@ -226,10 +227,12 @@ def is_identifier_part(ch):
     return is_identifier_start(ch)  or  is_digit(ch)
 
 def is_letter(ch):
-    return is_alpha_char(ch)
+    c = char_code(ch)
+    return c >= 65  and  c <= 90  or  c >= 97  and  c <= 122
 
 def is_digit(ch):
-    return is_decimal_digit(ch)
+    c = char_code(ch)
+    return c >= 48  and  c <= 57
 
 def is_double_quote(ch):
     return ch == "\""
