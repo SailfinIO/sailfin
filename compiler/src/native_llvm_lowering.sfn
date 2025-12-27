@@ -1266,6 +1266,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.drop");
     runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
     runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
@@ -4286,6 +4287,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         symbol: "sailfin_runtime_string_concat",
         return_type: "i8*",
         parameter_types: ["i8*", "i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.drop",
+        symbol: "sailfin_runtime_string_drop",
+        return_type: "void",
+        parameter_types: ["i8*"],
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
@@ -15200,6 +15208,7 @@ struct LoadLocalResult {
     operand -> LLVMOperand?;
     diagnostics -> string[];
 }
+
 
 fn load_local_operand(local -> LocalBinding, temp_index -> number, lines -> string[]) -> LoadLocalResult {
     let mut diagnostics -> string[] = [];

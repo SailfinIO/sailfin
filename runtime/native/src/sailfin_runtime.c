@@ -187,6 +187,118 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
     return true;
 }
 
+// ---- Stage2-native memory tracking (bootstrap-safe) ----
+//
+// Stage2 currently uses a raw `char *` ABI for strings, with a mix of:
+// - static literals (must never be freed)
+// - immediate-codepoint pseudo-strings (must never be freed)
+// - runtime-allocated strings (malloc) that can be safely freed
+// - foreign pointers (boxed structs/opaque pointers) passed as `i8*`
+//
+// To avoid freeing the wrong thing, we only free pointers that the native
+// runtime itself allocated and registered.
+
+static pthread_mutex_t _sailfin_persistent_lock = PTHREAD_MUTEX_INITIALIZER;
+static char **_sailfin_persistent_ptrs = NULL;
+static size_t _sailfin_persistent_len = 0;
+static size_t _sailfin_persistent_cap = 0;
+
+static pthread_mutex_t _sailfin_owned_string_lock = PTHREAD_MUTEX_INITIALIZER;
+static char **_sailfin_owned_strings = NULL;
+static size_t _sailfin_owned_string_len = 0;
+static size_t _sailfin_owned_string_cap = 0;
+
+static bool _ptr_list_contains(char **list, size_t len, const char *ptr)
+{
+    if (!list || len == 0 || !ptr)
+    {
+        return false;
+    }
+    for (size_t i = 0; i < len; i++)
+    {
+        if (list[i] == ptr)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void _ptr_list_add_unique(char ***list, size_t *len, size_t *cap, char *ptr)
+{
+    if (!ptr)
+    {
+        return;
+    }
+
+    if (*list && _ptr_list_contains(*list, *len, ptr))
+    {
+        return;
+    }
+
+    if (*len >= *cap)
+    {
+        size_t new_cap = (*cap == 0) ? 64 : (*cap * 2);
+        char **next = (char **)realloc(*list, new_cap * sizeof(char *));
+        if (!next)
+        {
+            // Best-effort: do not abort during bootstrap memory bookkeeping.
+            return;
+        }
+        *list = next;
+        *cap = new_cap;
+    }
+
+    (*list)[*len] = ptr;
+    *len = *len + 1;
+}
+
+static bool _ptr_list_remove(char **list, size_t *len, const char *ptr)
+{
+    if (!list || !len || *len == 0 || !ptr)
+    {
+        return false;
+    }
+    for (size_t i = 0; i < *len; i++)
+    {
+        if (list[i] == ptr)
+        {
+            // swap-remove
+            list[i] = list[*len - 1];
+            *len = *len - 1;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void _track_owned_string(char *ptr)
+{
+    if (!ptr)
+    {
+        return;
+    }
+    if (_is_immediate_codepoint_string(ptr, NULL))
+    {
+        return;
+    }
+    pthread_mutex_lock(&_sailfin_owned_string_lock);
+    _ptr_list_add_unique(&_sailfin_owned_strings, &_sailfin_owned_string_len, &_sailfin_owned_string_cap, ptr);
+    pthread_mutex_unlock(&_sailfin_owned_string_lock);
+}
+
+static bool _is_persistent_ptr(char *ptr)
+{
+    if (!ptr)
+    {
+        return false;
+    }
+    pthread_mutex_lock(&_sailfin_persistent_lock);
+    bool ok = _ptr_list_contains(_sailfin_persistent_ptrs, _sailfin_persistent_len, ptr);
+    pthread_mutex_unlock(&_sailfin_persistent_lock);
+    return ok;
+}
+
 static int _cmp_cstr_ptr(const void *a, const void *b)
 {
     const char *sa = *(const char *const *)a;
@@ -417,7 +529,42 @@ static SAILFIN_NOINLINE bool _asan_poisoned(const void *addr)
 
 void sailfin_runtime_mark_persistent(char *ptr)
 {
-    (void)ptr;
+    if (!ptr)
+    {
+        return;
+    }
+    if (_is_immediate_codepoint_string(ptr, NULL))
+    {
+        return;
+    }
+    pthread_mutex_lock(&_sailfin_persistent_lock);
+    _ptr_list_add_unique(&_sailfin_persistent_ptrs, &_sailfin_persistent_len, &_sailfin_persistent_cap, ptr);
+    pthread_mutex_unlock(&_sailfin_persistent_lock);
+}
+
+void sailfin_runtime_string_drop(char *text)
+{
+    if (!text)
+    {
+        return;
+    }
+    if (_is_immediate_codepoint_string(text, NULL))
+    {
+        return;
+    }
+    if (_is_persistent_ptr(text))
+    {
+        return;
+    }
+
+    pthread_mutex_lock(&_sailfin_owned_string_lock);
+    bool owned = _ptr_list_remove(_sailfin_owned_strings, &_sailfin_owned_string_len, text);
+    pthread_mutex_unlock(&_sailfin_owned_string_lock);
+    if (!owned)
+    {
+        return;
+    }
+    free(text);
 }
 
 void sailfin_runtime_print_info(char *msg) { _print_line("[info] ", msg); }
@@ -504,6 +651,7 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
         {
             out[0] = '\0';
         }
+        _track_owned_string(out);
         return out;
     }
 
@@ -540,6 +688,7 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
             memcpy(out, buf + start, (size_t)length);
         }
         out[length] = '\0';
+        _track_owned_string(out);
         return out;
     }
 
@@ -579,6 +728,7 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
         memcpy(out, text + start, (size_t)length);
     }
     out[length] = '\0';
+    _track_owned_string(out);
     return out;
 }
 
@@ -591,6 +741,7 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
         {
             out[0] = '\0';
         }
+        _track_owned_string(out);
         return out;
     }
 
@@ -628,6 +779,7 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
             memcpy(out, buf + start, (size_t)length);
         }
         out[length] = '\0';
+        _track_owned_string(out);
         return out;
     }
 
@@ -651,6 +803,7 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
         memcpy(out, text + start, (size_t)length);
     }
     out[length] = '\0';
+    _track_owned_string(out);
     return out;
 }
 
@@ -773,6 +926,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     }
 
     memset(out + alen + blen, 0, 1 + pad);
+    _track_owned_string(out);
     return out;
 }
 
@@ -799,6 +953,7 @@ char *sailfin_runtime_number_to_string(double value)
         return NULL;
     }
     memcpy(out, buf, len + 1);
+    _track_owned_string(out);
     return out;
 }
 
@@ -1469,6 +1624,7 @@ char *sailfin_runtime_grapheme_at(char *text, double index)
     }
     out[0] = text[idx];
     out[1] = '\0';
+    _track_owned_string(out);
     return out;
 }
 

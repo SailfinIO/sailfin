@@ -112,31 +112,6 @@ jobs:
         shell: bash -l {0}
         run: |
           CONDA=$(which conda) semantic-release version
-          # Sync sailfin_stage2_version() return value with __version__
-          python3 -c "
-          import re
-          path = 'compiler/src/version.sfn'
-          content = open(path).read()
-          m = re.search(r'let __version__ = \"([^\"]+)\";', content)
-          if m:
-              ver = m.group(1)
-              updated = re.sub(
-                  r'(fn sailfin_stage2_version\\(\\) -> string \\{[^}]*return \")([^\"]+)(\";)',
-                  r'\\g<1>' + ver + r'\\3',
-                  content,
-                  flags=re.DOTALL
-              )
-              if updated != content:
-                  open(path, 'w').write(updated)
-                  print(f'Synced sailfin_stage2_version() to {ver}')
-          "
-          # Amend the version commit if the function return was updated
-          if ! git diff --quiet compiler/src/version.sfn; then
-            git add compiler/src/version.sfn
-            git commit --amend --no-edit
-            # Force push the amended commit (safe: we just created this commit)
-            git push --force-with-lease origin HEAD
-          fi
 
       - name: Run semantic release
         env:
