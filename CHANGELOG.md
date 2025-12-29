@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.84 (2025-12-29)
+
+### Bug Fixes
+
+- Version strategy and ownership
+  ([`b3478a8`](https://github.com/SailfinIO/sailfin/commit/b3478a89159674a9edf61616fb77ebe68db775f7))
+
+
 ## v0.1.1-alpha.83 (2025-12-27)
 
 ### Bug Fixes
