@@ -1960,4 +1960,10 @@ def append_string(values, value):
     return (values) + ([value])
 
 def char_at(value, index):
-    return substring(value, index, index + 1)
+    if len(value) == 0:
+        return ""
+    if index < 0:
+        return ""
+    if index >= len(value):
+        return ""
+    return value[index]

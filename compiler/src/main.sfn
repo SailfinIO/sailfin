@@ -178,8 +178,19 @@ fn compile_to_llvm_with_module(source -> string, module_name -> string) -> strin
 // Emit LLVM IR that runs all `test ... {}` declarations in the module.
 // Used by the `sailfin test` CLI subcommand.
 fn compile_tests_to_llvm(source -> string) -> string ![io] {
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    if trace {
+        print.warn("test compiler: compile_to_native start");
+    }
     let native_result = compile_to_native(source);
+    if trace {
+        print.warn("test compiler: compile_to_native done (diagnostics=" + number_to_string(native_result.diagnostics.length) + ")");
+        print.warn("test compiler: lower_to_llvm_for_tests start");
+    }
     let lowered = lower_to_llvm_for_tests(native_result.module);
+    if trace {
+        print.warn("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(lowered.ir.length) + ")");
+    }
     return lowered.ir;
 }
 

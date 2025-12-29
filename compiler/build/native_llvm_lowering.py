@@ -937,6 +937,9 @@ def load_imported_layout_manifests(imports):
 
 def collect_imported_module_context(imports):
     # effects: io
+    trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
+    if trace:
+        print.warn("test llvm: collect_imported_module_context start (imports=" + number_to_string(len(imports)) + ")")
     manifests = []
     native_texts = []
     diagnostics = []
@@ -945,6 +948,8 @@ def collect_imported_module_context(imports):
     while True:
         if index >= len(imports):
             break
+        if trace  and  index > 0  and  index % 50 == 0:
+            print.warn("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")")
         module_path = imports[index].module
         slug = resolve_import_module_slug(module_path)
         if len(slug) == 0:
@@ -973,6 +978,8 @@ def collect_imported_module_context(imports):
         manifests = (manifests) + ([LayoutManifest(structs=manifest_structs, enums=manifest_enums, diagnostics=[])])
         native_texts = (native_texts) + ([native_text])
         index += 1
+    if trace:
+        print.warn("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(len(seen)) + ")")
     return ImportedModuleContext(manifests=manifests, native_texts=native_texts, diagnostics=diagnostics)
 
 def resolve_import_module_slug(module):
@@ -1065,17 +1072,33 @@ def lower_to_llvm(native_module):
 
 def lower_to_llvm_for_tests(native_module):
     # effects: io
+    trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
+    if trace:
+        print.warn("test llvm: lower_to_llvm_for_tests start (module=" + native_module.module_name + ")")
     artifact = select_text_artifact(native_module.artifacts)
     if artifact == None:
+        if trace:
+            print.warn("test llvm: lower_to_llvm_for_tests missing native text artifact")
         return lower_to_llvm_with_context_for_tests(native_module, [], [], [])
+    if trace:
+        print.warn("test llvm: lower_to_llvm_for_tests parse_native_artifact start (bytes=" + number_to_string(len(artifact.contents)) + ")")
     parse = parse_native_artifact(artifact.contents)
+    if trace:
+        print.warn("test llvm: lower_to_llvm_for_tests parse_native_artifact done (imports=" + number_to_string(len(parse.imports)) + ")")
+        print.warn("test llvm: lower_to_llvm_for_tests collect_imported_module_context start")
     import_context = collect_imported_module_context(parse.imports)
+    if trace:
+        print.warn("test llvm: lower_to_llvm_for_tests collect_imported_module_context done (native_texts=" + number_to_string(len(import_context.native_texts)) + ")")
+        print.warn("test llvm: lower_to_llvm_for_tests lower_to_llvm_with_context_for_tests start")
     return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
 def lower_to_llvm_with_manifests(native_module, imported_manifests):
+    # effects: io
     return lower_to_llvm_with_context(native_module, imported_manifests, [], [])
 
 def lower_to_llvm_with_context_for_tests(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
+    # effects: io
+    trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
     base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics)
     if len(base.ir) == 0:
         return base
@@ -1101,6 +1124,8 @@ def lower_to_llvm_with_context_for_tests(native_module, imported_manifests, impo
         updated = base
         updated.diagnostics = (updated.diagnostics) + (["llvm lowering (test): module defines `main`; skipping synthesized test harness"])
         return updated
+    if trace:
+        print.warn("test llvm: lower_to_llvm_with_context_for_tests synthesize harness (tests=" + number_to_string(len(tests)) + ")")
     harness = render_test_harness_main(tests)
     updated = base
     if len(updated.ir) > 0:
@@ -1127,6 +1152,9 @@ def module_global_symbol(name):
 def module_init_symbol(module_name):
     return "@sailfin_module_init__" + sanitize_symbol(module_name)
 
+def module_init_done_symbol(module_name):
+    return "@sailfin_module_init_done__" + sanitize_symbol(module_name)
+
 def module_user_main_symbol(module_name):
     return "sailfin_user_main__" + sanitize_symbol(module_name)
 
@@ -1137,6 +1165,7 @@ def lower_module_bindings_to_globals(bindings, context, module_name):
     locals = []
     collected_string_constants = empty_string_constant_set()
     init_symbol = module_init_symbol(module_name)
+    init_done_symbol = module_init_done_symbol(module_name)
     needs_init = False
     if len(bindings) == 0:
         return ModuleGlobalLoweringResult(preamble_lines=[], init_function_lines=[], init_function_symbol=init_symbol, needs_init_call=False, locals=[], string_constants=collected_string_constants, diagnostics=[])
@@ -1147,16 +1176,23 @@ def lower_module_bindings_to_globals(bindings, context, module_name):
         if index >= len(bindings):
             break
         binding = bindings[index]
-        if len(trim_text(binding.type_annotation)) == 0:
+        type_annotation = trim_text(binding.type_annotation)
+        effective_type_annotation = binding.type_annotation
+        if len(type_annotation) == 0  and  binding.value != None:
+            init_expr = trim_text(binding.value)
+            if is_string_literal(init_expr):
+                type_annotation = "string"
+                effective_type_annotation = "string"
+        if len(type_annotation) == 0:
             index += 1
             continue
         name = binding.name
         global_name = module_global_symbol(name)
         llvm_type = ""
-        if len(trim_text(binding.type_annotation)) > 0:
-            llvm_type = map_local_type(context, binding.type_annotation)
+        if len(type_annotation) > 0:
+            llvm_type = map_local_type(context, type_annotation)
         if len(llvm_type) == 0:
-            diagnostics = append_string(diagnostics, "llvm lowering: module binding `" + name + "` has unsupported type annotation `" + binding.type_annotation + "`")
+            diagnostics = append_string(diagnostics, "llvm lowering: module binding `" + name + "` has unsupported type annotation `" + type_annotation + "`")
             llvm_type = "double"
         if llvm_type == "i8*":
             preamble_lines = append_string(preamble_lines, global_name + " = global i8* null")
@@ -1182,21 +1218,19 @@ def lower_module_bindings_to_globals(bindings, context, module_name):
                             else:
                                 needs_init = True
             preamble_lines = append_string(preamble_lines, global_name + " = global " + llvm_type + " " + initializer_text)
-        locals = append_local_binding(locals, LocalBinding(name=name, pointer=global_name, llvm_type=llvm_type, type_annotation=binding.type_annotation, ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
+        locals = append_local_binding(locals, LocalBinding(name=name, pointer=global_name, llvm_type=llvm_type, type_annotation=effective_type_annotation, ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
         index += 1
     if not needs_init:
         return ModuleGlobalLoweringResult(preamble_lines=preamble_lines, init_function_lines=[], init_function_symbol=init_symbol, needs_init_call=False, locals=locals, string_constants=collected_string_constants, diagnostics=diagnostics)
-    init_lines = (init_lines) + (["define internal void " + init_symbol + "() {", "block.entry:"])
+    preamble_lines = append_string(preamble_lines, init_done_symbol + " = global i1 0")
+    init_lines = (init_lines) + (["define internal void " + init_symbol + "() {", "block.entry:", "  %t0 = load i1, i1* " + init_done_symbol, "  %t1 = icmp ne i1 %t0, 0", "  br i1 %t1, label %block.done, label %block.init", "block.init:", "  store i1 1, i1* " + init_done_symbol])
     init_index = 0
-    current_temp = 0
+    current_temp = 2
     current_lines = init_lines
     while True:
         if init_index >= len(bindings):
             break
         binding = bindings[init_index]
-        if len(trim_text(binding.type_annotation)) == 0:
-            init_index += 1
-            continue
         if binding.value == None:
             init_index += 1
             continue
@@ -1242,11 +1276,18 @@ def lower_module_bindings_to_globals(bindings, context, module_name):
                     if coerced.operand != None:
                         current_lines = append_string(current_lines, "  store " + llvm_type + " " + coerced.operand.value + ", " + llvm_type + "* " + global_name)
         init_index += 1
+    current_lines = append_string(current_lines, "  br label %block.done")
+    current_lines = append_string(current_lines, "block.done:")
     current_lines = append_string(current_lines, "  ret void")
     current_lines = append_string(current_lines, "}")
     return ModuleGlobalLoweringResult(preamble_lines=preamble_lines, init_function_lines=current_lines, init_function_symbol=init_symbol, needs_init_call=True, locals=locals, string_constants=collected_string_constants, diagnostics=diagnostics)
 
 def lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
+    # effects: io
+    trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
+    if trace:
+        print.warn("test llvm: lower_to_llvm_with_context start (module=" + native_module.module_name + ")")
+        print.warn("test llvm: lower_to_llvm_with_context imported_native_texts=" + number_to_string(len(imported_native_texts)) + " imported_manifests=" + number_to_string(len(imported_manifests)))
     diagnostics = []
     if len(imported_diagnostics) > 0:
         diagnostics = (diagnostics) + (imported_diagnostics)
@@ -1257,6 +1298,8 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
         return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=empty_constants)
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
+    if trace:
+        print.warn("test llvm: lower_to_llvm_with_context parsed (imports=" + number_to_string(len(parse.imports)) + " functions=" + number_to_string(len(parse.functions)) + ")")
     exported_symbols = collect_exported_symbol_names(parse.imports)
     manifest_artifact = select_layout_manifest_artifact(native_module.artifacts)
     module_manifest = None
@@ -1268,6 +1311,8 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     diagnostics = (diagnostics) + (manifest_application.diagnostics)
     module_structs = manifest_application.structs
     module_enums = manifest_application.enums
+    if trace:
+        print.warn("test llvm: lower_to_llvm_with_context layout applied (structs=" + number_to_string(len(module_structs)) + " enums=" + number_to_string(len(module_enums)) + ")")
     imported_structs = []
     imported_enums = []
     imported_interfaces = []
@@ -1278,6 +1323,8 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     while True:
         if text_index >= len(imported_native_texts):
             break
+        if trace:
+            print.warn("test llvm: lower_to_llvm_with_context import parse index=" + number_to_string(text_index) + " bytes=" + number_to_string(len(imported_native_texts[text_index])))
         native_text = imported_native_texts[text_index]
         manifest_for_module = None
         if text_index < manifest_count:
@@ -1299,6 +1346,8 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
         imported_methods = flatten_struct_methods(applied_import.structs)
         imported_struct_methods = (imported_struct_methods) + (imported_methods)
         text_index += 1
+    if trace:
+        print.warn("test llvm: lower_to_llvm_with_context import context loaded (imported_functions=" + number_to_string(len(imported_functions)) + ")")
     if len(imported_native_texts) < manifest_count:
         manifest_index = len(imported_native_texts)
         while True:
@@ -1332,6 +1381,8 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     direct_effects = collect_direct_function_effects(context_functions)
     call_graph = collect_function_call_graph(context_functions)
     aggregated_effects = propagate_function_effects(direct_effects, call_graph)
+    if trace:
+        print.warn("test llvm: lower_to_llvm_with_context effects aggregated (entries=" + number_to_string(len(aggregated_effects)) + ")")
     function_effects = []
     lifetime_regions = []
     lines = []
@@ -1390,10 +1441,14 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     index = 0
     has_add_function = False
     all_string_constants = module_globals.string_constants
+    if trace:
+        print.warn("test llvm: lower_to_llvm_with_context emit_function loop start (local_functions=" + number_to_string(len(local_functions)) + ")")
     while True:
         if index >= len(local_functions):
             break
         current_function = local_functions[index]
+        if trace:
+            print.warn("test llvm: lower_to_llvm_with_context lowering function index=" + number_to_string(index) + " name=" + current_function.name + " instructions=" + number_to_string(len(current_function.instructions)))
         aggregated_entry = find_function_effect_entry(aggregated_effects, current_function.name)
         effective_effects = []
         if aggregated_entry != None:
@@ -2772,13 +2827,14 @@ def collect_function_names(functions):
 
 def extract_call_targets(expression, function_names):
     results = []
-    if len(expression) == 0:
+    expression_len = len(expression)
+    if expression_len == 0:
         return results
     index = 0
     while True:
-        if index >= len(expression):
+        if index >= expression_len:
             break
-        ch = char_at(expression, index)
+        ch = expression[index]
         if ch == "\"":
             index = skip_string_literal(expression, index + 1)
             continue
@@ -2786,9 +2842,9 @@ def extract_call_targets(expression, function_names):
             start_index = index
             index += 1
             while True:
-                if index >= len(expression):
+                if index >= expression_len:
                     break
-                current = char_at(expression, index)
+                current = expression[index]
                 if is_identifier_part_char(current):
                     index += 1
                     continue
@@ -2796,18 +2852,18 @@ def extract_call_targets(expression, function_names):
                     index += 1
                     continue
                 break
-            candidate = trim_text(substring(expression, start_index, index))
+            candidate = substring(expression, start_index, index)
             if len(candidate) > 0:
                 while True:
                     dot_index = index_of(candidate, ".")
                     if dot_index == -1:
                         break
-                    candidate = trim_text(substring(candidate, dot_index + 1, len(candidate)))
+                    candidate = substring(candidate, dot_index + 1, len(candidate))
                 cursor = index
                 while True:
-                    if cursor >= len(expression):
+                    if cursor >= expression_len:
                         break
-                    next = char_at(expression, cursor)
+                    next = expression[cursor]
                     if is_trim_char(next):
                         cursor += 1
                         continue
@@ -2821,13 +2877,14 @@ def extract_call_targets(expression, function_names):
 
 def extract_all_call_targets(expression):
     results = []
-    if len(expression) == 0:
+    expression_len = len(expression)
+    if expression_len == 0:
         return results
     index = 0
     while True:
-        if index >= len(expression):
+        if index >= expression_len:
             break
-        ch = char_at(expression, index)
+        ch = expression[index]
         if ch == "\"":
             index = skip_string_literal(expression, index + 1)
             continue
@@ -2835,9 +2892,9 @@ def extract_all_call_targets(expression):
             start_index = index
             index += 1
             while True:
-                if index >= len(expression):
+                if index >= expression_len:
                     break
-                current = char_at(expression, index)
+                current = expression[index]
                 if is_identifier_part_char(current):
                     index += 1
                     continue
@@ -2845,13 +2902,13 @@ def extract_all_call_targets(expression):
                     index += 1
                     continue
                 break
-            candidate = trim_text(substring(expression, start_index, index))
+            candidate = substring(expression, start_index, index)
             if len(candidate) > 0:
                 cursor = index
                 while True:
-                    if cursor >= len(expression):
+                    if cursor >= expression_len:
                         break
-                    next = char_at(expression, cursor)
+                    next = expression[cursor]
                     if is_trim_char(next):
                         cursor += 1
                         continue
@@ -3577,7 +3634,7 @@ needs_module_init_call
         linkage = "internal "
     lines = append_string(lines, "define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {")
     lines = append_string(lines, entry_label + ":")
-    if emit_main_wrapper  and  needs_module_init_call:
+    if needs_module_init_call:
         lines = append_string(lines, "  call void " + module_init_symbol + "()")
     decorator_string_constants = empty_string_constant_set()
     decorator_index = 0

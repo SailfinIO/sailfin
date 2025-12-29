@@ -49,6 +49,100 @@ fn _path_join(base -> string, name -> string) -> string {
     return base + "/" + name;
 }
 
+fn _path_pop_last(parts -> string[]) -> string[] {
+    if parts.length == 0 {
+        return [];
+    }
+    let mut out -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index + 1 >= parts.length {
+            break;
+        }
+        out = out.concat([parts[index]]);
+        index += 1;
+    }
+    return out;
+}
+
+fn _path_join_parts(parts -> string[]) -> string {
+    let mut out -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= parts.length {
+            break;
+        }
+        if index == 0 {
+            out = parts[index];
+        } else {
+            out = out + "/" + parts[index];
+        }
+        index += 1;
+    }
+    return out;
+}
+
+fn _path_normalize(path -> string) -> string {
+    if path.length == 0 {
+        return ".";
+    }
+
+    let is_abs = path[0] == "/";
+    let mut parts -> string[] = [];
+
+    let mut seg_start -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= path.length {
+            break;
+        }
+        if path[i] == "/" {
+            let seg = substring(path, seg_start, i);
+            if seg.length == 0 || seg == "." {
+                // skip
+            } else if seg == ".." {
+                if parts.length > 0 && parts[parts.length - 1] != ".." {
+                    parts = _path_pop_last(parts);
+                } else if !is_abs {
+                    parts = parts.concat([".."]); 
+                }
+            } else {
+                parts = parts.concat([seg]);
+            }
+            seg_start = i + 1;
+        }
+        i += 1;
+    }
+
+    // trailing segment
+    if seg_start <= path.length {
+        let seg = substring(path, seg_start, path.length);
+        if seg.length == 0 || seg == "." {
+            // skip
+        } else if seg == ".." {
+            if parts.length > 0 && parts[parts.length - 1] != ".." {
+                parts = _path_pop_last(parts);
+            } else if !is_abs {
+                parts = parts.concat([".."]); 
+            }
+        } else {
+            parts = parts.concat([seg]);
+        }
+    }
+
+    let joined = _path_join_parts(parts);
+    if is_abs {
+        if joined.length == 0 {
+            return "/";
+        }
+        return "/" + joined;
+    }
+    if joined.length == 0 {
+        return ".";
+    }
+    return joined;
+}
+
 fn _has_prefix(value -> string, prefix -> string) -> boolean {
     if prefix.length > value.length {
         return false;
@@ -122,7 +216,24 @@ fn _extract_relative_import_specs(source -> string) -> string[] {
 }
 
 fn _resolve_import_path(base_dir -> string, spec -> string) -> string {
-    let mut path = _path_join(base_dir, spec);
+    // Resolve leading ./ and ../ segments without relying on full path
+    // normalization (keeps behaviour stable for test inlining).
+    let mut current_base = base_dir;
+    let mut remainder = spec;
+    loop {
+        if _has_prefix(remainder, "../") {
+            current_base = _dirname(current_base);
+            remainder = substring(remainder, 3, remainder.length);
+            continue;
+        }
+        if _has_prefix(remainder, "./") {
+            remainder = substring(remainder, 2, remainder.length);
+            continue;
+        }
+        break;
+    }
+
+    let mut path = _path_join(current_base, remainder);
     if _ends_with(path, ".sfn") {
         return path;
     }
@@ -143,32 +254,93 @@ fn _string_list_contains(items -> string[], value -> string) -> boolean {
     return false;
 }
 
+fn _string_contains(haystack -> string, needle -> string) -> boolean {
+    if needle.length == 0 {
+        return true;
+    }
+    let mut i -> number = 0;
+    loop {
+        if i >= haystack.length {
+            break;
+        }
+        if haystack[i] == needle {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn _sanitize_filename(value -> string) -> string {
+    // Keep this simple and self-contained (no extra imports): replace anything
+    // not [A-Za-z0-9._-] with '_'.
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-";
+    let mut out -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if _string_contains(allowed, ch) {
+            out = out + ch;
+        } else {
+            out = out + "_";
+        }
+        index += 1;
+    }
+    if out.length == 0 {
+        return "_";
+    }
+    return out;
+}
+
 fn _strip_relative_import_lines(source -> string) -> string {
     // Drop lines that contain relative `from "./..."` / `from "../..."` imports.
+    // Important: avoid quadratic behaviour from repeated `out = out + line`.
+    // Instead, splice together the large kept segments between removed lines.
+
     let mut out -> string = "";
     let mut i -> number = 0;
     let mut line_start -> number = 0;
+    let mut keep_start -> number = 0;
+
     loop {
         if i >= source.length {
             break;
         }
         if source[i] == "\n" {
-            let line = substring(source, line_start, i + 1);
+            let line_end = i + 1;
+            let line = substring(source, line_start, line_end);
             let specs = _extract_relative_import_specs(line);
-            if specs.length == 0 {
-                out = out + line;
+            if specs.length > 0 {
+                // Flush the kept segment before this import line.
+                if keep_start < line_start {
+                    out = out + substring(source, keep_start, line_start);
+                }
+                keep_start = line_end;
             }
-            line_start = i + 1;
+            line_start = line_end;
         }
         i += 1;
     }
+
+    // Handle trailing line with no newline.
     if line_start < source.length {
         let tail = substring(source, line_start, source.length);
         let specs = _extract_relative_import_specs(tail);
-        if specs.length == 0 {
-            out = out + tail;
+        if specs.length > 0 {
+            if keep_start < line_start {
+                out = out + substring(source, keep_start, line_start);
+            }
+            keep_start = source.length;
         }
     }
+
+    if keep_start < source.length {
+        out = out + substring(source, keep_start, source.length);
+    }
+
     return out;
 }
 
@@ -186,10 +358,21 @@ fn _inline_relative_imports(source -> string, base_dir -> string, depth -> numbe
         if index >= specs.length {
             break;
         }
+        if fs.exists("build/sailfin/.dump_test_sources") {
+            print.warn("test import inlining: base=" + base_dir + " spec=" + specs[index]);
+        }
         let dep_path = _resolve_import_path(base_dir, specs[index]);
         if !_string_list_contains(next_visited, dep_path) {
-            next_visited = next_visited.concat([dep_path]);
+            if !fs.exists(dep_path) {
+                print.warn("test import inlining: missing dependency: " + dep_path);
+                index += 1;
+                continue;
+            }
             let dep_source = fs.readFile(dep_path);
+            if dep_source.length == 0 {
+                print.warn("test import inlining: empty dependency source: " + dep_path);
+            }
+            next_visited = next_visited.concat([dep_path]);
             let dep_base = _dirname(dep_path);
             let inlined_dep = _inline_relative_imports(dep_source, dep_base, depth - 1, next_visited);
             combined = combined + inlined_dep + "\n";
@@ -274,7 +457,59 @@ fn _runtime_prelude_path(root -> string) -> string ![io] {
     return "";
 }
 
-fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
+fn _clang_compile_runtime_objects(runtime_root -> string, out_dir -> string, opt_flag -> string) -> string[] ![io] {
+    // Build (or reuse) cached runtime object files so repeated `test` invocations
+    // don't recompile the runtime C sources per test file.
+    if runtime_root.length == 0 {
+        return ["", "", ""]; 
+    }
+    if !_runtime_bundle_exists(runtime_root) {
+        return ["", "", ""]; 
+    }
+
+    let include_dir = _path_join(runtime_root, "native/include");
+    let runtime_src = _path_join(runtime_root, "native/src/sailfin_runtime.c");
+    let runtime_ir = _path_join(runtime_root, "native/ir/runtime_globals.ll");
+    let prelude_obj = _runtime_prelude_path(runtime_root);
+
+    let runtime_obj = _path_join(out_dir, "sailfin_runtime" + opt_flag + ".o");
+    let globals_obj = _path_join(out_dir, "runtime_globals" + opt_flag + ".o");
+
+    if !fs.exists(runtime_obj) {
+        let rc = process.run([
+            "clang",
+            opt_flag,
+            "-Wno-override-module",
+            "-I" + include_dir,
+            "-c",
+            runtime_src,
+            "-o",
+            runtime_obj,
+        ]);
+        if rc != 0 {
+            return ["", "", ""]; 
+        }
+    }
+
+    if !fs.exists(globals_obj) {
+        let rc2 = process.run([
+            "clang",
+            opt_flag,
+            "-Wno-override-module",
+            "-c",
+            runtime_ir,
+            "-o",
+            globals_obj,
+        ]);
+        if rc2 != 0 {
+            return ["", "", ""]; 
+        }
+    }
+
+    return [runtime_obj, globals_obj, prelude_obj];
+}
+
+fn _clang_link_with_opt(ll_path -> string, out_path -> string, runtime_root -> string, opt_flag -> string, cache_dir -> string) -> number ![io] {
     if runtime_root.length == 0 {
         print.error("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary");
         return 1;
@@ -283,17 +518,27 @@ fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) ->
         print.error("runtime bundle missing expected files under: " + runtime_root);
         return 1;
     }
-    let include_dir = _path_join(runtime_root, "native/include");
-    let runtime_src = _path_join(runtime_root, "native/src/sailfin_runtime.c");
-    let runtime_ir = _path_join(runtime_root, "native/ir/runtime_globals.ll");
-    let prelude_obj = _runtime_prelude_path(runtime_root);
+
+    // Cache runtime compilation products under build/sailfin.
+    _ensure_dir("build");
+    _ensure_dir("build/sailfin");
+    _ensure_dir(cache_dir);
+    let cached = _clang_compile_runtime_objects(runtime_root, cache_dir, opt_flag);
+    let runtime_obj = cached[0];
+    let globals_obj = cached[1];
+    let prelude_obj = cached[2];
+
+    if runtime_obj.length == 0 || globals_obj.length == 0 || prelude_obj.length == 0 {
+        print.error("failed to build cached runtime objects");
+        return 1;
+    }
+
     let args -> string[] = [
         "clang",
-        "-O2",
+        opt_flag,
         "-Wno-override-module",
-        "-I" + include_dir,
-        runtime_src,
-        runtime_ir,
+        runtime_obj,
+        globals_obj,
         prelude_obj,
         ll_path,
         "-o",
@@ -301,6 +546,16 @@ fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) ->
         "-lm",
     ];
     return process.run(args);
+}
+
+fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
+    // Default link used by `build` and `run`.
+    return _clang_link_with_opt(ll_path, out_path, runtime_root, "-O2", "build/sailfin");
+}
+
+fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
+    // Tests prioritize compile/link latency over runtime performance.
+    return _clang_link_with_opt(ll_path, out_path, runtime_root, "-O0", "build/sailfin/test-o0");
 }
 
 fn sailfin_cli_main(argv -> string[]) -> number ![io] {
@@ -481,14 +736,20 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         _ensure_dir("build");
         _ensure_dir("build/sailfin");
 
+        let test_runner_active_path = "build/sailfin/.test_runner_active";
+        _write_text(test_runner_active_path, "");
+
         let test_files = _collect_test_files(root, 25);
         if test_files.length == 0 {
             print.error("no Sailfin test files found under: " + root);
+            fs.deleteFile(test_runner_active_path);
             return 1;
         }
 
         let ll_path = "build/sailfin/test.ll";
         let exe_path = "build/sailfin/test";
+        let dump_sources = fs.exists("build/sailfin/.dump_test_sources");
+        let trace_runner = fs.exists("build/sailfin/.trace_test_runner");
 
         let mut index -> number = 0;
         loop {
@@ -502,27 +763,58 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             // Inline relative imports (../ and ./) into a single compilation unit.
             // This avoids duplicate symbols when linking multiple LLVM modules.
             let base_dir = _dirname(path);
+            if trace_runner {
+                print.warn("test runner: inlining start");
+            }
             let combined_source = _inline_relative_imports(source, base_dir, 10, []);
+            if trace_runner {
+                print.warn("test runner: inlining done (bytes=" + number_to_string(combined_source.length) + ")");
+            }
 
+            if dump_sources {
+                let safe = _sanitize_filename(path);
+                _write_text("build/sailfin/test-source-" + safe + ".sfn", combined_source);
+            }
+
+            if trace_runner {
+                print.warn("test runner: compile start");
+            }
             let llvm = compile_tests_to_llvm(combined_source);
+            if trace_runner {
+                print.warn("test runner: compile done (bytes=" + number_to_string(llvm.length) + ")");
+            }
             if llvm.length == 0 {
                 print.error("test compile failed: " + path);
+                fs.deleteFile(test_runner_active_path);
                 return 1;
             }
             _write_text(ll_path, llvm);
 
-            let link_rc = _clang_link(ll_path, exe_path, runtime_root);
+            if trace_runner {
+                print.warn("test runner: link start");
+            }
+            let link_rc = _clang_link_test(ll_path, exe_path, runtime_root);
             if link_rc != 0 {
                 print.error("link failed (clang exit=" + number_to_string(link_rc) + ")");
+                fs.deleteFile(test_runner_active_path);
                 return link_rc;
             }
+            if trace_runner {
+                print.warn("test runner: link done");
+                print.warn("test runner: exec start");
+            }
             let run_rc = process.run([exe_path]);
+            if trace_runner {
+                print.warn("test runner: exec done (exit=" + number_to_string(run_rc) + ")");
+            }
             if run_rc != 0 {
                 print.error("test failed: " + path);
+                fs.deleteFile(test_runner_active_path);
                 return run_rc;
             }
             index += 1;
         }
+        fs.deleteFile(test_runner_active_path);
         return 0;
     }
 

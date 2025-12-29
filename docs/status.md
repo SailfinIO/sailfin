@@ -9,7 +9,7 @@ This document tracks what works today and what is in progress.
 - Stage2 (llvmlite JIT) self-host execution remains experimental and is used for targeted backend coverage.
 - Stage1 Python lowering no longer blocks compilation on heuristic fallback checks; diagnostics still surface.
 - CI uses the Stage2 build/release workflows (`.github/workflows/build.yml`, `.github/workflows/release.yml`); Stage1 release workflow has been retired.
-- Stage2 self-hosted unit tests live in `compiler/tests` and run via `sailfin-stage2 test` (`make test-unit`).
+- Stage2 self-hosted tests live in `compiler/tests/{unit,integration,e2e}` and run via `sailfin-stage2 test` (`make test-unit`, `make test-integration`, `make test-e2e`).
 
 ## Runtime (Current)
 

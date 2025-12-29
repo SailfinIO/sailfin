@@ -30,7 +30,7 @@ def char_at(value, index):
         return ""
     if index >= len(value):
         return ""
-    return substring(value, index, index + 1)
+    return grapheme_at(value, index)
 
 def is_symbol_char(ch):
     if len(ch) == 0:

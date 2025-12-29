@@ -15,7 +15,8 @@ fn char_at(value -> string, index -> number) -> string {
 	if index >= value.length {
 		return "";
 	}
-	return substring(value, index, index + 1);
+	// Prefer grapheme_at so ASCII access avoids substring allocations.
+	return grapheme_at(value, index);
 }
 
 fn is_symbol_char(ch -> string) -> boolean {

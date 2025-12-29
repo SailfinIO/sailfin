@@ -199,9 +199,12 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
 // runtime itself allocated and registered.
 
 static pthread_mutex_t _sailfin_persistent_lock = PTHREAD_MUTEX_INITIALIZER;
-static char **_sailfin_persistent_ptrs = NULL;
-static size_t _sailfin_persistent_len = 0;
-static size_t _sailfin_persistent_cap = 0;
+// Persistent pointer set.
+// These pointers must never be freed by the runtime (e.g., static literals).
+// This is a hot path during compilation; use a hash set rather than linear scans.
+static char **_sailfin_persistent_table = NULL;
+static size_t _sailfin_persistent_table_cap = 0;
+static size_t _sailfin_persistent_table_len = 0;
 
 static pthread_mutex_t _sailfin_owned_string_lock = PTHREAD_MUTEX_INITIALIZER;
 static char **_sailfin_owned_strings = NULL;
@@ -222,6 +225,134 @@ static bool _ptr_list_contains(char **list, size_t len, const char *ptr)
         }
     }
     return false;
+}
+
+static inline uint64_t _ptr_hash_u64(const void *ptr)
+{
+    // Mix pointer bits; good enough for open addressing.
+    uint64_t x = (uint64_t)(uintptr_t)ptr;
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ULL;
+    x ^= x >> 33;
+    return x;
+}
+
+static bool _persistent_table_contains_unlocked(const char *ptr)
+{
+    if (!_sailfin_persistent_table || _sailfin_persistent_table_cap == 0 || !ptr)
+    {
+        return false;
+    }
+
+    size_t mask = _sailfin_persistent_table_cap - 1;
+    size_t idx = (size_t)_ptr_hash_u64(ptr) & mask;
+    for (size_t probe = 0; probe < _sailfin_persistent_table_cap; probe++)
+    {
+        char *slot = _sailfin_persistent_table[idx];
+        if (!slot)
+        {
+            return false;
+        }
+        if (slot == ptr)
+        {
+            return true;
+        }
+        idx = (idx + 1) & mask;
+    }
+    return false;
+}
+
+static bool _persistent_table_resize_unlocked(size_t new_cap)
+{
+    if (new_cap < 1024)
+    {
+        new_cap = 1024;
+    }
+    // Ensure power-of-two.
+    size_t cap = 1;
+    while (cap < new_cap)
+    {
+        cap <<= 1;
+    }
+
+    char **next = (char **)calloc(cap, sizeof(char *));
+    if (!next)
+    {
+        return false;
+    }
+
+    // Rehash.
+    if (_sailfin_persistent_table && _sailfin_persistent_table_cap)
+    {
+        size_t old_cap = _sailfin_persistent_table_cap;
+        char **old = _sailfin_persistent_table;
+
+        size_t mask = cap - 1;
+        for (size_t i = 0; i < old_cap; i++)
+        {
+            char *ptr = old[i];
+            if (!ptr)
+            {
+                continue;
+            }
+            size_t idx = (size_t)_ptr_hash_u64(ptr) & mask;
+            while (next[idx])
+            {
+                idx = (idx + 1) & mask;
+            }
+            next[idx] = ptr;
+        }
+
+        free(old);
+    }
+
+    _sailfin_persistent_table = next;
+    _sailfin_persistent_table_cap = cap;
+    return true;
+}
+
+static void _persistent_table_insert_unlocked(char *ptr)
+{
+    if (!ptr)
+    {
+        return;
+    }
+
+    // Lazy init.
+    if (!_sailfin_persistent_table || _sailfin_persistent_table_cap == 0)
+    {
+        if (!_persistent_table_resize_unlocked(1024))
+        {
+            return;
+        }
+    }
+
+    // Resize at ~70% load factor.
+    if ((_sailfin_persistent_table_len + 1) * 10 >= _sailfin_persistent_table_cap * 7)
+    {
+        (void)_persistent_table_resize_unlocked(_sailfin_persistent_table_cap * 2);
+    }
+
+    // Insert if absent.
+    size_t mask = _sailfin_persistent_table_cap - 1;
+    size_t idx = (size_t)_ptr_hash_u64(ptr) & mask;
+    for (;;)
+    {
+        char *slot = _sailfin_persistent_table[idx];
+        if (!slot)
+        {
+            _sailfin_persistent_table[idx] = ptr;
+            _sailfin_persistent_table_len++;
+            return;
+        }
+        if (slot == ptr)
+        {
+            return;
+        }
+        idx = (idx + 1) & mask;
+    }
 }
 
 static void _ptr_list_add_unique(char ***list, size_t *len, size_t *cap, char *ptr)
@@ -294,7 +425,7 @@ static bool _is_persistent_ptr(char *ptr)
         return false;
     }
     pthread_mutex_lock(&_sailfin_persistent_lock);
-    bool ok = _ptr_list_contains(_sailfin_persistent_ptrs, _sailfin_persistent_len, ptr);
+    bool ok = _persistent_table_contains_unlocked(ptr);
     pthread_mutex_unlock(&_sailfin_persistent_lock);
     return ok;
 }
@@ -356,7 +487,18 @@ static void _print_line(const char *prefix, const char *msg)
     {
         fputs(prefix, stderr);
     }
-    fputs(msg, stderr);
+
+    uint32_t codepoint = 0;
+    if (_is_immediate_codepoint_string(msg, &codepoint))
+    {
+        unsigned char buf[5] = {0};
+        _utf8_encode(codepoint, buf);
+        fputs((const char *)buf, stderr);
+    }
+    else
+    {
+        fputs(msg, stderr);
+    }
     fputc('\n', stderr);
     fflush(stderr);
 }
@@ -538,7 +680,7 @@ void sailfin_runtime_mark_persistent(char *ptr)
         return;
     }
     pthread_mutex_lock(&_sailfin_persistent_lock);
-    _ptr_list_add_unique(&_sailfin_persistent_ptrs, &_sailfin_persistent_len, &_sailfin_persistent_cap, ptr);
+    _persistent_table_insert_unlocked(ptr);
     pthread_mutex_unlock(&_sailfin_persistent_lock);
 }
 
@@ -1616,13 +1758,25 @@ char *sailfin_runtime_grapheme_at(char *text, double index)
     }
 
     // Bootstrap implementation: treat each UTF-8 byte as a grapheme.
-    // This is sufficient for ASCII-heavy compiler sources while we iterate.
+    // To avoid allocating on hot paths (compiler parsing), return an
+    // immediate-codepoint pseudo-string for ASCII bytes.
+    //
+    // NOTE: For bytes >= 0x80 we preserve legacy behaviour (a raw single-byte
+    // C string) because immediate-codepoint strings are interpreted as Unicode
+    // codepoints by other runtime helpers.
+    unsigned char byte = (unsigned char)text[idx];
+    if (byte <= 0x7fu)
+    {
+        uintptr_t packed = ((uintptr_t)byte) << 32;
+        return (char *)packed;
+    }
+
     char *out = (char *)malloc(2);
     if (!out)
     {
         return NULL;
     }
-    out[0] = text[idx];
+    out[0] = (char)byte;
     out[1] = '\0';
     _track_owned_string(out);
     return out;
@@ -1733,6 +1887,12 @@ bool sailfin_runtime_instance_of(char *value, char *type_descriptor)
 
 double sailfin_runtime_char_code(char *text)
 {
+    uint32_t codepoint = 0;
+    if (_is_immediate_codepoint_string(text, &codepoint))
+    {
+        return (double)codepoint;
+    }
+
     if (!text || !text[0])
     {
         return -1.0;

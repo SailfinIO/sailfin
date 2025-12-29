@@ -1,4 +1,4 @@
-import { prepare_stage2_aot_modules } from "../src/aot_prepare";
+import { prepare_stage2_aot_modules } from "../../src/aot_prepare";
 
 fn _index_of(haystack -> string, needle -> string) -> number {
     if needle.length == 0 {
@@ -36,7 +36,7 @@ fn _contains(haystack -> string, needle -> string) -> boolean {
     return _index_of(haystack, needle) >= 0;
 }
 
-test "integration: aot_prepare injects round declare" {
+test "aot_prepare: injects round declare" {
     // Multi-line concatenation exercises native-text instruction gathering.
     let ir = "source_filename = \"m1.ll\"\n\n" +
         "define double @foo(double %x) {\n" +

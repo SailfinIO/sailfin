@@ -1835,7 +1835,7 @@ def text_char_at(value, index):
         return ""
     if index >= len(value):
         return ""
-    return substring(value, index, index + 1)
+    return value[index]
 
 def trim_trailing_delimiters(text):
     end = len(text)
@@ -2476,28 +2476,28 @@ def parse_decimal_number(text):
     return NumberParseResult(success=True, value=value)
 
 def split_lines(value):
+    value_len = len(value)
     lines = []
-    current = ""
+    start = 0
     index = 0
     while True:
-        if index >= len(value):
+        if index >= value_len:
             break
         ch = value[index]
         if ch == "\n":
-            lines = append_string(lines, current)
-            current = ""
-        else:
-            current = current + ch
+            lines = append_string(lines, substring(value, start, index))
+            start = index + 1
         index += 1
-    lines = append_string(lines, current)
+    lines = append_string(lines, substring(value, start, value_len))
     return lines
 
 def split_comma_separated(value):
+    value_len = len(value)
     results = []
     current = ""
     index = 0
     while True:
-        if index >= len(value):
+        if index >= value_len:
             break
         ch = value[index]
         if ch == ",":

@@ -2423,5 +2423,15 @@ fn append_string(values -> string[], value -> string) -> string[] {
 }
 
 fn char_at(value -> string, index -> number) -> string {
-    return substring(value, index, index + 1);
+    if value.length == 0 {
+        return "";
+    }
+    if index < 0 {
+        return "";
+    }
+    if index >= value.length {
+        return "";
+    }
+    // Prefer direct indexing to avoid substring allocations.
+    return value[index];
 }

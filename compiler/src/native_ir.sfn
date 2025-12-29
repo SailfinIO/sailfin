@@ -2332,7 +2332,7 @@ fn text_char_at(value -> string, index -> number) -> string {
     if index >= value.length {
         return "";
     }
-    return substring(value, index, index + 1);
+    return value[index];
 }
 
 fn trim_trailing_delimiters(text -> string) -> string {
@@ -3144,32 +3144,32 @@ fn parse_decimal_number(text -> string) -> NumberParseResult {
 }
 
 fn split_lines(value -> string) -> string[] {
+    let value_len = value.length;
     let mut lines -> string[] = [];
-    let mut current -> string = "";
+    let mut start -> number = 0;
     let mut index -> number = 0;
     loop {
-        if index >= value.length {
+        if index >= value_len {
             break;
         }
         let ch = value[index];
         if ch == "\n" {
-            lines = append_string(lines, current);
-            current = "";
-        } else {
-            current = current + ch;
+            lines = append_string(lines, substring(value, start, index));
+            start = index + 1;
         }
         index += 1;
     }
-    lines = append_string(lines, current);
+    lines = append_string(lines, substring(value, start, value_len));
     return lines;
 }
 
 fn split_comma_separated(value -> string) -> string[] {
+    let value_len = value.length;
     let mut results -> string[] = [];
     let mut current -> string = "";
     let mut index -> number = 0;
     loop {
-        if index >= value.length {
+        if index >= value_len {
             break;
         }
         let ch = value[index];

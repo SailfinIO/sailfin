@@ -22,7 +22,7 @@ NATIVE_OBJ_DIR ?= build/native/obj
 NATIVE_OUT ?= build/native/sailfin-stage2
 NATIVE_LINK_EXTRA ?=
 
-.PHONY: help install test test-unit test-integration compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism
+.PHONY: help install test test-unit test-integration test-e2e compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism
 
 ifeq ($(origin CONDA_EXE), undefined)
 # `conda` is often a shell function (e.g. in zsh/bash init). We need the actual
@@ -43,6 +43,7 @@ help:
 	@echo "  make test         # Run Sailfin-native unit + integration tests"
 	@echo "  make test-unit    # Run Stage2 self-hosted Sailfin unit tests"
 	@echo "  make test-integration # Run Sailfin-native integration tests"
+	@echo "  make test-e2e     # Run Sailfin-native end-to-end tests"
 	@echo "  make compile      # Build the native sailfin-stage2 compiler (full pipeline)"
 	@echo "  make check-stage2-determinism # Bootstrap stage2 twice and diff outputs"
 	@echo "  make check-native-stage2-determinism # Rebuild native stage2 twice and diff the binaries"
@@ -53,21 +54,52 @@ help:
 install:
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
 
-test: test-unit test-integration
+test: test-unit test-integration test-e2e
 
 test-unit:
 	@if [ ! -x build/native/sailfin-stage2 ]; then \
 		echo "[test-unit] missing build/native/sailfin-stage2; running make compile"; \
 		$(MAKE) compile; \
 	fi
-	build/native/sailfin-stage2 test compiler/tests
+	@set -e; \
+	files=$$(find compiler/tests/unit -name '*_test.sfn' -print | sort); \
+	if [ -z "$$files" ]; then \
+		echo "[test-unit] no *_test.sfn files found under compiler/tests/unit"; \
+		exit 1; \
+	fi; \
+	for f in $$files; do \
+		build/native/sailfin-stage2 test "$$f"; \
+	done
 
 test-integration:
 	@if [ ! -x build/native/sailfin-stage2 ]; then \
 		echo "[test-integration] missing build/native/sailfin-stage2; running make compile"; \
 		$(MAKE) compile; \
 	fi
-	build/native/sailfin-stage2 test compiler/integration_tests
+	@set -e; \
+	files=$$(find compiler/tests/integration -name '*_test.sfn' -print | sort); \
+	if [ -z "$$files" ]; then \
+		echo "[test-integration] no *_test.sfn files found under compiler/tests/integration"; \
+		exit 1; \
+	fi; \
+	for f in $$files; do \
+		build/native/sailfin-stage2 test "$$f"; \
+	done
+
+test-e2e:
+	@if [ ! -x build/native/sailfin-stage2 ]; then \
+		echo "[test-e2e] missing build/native/sailfin-stage2; running make compile"; \
+		$(MAKE) compile; \
+	fi
+	@set -e; \
+	files=$$(find compiler/tests/e2e -name '*_test.sfn' -print | sort); \
+	if [ -z "$$files" ]; then \
+		echo "[test-e2e] no *_test.sfn files found under compiler/tests/e2e"; \
+		exit 1; \
+	fi; \
+	for f in $$files; do \
+		build/native/sailfin-stage2 test "$$f"; \
+	done
 
 clean:
 	rm -rf dist

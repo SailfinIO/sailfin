@@ -1,4 +1,4 @@
-import { Token, TokenKind, eof_token } from "../src/token";
+import { Token, TokenKind, eof_token } from "../../src/token";
 
 test "token: eof_token populates fields" {
     let tok = eof_token(12, 34);

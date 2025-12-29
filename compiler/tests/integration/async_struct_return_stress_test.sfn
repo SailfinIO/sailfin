@@ -10,7 +10,7 @@ async fn make_person(id -> number) -> Person {
     return Person { id: id };
 }
 
-test "integration: async struct return stress" {
+test "async: struct return stress" {
     let mut i -> number = 0;
     loop {
         if i >= 200 {

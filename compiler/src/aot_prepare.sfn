@@ -52,12 +52,14 @@ fn _aot_matches_at(value -> string, start -> number, pattern -> string) -> boole
 	if start < 0 {
 		return false;
 	}
-	if start + pattern.length > value.length {
+	let pattern_len = pattern.length;
+	let value_len = value.length;
+	if start + pattern_len > value_len {
 		return false;
 	}
 	let mut j -> number = 0;
 	loop {
-		if j >= pattern.length {
+		if j >= pattern_len {
 			break;
 		}
 		if value[start + j] != pattern[j] {
@@ -91,8 +93,9 @@ fn _aot_ensure_intrinsic_decls(ir -> string) -> string {
 
 	// Insert after the `source_filename = ...` line.
 	let mut line_end -> number = source_at;
+	let ir_len = ir.length;
 	loop {
-		if line_end >= ir.length {
+		if line_end >= ir_len {
 			break;
 		}
 		if ir[line_end] == "\n" {
@@ -100,21 +103,23 @@ fn _aot_ensure_intrinsic_decls(ir -> string) -> string {
 		}
 		line_end += 1;
 	}
-	if line_end < ir.length {
+	if line_end < ir_len {
 		line_end += 1;
 	}
-	return substring(ir, 0, line_end) + decl_line + substring(ir, line_end, ir.length);
+	return substring(ir, 0, line_end) + decl_line + substring(ir, line_end, ir_len);
 }
 
 fn _aot_find_substring_outside_quotes(text -> string, needle -> string) -> number {
-	if needle.length == 0 {
+	let needle_len = needle.length;
+	if needle_len == 0 {
 		return 0;
 	}
 
 	let mut i -> number = 0;
+	let text_len = text.length;
 	let mut in_quote -> boolean = false;
 	loop {
-		if i >= text.length {
+		if i >= text_len {
 			break;
 		}
 		let ch = text[i];
@@ -177,18 +182,20 @@ fn _aot_append_unique(values -> string[], value -> string) -> string[] {
 }
 
 fn _aot_starts_with_at(text -> string, start -> number, prefix -> string) -> boolean {
-	if prefix.length == 0 {
+	let prefix_len = prefix.length;
+	if prefix_len == 0 {
 		return true;
 	}
 	if start < 0 {
 		return false;
 	}
-	if start + prefix.length > text.length {
+	let text_len = text.length;
+	if start + prefix_len > text_len {
 		return false;
 	}
 	let mut j -> number = 0;
 	loop {
-		if j >= prefix.length {
+		if j >= prefix_len {
 			break;
 		}
 		if text[start + j] != prefix[j] {
@@ -219,15 +226,17 @@ fn _aot_count_trailing_backslashes(text -> string, before_index -> number) -> nu
 fn _aot_rename_symbol_refs(ir -> string, old -> string, fresh -> string) -> string {
 	// Replace exact @old references, but not @old.suffix.
 	// Do not rewrite inside LLVM IR string literals.
-	if old.length == 0 {
+	let old_len = old.length;
+	if old_len == 0 {
 		return ir;
 	}
-
+	let ir_len = ir.length;
 	let mut out -> string = "";
 	let mut i -> number = 0;
+	let mut last_emit -> number = 0;
 	let mut in_quote -> boolean = false;
 	loop {
-		if i >= ir.length {
+		if i >= ir_len {
 			break;
 		}
 		let ch = ir[i];
@@ -237,26 +246,24 @@ fn _aot_rename_symbol_refs(ir -> string, old -> string, fresh -> string) -> stri
 			if (backslashes % 2) == 0 {
 				in_quote = !in_quote;
 			}
-			out = out + ch;
 			i += 1;
 			continue;
 		}
 
 		if !in_quote && ch == "@" {
 			if _aot_starts_with_at(ir, i + 1, old) {
-				let end = i + 1 + old.length;
-				if end >= ir.length || !_aot_is_symbol_char(ir[end]) {
-					out = out + "@" + fresh;
+				let end = i + 1 + old_len;
+				if end >= ir_len || !_aot_is_symbol_char(ir[end]) {
+					out = out + substring(ir, last_emit, i) + "@" + fresh;
 					i = end;
+					last_emit = i;
 					continue;
 				}
 			}
 		}
-
-		out = out + ch;
 		i += 1;
 	}
-
+	out = out + substring(ir, last_emit, ir_len);
 	return out;
 }
 
@@ -391,8 +398,9 @@ fn _aot_split_lines(text -> string) -> string[] {
 	let mut lines -> string[] = [];
 	let mut start -> number = 0;
 	let mut index -> number = 0;
+	let text_len = text.length;
 	loop {
-		if index >= text.length {
+		if index >= text_len {
 			break;
 		}
 		if text[index] == "\n" {
@@ -402,7 +410,7 @@ fn _aot_split_lines(text -> string) -> string[] {
 		index += 1;
 	}
 	// last line
-	lines = lines.concat([substring(text, start, text.length)]);
+	lines = lines.concat([substring(text, start, text_len)]);
 	return lines;
 }
 

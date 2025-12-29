@@ -6,7 +6,7 @@ async fn computeTask2() -> number {
     return 21;
 }
 
-test "integration: async await futures" {
+test "async: await futures" {
     let future1 = computeTask1();
     let future2 = computeTask2();
 
