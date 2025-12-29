@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.85 (2025-12-29)
+
+### Bug Fixes
+
+- Tests time
+  ([`352d229`](https://github.com/SailfinIO/sailfin/commit/352d2291fcedca888ce2f4bb8d1161eb40af3bfc))
+
+
 ## v0.1.1-alpha.84 (2025-12-29)
 
 ### Bug Fixes
