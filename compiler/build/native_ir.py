@@ -2485,10 +2485,10 @@ def split_lines(value):
             break
         ch = value[index]
         if ch == "\n":
-            lines = append_string(lines, substring(value, start, index))
+            lines = append_string(lines, substring_unchecked(value, start, index))
             start = index + 1
         index += 1
-    lines = append_string(lines, substring(value, start, value_len))
+    lines = append_string(lines, substring_unchecked(value, start, value_len))
     return lines
 
 def split_comma_separated(value):

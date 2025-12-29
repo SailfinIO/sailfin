@@ -258,9 +258,10 @@ fn _string_contains(haystack -> string, needle -> string) -> boolean {
     if needle.length == 0 {
         return true;
     }
+    let haystack_len = haystack.length;
     let mut i -> number = 0;
     loop {
-        if i >= haystack.length {
+        if i >= haystack_len {
             break;
         }
         if haystack[i] == needle {
@@ -276,9 +277,10 @@ fn _sanitize_filename(value -> string) -> string {
     // not [A-Za-z0-9._-] with '_'.
     let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-";
     let mut out -> string = "";
+    let value_len = value.length;
     let mut index -> number = 0;
     loop {
-        if index >= value.length {
+        if index >= value_len {
             break;
         }
         let ch = value[index];
@@ -300,23 +302,24 @@ fn _strip_relative_import_lines(source -> string) -> string {
     // Important: avoid quadratic behaviour from repeated `out = out + line`.
     // Instead, splice together the large kept segments between removed lines.
 
+    let source_len = source.length;
     let mut out -> string = "";
     let mut i -> number = 0;
     let mut line_start -> number = 0;
     let mut keep_start -> number = 0;
 
     loop {
-        if i >= source.length {
+        if i >= source_len {
             break;
         }
         if source[i] == "\n" {
             let line_end = i + 1;
-            let line = substring(source, line_start, line_end);
+            let line = substring_unchecked(source, line_start, line_end);
             let specs = _extract_relative_import_specs(line);
             if specs.length > 0 {
                 // Flush the kept segment before this import line.
                 if keep_start < line_start {
-                    out = out + substring(source, keep_start, line_start);
+                    out = out + substring_unchecked(source, keep_start, line_start);
                 }
                 keep_start = line_end;
             }
@@ -326,19 +329,19 @@ fn _strip_relative_import_lines(source -> string) -> string {
     }
 
     // Handle trailing line with no newline.
-    if line_start < source.length {
-        let tail = substring(source, line_start, source.length);
+    if line_start < source_len {
+        let tail = substring_unchecked(source, line_start, source_len);
         let specs = _extract_relative_import_specs(tail);
         if specs.length > 0 {
             if keep_start < line_start {
-                out = out + substring(source, keep_start, line_start);
+                out = out + substring_unchecked(source, keep_start, line_start);
             }
-            keep_start = source.length;
+            keep_start = source_len;
         }
     }
 
-    if keep_start < source.length {
-        out = out + substring(source, keep_start, source.length);
+    if keep_start < source_len {
+        out = out + substring_unchecked(source, keep_start, source_len);
     }
 
     return out;

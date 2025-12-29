@@ -207,9 +207,16 @@ static size_t _sailfin_persistent_table_cap = 0;
 static size_t _sailfin_persistent_table_len = 0;
 
 static pthread_mutex_t _sailfin_owned_string_lock = PTHREAD_MUTEX_INITIALIZER;
-static char **_sailfin_owned_strings = NULL;
-static size_t _sailfin_owned_string_len = 0;
-static size_t _sailfin_owned_string_cap = 0;
+// Owned-string set.
+// Stores malloc'd strings allocated by the runtime so we can free them safely.
+// This is a hot path during compilation; use a hash set rather than linear scans.
+// We support removals (string_drop), so use tombstones.
+static char **_sailfin_owned_table = NULL;
+static size_t _sailfin_owned_table_cap = 0;
+static size_t _sailfin_owned_table_len = 0;
+static size_t _sailfin_owned_table_tombstones = 0;
+
+#define SAILFIN_TOMBSTONE_PTR ((char *)1)
 
 static bool _ptr_list_contains(char **list, size_t len, const char *ptr)
 {
@@ -237,6 +244,168 @@ static inline uint64_t _ptr_hash_u64(const void *ptr)
     x *= 0xc4ceb9fe1a85ec53ULL;
     x ^= x >> 33;
     return x;
+}
+
+static bool _owned_table_resize_unlocked(size_t new_cap)
+{
+    if (new_cap < 1024)
+    {
+        new_cap = 1024;
+    }
+    // Ensure power-of-two.
+    size_t cap = 1;
+    while (cap < new_cap)
+    {
+        cap <<= 1;
+    }
+
+    char **next = (char **)calloc(cap, sizeof(char *));
+    if (!next)
+    {
+        return false;
+    }
+
+    if (_sailfin_owned_table && _sailfin_owned_table_cap)
+    {
+        size_t old_cap = _sailfin_owned_table_cap;
+        char **old = _sailfin_owned_table;
+
+        size_t mask = cap - 1;
+        for (size_t i = 0; i < old_cap; i++)
+        {
+            char *ptr = old[i];
+            if (!ptr || ptr == SAILFIN_TOMBSTONE_PTR)
+            {
+                continue;
+            }
+            size_t idx = (size_t)_ptr_hash_u64(ptr) & mask;
+            while (next[idx])
+            {
+                idx = (idx + 1) & mask;
+            }
+            next[idx] = ptr;
+        }
+        free(old);
+    }
+
+    _sailfin_owned_table = next;
+    _sailfin_owned_table_cap = cap;
+    _sailfin_owned_table_tombstones = 0;
+    // _sailfin_owned_table_len remains unchanged.
+    return true;
+}
+
+static bool _owned_table_contains_unlocked(const char *ptr)
+{
+    if (!_sailfin_owned_table || _sailfin_owned_table_cap == 0 || !ptr)
+    {
+        return false;
+    }
+    size_t mask = _sailfin_owned_table_cap - 1;
+    size_t idx = (size_t)_ptr_hash_u64(ptr) & mask;
+    for (size_t probe = 0; probe < _sailfin_owned_table_cap; probe++)
+    {
+        char *slot = _sailfin_owned_table[idx];
+        if (!slot)
+        {
+            return false;
+        }
+        if (slot != SAILFIN_TOMBSTONE_PTR && slot == ptr)
+        {
+            return true;
+        }
+        idx = (idx + 1) & mask;
+    }
+    return false;
+}
+
+static void _owned_table_insert_unlocked(char *ptr)
+{
+    if (!ptr)
+    {
+        return;
+    }
+
+    if (!_sailfin_owned_table || _sailfin_owned_table_cap == 0)
+    {
+        if (!_owned_table_resize_unlocked(1024))
+        {
+            return;
+        }
+    }
+
+    // If too many tombstones, rehash in place.
+    if (_sailfin_owned_table_tombstones * 10 >= _sailfin_owned_table_cap * 3)
+    {
+        (void)_owned_table_resize_unlocked(_sailfin_owned_table_cap);
+    }
+
+    // Resize at ~70% load factor counting tombstones.
+    size_t effective = _sailfin_owned_table_len + _sailfin_owned_table_tombstones + 1;
+    if (effective * 10 >= _sailfin_owned_table_cap * 7)
+    {
+        (void)_owned_table_resize_unlocked(_sailfin_owned_table_cap * 2);
+    }
+
+    size_t mask = _sailfin_owned_table_cap - 1;
+    size_t idx = (size_t)_ptr_hash_u64(ptr) & mask;
+    size_t first_tombstone = (size_t)(-1);
+
+    for (;;)
+    {
+        char *slot = _sailfin_owned_table[idx];
+        if (!slot)
+        {
+            if (first_tombstone != (size_t)(-1))
+            {
+                _sailfin_owned_table[first_tombstone] = ptr;
+                _sailfin_owned_table_tombstones--;
+            }
+            else
+            {
+                _sailfin_owned_table[idx] = ptr;
+            }
+            _sailfin_owned_table_len++;
+            return;
+        }
+        if (slot == ptr)
+        {
+            return;
+        }
+        if (slot == SAILFIN_TOMBSTONE_PTR && first_tombstone == (size_t)(-1))
+        {
+            first_tombstone = idx;
+        }
+        idx = (idx + 1) & mask;
+    }
+}
+
+static bool _owned_table_remove_unlocked(const char *ptr)
+{
+    if (!_sailfin_owned_table || _sailfin_owned_table_cap == 0 || !ptr)
+    {
+        return false;
+    }
+
+    size_t mask = _sailfin_owned_table_cap - 1;
+    size_t idx = (size_t)_ptr_hash_u64(ptr) & mask;
+    for (size_t probe = 0; probe < _sailfin_owned_table_cap; probe++)
+    {
+        char *slot = _sailfin_owned_table[idx];
+        if (!slot)
+        {
+            return false;
+        }
+        if (slot != SAILFIN_TOMBSTONE_PTR && slot == ptr)
+        {
+            _sailfin_owned_table[idx] = SAILFIN_TOMBSTONE_PTR;
+            _sailfin_owned_table_len--;
+            _sailfin_owned_table_tombstones++;
+            return true;
+        }
+        idx = (idx + 1) & mask;
+    }
+    return false;
 }
 
 static bool _persistent_table_contains_unlocked(const char *ptr)
@@ -414,7 +583,7 @@ static void _track_owned_string(char *ptr)
         return;
     }
     pthread_mutex_lock(&_sailfin_owned_string_lock);
-    _ptr_list_add_unique(&_sailfin_owned_strings, &_sailfin_owned_string_len, &_sailfin_owned_string_cap, ptr);
+    _owned_table_insert_unlocked(ptr);
     pthread_mutex_unlock(&_sailfin_owned_string_lock);
 }
 
@@ -700,7 +869,7 @@ void sailfin_runtime_string_drop(char *text)
     }
 
     pthread_mutex_lock(&_sailfin_owned_string_lock);
-    bool owned = _ptr_list_remove(_sailfin_owned_strings, &_sailfin_owned_string_len, text);
+    bool owned = _owned_table_remove_unlocked(text);
     pthread_mutex_unlock(&_sailfin_owned_string_lock);
     if (!owned)
     {
@@ -751,8 +920,14 @@ int64_t sailfin_runtime_string_length(char *text)
         fflush(stderr);
     }
 
-    const char *trace = getenv("SAILFIN_TRACE_STRING_LENGTH");
-    if (trace && trace[0] != '\0')
+    static int trace_enabled = -1;
+    if (trace_enabled < 0)
+    {
+        const char *trace = getenv("SAILFIN_TRACE_STRING_LENGTH");
+        trace_enabled = (trace && trace[0] != '\0' && trace[0] != '0') ? 1 : 0;
+    }
+
+    if (trace_enabled)
     {
         static int trace_budget = 32;
         if (trace_budget > 0)
@@ -981,8 +1156,14 @@ char *sailfin_runtime_string_concat(char *a, char *b)
         fflush(stderr);
     }
 
-    const char *trace = getenv("SAILFIN_TRACE_STRING_CONCAT");
-    if (trace && trace[0] != '\0')
+    static int trace_enabled = -1;
+    if (trace_enabled < 0)
+    {
+        const char *trace = getenv("SAILFIN_TRACE_STRING_CONCAT");
+        trace_enabled = (trace && trace[0] != '\0' && trace[0] != '0') ? 1 : 0;
+    }
+
+    if (trace_enabled)
     {
         static int trace_budget = 64;
         if (trace_budget > 0)

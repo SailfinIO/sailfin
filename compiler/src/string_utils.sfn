@@ -6,13 +6,14 @@
 import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, strings_equal } from "runtime/prelude";
 
 fn char_at(value -> string, index -> number) -> string {
-	if value.length == 0 {
+	let value_len = value.length;
+	if value_len == 0 {
 		return "";
 	}
 	if index < 0 {
 		return "";
 	}
-	if index >= value.length {
+	if index >= value_len {
 		return "";
 	}
 	// Prefer grapheme_at so ASCII access avoids substring allocations.
@@ -46,16 +47,18 @@ fn is_symbol_char(ch -> string) -> boolean {
 }
 
 fn sanitize_symbol(name -> string) -> string {
-	if name.length == 0 {
+	let name_len = name.length;
+	if name_len == 0 {
 		return "_";
 	}
 	let mut result -> string = "";
 	let mut index -> number = 0;
 	loop {
-		if index >= name.length {
+		if index >= name_len {
 			break;
 		}
-		let ch = char_at(name, index);
+		// index is already bounds-checked against name_len.
+		let ch = grapheme_at(name, index);
 		if is_symbol_char(ch) {
 			result = result + ch;
 		}
