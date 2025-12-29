@@ -20,7 +20,7 @@
 
 extern char **environ;
 
-static void _print_line(const char *prefix, const char *msg);
+static void _print_line(FILE *stream, const char *prefix, const char *msg);
 
 typedef struct SailfinTryContext
 {
@@ -51,7 +51,7 @@ int32_t sailfin_runtime_try_enter(char **out_handle)
     SailfinTryContext *ctx = (SailfinTryContext *)malloc(sizeof(SailfinTryContext));
     if (!ctx)
     {
-        _print_line("[stage2-native] ", "out of memory entering try");
+        _print_line(stderr, "[stage2-native] ", "out of memory entering try");
         abort();
     }
     ctx->prev = _sailfin_try_stack;
@@ -107,7 +107,7 @@ void sailfin_runtime_throw(char *message)
     _sailfin_exception_message = message ? message : "";
     if (!_sailfin_try_stack)
     {
-        _print_line("[stage2-native] uncaught exception: ", _sailfin_exception_message);
+        _print_line(stderr, "[stage2-native] uncaught exception: ", _sailfin_exception_message);
         abort();
     }
     SailfinTryContext *ctx = _sailfin_try_stack;
@@ -646,15 +646,19 @@ static size_t _utf8_encode(uint32_t codepoint, unsigned char out[5])
     return 4;
 }
 
-static void _print_line(const char *prefix, const char *msg)
+static void _print_line(FILE *stream, const char *prefix, const char *msg)
 {
+    if (!stream)
+    {
+        stream = stderr;
+    }
     if (!msg)
     {
         msg = "";
     }
     if (prefix)
     {
-        fputs(prefix, stderr);
+        fputs(prefix, stream);
     }
 
     uint32_t codepoint = 0;
@@ -662,14 +666,14 @@ static void _print_line(const char *prefix, const char *msg)
     {
         unsigned char buf[5] = {0};
         _utf8_encode(codepoint, buf);
-        fputs((const char *)buf, stderr);
+        fputs((const char *)buf, stream);
     }
     else
     {
-        fputs(msg, stderr);
+        fputs(msg, stream);
     }
-    fputc('\n', stderr);
-    fflush(stderr);
+    fputc('\n', stream);
+    fflush(stream);
 }
 
 static bool _env_enabled(const char *name)
@@ -878,9 +882,9 @@ void sailfin_runtime_string_drop(char *text)
     free(text);
 }
 
-void sailfin_runtime_print_info(char *msg) { _print_line("[info] ", msg); }
-void sailfin_runtime_print_warn(char *msg) { _print_line("[warn] ", msg); }
-void sailfin_runtime_print_error(char *msg) { _print_line("[error] ", msg); }
+void sailfin_runtime_print_info(char *msg) { _print_line(stdout, "[info] ", msg); }
+void sailfin_runtime_print_warn(char *msg) { _print_line(stderr, "[warn] ", msg); }
+void sailfin_runtime_print_error(char *msg) { _print_line(stderr, "[error] ", msg); }
 
 void sailfin_runtime_sleep(double seconds)
 {
@@ -2166,7 +2170,7 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
     FILE *f = fopen(path_str, "wb");
     if (!f)
     {
-        _print_line("[stage2-native] fs.writeFile failed", path_str);
+        _print_line(stderr, "[stage2-native] fs.writeFile failed", path_str);
         return;
     }
 
@@ -2374,6 +2378,6 @@ void *sailfin_runtime_to_debug_string(void *value)
 
 void sailfin_runtime_raise_value_error(void *message)
 {
-    _print_line("[value_error] ", (const char *)message);
+    _print_line(stderr, "[value_error] ", (const char *)message);
     abort();
 }
