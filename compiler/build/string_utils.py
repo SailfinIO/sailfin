@@ -24,11 +24,12 @@ globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
 def char_at(value, index):
-    if len(value) == 0:
+    value_len = len(value)
+    if value_len == 0:
         return ""
     if index < 0:
         return ""
-    if index >= len(value):
+    if index >= value_len:
         return ""
     return grapheme_at(value, index)
 
@@ -53,14 +54,15 @@ def is_symbol_char(ch):
     return False
 
 def sanitize_symbol(name):
-    if len(name) == 0:
+    name_len = len(name)
+    if name_len == 0:
         return "_"
     result = ""
     index = 0
     while True:
-        if index >= len(name):
+        if index >= name_len:
             break
-        ch = char_at(name, index)
+        ch = grapheme_at(name, index)
         if is_symbol_char(ch):
             result = result + ch
         index += 1
