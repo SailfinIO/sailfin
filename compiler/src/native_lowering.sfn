@@ -1153,6 +1153,7 @@ fn rewrite_push_calls(expression -> string) -> string {
     if expression.length == 0 {
         return expression;
     }
+
     let target = ".push(";
     let replacement = ".append(";
     let mut result -> string = "";

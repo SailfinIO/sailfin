@@ -364,7 +364,8 @@ fn slice(text -> string, start -> number, end -> number) -> string {
 }
 
 fn append(tokens -> Token[], token -> Token) -> Token[] {
-    return tokens.concat([token]);
+    tokens.push(token);
+    return tokens;
 }
 
 fn is_two_char_symbol(value -> string) -> boolean {

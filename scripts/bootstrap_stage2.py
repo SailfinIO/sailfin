@@ -8,9 +8,12 @@ producing native executable artifacts that can run independently of the Python r
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
+import json
 import pathlib
 import re
+import shutil
 import sys
 from collections import defaultdict
 import time
@@ -25,6 +28,93 @@ if str(REPO_ROOT) not in sys.path:
 _STAGE1_LOWERING = None
 
 _STAGE1_AOT_PREPARE = None
+
+
+_STAGE2_BOOTSTRAP_CACHE_VERSION = "stage2-bootstrap-cache-v1"
+
+
+def _sha256_text(text: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(text.encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _atomic_write_text(path: pathlib.Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _stage1_fingerprint() -> str:
+    """Fingerprint the stage1-generated Python compiler modules.
+
+    `bootstrap_stage2.py` imports `compiler.build.main` + lowering helpers.
+    If those change, we must rebuild stage2 artifacts.
+    """
+
+    digest = hashlib.sha256()
+    digest.update(_STAGE2_BOOTSTRAP_CACHE_VERSION.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(
+        f"python-{sys.version_info.major}.{sys.version_info.minor}".encode("utf-8"))
+    digest.update(b"\0")
+
+    stage1_root = (REPO_ROOT / "compiler" / "build").resolve()
+    inputs: List[pathlib.Path] = []
+    if stage1_root.exists():
+        inputs.extend(sorted(stage1_root.rglob("*.py")))
+    inputs.append(pathlib.Path(__file__).resolve())
+
+    for path in inputs:
+        try:
+            rel = path.relative_to(REPO_ROOT)
+        except ValueError:
+            rel = path
+        digest.update(str(rel).encode("utf-8"))
+        digest.update(b"\0")
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            data = b"<missing>"
+        digest.update(data)
+        digest.update(b"\0")
+
+    return digest.hexdigest()
+
+
+def _bootstrap_manifest_path(output_dir: pathlib.Path) -> pathlib.Path:
+    return output_dir / ".stage2-bootstrap-manifest.json"
+
+
+def _load_bootstrap_manifest(output_dir: pathlib.Path) -> Dict[str, Any] | None:
+    path = _bootstrap_manifest_path(output_dir)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _write_bootstrap_manifest(output_dir: pathlib.Path, payload: Dict[str, Any]) -> None:
+    path = _bootstrap_manifest_path(output_dir)
+    _atomic_write_text(path, json.dumps(
+        payload, indent=2, sort_keys=True) + "\n")
+
+
+def _resolve_import_provider(
+    import_path: str,
+    *,
+    providers_by_name: Dict[str, pathlib.Path],
+) -> pathlib.Path | None:
+    module_name = _import_basename(import_path)
+    provider = providers_by_name.get(module_name)
+    if provider is not None:
+        return provider
+    if "/" in module_name:
+        provider = providers_by_name.get(module_name.split("/")[-1])
+    return provider
 
 
 def _stage1_lowering_module():
@@ -60,6 +150,35 @@ def prepare_stage2_aot_modules(
     aot_dir.mkdir(parents=True, exist_ok=True)
 
     module_names = [p.stem for p in module_paths]
+
+    # Fast path: skip AOT rewriting if inputs are unchanged.
+    manifest_path = aot_dir / ".aot-prepare-manifest.json"
+    input_hashes: Dict[str, str] = {}
+    for path in module_paths:
+        digest = hashlib.sha256()
+        digest.update(path.read_bytes())
+        input_hashes[path.stem] = digest.hexdigest()
+
+    expected_outputs_ok = True
+    for name in module_names:
+        if not (aot_dir / f"{name}.ll").exists():
+            expected_outputs_ok = False
+            break
+    if expected_outputs_ok and (aot_dir / "modules.txt").exists() and manifest_path.exists():
+        try:
+            cached = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            cached = None
+        if isinstance(cached, dict) and cached.get("version") == "aot-prepare-v1":
+            cached_names = cached.get("module_names")
+            cached_hashes = cached.get("input_hashes")
+            if cached_names == module_names and cached_hashes == input_hashes:
+                if debug:
+                    rel = aot_dir.relative_to(REPO_ROOT)
+                    print(
+                        f"[stage2-bootstrap] reused AOT-rewritten modules in {rel}")
+                return aot_dir
+
     module_texts = [p.read_text(encoding="utf-8") for p in module_paths]
 
     aot_prepare = _stage1_aot_prepare_module()
@@ -72,9 +191,22 @@ def prepare_stage2_aot_modules(
         )
 
     for name, ir in zip(module_names, rewritten):
-        (aot_dir / f"{name}.ll").write_text(ir, encoding="utf-8")
+        _atomic_write_text(aot_dir / f"{name}.ll", ir)
 
-    (aot_dir / "modules.txt").write_text("\n".join(module_names) + "\n", encoding="utf-8")
+    _atomic_write_text(aot_dir / "modules.txt", "\n".join(module_names) + "\n")
+    _atomic_write_text(
+        manifest_path,
+        json.dumps(
+            {
+                "version": "aot-prepare-v1",
+                "module_names": module_names,
+                "input_hashes": input_hashes,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
 
     if debug:
         rel = aot_dir.relative_to(REPO_ROOT)
@@ -376,6 +508,8 @@ def compile_compiler_to_stage2(
     quiet: bool = False,
     capture_results: bool = False,
     progress: bool = False,
+    incremental: bool = True,
+    force: bool = False,
 ) -> Tuple[List[pathlib.Path], DiagnosticAggregator] | Tuple[List[pathlib.Path], DiagnosticAggregator, Dict[pathlib.Path, Any]]:
     """Compile all compiler sources to Stage2 LLVM artifacts.
 
@@ -408,6 +542,11 @@ def compile_compiler_to_stage2(
         raise Stage2BootstrapError(
             f"runtime source directory not found: {runtime_src}")
 
+    has_full = hasattr(stage1_main, "compile_to_native_llvm_full")
+    has_manifest = hasattr(
+        stage1_main, "compile_to_native_llvm_with_manifests")
+    has_context = hasattr(stage1_main, "compile_to_native_llvm_with_context")
+
     # Collect all Sailfin source files
     # Note: compiler/src/aot_prepare.sfn is a stage1-only helper (used to rewrite
     # LLVM text for AOT); it is intentionally excluded from stage2 LLVM output.
@@ -430,26 +569,116 @@ def compile_compiler_to_stage2(
     lowered_results: Dict[pathlib.Path,
                           Any] | None = {} if capture_results else None
 
-    has_full = hasattr(stage1_main, "compile_to_native_llvm_full")
-    has_manifest = hasattr(
-        stage1_main, "compile_to_native_llvm_with_manifests")
-    has_context = hasattr(
-        stage1_main, "compile_to_native_llvm_with_context")
-
     source_cache: Dict[pathlib.Path, str] = {}
     import_cache: Dict[pathlib.Path, List[str]] = {}
     first_pass_results: Dict[pathlib.Path, Any] = {}
 
+    # --- Incremental planning -------------------------------------------------
+    current_stage1 = _stage1_fingerprint()
+    prior_manifest = _load_bootstrap_manifest(
+        output_dir) if incremental else None
+    prior_sources: Dict[str, Any] = {}
+    prior_stage1 = None
+    prior_version = None
+    prior_python = None
+    if prior_manifest is not None:
+        prior_sources = dict(prior_manifest.get("sources", {}) or {})
+        prior_stage1 = prior_manifest.get("stage1_fingerprint")
+        prior_version = prior_manifest.get("version")
+        prior_python = prior_manifest.get("python")
+
+    python_tag = f"{sys.version_info.major}.{sys.version_info.minor}"
+    rebuild_all = force or (not incremental)
+    if incremental and not rebuild_all:
+        if prior_manifest is None:
+            rebuild_all = True
+        elif prior_version != _STAGE2_BOOTSTRAP_CACHE_VERSION:
+            rebuild_all = True
+        elif prior_python != python_tag:
+            rebuild_all = True
+        elif prior_stage1 != current_stage1:
+            rebuild_all = True
+
+    # Map import basenames -> providing source paths.
+    providers_by_name: Dict[str, pathlib.Path] = {
+        p.stem: p for p in all_sources}
+    dependents: Dict[pathlib.Path, Set[pathlib.Path]] = defaultdict(set)
+
+    # Read sources once up-front and compute import graph.
+    source_hash: Dict[pathlib.Path, str] = {}
+    for source_path in all_sources:
+        source = source_path.read_text(encoding="utf-8")
+        source_cache[source_path] = source
+        imports = extract_import_paths(source)
+        import_cache[source_path] = imports
+        source_hash[source_path] = _sha256_text(source)
+        for import_path in imports:
+            provider = _resolve_import_provider(
+                import_path, providers_by_name=providers_by_name
+            )
+            if provider is None:
+                continue
+            dependents[provider].add(source_path)
+
+    # Determine which outputs must exist for a module to be considered reusable.
+    def _required_outputs_for(source_path: pathlib.Path) -> List[pathlib.Path]:
+        outputs = [output_dir / source_path.with_suffix(".ll").name]
+        if has_manifest or has_context:
+            outputs.append(
+                output_dir / source_path.with_suffix(".layout-manifest").name)
+        if has_context:
+            outputs.append(
+                output_dir / source_path.with_suffix(".sfn-asm").name)
+        return outputs
+
+    direct_rebuild: Set[pathlib.Path] = set()
+    missing_outputs: Set[pathlib.Path] = set()
+    if rebuild_all:
+        direct_rebuild = set(all_sources)
+    else:
+        for source_path in all_sources:
+            rel_key = str(source_path.relative_to(REPO_ROOT))
+            previous = prior_sources.get(rel_key) if prior_sources else None
+            previous_hash = previous.get(
+                "sha256") if isinstance(previous, dict) else None
+            required = _required_outputs_for(source_path)
+            if any(not path.exists() for path in required):
+                missing_outputs.add(source_path)
+                direct_rebuild.add(source_path)
+                continue
+            if previous_hash != source_hash[source_path]:
+                direct_rebuild.add(source_path)
+
+    # Propagate rebuild to dependents (imports) so callers see updated manifests.
+    to_rebuild: Set[pathlib.Path] = set(direct_rebuild)
+    queue: List[pathlib.Path] = list(direct_rebuild)
+    while queue:
+        changed = queue.pop()
+        for dependent in dependents.get(changed, set()):
+            if dependent in to_rebuild:
+                continue
+            to_rebuild.add(dependent)
+            queue.append(dependent)
+
+    if incremental and not force:
+        skipped = len(all_sources) - len(to_rebuild)
+        if skipped > 0:
+            changed = len(direct_rebuild)
+            missing = len(missing_outputs)
+            print(
+                f"[stage2-bootstrap] incremental: rebuilding {len(to_rebuild)}/{len(all_sources)} module(s) "
+                f"(direct={changed}, missing={missing}, reused={skipped})"
+            )
+
     if debug:
         print("[stage2-bootstrap] first pass: collecting layout manifests...")
 
-    first_pass_total = len(all_sources)
-    for index, source_path in enumerate(all_sources):
+    first_pass_sources = sorted(to_rebuild, key=lambda p: str(p))
+    first_pass_total = len(first_pass_sources)
+    for index, source_path in enumerate(first_pass_sources):
         try:
-            source = source_path.read_text(encoding="utf-8")
-            source_cache[source_path] = source
-            imports = extract_import_paths(source)
-            import_cache[source_path] = imports
+            source = source_cache[source_path]
+            imports = import_cache.get(source_path, [])
 
             if debug or progress:
                 rel = source_path.relative_to(REPO_ROOT)
@@ -472,8 +701,7 @@ def compile_compiler_to_stage2(
                                     ".layout-manifest").name
                             manifest_content = getattr(
                                 artifact, "contents", "")
-                            manifest_path.write_text(
-                                manifest_content, encoding="utf-8")
+                            _atomic_write_text(manifest_path, manifest_content)
                             if debug:
                                 rel_path = manifest_path.relative_to(REPO_ROOT)
                                 print(
@@ -482,8 +710,7 @@ def compile_compiler_to_stage2(
                             text_path = output_dir / \
                                 source_path.with_suffix(".sfn-asm").name
                             text_content = getattr(artifact, "contents", "")
-                            text_path.write_text(
-                                text_content, encoding="utf-8")
+                            _atomic_write_text(text_path, text_content)
                             if debug:
                                 rel_text = text_path.relative_to(REPO_ROOT)
                                 print(
@@ -508,8 +735,9 @@ def compile_compiler_to_stage2(
     if debug:
         print("[stage2-bootstrap] second pass: lowering with manifests...")
 
-    second_pass_total = len(all_sources)
-    for index, source_path in enumerate(all_sources):
+    second_pass_sources = sorted(to_rebuild, key=lambda p: str(p))
+    second_pass_total = len(second_pass_sources)
+    for index, source_path in enumerate(second_pass_sources):
         try:
             source = source_cache[source_path]
             import_paths = import_cache.get(source_path, [])
@@ -596,8 +824,7 @@ def compile_compiler_to_stage2(
                     f"no LLVM IR generated for {source_path.name}")
 
             output_path = output_dir / source_path.with_suffix(".ll").name
-            output_path.write_text(ir, encoding="utf-8")
-            compiled_modules.append(output_path)
+            _atomic_write_text(output_path, ir)
 
             if lowered_results is not None:
                 if fallback_llvm is not None and result is not fallback_llvm:
@@ -610,8 +837,7 @@ def compile_compiler_to_stage2(
                         manifest_path = output_dir / \
                             source_path.with_suffix(".layout-manifest").name
                         manifest_content = getattr(artifact, "contents", "")
-                        manifest_path.write_text(
-                            manifest_content, encoding="utf-8")
+                        _atomic_write_text(manifest_path, manifest_content)
                         if debug:
                             rel_path = manifest_path.relative_to(REPO_ROOT)
                             print(
@@ -620,7 +846,7 @@ def compile_compiler_to_stage2(
                         text_path = output_dir / \
                             source_path.with_suffix(".sfn-asm").name
                         text_content = getattr(artifact, "contents", "")
-                        text_path.write_text(text_content, encoding="utf-8")
+                        _atomic_write_text(text_path, text_content)
                         if debug:
                             rel_text = text_path.relative_to(REPO_ROOT)
                             print(
@@ -648,20 +874,50 @@ def compile_compiler_to_stage2(
             f"compilation failed with {aggregator.fatal_count} fatal diagnostic(s)"
         )
 
+    # Collect all module paths (rebuilt + reused) deterministically.
+    all_module_paths: List[pathlib.Path] = []
+    for source_path in all_sources:
+        module_path = output_dir / source_path.with_suffix(".ll").name
+        if not module_path.exists():
+            raise Stage2BootstrapError(
+                f"missing expected output module: {module_path} (source={source_path.name})"
+            )
+        all_module_paths.append(module_path)
+    module_paths = sorted(all_module_paths, key=lambda p: p.stem)
+
     # Persist a deterministic module list to drive native AOT compilation.
-    module_paths = sorted(compiled_modules, key=lambda p: p.stem)
-    (output_dir / "modules.txt").write_text(
-        "\n".join(p.stem for p in module_paths) + "\n", encoding="utf-8"
+    _atomic_write_text(
+        output_dir / "modules.txt",
+        "\n".join(p.stem for p in module_paths) + "\n",
     )
 
     # Prepare collision-free modules for AOT linking.
     prepare_stage2_aot_modules(
         module_paths, output_dir=output_dir, debug=debug)
 
+    # Persist bootstrap manifest for incremental builds.
+    manifest_sources: Dict[str, Any] = {}
+    for source_path in all_sources:
+        rel_key = str(source_path.relative_to(REPO_ROOT))
+        manifest_sources[rel_key] = {
+            "sha256": source_hash[source_path],
+            "imports": import_cache.get(source_path, []),
+        }
+    _write_bootstrap_manifest(
+        output_dir,
+        {
+            "version": _STAGE2_BOOTSTRAP_CACHE_VERSION,
+            "python": python_tag,
+            "stage1_fingerprint": current_stage1,
+            "sources": manifest_sources,
+        },
+    )
+
     if debug and aggregator.total_count > 0:
         print(
             f"[stage2-bootstrap] completed with {aggregator.total_count} diagnostic(s)")
 
+    compiled_modules = list(module_paths)
     if lowered_results is not None:
         return compiled_modules, aggregator, lowered_results
 
@@ -771,11 +1027,18 @@ _STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\])*"')
 _STRING_REF_RE = re.compile(r'@\.str[0-9A-Za-z_.]*')
 _ENUM_REF_RE = re.compile(r'@\.enum(?:\.[A-Za-z0-9_]+)+')
 _LITERAL_CACHE: Dict[pathlib.Path, Dict[str, Any]] = {}
-_HELPER_DECLARATIONS: Dict[str, str] = {
-    descriptor.symbol: f"declare {descriptor.return_type} @{descriptor.symbol}({', '.join(descriptor.parameter_types)})"
-    for descriptor in _stage1_lowering_module().runtime_helper_descriptors()
-}
+_HELPER_DECLARATIONS: Dict[str, str] | None = None
 _HELPER_REF_RE = re.compile(r'@(sailfin_(?:runtime|adapter)_[A-Za-z0-9_]+)')
+
+
+def _helper_declarations() -> Dict[str, str]:
+    global _HELPER_DECLARATIONS
+    if _HELPER_DECLARATIONS is None:
+        _HELPER_DECLARATIONS = {
+            descriptor.symbol: f"declare {descriptor.return_type} @{descriptor.symbol}({', '.join(descriptor.parameter_types)})"
+            for descriptor in _stage1_lowering_module().runtime_helper_descriptors()
+        }
+    return _HELPER_DECLARATIONS
 
 
 def _string_constants_from_source(source_path: pathlib.Path, source_text: str) -> Dict[str, Any]:
@@ -902,15 +1165,16 @@ def _ensure_runtime_helper_declarations(lowered) -> None:
                 declared_symbols.add(symbol)
     referenced: Set[str] = set(match.group(1)
                                for match in _HELPER_REF_RE.finditer(ir_text))
+    helper_decls = _helper_declarations()
     missing = [
-        symbol for symbol in referenced if symbol in _HELPER_DECLARATIONS and symbol not in declared_symbols]
+        symbol for symbol in referenced if symbol in helper_decls and symbol not in declared_symbols]
     if not missing:
         return
     lines = ir_text.splitlines()
     insert_index = 0
     while insert_index < len(lines) and not lines[insert_index].startswith("define "):
         insert_index += 1
-    declarations = [_HELPER_DECLARATIONS[symbol] for symbol in missing]
+    declarations = [helper_decls[symbol] for symbol in missing]
     new_lines = lines[:insert_index] + \
         declarations + [""] + lines[insert_index:]
     setattr(lowered, "ir", "\n".join(new_lines))
@@ -976,6 +1240,28 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_false",
         help="Skip LLVM module validation",
     )
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        default=True,
+        help="Enable incremental rebuilds (default: enabled)",
+    )
+    parser.add_argument(
+        "--no-incremental",
+        dest="incremental",
+        action="store_false",
+        help="Disable incremental mode (rebuild everything)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force rebuild all modules (still writes manifest)",
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Delete output directory before building",
+    )
     return parser.parse_args(argv)
 
 
@@ -986,12 +1272,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         print("[stage2-bootstrap] starting Stage2 self-hosting compilation...")
 
+        if args.clean and args.output.exists():
+            shutil.rmtree(args.output)
+
         # Compile compiler sources to LLVM
         compilation_result = compile_compiler_to_stage2(
             args.output,
             debug=args.debug,
             quiet=args.quiet,
             progress=args.progress,
+            incremental=args.incremental,
+            force=args.force,
         )
         llvm_modules, aggregator = compilation_result[:2]
 

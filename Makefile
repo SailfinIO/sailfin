@@ -24,6 +24,10 @@ NATIVE_LINK_EXTRA ?=
 
 .PHONY: help install test test-unit test-integration test-e2e compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism
 
+# Rebuild a fresh native stage2 using an existing *native* stage2 seed compiler.
+# This is the self-hosting check CI ultimately needs (no stage1, no bootstrap).
+.PHONY: selfhost-native-stage2
+
 ifeq ($(origin CONDA_EXE), undefined)
 # `conda` is often a shell function (e.g. in zsh/bash init). We need the actual
 # executable path for Makefile recipes.
@@ -109,6 +113,20 @@ compile:
 	$(CONDA) run -n $(CONDA_ENV) python scripts/bootstrap_stage2.py --no-validate
 	$(MAKE) _build-native-stage2
 	@echo "[compile] built $(NATIVE_OUT)"
+
+# Usage:
+#   make selfhost-native-stage2 SEED_STAGE2=path/to/sailfin-stage2
+# Output:
+#   build/native/sailfin-stage2-selfhost
+selfhost-native-stage2:
+	@seed=$${SEED_STAGE2:-build/native/sailfin-stage2}; \
+	if [ ! -x "$$seed" ]; then \
+		echo "[selfhost-native-stage2] missing seed compiler: $$seed"; \
+		echo "[selfhost-native-stage2] (hint) build one with: make compile"; \
+		exit 1; \
+	fi; \
+	python scripts/selfhost_native_stage2.py --seed "$$seed" --out build/native/sailfin-stage2-selfhost
+	@echo "[selfhost-native-stage2] built build/native/sailfin-stage2-selfhost"
 
 _build-native-stage2:
 	@if [ ! -f $(STAGE2_AOT_MODULES_FILE) ]; then \

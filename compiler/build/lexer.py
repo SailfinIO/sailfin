@@ -244,7 +244,8 @@ def slice(text, start, end):
     return substring_unchecked(text, start, end)
 
 def append(tokens, token):
-    return (tokens) + ([token])
+    tokens.append(token)
+    return tokens
 
 def is_two_char_symbol(value):
     if value == "->":

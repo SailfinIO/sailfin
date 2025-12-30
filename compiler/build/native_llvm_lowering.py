@@ -6951,6 +6951,67 @@ def lower_struct_array_concat(lhs, rhs, element_type, lines, temp_index):
     result_operand = LLVMOperand(llvm_type=lhs.llvm_type, value=new_struct_ptr)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=result_operand, diagnostics=diagnostics, string_constants=[])
 
+def lower_array_push_in_place(array, value, element_type, lines, temp_index):
+    current_lines = lines
+    current_temp = temp_index
+    diagnostics = []
+    if len(element_type) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: push requires a concrete element type")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=[])
+    array_struct_type = array_struct_type_for_element(element_type)
+    if len(array_struct_type) == 0:
+        diagnostics = append_string(diagnostics, "llvm lowering: unsupported push element type `" + element_type + "`")
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=[])
+    data_pointer_type = element_type + "*"
+    data_pointer_pointer_type = data_pointer_type + "*"
+    data_ptr_gep = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + data_ptr_gep + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 0")
+    data_value = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + data_ptr_gep)
+    len_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + len_ptr + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 1")
+    len_value = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + len_value + " = load i64, i64* " + len_ptr)
+    element_size_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1")
+    element_size_value = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64")
+    total_length = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + len_value + ", 1")
+    total_bytes = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length)
+    new_raw_buffer = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")")
+    new_data_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type)
+    new_data_i8 = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*")
+    existing_bytes = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + existing_bytes + " = mul i64 " + element_size_value + ", " + len_value)
+    existing_src_i8 = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + existing_src_i8 + " = bitcast " + data_pointer_type + " " + data_value + " to i8*")
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + existing_src_i8 + ", i64 " + existing_bytes + ")")
+    element_dest_ptr = format_temp_name(current_temp)
+    current_temp += 1
+    current_lines = append_string(current_lines, "  " + element_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + len_value)
+    current_lines = append_string(current_lines, "  store " + element_type + " " + value.value + ", " + element_type + "* " + element_dest_ptr)
+    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + data_ptr_gep)
+    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + len_ptr)
+    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=array, diagnostics=diagnostics, string_constants=[])
+
 def find_top_level_comma_in_llvm_type(text):
     brace_depth = 0
     index = 0
@@ -8486,6 +8547,8 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     helper_descriptor = None
     array_concat_element_type = ""
     is_array_concat = False
+    array_push_element_type = ""
+    is_array_push = False
     method_parse = parse_member_access(trimmed_target)
     if method_parse.success:
         method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context)
@@ -8559,6 +8622,14 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                             is_array_concat = True
                             if not ends_with_pointer_suffix(array_element_type):
                                 helper_descriptor = RuntimeHelperDescriptor(target="concat", symbol="", return_type=base_operand.llvm_type, parameter_types=[base_operand.llvm_type, base_operand.llvm_type], effects=[])
+                        else:
+                            if len(array_element_type) > 0  and  method_parse.field == "push":
+                                method_operand = base_operand
+                                trimmed_target = "push"
+                                injected_argument_count = 1
+                                array_push_element_type = array_element_type
+                                is_array_push = True
+                                helper_descriptor = RuntimeHelperDescriptor(target="push", symbol="", return_type=base_operand.llvm_type, parameter_types=[base_operand.llvm_type, array_element_type], effects=[])
                     else:
                         diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
                         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
@@ -8750,6 +8821,18 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=concat_result.operand, diagnostics=diagnostics, string_constants=collected_string_constants)
         else:
             diagnostics = append_string(diagnostics, "llvm lowering: concat requires two operands")
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+    if is_array_push  and  len(array_push_element_type) > 0:
+        if len(operands) >= 2:
+            push_result = lower_array_push_in_place(operands[0], operands[1], array_push_element_type, current_lines, current_temp)
+            diagnostics = (diagnostics) + (push_result.diagnostics)
+            current_lines = push_result.lines
+            current_temp = push_result.temp_index
+            if push_result.operand == None:
+                return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+            return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=push_result.operand, diagnostics=diagnostics, string_constants=collected_string_constants)
+        else:
+            diagnostics = append_string(diagnostics, "llvm lowering: push requires two operands")
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
     if function_entry != None  or  helper_descriptor != None:
         if len(expected_params) != len(operands):
@@ -12709,10 +12792,12 @@ def find_last_index_of_char(value, target):
     return -1
 
 def append_string(values, value):
-    return (values) + ([value])
+    values.append(value)
+    return values
 
 def append_match_arm_mutations(list, arm):
-    return (list) + ([arm])
+    list.append(arm)
+    return list
 
 def string_array_contains(values, target):
     index = 0

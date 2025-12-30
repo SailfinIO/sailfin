@@ -10313,6 +10313,86 @@ fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_typ
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
 }
 
+fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element_type -> string, lines -> string[], temp_index -> number) -> ExpressionResult {
+    let mut current_lines = lines;
+    let mut current_temp = temp_index;
+    let mut diagnostics -> string[] = [];
+    if element_type.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: push requires a concrete element type");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
+    }
+
+    let array_struct_type = array_struct_type_for_element(element_type);
+    if array_struct_type.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: unsupported push element type `" + element_type + "`");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
+    }
+
+    let data_pointer_type = element_type + "*";
+    let data_pointer_pointer_type = data_pointer_type + "*";
+
+    // Read current array fields.
+    let data_ptr_gep = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + data_ptr_gep + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 0");
+    let data_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + data_ptr_gep);
+
+    let len_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + len_ptr + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 1");
+    let len_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + len_value + " = load i64, i64* " + len_ptr);
+
+    // Allocate a new backing buffer.
+    let element_size_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1");
+    let element_size_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64");
+
+    let total_length = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + len_value + ", 1");
+    let total_bytes = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length);
+
+    let new_raw_buffer = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")");
+    let new_data_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type);
+    let new_data_i8 = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*");
+
+    // Copy existing bytes (no-op if len is 0).
+    let existing_bytes = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + existing_bytes + " = mul i64 " + element_size_value + ", " + len_value);
+    let existing_src_i8 = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + existing_src_i8 + " = bitcast " + data_pointer_type + " " + data_value + " to i8*");
+    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + existing_src_i8 + ", i64 " + existing_bytes + ")");
+
+    // Write new element at index len.
+    let element_dest_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + element_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + len_value);
+    current_lines = append_string(current_lines, "  store " + element_type + " " + value.value + ", " + element_type + "* " + element_dest_ptr);
+
+    // Mutate array struct fields in-place.
+    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + data_ptr_gep);
+    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + len_ptr);
+
+    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: array, diagnostics: diagnostics, string_constants: [] };
+}
+
 // Find the top-level comma in an LLVM type string, respecting nested braces.
 // This is needed for parsing array struct types like { { %T*, i64 }*, i64 }
 // where the element type itself contains commas.
@@ -12564,6 +12644,8 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let mut helper_descriptor -> RuntimeHelperDescriptor? = null;
     let mut array_concat_element_type -> string = "";
     let mut is_array_concat -> boolean = false;
+    let mut array_push_element_type -> string = "";
+    let mut is_array_push -> boolean = false;
 
     let method_parse = parse_member_access(trimmed_target);
     if method_parse.success {
@@ -12659,6 +12741,22 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                                 effects: [],
                             };
                         }
+                    } else if array_element_type.length > 0 && method_parse.field == "push" {
+                        method_operand = base_operand;
+                        trimmed_target = "push";
+                        injected_argument_count = 1;
+                        array_push_element_type = array_element_type;
+                        is_array_push = true;
+
+                        // We inline push as an in-place mutation of the array struct fields. We still
+                        // provide a typed signature so argument coercion doesn't bitcast the operands.
+                        helper_descriptor = RuntimeHelperDescriptor {
+                            target: "push",
+                            symbol: "",
+                            return_type: base_operand.llvm_type,
+                            parameter_types: [base_operand.llvm_type, array_element_type],
+                            effects: [],
+                        };
                     }
                 } else {
                     diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
@@ -12917,6 +13015,22 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: concat_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: concat requires two operands");
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+    }
+
+    if is_array_push && array_push_element_type.length > 0 {
+        if operands.length >= 2 {
+            let push_result = lower_array_push_in_place(operands[0], operands[1], array_push_element_type, current_lines, current_temp);
+            diagnostics = diagnostics.concat(push_result.diagnostics);
+            current_lines = push_result.lines;
+            current_temp = push_result.temp_index;
+            if push_result.operand == null {
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: push_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: push requires two operands");
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
     }
@@ -18286,11 +18400,13 @@ fn find_last_index_of_char(value -> string, target -> string) -> number {
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn append_match_arm_mutations(list -> MatchArmMutations[], arm -> MatchArmMutations) -> MatchArmMutations[] {
-    return list.concat([arm]);
+    list.push(arm);
+    return list;
 }
 
 fn string_array_contains(values -> string[], target -> string) -> boolean {
