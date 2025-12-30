@@ -46,6 +46,36 @@ def _atomic_write_text(path: pathlib.Path, content: str) -> None:
     tmp_path.replace(path)
 
 
+def _relative_output_path(source_path: pathlib.Path, suffix: str, output_dir: pathlib.Path) -> pathlib.Path:
+    """Compute the output path preserving directory structure relative to compiler/src or runtime.
+
+    For example:
+      compiler/src/llvm/types.sfn -> output_dir/llvm/types.ll
+      compiler/src/parser.sfn -> output_dir/parser.ll
+      runtime/prelude.sfn -> output_dir/prelude.ll
+
+    This enables nested module imports to resolve correctly.
+    """
+    compiler_src = REPO_ROOT / "compiler" / "src"
+    runtime_src = REPO_ROOT / "runtime"
+
+    try:
+        relative = source_path.relative_to(compiler_src)
+        return output_dir / relative.with_suffix(suffix)
+    except ValueError:
+        pass
+
+    try:
+        relative = source_path.relative_to(runtime_src)
+        # Runtime files go directly in output_dir (no subdirectory)
+        return output_dir / relative.with_suffix(suffix)
+    except ValueError:
+        pass
+
+    # Fallback to just the filename
+    return output_dir / source_path.with_suffix(suffix).name
+
+
 def _stage1_fingerprint() -> str:
     """Fingerprint the stage1-generated Python compiler modules.
 
@@ -622,13 +652,13 @@ def compile_compiler_to_stage2(
 
     # Determine which outputs must exist for a module to be considered reusable.
     def _required_outputs_for(source_path: pathlib.Path) -> List[pathlib.Path]:
-        outputs = [output_dir / source_path.with_suffix(".ll").name]
+        outputs = [_relative_output_path(source_path, ".ll", output_dir)]
         if has_manifest or has_context:
             outputs.append(
-                output_dir / source_path.with_suffix(".layout-manifest").name)
+                _relative_output_path(source_path, ".layout-manifest", output_dir))
         if has_context:
             outputs.append(
-                output_dir / source_path.with_suffix(".sfn-asm").name)
+                _relative_output_path(source_path, ".sfn-asm", output_dir))
         return outputs
 
     direct_rebuild: Set[pathlib.Path] = set()
@@ -696,9 +726,8 @@ def compile_compiler_to_stage2(
                 if native_module is not None and hasattr(native_module, "artifacts"):
                     for artifact in native_module.artifacts:
                         if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
-                            manifest_path = output_dir / \
-                                source_path.with_suffix(
-                                    ".layout-manifest").name
+                            manifest_path = _relative_output_path(
+                                source_path, ".layout-manifest", output_dir)
                             manifest_content = getattr(
                                 artifact, "contents", "")
                             _atomic_write_text(manifest_path, manifest_content)
@@ -707,8 +736,8 @@ def compile_compiler_to_stage2(
                                 print(
                                     f"[stage2-bootstrap]     wrote {rel_path}")
                         elif hasattr(artifact, "format") and artifact.format == "sailfin-native-text":
-                            text_path = output_dir / \
-                                source_path.with_suffix(".sfn-asm").name
+                            text_path = _relative_output_path(
+                                source_path, ".sfn-asm", output_dir)
                             text_content = getattr(artifact, "contents", "")
                             _atomic_write_text(text_path, text_content)
                             if debug:
@@ -823,7 +852,7 @@ def compile_compiler_to_stage2(
                 raise Stage2BootstrapError(
                     f"no LLVM IR generated for {source_path.name}")
 
-            output_path = output_dir / source_path.with_suffix(".ll").name
+            output_path = _relative_output_path(source_path, ".ll", output_dir)
             _atomic_write_text(output_path, ir)
 
             if lowered_results is not None:
@@ -834,8 +863,8 @@ def compile_compiler_to_stage2(
             if native_module is not None and hasattr(native_module, "artifacts"):
                 for artifact in native_module.artifacts:
                     if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
-                        manifest_path = output_dir / \
-                            source_path.with_suffix(".layout-manifest").name
+                        manifest_path = _relative_output_path(
+                            source_path, ".layout-manifest", output_dir)
                         manifest_content = getattr(artifact, "contents", "")
                         _atomic_write_text(manifest_path, manifest_content)
                         if debug:
@@ -843,8 +872,8 @@ def compile_compiler_to_stage2(
                             print(
                                 f"[stage2-bootstrap]     refreshed {rel_path}")
                     elif hasattr(artifact, "format") and artifact.format == "sailfin-native-text":
-                        text_path = output_dir / \
-                            source_path.with_suffix(".sfn-asm").name
+                        text_path = _relative_output_path(
+                            source_path, ".sfn-asm", output_dir)
                         text_content = getattr(artifact, "contents", "")
                         _atomic_write_text(text_path, text_content)
                         if debug:
@@ -877,7 +906,7 @@ def compile_compiler_to_stage2(
     # Collect all module paths (rebuilt + reused) deterministically.
     all_module_paths: List[pathlib.Path] = []
     for source_path in all_sources:
-        module_path = output_dir / source_path.with_suffix(".ll").name
+        module_path = _relative_output_path(source_path, ".ll", output_dir)
         if not module_path.exists():
             raise Stage2BootstrapError(
                 f"missing expected output module: {module_path} (source={source_path.name})"
