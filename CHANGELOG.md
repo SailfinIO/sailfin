@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.86 (2025-12-30)
+
+### Bug Fixes
+
+- Add aot prepare python
+  ([`2becc60`](https://github.com/SailfinIO/sailfin/commit/2becc60ed26f35b1118e33bdbf1a0cc669b9d694))
+
+- Module linking
+  ([`d988f49`](https://github.com/SailfinIO/sailfin/commit/d988f49713276c3de98462be2a146159dd900a72))
+
+- Print to stout
+  ([`36e8058`](https://github.com/SailfinIO/sailfin/commit/36e8058534c23c769163b8035d748a7111c875fc))
+
+- String utils
+  ([`3644f80`](https://github.com/SailfinIO/sailfin/commit/3644f80b58749be03e362f716aa33d29f52f134a))
+
+
 ## v0.1.1-alpha.85 (2025-12-29)
 
 ### Bug Fixes
