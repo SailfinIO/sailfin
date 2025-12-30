@@ -1,0 +1,871 @@
+// compiler/src/llvm/type_context.sfn
+//
+// TypeContext building and lookup functions. Constructs type metadata
+// from NativeStruct/NativeEnum/NativeInterface definitions.
+
+import { NativeStruct, NativeEnum, NativeInterface, NativeFunction, NativeInterfaceSignature } from "../native_ir";
+import { substring } from "../string_utils";
+import {
+    TypeContext,
+    TypeContextBuild,
+    StructTypeInfo,
+    StructFieldInfo,
+    EnumTypeInfo,
+    EnumVariantInfo,
+    InterfaceTypeInfo,
+    VTableInfo,
+    VTableEntry,
+    TypeAllocationInfo,
+    ParameterBinding,
+    LocalBinding
+} from "./types";
+import {
+    trim_text,
+    append_string,
+    sanitize_symbol,
+    is_simple_identifier,
+    find_last_index_of_char,
+    index_of,
+    string_array_contains
+} from "./utils";
+import {
+    map_type_annotation,
+    map_struct_field_annotation,
+    ends_with_pointer_suffix,
+    strip_pointer_suffix,
+    layout_annotation_base_type,
+    layout_annotation_represents_user_value
+} from "./type_mapping";
+
+// =============================================================================
+// TypeContext Construction
+// =============================================================================
+
+fn empty_type_context() -> TypeContext {
+    return TypeContext { structs: [], enums: [], interfaces: [], vtables: [] };
+}
+
+fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[]) -> TypeContextBuild {
+    let mut diagnostics -> string[] = [];
+    let mut struct_entries -> StructTypeInfo[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= structs.length {
+            break;
+        }
+        let definition = structs[index];
+        if definition.layout == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` missing layout metadata; skipping type emission");
+            index += 1;
+            continue;
+        }
+        let layout = definition.layout;
+        let sanitized = sanitize_symbol(definition.name);
+        let llvm_name = "%" + sanitized;
+        let mut fields -> StructFieldInfo[] = [];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= layout.fields.length {
+                break;
+            }
+            let layout_field = layout.fields[field_index];
+            let mapped = map_struct_field_annotation(layout_field.type_annotation);
+            let mut llvm_field_type -> string = mapped;
+            if llvm_field_type.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
+                llvm_field_type = "i8*";
+            } else if ends_with_pointer_suffix(llvm_field_type) {
+                let layout_base_type = layout_annotation_base_type(layout_field.type_annotation);
+                let references_self_type = layout_base_type == definition.name;
+                if layout_annotation_represents_user_value(layout_field.type_annotation) && !references_self_type {
+                    let stripped = strip_pointer_suffix(llvm_field_type);
+                    if stripped.length > 0 {
+                        llvm_field_type = stripped;
+                    }
+                }
+            }
+            fields = append_struct_field_info(fields, StructFieldInfo { name: layout_field.name, llvm_type: llvm_field_type, type_annotation: layout_field.type_annotation, index: field_index, offset: layout_field.offset });
+            field_index += 1;
+        }
+        let mut align_value -> number = layout.align;
+        if align_value <= 0 {
+            align_value = 1;
+        }
+        struct_entries = append_struct_type_info(struct_entries, StructTypeInfo { name: definition.name, llvm_name: llvm_name, fields: fields, size: layout.size, align: align_value });
+        index += 1;
+    }
+
+    let mut enum_entries -> EnumTypeInfo[] = [];
+    let mut enum_index -> number = 0;
+    loop {
+        if enum_index >= enums.length {
+            break;
+        }
+        let enum_def = enums[enum_index];
+        if enum_def.layout == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` missing layout metadata; skipping type emission");
+            enum_index += 1;
+            continue;
+        }
+        let enum_layout = enum_def.layout;
+        let sanitized_enum = sanitize_symbol(enum_def.name);
+        let llvm_enum_name = "%" + sanitized_enum;
+        let mut variants -> EnumVariantInfo[] = [];
+        let mut variant_index -> number = 0;
+        loop {
+            if variant_index >= enum_layout.variants.length {
+                break;
+            }
+            let variant_layout = enum_layout.variants[variant_index];
+            let mut variant_fields -> StructFieldInfo[] = [];
+            let mut variant_field_index -> number = 0;
+            loop {
+                if variant_field_index >= variant_layout.fields.length {
+                    break;
+                }
+                let variant_field = variant_layout.fields[variant_field_index];
+                let mapped_variant_type = map_struct_field_annotation(variant_field.type_annotation);
+                let mut llvm_variant_field_type -> string = mapped_variant_type;
+                if llvm_variant_field_type.length == 0 {
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
+                    llvm_variant_field_type = "i8*";
+                } else if ends_with_pointer_suffix(llvm_variant_field_type) {
+                    let variant_base_type = layout_annotation_base_type(variant_field.type_annotation);
+                    let references_declaring_enum = variant_base_type == enum_def.name;
+                    if layout_annotation_represents_user_value(variant_field.type_annotation) && !references_declaring_enum {
+                        let stripped_variant = strip_pointer_suffix(llvm_variant_field_type);
+                        if stripped_variant.length > 0 {
+                            llvm_variant_field_type = stripped_variant;
+                        }
+                    }
+                }
+                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo { name: variant_field.name, llvm_type: llvm_variant_field_type, type_annotation: variant_field.type_annotation, index: variant_field_index, offset: variant_field.offset });
+                variant_field_index += 1;
+            }
+            variants = append_enum_variant_info(variants, EnumVariantInfo {
+                name: variant_layout.name,
+                tag: variant_layout.tag,
+                offset: variant_layout.offset,
+                size: variant_layout.size,
+                align: variant_layout.align,
+                fields: variant_fields,
+            });
+            variant_index += 1;
+        }
+        let mut enum_align_value -> number = enum_layout.align;
+        if enum_align_value <= 0 {
+            enum_align_value = 1;
+        }
+        let mut max_payload_size -> number = 0;
+        let mut payload_scan -> number = 0;
+        loop {
+            if payload_scan >= variants.length {
+                break;
+            }
+            let variant = variants[payload_scan];
+            if variant.size > max_payload_size {
+                max_payload_size = variant.size;
+            }
+            payload_scan += 1;
+        }
+        enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo {
+            name: enum_def.name,
+            llvm_name: llvm_enum_name,
+            tag_type: enum_layout.tag_type,
+            tag_size: enum_layout.tag_size,
+            tag_align: enum_layout.tag_align,
+            max_payload_size: max_payload_size,
+            size: enum_layout.size,
+            align: enum_align_value,
+            variants: variants,
+        });
+        enum_index += 1;
+    }
+
+    // Build interface type information
+    let mut interface_entries -> InterfaceTypeInfo[] = [];
+    let mut interface_index -> number = 0;
+    loop {
+        if interface_index >= interfaces.length {
+            break;
+        }
+        let interface_def = interfaces[interface_index];
+        let sanitized_interface = sanitize_symbol(interface_def.name);
+        let llvm_interface_name = "%trait." + sanitized_interface;
+        interface_entries = append_interface_type_info(interface_entries, InterfaceTypeInfo {
+            name: interface_def.name,
+            llvm_name: llvm_interface_name,
+            type_parameters: interface_def.type_parameters,
+            signatures: interface_def.signatures,
+        });
+        interface_index += 1;
+    }
+
+    // Build vtable information for each struct-interface pair
+    let mut vtable_entries -> VTableInfo[] = [];
+    let mut struct_vtable_index -> number = 0;
+    loop {
+        if struct_vtable_index >= structs.length {
+            break;
+        }
+        let struct_def = structs[struct_vtable_index];
+        let mut implements_index -> number = 0;
+        loop {
+            if implements_index >= struct_def.implements.length {
+                break;
+            }
+            let interface_name = struct_def.implements[implements_index];
+            // Find the interface definition
+            let mut interface_def_opt -> NativeInterface? = null;
+            let mut search_idx -> number = 0;
+            loop {
+                if search_idx >= interfaces.length {
+                    break;
+                }
+                if interfaces[search_idx].name == interface_name {
+                    interface_def_opt = interfaces[search_idx];
+                    break;
+                }
+                search_idx += 1;
+            }
+
+            if interface_def_opt == null {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_def.name + "` implements unknown interface `" + interface_name + "`");
+                implements_index += 1;
+                continue;
+            }
+
+            let interface_def = interface_def_opt;
+            let sanitized_struct = sanitize_symbol(struct_def.name);
+            let sanitized_iface = sanitize_symbol(interface_name);
+            let vtable_type_name = "%vtable." + sanitized_struct + "." + sanitized_iface;
+            let vtable_global_name = "@vtable." + sanitized_struct + "." + sanitized_iface + ".const";
+
+            // Build vtable entries for each method
+            let mut vtable_method_entries -> VTableEntry[] = [];
+            let mut sig_index -> number = 0;
+            loop {
+                if sig_index >= interface_def.signatures.length {
+                    break;
+                }
+                let signature = interface_def.signatures[sig_index];
+                // Build function pointer type: return_type (param_types...)*
+                let mut param_types -> string[] = ["i8*"];  // First param is always self as i8*
+                let mut param_idx -> number = 1;  // Skip self since we already added it
+                loop {
+                    if param_idx >= signature.parameters.length {
+                        break;
+                    }
+                    let param = signature.parameters[param_idx];
+                    let mapped_type = map_type_annotation(param.type_annotation);
+                    param_types = append_string(param_types, mapped_type);
+                    param_idx += 1;
+                }
+                let return_type = map_type_annotation(signature.return_type);
+                let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*";
+
+                vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry {
+                    method_name: struct_def.name + "::" + signature.name,
+                    interface_method_name: signature.name,
+                    function_pointer_type: func_ptr_type,
+                });
+                sig_index += 1;
+            }
+
+            vtable_entries = append_vtable_info(vtable_entries, VTableInfo {
+                struct_name: struct_def.name,
+                interface_name: interface_name,
+                llvm_type_name: vtable_type_name,
+                llvm_global_name: vtable_global_name,
+                entries: vtable_method_entries,
+            });
+            implements_index += 1;
+        }
+
+        // Structural conformance: if the struct doesn't explicitly declare `implements`,
+        // but does provide compatible methods, synthesize a vtable anyway.
+        let mut interface_scan -> number = 0;
+        loop {
+            if interface_scan >= interfaces.length {
+                break;
+            }
+            let interface_def = interfaces[interface_scan];
+            if !struct_declares_interface(struct_def, interface_def.name) {
+                if struct_satisfies_interface_structurally(struct_def, interface_def) {
+                    let interface_name = interface_def.name;
+                    let sanitized_struct = sanitize_symbol(struct_def.name);
+                    let sanitized_iface = sanitize_symbol(interface_name);
+                    let vtable_type_name = "%vtable." + sanitized_struct + "." + sanitized_iface;
+                    let vtable_global_name = "@vtable." + sanitized_struct + "." + sanitized_iface + ".const";
+
+                    let mut vtable_method_entries -> VTableEntry[] = [];
+                    let mut sig_index -> number = 0;
+                    loop {
+                        if sig_index >= interface_def.signatures.length {
+                            break;
+                        }
+                        let signature = interface_def.signatures[sig_index];
+                        let mut param_types -> string[] = ["i8*"];
+                        let mut param_idx -> number = 1;
+                        loop {
+                            if param_idx >= signature.parameters.length {
+                                break;
+                            }
+                            let param = signature.parameters[param_idx];
+                            let mapped_type = map_type_annotation(param.type_annotation);
+                            param_types = append_string(param_types, mapped_type);
+                            param_idx += 1;
+                        }
+                        let return_type = map_type_annotation(signature.return_type);
+                        let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*";
+                        vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry {
+                            method_name: struct_def.name + "::" + signature.name,
+                            interface_method_name: signature.name,
+                            function_pointer_type: func_ptr_type,
+                        });
+                        sig_index += 1;
+                    }
+
+                    vtable_entries = append_vtable_info(vtable_entries, VTableInfo {
+                        struct_name: struct_def.name,
+                        interface_name: interface_name,
+                        llvm_type_name: vtable_type_name,
+                        llvm_global_name: vtable_global_name,
+                        entries: vtable_method_entries,
+                    });
+                }
+            }
+            interface_scan += 1;
+        }
+        struct_vtable_index += 1;
+    }
+
+    return TypeContextBuild { context: TypeContext { structs: struct_entries, enums: enum_entries, interfaces: interface_entries, vtables: vtable_entries }, diagnostics: diagnostics };
+}
+
+// =============================================================================
+// Append Helpers
+// =============================================================================
+
+fn append_struct_type_info(values -> StructTypeInfo[], value -> StructTypeInfo) -> StructTypeInfo[] {
+    return values.concat([value]);
+}
+
+fn append_struct_field_info(values -> StructFieldInfo[], value -> StructFieldInfo) -> StructFieldInfo[] {
+    return values.concat([value]);
+}
+
+fn append_enum_variant_info(values -> EnumVariantInfo[], value -> EnumVariantInfo) -> EnumVariantInfo[] {
+    return values.concat([value]);
+}
+
+fn append_enum_type_info(values -> EnumTypeInfo[], value -> EnumTypeInfo) -> EnumTypeInfo[] {
+    return values.concat([value]);
+}
+
+fn append_interface_type_info(values -> InterfaceTypeInfo[], value -> InterfaceTypeInfo) -> InterfaceTypeInfo[] {
+    return values.concat([value]);
+}
+
+fn append_vtable_info(values -> VTableInfo[], value -> VTableInfo) -> VTableInfo[] {
+    return values.concat([value]);
+}
+
+fn append_vtable_entry(values -> VTableEntry[], value -> VTableEntry) -> VTableEntry[] {
+    return values.concat([value]);
+}
+
+// =============================================================================
+// Interface Implementation Helpers
+// =============================================================================
+
+fn struct_declares_interface(struct_def -> NativeStruct, interface_name -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= struct_def.implements.length {
+            break;
+        }
+        if struct_def.implements[index] == interface_name {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn find_struct_method(struct_def -> NativeStruct, method_name -> string) -> NativeFunction? {
+    let mut index -> number = 0;
+    loop {
+        if index >= struct_def.methods.length {
+            break;
+        }
+        let method = struct_def.methods[index];
+        if method.name == method_name {
+            return method;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn struct_satisfies_interface_structurally(struct_def -> NativeStruct, interface_def -> NativeInterface) -> boolean {
+    let mut sig_index -> number = 0;
+    loop {
+        if sig_index >= interface_def.signatures.length {
+            break;
+        }
+        let signature = interface_def.signatures[sig_index];
+        let method = find_struct_method(struct_def, signature.name);
+        if method == null {
+            return false;
+        }
+        if method.parameters.length != signature.parameters.length {
+            return false;
+        }
+
+        let sig_return = map_type_annotation(signature.return_type);
+        let method_return = map_type_annotation(method.return_type);
+        if sig_return != method_return {
+            return false;
+        }
+
+        // Skip the first parameter (`self`) which is always passed as `i8*` in trait calls.
+        let mut param_index -> number = 1;
+        loop {
+            if param_index >= signature.parameters.length {
+                break;
+            }
+            let sig_param = signature.parameters[param_index];
+            let method_param = method.parameters[param_index];
+            let sig_ty = map_type_annotation(sig_param.type_annotation);
+            let method_ty = map_type_annotation(method_param.type_annotation);
+            if sig_ty != method_ty {
+                return false;
+            }
+            param_index += 1;
+        }
+        sig_index += 1;
+    }
+    return true;
+}
+
+// =============================================================================
+// TypeContext Lookup Functions
+// =============================================================================
+
+fn find_struct_info_by_name(context -> TypeContext, name -> string) -> StructTypeInfo? {
+    let mut index -> number = 0;
+    loop {
+        if index >= context.structs.length {
+            break;
+        }
+        let info = context.structs[index];
+        if info.name == name {
+            return info;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_interface_info_by_name(context -> TypeContext, name -> string) -> InterfaceTypeInfo? {
+    let mut index -> number = 0;
+    loop {
+        if index >= context.interfaces.length {
+            break;
+        }
+        let info = context.interfaces[index];
+        if info.name == name {
+            return info;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_vtable_for_struct_interface(context -> TypeContext, struct_name -> string, interface_name -> string) -> VTableInfo? {
+    let mut index -> number = 0;
+    loop {
+        if index >= context.vtables.length {
+            break;
+        }
+        let vtable = context.vtables[index];
+        if vtable.struct_name == struct_name && vtable.interface_name == interface_name {
+            return vtable;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_struct_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
+    let trimmed = trim_text(llvm_type);
+    let mut index -> number = 0;
+    loop {
+        if index >= context.structs.length {
+            break;
+        }
+        let info = context.structs[index];
+        if info.llvm_name == trimmed {
+            return info;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_struct_field_index(struct_info -> StructTypeInfo, field_name -> string) -> number {
+    let mut index -> number = 0;
+    loop {
+        if index >= struct_info.fields.length {
+            break;
+        }
+        let field = struct_info.fields[index];
+        if field.name == field_name {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_enum_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> EnumTypeInfo? {
+    let trimmed = trim_text(llvm_type);
+    let mut index -> number = 0;
+    loop {
+        if index >= context.enums.length {
+            break;
+        }
+        let info = context.enums[index];
+        if info.llvm_name == trimmed {
+            return info;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn resolve_struct_info_from_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
+    let mut candidate = trim_text(llvm_type);
+    if candidate.length == 0 {
+        return null;
+    }
+    if ends_with_pointer_suffix(candidate) {
+        candidate = strip_pointer_suffix(candidate);
+    }
+    return find_struct_info_by_llvm_type(context, candidate);
+}
+
+fn lookup_allocation_info(context -> TypeContext, llvm_type -> string) -> TypeAllocationInfo? {
+    let trimmed = trim_text(llvm_type);
+    if trimmed.length == 0 {
+        return null;
+    }
+    if ends_with_pointer_suffix(trimmed) {
+        return null;
+    }
+    if trimmed == "double" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 8, align: 8 };
+    }
+    if trimmed == "i64" || trimmed == "int" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 8, align: 8 };
+    }
+    if trimmed == "i32" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 4, align: 4 };
+    }
+    if trimmed == "i1" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 1, align: 1 };
+    }
+    if trimmed == "i8" {
+        return TypeAllocationInfo { llvm_type: trimmed, size: 1, align: 1 };
+    }
+    let struct_info = find_struct_info_by_llvm_type(context, trimmed);
+    if struct_info != null {
+        let mut align_value = struct_info.align;
+        if align_value <= 0 {
+            align_value = 1;
+        }
+        return TypeAllocationInfo { llvm_type: struct_info.llvm_name, size: struct_info.size, align: align_value };
+    }
+    let enum_info = find_enum_info_by_llvm_type(context, trimmed);
+    if enum_info != null {
+        let mut align_value = enum_info.align;
+        if align_value <= 0 {
+            align_value = 1;
+        }
+        return TypeAllocationInfo { llvm_type: enum_info.llvm_name, size: enum_info.size, align: align_value };
+    }
+    return null;
+}
+
+// =============================================================================
+// Method Target Resolution
+// =============================================================================
+
+fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> StructTypeInfo? {
+    let trimmed = trim_text(base);
+    if trimmed.length == 0 {
+        return null;
+    }
+    if is_simple_identifier(trimmed) {
+        let parameter = find_parameter_binding(bindings, trimmed);
+        if parameter != null {
+            let info = resolve_struct_info_from_llvm_type(context, parameter.llvm_type);
+            if info != null {
+                return info;
+            }
+        }
+        let local = find_local_binding(locals, trimmed);
+        if local != null {
+            let info = resolve_struct_info_from_llvm_type(context, local.llvm_type);
+            if info != null {
+                return info;
+            }
+        }
+    }
+    // Allow static method calls on a struct type (e.g. `BankAccount.new(123)`).
+    let by_name = find_struct_info_by_name(context, trimmed);
+    if by_name != null {
+        return by_name;
+    }
+    return null;
+}
+
+fn resolve_interface_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> InterfaceTypeInfo? {
+    let trimmed = trim_text(base);
+    if trimmed.length == 0 {
+        return null;
+    }
+    if is_simple_identifier(trimmed) {
+        let parameter = find_parameter_binding(bindings, trimmed);
+        if parameter != null {
+            let mut type_name = parameter.llvm_type;
+            if substring(type_name, 0, 7) == "%trait." {
+                let interface_name = substring(type_name, 7, type_name.length);
+                let info = find_interface_info_by_name(context, interface_name);
+                if info != null {
+                    return info;
+                }
+            }
+            let info = find_interface_info_by_name(context, type_name);
+            if info != null {
+                return info;
+            }
+        }
+        let local = find_local_binding(locals, trimmed);
+        if local != null {
+            let mut type_name = local.llvm_type;
+            if substring(type_name, 0, 7) == "%trait." {
+                let interface_name = substring(type_name, 7, type_name.length);
+                let info = find_interface_info_by_name(context, interface_name);
+                if info != null {
+                    return info;
+                }
+            }
+            let info = find_interface_info_by_name(context, type_name);
+            if info != null {
+                return info;
+            }
+        }
+    }
+    return null;
+}
+
+// =============================================================================
+// Field Info Lookup
+// =============================================================================
+
+fn find_struct_field_info(info -> StructTypeInfo, field_name -> string) -> StructFieldInfo? {
+    let mut index -> number = 0;
+    loop {
+        if index >= info.fields.length {
+            break;
+        }
+        let field = info.fields[index];
+        if field.name == field_name {
+            return field;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_variant_field_info(variant -> EnumVariantInfo, field_name -> string) -> StructFieldInfo? {
+    let mut index -> number = 0;
+    loop {
+        if index >= variant.fields.length {
+            break;
+        }
+        let field = variant.fields[index];
+        if field.name == field_name {
+            return field;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+// =============================================================================
+// Literal Resolution
+// =============================================================================
+
+fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) -> StructTypeInfo? {
+    let trimmed = trim_text(type_name);
+    if trimmed.length == 0 {
+        return null;
+    }
+
+    let mut candidates -> string[] = [trimmed];
+    let generic_index = index_of(trimmed, "<");
+    if generic_index >= 0 {
+        let base = trim_text(substring(trimmed, 0, generic_index));
+        if base.length > 0 {
+            if !string_array_contains(candidates, base) {
+                candidates = append_string(candidates, base);
+            }
+        }
+    }
+
+    let last_dot = find_last_index_of_char(trimmed, ".");
+    if last_dot >= 0 {
+        let tail_full = trim_text(substring(trimmed, last_dot + 1, trimmed.length));
+        if tail_full.length > 0 {
+            if !string_array_contains(candidates, tail_full) {
+                candidates = append_string(candidates, tail_full);
+            }
+            let tail_generic_index = index_of(tail_full, "<");
+            if tail_generic_index >= 0 {
+                let tail_base = trim_text(substring(tail_full, 0, tail_generic_index));
+                if tail_base.length > 0 {
+                    if !string_array_contains(candidates, tail_base) {
+                        candidates = append_string(candidates, tail_base);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= candidates.length {
+            break;
+        }
+        let candidate = candidates[index];
+        let info = find_struct_info_by_name(context, candidate);
+        if info != null {
+            return info;
+        }
+        index += 1;
+    }
+
+    return null;
+}
+
+fn resolve_enum_info_for_literal(context -> TypeContext, enum_name -> string) -> EnumTypeInfo? {
+    let trimmed = trim_text(enum_name);
+    if trimmed.length == 0 {
+        return null;
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= context.enums.length {
+            break;
+        }
+        let enum_info = context.enums[index];
+        if enum_info.name == trimmed {
+            return enum_info;
+        }
+        index += 1;
+    }
+
+    return null;
+}
+
+fn resolve_enum_variant_info(enum_info -> EnumTypeInfo, variant_name -> string) -> EnumVariantInfo? {
+    let trimmed = trim_text(variant_name);
+    if trimmed.length == 0 {
+        return null;
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= enum_info.variants.length {
+            break;
+        }
+        let variant = enum_info.variants[index];
+        if variant.name == trimmed {
+            return variant;
+        }
+        index += 1;
+    }
+
+    return null;
+}
+
+// =============================================================================
+// Binding Lookup Helpers (needed for method resolution)
+// =============================================================================
+
+fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
+    let mut index -> number = 0;
+    loop {
+        if index >= bindings.length {
+            break;
+        }
+        if bindings[index].name == name {
+            return bindings[index];
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_local_binding(locals -> LocalBinding[], name -> string) -> LocalBinding? {
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        if locals[index].name == name {
+            return locals[index];
+        }
+        index += 1;
+    }
+    return null;
+}
+
+// =============================================================================
+// String Join Helper (needed for vtable construction)
+// =============================================================================
+
+fn join_with_separator(values -> string[], separator -> string) -> string {
+    if values.length == 0 {
+        return "";
+    }
+    if values.length == 1 {
+        return values[0];
+    }
+    let mut parts -> string[] = values;
+    loop {
+        if parts.length <= 1 {
+            break;
+        }
+        let mut next -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= parts.length {
+                break;
+            }
+            if index + 1 < parts.length {
+                next = next.concat([parts[index] + separator + parts[index + 1]]);
+                index += 2;
+                continue;
+            }
+            next = next.concat([parts[index]]);
+            index += 1;
+        }
+        parts = next;
+    }
+    return parts[0];
+}

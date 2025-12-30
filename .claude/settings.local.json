@@ -55,7 +55,9 @@
       "Bash(for f in build/stage2/*.ll)",
       "Bash(do if grep -q '\\[0 x { %' $f)",
       "Bash(then echo 'Bad pattern in: $f' grep -n '\\[0 x { %' $f)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(mkdir:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

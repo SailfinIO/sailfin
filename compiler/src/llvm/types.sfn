@@ -1,0 +1,688 @@
+// compiler/src/llvm/types.sfn
+//
+// Struct definitions for the LLVM lowering pass. These types represent
+// intermediate data structures used during the translation from .sfn-asm
+// to LLVM IR.
+
+import { NativeInterfaceSignature, NativeSourceSpan, NativeEnum, NativeStruct, LayoutManifest } from "../native_ir";
+
+// =============================================================================
+// Enum Layout Fixup
+// =============================================================================
+
+struct EnumLayoutFixupResult {
+    enums -> NativeEnum[];
+    diagnostics -> string[];
+}
+
+// =============================================================================
+// Trait/Interface Metadata
+// =============================================================================
+
+struct TraitImplementationDescriptor {
+    struct_name -> string;
+    interfaces -> string[];
+}
+
+struct TraitDescriptor {
+    name -> string;
+    type_parameters -> string[];
+    signatures -> NativeInterfaceSignature[];
+}
+
+struct TraitMetadata {
+    interfaces -> TraitDescriptor[];
+    implementations -> TraitImplementationDescriptor[];
+}
+
+// =============================================================================
+// Effect System
+// =============================================================================
+
+struct FunctionEffectEntry {
+    name -> string;
+    effects -> string[];
+}
+
+struct CapabilityManifestEntry {
+    symbol -> string;
+    effects -> string[];
+}
+
+struct CapabilityManifest {
+    entries -> CapabilityManifestEntry[];
+}
+
+struct FunctionCallEntry {
+    name -> string;
+    callees -> string[];
+}
+
+// =============================================================================
+// Runtime Helpers
+// =============================================================================
+
+struct RuntimeHelperDescriptor {
+    target -> string;
+    symbol -> string;
+    return_type -> string;
+    parameter_types -> string[];
+    effects -> string[];
+}
+
+// =============================================================================
+// String Constants
+// =============================================================================
+
+struct StringConstant {
+    name -> string;
+    content -> string;
+    byte_count -> number;
+}
+
+struct StringPointerResult {
+    lines -> string[];
+    temp_index -> number;
+    pointer -> string;
+}
+
+struct InterpolatedTemplateParse {
+    parts -> string[];
+    expressions -> string[];
+    success -> boolean;
+}
+
+// =============================================================================
+// Lowering Results
+// =============================================================================
+
+struct LoweredLLVMResult {
+    ir -> string;
+    diagnostics -> string[];
+    trait_metadata -> TraitMetadata;
+    function_effects -> FunctionEffectEntry[];
+    lifetime_regions -> LifetimeRegionMetadata[];
+    capability_manifest -> CapabilityManifest;
+    string_constants -> StringConstant[];
+}
+
+struct LayoutManifestApplication {
+    structs -> NativeStruct[];
+    enums -> NativeEnum[];
+    diagnostics -> string[];
+}
+
+struct ImportedModuleContext {
+    manifests -> LayoutManifest[];
+    native_texts -> string[];
+    diagnostics -> string[];
+}
+
+struct LoweredLLVMFunction {
+    lines -> string[];
+    diagnostics -> string[];
+    lifetime_regions -> LifetimeRegionMetadata[];
+    string_constants -> StringConstant[];
+}
+
+struct BodyResult {
+    lines -> string[];
+    diagnostics -> string[];
+    lifetime_regions -> LifetimeRegionMetadata[];
+    string_constants -> StringConstant[];
+}
+
+// =============================================================================
+// Parameter/Local Bindings
+// =============================================================================
+
+struct ParameterBinding {
+    name -> string;
+    llvm_name -> string;
+    llvm_type -> string;
+    type_annotation -> string;
+    consumed -> boolean;
+    span -> NativeSourceSpan?;
+}
+
+struct ParameterPreparation {
+    signature -> string[];
+    bindings -> ParameterBinding[];
+    diagnostics -> string[];
+}
+
+struct LocalBinding {
+    name -> string;
+    pointer -> string;
+    llvm_type -> string;
+    type_annotation -> string;
+    ownership -> OwnershipInfo?;
+    consumed -> boolean;
+    scope_id -> string;
+    scope_depth -> number;
+}
+
+struct ModuleGlobalLoweringResult {
+    preamble_lines -> string[];
+    init_function_lines -> string[];
+    init_function_symbol -> string;
+    needs_init_call -> boolean;
+    locals -> LocalBinding[];
+    string_constants -> StringConstant[];
+    diagnostics -> string[];
+}
+
+// =============================================================================
+// LLVM Operands and Expression Results
+// =============================================================================
+
+struct LLVMOperand {
+    llvm_type -> string;
+    value -> string;
+}
+
+struct ExpressionResult {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+    string_constants -> StringConstant[];
+}
+
+struct ArrayLiteralMetadata {
+    element_type -> string;
+    start_index -> number;
+}
+
+// =============================================================================
+// Ownership and Lifetime Tracking
+// =============================================================================
+
+struct OwnershipInfo {
+    variant -> string;
+    base -> string;
+    mutable -> boolean;
+    span -> NativeSourceSpan?;
+    region_id -> number;
+}
+
+struct OwnershipConsumption {
+    kind -> string;
+    name -> string;
+}
+
+struct LifetimeRegionMetadata {
+    id -> number;
+    binding -> string;
+    base -> string;
+    mutable -> boolean;
+    start_span -> NativeSourceSpan?;
+    scope_id -> string;
+    scope_depth -> number;
+    base_scope_id -> string;
+    base_scope_depth -> number;
+    end_scope_id -> string;
+    end_scope_depth -> number;
+    released -> boolean;
+}
+
+struct LifetimeReleaseEvent {
+    region_id -> number;
+    scope_id -> string;
+    scope_depth -> number;
+}
+
+struct ScopeMetadata {
+    scope_id -> string;
+    scope_depth -> number;
+}
+
+struct OwnershipAnalysis {
+    ownership -> OwnershipInfo?;
+    consumption -> OwnershipConsumption?;
+    diagnostics -> string[];
+}
+
+// =============================================================================
+// Type Context (struct/enum/interface metadata)
+// =============================================================================
+
+struct StructFieldInfo {
+    name -> string;
+    llvm_type -> string;
+    type_annotation -> string;
+    index -> number;
+    offset -> number;
+}
+
+struct StructTypeInfo {
+    name -> string;
+    llvm_name -> string;
+    fields -> StructFieldInfo[];
+    size -> number;
+    align -> number;
+}
+
+struct EnumVariantInfo {
+    name -> string;
+    tag -> number;
+    offset -> number;
+    size -> number;
+    align -> number;
+    fields -> StructFieldInfo[];
+}
+
+struct EnumTypeInfo {
+    name -> string;
+    llvm_name -> string;
+    tag_type -> string;
+    tag_size -> number;
+    tag_align -> number;
+    max_payload_size -> number;
+    size -> number;
+    align -> number;
+    variants -> EnumVariantInfo[];
+}
+
+struct VTableEntry {
+    method_name -> string;
+    interface_method_name -> string;
+    function_pointer_type -> string;
+}
+
+struct VTableInfo {
+    struct_name -> string;
+    interface_name -> string;
+    llvm_type_name -> string;
+    llvm_global_name -> string;
+    entries -> VTableEntry[];
+}
+
+struct InterfaceTypeInfo {
+    name -> string;
+    llvm_name -> string;
+    type_parameters -> string[];
+    signatures -> NativeInterfaceSignature[];
+}
+
+struct TypeContext {
+    structs -> StructTypeInfo[];
+    enums -> EnumTypeInfo[];
+    interfaces -> InterfaceTypeInfo[];
+    vtables -> VTableInfo[];
+}
+
+struct TypeContextBuild {
+    context -> TypeContext;
+    diagnostics -> string[];
+}
+
+struct TypeAllocationInfo {
+    llvm_type -> string;
+    size -> number;
+    align -> number;
+}
+
+// =============================================================================
+// Heap/Allocation Helpers
+// =============================================================================
+
+struct HeapBoxResult {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+}
+
+// =============================================================================
+// Literal Parsing
+// =============================================================================
+
+struct StructLiteralField {
+    name -> string;
+    value -> string;
+}
+
+struct StructLiteralParse {
+    recognized -> boolean;
+    success -> boolean;
+    type_name -> string;
+    fields -> StructLiteralField[];
+    diagnostics -> string[];
+}
+
+struct EnumLiteralParse {
+    recognized -> boolean;
+    success -> boolean;
+    enum_name -> string;
+    variant_name -> string;
+    fields -> StructLiteralField[];
+    diagnostics -> string[];
+}
+
+struct MemberAccessParse {
+    success -> boolean;
+    base -> string;
+    field -> string;
+}
+
+struct IndexExpressionParse {
+    success -> boolean;
+    base -> string;
+    index -> string;
+}
+
+// =============================================================================
+// Mutation Tracking
+// =============================================================================
+
+struct LocalMutation {
+    name -> string;
+    llvm_type -> string;
+    value_name -> string;
+    span -> NativeSourceSpan?;
+    originating_label -> string;
+}
+
+// =============================================================================
+// Operator/Expression Parsing
+// =============================================================================
+
+struct OperatorMatch {
+    index -> number;
+    symbol -> string;
+    success -> boolean;
+}
+
+struct AssignmentParseResult {
+    success -> boolean;
+    target -> string;
+    value -> string;
+    operator -> string;  // "" for simple assignment, "+", "-", "*", "/" for compound
+}
+
+struct BorrowParseResult {
+    recognized -> boolean;
+    success -> boolean;
+    target -> string;
+    mutable -> boolean;
+    diagnostics -> string[];
+}
+
+struct BorrowArgumentParse {
+    success -> boolean;
+    argument -> string;
+    diagnostics -> string[];
+}
+
+struct RawAddressParseResult {
+    recognized -> boolean;
+    success -> boolean;
+    target -> string;
+    diagnostics -> string[];
+}
+
+struct CastParseResult {
+    recognized -> boolean;
+    success -> boolean;
+    value -> string;
+    type_annotation -> string;
+    diagnostics -> string[];
+}
+
+struct TernaryParseResult {
+    success -> boolean;
+    condition -> string;
+    true_value -> string;
+    false_value -> string;
+    diagnostics -> string[];
+}
+
+// =============================================================================
+// Statement/Instruction Lowering Results
+// =============================================================================
+
+struct ExpressionStatementResult {
+    lines -> string[];
+    temp_index -> number;
+    locals -> LocalBinding[];
+    bindings -> ParameterBinding[];
+    diagnostics -> string[];
+    lifetime_regions -> LifetimeRegionMetadata[];
+    lifetime_releases -> LifetimeReleaseEvent[];
+    next_region_id -> number;
+    mutations -> LocalMutation[];
+    string_constants -> StringConstant[];
+}
+
+struct LetLoweringResult {
+    lines -> string[];
+    allocas -> string[];
+    locals -> LocalBinding[];
+    bindings -> ParameterBinding[];
+    temp_index -> number;
+    diagnostics -> string[];
+    next_local_id -> number;
+    lifetime_regions -> LifetimeRegionMetadata[];
+    next_region_id -> number;
+    mutations -> LocalMutation[];
+    string_constants -> StringConstant[];
+}
+
+struct InlineLetParseResult {
+    success -> boolean;
+    name -> string;
+    mutable -> boolean;
+    type_annotation -> string;
+    initializer -> string?;
+    diagnostics -> string[];
+}
+
+// =============================================================================
+// Control Flow Structures
+// =============================================================================
+
+struct BlockLabelResult {
+    label -> string;
+    next_counter -> number;
+}
+
+struct IfStructure {
+    then_start -> number;
+    then_end -> number;
+    else_start -> number;
+    else_end -> number;
+    has_else -> boolean;
+    next_index -> number;
+    diagnostics -> string[];
+}
+
+struct LoopContext {
+    break_label -> string;
+    continue_label -> string;
+}
+
+struct LoopStructure {
+    body_start -> number;
+    body_end -> number;
+    next_index -> number;
+    diagnostics -> string[];
+}
+
+struct TryStructure {
+    try_start -> number;
+    try_end -> number;
+    catch_index -> number;
+    catch_name -> string;
+    catch_start -> number;
+    catch_end -> number;
+    finally_index -> number;
+    finally_start -> number;
+    finally_end -> number;
+    end_index -> number;
+    next_index -> number;
+    diagnostics -> string[];
+}
+
+struct RangeIterableParse {
+    success -> boolean;
+    start -> string;
+    end -> string;
+    stride -> string;
+    diagnostics -> string[];
+}
+
+// =============================================================================
+// Match Expression Structures
+// =============================================================================
+
+struct MatchCaseStructure {
+    pattern -> string;
+    guard -> string?;
+    body_start -> number;
+    body_end -> number;
+    is_default -> boolean;
+}
+
+struct MatchStructure {
+    cases -> MatchCaseStructure[];
+    end_index -> number;
+    diagnostics -> string[];
+}
+
+struct MatchFieldBinding {
+    field_name -> string;
+    field_type -> string;
+    field_offset -> number;
+}
+
+struct MatchStructFieldBinding {
+    field_name -> string;
+    field_type -> string;
+    field_index -> number;
+}
+
+struct MatchCaseCondition {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+    is_default -> boolean;
+    field_bindings -> MatchFieldBinding[];
+    enum_info -> EnumTypeInfo?;
+    variant_info -> EnumVariantInfo?;
+    union_variant_index -> number;
+    union_struct_info -> StructTypeInfo?;
+    union_struct_bindings -> MatchStructFieldBinding[];
+    string_constants -> StringConstant[];
+}
+
+// =============================================================================
+// Condition/Comparison Helpers
+// =============================================================================
+
+struct ConditionConversion {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+    string_constants -> StringConstant[];
+}
+
+struct ComparisonEmission {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+}
+
+struct CoercionResult {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+}
+
+struct BinaryAlignmentResult {
+    lines -> string[];
+    temp_index -> number;
+    left -> LLVMOperand?;
+    right -> LLVMOperand?;
+    diagnostics -> string[];
+    result_type -> string;
+}
+
+// =============================================================================
+// Block Lowering Result
+// =============================================================================
+
+struct BlockLoweringResult {
+    lines -> string[];
+    allocas -> string[];
+    locals -> LocalBinding[];
+    bindings -> ParameterBinding[];
+    temp_index -> number;
+    block_counter -> number;
+    diagnostics -> string[];
+    terminated -> boolean;
+    next_local_id -> number;
+    lifetime_regions -> LifetimeRegionMetadata[];
+    next_lifetime_region_id -> number;
+    next_index -> number;
+    mutations -> LocalMutation[];
+    string_constants -> StringConstant[];
+}
+
+// =============================================================================
+// Throw/Exception Handling
+// =============================================================================
+
+struct ThrowLoweringResult {
+    lines -> string[];
+    temp_index -> number;
+    diagnostics -> string[];
+    terminated -> boolean;
+    string_constants -> StringConstant[];
+}
+
+// =============================================================================
+// PHI Node Merging
+// =============================================================================
+
+struct PhiMergeResult {
+    lines -> string[];
+    mutations -> LocalMutation[];
+}
+
+struct PhiInputEntry {
+    label -> string;
+    value_name -> string;
+}
+
+struct MutationMaterializationResult {
+    lines -> string[];
+    mutations -> LocalMutation[];
+}
+
+struct PhiStoreEntry {
+    name -> string;
+    llvm_type -> string;
+    phi_result -> string;
+    pointer -> string;
+}
+
+struct MatchArmMutations {
+    arm_label -> string;
+    mutations -> LocalMutation[];
+}
+
+// =============================================================================
+// Local Loading
+// =============================================================================
+
+struct LoadLocalResult {
+    lines -> string[];
+    temp_index -> number;
+    operand -> LLVMOperand?;
+    diagnostics -> string[];
+}

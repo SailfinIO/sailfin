@@ -1,0 +1,134 @@
+// compiler/src/llvm/strings.sfn
+//
+// String constant management for LLVM IR generation. Handles deduplication,
+// escaping, and rendering of string constants in LLVM IR format.
+
+import { StringConstant } from "./types";
+import { number_to_string, append_string } from "./utils";
+
+// =============================================================================
+// String Constant Set Operations
+// =============================================================================
+
+fn empty_string_constant_set() -> StringConstant[] {
+    return [];
+}
+
+fn string_constant_singleton(constant -> StringConstant) -> StringConstant[] {
+    return [constant];
+}
+
+fn clone_string_constants(constants -> StringConstant[]) -> StringConstant[] {
+    let mut copy -> StringConstant[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= constants.length {
+            break;
+        }
+        copy = append_string_constant(copy, constants[index]);
+        index += 1;
+    }
+    return copy;
+}
+
+fn append_string_constant(set -> StringConstant[], constant -> StringConstant) -> StringConstant[] {
+    return set.concat([constant]);
+}
+
+fn merge_string_constants(existing -> StringConstant[], new_constants -> StringConstant[]) -> StringConstant[] {
+    let mut result -> StringConstant[] = existing;
+    let mut index -> number = 0;
+    loop {
+        if index >= new_constants.length {
+            break;
+        }
+        let candidate = new_constants[index];
+        let found_by_name = find_string_constant_by_name(result, candidate.name);
+        if found_by_name == null {
+            result = append_string_constant(result, candidate);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+// =============================================================================
+// String Constant Lookup
+// =============================================================================
+
+fn find_string_constant(constants -> StringConstant[], content -> string) -> StringConstant? {
+    let mut index -> number = 0;
+    loop {
+        if index >= constants.length {
+            break;
+        }
+        let candidate = constants[index];
+        if candidate.content == content {
+            return candidate;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_string_constant_by_name(constants -> StringConstant[], name -> string) -> StringConstant? {
+    let mut index -> number = 0;
+    loop {
+        if index >= constants.length {
+            break;
+        }
+        let candidate = constants[index];
+        if candidate.name == name {
+            return candidate;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+// =============================================================================
+// LLVM IR Rendering
+// =============================================================================
+
+fn render_string_constants(constants -> StringConstant[]) -> string[] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= constants.length {
+            break;
+        }
+        let constant = constants[index];
+        let escaped = escape_string_for_llvm(constant.content);
+        let length_str = number_to_string(constant.byte_count + 1);
+        let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\"";
+        lines = append_string(lines, declaration);
+        index += 1;
+    }
+    return lines;
+}
+
+fn escape_string_for_llvm(content -> string) -> string {
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= content.length {
+            break;
+        }
+        let ch = content[index];
+        if ch == "\n" {
+            result = result + "\\0A";
+        } else if ch == "\r" {
+            result = result + "\\0D";
+        } else if ch == "\t" {
+            result = result + "\\09";
+        } else if ch == "\"" {
+            result = result + "\\22";
+        } else if ch == "\\" {
+            result = result + "\\5C";
+        } else {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    return result;
+}
