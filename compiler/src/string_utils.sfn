@@ -77,4 +77,67 @@ fn sanitize_symbol(name -> string) -> string {
 	return result;
 }
 
-export { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, char_at, sanitize_symbol, strings_equal };
+fn char_code_at_text(text -> string, index -> number) -> number {
+	return char_code(char_at(text, index));
+}
+
+fn index_of(value -> string, target -> string) -> number {
+	if target.length == 0 {
+		return 0;
+	}
+	let mut index -> number = 0;
+	loop {
+		if index + target.length > value.length {
+			break;
+		}
+		let mut match_index -> number = 0;
+		let mut matches -> boolean = true;
+		loop {
+			if match_index >= target.length {
+				break;
+			}
+			if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index) {
+				matches = false;
+				break;
+			}
+			match_index += 1;
+		}
+		if matches {
+			return index;
+		}
+		index += 1;
+	}
+	return -1;
+}
+
+fn find_last_index_of_char(value -> string, target -> string) -> number {
+	if target.length != 1 {
+		return -1;
+	}
+	let target_code = char_code_at_text(target, 0);
+	let mut index -> number = value.length;
+	loop {
+		if index <= 0 {
+			break;
+		}
+		index -= 1;
+		if char_code_at_text(value, index) == target_code {
+			return index;
+		}
+	}
+	return -1;
+}
+
+export {
+	clamp,
+	substring,
+	find_char,
+	grapheme_count,
+	grapheme_at,
+	char_code,
+	char_at,
+	sanitize_symbol,
+	strings_equal,
+	index_of,
+	find_last_index_of_char,
+};

@@ -651,7 +651,7 @@ struct ThrowLoweringResult {
 
 struct PhiMergeResult {
     lines -> string[];
-    mutations -> LocalMutation[];
+    temp_index -> number;
 }
 
 struct PhiInputEntry {
@@ -662,18 +662,18 @@ struct PhiInputEntry {
 struct MutationMaterializationResult {
     lines -> string[];
     mutations -> LocalMutation[];
+    temp_index -> number;
 }
 
 struct PhiStoreEntry {
-    name -> string;
-    llvm_type -> string;
-    phi_result -> string;
-    pointer -> string;
+    phi_line -> string;
+    store_line -> string;
 }
 
 struct MatchArmMutations {
-    arm_label -> string;
     mutations -> LocalMutation[];
+    label -> string;
+    terminated -> boolean;
 }
 
 // =============================================================================

@@ -52,7 +52,8 @@ def compile_stage1(sources: Iterable[pathlib.Path], output_dir: pathlib.Path) ->
             source_path = getattr(entry, "source_path", "<unknown>")
             for message in getattr(entry, "messages", []):
                 messages.append(f"{source_path}: {message}")
-        raise Stage1CompileError("stage1 compilation failed:\n" + "\n".join(messages))
+        raise Stage1CompileError(
+            "stage1 compilation failed:\n" + "\n".join(messages))
 
     modules = getattr(result, "modules", [])
     if not modules:
@@ -67,11 +68,13 @@ def compile_stage1(sources: Iterable[pathlib.Path], output_dir: pathlib.Path) ->
         destination = output_dir / source_path.with_suffix(".py").name
         try:
             relative = source_path.relative_to(compiler_src_root)
-            destination = output_dir / relative.with_suffix(".py").name
+            destination = output_dir / relative.with_suffix(".py")
         except ValueError:
             try:
                 relative_runtime = source_path.relative_to(runtime_root)
-                destination = output_dir / pathlib.Path("runtime") / relative_runtime.with_suffix(".py")
+                destination = output_dir / \
+                    pathlib.Path("runtime") / \
+                    relative_runtime.with_suffix(".py")
             except ValueError:
                 destination = output_dir / source_path.with_suffix(".py").name
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +110,8 @@ def _iter_stage1_inputs() -> Iterable[pathlib.Path]:
 def _compute_stage1_cache_key() -> str:
     digest = hashlib.sha256()
     digest.update(_STAGE1_CACHE_VERSION.encode("utf-8"))
-    digest.update(f"python-{sys.version_info.major}.{sys.version_info.minor}".encode("utf-8"))
+    digest.update(
+        f"python-{sys.version_info.major}.{sys.version_info.minor}".encode("utf-8"))
 
     for path in _iter_stage1_inputs():
         try:
@@ -156,7 +160,8 @@ def ensure_stage1_cache(cache_root: pathlib.Path, *, debug: bool = False) -> pat
     success = False
     try:
         output_dir = staging_dir / "compiler" / "build"
-        compile_stage1([REPO_ROOT / "compiler" / "src", REPO_ROOT / "runtime"], output_dir)
+        compile_stage1([REPO_ROOT / "compiler" / "src",
+                       REPO_ROOT / "runtime"], output_dir)
         (staging_dir / ".complete").write_text("ok\n", encoding="utf-8")
         if cache_dir.exists():
             shutil.rmtree(cache_dir)
@@ -198,7 +203,8 @@ def _cleanup_old_cache_entries(cache_root: pathlib.Path, max_entries: int = 10, 
             shutil.rmtree(entry)
         except Exception as exc:
             if debug:
-                print(f"[stage1-cache] warning: failed to remove {entry.name}: {exc}")
+                print(
+                    f"[stage1-cache] warning: failed to remove {entry.name}: {exc}")
 
 
 def stage1_cache_stats() -> Dict[str, int]:
@@ -230,23 +236,30 @@ def link_stage2_binary(
                 subprocess.run([clang, "-c", str(module_path), "-o", str(obj_path)],
                                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except FileNotFoundError as exc:
-                raise Stage1CompileError(f"clang not found at '{clang}': {exc}") from exc
+                raise Stage1CompileError(
+                    f"clang not found at '{clang}': {exc}") from exc
             except subprocess.CalledProcessError as exc:
-                stderr = exc.stderr.decode("utf-8", errors="ignore") if exc.stderr else ""
-                raise Stage1CompileError(f"failed to compile {module_path.name}: {stderr}") from exc
+                stderr = exc.stderr.decode(
+                    "utf-8", errors="ignore") if exc.stderr else ""
+                raise Stage1CompileError(
+                    f"failed to compile {module_path.name}: {stderr}") from exc
             objects.append(obj_path)
 
-        link_cmd = [clang, "-o", str(output_path)] + [str(obj) for obj in objects]
+        link_cmd = [clang, "-o", str(output_path)] + [str(obj)
+                                                      for obj in objects]
         if extra_flags:
             link_cmd.extend(extra_flags)
         elif sys.platform == "darwin":
             link_cmd.extend(["-Wl,-undefined,dynamic_lookup"])
 
         try:
-            subprocess.run(link_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(link_cmd, check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except subprocess.CalledProcessError as exc:
-            stderr = exc.stderr.decode("utf-8", errors="ignore") if exc.stderr else ""
-            raise Stage1CompileError(f"failed to link Stage2 binary: {stderr}") from exc
+            stderr = exc.stderr.decode(
+                "utf-8", errors="ignore") if exc.stderr else ""
+            raise Stage1CompileError(
+                f"failed to link Stage2 binary: {stderr}") from exc
 
         print(f"[stage2] linked compiler binary to {output_path}")
     finally:
@@ -254,7 +267,8 @@ def link_stage2_binary(
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compile Sailfin sources with the stage1 pipeline")
+    parser = argparse.ArgumentParser(
+        description="Compile Sailfin sources with the stage1 pipeline")
     parser.add_argument(
         "paths",
         nargs="*",
@@ -291,7 +305,8 @@ def main(argv: list[str] | None = None) -> int:
     cache_dir = args.cache_dir
     if cache_dir is None:
         env_override = os.environ.get("PYTEST_STAGE1_CACHE_DIR")
-        cache_dir = pathlib.Path(env_override) if env_override else (REPO_ROOT / ".pytest-stage1")
+        cache_dir = pathlib.Path(env_override) if env_override else (
+            REPO_ROOT / ".pytest-stage1")
 
     if args.warm_cache:
         cache_path = ensure_stage1_cache(cache_dir, debug=args.debug_cache)
@@ -300,7 +315,8 @@ def main(argv: list[str] | None = None) -> int:
             hits = stats.get("hits", 0)
             misses = stats.get("misses", 0)
             builds = stats.get("builds", 0)
-            print(f"[stage1-cache] warmed {cache_path} (hits={hits}, misses={misses}, builds={builds})")
+            print(
+                f"[stage1-cache] warmed {cache_path} (hits={hits}, misses={misses}, builds={builds})")
         else:
             print(f"[stage1-cache] warmed {cache_path}")
         return 0
@@ -331,14 +347,17 @@ def main(argv: list[str] | None = None) -> int:
 
         fatal_count = getattr(aggregator, "fatal_count", 0)
         if fatal_count:
-            raise Stage1CompileError(f"stage2 bootstrap produced {fatal_count} fatal diagnostic(s)")
+            raise Stage1CompileError(
+                f"stage2 bootstrap produced {fatal_count} fatal diagnostic(s)")
 
         module_count = len(compiled_modules)
-        print(f"[stage2] generated {module_count} LLVM module(s) in {stage2_output}")
+        print(
+            f"[stage2] generated {module_count} LLVM module(s) in {stage2_output}")
 
         if args.stage2_binary:
             ldflags = args.stage2_ldflags or []
-            link_stage2_binary(compiled_modules, args.stage2_binary, clang=args.stage2_clang, extra_flags=ldflags)
+            link_stage2_binary(compiled_modules, args.stage2_binary,
+                               clang=args.stage2_clang, extra_flags=ldflags)
 
     return 0
 

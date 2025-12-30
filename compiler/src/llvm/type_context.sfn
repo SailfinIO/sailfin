@@ -3,7 +3,7 @@
 // TypeContext building and lookup functions. Constructs type metadata
 // from NativeStruct/NativeEnum/NativeInterface definitions.
 
-import { NativeStruct, NativeEnum, NativeInterface, NativeFunction, NativeInterfaceSignature } from "../native_ir";
+import { NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariantLayout, NativeInterface, NativeFunction, NativeInterfaceSignature } from "../native_ir";
 import { substring } from "../string_utils";
 import {
     TypeContext,
@@ -36,6 +36,130 @@ import {
     layout_annotation_base_type,
     layout_annotation_represents_user_value
 } from "./type_mapping";
+
+// =============================================================================
+// Enum Layout Fixups
+// =============================================================================
+
+struct EnumLayoutFixupResult {
+    enums -> NativeEnum[];
+    diagnostics -> string[];
+}
+
+fn is_unit_enum(enum_def -> NativeEnum) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= enum_def.variants.length {
+            break;
+        }
+        let variant = enum_def.variants[index];
+        if variant.fields.length > 0 {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn synthesize_unit_enum_layout(enum_def -> NativeEnum) -> NativeEnumLayout {
+    let tag_size -> number = 4;
+    let tag_align -> number = 4;
+    let mut layouts -> NativeEnumVariantLayout[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= enum_def.variants.length {
+            break;
+        }
+        let variant = enum_def.variants[index];
+        layouts = layouts.concat([
+            NativeEnumVariantLayout {
+                name: variant.name,
+                tag: index,
+                offset: 0,
+                size: tag_size,
+                align: tag_align,
+                fields: [],
+            },
+        ]);
+        index += 1;
+    }
+    return NativeEnumLayout {
+        size: tag_size,
+        align: tag_align,
+        tag_type: "i32",
+        tag_size: tag_size,
+        tag_align: tag_align,
+        variants: layouts,
+    };
+}
+
+fn enum_layout_matches_variants(enum_def -> NativeEnum, layout -> NativeEnumLayout) -> boolean {
+    if layout.variants.length != enum_def.variants.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= enum_def.variants.length {
+            break;
+        }
+        let expected = enum_def.variants[index].name;
+        let mut found -> boolean = false;
+        let mut layout_index -> number = 0;
+        loop {
+            if layout_index >= layout.variants.length {
+                break;
+            }
+            if layout.variants[layout_index].name == expected {
+                found = true;
+                break;
+            }
+            layout_index += 1;
+        }
+        if !found {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
+    let mut diagnostics -> string[] = [];
+    let mut updated -> NativeEnum[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= enums.length {
+            break;
+        }
+        let enum_def = enums[index];
+        let mut fixed = enum_def;
+
+        if enum_def.layout == null {
+            if is_unit_enum(enum_def) {
+                fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
+                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout"]);
+            }
+            updated = updated.concat([fixed]);
+            index += 1;
+            continue;
+        }
+
+        let layout = enum_def.layout;
+        if !enum_layout_matches_variants(enum_def, layout) {
+            if is_unit_enum(enum_def) {
+                fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
+                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout"]);
+            } else {
+                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata"]);
+            }
+        }
+
+        updated = updated.concat([fixed]);
+        index += 1;
+    }
+
+    return EnumLayoutFixupResult { enums: updated, diagnostics: diagnostics };
+}
 
 // =============================================================================
 // TypeContext Construction
@@ -466,6 +590,11 @@ fn find_struct_info_by_name(context -> TypeContext, name -> string) -> StructTyp
         index += 1;
     }
     return null;
+}
+
+fn find_struct_info_by_llvm_name(context -> TypeContext, llvm_name -> string) -> StructTypeInfo? {
+    // Back-compat: older callers refer to the LLVM type name as "llvm_name".
+    return find_struct_info_by_llvm_type(context, llvm_name);
 }
 
 fn find_interface_info_by_name(context -> TypeContext, name -> string) -> InterfaceTypeInfo? {

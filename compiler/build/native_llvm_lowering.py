@@ -2,8 +2,16 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.emit_native import NativeModule
-from compiler.build.native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest
-from compiler.build.string_utils import substring, char_code, char_at
+from compiler.build.native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest, NativeBinding
+from compiler.build.string_utils import substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of
+from compiler.build.llvm.types import TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo, InterfaceTypeInfo, VTableInfo, VTableEntry, LocalBinding, ParameterBinding, OwnershipInfo, OwnershipConsumption, OwnershipAnalysis, LifetimeRegionMetadata, LifetimeReleaseEvent, ScopeMetadata, LLVMOperand, ExpressionResult, CoercionResult, BlockLoweringResult, LoweredLLVMFunction, LoweredLLVMResult, LetLoweringResult, ModuleGlobalLoweringResult, OperatorMatch, BorrowParseResult, BorrowArgumentParse, TernaryParseResult, AssignmentParseResult, InlineLetParseResult, MemberAccessParse, IndexExpressionParse, RawAddressParseResult, CastParseResult, TraitMetadata, TraitDescriptor, TraitImplementationDescriptor, FunctionEffectEntry, RuntimeHelperDescriptor, CapabilityManifest, CapabilityManifestEntry, StringConstant, LocalMutation, LoopContext, ImportedModuleContext, LayoutManifestApplication, TypeContextBuild, FunctionCallEntry, StringPointerResult, InterpolatedTemplateParse, BodyResult, ParameterPreparation, ArrayLiteralMetadata, TypeAllocationInfo, HeapBoxResult, StructLiteralField, StructLiteralParse, EnumLiteralParse, ExpressionStatementResult, BlockLabelResult, IfStructure, LoopStructure, TryStructure, RangeIterableParse, MatchCaseStructure, MatchStructure, MatchFieldBinding, MatchStructFieldBinding, MatchCaseCondition, ConditionConversion, ComparisonEmission, BinaryAlignmentResult, ThrowLoweringResult, PhiMergeResult, PhiInputEntry, MutationMaterializationResult, PhiStoreEntry, MatchArmMutations, LoadLocalResult
+from compiler.build.llvm.utils import trim_text, starts_with, ends_with, char_at as utils_char_at, append_string, join_with_separator, string_array_contains, sanitize_symbol, number_to_string, index_of, is_identifier_start_char, is_identifier_part_char, find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings
+from compiler.build.llvm.strings import empty_string_constant_set, append_string_constant, merge_string_constants, find_string_constant, render_string_constants, escape_string_for_llvm
+from compiler.build.llvm.effects import collect_direct_function_effects, collect_function_call_graph, propagate_function_effects, build_capability_manifest, collect_function_borrow_effects, collect_expression_borrow_effects, collect_runtime_helper_targets
+from compiler.build.llvm.runtime_helpers import runtime_helper_descriptors, find_runtime_helper, append_runtime_helper
+from compiler.build.llvm.type_mapping import map_type_annotation, map_return_type, map_parameter_type, map_local_type, map_struct_type_annotation, map_struct_field_annotation, unwrap_move_wrapper, ends_with_pointer_suffix, strip_pointer_suffix, layout_annotation_requires_pointer, layout_annotation_base_type, annotation_is_array, layout_annotation_represents_user_value
+from compiler.build.llvm.rendering import render_test_harness_main, collect_exported_symbol_names, should_internalize_function, render_struct_type_definitions, render_enum_type_definitions, render_interface_type_definitions, render_vtable_type_definitions, render_vtable_constants, find_function_by_name
+from compiler.build.llvm.type_context import fixup_enum_layouts, find_struct_info_by_name, find_interface_info_by_name, find_vtable_for_struct_interface, find_struct_info_by_llvm_type, find_struct_field_index, find_struct_field_info, find_enum_info_by_llvm_type, resolve_struct_info_from_llvm_type, lookup_allocation_info, resolve_struct_info_for_literal, resolve_struct_info_for_method_target, resolve_interface_info_for_method_target, resolve_enum_info_for_literal, resolve_enum_variant_info, find_variant_field_info
 
 print = runtime.console
 sleep = runtime.sleep
@@ -24,1502 +32,6 @@ is_whitespace_char = runtime.is_whitespace_char
 is_alpha_char = runtime.is_alpha_char
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
-
-class EnumLayoutFixupResult:
-    def __init__(self, enums, diagnostics):
-        self.enums = enums
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('EnumLayoutFixupResult', [runtime.struct_field('enums', self.enums), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class TraitImplementationDescriptor:
-    def __init__(self, struct_name, interfaces):
-        self.struct_name = struct_name
-        self.interfaces = interfaces
-
-    def __repr__(self):
-        return runtime.struct_repr('TraitImplementationDescriptor', [runtime.struct_field('struct_name', self.struct_name), runtime.struct_field('interfaces', self.interfaces)])
-
-class TraitDescriptor:
-    def __init__(self, name, type_parameters, signatures):
-        self.name = name
-        self.type_parameters = type_parameters
-        self.signatures = signatures
-
-    def __repr__(self):
-        return runtime.struct_repr('TraitDescriptor', [runtime.struct_field('name', self.name), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('signatures', self.signatures)])
-
-class TraitMetadata:
-    def __init__(self, interfaces, implementations):
-        self.interfaces = interfaces
-        self.implementations = implementations
-
-    def __repr__(self):
-        return runtime.struct_repr('TraitMetadata', [runtime.struct_field('interfaces', self.interfaces), runtime.struct_field('implementations', self.implementations)])
-
-class FunctionEffectEntry:
-    def __init__(self, name, effects):
-        self.name = name
-        self.effects = effects
-
-    def __repr__(self):
-        return runtime.struct_repr('FunctionEffectEntry', [runtime.struct_field('name', self.name), runtime.struct_field('effects', self.effects)])
-
-class CapabilityManifestEntry:
-    def __init__(self, symbol, effects):
-        self.symbol = symbol
-        self.effects = effects
-
-    def __repr__(self):
-        return runtime.struct_repr('CapabilityManifestEntry', [runtime.struct_field('symbol', self.symbol), runtime.struct_field('effects', self.effects)])
-
-class CapabilityManifest:
-    def __init__(self, entries):
-        self.entries = entries
-
-    def __repr__(self):
-        return runtime.struct_repr('CapabilityManifest', [runtime.struct_field('entries', self.entries)])
-
-class RuntimeHelperDescriptor:
-    def __init__(self, target, symbol, return_type, parameter_types, effects):
-        self.target = target
-        self.symbol = symbol
-        self.return_type = return_type
-        self.parameter_types = parameter_types
-        self.effects = effects
-
-    def __repr__(self):
-        return runtime.struct_repr('RuntimeHelperDescriptor', [runtime.struct_field('target', self.target), runtime.struct_field('symbol', self.symbol), runtime.struct_field('return_type', self.return_type), runtime.struct_field('parameter_types', self.parameter_types), runtime.struct_field('effects', self.effects)])
-
-class FunctionCallEntry:
-    def __init__(self, name, callees):
-        self.name = name
-        self.callees = callees
-
-    def __repr__(self):
-        return runtime.struct_repr('FunctionCallEntry', [runtime.struct_field('name', self.name), runtime.struct_field('callees', self.callees)])
-
-class StringConstant:
-    def __init__(self, name, content, byte_count):
-        self.name = name
-        self.content = content
-        self.byte_count = byte_count
-
-    def __repr__(self):
-        return runtime.struct_repr('StringConstant', [runtime.struct_field('name', self.name), runtime.struct_field('content', self.content), runtime.struct_field('byte_count', self.byte_count)])
-
-class StringPointerResult:
-    def __init__(self, lines, temp_index, pointer):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.pointer = pointer
-
-    def __repr__(self):
-        return runtime.struct_repr('StringPointerResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('pointer', self.pointer)])
-
-class InterpolatedTemplateParse:
-    def __init__(self, parts, expressions, success):
-        self.parts = parts
-        self.expressions = expressions
-        self.success = success
-
-    def __repr__(self):
-        return runtime.struct_repr('InterpolatedTemplateParse', [runtime.struct_field('parts', self.parts), runtime.struct_field('expressions', self.expressions), runtime.struct_field('success', self.success)])
-
-class LoweredLLVMResult:
-    def __init__(self, ir, diagnostics, trait_metadata, function_effects, lifetime_regions, capability_manifest, string_constants):
-        self.ir = ir
-        self.diagnostics = diagnostics
-        self.trait_metadata = trait_metadata
-        self.function_effects = function_effects
-        self.lifetime_regions = lifetime_regions
-        self.capability_manifest = capability_manifest
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest), runtime.struct_field('string_constants', self.string_constants)])
-
-class LayoutManifestApplication:
-    def __init__(self, structs, enums, diagnostics):
-        self.structs = structs
-        self.enums = enums
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('LayoutManifestApplication', [runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class ImportedModuleContext:
-    def __init__(self, manifests, native_texts, diagnostics):
-        self.manifests = manifests
-        self.native_texts = native_texts
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('ImportedModuleContext', [runtime.struct_field('manifests', self.manifests), runtime.struct_field('native_texts', self.native_texts), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class LoweredLLVMFunction:
-    def __init__(self, lines, diagnostics, lifetime_regions, string_constants):
-        self.lines = lines
-        self.diagnostics = diagnostics
-        self.lifetime_regions = lifetime_regions
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('LoweredLLVMFunction', [runtime.struct_field('lines', self.lines), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('string_constants', self.string_constants)])
-
-class BodyResult:
-    def __init__(self, lines, diagnostics, lifetime_regions, string_constants):
-        self.lines = lines
-        self.diagnostics = diagnostics
-        self.lifetime_regions = lifetime_regions
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('BodyResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('string_constants', self.string_constants)])
-
-class ParameterBinding:
-    def __init__(self, name, llvm_name, llvm_type, type_annotation, consumed, span=None):
-        self.name = name
-        self.llvm_name = llvm_name
-        self.llvm_type = llvm_type
-        self.type_annotation = type_annotation
-        self.consumed = consumed
-        self.span = span
-
-    def __repr__(self):
-        return runtime.struct_repr('ParameterBinding', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('consumed', self.consumed), runtime.struct_field('span', self.span)])
-
-class ParameterPreparation:
-    def __init__(self, signature, bindings, diagnostics):
-        self.signature = signature
-        self.bindings = bindings
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('ParameterPreparation', [runtime.struct_field('signature', self.signature), runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class LLVMOperand:
-    def __init__(self, llvm_type, value):
-        self.llvm_type = llvm_type
-        self.value = value
-
-    def __repr__(self):
-        return runtime.struct_repr('LLVMOperand', [runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('value', self.value)])
-
-class ExpressionResult:
-    def __init__(self, lines, temp_index, diagnostics, string_constants, operand=None):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.operand = operand
-        self.diagnostics = diagnostics
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('ExpressionResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('string_constants', self.string_constants)])
-
-class ArrayLiteralMetadata:
-    def __init__(self, element_type, start_index):
-        self.element_type = element_type
-        self.start_index = start_index
-
-    def __repr__(self):
-        return runtime.struct_repr('ArrayLiteralMetadata', [runtime.struct_field('element_type', self.element_type), runtime.struct_field('start_index', self.start_index)])
-
-class OwnershipInfo:
-    def __init__(self, variant, base, mutable, region_id, span=None):
-        self.variant = variant
-        self.base = base
-        self.mutable = mutable
-        self.span = span
-        self.region_id = region_id
-
-    def __repr__(self):
-        return runtime.struct_repr('OwnershipInfo', [runtime.struct_field('variant', self.variant), runtime.struct_field('base', self.base), runtime.struct_field('mutable', self.mutable), runtime.struct_field('span', self.span), runtime.struct_field('region_id', self.region_id)])
-
-class OwnershipConsumption:
-    def __init__(self, kind, name):
-        self.kind = kind
-        self.name = name
-
-    def __repr__(self):
-        return runtime.struct_repr('OwnershipConsumption', [runtime.struct_field('kind', self.kind), runtime.struct_field('name', self.name)])
-
-class LifetimeRegionMetadata:
-    def __init__(self, id, binding, base, mutable, scope_id, scope_depth, base_scope_id, base_scope_depth, end_scope_id, end_scope_depth, released, start_span=None):
-        self.id = id
-        self.binding = binding
-        self.base = base
-        self.mutable = mutable
-        self.start_span = start_span
-        self.scope_id = scope_id
-        self.scope_depth = scope_depth
-        self.base_scope_id = base_scope_id
-        self.base_scope_depth = base_scope_depth
-        self.end_scope_id = end_scope_id
-        self.end_scope_depth = end_scope_depth
-        self.released = released
-
-    def __repr__(self):
-        return runtime.struct_repr('LifetimeRegionMetadata', [runtime.struct_field('id', self.id), runtime.struct_field('binding', self.binding), runtime.struct_field('base', self.base), runtime.struct_field('mutable', self.mutable), runtime.struct_field('start_span', self.start_span), runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth), runtime.struct_field('base_scope_id', self.base_scope_id), runtime.struct_field('base_scope_depth', self.base_scope_depth), runtime.struct_field('end_scope_id', self.end_scope_id), runtime.struct_field('end_scope_depth', self.end_scope_depth), runtime.struct_field('released', self.released)])
-
-class LifetimeReleaseEvent:
-    def __init__(self, region_id, scope_id, scope_depth):
-        self.region_id = region_id
-        self.scope_id = scope_id
-        self.scope_depth = scope_depth
-
-    def __repr__(self):
-        return runtime.struct_repr('LifetimeReleaseEvent', [runtime.struct_field('region_id', self.region_id), runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth)])
-
-class ScopeMetadata:
-    def __init__(self, scope_id, scope_depth):
-        self.scope_id = scope_id
-        self.scope_depth = scope_depth
-
-    def __repr__(self):
-        return runtime.struct_repr('ScopeMetadata', [runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth)])
-
-class StructFieldInfo:
-    def __init__(self, name, llvm_type, type_annotation, index, offset):
-        self.name = name
-        self.llvm_type = llvm_type
-        self.type_annotation = type_annotation
-        self.index = index
-        self.offset = offset
-
-    def __repr__(self):
-        return runtime.struct_repr('StructFieldInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('index', self.index), runtime.struct_field('offset', self.offset)])
-
-class StructTypeInfo:
-    def __init__(self, name, llvm_name, fields, size, align):
-        self.name = name
-        self.llvm_name = llvm_name
-        self.fields = fields
-        self.size = size
-        self.align = align
-
-    def __repr__(self):
-        return runtime.struct_repr('StructTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('fields', self.fields), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align)])
-
-class EnumVariantInfo:
-    def __init__(self, name, tag, offset, size, align, fields):
-        self.name = name
-        self.tag = tag
-        self.offset = offset
-        self.size = size
-        self.align = align
-        self.fields = fields
-
-    def __repr__(self):
-        return runtime.struct_repr('EnumVariantInfo', [runtime.struct_field('name', self.name), runtime.struct_field('tag', self.tag), runtime.struct_field('offset', self.offset), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('fields', self.fields)])
-
-class EnumTypeInfo:
-    def __init__(self, name, llvm_name, tag_type, tag_size, tag_align, max_payload_size, size, align, variants):
-        self.name = name
-        self.llvm_name = llvm_name
-        self.tag_type = tag_type
-        self.tag_size = tag_size
-        self.tag_align = tag_align
-        self.max_payload_size = max_payload_size
-        self.size = size
-        self.align = align
-        self.variants = variants
-
-    def __repr__(self):
-        return runtime.struct_repr('EnumTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('tag_type', self.tag_type), runtime.struct_field('tag_size', self.tag_size), runtime.struct_field('tag_align', self.tag_align), runtime.struct_field('max_payload_size', self.max_payload_size), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align), runtime.struct_field('variants', self.variants)])
-
-class VTableEntry:
-    def __init__(self, method_name, interface_method_name, function_pointer_type):
-        self.method_name = method_name
-        self.interface_method_name = interface_method_name
-        self.function_pointer_type = function_pointer_type
-
-    def __repr__(self):
-        return runtime.struct_repr('VTableEntry', [runtime.struct_field('method_name', self.method_name), runtime.struct_field('interface_method_name', self.interface_method_name), runtime.struct_field('function_pointer_type', self.function_pointer_type)])
-
-class VTableInfo:
-    def __init__(self, struct_name, interface_name, llvm_type_name, llvm_global_name, entries):
-        self.struct_name = struct_name
-        self.interface_name = interface_name
-        self.llvm_type_name = llvm_type_name
-        self.llvm_global_name = llvm_global_name
-        self.entries = entries
-
-    def __repr__(self):
-        return runtime.struct_repr('VTableInfo', [runtime.struct_field('struct_name', self.struct_name), runtime.struct_field('interface_name', self.interface_name), runtime.struct_field('llvm_type_name', self.llvm_type_name), runtime.struct_field('llvm_global_name', self.llvm_global_name), runtime.struct_field('entries', self.entries)])
-
-class InterfaceTypeInfo:
-    def __init__(self, name, llvm_name, type_parameters, signatures):
-        self.name = name
-        self.llvm_name = llvm_name
-        self.type_parameters = type_parameters
-        self.signatures = signatures
-
-    def __repr__(self):
-        return runtime.struct_repr('InterfaceTypeInfo', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_name', self.llvm_name), runtime.struct_field('type_parameters', self.type_parameters), runtime.struct_field('signatures', self.signatures)])
-
-class TypeContext:
-    def __init__(self, structs, enums, interfaces, vtables):
-        self.structs = structs
-        self.enums = enums
-        self.interfaces = interfaces
-        self.vtables = vtables
-
-    def __repr__(self):
-        return runtime.struct_repr('TypeContext', [runtime.struct_field('structs', self.structs), runtime.struct_field('enums', self.enums), runtime.struct_field('interfaces', self.interfaces), runtime.struct_field('vtables', self.vtables)])
-
-class TypeContextBuild:
-    def __init__(self, context, diagnostics):
-        self.context = context
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('TypeContextBuild', [runtime.struct_field('context', self.context), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class TypeAllocationInfo:
-    def __init__(self, llvm_type, size, align):
-        self.llvm_type = llvm_type
-        self.size = size
-        self.align = align
-
-    def __repr__(self):
-        return runtime.struct_repr('TypeAllocationInfo', [runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('size', self.size), runtime.struct_field('align', self.align)])
-
-class HeapBoxResult:
-    def __init__(self, lines, temp_index, diagnostics, operand=None):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.operand = operand
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('HeapBoxResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class StructLiteralField:
-    def __init__(self, name, value):
-        self.name = name
-        self.value = value
-
-    def __repr__(self):
-        return runtime.struct_repr('StructLiteralField', [runtime.struct_field('name', self.name), runtime.struct_field('value', self.value)])
-
-class StructLiteralParse:
-    def __init__(self, recognized, success, type_name, fields, diagnostics):
-        self.recognized = recognized
-        self.success = success
-        self.type_name = type_name
-        self.fields = fields
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('StructLiteralParse', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('type_name', self.type_name), runtime.struct_field('fields', self.fields), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class EnumLiteralParse:
-    def __init__(self, recognized, success, enum_name, variant_name, fields, diagnostics):
-        self.recognized = recognized
-        self.success = success
-        self.enum_name = enum_name
-        self.variant_name = variant_name
-        self.fields = fields
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('EnumLiteralParse', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('enum_name', self.enum_name), runtime.struct_field('variant_name', self.variant_name), runtime.struct_field('fields', self.fields), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class MemberAccessParse:
-    def __init__(self, success, base, field):
-        self.success = success
-        self.base = base
-        self.field = field
-
-    def __repr__(self):
-        return runtime.struct_repr('MemberAccessParse', [runtime.struct_field('success', self.success), runtime.struct_field('base', self.base), runtime.struct_field('field', self.field)])
-
-class IndexExpressionParse:
-    def __init__(self, success, base, index):
-        self.success = success
-        self.base = base
-        self.index = index
-
-    def __repr__(self):
-        return runtime.struct_repr('IndexExpressionParse', [runtime.struct_field('success', self.success), runtime.struct_field('base', self.base), runtime.struct_field('index', self.index)])
-
-class LocalBinding:
-    def __init__(self, name, pointer, llvm_type, type_annotation, consumed, scope_id, scope_depth, ownership=None):
-        self.name = name
-        self.pointer = pointer
-        self.llvm_type = llvm_type
-        self.type_annotation = type_annotation
-        self.ownership = ownership
-        self.consumed = consumed
-        self.scope_id = scope_id
-        self.scope_depth = scope_depth
-
-    def __repr__(self):
-        return runtime.struct_repr('LocalBinding', [runtime.struct_field('name', self.name), runtime.struct_field('pointer', self.pointer), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('ownership', self.ownership), runtime.struct_field('consumed', self.consumed), runtime.struct_field('scope_id', self.scope_id), runtime.struct_field('scope_depth', self.scope_depth)])
-
-class ModuleGlobalLoweringResult:
-    def __init__(self, preamble_lines, init_function_lines, init_function_symbol, needs_init_call, locals, string_constants, diagnostics):
-        self.preamble_lines = preamble_lines
-        self.init_function_lines = init_function_lines
-        self.init_function_symbol = init_function_symbol
-        self.needs_init_call = needs_init_call
-        self.locals = locals
-        self.string_constants = string_constants
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('ModuleGlobalLoweringResult', [runtime.struct_field('preamble_lines', self.preamble_lines), runtime.struct_field('init_function_lines', self.init_function_lines), runtime.struct_field('init_function_symbol', self.init_function_symbol), runtime.struct_field('needs_init_call', self.needs_init_call), runtime.struct_field('locals', self.locals), runtime.struct_field('string_constants', self.string_constants), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class LocalMutation:
-    def __init__(self, name, llvm_type, value_name, originating_label, span=None):
-        self.name = name
-        self.llvm_type = llvm_type
-        self.value_name = value_name
-        self.span = span
-        self.originating_label = originating_label
-
-    def __repr__(self):
-        return runtime.struct_repr('LocalMutation', [runtime.struct_field('name', self.name), runtime.struct_field('llvm_type', self.llvm_type), runtime.struct_field('value_name', self.value_name), runtime.struct_field('span', self.span), runtime.struct_field('originating_label', self.originating_label)])
-
-class OwnershipAnalysis:
-    def __init__(self, diagnostics, ownership=None, consumption=None):
-        self.ownership = ownership
-        self.consumption = consumption
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('OwnershipAnalysis', [runtime.struct_field('ownership', self.ownership), runtime.struct_field('consumption', self.consumption), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class OperatorMatch:
-    def __init__(self, index, symbol, success):
-        self.index = index
-        self.symbol = symbol
-        self.success = success
-
-    def __repr__(self):
-        return runtime.struct_repr('OperatorMatch', [runtime.struct_field('index', self.index), runtime.struct_field('symbol', self.symbol), runtime.struct_field('success', self.success)])
-
-class AssignmentParseResult:
-    def __init__(self, success, target, value, operator):
-        self.success = success
-        self.target = target
-        self.value = value
-        self.operator = operator
-
-    def __repr__(self):
-        return runtime.struct_repr('AssignmentParseResult', [runtime.struct_field('success', self.success), runtime.struct_field('target', self.target), runtime.struct_field('value', self.value), runtime.struct_field('operator', self.operator)])
-
-class BorrowParseResult:
-    def __init__(self, recognized, success, target, mutable, diagnostics):
-        self.recognized = recognized
-        self.success = success
-        self.target = target
-        self.mutable = mutable
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('BorrowParseResult', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('target', self.target), runtime.struct_field('mutable', self.mutable), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class BorrowArgumentParse:
-    def __init__(self, success, argument, diagnostics):
-        self.success = success
-        self.argument = argument
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('BorrowArgumentParse', [runtime.struct_field('success', self.success), runtime.struct_field('argument', self.argument), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class RawAddressParseResult:
-    def __init__(self, recognized, success, target, diagnostics):
-        self.recognized = recognized
-        self.success = success
-        self.target = target
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('RawAddressParseResult', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('target', self.target), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class CastParseResult:
-    def __init__(self, recognized, success, value, type_annotation, diagnostics):
-        self.recognized = recognized
-        self.success = success
-        self.value = value
-        self.type_annotation = type_annotation
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('CastParseResult', [runtime.struct_field('recognized', self.recognized), runtime.struct_field('success', self.success), runtime.struct_field('value', self.value), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class TernaryParseResult:
-    def __init__(self, success, condition, true_value, false_value, diagnostics):
-        self.success = success
-        self.condition = condition
-        self.true_value = true_value
-        self.false_value = false_value
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('TernaryParseResult', [runtime.struct_field('success', self.success), runtime.struct_field('condition', self.condition), runtime.struct_field('true_value', self.true_value), runtime.struct_field('false_value', self.false_value), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class ExpressionStatementResult:
-    def __init__(self, lines, temp_index, locals, bindings, diagnostics, lifetime_regions, lifetime_releases, next_region_id, mutations, string_constants):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.locals = locals
-        self.bindings = bindings
-        self.diagnostics = diagnostics
-        self.lifetime_regions = lifetime_regions
-        self.lifetime_releases = lifetime_releases
-        self.next_region_id = next_region_id
-        self.mutations = mutations
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('ExpressionStatementResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('lifetime_releases', self.lifetime_releases), runtime.struct_field('next_region_id', self.next_region_id), runtime.struct_field('mutations', self.mutations), runtime.struct_field('string_constants', self.string_constants)])
-
-class LetLoweringResult:
-    def __init__(self, lines, allocas, locals, bindings, temp_index, diagnostics, next_local_id, lifetime_regions, next_region_id, mutations, string_constants):
-        self.lines = lines
-        self.allocas = allocas
-        self.locals = locals
-        self.bindings = bindings
-        self.temp_index = temp_index
-        self.diagnostics = diagnostics
-        self.next_local_id = next_local_id
-        self.lifetime_regions = lifetime_regions
-        self.next_region_id = next_region_id
-        self.mutations = mutations
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('LetLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('allocas', self.allocas), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('next_local_id', self.next_local_id), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('next_region_id', self.next_region_id), runtime.struct_field('mutations', self.mutations), runtime.struct_field('string_constants', self.string_constants)])
-
-class InlineLetParseResult:
-    def __init__(self, success, name, mutable, type_annotation, diagnostics, initializer=None):
-        self.success = success
-        self.name = name
-        self.mutable = mutable
-        self.type_annotation = type_annotation
-        self.initializer = initializer
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('InlineLetParseResult', [runtime.struct_field('success', self.success), runtime.struct_field('name', self.name), runtime.struct_field('mutable', self.mutable), runtime.struct_field('type_annotation', self.type_annotation), runtime.struct_field('initializer', self.initializer), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class BlockLabelResult:
-    def __init__(self, label, next_counter):
-        self.label = label
-        self.next_counter = next_counter
-
-    def __repr__(self):
-        return runtime.struct_repr('BlockLabelResult', [runtime.struct_field('label', self.label), runtime.struct_field('next_counter', self.next_counter)])
-
-class IfStructure:
-    def __init__(self, then_start, then_end, else_start, else_end, has_else, next_index, diagnostics):
-        self.then_start = then_start
-        self.then_end = then_end
-        self.else_start = else_start
-        self.else_end = else_end
-        self.has_else = has_else
-        self.next_index = next_index
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('IfStructure', [runtime.struct_field('then_start', self.then_start), runtime.struct_field('then_end', self.then_end), runtime.struct_field('else_start', self.else_start), runtime.struct_field('else_end', self.else_end), runtime.struct_field('has_else', self.has_else), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class LoopContext:
-    def __init__(self, break_label, continue_label):
-        self.break_label = break_label
-        self.continue_label = continue_label
-
-    def __repr__(self):
-        return runtime.struct_repr('LoopContext', [runtime.struct_field('break_label', self.break_label), runtime.struct_field('continue_label', self.continue_label)])
-
-class LoopStructure:
-    def __init__(self, body_start, body_end, next_index, diagnostics):
-        self.body_start = body_start
-        self.body_end = body_end
-        self.next_index = next_index
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('LoopStructure', [runtime.struct_field('body_start', self.body_start), runtime.struct_field('body_end', self.body_end), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class TryStructure:
-    def __init__(self, try_start, try_end, catch_index, catch_name, catch_start, catch_end, finally_index, finally_start, finally_end, end_index, next_index, diagnostics):
-        self.try_start = try_start
-        self.try_end = try_end
-        self.catch_index = catch_index
-        self.catch_name = catch_name
-        self.catch_start = catch_start
-        self.catch_end = catch_end
-        self.finally_index = finally_index
-        self.finally_start = finally_start
-        self.finally_end = finally_end
-        self.end_index = end_index
-        self.next_index = next_index
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('TryStructure', [runtime.struct_field('try_start', self.try_start), runtime.struct_field('try_end', self.try_end), runtime.struct_field('catch_index', self.catch_index), runtime.struct_field('catch_name', self.catch_name), runtime.struct_field('catch_start', self.catch_start), runtime.struct_field('catch_end', self.catch_end), runtime.struct_field('finally_index', self.finally_index), runtime.struct_field('finally_start', self.finally_start), runtime.struct_field('finally_end', self.finally_end), runtime.struct_field('end_index', self.end_index), runtime.struct_field('next_index', self.next_index), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class RangeIterableParse:
-    def __init__(self, success, start, end, stride, diagnostics):
-        self.success = success
-        self.start = start
-        self.end = end
-        self.stride = stride
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('RangeIterableParse', [runtime.struct_field('success', self.success), runtime.struct_field('start', self.start), runtime.struct_field('end', self.end), runtime.struct_field('stride', self.stride), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class MatchCaseStructure:
-    def __init__(self, pattern, body_start, body_end, is_default, guard=None):
-        self.pattern = pattern
-        self.guard = guard
-        self.body_start = body_start
-        self.body_end = body_end
-        self.is_default = is_default
-
-    def __repr__(self):
-        return runtime.struct_repr('MatchCaseStructure', [runtime.struct_field('pattern', self.pattern), runtime.struct_field('guard', self.guard), runtime.struct_field('body_start', self.body_start), runtime.struct_field('body_end', self.body_end), runtime.struct_field('is_default', self.is_default)])
-
-class MatchStructure:
-    def __init__(self, cases, end_index, diagnostics):
-        self.cases = cases
-        self.end_index = end_index
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('MatchStructure', [runtime.struct_field('cases', self.cases), runtime.struct_field('end_index', self.end_index), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class MatchFieldBinding:
-    def __init__(self, field_name, field_type, field_offset):
-        self.field_name = field_name
-        self.field_type = field_type
-        self.field_offset = field_offset
-
-    def __repr__(self):
-        return runtime.struct_repr('MatchFieldBinding', [runtime.struct_field('field_name', self.field_name), runtime.struct_field('field_type', self.field_type), runtime.struct_field('field_offset', self.field_offset)])
-
-class MatchStructFieldBinding:
-    def __init__(self, field_name, field_type, field_index):
-        self.field_name = field_name
-        self.field_type = field_type
-        self.field_index = field_index
-
-    def __repr__(self):
-        return runtime.struct_repr('MatchStructFieldBinding', [runtime.struct_field('field_name', self.field_name), runtime.struct_field('field_type', self.field_type), runtime.struct_field('field_index', self.field_index)])
-
-class MatchCaseCondition:
-    def __init__(self, lines, temp_index, diagnostics, is_default, field_bindings, union_variant_index, union_struct_bindings, string_constants, operand=None, enum_info=None, variant_info=None, union_struct_info=None):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.operand = operand
-        self.diagnostics = diagnostics
-        self.is_default = is_default
-        self.field_bindings = field_bindings
-        self.enum_info = enum_info
-        self.variant_info = variant_info
-        self.union_variant_index = union_variant_index
-        self.union_struct_info = union_struct_info
-        self.union_struct_bindings = union_struct_bindings
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('MatchCaseCondition', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('is_default', self.is_default), runtime.struct_field('field_bindings', self.field_bindings), runtime.struct_field('enum_info', self.enum_info), runtime.struct_field('variant_info', self.variant_info), runtime.struct_field('union_variant_index', self.union_variant_index), runtime.struct_field('union_struct_info', self.union_struct_info), runtime.struct_field('union_struct_bindings', self.union_struct_bindings), runtime.struct_field('string_constants', self.string_constants)])
-
-class ConditionConversion:
-    def __init__(self, lines, temp_index, diagnostics, string_constants, operand=None):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.operand = operand
-        self.diagnostics = diagnostics
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('ConditionConversion', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('string_constants', self.string_constants)])
-
-class ComparisonEmission:
-    def __init__(self, lines, temp_index, diagnostics, operand=None):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.operand = operand
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('ComparisonEmission', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class CoercionResult:
-    def __init__(self, lines, temp_index, diagnostics, operand=None):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.operand = operand
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('CoercionResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
-
-class BinaryAlignmentResult:
-    def __init__(self, lines, temp_index, diagnostics, result_type, left=None, right=None):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.left = left
-        self.right = right
-        self.diagnostics = diagnostics
-        self.result_type = result_type
-
-    def __repr__(self):
-        return runtime.struct_repr('BinaryAlignmentResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('left', self.left), runtime.struct_field('right', self.right), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('result_type', self.result_type)])
-
-class BlockLoweringResult:
-    def __init__(self, lines, allocas, locals, bindings, temp_index, block_counter, diagnostics, terminated, next_local_id, lifetime_regions, next_lifetime_region_id, next_index, mutations, string_constants):
-        self.lines = lines
-        self.allocas = allocas
-        self.locals = locals
-        self.bindings = bindings
-        self.temp_index = temp_index
-        self.block_counter = block_counter
-        self.diagnostics = diagnostics
-        self.terminated = terminated
-        self.next_local_id = next_local_id
-        self.lifetime_regions = lifetime_regions
-        self.next_lifetime_region_id = next_lifetime_region_id
-        self.next_index = next_index
-        self.mutations = mutations
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('BlockLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('allocas', self.allocas), runtime.struct_field('locals', self.locals), runtime.struct_field('bindings', self.bindings), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('block_counter', self.block_counter), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('terminated', self.terminated), runtime.struct_field('next_local_id', self.next_local_id), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('next_lifetime_region_id', self.next_lifetime_region_id), runtime.struct_field('next_index', self.next_index), runtime.struct_field('mutations', self.mutations), runtime.struct_field('string_constants', self.string_constants)])
-
-class ThrowLoweringResult:
-    def __init__(self, lines, temp_index, diagnostics, string_constants):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.diagnostics = diagnostics
-        self.string_constants = string_constants
-
-    def __repr__(self):
-        return runtime.struct_repr('ThrowLoweringResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('string_constants', self.string_constants)])
-
-class PhiMergeResult:
-    def __init__(self, lines, temp_index):
-        self.lines = lines
-        self.temp_index = temp_index
-
-    def __repr__(self):
-        return runtime.struct_repr('PhiMergeResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index)])
-
-class PhiInputEntry:
-    def __init__(self, value, label):
-        self.value = value
-        self.label = label
-
-    def __repr__(self):
-        return runtime.struct_repr('PhiInputEntry', [runtime.struct_field('value', self.value), runtime.struct_field('label', self.label)])
-
-class MutationMaterializationResult:
-    def __init__(self, mutations, lines, temp_index):
-        self.mutations = mutations
-        self.lines = lines
-        self.temp_index = temp_index
-
-    def __repr__(self):
-        return runtime.struct_repr('MutationMaterializationResult', [runtime.struct_field('mutations', self.mutations), runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index)])
-
-class PhiStoreEntry:
-    def __init__(self, phi_line, store_line):
-        self.phi_line = phi_line
-        self.store_line = store_line
-
-    def __repr__(self):
-        return runtime.struct_repr('PhiStoreEntry', [runtime.struct_field('phi_line', self.phi_line), runtime.struct_field('store_line', self.store_line)])
-
-class MatchArmMutations:
-    def __init__(self, mutations, label, terminated):
-        self.mutations = mutations
-        self.label = label
-        self.terminated = terminated
-
-    def __repr__(self):
-        return runtime.struct_repr('MatchArmMutations', [runtime.struct_field('mutations', self.mutations), runtime.struct_field('label', self.label), runtime.struct_field('terminated', self.terminated)])
-
-class LoadLocalResult:
-    def __init__(self, lines, temp_index, diagnostics, operand=None):
-        self.lines = lines
-        self.temp_index = temp_index
-        self.operand = operand
-        self.diagnostics = diagnostics
-
-    def __repr__(self):
-        return runtime.struct_repr('LoadLocalResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('temp_index', self.temp_index), runtime.struct_field('operand', self.operand), runtime.struct_field('diagnostics', self.diagnostics)])
-
-def is_unit_enum(enum_def):
-    index = 0
-    while True:
-        if index >= len(enum_def.variants):
-            break
-        variant = enum_def.variants[index]
-        if len(variant.fields) > 0:
-            return False
-        index += 1
-    return True
-
-def synthesize_unit_enum_layout(enum_def):
-    tag_size = 4
-    tag_align = 4
-    layouts = []
-    index = 0
-    while True:
-        if index >= len(enum_def.variants):
-            break
-        variant = enum_def.variants[index]
-        layouts = (layouts) + ([NativeEnumVariantLayout(name=variant.name, tag=index, offset=0, size=tag_size, align=tag_align, fields=[])])
-        index += 1
-    return NativeEnumLayout(size=tag_size, align=tag_align, tag_type="i32", tag_size=tag_size, tag_align=tag_align, variants=layouts)
-
-def enum_layout_matches_variants(enum_def, layout):
-    if len(layout.variants) != len(enum_def.variants):
-        return False
-    index = 0
-    while True:
-        if index >= len(enum_def.variants):
-            break
-        expected = enum_def.variants[index].name
-        found = False
-        layout_index = 0
-        while True:
-            if layout_index >= len(layout.variants):
-                break
-            if layout.variants[layout_index].name == expected:
-                found = True
-                break
-            layout_index += 1
-        if not found:
-            return False
-        index += 1
-    return True
-
-def fixup_enum_layouts(enums):
-    diagnostics = []
-    updated = []
-    index = 0
-    while True:
-        if index >= len(enums):
-            break
-        enum_def = enums[index]
-        fixed = enum_def
-        if enum_def.layout == None:
-            if is_unit_enum(enum_def):
-                fixed = NativeEnum(name=enum_def.name, variants=enum_def.variants, layout=synthesize_unit_enum_layout(enum_def))
-                diagnostics = (diagnostics) + (["llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout"])
-            updated = (updated) + ([fixed])
-            index += 1
-            continue
-        layout = enum_def.layout
-        if not enum_layout_matches_variants(enum_def, layout):
-            if is_unit_enum(enum_def):
-                fixed = NativeEnum(name=enum_def.name, variants=enum_def.variants, layout=synthesize_unit_enum_layout(enum_def))
-                diagnostics = (diagnostics) + (["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout"])
-            else:
-                diagnostics = (diagnostics) + (["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata"])
-        updated = (updated) + ([fixed])
-        index += 1
-    return EnumLayoutFixupResult(enums=updated, diagnostics=diagnostics)
-
-def load_imported_layout_manifests(imports):
-    # effects: io
-    context = collect_imported_module_context(imports)
-    return context.manifests
-
-def collect_imported_module_context(imports):
-    # effects: io
-    trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
-    if trace:
-        print.warn("test llvm: collect_imported_module_context start (imports=" + number_to_string(len(imports)) + ")")
-    manifests = []
-    native_texts = []
-    diagnostics = []
-    seen = []
-    index = 0
-    while True:
-        if index >= len(imports):
-            break
-        if trace  and  index > 0  and  index % 50 == 0:
-            print.warn("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")")
-        module_path = imports[index].module
-        slug = resolve_import_module_slug(module_path)
-        if len(slug) == 0:
-            index += 1
-            continue
-        if string_array_contains(seen, slug):
-            index += 1
-            continue
-        seen = append_string(seen, slug)
-        manifest_path = layout_manifest_path_for_slug(slug)
-        native_text_path = native_text_path_for_slug(slug)
-        manifest_structs = []
-        manifest_enums = []
-        if fs.exists(manifest_path):
-            manifest_contents = fs.readFile(manifest_path)
-            parsed_manifest = parse_layout_manifest(manifest_contents)
-            manifest_structs = parsed_manifest.structs
-            manifest_enums = parsed_manifest.enums
-        else:
-            diagnostics = (diagnostics) + (["layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")"])
-        native_text = ""
-        if fs.exists(native_text_path):
-            native_text = fs.readFile(native_text_path)
-        else:
-            diagnostics = (diagnostics) + (["native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")"])
-        manifests = (manifests) + ([LayoutManifest(structs=manifest_structs, enums=manifest_enums, diagnostics=[])])
-        native_texts = (native_texts) + ([native_text])
-        index += 1
-    if trace:
-        print.warn("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(len(seen)) + ")")
-    return ImportedModuleContext(manifests=manifests, native_texts=native_texts, diagnostics=diagnostics)
-
-def resolve_import_module_slug(module):
-    trimmed = trim_text(module)
-    if len(trimmed) == 0:
-        return ""
-    normalized = normalize_import_module_path(trimmed)
-    start_index = 0
-    while True:
-        if start_index >= len(normalized):
-            break
-        ch = normalized[start_index]
-        if ch == "."  or  ch == "/":
-            start_index += 1
-            continue
-        break
-    candidate = normalized
-    if start_index > 0:
-        candidate = substring(normalized, start_index, len(normalized))
-    return candidate
-
-def layout_manifest_path_for_slug(slug):
-    return "build/stage2/" + slug + ".layout-manifest"
-
-def native_text_path_for_slug(slug):
-    return "build/stage2/" + slug + ".sfn-asm"
-
-def normalize_import_module_path(value):
-    result = ""
-    index = 0
-    while True:
-        if index >= len(value):
-            break
-        ch = value[index]
-        if ch == "\\":
-            result = result + "/"
-        else:
-            result = result + ch
-        index += 1
-    return result
-
-def apply_layout_manifest_to_module(structs, enums, manifest):
-    if manifest == None:
-        return LayoutManifestApplication(structs=structs, enums=enums, diagnostics=[])
-    return apply_layout_manifest_entries(structs, enums, manifest)
-
-def apply_layout_manifest_entries(structs, enums, manifest):
-    diagnostics = []
-    updated_structs = structs
-    struct_index = 0
-    while True:
-        if struct_index >= len(manifest.structs):
-            break
-        layout_struct = manifest.structs[struct_index]
-        target_index = find_struct_index(updated_structs, layout_struct.name)
-        if target_index < 0:
-            diagnostics = append_string(diagnostics, "layout manifest: struct `" + layout_struct.name + "` missing from native module")
-        else:
-            target = updated_structs[target_index]
-            replaced = NativeStruct(name=target.name, fields=target.fields, methods=target.methods, implements=target.implements, layout=layout_struct.layout)
-            updated_structs = replace_native_struct(updated_structs, target_index, replaced)
-        struct_index += 1
-    updated_enums = enums
-    enum_index = 0
-    while True:
-        if enum_index >= len(manifest.enums):
-            break
-        layout_enum = manifest.enums[enum_index]
-        target_index = find_enum_index(updated_enums, layout_enum.name)
-        if target_index < 0:
-            diagnostics = append_string(diagnostics, "layout manifest: enum `" + layout_enum.name + "` missing from native module")
-        else:
-            target = updated_enums[target_index]
-            replaced = NativeEnum(name=target.name, variants=target.variants, layout=layout_enum.layout)
-            updated_enums = replace_native_enum(updated_enums, target_index, replaced)
-        enum_index += 1
-    return LayoutManifestApplication(structs=updated_structs, enums=updated_enums, diagnostics=diagnostics)
-
-def lower_to_llvm(native_module):
-    # effects: io
-    artifact = select_text_artifact(native_module.artifacts)
-    if artifact == None:
-        return lower_to_llvm_with_context(native_module, [], [], [])
-    parse = parse_native_artifact(artifact.contents)
-    import_context = collect_imported_module_context(parse.imports)
-    return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
-
-def lower_to_llvm_for_tests(native_module):
-    # effects: io
-    trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
-    if trace:
-        print.warn("test llvm: lower_to_llvm_for_tests start (module=" + native_module.module_name + ")")
-    artifact = select_text_artifact(native_module.artifacts)
-    if artifact == None:
-        if trace:
-            print.warn("test llvm: lower_to_llvm_for_tests missing native text artifact")
-        return lower_to_llvm_with_context_for_tests(native_module, [], [], [])
-    if trace:
-        print.warn("test llvm: lower_to_llvm_for_tests parse_native_artifact start (bytes=" + number_to_string(len(artifact.contents)) + ")")
-    parse = parse_native_artifact(artifact.contents)
-    if trace:
-        print.warn("test llvm: lower_to_llvm_for_tests parse_native_artifact done (imports=" + number_to_string(len(parse.imports)) + ")")
-        print.warn("test llvm: lower_to_llvm_for_tests collect_imported_module_context start")
-    import_context = collect_imported_module_context(parse.imports)
-    if trace:
-        print.warn("test llvm: lower_to_llvm_for_tests collect_imported_module_context done (native_texts=" + number_to_string(len(import_context.native_texts)) + ")")
-        print.warn("test llvm: lower_to_llvm_for_tests lower_to_llvm_with_context_for_tests start")
-    return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
-
-def lower_to_llvm_with_manifests(native_module, imported_manifests):
-    # effects: io
-    return lower_to_llvm_with_context(native_module, imported_manifests, [], [])
-
-def lower_to_llvm_with_context_for_tests(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
-    # effects: io
-    trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
-    base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics)
-    if len(base.ir) == 0:
-        return base
-    artifact = select_text_artifact(native_module.artifacts)
-    if artifact == None:
-        return base
-    parse = parse_native_artifact(artifact.contents)
-    tests = []
-    has_main = False
-    index = 0
-    while True:
-        if index >= len(parse.functions):
-            break
-        fun = parse.functions[index]
-        if fun.name == "main":
-            has_main = True
-        if len(fun.name) >= 5  and  substring(fun.name, 0, 5) == "test:":
-            tests = (tests) + ([fun])
-        index += 1
-    if len(tests) == 0:
-        return base
-    if has_main:
-        updated = base
-        updated.diagnostics = (updated.diagnostics) + (["llvm lowering (test): module defines `main`; skipping synthesized test harness"])
-        return updated
-    if trace:
-        print.warn("test llvm: lower_to_llvm_with_context_for_tests synthesize harness (tests=" + number_to_string(len(tests)) + ")")
-    harness = render_test_harness_main(tests)
-    updated = base
-    if len(updated.ir) > 0:
-        updated.ir = updated.ir + "\n"
-    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n"
-    return updated
-
-def render_test_harness_main(tests):
-    lines = []
-    lines = (lines) + (["define i32 @main(i32 %argc, i8** %argv) {", "entry:"])
-    index = 0
-    while True:
-        if index >= len(tests):
-            break
-        sym = sanitize_symbol(tests[index].name)
-        lines = append_string(lines, "  call void @" + sym + "()")
-        index += 1
-    lines = (lines) + (["  ret i32 0", "}"])
-    return lines
-
-def module_global_symbol(name):
-    return "@global." + sanitize_symbol(name)
-
-def module_init_symbol(module_name):
-    return "@sailfin_module_init__" + sanitize_symbol(module_name)
-
-def module_init_done_symbol(module_name):
-    return "@sailfin_module_init_done__" + sanitize_symbol(module_name)
-
-def module_user_main_symbol(module_name):
-    return "sailfin_user_main__" + sanitize_symbol(module_name)
-
-def lower_module_bindings_to_globals(bindings, context, module_name):
-    diagnostics = []
-    preamble_lines = []
-    init_lines = []
-    locals = []
-    collected_string_constants = empty_string_constant_set()
-    init_symbol = module_init_symbol(module_name)
-    init_done_symbol = module_init_done_symbol(module_name)
-    needs_init = False
-    if len(bindings) == 0:
-        return ModuleGlobalLoweringResult(preamble_lines=[], init_function_lines=[], init_function_symbol=init_symbol, needs_init_call=False, locals=[], string_constants=collected_string_constants, diagnostics=[])
-    scope_id = format_root_scope_id("module")
-    scope_depth = 0
-    index = 0
-    while True:
-        if index >= len(bindings):
-            break
-        binding = bindings[index]
-        type_annotation = trim_text(binding.type_annotation)
-        effective_type_annotation = binding.type_annotation
-        if len(type_annotation) == 0  and  binding.value != None:
-            init_expr = trim_text(binding.value)
-            if is_string_literal(init_expr):
-                type_annotation = "string"
-                effective_type_annotation = "string"
-        if len(type_annotation) == 0:
-            index += 1
-            continue
-        name = binding.name
-        global_name = module_global_symbol(name)
-        llvm_type = ""
-        if len(type_annotation) > 0:
-            llvm_type = map_local_type(context, type_annotation)
-        if len(llvm_type) == 0:
-            diagnostics = append_string(diagnostics, "llvm lowering: module binding `" + name + "` has unsupported type annotation `" + type_annotation + "`")
-            llvm_type = "double"
-        if llvm_type == "i8*":
-            preamble_lines = append_string(preamble_lines, global_name + " = global i8* null")
-            if binding.value != None:
-                needs_init = True
-        else:
-            initializer_text = default_return_literal(llvm_type)
-            if binding.value != None:
-                init_expr = trim_text(binding.value)
-                if llvm_type == "double"  and  is_number_literal(init_expr):
-                    initializer_text = normalise_number_literal(init_expr)
-                else:
-                    if llvm_type == "i64"  and  is_integer_literal(init_expr):
-                        initializer_text = init_expr
-                    else:
-                        if llvm_type == "i32"  and  is_integer_literal(init_expr):
-                            initializer_text = init_expr
-                        else:
-                            if llvm_type == "i1"  and  is_boolean_literal(init_expr):
-                                initializer_text = "0"
-                                if matches_case_insensitive(init_expr, "true"):
-                                    initializer_text = "1"
-                            else:
-                                needs_init = True
-            preamble_lines = append_string(preamble_lines, global_name + " = global " + llvm_type + " " + initializer_text)
-        locals = append_local_binding(locals, LocalBinding(name=name, pointer=global_name, llvm_type=llvm_type, type_annotation=effective_type_annotation, ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
-        index += 1
-    if not needs_init:
-        return ModuleGlobalLoweringResult(preamble_lines=preamble_lines, init_function_lines=[], init_function_symbol=init_symbol, needs_init_call=False, locals=locals, string_constants=collected_string_constants, diagnostics=diagnostics)
-    preamble_lines = append_string(preamble_lines, init_done_symbol + " = global i1 0")
-    init_lines = (init_lines) + (["define internal void " + init_symbol + "() {", "block.entry:", "  %t0 = load i1, i1* " + init_done_symbol, "  %t1 = icmp ne i1 %t0, 0", "  br i1 %t1, label %block.done, label %block.init", "block.init:", "  store i1 1, i1* " + init_done_symbol])
-    init_index = 0
-    current_temp = 2
-    current_lines = init_lines
-    while True:
-        if init_index >= len(bindings):
-            break
-        binding = bindings[init_index]
-        if binding.value == None:
-            init_index += 1
-            continue
-        name = binding.name
-        global_name = module_global_symbol(name)
-        local = find_local_binding(locals, name)
-        if local == None:
-            init_index += 1
-            continue
-        llvm_type = local.llvm_type
-        init_expr = trim_text(binding.value)
-        if llvm_type == "i8*":
-            lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type)
-            diagnostics = (diagnostics) + (lowered.diagnostics)
-            current_lines = lowered.lines
-            current_temp = lowered.temp_index
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
-            if lowered.operand != None:
-                current_lines = append_string(current_lines, "  store i8* " + lowered.operand.value + ", i8** " + global_name)
-            else:
-                diagnostics = append_string(diagnostics, "llvm lowering: failed to initialize module string binding `" + name + "`")
-        else:
-            should_store = True
-            if llvm_type == "double"  and  is_number_literal(init_expr):
-                should_store = False
-            if llvm_type == "i64"  and  is_integer_literal(init_expr):
-                should_store = False
-            if llvm_type == "i32"  and  is_integer_literal(init_expr):
-                should_store = False
-            if llvm_type == "i1"  and  is_boolean_literal(init_expr):
-                should_store = False
-            if should_store:
-                lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type)
-                diagnostics = (diagnostics) + (lowered.diagnostics)
-                current_lines = lowered.lines
-                current_temp = lowered.temp_index
-                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
-                if lowered.operand != None:
-                    coerced = coerce_operand_to_type(lowered.operand, llvm_type, current_temp, current_lines)
-                    diagnostics = (diagnostics) + (coerced.diagnostics)
-                    current_lines = coerced.lines
-                    current_temp = coerced.temp_index
-                    if coerced.operand != None:
-                        current_lines = append_string(current_lines, "  store " + llvm_type + " " + coerced.operand.value + ", " + llvm_type + "* " + global_name)
-        init_index += 1
-    current_lines = append_string(current_lines, "  br label %block.done")
-    current_lines = append_string(current_lines, "block.done:")
-    current_lines = append_string(current_lines, "  ret void")
-    current_lines = append_string(current_lines, "}")
-    return ModuleGlobalLoweringResult(preamble_lines=preamble_lines, init_function_lines=current_lines, init_function_symbol=init_symbol, needs_init_call=True, locals=locals, string_constants=collected_string_constants, diagnostics=diagnostics)
-
-def lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
-    # effects: io
-    trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
-    if trace:
-        print.warn("test llvm: lower_to_llvm_with_context start (module=" + native_module.module_name + ")")
-        print.warn("test llvm: lower_to_llvm_with_context imported_native_texts=" + number_to_string(len(imported_native_texts)) + " imported_manifests=" + number_to_string(len(imported_manifests)))
-    diagnostics = []
-    if len(imported_diagnostics) > 0:
-        diagnostics = (diagnostics) + (imported_diagnostics)
-    artifact = select_text_artifact(native_module.artifacts)
-    if artifact == None:
-        diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
-        empty_constants = empty_string_constant_set()
-        return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=empty_constants)
-    parse = parse_native_artifact(artifact.contents)
-    diagnostics = (diagnostics) + (parse.diagnostics)
-    if trace:
-        print.warn("test llvm: lower_to_llvm_with_context parsed (imports=" + number_to_string(len(parse.imports)) + " functions=" + number_to_string(len(parse.functions)) + ")")
-    exported_symbols = collect_exported_symbol_names(parse.imports)
-    manifest_artifact = select_layout_manifest_artifact(native_module.artifacts)
-    module_manifest = None
-    if manifest_artifact != None:
-        parsed_manifest = parse_layout_manifest(manifest_artifact.contents)
-        diagnostics = (diagnostics) + (parsed_manifest.diagnostics)
-        module_manifest = parsed_manifest
-    manifest_application = apply_layout_manifest_to_module(parse.structs, parse.enums, module_manifest)
-    diagnostics = (diagnostics) + (manifest_application.diagnostics)
-    module_structs = manifest_application.structs
-    module_enums = manifest_application.enums
-    if trace:
-        print.warn("test llvm: lower_to_llvm_with_context layout applied (structs=" + number_to_string(len(module_structs)) + " enums=" + number_to_string(len(module_enums)) + ")")
-    imported_structs = []
-    imported_enums = []
-    imported_interfaces = []
-    imported_functions = []
-    imported_struct_methods = []
-    manifest_count = len(imported_manifests)
-    text_index = 0
-    while True:
-        if text_index >= len(imported_native_texts):
-            break
-        if trace:
-            print.warn("test llvm: lower_to_llvm_with_context import parse index=" + number_to_string(text_index) + " bytes=" + number_to_string(len(imported_native_texts[text_index])))
-        native_text = imported_native_texts[text_index]
-        manifest_for_module = None
-        if text_index < manifest_count:
-            candidate_manifest = imported_manifests[text_index]
-            manifest_for_module = candidate_manifest
-        if len(native_text) == 0:
-            if manifest_for_module != None:
-                manifest_only = manifest_for_module
-                imported_structs = (imported_structs) + (manifest_only.structs)
-                imported_enums = (imported_enums) + (manifest_only.enums)
-            text_index += 1
-            continue
-        imported_parse = parse_native_artifact(native_text)
-        applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module)
-        imported_structs = (imported_structs) + (applied_import.structs)
-        imported_enums = (imported_enums) + (applied_import.enums)
-        imported_interfaces = (imported_interfaces) + (imported_parse.interfaces)
-        imported_functions = (imported_functions) + (imported_parse.functions)
-        imported_methods = flatten_struct_methods(applied_import.structs)
-        imported_struct_methods = (imported_struct_methods) + (imported_methods)
-        text_index += 1
-    if trace:
-        print.warn("test llvm: lower_to_llvm_with_context import context loaded (imported_functions=" + number_to_string(len(imported_functions)) + ")")
-    if len(imported_native_texts) < manifest_count:
-        manifest_index = len(imported_native_texts)
-        while True:
-            if manifest_index >= manifest_count:
-                break
-            leftover_manifest = imported_manifests[manifest_index]
-            imported_structs = (imported_structs) + (leftover_manifest.structs)
-            imported_enums = (imported_enums) + (leftover_manifest.enums)
-            manifest_index += 1
-    combined_structs = (module_structs) + (imported_structs)
-    combined_enums = (module_enums) + (imported_enums)
-    combined_interfaces = (parse.interfaces) + (imported_interfaces)
-    trait_metadata = build_trait_metadata(combined_interfaces, combined_structs)
-    fixed_enums = fixup_enum_layouts(combined_enums)
-    diagnostics = (diagnostics) + (fixed_enums.diagnostics)
-    type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces)
-    diagnostics = (diagnostics) + (type_build.diagnostics)
-    type_context = type_build.context
-    module_struct_methods = flatten_struct_methods(module_structs)
-    local_functions = concat_native_functions(parse.functions, module_struct_methods)
-    context_functions = concat_native_functions(local_functions, imported_functions)
-    context_functions = concat_native_functions(context_functions, imported_struct_methods)
-    runtime_helpers = collect_runtime_helper_targets(local_functions)
-    runtime_helpers = append_unique_effect(runtime_helpers, "get_field")
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.concat")
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.drop")
-    runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string")
-    runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal")
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check")
-    runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent")
-    direct_effects = collect_direct_function_effects(context_functions)
-    call_graph = collect_function_call_graph(context_functions)
-    aggregated_effects = propagate_function_effects(direct_effects, call_graph)
-    if trace:
-        print.warn("test llvm: lower_to_llvm_with_context effects aggregated (entries=" + number_to_string(len(aggregated_effects)) + ")")
-    function_effects = []
-    lifetime_regions = []
-    lines = []
-    lines = append_string(lines, "source_filename = \"" + module_source_filename(native_module.module_name) + "\"")
-    lines = append_string(lines, "")
-    trait_lines = render_trait_metadata_comments(trait_metadata)
-    if len(trait_lines) > 0:
-        lines = (lines) + (trait_lines)
-        lines = append_string(lines, "")
-    struct_type_lines = render_struct_type_definitions(type_context, context_functions)
-    if len(struct_type_lines) > 0:
-        lines = (lines) + (struct_type_lines)
-        lines = append_string(lines, "")
-    enum_type_lines = render_enum_type_definitions(type_context)
-    if len(enum_type_lines) > 0:
-        lines = (lines) + (enum_type_lines)
-        lines = append_string(lines, "")
-    interface_type_lines = render_interface_type_definitions(type_context)
-    if len(interface_type_lines) > 0:
-        lines = (lines) + (interface_type_lines)
-        lines = append_string(lines, "")
-    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFuturePtr = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)", "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
-    vtable_type_lines = render_vtable_type_definitions(type_context)
-    if len(vtable_type_lines) > 0:
-        lines = (lines) + (vtable_type_lines)
-        lines = append_string(lines, "")
-    vtable_const_lines = render_vtable_constants(type_context)
-    if len(vtable_const_lines) > 0:
-        lines = (lines) + (vtable_const_lines)
-        lines = append_string(lines, "")
-    helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions)
-    if len(helper_declarations) > 0:
-        lines = (lines) + (helper_declarations)
-        lines = append_string(lines, "")
-    imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context)
-    if len(imported_declarations) > 0:
-        lines = (lines) + (imported_declarations)
-        lines = append_string(lines, "")
-    if find_function_by_name(context_functions, "malloc") == None:
-        lines = append_string(lines, "declare noalias i8* @malloc(i64)")
-    if find_function_by_name(context_functions, "free") == None:
-        lines = append_string(lines, "declare void @free(i8*)")
-    lines = append_string(lines, "")
-    lines = append_string(lines, "@runtime = external global i8**")
-    lines = append_string(lines, "")
-    module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name)
-    diagnostics = (diagnostics) + (module_globals.diagnostics)
-    if len(module_globals.preamble_lines) > 0:
-        lines = (lines) + (module_globals.preamble_lines)
-        lines = append_string(lines, "")
-    preamble_lines = lines
-    function_lines = []
-    if len(module_globals.init_function_lines) > 0:
-        function_lines = (function_lines) + (module_globals.init_function_lines)
-        function_lines = append_string(function_lines, "")
-    index = 0
-    has_add_function = False
-    all_string_constants = module_globals.string_constants
-    if trace:
-        print.warn("test llvm: lower_to_llvm_with_context emit_function loop start (local_functions=" + number_to_string(len(local_functions)) + ")")
-    while True:
-        if index >= len(local_functions):
-            break
-        current_function = local_functions[index]
-        if trace:
-            print.warn("test llvm: lower_to_llvm_with_context lowering function index=" + number_to_string(index) + " name=" + current_function.name + " instructions=" + number_to_string(len(current_function.instructions)))
-        aggregated_entry = find_function_effect_entry(aggregated_effects, current_function.name)
-        effective_effects = []
-        if aggregated_entry != None:
-            effective_effects = aggregated_entry.effects
-        function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry(name=current_function.name, effects=effective_effects))
-        lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, exported_symbols, imported_functions, module_globals.locals, module_globals.init_function_symbol, module_globals.needs_init_call)
-        if sanitize_symbol(current_function.name) == "add":
-            has_add_function = True
-        diagnostics = (diagnostics) + (lowered.diagnostics)
-        lifetime_regions = (lifetime_regions) + (lowered.lifetime_regions)
-        all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants)
-        if len(lowered.lines) > 0:
-            function_lines = (function_lines) + (lowered.lines)
-            if index + 1 < len(local_functions):
-                function_lines = append_string(function_lines, "")
-        index += 1
-    if not has_add_function:
-        if len(function_lines) > 0:
-            function_lines = append_string(function_lines, "")
-        function_lines = (function_lines) + (["define internal double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
-    string_constant_lines = render_string_constants(all_string_constants)
-    final_lines = preamble_lines
-    if len(string_constant_lines) > 0:
-        final_lines = (final_lines) + (string_constant_lines)
-        final_lines = append_string(final_lines, "")
-    final_lines = (final_lines) + (function_lines)
-    final_lines = ensure_intrinsic_declarations(final_lines)
-    ir = join_with_separator(final_lines, "\n")
-    manifest = build_capability_manifest(native_module.entry_points, function_effects)
-    output = ir
-    if len(output) > 0:
-        output = output + "\n"
-    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects, lifetime_regions=lifetime_regions, capability_manifest=manifest, string_constants=all_string_constants)
-
-def module_source_filename(module_name):
-    if len(module_name) == 0:
-        return "sailfin"
-    if len(module_name) >= 4:
-        suffix = substring(module_name, len(module_name) - 4, len(module_name))
-        if suffix == ".sfn":
-            return module_name
-    return module_name + ".sfn"
-
-def ensure_intrinsic_declarations(lines):
-    uses_round = False
-    has_round_decl = False
-    index = 0
-    while True:
-        if index >= len(lines):
-            break
-        line = lines[index]
-        if index_of(line, "call double @round(") >= 0:
-            uses_round = True
-        trimmed = trim_text(line)
-        if starts_with(trimmed, "declare double @round(double)"):
-            has_round_decl = True
-        index += 1
-    if not uses_round  or  has_round_decl:
-        return lines
-    return insert_string_at(lines, 1, "declare double @round(double)")
-
-def insert_string_at(values, insert_index, value):
-    out = []
-    index = 0
-    while True:
-        if index >= len(values):
-            break
-        if index == insert_index:
-            out = append_string(out, value)
-        out = append_string(out, values[index])
-        index += 1
-    if insert_index >= len(values):
-        out = append_string(out, value)
-    return out
 
 def empty_trait_metadata():
     return TraitMetadata(interfaces=[], implementations=[])
@@ -1961,716 +473,613 @@ def flatten_struct_methods(structs):
         index += 1
     return result
 
-def extract_struct_type_from_llvm(llvm_type):
-    if len(llvm_type) == 0:
-        return ""
-    result = ""
-    index = 0
-    while True:
-        if index >= len(llvm_type):
-            break
-        ch = substring(llvm_type, index, index + 1)
-        if ch == "%":
-            end_index = index + 1
-            while True:
-                if end_index >= len(llvm_type):
-                    break
-                end_ch = substring(llvm_type, end_index, end_index + 1)
-                if end_ch == " "  or  end_ch == ","  or  end_ch == "*"  or  end_ch == "}"  or  end_ch == ">":
-                    break
-                end_index += 1
-            if end_index > index + 1:
-                result = substring(llvm_type, index, end_index)
-                break
-        index += 1
-    return result
+def load_imported_layout_manifests(imports):
+    # effects: io
+    context = collect_imported_module_context(imports)
+    return context.manifests
 
-def render_struct_type_definitions(context, functions):
-    lines = []
-    referenced_types = []
-    struct_index = 0
-    while True:
-        if struct_index >= len(context.structs):
-            break
-        info = context.structs[struct_index]
-        field_index = 0
-        while True:
-            if field_index >= len(info.fields):
-                break
-            field_type = info.fields[field_index].llvm_type
-            extracted = extract_struct_type_from_llvm(field_type)
-            if len(extracted) > 0  and  not string_array_contains(referenced_types, extracted):
-                referenced_types = append_string(referenced_types, extracted)
-            field_index += 1
-        struct_index += 1
-    enum_index = 0
-    while True:
-        if enum_index >= len(context.enums):
-            break
-        enum_info = context.enums[enum_index]
-        variant_index = 0
-        while True:
-            if variant_index >= len(enum_info.variants):
-                break
-            variant = enum_info.variants[variant_index]
-            variant_field_index = 0
-            while True:
-                if variant_field_index >= len(variant.fields):
-                    break
-                field_type = variant.fields[variant_field_index].llvm_type
-                extracted = extract_struct_type_from_llvm(field_type)
-                if len(extracted) > 0  and  not string_array_contains(referenced_types, extracted):
-                    referenced_types = append_string(referenced_types, extracted)
-                variant_field_index += 1
-            variant_index += 1
-        enum_index += 1
-    func_index = 0
-    while True:
-        if func_index >= len(functions):
-            break
-        func = functions[func_index]
-        return_llvm_type = map_return_type(context, func.return_type)
-        extracted_return = extract_struct_type_from_llvm(return_llvm_type)
-        if len(extracted_return) > 0  and  not string_array_contains(referenced_types, extracted_return):
-            referenced_types = append_string(referenced_types, extracted_return)
-        param_index = 0
-        while True:
-            if param_index >= len(func.parameters):
-                break
-            param_llvm_type = map_parameter_type(context, func.parameters[param_index].type_annotation)
-            extracted_param = extract_struct_type_from_llvm(param_llvm_type)
-            if len(extracted_param) > 0  and  not string_array_contains(referenced_types, extracted_param):
-                referenced_types = append_string(referenced_types, extracted_param)
-            param_index += 1
-        func_index += 1
-    ref_index = 0
-    while True:
-        if ref_index >= len(referenced_types):
-            break
-        ref_type = referenced_types[ref_index]
-        is_defined = False
-        check_index = 0
-        while True:
-            if check_index >= len(context.structs):
-                break
-            if context.structs[check_index].llvm_name == ref_type:
-                is_defined = True
-                break
-            check_index += 1
-        if not is_defined:
-            check_index = 0
-            while True:
-                if check_index >= len(context.enums):
-                    break
-                enum_llvm_name = "%" + sanitize_symbol(context.enums[check_index].name)
-                if enum_llvm_name == ref_type:
-                    is_defined = True
-                    break
-                check_index += 1
-        if not is_defined:
-            lines = append_string(lines, ref_type + " = type opaque")
-        ref_index += 1
-    index = 0
-    emitted_types = []
-    while True:
-        if index >= len(context.structs):
-            break
-        info = context.structs[index]
-        if string_array_contains(emitted_types, info.llvm_name):
-            index += 1
-            continue
-        emitted_types = append_string(emitted_types, info.llvm_name)
-        field_types = []
-        field_index = 0
-        while True:
-            if field_index >= len(info.fields):
-                break
-            field_types = append_string(field_types, info.fields[field_index].llvm_type)
-            field_index += 1
-        body = ""
-        if len(field_types) == 0:
-            body = "{}"
-        else:
-            body = "{ " + join_with_separator(field_types, ", ") + " }"
-        lines = append_string(lines, info.llvm_name + " = type " + body)
-        index += 1
-    return lines
-
-def render_enum_type_definitions(context):
-    lines = []
-    emitted_types = []
-    index = 0
-    while True:
-        if index >= len(context.enums):
-            break
-        enum_info = context.enums[index]
-        enum_llvm_name = "%" + sanitize_symbol(enum_info.name)
-        if string_array_contains(emitted_types, enum_llvm_name):
-            index += 1
-            continue
-        emitted_types = append_string(emitted_types, enum_llvm_name)
-        llvm_tag_type = "i32"
-        if enum_info.tag_type == "i8":
-            llvm_tag_type = "i8"
-        if enum_info.tag_type == "i16":
-            llvm_tag_type = "i16"
-        if enum_info.tag_type == "i32":
-            llvm_tag_type = "i32"
-        if enum_info.tag_type == "i64":
-            llvm_tag_type = "i64"
-        max_payload_size = 0
-        variant_idx = 0
-        while True:
-            if variant_idx >= len(enum_info.variants):
-                break
-            variant = enum_info.variants[variant_idx]
-            if variant.size > max_payload_size:
-                max_payload_size = variant.size
-            variant_idx += 1
-        payload_repr = ""
-        if max_payload_size > 0:
-            payload_repr = ", [" + number_to_string(max_payload_size) + " x i8]"
-        body = "{ " + llvm_tag_type + payload_repr + " }"
-        lines = append_string(lines, enum_info.llvm_name + " = type " + body)
-        index += 1
-    return lines
-
-def render_interface_type_definitions(context):
-    lines = []
-    index = 0
-    while True:
-        if index >= len(context.interfaces):
-            break
-        interface_info = context.interfaces[index]
-        body = "{ i8*, i8* }"
-        lines = append_string(lines, interface_info.llvm_name + " = type " + body)
-        index += 1
-    return lines
-
-def render_vtable_type_definitions(context):
-    lines = []
-    index = 0
-    while True:
-        if index >= len(context.vtables):
-            break
-        vtable = context.vtables[index]
-        entry_types = []
-        entry_index = 0
-        while True:
-            if entry_index >= len(vtable.entries):
-                break
-            entry_types = append_string(entry_types, vtable.entries[entry_index].function_pointer_type)
-            entry_index += 1
-        body = ""
-        if len(entry_types) == 0:
-            body = "{}"
-        else:
-            body = "{ " + join_with_separator(entry_types, ", ") + " }"
-        lines = append_string(lines, vtable.llvm_type_name + " = type " + body)
-        index += 1
-    return lines
-
-def render_vtable_constants(context):
-    lines = []
-    index = 0
-    while True:
-        if index >= len(context.vtables):
-            break
-        vtable = context.vtables[index]
-        entry_values = []
-        entry_index = 0
-        while True:
-            if entry_index >= len(vtable.entries):
-                break
-            entry = vtable.entries[entry_index]
-            sanitized_method = sanitize_symbol(entry.method_name)
-            cast_value = "bitcast (" + entry.function_pointer_type + " @" + sanitized_method + " to " + entry.function_pointer_type + ")"
-            typed_value = entry.function_pointer_type + " " + cast_value
-            entry_values = append_string(entry_values, typed_value)
-            entry_index += 1
-        body = ""
-        if len(entry_values) == 0:
-            body = "zeroinitializer"
-        else:
-            body = "{ " + join_with_separator(entry_values, ", ") + " }"
-        lines = append_string(lines, vtable.llvm_global_name + " = internal constant " + vtable.llvm_type_name + " " + body)
-        index += 1
-    return lines
-
-def is_entry_point(entry_points, function_name):
-    index = 0
-    while True:
-        if index >= len(entry_points):
-            break
-        if entry_points[index] == function_name:
-            return True
-        index += 1
-    return False
-
-def collect_exported_symbol_names(imports):
-    names = []
+def collect_imported_module_context(imports):
+    # effects: io
+    manifests = []
+    native_texts = []
+    diagnostics = []
+    seen = []
     index = 0
     while True:
         if index >= len(imports):
             break
-        entry = imports[index]
-        if entry.kind == "export":
-            specifiers = entry.specifiers
-            spec_index = 0
-            while True:
-                if spec_index >= len(specifiers):
-                    break
-                exported = specifiers[spec_index].name
-                if len(exported) > 0  and  not string_array_contains(names, exported):
-                    names = append_string(names, exported)
-                spec_index += 1
+        module_path = imports[index].module
+        slug = resolve_import_module_slug(module_path)
+        if len(slug) == 0:
+            index += 1
+            continue
+        if string_array_contains(seen, slug):
+            index += 1
+            continue
+        seen = append_string(seen, slug)
+        manifest_path = layout_manifest_path_for_slug(slug)
+        native_text_path = native_text_path_for_slug(slug)
+        manifest_structs = []
+        manifest_enums = []
+        if fs.exists(manifest_path):
+            manifest_contents = fs.readFile(manifest_path)
+            parsed_manifest = parse_layout_manifest(manifest_contents)
+            manifest_structs = parsed_manifest.structs
+            manifest_enums = parsed_manifest.enums
+        else:
+            diagnostics = (diagnostics) + (["layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")"])
+        native_text = ""
+        if fs.exists(native_text_path):
+            native_text = fs.readFile(native_text_path)
+        else:
+            diagnostics = (diagnostics) + (["native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")"])
+        manifests = (manifests) + ([LayoutManifest(structs=manifest_structs, enums=manifest_enums, diagnostics=[])])
+        native_texts = (native_texts) + ([native_text])
         index += 1
-    return names
+    return ImportedModuleContext(manifests=manifests, native_texts=native_texts, diagnostics=diagnostics)
 
-def is_exported_symbol(exported_symbols, function_name):
+def resolve_import_module_slug(module):
+    trimmed = trim_text(module)
+    if len(trimmed) == 0:
+        return ""
+    normalized = normalize_import_module_path(trimmed)
+    parts = []
+    segment = ""
     index = 0
     while True:
-        if index >= len(exported_symbols):
+        if index >= len(normalized):
             break
-        if exported_symbols[index] == function_name:
-            return True
+        ch = normalized[index]
+        if ch == "/":
+            if len(segment) > 0:
+                parts = append_string(parts, segment)
+            segment = ""
+        else:
+            segment = segment + ch
         index += 1
-    return False
-
-def should_internalize_function(function, entry_points, exported_symbols, imported_functions):
-    if function.is_extern:
-        return False
-    if is_entry_point(entry_points, function.name):
-        return False
-    if is_exported_symbol(exported_symbols, function.name):
-        return False
-    sanitized = sanitize_symbol(function.name)
-    if len(sanitized) > 0  and  sanitized[0] == "_":
-        return True
-    if find_function_by_name(imported_functions, function.name) != None:
-        return True
-    return True
-
-def is_ascii_uppercase(ch):
-    if len(ch) == 0:
-        return False
-    code = char_code(ch)
-    return code >= char_code("A")  and  code <= char_code("Z")
-
-def looks_like_user_type(annotation):
-    trimmed = trim_text(annotation)
-    if len(trimmed) == 0:
-        return False
-    first = trimmed[0]
-    if is_ascii_uppercase(first):
-        return True
-    index = 1
+    if len(segment) > 0:
+        parts = append_string(parts, segment)
+    resolved = []
+    index = 0
     while True:
-        if index >= len(trimmed):
+        if index >= len(parts):
             break
-        current = trimmed[index]
-        if current == "."  and  index + 1 < len(trimmed):
-            next = trimmed[index + 1]
-            if is_ascii_uppercase(next):
-                return True
+        part = parts[index]
+        if len(part) == 0  or  part == ".":
+            index += 1
+            continue
+        if part == "..":
+            if len(resolved) > 0:
+                shortened = []
+                drop_index = 0
+                limit = len(resolved) - 1
+                while True:
+                    if drop_index >= limit:
+                        break
+                    shortened = append_string(shortened, resolved[drop_index])
+                    drop_index += 1
+                resolved = shortened
+            index += 1
+            continue
+        resolved = append_string(resolved, part)
         index += 1
-    return False
+    return join_with_separator(resolved, "/")
 
-def map_type_annotation(annotation):
-    trimmed = trim_text(annotation)
-    if len(trimmed) == 0:
-        return "void"
-    normalized = unwrap_move_wrapper(trimmed)
-    if starts_with(normalized, "*"):
-        remainder = trim_text(substring(normalized, 1, len(normalized)))
-        if starts_with(remainder, "mut"):
-            remainder = trim_text(substring(remainder, 3, len(remainder)))
-        if remainder == "opaque":
-            return "i8*"
-        if len(remainder) == 0:
-            return "i8*"
-        inner = map_type_annotation(remainder)
-        if len(inner) == 0  or  inner == "void":
-            return "i8*"
-        if inner[len(inner) - 1] == "*":
-            return inner
-        return inner + "*"
-    if len(normalized) > 0:
-        optional_marker = normalized[len(normalized) - 1]
-        if optional_marker == "?":
-            inner_annotation = trim_text(substring(normalized, 0, len(normalized) - 1))
-            if len(inner_annotation) == 0:
-                return "i8*"
-            inner_type = map_type_annotation(inner_annotation)
-            if len(inner_type) == 0  or  inner_type == "void":
-                return "i8*"
-            if len(inner_type) > 0  and  inner_type[len(inner_type) - 1] == "*":
-                return inner_type
-            return inner_type + "*"
-    if normalized == "number":
-        return "double"
-    if normalized == "boolean"  or  normalized == "bool":
-        return "i1"
-    if normalized == "usize":
-        return "i64"
-    if normalized == "int"  or  normalized == "i64":
-        return "i64"
-    if normalized == "i32":
-        return "i32"
-    if normalized == "u8":
-        return "i8"
-    if normalized == "string":
-        return "i8*"
-    if normalized == "void":
-        return "void"
-    if len(normalized) > 2:
-        suffix = substring(normalized, len(normalized) - 2, len(normalized))
-        if suffix == "[]":
-            element_annotation = trim_text(substring(normalized, 0, len(normalized) - 2))
-            element_type = map_type_annotation(element_annotation)
-            if len(element_type) == 0:
-                return "i8*"
-            if not annotation_is_array(element_annotation)  and  layout_annotation_represents_user_value(element_annotation)  and  ends_with_pointer_suffix(element_type):
-                stripped_element = strip_pointer_suffix(element_type)
-                if len(stripped_element) > 0:
-                    element_type = stripped_element
-            aggregate = array_struct_type_for_element(element_type)
-            return aggregate + "*"
-    if looks_like_user_type(normalized):
-        sanitized = sanitize_symbol(normalized)
-        return "%" + sanitized + "*"
-    return "i8*"
+def layout_manifest_path_for_slug(slug):
+    return "build/stage2/" + slug + ".layout-manifest"
 
-def map_struct_field_annotation(annotation):
-    result = map_type_annotation(annotation)
-    if result == "void":
-        return ""
+def native_text_path_for_slug(slug):
+    return "build/stage2/" + slug + ".sfn-asm"
+
+def normalize_import_module_path(value):
+    result = ""
+    index = 0
+    while True:
+        if index >= len(value):
+            break
+        ch = value[index]
+        if ch == "\\":
+            result = result + "/"
+        else:
+            result = result + ch
+        index += 1
     return result
 
-def layout_annotation_requires_pointer(annotation):
-    trimmed = trim_text(annotation)
-    if len(trimmed) == 0:
-        return False
-    normalized = unwrap_move_wrapper(trimmed)
-    if len(normalized) == 0:
-        return False
-    if starts_with(normalized, "mut "):
-        remainder = trim_text(substring(normalized, 4, len(normalized)))
-        if len(remainder) == 0:
-            return False
-        return layout_annotation_requires_pointer(remainder)
-    if len(normalized) > 0:
-        first = normalized[0]
-        if first == "&":
-            return True
-    if len(normalized) > 0:
-        last = normalized[len(normalized) - 1]
-        if last == "?":
-            return True
-    if len(normalized) > 2:
-        suffix = substring(normalized, len(normalized) - 2, len(normalized))
-        if suffix == "[]":
-            return True
-    return False
+def replace_native_struct(values, index, value):
+    result = []
+    current = 0
+    while True:
+        if current >= len(values):
+            break
+        if current == index:
+            result = append_native_struct(result, value)
+        else:
+            result = append_native_struct(result, values[current])
+        current += 1
+    return result
 
-def layout_annotation_base_type(annotation):
-    trimmed = trim_text(annotation)
-    if len(trimmed) == 0:
-        return ""
-    normalized = unwrap_move_wrapper(trimmed)
-    if len(normalized) == 0:
-        return ""
-    if starts_with(normalized, "mut "):
-        remainder = trim_text(substring(normalized, 4, len(normalized)))
-        return layout_annotation_base_type(remainder)
-    if len(normalized) > 0:
-        first = normalized[0]
-        if first == "&":
-            inner_reference = trim_text(substring(normalized, 1, len(normalized)))
-            return layout_annotation_base_type(inner_reference)
-    if len(normalized) > 0:
-        last = normalized[len(normalized) - 1]
-        if last == "?":
-            inner_optional = trim_text(substring(normalized, 0, len(normalized) - 1))
-            return layout_annotation_base_type(inner_optional)
-    if len(normalized) > 2:
-        suffix = substring(normalized, len(normalized) - 2, len(normalized))
-        if suffix == "[]":
-            element = trim_text(substring(normalized, 0, len(normalized) - 2))
-            return layout_annotation_base_type(element)
-    return normalized
+def replace_native_enum(values, index, value):
+    result = []
+    current = 0
+    while True:
+        if current >= len(values):
+            break
+        if current == index:
+            result = append_native_enum(result, value)
+        else:
+            result = append_native_enum(result, values[current])
+        current += 1
+    return result
 
-def annotation_is_array(annotation):
-    trimmed = trim_text(annotation)
-    if len(trimmed) < 3:
-        return False
-    suffix = substring(trimmed, len(trimmed) - 2, len(trimmed))
-    return suffix == "[]"
-
-def layout_annotation_represents_user_value(annotation):
-    if layout_annotation_requires_pointer(annotation):
-        return False
-    base = layout_annotation_base_type(annotation)
-    if len(base) == 0:
-        return False
-    if base == "number":
-        return False
-    if base == "boolean"  or  base == "bool":
-        return False
-    if base == "int"  or  base == "i64":
-        return False
-    if base == "i32":
-        return False
-    if base == "string":
-        return False
-    if base == "void":
-        return False
-    if contains_text(base, "<"):
-        return False
-    if contains_text(base, ">"):
-        return False
-    if looks_like_user_type(base):
-        return True
-    return False
-
-def find_struct_info_by_name(context, name):
+def find_struct_index(structs, name):
     index = 0
     while True:
-        if index >= len(context.structs):
+        if index >= len(structs):
             break
-        info = context.structs[index]
-        if info.name == name:
-            return info
-        index += 1
-    return None
-
-def find_interface_info_by_name(context, name):
-    index = 0
-    while True:
-        if index >= len(context.interfaces):
-            break
-        info = context.interfaces[index]
-        if info.name == name:
-            return info
-        index += 1
-    return None
-
-def find_vtable_for_struct_interface(context, struct_name, interface_name):
-    index = 0
-    while True:
-        if index >= len(context.vtables):
-            break
-        vtable = context.vtables[index]
-        if vtable.struct_name == struct_name  and  vtable.interface_name == interface_name:
-            return vtable
-        index += 1
-    return None
-
-def find_struct_info_by_llvm_type(context, llvm_type):
-    trimmed = trim_text(llvm_type)
-    index = 0
-    while True:
-        if index >= len(context.structs):
-            break
-        info = context.structs[index]
-        if info.llvm_name == trimmed:
-            return info
-        index += 1
-    return None
-
-def find_struct_field_index(struct_info, field_name):
-    index = 0
-    while True:
-        if index >= len(struct_info.fields):
-            break
-        field = struct_info.fields[index]
-        if field.name == field_name:
+        if structs[index].name == name:
             return index
         index += 1
     return -1
 
-def find_enum_info_by_llvm_type(context, llvm_type):
-    trimmed = trim_text(llvm_type)
+def find_enum_index(enums, name):
     index = 0
     while True:
-        if index >= len(context.enums):
+        if index >= len(enums):
             break
-        info = context.enums[index]
-        if info.llvm_name == trimmed:
-            return info
+        if enums[index].name == name:
+            return index
         index += 1
-    return None
+    return -1
 
-def resolve_struct_info_from_llvm_type(context, llvm_type):
-    candidate = trim_text(llvm_type)
-    if len(candidate) == 0:
-        return None
-    if ends_with_pointer_suffix(candidate):
-        candidate = strip_pointer_suffix(candidate)
-    return find_struct_info_by_llvm_type(context, candidate)
+def apply_layout_manifest_to_module(structs, enums, manifest):
+    if manifest == None:
+        return LayoutManifestApplication(structs=structs, enums=enums, diagnostics=[])
+    return apply_layout_manifest_entries(structs, enums, manifest)
 
-def lookup_allocation_info(context, llvm_type):
-    trimmed = trim_text(llvm_type)
-    if len(trimmed) == 0:
-        return None
-    if ends_with_pointer_suffix(trimmed):
-        return None
-    if trimmed == "double":
-        return TypeAllocationInfo(llvm_type=trimmed, size=8, align=8)
-    if trimmed == "i64"  or  trimmed == "int":
-        return TypeAllocationInfo(llvm_type=trimmed, size=8, align=8)
-    if trimmed == "i32":
-        return TypeAllocationInfo(llvm_type=trimmed, size=4, align=4)
-    if trimmed == "i1":
-        return TypeAllocationInfo(llvm_type=trimmed, size=1, align=1)
-    if trimmed == "i8":
-        return TypeAllocationInfo(llvm_type=trimmed, size=1, align=1)
-    struct_info = find_struct_info_by_llvm_type(context, trimmed)
-    if struct_info != None:
-        align_value = struct_info.align
-        if align_value <= 0:
-            align_value = 1
-        return TypeAllocationInfo(llvm_type=struct_info.llvm_name, size=struct_info.size, align=align_value)
-    enum_info = find_enum_info_by_llvm_type(context, trimmed)
-    if enum_info != None:
-        align_value = enum_info.align
-        if align_value <= 0:
-            align_value = 1
-        return TypeAllocationInfo(llvm_type=enum_info.llvm_name, size=enum_info.size, align=align_value)
-    return None
+def apply_layout_manifest_entries(structs, enums, manifest):
+    diagnostics = []
+    updated_structs = structs
+    struct_index = 0
+    while True:
+        if struct_index >= len(manifest.structs):
+            break
+        layout_struct = manifest.structs[struct_index]
+        target_index = find_struct_index(updated_structs, layout_struct.name)
+        if target_index < 0:
+            diagnostics = append_string(diagnostics, "layout manifest: struct `" + layout_struct.name + "` missing from native module")
+        else:
+            target = updated_structs[target_index]
+            replaced = NativeStruct(name=target.name, fields=target.fields, methods=target.methods, implements=target.implements, layout=layout_struct.layout)
+            updated_structs = replace_native_struct(updated_structs, target_index, replaced)
+        struct_index += 1
+    updated_enums = enums
+    enum_index = 0
+    while True:
+        if enum_index >= len(manifest.enums):
+            break
+        layout_enum = manifest.enums[enum_index]
+        target_index = find_enum_index(updated_enums, layout_enum.name)
+        if target_index < 0:
+            diagnostics = append_string(diagnostics, "layout manifest: enum `" + layout_enum.name + "` missing from native module")
+        else:
+            target = updated_enums[target_index]
+            replaced = NativeEnum(name=target.name, variants=target.variants, layout=layout_enum.layout)
+            updated_enums = replace_native_enum(updated_enums, target_index, replaced)
+        enum_index += 1
+    return LayoutManifestApplication(structs=updated_structs, enums=updated_enums, diagnostics=diagnostics)
 
-def resolve_struct_info_for_method_target(base, bindings, locals, context):
-    trimmed = trim_text(base)
-    if len(trimmed) == 0:
-        return None
-    if is_simple_identifier(trimmed):
-        parameter = find_parameter_binding(bindings, trimmed)
-        if parameter != None:
-            info = resolve_struct_info_from_llvm_type(context, parameter.llvm_type)
-            if info != None:
-                return info
-        local = find_local_binding(locals, trimmed)
-        if local != None:
-            info = resolve_struct_info_from_llvm_type(context, local.llvm_type)
-            if info != None:
-                return info
-    by_name = find_struct_info_by_name(context, trimmed)
-    if by_name != None:
-        return by_name
-    return None
+def lower_to_llvm(native_module):
+    # effects: io
+    artifact = select_text_artifact(native_module.artifacts)
+    if artifact == None:
+        return lower_to_llvm_with_context(native_module, [], [], [])
+    parse = parse_native_artifact(artifact.contents)
+    import_context = collect_imported_module_context(parse.imports)
+    return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
-def resolve_interface_info_for_method_target(base, bindings, locals, context):
-    trimmed = trim_text(base)
-    if len(trimmed) == 0:
-        return None
-    if is_simple_identifier(trimmed):
-        parameter = find_parameter_binding(bindings, trimmed)
-        if parameter != None:
-            type_name = parameter.llvm_type
-            if substring(type_name, 0, 7) == "%trait.":
-                interface_name = substring(type_name, 7, len(type_name))
-                info = find_interface_info_by_name(context, interface_name)
-                if info != None:
-                    return info
-            info = find_interface_info_by_name(context, type_name)
-            if info != None:
-                return info
-        local = find_local_binding(locals, trimmed)
-        if local != None:
-            type_name = local.llvm_type
-            if substring(type_name, 0, 7) == "%trait.":
-                interface_name = substring(type_name, 7, len(type_name))
-                info = find_interface_info_by_name(context, interface_name)
-                if info != None:
-                    return info
-            info = find_interface_info_by_name(context, type_name)
-            if info != None:
-                return info
-    return None
+def lower_to_llvm_for_tests(native_module):
+    # effects: io
+    artifact = select_text_artifact(native_module.artifacts)
+    if artifact == None:
+        return lower_to_llvm_with_context_for_tests(native_module, [], [], [])
+    parse = parse_native_artifact(artifact.contents)
+    import_context = collect_imported_module_context(parse.imports)
+    return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
-def find_struct_field_info(info, field_name):
+def lower_to_llvm_with_manifests(native_module, imported_manifests):
+    return lower_to_llvm_with_context(native_module, imported_manifests, [], [])
+
+def lower_to_llvm_with_context_for_tests(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
+    base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics)
+    if len(base.ir) == 0:
+        return base
+    artifact = select_text_artifact(native_module.artifacts)
+    if artifact == None:
+        return base
+    parse = parse_native_artifact(artifact.contents)
+    tests = []
+    has_main = False
     index = 0
     while True:
-        if index >= len(info.fields):
+        if index >= len(parse.functions):
             break
-        field = info.fields[index]
-        if field.name == field_name:
-            return field
+        fun = parse.functions[index]
+        if fun.name == "main":
+            has_main = True
+        if len(fun.name) >= 5  and  substring(fun.name, 0, 5) == "test:":
+            tests = (tests) + ([fun])
         index += 1
-    return None
+    if len(tests) == 0:
+        return base
+    if has_main:
+        updated = base
+        updated.diagnostics = (updated.diagnostics) + (["llvm lowering (test): module defines `main`; skipping synthesized test harness"])
+        return updated
+    harness = render_test_harness_main(tests)
+    updated = base
+    if len(updated.ir) > 0:
+        updated.ir = updated.ir + "\n"
+    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n"
+    return updated
 
-def find_variant_field_info(variant, field_name):
+def module_global_symbol(name):
+    return "@global." + sanitize_symbol(name)
+
+def module_init_symbol(module_name):
+    return "@sailfin_module_init__" + sanitize_symbol(module_name)
+
+def module_user_main_symbol(module_name):
+    return "sailfin_user_main__" + sanitize_symbol(module_name)
+
+def lower_module_bindings_to_globals(bindings, context, module_name):
+    diagnostics = []
+    preamble_lines = []
+    init_lines = []
+    locals = []
+    collected_string_constants = empty_string_constant_set()
+    init_symbol = module_init_symbol(module_name)
+    needs_init = False
+    if len(bindings) == 0:
+        return ModuleGlobalLoweringResult(preamble_lines=[], init_function_lines=[], init_function_symbol=init_symbol, needs_init_call=False, locals=[], string_constants=collected_string_constants, diagnostics=[])
+    scope_id = format_root_scope_id("module")
+    scope_depth = 0
     index = 0
     while True:
-        if index >= len(variant.fields):
+        if index >= len(bindings):
             break
-        field = variant.fields[index]
-        if field.name == field_name:
-            return field
+        binding = bindings[index]
+        type_annotation = trim_text(binding.type_annotation)
+        effective_type_annotation = binding.type_annotation
+        if len(type_annotation) == 0  and  binding.value != None:
+            init_expr = trim_text(binding.value)
+            if is_string_literal(init_expr):
+                type_annotation = "string"
+                effective_type_annotation = "string"
+        if len(type_annotation) == 0:
+            index += 1
+            continue
+        name = binding.name
+        global_name = module_global_symbol(name)
+        llvm_type = ""
+        if len(type_annotation) > 0:
+            llvm_type = map_local_type(context, type_annotation)
+        if len(llvm_type) == 0:
+            diagnostics = append_string(diagnostics, "llvm lowering: module binding `" + name + "` has unsupported type annotation `" + effective_type_annotation + "`")
+            llvm_type = "double"
+        if llvm_type == "i8*":
+            preamble_lines = append_string(preamble_lines, global_name + " = global i8* null")
+            if binding.value != None:
+                needs_init = True
+        else:
+            initializer_text = default_return_literal(llvm_type)
+            if binding.value != None:
+                init_expr = trim_text(binding.value)
+                if llvm_type == "double"  and  is_number_literal(init_expr):
+                    initializer_text = normalise_number_literal(init_expr)
+                else:
+                    if llvm_type == "i64"  and  is_integer_literal(init_expr):
+                        initializer_text = init_expr
+                    else:
+                        if llvm_type == "i32"  and  is_integer_literal(init_expr):
+                            initializer_text = init_expr
+                        else:
+                            if llvm_type == "i1"  and  is_boolean_literal(init_expr):
+                                initializer_text = "0"
+                                if matches_case_insensitive(init_expr, "true"):
+                                    initializer_text = "1"
+                            else:
+                                needs_init = True
+            preamble_lines = append_string(preamble_lines, global_name + " = global " + llvm_type + " " + initializer_text)
+        locals = append_local_binding(locals, LocalBinding(name=name, pointer=global_name, llvm_type=llvm_type, type_annotation=effective_type_annotation, ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
         index += 1
-    return None
+    if not needs_init:
+        return ModuleGlobalLoweringResult(preamble_lines=preamble_lines, init_function_lines=[], init_function_symbol=init_symbol, needs_init_call=False, locals=locals, string_constants=collected_string_constants, diagnostics=diagnostics)
+    init_lines = (init_lines) + (["define internal void " + init_symbol + "() {", "block.entry:"])
+    init_index = 0
+    current_temp = 0
+    current_lines = init_lines
+    while True:
+        if init_index >= len(bindings):
+            break
+        binding = bindings[init_index]
+        type_annotation = trim_text(binding.type_annotation)
+        if len(type_annotation) == 0  and  binding.value != None:
+            init_expr = trim_text(binding.value)
+            if is_string_literal(init_expr):
+                type_annotation = "string"
+        if len(type_annotation) == 0:
+            init_index += 1
+            continue
+        if binding.value == None:
+            init_index += 1
+            continue
+        name = binding.name
+        global_name = module_global_symbol(name)
+        local = find_local_binding(locals, name)
+        if local == None:
+            init_index += 1
+            continue
+        llvm_type = local.llvm_type
+        init_expr = trim_text(binding.value)
+        if llvm_type == "i8*":
+            lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type)
+            diagnostics = (diagnostics) + (lowered.diagnostics)
+            current_lines = lowered.lines
+            current_temp = lowered.temp_index
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+            if lowered.operand != None:
+                current_lines = append_string(current_lines, "  store i8* " + lowered.operand.value + ", i8** " + global_name)
+            else:
+                diagnostics = append_string(diagnostics, "llvm lowering: failed to initialize module string binding `" + name + "`")
+        else:
+            should_store = True
+            if llvm_type == "double"  and  is_number_literal(init_expr):
+                should_store = False
+            if llvm_type == "i64"  and  is_integer_literal(init_expr):
+                should_store = False
+            if llvm_type == "i32"  and  is_integer_literal(init_expr):
+                should_store = False
+            if llvm_type == "i1"  and  is_boolean_literal(init_expr):
+                should_store = False
+            if should_store:
+                lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type)
+                diagnostics = (diagnostics) + (lowered.diagnostics)
+                current_lines = lowered.lines
+                current_temp = lowered.temp_index
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
+                if lowered.operand != None:
+                    coerced = coerce_operand_to_type(lowered.operand, llvm_type, current_temp, current_lines)
+                    diagnostics = (diagnostics) + (coerced.diagnostics)
+                    current_lines = coerced.lines
+                    current_temp = coerced.temp_index
+                    if coerced.operand != None:
+                        current_lines = append_string(current_lines, "  store " + llvm_type + " " + coerced.operand.value + ", " + llvm_type + "* " + global_name)
+        init_index += 1
+    current_lines = append_string(current_lines, "  ret void")
+    current_lines = append_string(current_lines, "}")
+    return ModuleGlobalLoweringResult(preamble_lines=preamble_lines, init_function_lines=current_lines, init_function_symbol=init_symbol, needs_init_call=True, locals=locals, string_constants=collected_string_constants, diagnostics=diagnostics)
 
-def resolve_struct_info_for_literal(context, type_name):
-    trimmed = trim_text(type_name)
-    if len(trimmed) == 0:
-        return None
-    candidates = [trimmed]
-    generic_index = index_of(trimmed, "<")
-    if generic_index >= 0:
-        base = trim_text(substring(trimmed, 0, generic_index))
-        if len(base) > 0:
-            if not string_array_contains(candidates, base):
-                candidates = append_string(candidates, base)
-    last_dot = find_last_index_of_char(trimmed, ".")
-    if last_dot >= 0:
-        tail_full = trim_text(substring(trimmed, last_dot + 1, len(trimmed)))
-        if len(tail_full) > 0:
-            if not string_array_contains(candidates, tail_full):
-                candidates = append_string(candidates, tail_full)
-            tail_generic_index = index_of(tail_full, "<")
-            if tail_generic_index >= 0:
-                tail_base = trim_text(substring(tail_full, 0, tail_generic_index))
-                if len(tail_base) > 0:
-                    if not string_array_contains(candidates, tail_base):
-                        candidates = append_string(candidates, tail_base)
+def lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
+    diagnostics = []
+    if len(imported_diagnostics) > 0:
+        diagnostics = (diagnostics) + (imported_diagnostics)
+    artifact = select_text_artifact(native_module.artifacts)
+    if artifact == None:
+        diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
+        empty_constants = empty_string_constant_set()
+        return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=empty_constants)
+    parse = parse_native_artifact(artifact.contents)
+    diagnostics = (diagnostics) + (parse.diagnostics)
+    exported_symbols = collect_exported_symbol_names(parse.imports)
+    manifest_artifact = select_layout_manifest_artifact(native_module.artifacts)
+    module_manifest = None
+    if manifest_artifact != None:
+        parsed_manifest = parse_layout_manifest(manifest_artifact.contents)
+        diagnostics = (diagnostics) + (parsed_manifest.diagnostics)
+        module_manifest = parsed_manifest
+    manifest_application = apply_layout_manifest_to_module(parse.structs, parse.enums, module_manifest)
+    diagnostics = (diagnostics) + (manifest_application.diagnostics)
+    module_structs = manifest_application.structs
+    module_enums = manifest_application.enums
+    imported_structs = []
+    imported_enums = []
+    imported_interfaces = []
+    imported_functions = []
+    imported_struct_methods = []
+    manifest_count = len(imported_manifests)
+    text_index = 0
+    while True:
+        if text_index >= len(imported_native_texts):
+            break
+        native_text = imported_native_texts[text_index]
+        manifest_for_module = None
+        if text_index < manifest_count:
+            candidate_manifest = imported_manifests[text_index]
+            manifest_for_module = candidate_manifest
+        if len(native_text) == 0:
+            if manifest_for_module != None:
+                manifest_only = manifest_for_module
+                imported_structs = (imported_structs) + (manifest_only.structs)
+                imported_enums = (imported_enums) + (manifest_only.enums)
+            text_index += 1
+            continue
+        imported_parse = parse_native_artifact(native_text)
+        applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module)
+        imported_structs = (imported_structs) + (applied_import.structs)
+        imported_enums = (imported_enums) + (applied_import.enums)
+        imported_interfaces = (imported_interfaces) + (imported_parse.interfaces)
+        imported_functions = (imported_functions) + (imported_parse.functions)
+        imported_methods = flatten_struct_methods(applied_import.structs)
+        imported_struct_methods = (imported_struct_methods) + (imported_methods)
+        text_index += 1
+    if len(imported_native_texts) < manifest_count:
+        manifest_index = len(imported_native_texts)
+        while True:
+            if manifest_index >= manifest_count:
+                break
+            leftover_manifest = imported_manifests[manifest_index]
+            imported_structs = (imported_structs) + (leftover_manifest.structs)
+            imported_enums = (imported_enums) + (leftover_manifest.enums)
+            manifest_index += 1
+    combined_structs = (module_structs) + (imported_structs)
+    combined_enums = (module_enums) + (imported_enums)
+    combined_interfaces = (parse.interfaces) + (imported_interfaces)
+    trait_metadata = build_trait_metadata(combined_interfaces, combined_structs)
+    fixed_enums = fixup_enum_layouts(combined_enums)
+    diagnostics = (diagnostics) + (fixed_enums.diagnostics)
+    type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces)
+    diagnostics = (diagnostics) + (type_build.diagnostics)
+    type_context = type_build.context
+    module_struct_methods = flatten_struct_methods(module_structs)
+    local_functions = concat_native_functions(parse.functions, module_struct_methods)
+    context_functions = concat_native_functions(local_functions, imported_functions)
+    context_functions = concat_native_functions(context_functions, imported_struct_methods)
+    runtime_helpers = collect_runtime_helper_targets(local_functions)
+    runtime_helpers = append_unique_effect(runtime_helpers, "get_field")
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.concat")
+    runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string")
+    runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal")
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check")
+    runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent")
+    direct_effects = collect_direct_function_effects(context_functions)
+    call_graph = collect_function_call_graph(context_functions)
+    aggregated_effects = propagate_function_effects(direct_effects, call_graph)
+    function_effects = []
+    lifetime_regions = []
+    lines = []
+    lines = append_string(lines, "source_filename = \"" + module_source_filename(native_module.module_name) + "\"")
+    lines = append_string(lines, "")
+    trait_lines = render_trait_metadata_comments(trait_metadata)
+    if len(trait_lines) > 0:
+        lines = (lines) + (trait_lines)
+        lines = append_string(lines, "")
+    struct_type_lines = render_struct_type_definitions(type_context, context_functions)
+    if len(struct_type_lines) > 0:
+        lines = (lines) + (struct_type_lines)
+        lines = append_string(lines, "")
+    enum_type_lines = render_enum_type_definitions(type_context)
+    if len(enum_type_lines) > 0:
+        lines = (lines) + (enum_type_lines)
+        lines = append_string(lines, "")
+    interface_type_lines = render_interface_type_definitions(type_context)
+    if len(interface_type_lines) > 0:
+        lines = (lines) + (interface_type_lines)
+        lines = append_string(lines, "")
+    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFuturePtr = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)", "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
+    vtable_type_lines = render_vtable_type_definitions(type_context)
+    if len(vtable_type_lines) > 0:
+        lines = (lines) + (vtable_type_lines)
+        lines = append_string(lines, "")
+    vtable_const_lines = render_vtable_constants(type_context)
+    if len(vtable_const_lines) > 0:
+        lines = (lines) + (vtable_const_lines)
+        lines = append_string(lines, "")
+    helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions)
+    if len(helper_declarations) > 0:
+        lines = (lines) + (helper_declarations)
+        lines = append_string(lines, "")
+    imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context)
+    if len(imported_declarations) > 0:
+        lines = (lines) + (imported_declarations)
+        lines = append_string(lines, "")
+    if find_function_by_name(context_functions, "malloc") == None:
+        lines = append_string(lines, "declare noalias i8* @malloc(i64)")
+    if find_function_by_name(context_functions, "free") == None:
+        lines = append_string(lines, "declare void @free(i8*)")
+    lines = append_string(lines, "")
+    lines = append_string(lines, "@runtime = external global i8**")
+    lines = append_string(lines, "")
+    module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name)
+    diagnostics = (diagnostics) + (module_globals.diagnostics)
+    if len(module_globals.preamble_lines) > 0:
+        lines = (lines) + (module_globals.preamble_lines)
+        lines = append_string(lines, "")
+    preamble_lines = lines
+    function_lines = []
+    if len(module_globals.init_function_lines) > 0:
+        function_lines = (function_lines) + (module_globals.init_function_lines)
+        function_lines = append_string(function_lines, "")
+    index = 0
+    has_add_function = False
+    all_string_constants = module_globals.string_constants
+    while True:
+        if index >= len(local_functions):
+            break
+        current_function = local_functions[index]
+        aggregated_entry = find_function_effect_entry(aggregated_effects, current_function.name)
+        effective_effects = []
+        if aggregated_entry != None:
+            effective_effects = aggregated_entry.effects
+        function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry(name=current_function.name, effects=effective_effects))
+        lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, exported_symbols, imported_functions, module_globals.locals, module_globals.init_function_symbol, module_globals.needs_init_call)
+        if sanitize_symbol(current_function.name) == "add":
+            has_add_function = True
+        diagnostics = (diagnostics) + (lowered.diagnostics)
+        lifetime_regions = (lifetime_regions) + (lowered.lifetime_regions)
+        all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants)
+        if len(lowered.lines) > 0:
+            function_lines = (function_lines) + (lowered.lines)
+            if index + 1 < len(local_functions):
+                function_lines = append_string(function_lines, "")
+        index += 1
+    if not has_add_function:
+        if len(function_lines) > 0:
+            function_lines = append_string(function_lines, "")
+        function_lines = (function_lines) + (["define internal double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
+    string_constant_lines = render_string_constants(all_string_constants)
+    final_lines = preamble_lines
+    if len(string_constant_lines) > 0:
+        final_lines = (final_lines) + (string_constant_lines)
+        final_lines = append_string(final_lines, "")
+    final_lines = (final_lines) + (function_lines)
+    final_lines = ensure_intrinsic_declarations(final_lines)
+    ir = join_with_separator(final_lines, "\n")
+    manifest = build_capability_manifest(native_module.entry_points, function_effects)
+    output = ir
+    if len(output) > 0:
+        output = output + "\n"
+    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects, lifetime_regions=lifetime_regions, capability_manifest=manifest, string_constants=all_string_constants)
+
+def module_source_filename(module_name):
+    if len(module_name) == 0:
+        return "sailfin"
+    if len(module_name) >= 4:
+        suffix = substring(module_name, len(module_name) - 4, len(module_name))
+        if suffix == ".sfn":
+            return module_name
+    return module_name + ".sfn"
+
+def ensure_intrinsic_declarations(lines):
+    uses_round = False
+    has_round_decl = False
     index = 0
     while True:
-        if index >= len(candidates):
+        if index >= len(lines):
             break
-        candidate = candidates[index]
-        info = find_struct_info_by_name(context, candidate)
-        if info != None:
-            return info
+        line = lines[index]
+        if index_of(line, "call double @round(") >= 0:
+            uses_round = True
+        trimmed = trim_text(line)
+        if starts_with(trimmed, "declare double @round(double)"):
+            has_round_decl = True
         index += 1
-    return None
+    if not uses_round  or  has_round_decl:
+        return lines
+    return insert_string_at(lines, 1, "declare double @round(double)")
 
-def resolve_enum_info_for_literal(context, enum_name):
-    trimmed = trim_text(enum_name)
-    if len(trimmed) == 0:
-        return None
+def insert_string_at(values, insert_index, value):
+    out = []
     index = 0
     while True:
-        if index >= len(context.enums):
+        if index >= len(values):
             break
-        enum_info = context.enums[index]
-        if enum_info.name == trimmed:
-            return enum_info
+        if index == insert_index:
+            out = append_string(out, value)
+        out = append_string(out, values[index])
         index += 1
-    return None
-
-def resolve_enum_variant_info(enum_info, variant_name):
-    trimmed = trim_text(variant_name)
-    if len(trimmed) == 0:
-        return None
-    index = 0
-    while True:
-        if index >= len(enum_info.variants):
-            break
-        variant = enum_info.variants[index]
-        if variant.name == trimmed:
-            return variant
-        index += 1
-    return None
+    if insert_index >= len(values):
+        out = append_string(out, value)
+    return out
 
 def collect_direct_function_effects(functions):
     entries = []
@@ -4154,7 +2563,7 @@ context,
     if lowered_expr.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported throw expression in `" + function_name + "`")
         current_lines = append_string(current_lines, "  unreachable")
-        return ThrowLoweringResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics, string_constants=collected_string_constants)
+        return ThrowLoweringResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics, terminated=True, string_constants=collected_string_constants)
     coerced = coerce_operand_to_type(lowered_expr.operand, "i8*", current_temp, current_lines)
     diagnostics = (diagnostics) + (coerced.diagnostics)
     current_lines = coerced.lines
@@ -4162,13 +2571,13 @@ context,
     if coerced.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce throw value to string in `" + function_name + "`")
         current_lines = append_string(current_lines, "  unreachable")
-        return ThrowLoweringResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics, string_constants=collected_string_constants)
+        return ThrowLoweringResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics, terminated=True, string_constants=collected_string_constants)
     current_lines = append_string(current_lines, "  call void @sailfin_runtime_set_exception(i8* " + coerced.operand.value + ")")
     if llvm_return == "void":
         current_lines = append_string(current_lines, "  ret void")
     else:
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return))
-    return ThrowLoweringResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics, string_constants=collected_string_constants)
+    return ThrowLoweringResult(lines=current_lines, temp_index=current_temp, diagnostics=diagnostics, terminated=True, string_constants=collected_string_constants)
 
 def collect_try_structure(instructions, start_index, end, function_name):
     diagnostics = []
@@ -12191,62 +10600,6 @@ def replace_llvm_operand(values, index, value):
             result = append_llvm_operand(result, values[current])
         current += 1
     return result
-
-def replace_native_struct(values, index, value):
-    result = []
-    current = 0
-    while True:
-        if current >= len(values):
-            break
-        if current == index:
-            result = append_native_struct(result, value)
-        else:
-            result = append_native_struct(result, values[current])
-        current += 1
-    return result
-
-def replace_native_enum(values, index, value):
-    result = []
-    current = 0
-    while True:
-        if current >= len(values):
-            break
-        if current == index:
-            result = append_native_enum(result, value)
-        else:
-            result = append_native_enum(result, values[current])
-        current += 1
-    return result
-
-def find_function_by_name(functions, name):
-    index = 0
-    while True:
-        if index >= len(functions):
-            break
-        if functions[index].name == name:
-            return functions[index]
-        index += 1
-    return None
-
-def find_struct_index(structs, name):
-    index = 0
-    while True:
-        if index >= len(structs):
-            break
-        if structs[index].name == name:
-            return index
-        index += 1
-    return -1
-
-def find_enum_index(enums, name):
-    index = 0
-    while True:
-        if index >= len(enums):
-            break
-        if enums[index].name == name:
-            return index
-        index += 1
-    return -1
 
 def number_to_string(value):
     if value == 0:

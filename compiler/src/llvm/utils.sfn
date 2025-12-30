@@ -4,7 +4,7 @@
 // string manipulation, array helpers, and parsing utilities.
 
 import { substring, char_code, char_at } from "../string_utils";
-import { ParameterBinding, MatchArmMutations } from "./types";
+import { ParameterBinding } from "./types";
 
 // =============================================================================
 // String manipulation
@@ -608,11 +608,6 @@ fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBind
         index += 1;
     }
     return result;
-}
-
-fn append_match_arm_mutations(list -> MatchArmMutations[], arm -> MatchArmMutations) -> MatchArmMutations[] {
-    list.push(arm);
-    return list;
 }
 
 // =============================================================================

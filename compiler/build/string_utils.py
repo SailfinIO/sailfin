@@ -76,4 +76,41 @@ def sanitize_symbol(name):
         result = "_" + result
     return result
 
-__all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "char_at", "sanitize_symbol", "strings_equal"]
+def char_code_at_text(text, index):
+    return char_code(char_at(text, index))
+
+def index_of(value, target):
+    if len(target) == 0:
+        return 0
+    index = 0
+    while True:
+        if index + len(target) > len(value):
+            break
+        match_index = 0
+        matches = True
+        while True:
+            if match_index >= len(target):
+                break
+            if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index):
+                matches = False
+                break
+            match_index += 1
+        if matches:
+            return index
+        index += 1
+    return -1
+
+def find_last_index_of_char(value, target):
+    if len(target) != 1:
+        return -1
+    target_code = char_code_at_text(target, 0)
+    index = len(value)
+    while True:
+        if index <= 0:
+            break
+        index -= 1
+        if char_code_at_text(value, index) == target_code:
+            return index
+    return -1
+
+__all__ = ["clamp", "substring", "find_char", "grapheme_count", "grapheme_at", "char_code", "char_at", "sanitize_symbol", "strings_equal", "index_of", "find_last_index_of_char"]

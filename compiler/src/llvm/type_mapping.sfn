@@ -373,6 +373,41 @@ fn map_struct_field_annotation(annotation -> string) -> string {
     return result;
 }
 
+fn map_struct_type_annotation(annotation -> string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if looks_like_user_type(normalized) {
+        return "%" + sanitize_symbol(normalized);
+    }
+    let mapped = map_type_annotation(normalized);
+    if ends_with_pointer_suffix(mapped) {
+        let stripped = strip_pointer_suffix(mapped);
+        if stripped.length > 0 {
+            return stripped;
+        }
+    }
+    return mapped;
+}
+
+fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> string {
+    let mapped = map_type_annotation(parameter_type);
+    if mapped == "void" {
+        return "";
+    }
+    return mapped;
+}
+
+fn map_local_type(context -> TypeContext, annotation -> string) -> string {
+    let mapped = map_type_annotation(annotation);
+    if mapped == "void" {
+        return "";
+    }
+    return mapped;
+}
+
 // =============================================================================
 // Return Type Mapping
 // =============================================================================

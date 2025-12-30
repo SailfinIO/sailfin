@@ -6,7 +6,7 @@ from compiler.build.ast import Program
 from compiler.build.emitter_sailfin import emit_program
 from compiler.build.emit_native import emit_native, emit_native_with_module_name, EmitNativeResult, NativeModule
 from compiler.build.native_lowering import lower_to_python, LoweredPythonResult
-from compiler.build.native_llvm_lowering import lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult
+from compiler.build.native_llvm_lowering import lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context
 from compiler.build.native_ir import LayoutManifest, parse_layout_manifest
 from compiler.build.string_utils import substring
 from compiler.build.token import Token
@@ -72,6 +72,19 @@ class LLVMCompilationResult:
 
     def __repr__(self):
         return runtime.struct_repr('LLVMCompilationResult', [runtime.struct_field('llvm', self.llvm), runtime.struct_field('native_module', self.native_module)])
+
+class LoweredLLVMResult:
+    def __init__(self, ir, diagnostics, trait_metadata, function_effects, lifetime_regions, capability_manifest, string_constants):
+        self.ir = ir
+        self.diagnostics = diagnostics
+        self.trait_metadata = trait_metadata
+        self.function_effects = function_effects
+        self.lifetime_regions = lifetime_regions
+        self.capability_manifest = capability_manifest
+        self.string_constants = string_constants
+
+    def __repr__(self):
+        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest), runtime.struct_field('string_constants', self.string_constants)])
 
 def compile_to_sailfin(source):
     # effects: io

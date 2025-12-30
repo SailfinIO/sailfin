@@ -11,7 +11,7 @@ import {
     AssignmentParseResult, InlineLetParseResult, TernaryParseResult,
     MemberAccessParse, IndexExpressionParse, RawAddressParseResult, CastParseResult
 } from "./types";
-import { trim_text, append_string, starts_with, ends_with, sanitize_symbol, number_to_string, index_of as utils_index_of, join_with_separator, is_identifier_start_char, is_identifier_part_char } from "./utils";
+import { trim_text, append_string, starts_with, ends_with, sanitize_symbol, number_to_string, join_with_separator, is_identifier_start_char, is_identifier_part_char } from "./utils";
 import { empty_string_constant_set, append_string_constant, find_string_constant } from "./strings";
 
 // =============================================================================
@@ -634,7 +634,10 @@ fn find_top_level_operator(expression -> string, operators -> string) -> Operato
         }
         index += 1;
     }
-    return OperatorMatch { found: candidate_index >= 0, index: candidate_index, symbol: candidate_symbol };
+    // Keep struct literal values simple; our stage2 LLVM lowering has a
+    // lightweight struct-literal parser that can get confused by comparisons.
+    let success = candidate_index >= 0;
+    return OperatorMatch { success: success, index: candidate_index, symbol: candidate_symbol };
 }
 
 fn is_binary_minus(expression -> string, index -> number) -> boolean {
@@ -931,20 +934,20 @@ fn parse_member_access(expression -> string) -> MemberAccessParse {
         index += 1;
     }
     if last_dot < 0 {
-        return MemberAccessParse { found: false, target: "", member: "" };
+        return MemberAccessParse { success: false, base: "", field: "" };
     }
-    let target = trim_text(substring(trimmed, 0, last_dot));
-    let member = trim_text(substring(trimmed, last_dot + 1, trimmed.length));
-    return MemberAccessParse { found: true, target: target, member: member };
+    let base = trim_text(substring(trimmed, 0, last_dot));
+    let field = trim_text(substring(trimmed, last_dot + 1, trimmed.length));
+    return MemberAccessParse { success: true, base: base, field: field };
 }
 
 fn parse_index_expression(expression -> string) -> IndexExpressionParse {
     let trimmed = trim_text(expression);
     if trimmed.length < 3 {
-        return IndexExpressionParse { found: false, target: "", index_expr: "" };
+        return IndexExpressionParse { success: false, base: "", index: "" };
     }
     if trimmed[trimmed.length - 1] != "]" {
-        return IndexExpressionParse { found: false, target: "", index_expr: "" };
+        return IndexExpressionParse { success: false, base: "", index: "" };
     }
     let mut bracket_depth -> number = 0;
     let mut paren_depth -> number = 0;
@@ -1046,11 +1049,11 @@ fn parse_index_expression(expression -> string) -> IndexExpressionParse {
         index -= 1;
     }
     if open_bracket < 0 {
-        return IndexExpressionParse { found: false, target: "", index_expr: "" };
+        return IndexExpressionParse { success: false, base: "", index: "" };
     }
-    let target = trim_text(substring(trimmed, 0, open_bracket));
-    let index_expr = trim_text(substring(trimmed, open_bracket + 1, trimmed.length - 1));
-    return IndexExpressionParse { found: true, target: target, index_expr: index_expr };
+    let base = trim_text(substring(trimmed, 0, open_bracket));
+    let index_value = trim_text(substring(trimmed, open_bracket + 1, trimmed.length - 1));
+    return IndexExpressionParse { success: true, base: base, index: index_value };
 }
 
 // =============================================================================
@@ -1176,11 +1179,11 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
         index += 1;
     }
     if equals_index < 0 {
-        return AssignmentParseResult { found: false, target: "", value: "" };
+        return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
     }
     let target = trim_text(substring(trimmed, 0, equals_index));
     let value = trim_text(substring(trimmed, equals_index + 1, trimmed.length));
-    return AssignmentParseResult { found: true, target: target, value: value };
+    return AssignmentParseResult { success: true, target: target, value: value, operator: "" };
 }
 
 fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
@@ -1201,7 +1204,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
 
     // Find the = sign
     let assignment = parse_assignment_expression(after_mut);
-    if !assignment.found {
+    if !assignment.success {
         diagnostics = append_string(diagnostics, "llvm lowering: inline let expression missing initializer");
         return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: "", diagnostics: diagnostics };
     }
@@ -1213,7 +1216,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
     let mut name -> string = "";
     let mut type_annotation -> string = "";
 
-    let arrow_index = utils_index_of(lhs, "->");
+    let arrow_index = index_of(lhs, "->");
     if arrow_index >= 0 {
         name = trim_text(substring(lhs, 0, arrow_index));
         type_annotation = trim_text(substring(lhs, arrow_index + 2, lhs.length));
@@ -1356,15 +1359,20 @@ fn parse_raw_address_expression(text -> string) -> RawAddressParseResult {
 
 fn parse_cast_expression(text -> string) -> CastParseResult {
     let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        return CastParseResult { recognized: false, success: false, value: "", type_annotation: "", diagnostics: diagnostics };
+    }
 
-    // Look for "as" keyword at top level
+    // Scan for a top-level ` as ` outside of brackets/strings.
     let mut paren_depth -> number = 0;
     let mut bracket_depth -> number = 0;
     let mut brace_depth -> number = 0;
+    let mut angle_depth -> number = 0;
     let mut in_double -> boolean = false;
     let mut in_single -> boolean = false;
     let mut escape_next -> boolean = false;
-    let mut as_index -> number = -1;
+    let mut match_index -> number = -1;
     let mut index -> number = 0;
 
     loop {
@@ -1452,37 +1460,39 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
             index += 1;
             continue;
         }
-        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-            if ch == "a" && index + 2 < trimmed.length {
-                let candidate = substring(trimmed, index, index + 2);
-                if candidate == "as" {
-                    // Check word boundaries
-                    let mut is_word_start -> boolean = index == 0;
-                    if !is_word_start {
-                        let prev = char_at(trimmed, index - 1);
-                        is_word_start = prev == " " || prev == "\t" || prev == ")";
-                    }
-                    let mut is_word_end -> boolean = index + 2 >= trimmed.length;
-                    if !is_word_end {
-                        let next = char_at(trimmed, index + 2);
-                        is_word_end = next == " " || next == "\t";
-                    }
-                    if is_word_start && is_word_end {
-                        as_index = index;
-                        break;
-                    }
+        if ch == "<" {
+            angle_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+
+        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
+            if index + 4 <= trimmed.length {
+                let window = substring(trimmed, index, index + 4);
+                if window == " as " {
+                    match_index = index;
                 }
             }
         }
         index += 1;
     }
 
-    if as_index < 0 {
-        return CastParseResult { found: false, expression: "", target_type: "" };
+    if match_index < 0 {
+        return CastParseResult { recognized: false, success: false, value: "", type_annotation: "", diagnostics: diagnostics };
     }
 
-    let expression = trim_text(substring(trimmed, 0, as_index));
-    let target_type = trim_text(substring(trimmed, as_index + 2, trimmed.length));
-
-    return CastParseResult { found: true, expression: expression, target_type: target_type };
+    let value = trim_text(substring(trimmed, 0, match_index));
+    let annotation = trim_text(substring(trimmed, match_index + 4, trimmed.length));
+    if value.length == 0 || annotation.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: malformed cast expression `" + text + "`");
+        return CastParseResult { recognized: true, success: false, value: value, type_annotation: annotation, diagnostics: diagnostics };
+    }
+    return CastParseResult { recognized: true, success: true, value: value, type_annotation: annotation, diagnostics: diagnostics };
 }

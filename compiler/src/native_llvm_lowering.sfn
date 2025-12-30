@@ -1,1604 +1,104 @@
 // compiler/src/native_llvm_lowering.sfn
 //
-// Initial LLVM lowering prototype. Converts textual `.sfn-asm` artifacts into
-// a skeletal LLVM IR module so we can begin validating instruction selection
-// without relying on the Python runtime scaffold.
+// LLVM IR lowering module. Converts textual `.sfn-asm` artifacts into
+// LLVM IR for native code generation.
+//
+// This module orchestrates the lowering process by importing modular components
+// from the ./llvm/ directory.
 
 import { NativeModule } from "./emit_native";
-import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest } from "./native_ir";
-import { substring, char_code, char_at } from "./string_utils";
+import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest, NativeBinding } from "./native_ir";
+import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "./string_utils";
+
+// Import types from modular structure
+import {
+    TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
+    InterfaceTypeInfo, VTableInfo, VTableEntry, LocalBinding, ParameterBinding,
+    OwnershipInfo, OwnershipConsumption, OwnershipAnalysis, LifetimeRegionMetadata,
+    LifetimeReleaseEvent, ScopeMetadata, LLVMOperand, ExpressionResult, CoercionResult,
+    BlockLoweringResult, LoweredLLVMFunction, LoweredLLVMResult, LetLoweringResult,
+    ModuleGlobalLoweringResult, OperatorMatch, BorrowParseResult, BorrowArgumentParse,
+    TernaryParseResult, AssignmentParseResult, InlineLetParseResult, MemberAccessParse,
+    IndexExpressionParse, RawAddressParseResult, CastParseResult, TraitMetadata,
+    TraitDescriptor, TraitImplementationDescriptor, FunctionEffectEntry, RuntimeHelperDescriptor,
+    CapabilityManifest, CapabilityManifestEntry, StringConstant, LocalMutation, LoopContext,
+    ImportedModuleContext, LayoutManifestApplication, TypeContextBuild, FunctionCallEntry,
+    StringPointerResult, InterpolatedTemplateParse, BodyResult, ParameterPreparation,
+    ArrayLiteralMetadata, TypeAllocationInfo, HeapBoxResult, StructLiteralField,
+    StructLiteralParse, EnumLiteralParse, ExpressionStatementResult, BlockLabelResult,
+    IfStructure, LoopStructure, TryStructure, RangeIterableParse, MatchCaseStructure,
+    MatchStructure, MatchFieldBinding, MatchStructFieldBinding, MatchCaseCondition,
+    ConditionConversion, ComparisonEmission, BinaryAlignmentResult,
+    ThrowLoweringResult, PhiMergeResult, PhiInputEntry, MutationMaterializationResult,
+    PhiStoreEntry, MatchArmMutations, LoadLocalResult
+} from "./llvm/types";
+
+// Import utilities
+import {
+    trim_text, starts_with, ends_with, char_at as utils_char_at, append_string,
+    join_with_separator, string_array_contains, sanitize_symbol, number_to_string,
+    index_of, is_identifier_start_char, is_identifier_part_char,
+    find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings
+} from "./llvm/utils";
+
+// Import string constant management
+import {
+    empty_string_constant_set, append_string_constant, merge_string_constants,
+    find_string_constant, render_string_constants, escape_string_for_llvm
+} from "./llvm/strings";
+
+// Import effect system
+import {
+    collect_direct_function_effects, collect_function_call_graph,
+    propagate_function_effects, build_capability_manifest,
+    collect_function_borrow_effects, collect_expression_borrow_effects,
+    collect_runtime_helper_targets
+} from "./llvm/effects";
+
+// Import runtime helpers
+import { runtime_helper_descriptors, find_runtime_helper, append_runtime_helper } from "./llvm/runtime_helpers";
+
+// Import type mapping
+import {
+    map_type_annotation, map_return_type, map_parameter_type, map_local_type,
+    map_struct_type_annotation, map_struct_field_annotation, unwrap_move_wrapper,
+    ends_with_pointer_suffix, strip_pointer_suffix,
+    layout_annotation_requires_pointer, layout_annotation_base_type,
+    annotation_is_array, layout_annotation_represents_user_value
+} from "./llvm/type_mapping";
+
+// Import rendering helpers (type definitions + symbol visibility)
+import {
+    render_test_harness_main,
+    collect_exported_symbol_names,
+    should_internalize_function,
+    render_struct_type_definitions,
+    render_enum_type_definitions,
+    render_interface_type_definitions,
+    render_vtable_type_definitions,
+    render_vtable_constants,
+    find_function_by_name
+} from "./llvm/rendering";
+
+import {
+    fixup_enum_layouts,
+    find_struct_info_by_name,
+    find_interface_info_by_name,
+    find_vtable_for_struct_interface,
+    find_struct_info_by_llvm_type,
+    find_struct_field_index,
+    find_struct_field_info,
+    find_enum_info_by_llvm_type,
+    resolve_struct_info_from_llvm_type,
+    lookup_allocation_info,
+    resolve_struct_info_for_literal,
+    resolve_struct_info_for_method_target,
+    resolve_interface_info_for_method_target,
+    resolve_enum_info_for_literal,
+    resolve_enum_variant_info,
+    find_variant_field_info
+} from "./llvm/type_context";
 
-struct EnumLayoutFixupResult {
-    enums -> NativeEnum[];
-    diagnostics -> string[];
-}
-
-fn is_unit_enum(enum_def -> NativeEnum) -> boolean {
-    let mut index -> number = 0;
-    loop {
-        if index >= enum_def.variants.length {
-            break;
-        }
-        let variant = enum_def.variants[index];
-        if variant.fields.length > 0 {
-            return false;
-        }
-        index += 1;
-    }
-    return true;
-}
-
-fn synthesize_unit_enum_layout(enum_def -> NativeEnum) -> NativeEnumLayout {
-    let tag_size -> number = 4;
-    let tag_align -> number = 4;
-    let mut layouts -> NativeEnumVariantLayout[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= enum_def.variants.length {
-            break;
-        }
-        let variant = enum_def.variants[index];
-        layouts = layouts.concat([
-            NativeEnumVariantLayout {
-                name: variant.name,
-                tag: index,
-                offset: 0,
-                size: tag_size,
-                align: tag_align,
-                fields: [],
-            },
-        ]);
-        index += 1;
-    }
-    return NativeEnumLayout {
-        size: tag_size,
-        align: tag_align,
-        tag_type: "i32",
-        tag_size: tag_size,
-        tag_align: tag_align,
-        variants: layouts,
-    };
-}
-
-fn enum_layout_matches_variants(enum_def -> NativeEnum, layout -> NativeEnumLayout) -> boolean {
-    if layout.variants.length != enum_def.variants.length {
-        return false;
-    }
-    let mut index -> number = 0;
-    loop {
-        if index >= enum_def.variants.length {
-            break;
-        }
-        let expected = enum_def.variants[index].name;
-        let mut found -> boolean = false;
-        let mut layout_index -> number = 0;
-        loop {
-            if layout_index >= layout.variants.length {
-                break;
-            }
-            if layout.variants[layout_index].name == expected {
-                found = true;
-                break;
-            }
-            layout_index += 1;
-        }
-        if !found {
-            return false;
-        }
-        index += 1;
-    }
-    return true;
-}
-
-fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
-    let mut diagnostics -> string[] = [];
-    let mut updated -> NativeEnum[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= enums.length {
-            break;
-        }
-        let enum_def = enums[index];
-        let mut fixed = enum_def;
-
-        if enum_def.layout == null {
-            if is_unit_enum(enum_def) {
-                fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
-                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout"]);
-            }
-            updated = updated.concat([fixed]);
-            index += 1;
-            continue;
-        }
-
-        let layout = enum_def.layout;
-        if !enum_layout_matches_variants(enum_def, layout) {
-            if is_unit_enum(enum_def) {
-                fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
-                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout"]);
-            } else {
-                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata"]);
-            }
-        }
-
-        updated = updated.concat([fixed]);
-        index += 1;
-    }
-
-    return EnumLayoutFixupResult { enums: updated, diagnostics: diagnostics };
-}
-
-struct TraitImplementationDescriptor {
-    struct_name -> string;
-    interfaces -> string[];
-}
-
-struct TraitDescriptor {
-    name -> string;
-    type_parameters -> string[];
-    signatures -> NativeInterfaceSignature[];
-}
-
-struct TraitMetadata {
-    interfaces -> TraitDescriptor[];
-    implementations -> TraitImplementationDescriptor[];
-}
-
-struct FunctionEffectEntry {
-    name -> string;
-    effects -> string[];
-}
-
-struct CapabilityManifestEntry {
-    symbol -> string;
-    effects -> string[];
-}
-
-struct CapabilityManifest {
-    entries -> CapabilityManifestEntry[];
-}
-
-struct RuntimeHelperDescriptor {
-    target -> string;
-    symbol -> string;
-    return_type -> string;
-    parameter_types -> string[];
-    effects -> string[];
-}
-
-struct FunctionCallEntry {
-    name -> string;
-    callees -> string[];
-}
-
-struct StringConstant {
-    name -> string;
-    content -> string;
-    byte_count -> number;
-}
-
-struct StringPointerResult {
-    lines -> string[];
-    temp_index -> number;
-    pointer -> string;
-}
-
-struct InterpolatedTemplateParse {
-    parts -> string[];
-    expressions -> string[];
-    success -> boolean;
-}
-
-struct LoweredLLVMResult {
-    ir -> string;
-    diagnostics -> string[];
-    trait_metadata -> TraitMetadata;
-    function_effects -> FunctionEffectEntry[];
-    lifetime_regions -> LifetimeRegionMetadata[];
-    capability_manifest -> CapabilityManifest;
-    string_constants -> StringConstant[];
-}
-
-struct LayoutManifestApplication {
-    structs -> NativeStruct[];
-    enums -> NativeEnum[];
-    diagnostics -> string[];
-}
-
-struct ImportedModuleContext {
-    manifests -> LayoutManifest[];
-    native_texts -> string[];
-    diagnostics -> string[];
-}
-
-struct LoweredLLVMFunction {
-    lines -> string[];
-    diagnostics -> string[];
-    lifetime_regions -> LifetimeRegionMetadata[];
-    string_constants -> StringConstant[];
-}
-
-struct BodyResult {
-    lines -> string[];
-    diagnostics -> string[];
-    lifetime_regions -> LifetimeRegionMetadata[];
-    string_constants -> StringConstant[];
-}
-
-struct ParameterBinding {
-    name -> string;
-    llvm_name -> string;
-    llvm_type -> string;
-    type_annotation -> string;
-    consumed -> boolean;
-    span -> NativeSourceSpan?;
-}
-
-struct ParameterPreparation {
-    signature -> string[];
-    bindings -> ParameterBinding[];
-    diagnostics -> string[];
-}
-
-struct LLVMOperand {
-    llvm_type -> string;
-    value -> string;
-}
-
-struct ExpressionResult {
-    lines -> string[];
-    temp_index -> number;
-    operand -> LLVMOperand?;
-    diagnostics -> string[];
-    string_constants -> StringConstant[];
-}
-
-struct ArrayLiteralMetadata {
-    element_type -> string;
-    start_index -> number;
-}
-
-struct OwnershipInfo {
-    variant -> string;
-    base -> string;
-    mutable -> boolean;
-    span -> NativeSourceSpan?;
-    region_id -> number;
-}
-
-struct OwnershipConsumption {
-    kind -> string;
-    name -> string;
-}
-
-struct LifetimeRegionMetadata {
-    id -> number;
-    binding -> string;
-    base -> string;
-    mutable -> boolean;
-    start_span -> NativeSourceSpan?;
-    scope_id -> string;
-    scope_depth -> number;
-    base_scope_id -> string;
-    base_scope_depth -> number;
-    end_scope_id -> string;
-    end_scope_depth -> number;
-    released -> boolean;
-}
-
-struct LifetimeReleaseEvent {
-    region_id -> number;
-    scope_id -> string;
-    scope_depth -> number;
-}
-
-struct ScopeMetadata {
-    scope_id -> string;
-    scope_depth -> number;
-}
-
-struct StructFieldInfo {
-    name -> string;
-    llvm_type -> string;
-    type_annotation -> string;
-    index -> number;
-    offset -> number;
-}
-
-struct StructTypeInfo {
-    name -> string;
-    llvm_name -> string;
-    fields -> StructFieldInfo[];
-    size -> number;
-    align -> number;
-}
-
-struct EnumVariantInfo {
-    name -> string;
-    tag -> number;
-    offset -> number;
-    size -> number;
-    align -> number;
-    fields -> StructFieldInfo[];
-}
-
-struct EnumTypeInfo {
-    name -> string;
-    llvm_name -> string;
-    tag_type -> string;
-    tag_size -> number;
-    tag_align -> number;
-    max_payload_size -> number;
-    size -> number;
-    align -> number;
-    variants -> EnumVariantInfo[];
-}
-
-struct VTableEntry {
-    method_name -> string;
-    interface_method_name -> string;
-    function_pointer_type -> string;
-}
-
-struct VTableInfo {
-    struct_name -> string;
-    interface_name -> string;
-    llvm_type_name -> string;
-    llvm_global_name -> string;
-    entries -> VTableEntry[];
-}
-
-struct InterfaceTypeInfo {
-    name -> string;
-    llvm_name -> string;
-    type_parameters -> string[];
-    signatures -> NativeInterfaceSignature[];
-}
-
-struct TypeContext {
-    structs -> StructTypeInfo[];
-    enums -> EnumTypeInfo[];
-    interfaces -> InterfaceTypeInfo[];
-    vtables -> VTableInfo[];
-}
-
-struct TypeContextBuild {
-    context -> TypeContext;
-    diagnostics -> string[];
-}
-
-struct TypeAllocationInfo {
-    llvm_type -> string;
-    size -> number;
-    align -> number;
-}
-
-struct HeapBoxResult {
-    lines -> string[];
-    temp_index -> number;
-    operand -> LLVMOperand?;
-    diagnostics -> string[];
-}
-
-struct StructLiteralField {
-    name -> string;
-    value -> string;
-}
-
-struct StructLiteralParse {
-    recognized -> boolean;
-    success -> boolean;
-    type_name -> string;
-    fields -> StructLiteralField[];
-    diagnostics -> string[];
-}
-
-struct EnumLiteralParse {
-    recognized -> boolean;
-    success -> boolean;
-    enum_name -> string;
-    variant_name -> string;
-    fields -> StructLiteralField[];
-    diagnostics -> string[];
-}
-
-struct MemberAccessParse {
-    success -> boolean;
-    base -> string;
-    field -> string;
-}
-
-struct IndexExpressionParse {
-    success -> boolean;
-    base -> string;
-    index -> string;
-}
-
-struct LocalBinding {
-    name -> string;
-    pointer -> string;
-    llvm_type -> string;
-    type_annotation -> string;
-    ownership -> OwnershipInfo?;
-    consumed -> boolean;
-    scope_id -> string;
-    scope_depth -> number;
-}
-
-struct ModuleGlobalLoweringResult {
-    preamble_lines -> string[];
-    init_function_lines -> string[];
-    init_function_symbol -> string;
-    needs_init_call -> boolean;
-    locals -> LocalBinding[];
-    string_constants -> StringConstant[];
-    diagnostics -> string[];
-}
-
-struct LocalMutation {
-    name -> string;
-    llvm_type -> string;
-    value_name -> string;
-    span -> NativeSourceSpan?;
-    originating_label -> string;
-}
-
-struct OwnershipAnalysis {
-    ownership -> OwnershipInfo?;
-    consumption -> OwnershipConsumption?;
-    diagnostics -> string[];
-}
-
-struct OperatorMatch {
-    index -> number;
-    symbol -> string;
-    success -> boolean;
-}
-
-struct AssignmentParseResult {
-    success -> boolean;
-    target -> string;
-    value -> string;
-    operator -> string;  // "" for simple assignment, "+", "-", "*", "/" for compound
-}
-
-struct BorrowParseResult {
-    recognized -> boolean;
-    success -> boolean;
-    target -> string;
-    mutable -> boolean;
-    diagnostics -> string[];
-}
-
-struct BorrowArgumentParse {
-    success -> boolean;
-    argument -> string;
-    diagnostics -> string[];
-}
-
-struct RawAddressParseResult {
-    recognized -> boolean;
-    success -> boolean;
-    target -> string;
-    diagnostics -> string[];
-}
-
-struct CastParseResult {
-    recognized -> boolean;
-    success -> boolean;
-    value -> string;
-    type_annotation -> string;
-    diagnostics -> string[];
-}
-
-struct TernaryParseResult {
-    success -> boolean;
-    condition -> string;
-    true_value -> string;
-    false_value -> string;
-    diagnostics -> string[];
-}
-
-struct ExpressionStatementResult {
-    lines -> string[];
-    temp_index -> number;
-    locals -> LocalBinding[];
-    bindings -> ParameterBinding[];
-    diagnostics -> string[];
-    lifetime_regions -> LifetimeRegionMetadata[];
-    lifetime_releases -> LifetimeReleaseEvent[];
-    next_region_id -> number;
-    mutations -> LocalMutation[];
-    string_constants -> StringConstant[];
-}
-
-struct LetLoweringResult {
-    lines -> string[];
-    allocas -> string[];
-    locals -> LocalBinding[];
-    bindings -> ParameterBinding[];
-    temp_index -> number;
-    diagnostics -> string[];
-    next_local_id -> number;
-    lifetime_regions -> LifetimeRegionMetadata[];
-    next_region_id -> number;
-    mutations -> LocalMutation[];
-    string_constants -> StringConstant[];
-}
-
-struct InlineLetParseResult {
-    success -> boolean;
-    name -> string;
-    mutable -> boolean;
-    type_annotation -> string;
-    initializer -> string?;
-    diagnostics -> string[];
-}
-
-struct BlockLabelResult {
-    label -> string;
-    next_counter -> number;
-}
-
-struct IfStructure {
-    then_start -> number;
-    then_end -> number;
-    else_start -> number;
-    else_end -> number;
-    has_else -> boolean;
-    next_index -> number;
-    diagnostics -> string[];
-}
-
-struct LoopContext {
-    break_label -> string;
-    continue_label -> string;
-}
-
-struct LoopStructure {
-    body_start -> number;
-    body_end -> number;
-    next_index -> number;
-    diagnostics -> string[];
-}
-
-struct TryStructure {
-    try_start -> number;
-    try_end -> number;
-    catch_index -> number;
-    catch_name -> string;
-    catch_start -> number;
-    catch_end -> number;
-    finally_index -> number;
-    finally_start -> number;
-    finally_end -> number;
-    end_index -> number;
-    next_index -> number;
-    diagnostics -> string[];
-}
-
-struct RangeIterableParse {
-    success -> boolean;
-    start -> string;
-    end -> string;
-    stride -> string;
-    diagnostics -> string[];
-}
-
-struct MatchCaseStructure {
-    pattern -> string;
-    guard -> string?;
-    body_start -> number;
-    body_end -> number;
-    is_default -> boolean;
-}
-
-struct MatchStructure {
-    cases -> MatchCaseStructure[];
-    end_index -> number;
-    diagnostics -> string[];
-}
-
-struct MatchFieldBinding {
-    field_name -> string;
-    field_type -> string;
-    field_offset -> number;
-}
-
-struct MatchStructFieldBinding {
-    field_name -> string;
-    field_type -> string;
-    field_index -> number;
-}
-
-struct MatchCaseCondition {
-    lines -> string[];
-    temp_index -> number;
-    operand -> LLVMOperand?;
-    diagnostics -> string[];
-    is_default -> boolean;
-    field_bindings -> MatchFieldBinding[];
-    enum_info -> EnumTypeInfo?;
-    variant_info -> EnumVariantInfo?;
-    union_variant_index -> number;
-    union_struct_info -> StructTypeInfo?;
-    union_struct_bindings -> MatchStructFieldBinding[];
-    string_constants -> StringConstant[];
-}
-
-struct ConditionConversion {
-    lines -> string[];
-    temp_index -> number;
-    operand -> LLVMOperand?;
-    diagnostics -> string[];
-    string_constants -> StringConstant[];
-}
-
-struct ComparisonEmission {
-    lines -> string[];
-    temp_index -> number;
-    operand -> LLVMOperand?;
-    diagnostics -> string[];
-}
-
-struct CoercionResult {
-    lines -> string[];
-    temp_index -> number;
-    operand -> LLVMOperand?;
-    diagnostics -> string[];
-}
-
-struct BinaryAlignmentResult {
-    lines -> string[];
-    temp_index -> number;
-    left -> LLVMOperand?;
-    right -> LLVMOperand?;
-    diagnostics -> string[];
-    result_type -> string;
-}
-
-struct BlockLoweringResult {
-    lines -> string[];
-    allocas -> string[];
-    locals -> LocalBinding[];
-    bindings -> ParameterBinding[];
-    temp_index -> number;
-    block_counter -> number;
-    diagnostics -> string[];
-    terminated -> boolean;
-    next_local_id -> number;
-    lifetime_regions -> LifetimeRegionMetadata[];
-    next_lifetime_region_id -> number;
-    next_index -> number;
-    mutations -> LocalMutation[];
-    string_constants -> StringConstant[];
-}
-
-fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[] ![io] {
-    let context = collect_imported_module_context(imports);
-    return context.manifests;
-}
-
-fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleContext ![io] {
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
-    if trace {
-        print.warn("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
-    }
-    let mut manifests -> LayoutManifest[] = [];
-    let mut native_texts -> string[] = [];
-    let mut diagnostics -> string[] = [];
-    let mut seen -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= imports.length {
-            break;
-        }
-        if trace && index > 0 && index % 50 == 0 {
-            print.warn("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")");
-        }
-        let module_path = imports[index].module;
-        let slug = resolve_import_module_slug(module_path);
-        if slug.length == 0 {
-            index += 1;
-            continue;
-        }
-        if string_array_contains(seen, slug) {
-            index += 1;
-            continue;
-        }
-        seen = append_string(seen, slug);
-
-        let manifest_path = layout_manifest_path_for_slug(slug);
-        let native_text_path = native_text_path_for_slug(slug);
-
-        let mut manifest_structs -> NativeStruct[] = [];
-        let mut manifest_enums -> NativeEnum[] = [];
-        if fs.exists(manifest_path) {
-            let manifest_contents = fs.readFile(manifest_path);
-            let parsed_manifest = parse_layout_manifest(manifest_contents);
-            manifest_structs = parsed_manifest.structs;
-            manifest_enums = parsed_manifest.enums;
-        } else {
-            diagnostics = diagnostics.concat(["layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")"]);
-        }
-
-        let mut native_text -> string = "";
-        if fs.exists(native_text_path) {
-            native_text = fs.readFile(native_text_path);
-        } else {
-            diagnostics = diagnostics.concat(["native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")"]);
-        }
-
-        manifests = manifests.concat([LayoutManifest {
-            structs: manifest_structs,
-            enums: manifest_enums,
-            diagnostics: [],
-        }]);
-        native_texts = native_texts.concat([native_text]);
-        index += 1;
-    }
-
-    if trace {
-        print.warn("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(seen.length) + ")");
-    }
-
-    return ImportedModuleContext { manifests: manifests, native_texts: native_texts, diagnostics: diagnostics };
-}
-
-fn resolve_import_module_slug(module -> string) -> string {
-    let trimmed = trim_text(module);
-    if trimmed.length == 0 {
-        return "";
-    }
-    let normalized = normalize_import_module_path(trimmed);
-    let mut start_index -> number = 0;
-    loop {
-        if start_index >= normalized.length {
-            break;
-        }
-        let ch = normalized[start_index];
-        if ch == "." || ch == "/" {
-            start_index += 1;
-            continue;
-        }
-        break;
-    }
-    let mut candidate = normalized;
-    if start_index > 0 {
-        candidate = substring(normalized, start_index, normalized.length);
-    }
-    // Preserve directory structure for nested imports (e.g., "llvm/strings" -> "llvm/strings")
-    // Only strip to basename for flat imports without slashes
-    // This enables imports like `import { foo } from "./llvm/strings"` to resolve to
-    // build/stage2/llvm/strings.sfn-asm instead of build/stage2/strings.sfn-asm
-    return candidate;
-}
-
-fn layout_manifest_path_for_slug(slug -> string) -> string {
-    return "build/stage2/" + slug + ".layout-manifest";
-}
-
-fn native_text_path_for_slug(slug -> string) -> string {
-    return "build/stage2/" + slug + ".sfn-asm";
-}
-
-fn normalize_import_module_path(value -> string) -> string {
-    let mut result -> string = "";
-    let mut index -> number = 0;
-    loop {
-        if index >= value.length {
-            break;
-        }
-        let ch = value[index];
-        if ch == "\\" {
-            result = result + "/";
-        } else {
-            result = result + ch;
-        }
-        index += 1;
-    }
-    return result;
-}
-fn apply_layout_manifest_to_module(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest?) -> LayoutManifestApplication {
-    if manifest == null {
-        return LayoutManifestApplication { structs: structs, enums: enums, diagnostics: [] };
-    }
-    return apply_layout_manifest_entries(structs, enums, manifest);
-}
-
-fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest) -> LayoutManifestApplication {
-    let mut diagnostics -> string[] = [];
-
-    let mut updated_structs -> NativeStruct[] = structs;
-    let mut struct_index -> number = 0;
-    loop {
-        if struct_index >= manifest.structs.length {
-            break;
-        }
-        let layout_struct = manifest.structs[struct_index];
-        let target_index = find_struct_index(updated_structs, layout_struct.name);
-        if target_index < 0 {
-            diagnostics = append_string(diagnostics, "layout manifest: struct `" + layout_struct.name + "` missing from native module");
-        } else {
-            let target = updated_structs[target_index];
-            let replaced = NativeStruct {
-                name: target.name,
-                fields: target.fields,
-                methods: target.methods,
-                implements: target.implements,
-                layout: layout_struct.layout,
-            };
-            updated_structs = replace_native_struct(updated_structs, target_index, replaced);
-        }
-        struct_index += 1;
-    }
-
-    let mut updated_enums -> NativeEnum[] = enums;
-    let mut enum_index -> number = 0;
-    loop {
-        if enum_index >= manifest.enums.length {
-            break;
-        }
-        let layout_enum = manifest.enums[enum_index];
-    let target_index = find_enum_index(updated_enums, layout_enum.name);
-        if target_index < 0 {
-            diagnostics = append_string(diagnostics, "layout manifest: enum `" + layout_enum.name + "` missing from native module");
-        } else {
-            let target = updated_enums[target_index];
-            let replaced = NativeEnum {
-                name: target.name,
-                variants: target.variants,
-                layout: layout_enum.layout,
-            };
-            updated_enums = replace_native_enum(updated_enums, target_index, replaced);
-        }
-        enum_index += 1;
-    }
-
-    return LayoutManifestApplication {
-        structs: updated_structs,
-        enums: updated_enums,
-        diagnostics: diagnostics,
-    };
-}
-
-fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
-    let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        return lower_to_llvm_with_context(native_module, [], [], []);
-    }
-    let parse = parse_native_artifact(artifact.contents);
-    let import_context = collect_imported_module_context(parse.imports);
-    return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
-}
-
-fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
-    if trace {
-        print.warn("test llvm: lower_to_llvm_for_tests start (module=" + native_module.module_name + ")");
-    }
-    let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        if trace {
-            print.warn("test llvm: lower_to_llvm_for_tests missing native text artifact");
-        }
-        return lower_to_llvm_with_context_for_tests(native_module, [], [], []);
-    }
-    if trace {
-        print.warn("test llvm: lower_to_llvm_for_tests parse_native_artifact start (bytes=" + number_to_string(artifact.contents.length) + ")");
-    }
-    let parse = parse_native_artifact(artifact.contents);
-    if trace {
-        print.warn("test llvm: lower_to_llvm_for_tests parse_native_artifact done (imports=" + number_to_string(parse.imports.length) + ")");
-        print.warn("test llvm: lower_to_llvm_for_tests collect_imported_module_context start");
-    }
-    let import_context = collect_imported_module_context(parse.imports);
-    if trace {
-        print.warn("test llvm: lower_to_llvm_for_tests collect_imported_module_context done (native_texts=" + number_to_string(import_context.native_texts.length) + ")");
-        print.warn("test llvm: lower_to_llvm_for_tests lower_to_llvm_with_context_for_tests start");
-    }
-    return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
-}
-
-fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifests -> LayoutManifest[]) -> LoweredLLVMResult ![io] {
-    return lower_to_llvm_with_context(native_module, imported_manifests, [], []);
-}
-
-fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult ![io] {
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
-    let base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
-    if base.ir.length == 0 {
-        return base;
-    }
-
-    let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        return base;
-    }
-
-    let parse = parse_native_artifact(artifact.contents);
-    let mut tests -> NativeFunction[] = [];
-    let mut has_main -> boolean = false;
-
-    let mut index -> number = 0;
-    loop {
-        if index >= parse.functions.length {
-            break;
-        }
-        let fun = parse.functions[index];
-        if fun.name == "main" {
-            has_main = true;
-        }
-        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
-            tests = tests.concat([fun]);
-        }
-        index += 1;
-    }
-
-    if tests.length == 0 {
-        return base;
-    }
-
-    // For now we only synthesize `main` when no user-provided `main` exists.
-    if has_main {
-        let mut updated = base;
-        updated.diagnostics = updated.diagnostics.concat([
-            "llvm lowering (test): module defines `main`; skipping synthesized test harness",
-        ]);
-        return updated;
-    }
-
-    if trace {
-        print.warn("test llvm: lower_to_llvm_with_context_for_tests synthesize harness (tests=" + number_to_string(tests.length) + ")");
-    }
-    let harness = render_test_harness_main(tests);
-    let mut updated = base;
-    if updated.ir.length > 0 {
-        updated.ir = updated.ir + "\n";
-    }
-    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
-    return updated;
-}
-
-fn render_test_harness_main(tests -> NativeFunction[]) -> string[] {
-    let mut lines -> string[] = [];
-    lines = lines.concat([
-        "define i32 @main(i32 %argc, i8** %argv) {",
-        "entry:",
-    ]);
-
-    let mut index -> number = 0;
-    loop {
-        if index >= tests.length {
-            break;
-        }
-        let sym = sanitize_symbol(tests[index].name);
-        lines = append_string(lines, "  call void @" + sym + "()");
-        index += 1;
-    }
-    lines = lines.concat([
-        "  ret i32 0",
-        "}",
-    ]);
-    return lines;
-}
-
-fn module_global_symbol(name -> string) -> string {
-    return "@global." + sanitize_symbol(name);
-}
-
-fn module_init_symbol(module_name -> string) -> string {
-    return "@sailfin_module_init__" + sanitize_symbol(module_name);
-}
-
-fn module_init_done_symbol(module_name -> string) -> string {
-    return "@sailfin_module_init_done__" + sanitize_symbol(module_name);
-}
-
-fn module_user_main_symbol(module_name -> string) -> string {
-    return "sailfin_user_main__" + sanitize_symbol(module_name);
-}
-
-fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> TypeContext, module_name -> string) -> ModuleGlobalLoweringResult {
-    let mut diagnostics -> string[] = [];
-    let mut preamble_lines -> string[] = [];
-    let mut init_lines -> string[] = [];
-    let mut locals -> LocalBinding[] = [];
-    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
-    let init_symbol = module_init_symbol(module_name);
-    let init_done_symbol = module_init_done_symbol(module_name);
-    let mut needs_init -> boolean = false;
-
-    if bindings.length == 0 {
-        return ModuleGlobalLoweringResult {
-            preamble_lines: [],
-            init_function_lines: [],
-            init_function_symbol: init_symbol,
-            needs_init_call: false,
-            locals: [],
-            string_constants: collected_string_constants,
-            diagnostics: [],
-        };
-    }
-
-    let scope_id = format_root_scope_id("module");
-    let scope_depth = 0;
-
-    let mut index -> number = 0;
-    loop {
-        if index >= bindings.length {
-            break;
-        }
-        let binding = bindings[index];
-        let mut type_annotation = trim_text(binding.type_annotation);
-        let mut effective_type_annotation = binding.type_annotation;
-        if type_annotation.length == 0 && binding.value != null {
-            let init_expr = trim_text(binding.value);
-            if is_string_literal(init_expr) {
-                type_annotation = "string";
-                effective_type_annotation = "string";
-            }
-        }
-        if type_annotation.length == 0 {
-            // Untyped module bindings are currently used by the prelude/runtime layer
-            // as dynamic handles (e.g. `fs`, `console`). Keep prior behaviour by
-            // leaving them to the runtime-global resolution paths.
-            index += 1;
-            continue;
-        }
-        let name = binding.name;
-        let global_name = module_global_symbol(name);
-        let mut llvm_type -> string = "";
-        if type_annotation.length > 0 {
-            llvm_type = map_local_type(context, type_annotation);
-        }
-        if llvm_type.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: module binding `" + name + "` has unsupported type annotation `" + type_annotation + "`");
-            llvm_type = "double";
-        }
-
-        if llvm_type == "i8*" {
-            preamble_lines = append_string(preamble_lines, global_name + " = global i8* null");
-            if binding.value != null {
-                needs_init = true;
-            }
-        } else {
-            let mut initializer_text -> string = default_return_literal(llvm_type);
-            if binding.value != null {
-                let init_expr = trim_text(binding.value);
-                if llvm_type == "double" && is_number_literal(init_expr) {
-                    initializer_text = normalise_number_literal(init_expr);
-                } else if llvm_type == "i64" && is_integer_literal(init_expr) {
-                    initializer_text = init_expr;
-                } else if llvm_type == "i32" && is_integer_literal(init_expr) {
-                    initializer_text = init_expr;
-                } else if llvm_type == "i1" && is_boolean_literal(init_expr) {
-                    initializer_text = "0";
-                    if matches_case_insensitive(init_expr, "true") {
-                        initializer_text = "1";
-                    }
-                } else {
-                    needs_init = true;
-                }
-            }
-            preamble_lines = append_string(preamble_lines, global_name + " = global " + llvm_type + " " + initializer_text);
-        }
-
-        locals = append_local_binding(locals, LocalBinding {
-            name: name,
-            pointer: global_name,
-            llvm_type: llvm_type,
-            type_annotation: effective_type_annotation,
-            ownership: null,
-            consumed: false,
-            scope_id: scope_id,
-            scope_depth: scope_depth,
-        });
-
-        index += 1;
-    }
-
-    if !needs_init {
-        return ModuleGlobalLoweringResult {
-            preamble_lines: preamble_lines,
-            init_function_lines: [],
-            init_function_symbol: init_symbol,
-            needs_init_call: false,
-            locals: locals,
-            string_constants: collected_string_constants,
-            diagnostics: diagnostics,
-        };
-    }
-
-    preamble_lines = append_string(preamble_lines, init_done_symbol + " = global i1 0");
-
-    init_lines = init_lines.concat([
-        "define internal void " + init_symbol + "() {",
-        "block.entry:",
-        "  %t0 = load i1, i1* " + init_done_symbol,
-        "  %t1 = icmp ne i1 %t0, 0",
-        "  br i1 %t1, label %block.done, label %block.init",
-        "block.init:",
-        "  store i1 1, i1* " + init_done_symbol,
-    ]);
-
-    let mut init_index -> number = 0;
-    let mut current_temp -> number = 2;
-    let mut current_lines -> string[] = init_lines;
-    loop {
-        if init_index >= bindings.length {
-            break;
-        }
-        let binding = bindings[init_index];
-        if binding.value == null {
-            init_index += 1;
-            continue;
-        }
-        let name = binding.name;
-        let global_name = module_global_symbol(name);
-        let local = find_local_binding(locals, name);
-        if local == null {
-            init_index += 1;
-            continue;
-        }
-        let llvm_type = local.llvm_type;
-        let init_expr = trim_text(binding.value);
-
-        if llvm_type == "i8*" {
-            let lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type);
-            diagnostics = diagnostics.concat(lowered.diagnostics);
-            current_lines = lowered.lines;
-            current_temp = lowered.temp_index;
-            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
-            if lowered.operand != null {
-                current_lines = append_string(current_lines, "  store i8* " + lowered.operand.value + ", i8** " + global_name);
-            } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: failed to initialize module string binding `" + name + "`");
-            }
-        } else {
-            let mut should_store -> boolean = true;
-            if llvm_type == "double" && is_number_literal(init_expr) {
-                should_store = false;
-            }
-            if llvm_type == "i64" && is_integer_literal(init_expr) {
-                should_store = false;
-            }
-            if llvm_type == "i32" && is_integer_literal(init_expr) {
-                should_store = false;
-            }
-            if llvm_type == "i1" && is_boolean_literal(init_expr) {
-                should_store = false;
-            }
-            if should_store {
-                let lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type);
-                diagnostics = diagnostics.concat(lowered.diagnostics);
-                current_lines = lowered.lines;
-                current_temp = lowered.temp_index;
-                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
-                if lowered.operand != null {
-                    let coerced = coerce_operand_to_type(lowered.operand, llvm_type, current_temp, current_lines);
-                    diagnostics = diagnostics.concat(coerced.diagnostics);
-                    current_lines = coerced.lines;
-                    current_temp = coerced.temp_index;
-                    if coerced.operand != null {
-                        current_lines = append_string(current_lines, "  store " + llvm_type + " " + coerced.operand.value + ", " + llvm_type + "* " + global_name);
-                    }
-                }
-            }
-        }
-
-        init_index += 1;
-    }
-
-    current_lines = append_string(current_lines, "  br label %block.done");
-    current_lines = append_string(current_lines, "block.done:");
-    current_lines = append_string(current_lines, "  ret void");
-    current_lines = append_string(current_lines, "}");
-
-    return ModuleGlobalLoweringResult {
-        preamble_lines: preamble_lines,
-        init_function_lines: current_lines,
-        init_function_symbol: init_symbol,
-        needs_init_call: true,
-        locals: locals,
-        string_constants: collected_string_constants,
-        diagnostics: diagnostics,
-    };
-}
-
-fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult ![io] {
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
-    if trace {
-        print.warn("test llvm: lower_to_llvm_with_context start (module=" + native_module.module_name + ")");
-        print.warn("test llvm: lower_to_llvm_with_context imported_native_texts=" + number_to_string(imported_native_texts.length) + " imported_manifests=" + number_to_string(imported_manifests.length));
-    }
-    let mut diagnostics -> string[] = [];
-    if imported_diagnostics.length > 0 {
-        diagnostics = diagnostics.concat(imported_diagnostics);
-    }
-    let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
-        let empty_constants = empty_string_constant_set();
-        return LoweredLLVMResult {
-            ir: "",
-            diagnostics: diagnostics,
-            trait_metadata: empty_trait_metadata(),
-            function_effects: [],
-            lifetime_regions: [],
-            capability_manifest: empty_capability_manifest(),
-            string_constants: empty_constants,
-        };
-    }
-
-    let parse = parse_native_artifact(artifact.contents);
-    diagnostics = diagnostics.concat(parse.diagnostics);
-    if trace {
-        print.warn("test llvm: lower_to_llvm_with_context parsed (imports=" + number_to_string(parse.imports.length) + " functions=" + number_to_string(parse.functions.length) + ")");
-    }
-
-    // Only exported symbols should keep external linkage across modules.
-    let exported_symbols = collect_exported_symbol_names(parse.imports);
-
-    let manifest_artifact = select_layout_manifest_artifact(native_module.artifacts);
-    let mut module_manifest -> LayoutManifest? = null;
-    if manifest_artifact != null {
-        let parsed_manifest = parse_layout_manifest(manifest_artifact.contents);
-        diagnostics = diagnostics.concat(parsed_manifest.diagnostics);
-        module_manifest = parsed_manifest;
-    }
-
-    let manifest_application = apply_layout_manifest_to_module(parse.structs, parse.enums, module_manifest);
-    diagnostics = diagnostics.concat(manifest_application.diagnostics);
-    let module_structs = manifest_application.structs;
-    let module_enums = manifest_application.enums;
-    if trace {
-        print.warn("test llvm: lower_to_llvm_with_context layout applied (structs=" + number_to_string(module_structs.length) + " enums=" + number_to_string(module_enums.length) + ")");
-    }
-
-    // Gather imported module context (layout + signatures) to improve lowering fidelity
-    let mut imported_structs -> NativeStruct[] = [];
-    let mut imported_enums -> NativeEnum[] = [];
-    let mut imported_interfaces -> NativeInterface[] = [];
-    let mut imported_functions -> NativeFunction[] = [];
-    let mut imported_struct_methods -> NativeFunction[] = [];
-
-    let manifest_count = imported_manifests.length;
-    let mut text_index -> number = 0;
-    loop {
-        if text_index >= imported_native_texts.length {
-            break;
-        }
-        if trace {
-            print.warn("test llvm: lower_to_llvm_with_context import parse index=" + number_to_string(text_index) + " bytes=" + number_to_string(imported_native_texts[text_index].length));
-        }
-        let native_text = imported_native_texts[text_index];
-        let mut manifest_for_module -> LayoutManifest? = null;
-        if text_index < manifest_count {
-            let candidate_manifest = imported_manifests[text_index];
-            manifest_for_module = candidate_manifest;
-        }
-        if native_text.length == 0 {
-            if manifest_for_module != null {
-                let manifest_only = manifest_for_module;
-                imported_structs = imported_structs.concat(manifest_only.structs);
-                imported_enums = imported_enums.concat(manifest_only.enums);
-            }
-            text_index += 1;
-            continue;
-        }
-
-        let imported_parse = parse_native_artifact(native_text);
-        let applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module);
-
-        imported_structs = imported_structs.concat(applied_import.structs);
-        imported_enums = imported_enums.concat(applied_import.enums);
-        imported_interfaces = imported_interfaces.concat(imported_parse.interfaces);
-        imported_functions = imported_functions.concat(imported_parse.functions);
-        let imported_methods = flatten_struct_methods(applied_import.structs);
-        imported_struct_methods = imported_struct_methods.concat(imported_methods);
-        text_index += 1;
-    }
-    if trace {
-        print.warn("test llvm: lower_to_llvm_with_context import context loaded (imported_functions=" + number_to_string(imported_functions.length) + ")");
-    }
-
-    if imported_native_texts.length < manifest_count {
-        let mut manifest_index -> number = imported_native_texts.length;
-        loop {
-            if manifest_index >= manifest_count {
-                break;
-            }
-            let leftover_manifest = imported_manifests[manifest_index];
-            imported_structs = imported_structs.concat(leftover_manifest.structs);
-            imported_enums = imported_enums.concat(leftover_manifest.enums);
-            manifest_index += 1;
-        }
-    }
-
-    let combined_structs = module_structs.concat(imported_structs);
-    let combined_enums = module_enums.concat(imported_enums);
-    let combined_interfaces = parse.interfaces.concat(imported_interfaces);
-
-    let trait_metadata = build_trait_metadata(combined_interfaces, combined_structs);
-    let fixed_enums = fixup_enum_layouts(combined_enums);
-    diagnostics = diagnostics.concat(fixed_enums.diagnostics);
-    let type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces);
-    diagnostics = diagnostics.concat(type_build.diagnostics);
-    let type_context = type_build.context;
-
-    let module_struct_methods = flatten_struct_methods(module_structs);
-    let local_functions = concat_native_functions(parse.functions, module_struct_methods);
-    let mut context_functions = concat_native_functions(local_functions, imported_functions);
-    context_functions = concat_native_functions(context_functions, imported_struct_methods);
-
-    let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
-    runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.drop");
-    runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
-    runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
-    runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent");
-    let direct_effects = collect_direct_function_effects(context_functions);
-    let call_graph = collect_function_call_graph(context_functions);
-    let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
-    if trace {
-        print.warn("test llvm: lower_to_llvm_with_context effects aggregated (entries=" + number_to_string(aggregated_effects.length) + ")");
-    }
-
-    let mut function_effects -> FunctionEffectEntry[] = [];
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut lines -> string[] = [];
-    lines = append_string(lines, "source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
-    lines = append_string(lines, "");
-
-    let trait_lines = render_trait_metadata_comments(trait_metadata);
-    if trait_lines.length > 0 {
-        lines = lines.concat(trait_lines);
-        lines = append_string(lines, "");
-    }
-
-    let struct_type_lines = render_struct_type_definitions(type_context, context_functions);
-    if struct_type_lines.length > 0 {
-        lines = lines.concat(struct_type_lines);
-        lines = append_string(lines, "");
-    }
-
-    let enum_type_lines = render_enum_type_definitions(type_context);
-    if enum_type_lines.length > 0 {
-        lines = lines.concat(enum_type_lines);
-        lines = append_string(lines, "");
-    }
-
-    let interface_type_lines = render_interface_type_definitions(type_context);
-    if interface_type_lines.length > 0 {
-        lines = lines.concat(interface_type_lines);
-        lines = append_string(lines, "");
-    }
-
-    // Async/future runtime types (opaque in LLVM; implemented by the native runtime).
-    lines = lines.concat([
-        "%SailfinFutureNumber = type opaque",
-        "%SailfinFutureBool = type opaque",
-        "%SailfinFuturePtr = type opaque",
-        "%SailfinFutureVoid = type opaque",
-        "%SailfinFutureString = type opaque",
-        "",
-        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)",
-        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)",
-        "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)",
-        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)",
-        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)",
-        "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)",
-        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)",
-        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)",
-        "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)",
-        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)",
-        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)",
-        "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)",
-        "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)",
-        "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)",
-        "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)",
-        "",
-    ]);
-
-    let vtable_type_lines = render_vtable_type_definitions(type_context);
-    if vtable_type_lines.length > 0 {
-        lines = lines.concat(vtable_type_lines);
-        lines = append_string(lines, "");
-    }
-
-    let vtable_const_lines = render_vtable_constants(type_context);
-    if vtable_const_lines.length > 0 {
-        lines = lines.concat(vtable_const_lines);
-        lines = append_string(lines, "");
-    }
-
-    let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
-    if helper_declarations.length > 0 {
-        lines = lines.concat(helper_declarations);
-        lines = append_string(lines, "");
-    }
-
-    // Declare imported functions from other modules (excluding local functions)
-    let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
-    if imported_declarations.length > 0 {
-        lines = lines.concat(imported_declarations);
-        lines = append_string(lines, "");
-    }
-
-    // Provide libc declarations for common helpers when not declared in the module.
-    if find_function_by_name(context_functions, "malloc") == null {
-        lines = append_string(lines, "declare noalias i8* @malloc(i64)");
-    }
-    if find_function_by_name(context_functions, "free") == null {
-        lines = append_string(lines, "declare void @free(i8*)");
-    }
-    lines = append_string(lines, "");
-
-    // Declare the runtime global (provided by the Python bootstrap runtime)
-    // This is a pointer to the Python runtime object (i8** because we need to load from it)
-    lines = append_string(lines, "@runtime = external global i8**");
-    lines = append_string(lines, "");
-
-    // Lower module-level `let` bindings into LLVM globals (and an optional init function).
-    let module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name);
-    diagnostics = diagnostics.concat(module_globals.diagnostics);
-    if module_globals.preamble_lines.length > 0 {
-        lines = lines.concat(module_globals.preamble_lines);
-        lines = append_string(lines, "");
-    }
-
-    let mut preamble_lines -> string[] = lines;
-    let mut function_lines -> string[] = [];
-
-    if module_globals.init_function_lines.length > 0 {
-        function_lines = function_lines.concat(module_globals.init_function_lines);
-        function_lines = append_string(function_lines, "");
-    }
-
-    let mut index -> number = 0;
-    let mut has_add_function -> boolean = false;
-    let mut all_string_constants -> StringConstant[] = module_globals.string_constants;
-    if trace {
-        print.warn("test llvm: lower_to_llvm_with_context emit_function loop start (local_functions=" + number_to_string(local_functions.length) + ")");
-    }
-    loop {
-        if index >= local_functions.length {
-            break;
-        }
-        let current_function = local_functions[index];
-        if trace {
-            print.warn("test llvm: lower_to_llvm_with_context lowering function index=" + number_to_string(index) + " name=" + current_function.name + " instructions=" + number_to_string(current_function.instructions.length));
-        }
-        let aggregated_entry = find_function_effect_entry(aggregated_effects, current_function.name);
-        let mut effective_effects -> string[] = [];
-        if aggregated_entry != null {
-            effective_effects = aggregated_entry.effects;
-        }
-        function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry {
-            name: current_function.name,
-            effects: effective_effects,
-        });
-        let lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, exported_symbols, imported_functions, module_globals.locals, module_globals.init_function_symbol, module_globals.needs_init_call);
-        if sanitize_symbol(current_function.name) == "add" {
-            has_add_function = true;
-        }
-        diagnostics = diagnostics.concat(lowered.diagnostics);
-        lifetime_regions = lifetime_regions.concat(lowered.lifetime_regions);
-        all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants);
-        if lowered.lines.length > 0 {
-            function_lines = function_lines.concat(lowered.lines);
-            if index + 1 < local_functions.length {
-                function_lines = append_string(function_lines, "");
-            }
-        }
-        index += 1;
-    }
-
-    if !has_add_function {
-        if function_lines.length > 0 {
-            function_lines = append_string(function_lines, "");
-        }
-        function_lines = function_lines.concat([
-            "define internal double @add(double %a, double %b) {",
-            "entry:",
-            "  %t0 = fadd double %a, %b",
-            "  ret double %t0",
-            "}"
-        ]);
-    }
-
-    let string_constant_lines = render_string_constants(all_string_constants);
-    let mut final_lines -> string[] = preamble_lines;
-    if string_constant_lines.length > 0 {
-        final_lines = final_lines.concat(string_constant_lines);
-        final_lines = append_string(final_lines, "");
-    }
-    final_lines = final_lines.concat(function_lines);
-    final_lines = ensure_intrinsic_declarations(final_lines);
-
-    let ir = join_with_separator(final_lines, "\n");
-    let manifest = build_capability_manifest(native_module.entry_points, function_effects);
-    let mut output -> string = ir;
-    if output.length > 0 {
-        output = output + "\n";
-    }
-    return LoweredLLVMResult {
-        ir: output,
-        diagnostics: diagnostics,
-        trait_metadata: trait_metadata,
-        function_effects: function_effects,
-        lifetime_regions: lifetime_regions,
-        capability_manifest: manifest,
-        string_constants: all_string_constants,
-    };
-}
-
-fn module_source_filename(module_name -> string) -> string {
-    if module_name.length == 0 {
-        return "sailfin";
-    }
-    // Avoid appending twice.
-    if module_name.length >= 4 {
-        let suffix = substring(module_name, module_name.length - 4, module_name.length);
-        if suffix == ".sfn" {
-            return module_name;
-        }
-    }
-    return module_name + ".sfn";
-}
-
-fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
-    // Some toolchains reject calls to intrinsics without an explicit declare.
-    // Use libm round() instead of @llvm.round.f64 for cross-platform compatibility.
-    // Match "call double @round" to detect uses (avoids matching string constants).
-    // Match lines starting with "declare" to find real declarations.
-    let mut uses_round -> boolean = false;
-    let mut has_round_decl -> boolean = false;
-    let mut index -> number = 0;
-    loop {
-        if index >= lines.length {
-            break;
-        }
-        let line = lines[index];
-        if index_of(line, "call double @round(") >= 0 {
-            uses_round = true;
-        }
-        let trimmed = trim_text(line);
-        if starts_with(trimmed, "declare double @round(double)") {
-            has_round_decl = true;
-        }
-        index += 1;
-    }
-
-    if !uses_round || has_round_decl {
-        return lines;
-    }
-
-    // Insert right after source_filename, preserving the existing blank line.
-    return insert_string_at(lines, 1, "declare double @round(double)");
-}
-
-fn insert_string_at(values -> string[], insert_index -> number, value -> string) -> string[] {
-    let mut out -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= values.length {
-            break;
-        }
-        if index == insert_index {
-            out = append_string(out, value);
-        }
-        out = append_string(out, values[index]);
-        index += 1;
-    }
-    if insert_index >= values.length {
-        out = append_string(out, value);
-    }
-    return out;
-}
 fn empty_trait_metadata() -> TraitMetadata {
     return TraitMetadata { interfaces: [], implementations: [] };
 }
@@ -2255,768 +755,202 @@ fn flatten_struct_methods(structs -> NativeStruct[]) -> NativeFunction[] {
     return result;
 }
 
-fn extract_struct_type_from_llvm(llvm_type -> string) -> string {
-    // Extract struct type name from LLVM type like "%Token**" or "{ %Token**, i64 }*"
-    // Returns empty string if no struct type found
-    if llvm_type.length == 0 {
-        return "";
-    }
-    let mut result -> string = "";
-    let mut index -> number = 0;
-    loop {
-        if index >= llvm_type.length {
-            break;
-        }
-        let ch = substring(llvm_type, index, index + 1);
-        if ch == "%" {
-            // Found a struct type reference, extract the name
-            let mut end_index -> number = index + 1;
-            loop {
-                if end_index >= llvm_type.length {
-                    break;
-                }
-                let end_ch = substring(llvm_type, end_index, end_index + 1);
-                // Struct name ends at space, comma, *, }, or >
-                if end_ch == " " || end_ch == "," || end_ch == "*" || end_ch == "}" || end_ch == ">" {
-                    break;
-                }
-                end_index += 1;
-            }
-            if end_index > index + 1 {
-                result = substring(llvm_type, index, end_index);
-                break;
-            }
-        }
-        index += 1;
-    }
-    return result;
+fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[] ![io] {
+    let context = collect_imported_module_context(imports);
+    return context.manifests;
 }
 
-fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFunction[]) -> string[] {
-    let mut lines -> string[] = [];
-
-    // First pass: collect all referenced struct types
-    let mut referenced_types -> string[] = [];
-    let mut struct_index -> number = 0;
-    loop {
-        if struct_index >= context.structs.length {
-            break;
-        }
-        let info = context.structs[struct_index];
-        let mut field_index -> number = 0;
-        loop {
-            if field_index >= info.fields.length {
-                break;
-            }
-            let field_type = info.fields[field_index].llvm_type;
-            let extracted = extract_struct_type_from_llvm(field_type);
-            if extracted.length > 0 && !string_array_contains(referenced_types, extracted) {
-                referenced_types = append_string(referenced_types, extracted);
-            }
-            field_index += 1;
-        }
-        struct_index += 1;
-    }
-
-    // Check enums too
-    let mut enum_index -> number = 0;
-    loop {
-        if enum_index >= context.enums.length {
-            break;
-        }
-        let enum_info = context.enums[enum_index];
-        let mut variant_index -> number = 0;
-        loop {
-            if variant_index >= enum_info.variants.length {
-                break;
-            }
-            let variant = enum_info.variants[variant_index];
-            // Check each field in the variant for struct references
-            let mut variant_field_index -> number = 0;
-            loop {
-                if variant_field_index >= variant.fields.length {
-                    break;
-                }
-                let field_type = variant.fields[variant_field_index].llvm_type;
-                let extracted = extract_struct_type_from_llvm(field_type);
-                if extracted.length > 0 && !string_array_contains(referenced_types, extracted) {
-                    referenced_types = append_string(referenced_types, extracted);
-                }
-                variant_field_index += 1;
-            }
-            variant_index += 1;
-        }
-        enum_index += 1;
-    }
-
-    // Check function signatures too (return types and parameters)
-    let mut func_index -> number = 0;
-    loop {
-        if func_index >= functions.length {
-            break;
-        }
-        let func = functions[func_index];
-        // Check return type
-        let return_llvm_type = map_return_type(context, func.return_type);
-        let extracted_return = extract_struct_type_from_llvm(return_llvm_type);
-        if extracted_return.length > 0 && !string_array_contains(referenced_types, extracted_return) {
-            referenced_types = append_string(referenced_types, extracted_return);
-        }
-        // Check each parameter type
-        let mut param_index -> number = 0;
-        loop {
-            if param_index >= func.parameters.length {
-                break;
-            }
-            let param_llvm_type = map_parameter_type(context, func.parameters[param_index].type_annotation);
-            let extracted_param = extract_struct_type_from_llvm(param_llvm_type);
-            if extracted_param.length > 0 && !string_array_contains(referenced_types, extracted_param) {
-                referenced_types = append_string(referenced_types, extracted_param);
-            }
-            param_index += 1;
-        }
-        func_index += 1;
-    }
-
-    // Emit opaque forward declarations for referenced but undefined types
-    let mut ref_index -> number = 0;
-    loop {
-        if ref_index >= referenced_types.length {
-            break;
-        }
-        let ref_type = referenced_types[ref_index];
-        // Check if this type is defined in our context (structs or enums)
-        let mut is_defined -> boolean = false;
-        let mut check_index -> number = 0;
-        loop {
-            if check_index >= context.structs.length {
-                break;
-            }
-            if context.structs[check_index].llvm_name == ref_type {
-                is_defined = true;
-                break;
-            }
-            check_index += 1;
-        }
-        // Also check enums
-        if !is_defined {
-            check_index = 0;
-            loop {
-                if check_index >= context.enums.length {
-                    break;
-                }
-                let enum_llvm_name = "%" + sanitize_symbol(context.enums[check_index].name);
-                if enum_llvm_name == ref_type {
-                    is_defined = true;
-                    break;
-                }
-                check_index += 1;
-            }
-        }
-        if !is_defined {
-            // Emit opaque declaration
-            lines = append_string(lines, ref_type + " = type opaque");
-        }
-        ref_index += 1;
-    }
-
-    // Second pass: emit actual struct definitions (deduplicated)
-    let mut index -> number = 0;
-    let mut emitted_types -> string[] = [];
-    loop {
-        if index >= context.structs.length {
-            break;
-        }
-        let info = context.structs[index];
-        // Skip if we already emitted this type
-        if string_array_contains(emitted_types, info.llvm_name) {
-            index += 1;
-            continue;
-        }
-        emitted_types = append_string(emitted_types, info.llvm_name);
-
-        let mut field_types -> string[] = [];
-        let mut field_index -> number = 0;
-        loop {
-            if field_index >= info.fields.length {
-                break;
-            }
-            field_types = append_string(field_types, info.fields[field_index].llvm_type);
-            field_index += 1;
-        }
-        let mut body -> string = "";
-        if field_types.length == 0 {
-            body = "{}";
-        } else {
-            body = "{ " + join_with_separator(field_types, ", ") + " }";
-        }
-        lines = append_string(lines, info.llvm_name + " = type " + body);
-        index += 1;
-    }
-    return lines;
-}
-
-fn render_enum_type_definitions(context -> TypeContext) -> string[] {
-    let mut lines -> string[] = [];
-    let mut emitted_types -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= context.enums.length {
-            break;
-        }
-        let enum_info = context.enums[index];
-        let enum_llvm_name = "%" + sanitize_symbol(enum_info.name);
-
-        // Skip if we already emitted this type
-        if string_array_contains(emitted_types, enum_llvm_name) {
-            index += 1;
-            continue;
-        }
-        emitted_types = append_string(emitted_types, enum_llvm_name);
-
-        // Map tag type to LLVM type
-        let mut llvm_tag_type -> string = "i32";
-        if enum_info.tag_type == "i8" {
-            llvm_tag_type = "i8";
-        }
-        if enum_info.tag_type == "i16" {
-            llvm_tag_type = "i16";
-        }
-        if enum_info.tag_type == "i32" {
-            llvm_tag_type = "i32";
-        }
-        if enum_info.tag_type == "i64" {
-            llvm_tag_type = "i64";
-        }
-
-        // Calculate the maximum payload size across all variants
-        let mut max_payload_size -> number = 0;
-        let mut variant_idx -> number = 0;
-        loop {
-            if variant_idx >= enum_info.variants.length {
-                break;
-            }
-            let variant = enum_info.variants[variant_idx];
-            if variant.size > max_payload_size {
-                max_payload_size = variant.size;
-            }
-            variant_idx += 1;
-        }
-
-        // Enum layout: { tag, [payload_bytes x payload_size] }
-        // We represent payload as a byte array for the largest variant
-        let mut payload_repr -> string = "";
-        if max_payload_size > 0 {
-            payload_repr = ", [" + number_to_string(max_payload_size) + " x i8]";
-        }
-
-        let body = "{ " + llvm_tag_type + payload_repr + " }";
-        lines = append_string(lines, enum_info.llvm_name + " = type " + body);
-        index += 1;
-    }
-    return lines;
-}
-
-fn render_interface_type_definitions(context -> TypeContext) -> string[] {
-    let mut lines -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= context.interfaces.length {
-            break;
-        }
-        let interface_info = context.interfaces[index];
-        // Trait object layout: { data_ptr, vtable_ptr }
-        let body = "{ i8*, i8* }";
-        lines = append_string(lines, interface_info.llvm_name + " = type " + body);
-        index += 1;
-    }
-    return lines;
-}
-
-fn render_vtable_type_definitions(context -> TypeContext) -> string[] {
-    let mut lines -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= context.vtables.length {
-            break;
-        }
-        let vtable = context.vtables[index];
-        let mut entry_types -> string[] = [];
-        let mut entry_index -> number = 0;
-        loop {
-            if entry_index >= vtable.entries.length {
-                break;
-            }
-            entry_types = append_string(entry_types, vtable.entries[entry_index].function_pointer_type);
-            entry_index += 1;
-        }
-        let mut body -> string = "";
-        if entry_types.length == 0 {
-            body = "{}";
-        } else {
-            body = "{ " + join_with_separator(entry_types, ", ") + " }";
-        }
-        lines = append_string(lines, vtable.llvm_type_name + " = type " + body);
-        index += 1;
-    }
-    return lines;
-}
-
-fn render_vtable_constants(context -> TypeContext) -> string[] {
-    let mut lines -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= context.vtables.length {
-            break;
-        }
-        let vtable = context.vtables[index];
-        let mut entry_values -> string[] = [];
-        let mut entry_index -> number = 0;
-        loop {
-            if entry_index >= vtable.entries.length {
-                break;
-            }
-            let entry = vtable.entries[entry_index];
-            let sanitized_method = sanitize_symbol(entry.method_name);
-            // Cast the method to i8* function pointer type
-            let cast_value = "bitcast (" + entry.function_pointer_type + " @" + sanitized_method + " to " + entry.function_pointer_type + ")";
-            let typed_value = entry.function_pointer_type + " " + cast_value;
-            entry_values = append_string(entry_values, typed_value);
-            entry_index += 1;
-        }
-        let mut body -> string = "";
-        if entry_values.length == 0 {
-            body = "zeroinitializer";
-        } else {
-            body = "{ " + join_with_separator(entry_values, ", ") + " }";
-        }
-        // Vtable globals are safe to keep module-local.
-        // Marking them internal avoids duplicate symbol collisions when linking
-        // multiple LLVM modules that share the same type context.
-        lines = append_string(lines, vtable.llvm_global_name + " = internal constant " + vtable.llvm_type_name + " " + body);
-        index += 1;
-    }
-    return lines;
-}
-
-fn is_entry_point(entry_points -> string[], function_name -> string) -> boolean {
-    let mut index -> number = 0;
-    loop {
-        if index >= entry_points.length {
-            break;
-        }
-        if entry_points[index] == function_name {
-            return true;
-        }
-        index += 1;
-    }
-    return false;
-}
-
-fn collect_exported_symbol_names(imports -> NativeImport[]) -> string[] {
-    let mut names -> string[] = [];
+fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleContext ![io] {
+    let mut manifests -> LayoutManifest[] = [];
+    let mut native_texts -> string[] = [];
+    let mut diagnostics -> string[] = [];
+    let mut seen -> string[] = [];
     let mut index -> number = 0;
     loop {
         if index >= imports.length {
             break;
         }
-        let entry = imports[index];
-        if entry.kind == "export" {
-            let specifiers = entry.specifiers;
-            let mut spec_index -> number = 0;
-            loop {
-                if spec_index >= specifiers.length {
-                    break;
-                }
-                let exported = specifiers[spec_index].name;
-                if exported.length > 0 && !string_array_contains(names, exported) {
-                    names = append_string(names, exported);
-                }
-                spec_index += 1;
-            }
+        let module_path = imports[index].module;
+        let slug = resolve_import_module_slug(module_path);
+        if slug.length == 0 {
+            index += 1;
+            continue;
         }
+        if string_array_contains(seen, slug) {
+            index += 1;
+            continue;
+        }
+        seen = append_string(seen, slug);
+
+        let manifest_path = layout_manifest_path_for_slug(slug);
+        let native_text_path = native_text_path_for_slug(slug);
+
+        let mut manifest_structs -> NativeStruct[] = [];
+        let mut manifest_enums -> NativeEnum[] = [];
+        if fs.exists(manifest_path) {
+            let manifest_contents = fs.readFile(manifest_path);
+            let parsed_manifest = parse_layout_manifest(manifest_contents);
+            manifest_structs = parsed_manifest.structs;
+            manifest_enums = parsed_manifest.enums;
+        } else {
+            diagnostics = diagnostics.concat(["layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")"]);
+        }
+
+        let mut native_text -> string = "";
+        if fs.exists(native_text_path) {
+            native_text = fs.readFile(native_text_path);
+        } else {
+            diagnostics = diagnostics.concat(["native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")"]);
+        }
+
+        manifests = manifests.concat([LayoutManifest {
+            structs: manifest_structs,
+            enums: manifest_enums,
+            diagnostics: [],
+        }]);
+        native_texts = native_texts.concat([native_text]);
         index += 1;
     }
-    return names;
+
+    return ImportedModuleContext { manifests: manifests, native_texts: native_texts, diagnostics: diagnostics };
 }
 
-fn is_exported_symbol(exported_symbols -> string[], function_name -> string) -> boolean {
+fn resolve_import_module_slug(module -> string) -> string {
+    let trimmed = trim_text(module);
+    if trimmed.length == 0 {
+        return "";
+    }
+    let normalized = normalize_import_module_path(trimmed);
+
+    // Normalize relative module specifiers (./foo, ../bar, foo/../baz) into
+    // a stable slug that matches our build artifact layout under build/stage2.
+    // Examples:
+    // - "./llvm/type_context" -> "llvm/type_context"
+    // - "../native_ir" -> "native_ir"
+    let mut parts -> string[] = [];
+    let mut segment -> string = "";
     let mut index -> number = 0;
     loop {
-        if index >= exported_symbols.length {
+        if index >= normalized.length {
             break;
         }
-        if exported_symbols[index] == function_name {
-            return true;
+        let ch = normalized[index];
+        if ch == "/" {
+            if segment.length > 0 {
+                parts = append_string(parts, segment);
+            }
+            segment = "";
+        } else {
+            segment = segment + ch;
         }
         index += 1;
     }
-    return false;
-}
-
-fn should_internalize_function(function -> NativeFunction, entry_points -> string[], exported_symbols -> string[], imported_functions -> NativeFunction[]) -> boolean {
-    // Externs are emitted as declarations.
-    if function.is_extern {
-        return false;
+    if segment.length > 0 {
+        parts = append_string(parts, segment);
     }
 
-    // Keep declared entry points externally visible.
-    if is_entry_point(entry_points, function.name) {
-        return false;
-    }
-
-    // Preserve explicitly exported symbols for cross-module linkage.
-    if is_exported_symbol(exported_symbols, function.name) {
-        return false;
-    }
-
-    // Treat leading-underscore helpers as module-local.
-    let sanitized = sanitize_symbol(function.name);
-    if sanitized.length > 0 && sanitized[0] == "_" {
-        return true;
-    }
-
-    // If another imported module already defines a function with this name,
-    // keep our copy module-local to avoid link-time collisions.
-    if find_function_by_name(imported_functions, function.name) != null {
-        return true;
-    }
-
-    // Default: keep module-local to prevent duplicate symbol collisions.
-    return true;
-}
-
-fn is_ascii_uppercase(ch -> string) -> boolean {
-    if ch.length == 0 {
-        return false;
-    }
-    let code = char_code(ch);
-    return code >= char_code("A") && code <= char_code("Z");
-}
-
-fn looks_like_user_type(annotation -> string) -> boolean {
-    let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return false;
-    }
-    let first = trimmed[0];
-    if is_ascii_uppercase(first) {
-        return true;
-    }
-    let mut index -> number = 1;
+    let mut resolved -> string[] = [];
+    index = 0;
     loop {
-        if index >= trimmed.length {
+        if index >= parts.length {
             break;
         }
-        let current = trimmed[index];
-        if current == "." && index + 1 < trimmed.length {
-            let next = trimmed[index + 1];
-            if is_ascii_uppercase(next) {
-                return true;
-            }
+        let part = parts[index];
+        if part.length == 0 || part == "." {
+            index += 1;
+            continue;
         }
+        if part == ".." {
+            if resolved.length > 0 {
+                let mut shortened -> string[] = [];
+                let mut drop_index -> number = 0;
+                let limit = resolved.length - 1;
+                loop {
+                    if drop_index >= limit {
+                        break;
+                    }
+                    shortened = append_string(shortened, resolved[drop_index]);
+                    drop_index += 1;
+                }
+                resolved = shortened;
+            }
+            index += 1;
+            continue;
+        }
+        resolved = append_string(resolved, part);
         index += 1;
     }
-    return false;
+
+    return join_with_separator(resolved, "/");
 }
 
-fn map_type_annotation(annotation -> string) -> string {
-    let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return "void";
-    }
-    let normalized = unwrap_move_wrapper(trimmed);
-
-    // Raw pointer types: `*T`, `*mut T`, `*opaque`.
-    // Sailfin user-defined values often lower as pointers already; avoid
-    // introducing a second pointer layer when the inner mapping already
-    // returns a pointer type.
-    if starts_with(normalized, "*") {
-        let mut remainder = trim_text(substring(normalized, 1, normalized.length));
-        if starts_with(remainder, "mut") {
-            remainder = trim_text(substring(remainder, 3, remainder.length));
-        }
-        if remainder == "opaque" {
-            return "i8*";
-        }
-        if remainder.length == 0 {
-            return "i8*";
-        }
-        let inner = map_type_annotation(remainder);
-        if inner.length == 0 || inner == "void" {
-            return "i8*";
-        }
-        if inner[inner.length - 1] == "*" {
-            return inner;
-        }
-        return inner + "*";
-    }
-
-    if normalized.length > 0 {
-        let optional_marker = normalized[normalized.length - 1];
-        if optional_marker == "?" {
-            let inner_annotation = trim_text(substring(normalized, 0, normalized.length - 1));
-            if inner_annotation.length == 0 {
-                return "i8*";
-            }
-            let inner_type = map_type_annotation(inner_annotation);
-            if inner_type.length == 0 || inner_type == "void" {
-                return "i8*";
-            }
-            if inner_type.length > 0 && inner_type[inner_type.length - 1] == "*" {
-                return inner_type;
-            }
-            return inner_type + "*";
-        }
-    }
-    if normalized == "number" {
-        return "double";
-    }
-    if normalized == "boolean" || normalized == "bool" {
-        return "i1";
-    }
-    if normalized == "usize" {
-        return "i64";
-    }
-    if normalized == "int" || normalized == "i64" {
-        return "i64";
-    }
-    if normalized == "i32" {
-        return "i32";
-    }
-    if normalized == "u8" {
-        return "i8";
-    }
-    if normalized == "string" {
-        return "i8*";
-    }
-    if normalized == "void" {
-        return "void";
-    }
-    if normalized.length > 2 {
-        let suffix = substring(normalized, normalized.length - 2, normalized.length);
-        if suffix == "[]" {
-            let element_annotation = trim_text(substring(normalized, 0, normalized.length - 2));
-            let element_type = map_type_annotation(element_annotation);
-            if element_type.length == 0 {
-                return "i8*";
-            }
-            if !annotation_is_array(element_annotation) && layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
-                let stripped_element = strip_pointer_suffix(element_type);
-                if stripped_element.length > 0 {
-                    element_type = stripped_element;
-                }
-            }
-            let aggregate = array_struct_type_for_element(element_type);
-            return aggregate + "*";
-        }
-    }
-    if looks_like_user_type(normalized) {
-        let sanitized = sanitize_symbol(normalized);
-        return "%" + sanitized + "*";
-    }
-    // Default to i8* for unknown types
-    return "i8*";
+fn layout_manifest_path_for_slug(slug -> string) -> string {
+    return "build/stage2/" + slug + ".layout-manifest";
 }
 
-fn map_struct_field_annotation(annotation -> string) -> string {
-    let result = map_type_annotation(annotation);
-    if result == "void" {
-        return "";
+fn native_text_path_for_slug(slug -> string) -> string {
+    return "build/stage2/" + slug + ".sfn-asm";
+}
+
+fn normalize_import_module_path(value -> string) -> string {
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "\\" {
+            result = result + "/";
+        } else {
+            result = result + ch;
+        }
+        index += 1;
     }
     return result;
 }
 
-fn layout_annotation_requires_pointer(annotation -> string) -> boolean {
-    let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return false;
-    }
-    let normalized = unwrap_move_wrapper(trimmed);
-    if normalized.length == 0 {
-        return false;
-    }
-    if starts_with(normalized, "mut ") {
-        let remainder = trim_text(substring(normalized, 4, normalized.length));
-        if remainder.length == 0 {
-            return false;
-        }
-        return layout_annotation_requires_pointer(remainder);
-    }
-    if normalized.length > 0 {
-        let first = normalized[0];
-        if first == "&" {
-            return true;
-        }
-    }
-    if normalized.length > 0 {
-        let last = normalized[normalized.length - 1];
-        if last == "?" {
-            return true;
-        }
-    }
-    if normalized.length > 2 {
-        let suffix = substring(normalized, normalized.length - 2, normalized.length);
-        if suffix == "[]" {
-            return true;
-        }
-    }
-    return false;
-}
-
-fn layout_annotation_base_type(annotation -> string) -> string {
-    let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return "";
-    }
-    let normalized = unwrap_move_wrapper(trimmed);
-    if normalized.length == 0 {
-        return "";
-    }
-    if starts_with(normalized, "mut ") {
-        let remainder = trim_text(substring(normalized, 4, normalized.length));
-        return layout_annotation_base_type(remainder);
-    }
-    if normalized.length > 0 {
-        let first = normalized[0];
-        if first == "&" {
-            let inner_reference = trim_text(substring(normalized, 1, normalized.length));
-            return layout_annotation_base_type(inner_reference);
-        }
-    }
-    if normalized.length > 0 {
-        let last = normalized[normalized.length - 1];
-        if last == "?" {
-            let inner_optional = trim_text(substring(normalized, 0, normalized.length - 1));
-            return layout_annotation_base_type(inner_optional);
-        }
-    }
-    if normalized.length > 2 {
-        let suffix = substring(normalized, normalized.length - 2, normalized.length);
-        if suffix == "[]" {
-            let element = trim_text(substring(normalized, 0, normalized.length - 2));
-            return layout_annotation_base_type(element);
-        }
-    }
-    return normalized;
-}
-
-fn annotation_is_array(annotation -> string) -> boolean {
-    let trimmed = trim_text(annotation);
-    if trimmed.length < 3 {
-        return false;
-    }
-    let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
-    return suffix == "[]";
-}
-
-fn layout_annotation_represents_user_value(annotation -> string) -> boolean {
-    if layout_annotation_requires_pointer(annotation) {
-        return false;
-    }
-    let base = layout_annotation_base_type(annotation);
-    if base.length == 0 {
-        return false;
-    }
-    if base == "number" {
-        return false;
-    }
-    if base == "boolean" || base == "bool" {
-        return false;
-    }
-    if base == "int" || base == "i64" {
-        return false;
-    }
-    if base == "i32" {
-        return false;
-    }
-    if base == "string" {
-        return false;
-    }
-    if base == "void" {
-        return false;
-    }
-    if contains_text(base, "<") {
-        return false;
-    }
-    if contains_text(base, ">") {
-        return false;
-    }
-    if looks_like_user_type(base) {
-        return true;
-    }
-    return false;
-}
-
-fn find_struct_info_by_name(context -> TypeContext, name -> string) -> StructTypeInfo? {
-    let mut index -> number = 0;
+fn replace_native_struct(values -> NativeStruct[], index -> number, value -> NativeStruct) -> NativeStruct[] {
+    let mut result -> NativeStruct[] = [];
+    let mut current -> number = 0;
     loop {
-        if index >= context.structs.length {
+        if current >= values.length {
             break;
         }
-        let info = context.structs[index];
-        if info.name == name {
-            return info;
+        if current == index {
+            result = append_native_struct(result, value);
+        } else {
+            result = append_native_struct(result, values[current]);
         }
-        index += 1;
+        current += 1;
     }
-    return null;
+    return result;
 }
 
-fn find_interface_info_by_name(context -> TypeContext, name -> string) -> InterfaceTypeInfo? {
-    let mut index -> number = 0;
+fn replace_native_enum(values -> NativeEnum[], index -> number, value -> NativeEnum) -> NativeEnum[] {
+    let mut result -> NativeEnum[] = [];
+    let mut current -> number = 0;
     loop {
-        if index >= context.interfaces.length {
+        if current >= values.length {
             break;
         }
-        let info = context.interfaces[index];
-        if info.name == name {
-            return info;
+        if current == index {
+            result = append_native_enum(result, value);
+        } else {
+            result = append_native_enum(result, values[current]);
         }
-        index += 1;
+        current += 1;
     }
-    return null;
+    return result;
 }
 
-fn find_vtable_for_struct_interface(context -> TypeContext, struct_name -> string, interface_name -> string) -> VTableInfo? {
+fn find_struct_index(structs -> NativeStruct[], name -> string) -> number {
     let mut index -> number = 0;
     loop {
-        if index >= context.vtables.length {
+        if index >= structs.length {
             break;
         }
-        let vtable = context.vtables[index];
-        if vtable.struct_name == struct_name && vtable.interface_name == interface_name {
-            return vtable;
-        }
-        index += 1;
-    }
-    return null;
-}
-
-fn find_struct_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
-    let trimmed = trim_text(llvm_type);
-    let mut index -> number = 0;
-    loop {
-        if index >= context.structs.length {
-            break;
-        }
-        let info = context.structs[index];
-        if info.llvm_name == trimmed {
-            return info;
-        }
-        index += 1;
-    }
-    return null;
-}
-
-fn find_struct_field_index(struct_info -> StructTypeInfo, field_name -> string) -> number {
-    let mut index -> number = 0;
-    loop {
-        if index >= struct_info.fields.length {
-            break;
-        }
-        let field = struct_info.fields[index];
-        if field.name == field_name {
+        if structs[index].name == name {
             return index;
         }
         index += 1;
@@ -3024,270 +958,736 @@ fn find_struct_field_index(struct_info -> StructTypeInfo, field_name -> string) 
     return -1;
 }
 
-fn find_enum_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> EnumTypeInfo? {
-    let trimmed = trim_text(llvm_type);
+fn find_enum_index(enums -> NativeEnum[], name -> string) -> number {
     let mut index -> number = 0;
     loop {
-        if index >= context.enums.length {
+        if index >= enums.length {
             break;
         }
-        let info = context.enums[index];
-        if info.llvm_name == trimmed {
-            return info;
+        if enums[index].name == name {
+            return index;
         }
         index += 1;
     }
-    return null;
+    return -1;
 }
 
-fn resolve_struct_info_from_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
-    let mut candidate = trim_text(llvm_type);
-    if candidate.length == 0 {
-        return null;
+fn apply_layout_manifest_to_module(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest?) -> LayoutManifestApplication {
+    if manifest == null {
+        return LayoutManifestApplication { structs: structs, enums: enums, diagnostics: [] };
     }
-    if ends_with_pointer_suffix(candidate) {
-        candidate = strip_pointer_suffix(candidate);
-    }
-    return find_struct_info_by_llvm_type(context, candidate);
+    return apply_layout_manifest_entries(structs, enums, manifest);
 }
 
-fn lookup_allocation_info(context -> TypeContext, llvm_type -> string) -> TypeAllocationInfo? {
-    let trimmed = trim_text(llvm_type);
-    if trimmed.length == 0 {
-        return null;
-    }
-    if ends_with_pointer_suffix(trimmed) {
-        return null;
-    }
-    if trimmed == "double" {
-        return TypeAllocationInfo { llvm_type: trimmed, size: 8, align: 8 };
-    }
-    if trimmed == "i64" || trimmed == "int" {
-        return TypeAllocationInfo { llvm_type: trimmed, size: 8, align: 8 };
-    }
-    if trimmed == "i32" {
-        return TypeAllocationInfo { llvm_type: trimmed, size: 4, align: 4 };
-    }
-    if trimmed == "i1" {
-        return TypeAllocationInfo { llvm_type: trimmed, size: 1, align: 1 };
-    }
-    if trimmed == "i8" {
-        return TypeAllocationInfo { llvm_type: trimmed, size: 1, align: 1 };
-    }
-    let struct_info = find_struct_info_by_llvm_type(context, trimmed);
-    if struct_info != null {
-        let mut align_value = struct_info.align;
-        if align_value <= 0 {
-            align_value = 1;
+fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest) -> LayoutManifestApplication {
+    let mut diagnostics -> string[] = [];
+
+    let mut updated_structs -> NativeStruct[] = structs;
+    let mut struct_index -> number = 0;
+    loop {
+        if struct_index >= manifest.structs.length {
+            break;
         }
-        return TypeAllocationInfo { llvm_type: struct_info.llvm_name, size: struct_info.size, align: align_value };
-    }
-    let enum_info = find_enum_info_by_llvm_type(context, trimmed);
-    if enum_info != null {
-        let mut align_value = enum_info.align;
-        if align_value <= 0 {
-            align_value = 1;
+        let layout_struct = manifest.structs[struct_index];
+        let target_index = find_struct_index(updated_structs, layout_struct.name);
+        if target_index < 0 {
+            diagnostics = append_string(diagnostics, "layout manifest: struct `" + layout_struct.name + "` missing from native module");
+        } else {
+            let target = updated_structs[target_index];
+            let replaced = NativeStruct {
+                name: target.name,
+                fields: target.fields,
+                methods: target.methods,
+                implements: target.implements,
+                layout: layout_struct.layout,
+            };
+            updated_structs = replace_native_struct(updated_structs, target_index, replaced);
         }
-        return TypeAllocationInfo { llvm_type: enum_info.llvm_name, size: enum_info.size, align: align_value };
+        struct_index += 1;
     }
-    return null;
+
+    let mut updated_enums -> NativeEnum[] = enums;
+    let mut enum_index -> number = 0;
+    loop {
+        if enum_index >= manifest.enums.length {
+            break;
+        }
+        let layout_enum = manifest.enums[enum_index];
+        let target_index = find_enum_index(updated_enums, layout_enum.name);
+        if target_index < 0 {
+            diagnostics = append_string(diagnostics, "layout manifest: enum `" + layout_enum.name + "` missing from native module");
+        } else {
+            let target = updated_enums[target_index];
+            let replaced = NativeEnum {
+                name: target.name,
+                variants: target.variants,
+                layout: layout_enum.layout,
+            };
+            updated_enums = replace_native_enum(updated_enums, target_index, replaced);
+        }
+        enum_index += 1;
+    }
+
+    return LayoutManifestApplication {
+        structs: updated_structs,
+        enums: updated_enums,
+        diagnostics: diagnostics,
+    };
 }
 
-fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> StructTypeInfo? {
-    let trimmed = trim_text(base);
-    if trimmed.length == 0 {
-        return null;
+fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        return lower_to_llvm_with_context(native_module, [], [], []);
     }
-    if is_simple_identifier(trimmed) {
-        let parameter = find_parameter_binding(bindings, trimmed);
-        if parameter != null {
-            let info = resolve_struct_info_from_llvm_type(context, parameter.llvm_type);
-            if info != null {
-                return info;
+    let parse = parse_native_artifact(artifact.contents);
+    let import_context = collect_imported_module_context(parse.imports);
+    return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+}
+
+fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        return lower_to_llvm_with_context_for_tests(native_module, [], [], []);
+    }
+    let parse = parse_native_artifact(artifact.contents);
+    let import_context = collect_imported_module_context(parse.imports);
+    return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+}
+
+fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifests -> LayoutManifest[]) -> LoweredLLVMResult {
+    return lower_to_llvm_with_context(native_module, imported_manifests, [], []);
+}
+
+fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+    let base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
+    if base.ir.length == 0 {
+        return base;
+    }
+
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        return base;
+    }
+
+    let parse = parse_native_artifact(artifact.contents);
+    let mut tests -> NativeFunction[] = [];
+    let mut has_main -> boolean = false;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= parse.functions.length {
+            break;
+        }
+        let fun = parse.functions[index];
+        if fun.name == "main" {
+            has_main = true;
+        }
+        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
+            tests = tests.concat([fun]);
+        }
+        index += 1;
+    }
+
+    if tests.length == 0 {
+        return base;
+    }
+
+    // For now we only synthesize `main` when no user-provided `main` exists.
+    if has_main {
+        let mut updated = base;
+        updated.diagnostics = updated.diagnostics.concat([
+            "llvm lowering (test): module defines `main`; skipping synthesized test harness",
+        ]);
+        return updated;
+    }
+
+    let harness = render_test_harness_main(tests);
+    let mut updated = base;
+    if updated.ir.length > 0 {
+        updated.ir = updated.ir + "\n";
+    }
+    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
+    return updated;
+}
+
+fn module_global_symbol(name -> string) -> string {
+    return "@global." + sanitize_symbol(name);
+}
+
+fn module_init_symbol(module_name -> string) -> string {
+    return "@sailfin_module_init__" + sanitize_symbol(module_name);
+}
+
+fn module_user_main_symbol(module_name -> string) -> string {
+    return "sailfin_user_main__" + sanitize_symbol(module_name);
+}
+
+fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> TypeContext, module_name -> string) -> ModuleGlobalLoweringResult {
+    let mut diagnostics -> string[] = [];
+    let mut preamble_lines -> string[] = [];
+    let mut init_lines -> string[] = [];
+    let mut locals -> LocalBinding[] = [];
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+    let init_symbol = module_init_symbol(module_name);
+    let mut needs_init -> boolean = false;
+
+    if bindings.length == 0 {
+        return ModuleGlobalLoweringResult {
+            preamble_lines: [],
+            init_function_lines: [],
+            init_function_symbol: init_symbol,
+            needs_init_call: false,
+            locals: [],
+            string_constants: collected_string_constants,
+            diagnostics: [],
+        };
+    }
+
+    let scope_id = format_root_scope_id("module");
+    let scope_depth = 0;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= bindings.length {
+            break;
+        }
+        let binding = bindings[index];
+        let mut type_annotation = trim_text(binding.type_annotation);
+        let mut effective_type_annotation = binding.type_annotation;
+        if type_annotation.length == 0 && binding.value != null {
+            let init_expr = trim_text(binding.value);
+            if is_string_literal(init_expr) {
+                type_annotation = "string";
+                effective_type_annotation = "string";
             }
         }
-        let local = find_local_binding(locals, trimmed);
-        if local != null {
-            let info = resolve_struct_info_from_llvm_type(context, local.llvm_type);
-            if info != null {
-                return info;
-            }
+        if type_annotation.length == 0 {
+            index += 1;
+            continue;
         }
-    }
-    // Allow static method calls on a struct type (e.g. `BankAccount.new(123)`).
-    // The base identifier has no runtime value, but its name can still resolve
-    // to a known struct type in the module context.
-    let by_name = find_struct_info_by_name(context, trimmed);
-    if by_name != null {
-        return by_name;
-    }
-    return null;
-}
+        let name = binding.name;
+        let global_name = module_global_symbol(name);
+        let mut llvm_type -> string = "";
+        if type_annotation.length > 0 {
+            llvm_type = map_local_type(context, type_annotation);
+        }
+        if llvm_type.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: module binding `" + name + "` has unsupported type annotation `" + effective_type_annotation + "`");
+            llvm_type = "double";
+        }
 
-fn resolve_interface_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> InterfaceTypeInfo? {
-    let trimmed = trim_text(base);
-    if trimmed.length == 0 {
-        return null;
-    }
-    if is_simple_identifier(trimmed) {
-        let parameter = find_parameter_binding(bindings, trimmed);
-        if parameter != null {
-            let mut type_name = parameter.llvm_type;
-            if substring(type_name, 0, 7) == "%trait." {
-                let interface_name = substring(type_name, 7, type_name.length);
-                let info = find_interface_info_by_name(context, interface_name);
-                if info != null {
-                    return info;
+        if llvm_type == "i8*" {
+            preamble_lines = append_string(preamble_lines, global_name + " = global i8* null");
+            if binding.value != null {
+                needs_init = true;
+            }
+        } else {
+            let mut initializer_text -> string = default_return_literal(llvm_type);
+            if binding.value != null {
+                let init_expr = trim_text(binding.value);
+                if llvm_type == "double" && is_number_literal(init_expr) {
+                    initializer_text = normalise_number_literal(init_expr);
+                } else if llvm_type == "i64" && is_integer_literal(init_expr) {
+                    initializer_text = init_expr;
+                } else if llvm_type == "i32" && is_integer_literal(init_expr) {
+                    initializer_text = init_expr;
+                } else if llvm_type == "i1" && is_boolean_literal(init_expr) {
+                    initializer_text = "0";
+                    if matches_case_insensitive(init_expr, "true") {
+                        initializer_text = "1";
+                    }
+                } else {
+                    needs_init = true;
                 }
             }
-            // Try direct lookup
-            let info = find_interface_info_by_name(context, type_name);
-            if info != null {
-                return info;
-            }
+            preamble_lines = append_string(preamble_lines, global_name + " = global " + llvm_type + " " + initializer_text);
         }
-        let local = find_local_binding(locals, trimmed);
-        if local != null {
-            let mut type_name = local.llvm_type;
-            if substring(type_name, 0, 7) == "%trait." {
-                let interface_name = substring(type_name, 7, type_name.length);
-                let info = find_interface_info_by_name(context, interface_name);
-                if info != null {
-                    return info;
-                }
-            }
-            // Try direct lookup
-            let info = find_interface_info_by_name(context, type_name);
-            if info != null {
-                return info;
-            }
-        }
-    }
-    return null;
-}
 
-fn find_struct_field_info(info -> StructTypeInfo, field_name -> string) -> StructFieldInfo? {
-    let mut index -> number = 0;
-    loop {
-        if index >= info.fields.length {
-            break;
-        }
-        let field = info.fields[index];
-        if field.name == field_name {
-            return field;
-        }
+        locals = append_local_binding(locals, LocalBinding {
+            name: name,
+            pointer: global_name,
+            llvm_type: llvm_type,
+            type_annotation: effective_type_annotation,
+            ownership: null,
+            consumed: false,
+            scope_id: scope_id,
+            scope_depth: scope_depth,
+        });
+
         index += 1;
     }
-    return null;
-}
 
-fn find_variant_field_info(variant -> EnumVariantInfo, field_name -> string) -> StructFieldInfo? {
-    let mut index -> number = 0;
+    if !needs_init {
+        return ModuleGlobalLoweringResult {
+            preamble_lines: preamble_lines,
+            init_function_lines: [],
+            init_function_symbol: init_symbol,
+            needs_init_call: false,
+            locals: locals,
+            string_constants: collected_string_constants,
+            diagnostics: diagnostics,
+        };
+    }
+
+    init_lines = init_lines.concat([
+        "define internal void " + init_symbol + "() {",
+        "block.entry:",
+    ]);
+
+    let mut init_index -> number = 0;
+    let mut current_temp -> number = 0;
+    let mut current_lines -> string[] = init_lines;
     loop {
-        if index >= variant.fields.length {
+        if init_index >= bindings.length {
             break;
         }
-        let field = variant.fields[index];
-        if field.name == field_name {
-            return field;
-        }
-        index += 1;
-    }
-    return null;
-}
-
-fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) -> StructTypeInfo? {
-    let trimmed = trim_text(type_name);
-    if trimmed.length == 0 {
-        return null;
-    }
-
-    let mut candidates -> string[] = [trimmed];
-    let generic_index = index_of(trimmed, "<");
-    if generic_index >= 0 {
-        let base = trim_text(substring(trimmed, 0, generic_index));
-        if base.length > 0 {
-            if !string_array_contains(candidates, base) {
-                candidates = append_string(candidates, base);
+        let binding = bindings[init_index];
+        let mut type_annotation = trim_text(binding.type_annotation);
+        if type_annotation.length == 0 && binding.value != null {
+            let init_expr = trim_text(binding.value);
+            if is_string_literal(init_expr) {
+                type_annotation = "string";
             }
         }
-    }
+        if type_annotation.length == 0 {
+            init_index += 1;
+            continue;
+        }
+        if binding.value == null {
+            init_index += 1;
+            continue;
+        }
+        let name = binding.name;
+        let global_name = module_global_symbol(name);
+        let local = find_local_binding(locals, name);
+        if local == null {
+            init_index += 1;
+            continue;
+        }
+        let llvm_type = local.llvm_type;
+        let init_expr = trim_text(binding.value);
 
-    let last_dot = find_last_index_of_char(trimmed, ".");
-    if last_dot >= 0 {
-        let tail_full = trim_text(substring(trimmed, last_dot + 1, trimmed.length));
-        if tail_full.length > 0 {
-            if !string_array_contains(candidates, tail_full) {
-                candidates = append_string(candidates, tail_full);
+        if llvm_type == "i8*" {
+            let lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type);
+            diagnostics = diagnostics.concat(lowered.diagnostics);
+            current_lines = lowered.lines;
+            current_temp = lowered.temp_index;
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+            if lowered.operand != null {
+                current_lines = append_string(current_lines, "  store i8* " + lowered.operand.value + ", i8** " + global_name);
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: failed to initialize module string binding `" + name + "`");
             }
-            let tail_generic_index = index_of(tail_full, "<");
-            if tail_generic_index >= 0 {
-                let tail_base = trim_text(substring(tail_full, 0, tail_generic_index));
-                if tail_base.length > 0 {
-                    if !string_array_contains(candidates, tail_base) {
-                        candidates = append_string(candidates, tail_base);
+        } else {
+            let mut should_store -> boolean = true;
+            if llvm_type == "double" && is_number_literal(init_expr) {
+                should_store = false;
+            }
+            if llvm_type == "i64" && is_integer_literal(init_expr) {
+                should_store = false;
+            }
+            if llvm_type == "i32" && is_integer_literal(init_expr) {
+                should_store = false;
+            }
+            if llvm_type == "i1" && is_boolean_literal(init_expr) {
+                should_store = false;
+            }
+            if should_store {
+                let lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type);
+                diagnostics = diagnostics.concat(lowered.diagnostics);
+                current_lines = lowered.lines;
+                current_temp = lowered.temp_index;
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                if lowered.operand != null {
+                    let coerced = coerce_operand_to_type(lowered.operand, llvm_type, current_temp, current_lines);
+                    diagnostics = diagnostics.concat(coerced.diagnostics);
+                    current_lines = coerced.lines;
+                    current_temp = coerced.temp_index;
+                    if coerced.operand != null {
+                        current_lines = append_string(current_lines, "  store " + llvm_type + " " + coerced.operand.value + ", " + llvm_type + "* " + global_name);
                     }
                 }
             }
         }
+
+        init_index += 1;
     }
 
-    let mut index -> number = 0;
-    loop {
-        if index >= candidates.length {
-            break;
-        }
-        let candidate = candidates[index];
-        let info = find_struct_info_by_name(context, candidate);
-        if info != null {
-            return info;
-        }
-        index += 1;
-    }
+    current_lines = append_string(current_lines, "  ret void");
+    current_lines = append_string(current_lines, "}");
 
-    return null;
+    return ModuleGlobalLoweringResult {
+        preamble_lines: preamble_lines,
+        init_function_lines: current_lines,
+        init_function_symbol: init_symbol,
+        needs_init_call: true,
+        locals: locals,
+        string_constants: collected_string_constants,
+        diagnostics: diagnostics,
+    };
 }
 
-fn resolve_enum_info_for_literal(context -> TypeContext, enum_name -> string) -> EnumTypeInfo? {
-    let trimmed = trim_text(enum_name);
-    if trimmed.length == 0 {
-        return null;
+fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+    let mut diagnostics -> string[] = [];
+    if imported_diagnostics.length > 0 {
+        diagnostics = diagnostics.concat(imported_diagnostics);
+    }
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
+        let empty_constants = empty_string_constant_set();
+        return LoweredLLVMResult {
+            ir: "",
+            diagnostics: diagnostics,
+            trait_metadata: empty_trait_metadata(),
+            function_effects: [],
+            lifetime_regions: [],
+            capability_manifest: empty_capability_manifest(),
+            string_constants: empty_constants,
+        };
+    }
+
+    let parse = parse_native_artifact(artifact.contents);
+    diagnostics = diagnostics.concat(parse.diagnostics);
+
+    // Only exported symbols should keep external linkage across modules.
+    let exported_symbols = collect_exported_symbol_names(parse.imports);
+
+    let manifest_artifact = select_layout_manifest_artifact(native_module.artifacts);
+    let mut module_manifest -> LayoutManifest? = null;
+    if manifest_artifact != null {
+        let parsed_manifest = parse_layout_manifest(manifest_artifact.contents);
+        diagnostics = diagnostics.concat(parsed_manifest.diagnostics);
+        module_manifest = parsed_manifest;
+    }
+
+    let manifest_application = apply_layout_manifest_to_module(parse.structs, parse.enums, module_manifest);
+    diagnostics = diagnostics.concat(manifest_application.diagnostics);
+    let module_structs = manifest_application.structs;
+    let module_enums = manifest_application.enums;
+
+    // Gather imported module context (layout + signatures) to improve lowering fidelity
+    let mut imported_structs -> NativeStruct[] = [];
+    let mut imported_enums -> NativeEnum[] = [];
+    let mut imported_interfaces -> NativeInterface[] = [];
+    let mut imported_functions -> NativeFunction[] = [];
+    let mut imported_struct_methods -> NativeFunction[] = [];
+
+    let manifest_count = imported_manifests.length;
+    let mut text_index -> number = 0;
+    loop {
+        if text_index >= imported_native_texts.length {
+            break;
+        }
+        let native_text = imported_native_texts[text_index];
+        let mut manifest_for_module -> LayoutManifest? = null;
+        if text_index < manifest_count {
+            let candidate_manifest = imported_manifests[text_index];
+            manifest_for_module = candidate_manifest;
+        }
+        if native_text.length == 0 {
+            if manifest_for_module != null {
+                let manifest_only = manifest_for_module;
+                imported_structs = imported_structs.concat(manifest_only.structs);
+                imported_enums = imported_enums.concat(manifest_only.enums);
+            }
+            text_index += 1;
+            continue;
+        }
+
+        let imported_parse = parse_native_artifact(native_text);
+        let applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module);
+
+        imported_structs = imported_structs.concat(applied_import.structs);
+        imported_enums = imported_enums.concat(applied_import.enums);
+        imported_interfaces = imported_interfaces.concat(imported_parse.interfaces);
+        imported_functions = imported_functions.concat(imported_parse.functions);
+        let imported_methods = flatten_struct_methods(applied_import.structs);
+        imported_struct_methods = imported_struct_methods.concat(imported_methods);
+        text_index += 1;
+    }
+
+    if imported_native_texts.length < manifest_count {
+        let mut manifest_index -> number = imported_native_texts.length;
+        loop {
+            if manifest_index >= manifest_count {
+                break;
+            }
+            let leftover_manifest = imported_manifests[manifest_index];
+            imported_structs = imported_structs.concat(leftover_manifest.structs);
+            imported_enums = imported_enums.concat(leftover_manifest.enums);
+            manifest_index += 1;
+        }
+    }
+
+    let combined_structs = module_structs.concat(imported_structs);
+    let combined_enums = module_enums.concat(imported_enums);
+    let combined_interfaces = parse.interfaces.concat(imported_interfaces);
+
+    let trait_metadata = build_trait_metadata(combined_interfaces, combined_structs);
+    let fixed_enums = fixup_enum_layouts(combined_enums);
+    diagnostics = diagnostics.concat(fixed_enums.diagnostics);
+    let type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces);
+    diagnostics = diagnostics.concat(type_build.diagnostics);
+    let type_context = type_build.context;
+
+    let module_struct_methods = flatten_struct_methods(module_structs);
+    let local_functions = concat_native_functions(parse.functions, module_struct_methods);
+    let mut context_functions = concat_native_functions(local_functions, imported_functions);
+    context_functions = concat_native_functions(context_functions, imported_struct_methods);
+
+    let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
+    runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
+    runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
+    runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
+    runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent");
+    let direct_effects = collect_direct_function_effects(context_functions);
+    let call_graph = collect_function_call_graph(context_functions);
+    let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
+
+    let mut function_effects -> FunctionEffectEntry[] = [];
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut lines -> string[] = [];
+    lines = append_string(lines, "source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
+    lines = append_string(lines, "");
+
+    let trait_lines = render_trait_metadata_comments(trait_metadata);
+    if trait_lines.length > 0 {
+        lines = lines.concat(trait_lines);
+        lines = append_string(lines, "");
+    }
+
+    let struct_type_lines = render_struct_type_definitions(type_context, context_functions);
+    if struct_type_lines.length > 0 {
+        lines = lines.concat(struct_type_lines);
+        lines = append_string(lines, "");
+    }
+
+    let enum_type_lines = render_enum_type_definitions(type_context);
+    if enum_type_lines.length > 0 {
+        lines = lines.concat(enum_type_lines);
+        lines = append_string(lines, "");
+    }
+
+    let interface_type_lines = render_interface_type_definitions(type_context);
+    if interface_type_lines.length > 0 {
+        lines = lines.concat(interface_type_lines);
+        lines = append_string(lines, "");
+    }
+
+    // Async/future runtime types (opaque in LLVM; implemented by the native runtime).
+    lines = lines.concat([
+        "%SailfinFutureNumber = type opaque",
+        "%SailfinFutureBool = type opaque",
+        "%SailfinFuturePtr = type opaque",
+        "%SailfinFutureVoid = type opaque",
+        "%SailfinFutureString = type opaque",
+        "",
+        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)",
+        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)",
+        "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)",
+        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)",
+        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)",
+        "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)",
+        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)",
+        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)",
+        "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)",
+        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)",
+        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)",
+        "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)",
+        "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)",
+        "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)",
+        "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)",
+        "",
+    ]);
+
+    let vtable_type_lines = render_vtable_type_definitions(type_context);
+    if vtable_type_lines.length > 0 {
+        lines = lines.concat(vtable_type_lines);
+        lines = append_string(lines, "");
+    }
+
+    let vtable_const_lines = render_vtable_constants(type_context);
+    if vtable_const_lines.length > 0 {
+        lines = lines.concat(vtable_const_lines);
+        lines = append_string(lines, "");
+    }
+
+    let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
+    if helper_declarations.length > 0 {
+        lines = lines.concat(helper_declarations);
+        lines = append_string(lines, "");
+    }
+
+    // Declare imported functions from other modules (excluding local functions)
+    let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
+    if imported_declarations.length > 0 {
+        lines = lines.concat(imported_declarations);
+        lines = append_string(lines, "");
+    }
+
+    // Provide libc declarations for common helpers when not declared in the module.
+    if find_function_by_name(context_functions, "malloc") == null {
+        lines = append_string(lines, "declare noalias i8* @malloc(i64)");
+    }
+    if find_function_by_name(context_functions, "free") == null {
+        lines = append_string(lines, "declare void @free(i8*)");
+    }
+    lines = append_string(lines, "");
+
+    // Declare the runtime global (provided by the Python bootstrap runtime)
+    lines = append_string(lines, "@runtime = external global i8**");
+    lines = append_string(lines, "");
+
+    // Lower module-level `let` bindings into LLVM globals (and an optional init function).
+    let module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name);
+    diagnostics = diagnostics.concat(module_globals.diagnostics);
+    if module_globals.preamble_lines.length > 0 {
+        lines = lines.concat(module_globals.preamble_lines);
+        lines = append_string(lines, "");
+    }
+
+    let mut preamble_lines -> string[] = lines;
+    let mut function_lines -> string[] = [];
+
+    if module_globals.init_function_lines.length > 0 {
+        function_lines = function_lines.concat(module_globals.init_function_lines);
+        function_lines = append_string(function_lines, "");
     }
 
     let mut index -> number = 0;
+    let mut has_add_function -> boolean = false;
+    let mut all_string_constants -> StringConstant[] = module_globals.string_constants;
     loop {
-        if index >= context.enums.length {
+        if index >= local_functions.length {
             break;
         }
-        let enum_info = context.enums[index];
-        if enum_info.name == trimmed {
-            return enum_info;
+        let current_function = local_functions[index];
+        let aggregated_entry = find_function_effect_entry(aggregated_effects, current_function.name);
+        let mut effective_effects -> string[] = [];
+        if aggregated_entry != null {
+            effective_effects = aggregated_entry.effects;
+        }
+        function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry {
+            name: current_function.name,
+            effects: effective_effects,
+        });
+        let lowered = emit_function(current_function, context_functions, effective_effects, type_context, native_module.module_name, native_module.entry_points, exported_symbols, imported_functions, module_globals.locals, module_globals.init_function_symbol, module_globals.needs_init_call);
+        if sanitize_symbol(current_function.name) == "add" {
+            has_add_function = true;
+        }
+        diagnostics = diagnostics.concat(lowered.diagnostics);
+        lifetime_regions = lifetime_regions.concat(lowered.lifetime_regions);
+        all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants);
+        if lowered.lines.length > 0 {
+            function_lines = function_lines.concat(lowered.lines);
+            if index + 1 < local_functions.length {
+                function_lines = append_string(function_lines, "");
+            }
         }
         index += 1;
     }
 
-    return null;
+    if !has_add_function {
+        if function_lines.length > 0 {
+            function_lines = append_string(function_lines, "");
+        }
+        function_lines = function_lines.concat([
+            "define internal double @add(double %a, double %b) {",
+            "entry:",
+            "  %t0 = fadd double %a, %b",
+            "  ret double %t0",
+            "}"
+        ]);
+    }
+
+    let string_constant_lines = render_string_constants(all_string_constants);
+    let mut final_lines -> string[] = preamble_lines;
+    if string_constant_lines.length > 0 {
+        final_lines = final_lines.concat(string_constant_lines);
+        final_lines = append_string(final_lines, "");
+    }
+    final_lines = final_lines.concat(function_lines);
+    final_lines = ensure_intrinsic_declarations(final_lines);
+
+    let ir = join_with_separator(final_lines, "\n");
+    let manifest = build_capability_manifest(native_module.entry_points, function_effects);
+    let mut output -> string = ir;
+    if output.length > 0 {
+        output = output + "\n";
+    }
+    return LoweredLLVMResult {
+        ir: output,
+        diagnostics: diagnostics,
+        trait_metadata: trait_metadata,
+        function_effects: function_effects,
+        lifetime_regions: lifetime_regions,
+        capability_manifest: manifest,
+        string_constants: all_string_constants,
+    };
 }
 
-fn resolve_enum_variant_info(enum_info -> EnumTypeInfo, variant_name -> string) -> EnumVariantInfo? {
-    let trimmed = trim_text(variant_name);
-    if trimmed.length == 0 {
-        return null;
+fn module_source_filename(module_name -> string) -> string {
+    if module_name.length == 0 {
+        return "sailfin";
     }
+    // Avoid appending twice.
+    if module_name.length >= 4 {
+        let suffix = substring(module_name, module_name.length - 4, module_name.length);
+        if suffix == ".sfn" {
+            return module_name;
+        }
+    }
+    return module_name + ".sfn";
+}
 
+fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
+    let mut uses_round -> boolean = false;
+    let mut has_round_decl -> boolean = false;
     let mut index -> number = 0;
     loop {
-        if index >= enum_info.variants.length {
+        if index >= lines.length {
             break;
         }
-        let variant = enum_info.variants[index];
-        if variant.name == trimmed {
-            return variant;
+        let line = lines[index];
+        if index_of(line, "call double @round(") >= 0 {
+            uses_round = true;
+        }
+        let trimmed = trim_text(line);
+        if starts_with(trimmed, "declare double @round(double)") {
+            has_round_decl = true;
         }
         index += 1;
     }
 
-    return null;
+    if !uses_round || has_round_decl {
+        return lines;
+    }
+
+    // Insert right after source_filename, preserving the existing blank line.
+    return insert_string_at(lines, 1, "declare double @round(double)");
+}
+
+fn insert_string_at(values -> string[], insert_index -> number, value -> string) -> string[] {
+    let mut out -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        if index == insert_index {
+            out = append_string(out, value);
+        }
+        out = append_string(out, values[index]);
+        index += 1;
+    }
+    if insert_index >= values.length {
+        out = append_string(out, value);
+    }
+    return out;
 }
 
 fn collect_direct_function_effects(functions -> NativeFunction[]) -> FunctionEffectEntry[] {
@@ -5744,12 +4144,7 @@ fn collect_if_structure(
     };
 }
 
-struct ThrowLoweringResult {
-    lines -> string[];
-    temp_index -> number;
-    diagnostics -> string[];
-    string_constants -> StringConstant[];
-}
+// NOTE: ThrowLoweringResult has been moved to ./llvm/types.sfn
 
 fn lower_throw_instruction(
     function_name -> string,
@@ -5785,7 +4180,7 @@ fn lower_throw_instruction(
     if lowered_expr.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported throw expression in `" + function_name + "`");
         current_lines = append_string(current_lines, "  unreachable");
-        return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
     }
 
     let coerced = coerce_operand_to_type(lowered_expr.operand, "i8*", current_temp, current_lines);
@@ -5795,7 +4190,7 @@ fn lower_throw_instruction(
     if coerced.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce throw value to string in `" + function_name + "`");
         current_lines = append_string(current_lines, "  unreachable");
-        return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
     }
 
     current_lines = append_string(current_lines, "  call void @sailfin_runtime_set_exception(i8* " + coerced.operand.value + ")");
@@ -5804,7 +4199,7 @@ fn lower_throw_instruction(
     } else {
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
     }
-    return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
 }
 
 fn collect_try_structure(instructions -> NativeInstruction[], start_index -> number, end -> number, function_name -> string) -> TryStructure {
@@ -8327,21 +6722,7 @@ fn lower_condition_to_i1(
     return ConditionConversion { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
 }
 
-struct PhiMergeResult {
-    lines -> string[];
-    temp_index -> number;
-}
-
-struct PhiInputEntry {
-    value -> string;
-    label -> string;
-}
-
-struct MutationMaterializationResult {
-    mutations -> LocalMutation[];
-    lines -> string[];
-    temp_index -> number;
-}
+// NOTE: PhiMergeResult, PhiInputEntry, MutationMaterializationResult have been moved to ./llvm/types.sfn
 
 // Helper: Find preloaded value for a local by name
 fn find_preloaded_value(locals -> LocalBinding[], preloaded_values -> string[], name -> string) -> string? {
@@ -8420,10 +6801,7 @@ fn join_strings(strings -> string[], separator -> string) -> string {
     return result;
 }
 
-struct PhiStoreEntry {
-    phi_line -> string;
-    store_line -> string;
-}
+// NOTE: PhiStoreEntry has been moved to ./llvm/types.sfn
 
 // Helper: Create phi and store lines for a single local (returns both lines separately)
 fn build_phi_and_store(
@@ -8722,11 +7100,7 @@ fn emit_phi_merges_for_if_else(
     return PhiMergeResult { lines: combined_lines, temp_index: current_temp };
 }
 
-struct MatchArmMutations {
-    mutations -> LocalMutation[];
-    label -> string;
-    terminated -> boolean;
-}
+// NOTE: MatchArmMutations has been moved to ./llvm/types.sfn
 
 fn emit_phi_merges_for_match(
     arm_mutations_list -> MatchArmMutations[],
@@ -15403,13 +13777,7 @@ fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter
     return types;
 }
 
-struct LoadLocalResult {
-    lines -> string[];
-    temp_index -> number;
-    operand -> LLVMOperand?;
-    diagnostics -> string[];
-}
-
+// NOTE: LoadLocalResult has been moved to ./llvm/types.sfn
 
 fn load_local_operand(local -> LocalBinding, temp_index -> number, lines -> string[]) -> LoadLocalResult {
     let mut diagnostics -> string[] = [];
@@ -17596,81 +15964,9 @@ fn replace_llvm_operand(values -> LLVMOperand[], index -> number, value -> LLVMO
     return result;
 }
 
-fn replace_native_struct(values -> NativeStruct[], index -> number, value -> NativeStruct) -> NativeStruct[] {
-    let mut result -> NativeStruct[] = [];
-    let mut current -> number = 0;
-    loop {
-        if current >= values.length {
-            break;
-        }
-        if current == index {
-            result = append_native_struct(result, value);
-        } else {
-            result = append_native_struct(result, values[current]);
-        }
-        current += 1;
-    }
-    return result;
-}
-
-fn replace_native_enum(values -> NativeEnum[], index -> number, value -> NativeEnum) -> NativeEnum[] {
-    let mut result -> NativeEnum[] = [];
-    let mut current -> number = 0;
-    loop {
-        if current >= values.length {
-            break;
-        }
-        if current == index {
-            result = append_native_enum(result, value);
-        } else {
-            result = append_native_enum(result, values[current]);
-        }
-        current += 1;
-    }
-    return result;
-}
-
-fn find_function_by_name(functions -> NativeFunction[], name -> string) -> NativeFunction? {
-    let mut index -> number = 0;
-    loop {
-        if index >= functions.length {
-            break;
-        }
-        if functions[index].name == name {
-            return functions[index];
-        }
-        index += 1;
-    }
-    return null;
-}
-
-fn find_struct_index(structs -> NativeStruct[], name -> string) -> number {
-    let mut index -> number = 0;
-    loop {
-        if index >= structs.length {
-            break;
-        }
-        if structs[index].name == name {
-            return index;
-        }
-        index += 1;
-    }
-    return -1;
-}
-
-fn find_enum_index(enums -> NativeEnum[], name -> string) -> number {
-    let mut index -> number = 0;
-    loop {
-        if index >= enums.length {
-            break;
-        }
-        if enums[index].name == name {
-            return index;
-        }
-        index += 1;
-    }
-    return -1;
-}
+// NOTE: replace_native_struct, replace_native_enum, find_function_by_name,
+// find_struct_index, find_enum_index have been moved to ./llvm/imports.sfn
+// and ./llvm/rendering.sfn
 
 fn number_to_string(value -> number) -> string {
     if value == 0 {

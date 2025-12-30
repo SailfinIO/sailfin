@@ -8,7 +8,7 @@ import { Program } from "./ast";
 import { emit_program } from "./emitter_sailfin";
 import { emit_native, emit_native_with_module_name, EmitNativeResult, NativeModule } from "./emit_native";
 import { lower_to_python, LoweredPythonResult } from "./native_lowering";
-import { lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context, LoweredLLVMResult } from "./native_llvm_lowering";
+import { lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context } from "./native_llvm_lowering";
 import { LayoutManifest, parse_layout_manifest } from "./native_ir";
 import { substring } from "./string_utils";
 import { Token } from "./token";
@@ -126,6 +126,21 @@ struct LLVMCompilationResult {
     // full layouts for `LoweredLLVMResult` / `NativeModule`.
     llvm -> any;
     native_module -> any;
+}
+
+// NOTE: This is intentionally defined in this module (instead of importing the
+// canonical definition from `./llvm/types`) because stage1's LLVM backend
+// currently treats imported structs as opaque when lowering struct literals.
+// Keeping these fields as `any` avoids pulling full type layouts across
+// tool/runtime boundaries (stage1 Python + stage2 native).
+struct LoweredLLVMResult {
+    ir -> string;
+    diagnostics -> string[];
+    trait_metadata -> any;
+    function_effects -> any;
+    lifetime_regions -> any;
+    capability_manifest -> any;
+    string_constants -> any;
 }
 
 fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
