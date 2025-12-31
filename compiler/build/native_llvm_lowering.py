@@ -2168,6 +2168,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
             lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label)
             diagnostics = (diagnostics) + (lowered.diagnostics)
             collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
+            collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases)
             current_lines = lowered.lines
             current_allocas = lowered.allocas
             current_locals = lowered.locals
@@ -2193,6 +2194,7 @@ def lower_instruction_range(function, start_index, end, llvm_return, bindings, l
                             lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label)
                             diagnostics = (diagnostics) + (lowered.diagnostics)
                             collected_lifetime_regions = (collected_lifetime_regions) + (lowered.lifetime_regions)
+                            collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases)
                             current_lines = lowered.lines
                             current_allocas = lowered.allocas
                             current_locals = lowered.locals
@@ -4579,6 +4581,14 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         initializer_span = instruction.span
     suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span)
     diagnostics = (diagnostics) + (suspension_diagnostics)
+    existing_binding = find_local_binding(current_locals, instruction.name)
+    if existing_binding != None:
+        previous_ownership = existing_binding.ownership
+        if previous_ownership != None:
+            if previous_ownership.variant == "Borrow":
+                if previous_ownership.region_id >= 0:
+                    release_event = LifetimeReleaseEvent(region_id=previous_ownership.region_id, scope_id=scope_id, scope_depth=scope_depth)
+                    lifetime_releases = append_lifetime_release_event(lifetime_releases, release_event)
     trimmed_annotation = trim_text(instruction.type_annotation)
     llvm_type = ""
     if len(trimmed_annotation) > 0:
@@ -4669,7 +4679,7 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
     current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type, type_annotation=instruction.type_annotation, ownership=ownership, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
     mutation = LocalMutation(name=instruction.name, llvm_type=llvm_type, value_name=stored_value, span=initializer_span, originating_label=current_label)
     mutations = (mutations) + ([mutation])
-    return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1, lifetime_regions=lifetime_regions, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
+    return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
 
 def find_local_binding(locals, name):
     index = len(locals)

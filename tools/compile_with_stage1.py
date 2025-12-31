@@ -80,6 +80,20 @@ def compile_stage1(sources: Iterable[pathlib.Path], output_dir: pathlib.Path) ->
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(python_source, encoding="utf-8")
 
+    # If a previous run left behind a package directory that conflicts with a
+    # generated module (e.g. both `foo.py` and `foo/__init__.py`), Python's
+    # import resolution can select the stale package. Prefer the generated
+    # module file and remove the conflicting directory.
+    try:
+        for entry in output_dir.iterdir():
+            if entry.is_file() and entry.suffix == ".py":
+                conflicting_dir = output_dir / entry.stem
+                if conflicting_dir.is_dir():
+                    shutil.rmtree(conflicting_dir)
+    except Exception as exc:
+        raise Stage1CompileError(
+            f"failed to clean stale output directories under {output_dir}: {exc}") from exc
+
     for entry in diagnostics:
         if getattr(entry, "fatal", False):
             continue

@@ -464,6 +464,7 @@ struct LetLoweringResult {
     diagnostics -> string[];
     next_local_id -> number;
     lifetime_regions -> LifetimeRegionMetadata[];
+    lifetime_releases -> LifetimeReleaseEvent[];
     next_region_id -> number;
     mutations -> LocalMutation[];
     string_constants -> StringConstant[];
