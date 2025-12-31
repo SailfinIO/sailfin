@@ -89,7 +89,7 @@ runtime/build/
 
 # Build outputs (Stage2 bootstrap/native artifacts). These are generated and
 # should never be committed; use dist/ for release packaging instead.
-build/
+/build/
 
 # Stage1 bootstrap compiler (checked-in Python).
 # We want CI to have the stage1 llvm support modules, but we do NOT want to
