@@ -6,7 +6,7 @@
 import { NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest } from "../native_ir";
 import { substring } from "../string_utils";
 import { ImportedModuleContext, LayoutManifestApplication } from "./types";
-import { trim_text, append_string, string_array_contains, number_to_string } from "./utils";
+import { trim_text, append_string, string_array_contains, number_to_string, starts_with, join_with_separator } from "./utils";
 
 // =============================================================================
 // Import Context Collection
@@ -93,25 +93,78 @@ fn resolve_import_module_slug(module -> string) -> string {
         return "";
     }
     let normalized = normalize_import_module_path(trimmed);
-    let mut start_index -> number = 0;
+
+    // Normalize relative module specifiers (./foo, ../bar, foo/../baz) into
+    // a stable slug that matches our build artifact layout under build/stage2.
+    // Examples:
+    // - "./llvm/type_context" -> "llvm/type_context"
+    // - "../native_ir" -> "native_ir"
+    let mut parts -> string[] = [];
+    let mut segment -> string = "";
+    let mut index -> number = 0;
     loop {
-        if start_index >= normalized.length {
+        if index >= normalized.length {
             break;
         }
-        let ch = normalized[start_index];
-        if ch == "." || ch == "/" {
-            start_index += 1;
+        let ch = normalized[index];
+        if ch == "/" {
+            if segment.length > 0 {
+                parts = append_string(parts, segment);
+            }
+            segment = "";
+        } else {
+            segment = segment + ch;
+        }
+        index += 1;
+    }
+    if segment.length > 0 {
+        parts = append_string(parts, segment);
+    }
+
+    let mut resolved -> string[] = [];
+    index = 0;
+    loop {
+        if index >= parts.length {
+            break;
+        }
+        let part = parts[index];
+        if part.length == 0 || part == "." {
+            index += 1;
             continue;
         }
-        break;
+        if part == ".." {
+            if resolved.length > 0 {
+                let mut shortened -> string[] = [];
+                let mut drop_index -> number = 0;
+                let limit = resolved.length - 1;
+                loop {
+                    if drop_index >= limit {
+                        break;
+                    }
+                    shortened = append_string(shortened, resolved[drop_index]);
+                    drop_index += 1;
+                }
+                resolved = shortened;
+            }
+            index += 1;
+            continue;
+        }
+        resolved = append_string(resolved, part);
+        index += 1;
     }
-    let mut candidate = normalized;
-    if start_index > 0 {
-        candidate = substring(normalized, start_index, normalized.length);
+
+    let mut slug = join_with_separator(resolved, "/");
+
+    // compiler/tests often import compiler sources via "../../src/<name>".
+    // Our stage2 artifacts are rooted at build/stage2/<name>.* (no "src/" dir),
+    // so strip that prefix to keep imports and artifact layout consistent.
+    if starts_with(slug, "src/") {
+        slug = substring(slug, 4, slug.length);
     }
-    // Preserve directory structure for nested imports (e.g., "llvm/strings" -> "llvm/strings")
-    // Only strip to basename for flat imports without slashes
-    return candidate;
+    if starts_with(slug, "compiler/src/") {
+        slug = substring(slug, 13, slug.length);
+    }
+    return slug;
 }
 
 fn layout_manifest_path_for_slug(slug -> string) -> string {

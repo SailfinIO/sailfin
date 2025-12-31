@@ -4,7 +4,7 @@ from runtime import runtime_support as runtime
 from ...native_ir import NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest
 from ...string_utils import substring
 from compiler.build.types import ImportedModuleContext, LayoutManifestApplication
-from compiler.build.utils import trim_text, append_string, string_array_contains, number_to_string
+from compiler.build.utils import trim_text, append_string, string_array_contains, number_to_string, starts_with, join_with_separator
 
 print = runtime.console
 sleep = runtime.sleep
@@ -83,19 +83,52 @@ def resolve_import_module_slug(module):
     if len(trimmed) == 0:
         return ""
     normalized = normalize_import_module_path(trimmed)
-    start_index = 0
+    parts = []
+    segment = ""
+    index = 0
     while True:
-        if start_index >= len(normalized):
+        if index >= len(normalized):
             break
-        ch = normalized[start_index]
-        if ch == "."  or  ch == "/":
-            start_index += 1
+        ch = normalized[index]
+        if ch == "/":
+            if len(segment) > 0:
+                parts = append_string(parts, segment)
+            segment = ""
+        else:
+            segment = segment + ch
+        index += 1
+    if len(segment) > 0:
+        parts = append_string(parts, segment)
+    resolved = []
+    index = 0
+    while True:
+        if index >= len(parts):
+            break
+        part = parts[index]
+        if len(part) == 0  or  part == ".":
+            index += 1
             continue
-        break
-    candidate = normalized
-    if start_index > 0:
-        candidate = substring(normalized, start_index, len(normalized))
-    return candidate
+        if part == "..":
+            if len(resolved) > 0:
+                shortened = []
+                drop_index = 0
+                limit = len(resolved) - 1
+                while True:
+                    if drop_index >= limit:
+                        break
+                    shortened = append_string(shortened, resolved[drop_index])
+                    drop_index += 1
+                resolved = shortened
+            index += 1
+            continue
+        resolved = append_string(resolved, part)
+        index += 1
+    slug = join_with_separator(resolved, "/")
+    if starts_with(slug, "src/"):
+        slug = substring(slug, 4, len(slug))
+    if starts_with(slug, "compiler/src/"):
+        slug = substring(slug, 13, len(slug))
+    return slug
 
 def layout_manifest_path_for_slug(slug):
     return "build/stage2/" + slug + ".layout-manifest"
