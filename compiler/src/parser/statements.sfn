@@ -1,0 +1,1253 @@
+// compiler/src/parser/statements.sfn
+//
+// Block-level statement parsing - control flow, loops, return, throw,
+// try/catch, match statements, and expression statements.
+
+import { Token } from "./token";
+import {
+    Block,
+    Decorator,
+    Expression,
+    Statement,
+    MatchCase,
+    ElseBranch,
+    ForClause,
+    WithClause,
+    SourceSpan,
+} from "./ast";
+import { substring, char_code, char_at, strings_equal } from "./string_utils";
+import {
+    Parser,
+    StatementParseResult,
+    BlockStatementParseResult,
+    BlockParseResult,
+    DecoratorParseResult,
+    MatchCasesParseResult,
+    MatchCaseParseResult,
+    MatchCaseTokenSplit,
+} from "./parser/types";
+import { trim_text } from "./parser/utils";
+import {
+    parser_peek_raw,
+    parser_advance_raw,
+    skip_trivia,
+    identifier_matches,
+    symbol_matches,
+    identifier_text,
+    string_literal_value,
+    consume_keyword,
+    consume_symbol,
+    collect_until,
+    collect_pattern_until_arrow,
+    token_slice,
+    trim_token_edges,
+    tokens_to_text,
+    source_span_from_tokens,
+    append_token,
+    find_top_level_identifier,
+    split_token_slices_by_comma,
+} from "./parser/token_utils";
+import { expression_from_tokens } from "./parser/expressions";
+
+// Forward declaration for decorators - will be imported from declarations
+// For now we provide a stub that returns empty decorators
+fn parse_decorators_stub(parser -> Parser) -> DecoratorParseResult {
+    let mut current = parser;
+    let mut decorators -> Decorator[] = [];
+
+    loop {
+        current = skip_trivia(current);
+        let token = parser_peek_raw(current);
+        if !symbol_matches(token, "@") {
+            break;
+        }
+
+        let decorator_start = current;
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+
+        let name_token = parser_peek_raw(current);
+        if name_token.kind.variant != "Identifier" {
+            current = decorator_start;
+            break;
+        }
+
+        let name = identifier_text(name_token);
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+
+        // Skip arguments if present
+        let after = parser_peek_raw(current);
+        if symbol_matches(after, "(") {
+            let mut depth -> number = 1;
+            current = parser_advance_raw(current);
+            loop {
+                let tok = parser_peek_raw(current);
+                if tok.kind.variant == "EndOfFile" {
+                    break;
+                }
+                if tok.kind.variant == "Symbol" {
+                    if strings_equal(tok.lexeme, "(") {
+                        depth += 1;
+                    } else if strings_equal(tok.lexeme, ")") {
+                        depth -= 1;
+                        if depth == 0 {
+                            current = parser_advance_raw(current);
+                            break;
+                        }
+                    }
+                }
+                current = parser_advance_raw(current);
+            }
+        }
+
+        decorators = append_decorator(decorators, Decorator { name: name, arguments: [] });
+    }
+
+    return DecoratorParseResult { parser: current, decorators: decorators };
+}
+
+// ============================================================================
+// Block Parsing
+// ============================================================================
+
+fn parse_block(initial_parser -> Parser) -> BlockParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let token = parser_peek_raw(parser);
+    if !symbol_matches(token, "{") {
+        return BlockParseResult {
+            parser: parser,
+            block: Block { tokens: [], text: "", statements: [] },
+        };
+    }
+
+    let start_index = parser.index;
+    let mut current = parser_advance_raw(parser);
+    let mut block_end_index -> number = start_index;
+    let mut statements -> Statement[] = [];
+
+    loop {
+        current = skip_trivia(current);
+        let tok = parser_peek_raw(current);
+        if symbol_matches(tok, "}") {
+            block_end_index = current.index + 1;
+            current = parser_advance_raw(current);
+            break;
+        }
+        if tok.kind.variant == "EndOfFile" {
+            break;
+        }
+
+        let block_result = parse_block_statement(current);
+        if block_result.success {
+            current = block_result.parser;
+            if block_result.statement != null {
+                statements = append_statement(statements, block_result.statement);
+            }
+            continue;
+        }
+
+        let before_index = current.index;
+        let unknown_result = parse_unknown_statement(current);
+        current = unknown_result.parser;
+        if unknown_result.statement.variant == "Unknown" {
+            statements = append_statement(statements, unknown_result.statement);
+        }
+
+        if current.index <= before_index {
+            current = parser_advance_raw(current);
+        }
+    }
+
+    let mut end_index = current.index;
+    if block_end_index > start_index {
+        end_index = block_end_index;
+    }
+    let mut block_tokens = token_slice(parser.tokens, start_index, end_index);
+    block_tokens = trim_block_tokens_local(block_tokens);
+    let text = tokens_to_text(block_tokens);
+    let block = Block { tokens: block_tokens, text: text, statements: statements };
+    return BlockParseResult { parser: skip_trivia(current), block: block };
+}
+
+fn trim_block_tokens_local(tokens -> Token[]) -> Token[] {
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    let mut end -> number = tokens.length;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if token.kind.variant == "Symbol" {
+            let sym = token.lexeme;
+            if strings_equal(sym, "{") {
+                depth += 1;
+            } else if strings_equal(sym, "}") {
+                if depth > 0 {
+                    depth -= 1;
+                }
+                if depth == 0 {
+                    end = index + 1;
+                    break;
+                }
+            }
+        }
+        index += 1;
+    }
+    return token_slice(tokens, 0, end);
+}
+
+// ============================================================================
+// Block Statement Dispatch
+// ============================================================================
+
+fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let decorator_result = parse_decorators_stub(parser);
+    let current = decorator_result.parser;
+    let decorators = decorator_result.decorators;
+
+    let after_decorators = skip_trivia(current);
+    let token = parser_peek_raw(after_decorators);
+    if symbol_matches(token, "{") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        let body_result = parse_block(after_decorators);
+        return BlockStatementParseResult {
+            parser: body_result.parser,
+            statement: Statement.BlockStatement { body: body_result.block },
+            success: true,
+        };
+    }
+    if identifier_matches(token, "for") {
+        return parse_for_statement(after_decorators, decorators);
+    }
+    if identifier_matches(token, "loop") {
+        return parse_loop_statement(after_decorators, decorators);
+    }
+    if identifier_matches(token, "break") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_break_statement(after_decorators);
+    }
+    if identifier_matches(token, "continue") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_continue_statement(after_decorators);
+    }
+    if identifier_matches(token, "if") {
+        return parse_if_statement(after_decorators, decorators);
+    }
+    if identifier_matches(token, "match") {
+        return parse_match_statement(after_decorators, decorators);
+    }
+    if identifier_matches(token, "prompt") {
+        return parse_prompt_statement(after_decorators, decorators);
+    }
+    if identifier_matches(token, "with") {
+        return parse_with_statement(after_decorators, decorators);
+    }
+    if identifier_matches(token, "unsafe") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        let mut unsafe_current = consume_keyword(after_decorators, "unsafe");
+        unsafe_current = skip_trivia(unsafe_current);
+        let body_result = parse_block(unsafe_current);
+        return BlockStatementParseResult {
+            parser: body_result.parser,
+            statement: Statement.BlockStatement { body: body_result.block },
+            success: true,
+        };
+    }
+    if identifier_matches(token, "return") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_return_statement(after_decorators);
+    }
+    if identifier_matches(token, "throw") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_throw_statement(after_decorators);
+    }
+    if identifier_matches(token, "try") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_try_statement(after_decorators);
+    }
+    if identifier_matches(token, "assert") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        return parse_assert_statement(after_decorators);
+    }
+
+    let expression_result = parse_expression_statement(after_decorators, decorators);
+    if expression_result.success {
+        return expression_result;
+    }
+
+    return BlockStatementParseResult { parser: original, statement: null, success: false };
+}
+
+// ============================================================================
+// Control Flow Statements
+// ============================================================================
+
+fn parse_for_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "for") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "for");
+
+    let clause_capture = collect_until(skip_trivia(current), ["{"]);
+    current = clause_capture.parser;
+    let clause_tokens = trim_token_edges(clause_capture.tokens);
+    if clause_tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let in_index = find_top_level_identifier(clause_tokens, "in");
+    if in_index == -1 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let target_tokens = trim_token_edges(token_slice(clause_tokens, 0, in_index));
+    let iterable_tokens = trim_token_edges(token_slice(clause_tokens, in_index + 1, clause_tokens.length));
+    if target_tokens.length == 0 || iterable_tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let target_expression = expression_from_tokens(target_tokens);
+    let iterable_expression = expression_from_tokens(iterable_tokens);
+    let clause = ForClause {
+        target: target_expression,
+        iterable: iterable_expression,
+        tokens: clause_tokens,
+    };
+
+    let body_result = parse_block(current);
+    if body_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = body_result.parser;
+    let body = body_result.block;
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.ForStatement {
+        clause: clause,
+        body: body,
+        decorators: decorators,
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+fn parse_loop_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "loop") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "loop");
+
+    let body_result = parse_block(current);
+    if body_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = body_result.parser;
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.LoopStatement {
+        body: body_result.block,
+        decorators: decorators,
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+fn parse_break_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "break") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "break");
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+    }
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: Statement.BreakStatement(),
+        success: true,
+    };
+}
+
+fn parse_continue_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "continue") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "continue");
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+    }
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: Statement.ContinueStatement(),
+        success: true,
+    };
+}
+
+fn parse_if_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "if") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "if");
+
+    let condition_capture = collect_until(skip_trivia(current), ["{"]);
+    current = condition_capture.parser;
+    let condition_tokens = trim_token_edges(condition_capture.tokens);
+    if condition_tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    let condition_expression = expression_from_tokens(condition_tokens);
+
+    let then_result = parse_block(current);
+    if then_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = then_result.parser;
+    let then_block = then_result.block;
+
+    current = skip_trivia(current);
+    let mut else_branch -> ElseBranch? = null;
+    if identifier_matches(parser_peek_raw(current), "else") {
+        current = consume_keyword(current, "else");
+        current = skip_trivia(current);
+        let next_token = parser_peek_raw(current);
+        if identifier_matches(next_token, "if") {
+            let nested_result = parse_if_statement(current, []);
+            if !nested_result.success {
+                return BlockStatementParseResult { parser: original, statement: null, success: false };
+            }
+            if nested_result.statement == null {
+                return BlockStatementParseResult { parser: original, statement: null, success: false };
+            }
+            current = nested_result.parser;
+            else_branch = ElseBranch { statement: nested_result.statement, body: null };
+        } else {
+            let else_result = parse_block(current);
+            if else_result.block.tokens.length == 0 {
+                return BlockStatementParseResult { parser: original, statement: null, success: false };
+            }
+            current = else_result.parser;
+            else_branch = ElseBranch { statement: null, body: else_result.block };
+        }
+
+        current = skip_trivia(current);
+        let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+            current = parser_advance_raw(current);
+        }
+    }
+
+    let statement = Statement.IfStatement {
+        condition: condition_expression,
+        then_block: then_block,
+        else_branch: else_branch,
+        decorators: decorators,
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+// ============================================================================
+// Match Statement
+// ============================================================================
+
+fn parse_match_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "match") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "match");
+
+    let value_capture = collect_until(skip_trivia(current), ["{"]);
+    current = value_capture.parser;
+    let value_tokens = trim_token_edges(value_capture.tokens);
+    if value_tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    let match_expression = expression_from_tokens(value_tokens);
+
+    let body_result = parse_match_cases(current);
+    if !body_result.success {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = body_result.parser;
+
+    current = skip_trivia(current);
+    if current.index < current.tokens.length {
+        let terminator = parser_peek_raw(current);
+        if symbol_matches(terminator, ";") {
+            current = parser_advance_raw(current);
+        }
+    }
+
+    let statement = Statement.MatchStatement {
+        expression: match_expression,
+        cases: body_result.cases,
+        decorators: decorators,
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
+    let mut current = skip_trivia(parser);
+    current = advance_to_symbol_local(current, "{");
+    let peek = parser_peek_raw(current);
+    if !symbol_matches(peek, "{") {
+        return MatchCasesParseResult { parser: parser, cases: [], success: false };
+    }
+    current = parser_advance_raw(current);
+
+    let mut cases -> MatchCase[] = [];
+
+    loop {
+        current = skip_trivia(current);
+        let token = parser_peek_raw(current);
+        if symbol_matches(token, "}") {
+            current = parser_advance_raw(current);
+            break;
+        }
+        if token.kind.variant == "EndOfFile" {
+            return MatchCasesParseResult { parser: parser, cases: [], success: false };
+        }
+
+        let case_result = parse_match_case(current);
+        if !case_result.success || case_result.case == null {
+            return MatchCasesParseResult { parser: parser, cases: [], success: false };
+        }
+        current = case_result.parser;
+        cases = append_match_case(cases, case_result.case);
+
+        current = skip_trivia(current);
+        let separator = parser_peek_raw(current);
+        if symbol_matches(separator, ",") {
+            current = parser_advance_raw(current);
+        }
+    }
+
+    return MatchCasesParseResult { parser: current, cases: cases, success: true };
+}
+
+fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+
+    if identifier_matches(parser_peek_raw(current), "case") {
+        current = consume_keyword(current, "case");
+        current = skip_trivia(current);
+    }
+
+    let pattern_capture = collect_pattern_until_arrow(current);
+    if !pattern_capture.success {
+        return MatchCaseParseResult { parser: original, case: null, success: false };
+    }
+    current = pattern_capture.parser;
+    let split_tokens = split_match_case_tokens(pattern_capture.tokens);
+    if split_tokens.pattern_tokens.length == 0 {
+        return MatchCaseParseResult { parser: original, case: null, success: false };
+    }
+
+    let pattern_expression = expression_from_tokens(split_tokens.pattern_tokens);
+
+    let mut guard_expression -> Expression? = null;
+    if split_tokens.has_guard {
+        if split_tokens.guard_tokens.length == 0 {
+            return MatchCaseParseResult { parser: original, case: null, success: false };
+        }
+        guard_expression = expression_from_tokens(split_tokens.guard_tokens);
+    }
+
+    current = skip_trivia(current);
+    let next = parser_peek_raw(current);
+
+    let mut body -> Block? = null;
+
+    if symbol_matches(next, "{") {
+        let body_result = parse_block(current);
+        if body_result.block.tokens.length == 0 {
+            return MatchCaseParseResult { parser: original, case: null, success: false };
+        }
+        current = body_result.parser;
+        body = body_result.block;
+    } else if identifier_matches(next, "return") {
+        let mut block_tokens -> Token[] = [];
+
+        block_tokens = append_token(block_tokens, next);
+        current = parser_advance_raw(current);
+
+        let capture = collect_until(current, [";", ",", "}"]);
+        let mut index -> number = 0;
+        loop {
+            if index >= capture.tokens.length {
+                break;
+            }
+            block_tokens = append_token(block_tokens, capture.tokens[index]);
+            index += 1;
+        }
+
+        let trimmed_expression_tokens = trim_token_edges(capture.tokens);
+        let mut return_expression -> Expression? = null;
+        if trimmed_expression_tokens.length > 0 {
+            return_expression = expression_from_tokens(trimmed_expression_tokens);
+        } else if capture.tokens.length > 0 {
+            return_expression = expression_from_tokens(capture.tokens);
+        }
+
+        current = skip_trivia(capture.parser);
+        let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+            block_tokens = append_token(block_tokens, terminator);
+            current = parser_advance_raw(current);
+        }
+
+    block_tokens = trim_token_edges(block_tokens);
+
+    let statement_span = source_span_from_tokens(block_tokens);
+
+    let mut statements -> Statement[] = [];
+    statements = append_statement(statements, Statement.ReturnStatement { expression: return_expression, span: statement_span });
+        let text = trim_text(tokens_to_text(block_tokens));
+        body = Block { tokens: block_tokens, text: text, statements: statements };
+    } else {
+        let capture = collect_until(current, [";", ",", "}"]);
+        let trimmed_expression_tokens = trim_token_edges(capture.tokens);
+        if trimmed_expression_tokens.length == 0 {
+            return MatchCaseParseResult { parser: original, case: null, success: false };
+        }
+
+        let expression = expression_from_tokens(trimmed_expression_tokens);
+
+        let mut block_tokens -> Token[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= capture.tokens.length {
+                break;
+            }
+            block_tokens = append_token(block_tokens, capture.tokens[index]);
+            index += 1;
+        }
+
+        current = skip_trivia(capture.parser);
+        let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+            block_tokens = append_token(block_tokens, terminator);
+            current = parser_advance_raw(current);
+        }
+
+    block_tokens = trim_token_edges(block_tokens);
+
+    let statement_span = source_span_from_tokens(block_tokens);
+
+    let mut statements -> Statement[] = [];
+    statements = append_statement(statements, Statement.ExpressionStatement { expression: expression, span: statement_span });
+        let text = trim_text(tokens_to_text(block_tokens));
+        body = Block { tokens: block_tokens, text: text, statements: statements };
+    }
+
+    if body == null {
+        return MatchCaseParseResult { parser: original, case: null, success: false };
+    }
+
+    let case = MatchCase {
+        pattern: pattern_expression,
+        guard: guard_expression,
+        body: body,
+    };
+
+    return MatchCaseParseResult { parser: current, case: case, success: true };
+}
+
+fn split_match_case_tokens(tokens -> Token[]) -> MatchCaseTokenSplit {
+    let trimmed = trim_token_edges(tokens);
+    if trimmed.length == 0 {
+        return MatchCaseTokenSplit {
+            pattern_tokens: [],
+            guard_tokens: [],
+            has_guard: false,
+        };
+    }
+
+    let guard_index = find_top_level_identifier(trimmed, "if");
+    if guard_index == -1 {
+        return MatchCaseTokenSplit {
+            pattern_tokens: trimmed,
+            guard_tokens: [],
+            has_guard: false,
+        };
+    }
+
+    let pattern_tokens = trim_token_edges(token_slice(trimmed, 0, guard_index));
+    let guard_tokens = trim_token_edges(token_slice(trimmed, guard_index + 1, trimmed.length));
+
+    return MatchCaseTokenSplit {
+        pattern_tokens: pattern_tokens,
+        guard_tokens: guard_tokens,
+        has_guard: true,
+    };
+}
+
+// ============================================================================
+// Special Statements (prompt, with)
+// ============================================================================
+
+fn parse_prompt_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    let prompt_token = parser_peek_raw(current);
+    if !identifier_matches(prompt_token, "prompt") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "prompt");
+
+    current = skip_trivia(current);
+    let channel_token = parser_peek_raw(current);
+    let mut channel -> string = "";
+    if channel_token.kind.variant == "Identifier" {
+        channel = identifier_text(channel_token);
+        current = parser_advance_raw(current);
+    } else if channel_token.kind.variant == "StringLiteral" {
+        channel = string_literal_value(channel_token);
+        current = parser_advance_raw(current);
+    } else {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let block_result = parse_block(current);
+    if block_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = block_result.parser;
+    let body = block_result.block;
+
+    current = skip_trivia(current);
+    if symbol_matches(parser_peek_raw(current), ";") {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.PromptStatement {
+        channel: channel,
+        keyword_token: prompt_token,
+        channel_token: channel_token,
+        body: body,
+        decorators: decorators,
+    };
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+fn parse_with_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "with") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = consume_keyword(current, "with");
+
+    let clauses_capture = collect_until(skip_trivia(current), ["{"]);
+    current = clauses_capture.parser;
+    let clause_slices = split_token_slices_by_comma(clauses_capture.tokens);
+    let mut clauses -> WithClause[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= clause_slices.length {
+            break;
+        }
+        let slice_tokens = trim_token_edges(clause_slices[index]);
+        if slice_tokens.length > 0 {
+            let expression = expression_from_tokens(slice_tokens);
+            clauses = append_with_clause(clauses, WithClause { expression: expression });
+        }
+        index += 1;
+    }
+
+    let block_result = parse_block(current);
+    if block_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = block_result.parser;
+    let body = block_result.block;
+
+    current = skip_trivia(current);
+    if symbol_matches(parser_peek_raw(current), ";") {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.WithStatement {
+        clauses: clauses,
+        body: body,
+        decorators: decorators,
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+// ============================================================================
+// Return, Throw, Try/Catch, Assert
+// ============================================================================
+
+fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "return") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    let mut statement_tokens -> Token[] = [];
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
+    current = consume_keyword(current, "return");
+
+    let capture = collect_until(skip_trivia(current), [";", "}"]);
+    current = capture.parser;
+    let trimmed = trim_token_edges(capture.tokens);
+
+    let mut expression -> Expression? = null;
+    if trimmed.length > 0 {
+        expression = expression_from_tokens(trimmed);
+    } else if capture.tokens.length > 0 {
+        expression = expression_from_tokens(capture.tokens);
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= capture.tokens.length {
+            break;
+        }
+        statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+        index += 1;
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        statement_tokens = append_token(statement_tokens, terminator);
+        current = parser_advance_raw(current);
+    }
+
+    let span = source_span_from_tokens(statement_tokens);
+
+    let statement = Statement.ReturnStatement { expression: expression, span: span };
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+fn parse_throw_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "throw") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let mut statement_tokens -> Token[] = [];
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
+    current = consume_keyword(current, "throw");
+
+    let capture = collect_until(skip_trivia(current), [";", "}"]);
+    current = capture.parser;
+    let trimmed = trim_token_edges(capture.tokens);
+    if trimmed.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= capture.tokens.length {
+            break;
+        }
+        statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+        index += 1;
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        statement_tokens = append_token(statement_tokens, terminator);
+        current = parser_advance_raw(current);
+    }
+
+    let span = source_span_from_tokens(statement_tokens);
+    let expression = expression_from_tokens(trimmed);
+    let statement = Statement.ThrowStatement { expression: expression, span: span };
+
+    return BlockStatementParseResult { parser: current, statement: statement, success: true };
+}
+
+fn parse_try_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "try") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    current = consume_keyword(current, "try");
+
+    let try_result = parse_block(current);
+    if try_result.block.tokens.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    current = try_result.parser;
+
+    let mut catch_name -> string? = null;
+    let mut catch_name_token -> Token? = null;
+    let mut catch_block -> Block? = null;
+
+    current = skip_trivia(current);
+    if identifier_matches(parser_peek_raw(current), "catch") {
+        current = consume_keyword(current, "catch");
+
+        // Optional (name)
+        current = skip_trivia(current);
+        if symbol_matches(parser_peek_raw(current), "(") {
+            current = parser_advance_raw(current);
+            current = skip_trivia(current);
+            let name_token = parser_peek_raw(current);
+            if name_token.kind.variant != "Identifier" {
+                return BlockStatementParseResult { parser: original, statement: null, success: false };
+            }
+            catch_name = name_token.lexeme;
+            catch_name_token = name_token;
+            current = parser_advance_raw(current);
+
+            current = skip_trivia(current);
+            if !symbol_matches(parser_peek_raw(current), ")") {
+                return BlockStatementParseResult { parser: original, statement: null, success: false };
+            }
+            current = parser_advance_raw(current);
+        }
+
+        let catch_result = parse_block(current);
+        if catch_result.block.tokens.length == 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        catch_block = catch_result.block;
+        current = catch_result.parser;
+    }
+
+    let mut finally_block -> Block? = null;
+    current = skip_trivia(current);
+    if identifier_matches(parser_peek_raw(current), "finally") {
+        current = consume_keyword(current, "finally");
+        let finally_result = parse_block(current);
+        if finally_result.block.tokens.length == 0 {
+            return BlockStatementParseResult { parser: original, statement: null, success: false };
+        }
+        finally_block = finally_result.block;
+        current = finally_result.parser;
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.TryStatement {
+        try_block: try_result.block,
+        catch_name: catch_name,
+        catch_name_token: catch_name_token,
+        catch_block: catch_block,
+        finally_block: finally_block,
+    };
+
+    return BlockStatementParseResult { parser: current, statement: statement, success: true };
+}
+
+fn parse_assert_statement(parser -> Parser) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "assert") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let mut statement_tokens -> Token[] = [];
+    statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
+    current = consume_keyword(current, "assert");
+
+    let capture = collect_until(skip_trivia(current), [";"]);
+    current = capture.parser;
+    let trimmed = trim_token_edges(capture.tokens);
+    if trimmed.length == 0 {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= capture.tokens.length {
+            break;
+        }
+        statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+        index += 1;
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if !symbol_matches(terminator, ";") {
+        return BlockStatementParseResult { parser: original, statement: null, success: false };
+    }
+    statement_tokens = append_token(statement_tokens, terminator);
+    current = parser_advance_raw(current);
+
+    let condition = expression_from_tokens(trimmed);
+
+    let fail_call = Expression.Call {
+        callee: Expression.Identifier { name: "runtime_raise_value_error_fn" },
+        arguments: [Expression.StringLiteral { value: "assertion failed" }],
+    };
+    let fail_statement = Statement.ExpressionStatement { expression: fail_call, span: null };
+
+    let then_block = Block { tokens: [], text: "", statements: [] };
+    let else_block = Block { tokens: [], text: "", statements: [fail_statement] };
+    let else_branch = ElseBranch { statement: null, body: else_block };
+
+    let statement = Statement.IfStatement {
+        condition: condition,
+        then_block: then_block,
+        else_branch: else_branch,
+        decorators: [],
+    };
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+// ============================================================================
+// Expression Statement
+// ============================================================================
+
+fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+    if decorators.length > 0 {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+
+    let mut current = skip_trivia(parser);
+    let start = parser_peek_raw(current);
+    if start.kind.variant == "EndOfFile" {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+    if start.kind.variant == "Symbol" {
+        let sym = start.lexeme;
+        if strings_equal(sym, "}") || strings_equal(sym, "{") {
+            return BlockStatementParseResult { parser: parser, statement: null, success: false };
+        }
+    }
+
+    // Expression statements are usually terminated with ';'.
+    // As a convenience, allow a trailing expression statement right before a
+    // block close '}' to omit the semicolon.
+    let capture = collect_until(current, [";", "}"]);
+    if capture.tokens.length == 0 {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+
+    let mut statement_tokens -> Token[] = [];
+    let mut token_index -> number = 0;
+    loop {
+        if token_index >= capture.tokens.length {
+            break;
+        }
+        statement_tokens = append_token(statement_tokens, capture.tokens[token_index]);
+        token_index += 1;
+    }
+
+    let trimmed = trim_token_edges(capture.tokens);
+    if trimmed.length == 0 {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+
+    current = capture.parser;
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+
+    // Consume ';' if present; otherwise allow '}' (handled by outer block parser).
+    if symbol_matches(terminator, ";") {
+        statement_tokens = append_token(statement_tokens, terminator);
+        current = parser_advance_raw(current);
+    } else if !symbol_matches(terminator, "}") {
+        return BlockStatementParseResult { parser: parser, statement: null, success: false };
+    }
+
+    let expression = expression_from_tokens(trimmed);
+    let span = source_span_from_tokens(statement_tokens);
+    let statement = Statement.ExpressionStatement { expression: expression, span: span };
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true,
+    };
+}
+
+// ============================================================================
+// Unknown Statement (fallback)
+// ============================================================================
+
+fn parse_unknown_statement(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let mut tokens -> Token[] = [];
+    let mut current = parser;
+    let mut depth -> number = 0;
+    let iteration_limit -> number = 16384;
+    let mut iteration_count -> number = 0;
+    let mut truncated -> boolean = false;
+
+    loop {
+        if iteration_count >= iteration_limit {
+            truncated = true;
+            current = parser_advance_raw(current);
+            break;
+        }
+        iteration_count += 1;
+        let tok = parser_peek_raw(current);
+        tokens = append_token(tokens, tok);
+
+        if symbol_matches(tok, "{") {
+            depth += 1;
+        } else if symbol_matches(tok, "}") {
+            if depth > 0 {
+                depth -= 1;
+            }
+            if depth == 0 {
+                current = parser_advance_raw(current);
+                break;
+            }
+        } else if depth == 0 && symbol_matches(tok, ";") {
+            current = parser_advance_raw(current);
+            break;
+        }
+
+        if is_end_of_file_local(current, tok) {
+            current = parser_advance_raw(current);
+            break;
+        }
+
+        current = parser_advance_raw(current);
+    }
+
+    let mut text -> string = tokens_to_text(tokens);
+    if truncated {
+        text = text + " /* parse_unknown truncated */";
+    }
+    let block = Statement.Unknown { tokens: tokens, text: text };
+    parser = skip_trivia(current);
+    return StatementParseResult { parser: parser, statement: block };
+}
+
+fn is_end_of_file_local(parser -> Parser, token -> Token) -> boolean {
+    if parser.index + 1 >= parser.tokens.length {
+        return token.lexeme.length == 0;
+    }
+    return false;
+}
+
+fn advance_to_symbol_local(parser -> Parser, symbol -> string) -> Parser {
+    let mut current = parser;
+    loop {
+        current = skip_trivia(current);
+        let token = parser_peek_raw(current);
+        if symbol_matches(token, symbol) {
+            return current;
+        }
+        if token.kind.variant == "EndOfFile" {
+            return current;
+        }
+        let next = parser_advance_raw(current);
+        if next.index == current.index {
+            return current;
+        }
+        current = next;
+    }
+    return current;
+}
+
+// ============================================================================
+// Append Helpers
+// ============================================================================
+
+fn append_statement(statements -> Statement[], statement -> Statement) -> Statement[] {
+    return statements.concat([statement]);
+}
+
+fn append_match_case(cases -> MatchCase[], case -> MatchCase) -> MatchCase[] {
+    return cases.concat([case]);
+}
+
+fn append_with_clause(clauses -> WithClause[], clause -> WithClause) -> WithClause[] {
+    return clauses.concat([clause]);
+}
+
+fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
+    return decorators.concat([decorator]);
+}

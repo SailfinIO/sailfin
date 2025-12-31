@@ -88,6 +88,7 @@ import {
 import {
     load_imported_layout_manifests,
     collect_imported_module_context,
+    collect_imported_module_context_for_module,
     resolve_import_module_slug,
     apply_layout_manifest_to_module
 } from "./llvm/imports";
@@ -289,7 +290,7 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
         return lower_to_llvm_with_context(native_module, [], [], []);
     }
     let parse = parse_native_artifact(artifact.contents);
-    let import_context = collect_imported_module_context(parse.imports);
+    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
     return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
 }
 
@@ -299,7 +300,7 @@ fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult !
         return lower_to_llvm_with_context_for_tests(native_module, [], [], []);
     }
     let parse = parse_native_artifact(artifact.contents);
-    let import_context = collect_imported_module_context(parse.imports);
+    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
     return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
 }
 

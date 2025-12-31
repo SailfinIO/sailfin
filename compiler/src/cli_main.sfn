@@ -452,10 +452,18 @@ fn _runtime_prelude_path(root -> string) -> string ![io] {
     if fs.exists(bundled) {
         return bundled;
     }
+    let bundled_nested = _path_join(root, "native/obj/runtime/prelude.o");
+    if fs.exists(bundled_nested) {
+        return bundled_nested;
+    }
     let parent = _dirname(root);
     let fallback = _path_join(parent, "build/native/obj/prelude.o");
     if fs.exists(fallback) {
         return fallback;
+    }
+    let fallback_nested = _path_join(parent, "build/native/obj/runtime/prelude.o");
+    if fs.exists(fallback_nested) {
+        return fallback_nested;
     }
     return "";
 }

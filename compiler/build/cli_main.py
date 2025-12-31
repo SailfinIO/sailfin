@@ -334,10 +334,16 @@ def _runtime_prelude_path(root):
     bundled = _path_join(root, "native/obj/prelude.o")
     if fs.exists(bundled):
         return bundled
+    bundled_nested = _path_join(root, "native/obj/runtime/prelude.o")
+    if fs.exists(bundled_nested):
+        return bundled_nested
     parent = _dirname(root)
     fallback = _path_join(parent, "build/native/obj/prelude.o")
     if fs.exists(fallback):
         return fallback
+    fallback_nested = _path_join(parent, "build/native/obj/runtime/prelude.o")
+    if fs.exists(fallback_nested):
+        return fallback_nested
     return ""
 
 def _clang_compile_runtime_objects(runtime_root, out_dir, opt_flag):

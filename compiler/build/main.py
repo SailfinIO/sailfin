@@ -107,27 +107,65 @@ def compile_to_native(source):
 def module_name_from_path(source_path):
     if len(source_path) == 0:
         return "main"
+    normalized = ""
+    index = 0
+    while True:
+        if index >= len(source_path):
+            break
+        ch = source_path[index]
+        if ch == "\\":
+            normalized = normalized + "/"
+        else:
+            normalized = normalized + ch
+        index += 1
+    compiler_prefix = "compiler/src/"
+    runtime_prefix = "runtime/"
     start = 0
-    index = len(source_path)
+    last_compiler = -1
+    index = 0
     while True:
-        if index <= 0:
+        if index + len(compiler_prefix) > len(normalized):
+            break
+        if substring(normalized, index, index + len(compiler_prefix)) == compiler_prefix:
+            last_compiler = index
+        index += 1
+    if last_compiler >= 0:
+        start = last_compiler + len(compiler_prefix)
+    else:
+        last_runtime = -1
+        index = 0
+        while True:
+            if index + len(runtime_prefix) > len(normalized):
+                break
+            if substring(normalized, index, index + len(runtime_prefix)) == runtime_prefix:
+                last_runtime = index
+            index += 1
+        if last_runtime >= 0:
+            start = last_runtime
+    last_slash = -1
+    index = start
+    while True:
+        if index >= len(normalized):
+            break
+        if normalized[index] == "/":
+            last_slash = index
+        index += 1
+    end = len(normalized)
+    dot_index = -1
+    index = len(normalized)
+    dot_limit = last_slash + 1
+    while True:
+        if index <= dot_limit:
             break
         index -= 1
-        if source_path[index] == "/":
-            start = index + 1
+        if normalized[index] == ".":
+            dot_index = index
             break
-    end = len(source_path)
-    index = len(source_path)
-    while True:
-        if index <= start:
-            break
-        index -= 1
-        if source_path[index] == ".":
-            end = index
-            break
+    if dot_index >= 0:
+        end = dot_index
     if end <= start:
         return "main"
-    base = substring(source_path, start, end)
+    base = substring(normalized, start, end)
     if len(base) == 0:
         return "main"
     return base
@@ -151,6 +189,28 @@ def compile_to_native_python(source):
 def compile_to_native_llvm(source):
     # effects: io
     native_result = compile_to_native(source)
+    lowered = lower_to_llvm(native_result.module)
+    combined = []
+    combined = (combined) + (native_result.diagnostics)
+    combined = (combined) + (lowered.diagnostics)
+    if len(combined) > 0:
+        index = 0
+        while True:
+            if index >= len(combined):
+                break
+            print.warn("[native-llvm] " + combined[index])
+            index += 1
+    return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+
+def compile_to_native_llvm_with_module(source, module_name):
+    # effects: io
+    program = parse_program(source)
+    analysis_result = typecheck_program(program)
+    if len(analysis_result.diagnostics) > 0:
+        report_typecheck_errors(analysis_result.diagnostics, source)
+        messages = format_typecheck_diagnostics(analysis_result.diagnostics, source)
+        return LoweredLLVMResult(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None)
+    native_result = emit_native_with_module_name(program, module_name)
     lowered = lower_to_llvm(native_result.module)
     combined = []
     combined = (combined) + (native_result.diagnostics)
@@ -223,9 +283,65 @@ def compile_to_native_llvm_full(source):
             index += 1
     return LLVMCompilationResult(llvm=LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants), native_module=native_result.module)
 
+def compile_to_native_llvm_full_with_module(source, module_name):
+    # effects: io
+    program = parse_program(source)
+    analysis_result = typecheck_program(program)
+    if len(analysis_result.diagnostics) > 0:
+        report_typecheck_errors(analysis_result.diagnostics, source)
+        messages = format_typecheck_diagnostics(analysis_result.diagnostics, source)
+        return LLVMCompilationResult(llvm=LoweredLLVMResult(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None), native_module=None)
+    native_result = emit_native_with_module_name(program, module_name)
+    lowered = lower_to_llvm(native_result.module)
+    combined = []
+    combined = (combined) + (native_result.diagnostics)
+    combined = (combined) + (lowered.diagnostics)
+    if len(combined) > 0:
+        index = 0
+        while True:
+            if index >= len(combined):
+                break
+            print.warn("[native-llvm] " + combined[index])
+            index += 1
+    return LLVMCompilationResult(llvm=LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants), native_module=native_result.module)
+
 def compile_to_native_llvm_with_context(source, manifest_contents, native_artifacts):
     # effects: io
     native_result = compile_to_native(source)
+    manifests = []
+    manifest_index = 0
+    while True:
+        if manifest_index >= len(manifest_contents):
+            break
+        manifest_text = manifest_contents[manifest_index]
+        if len(manifest_text) == 0:
+            manifests = (manifests) + ([LayoutManifest(structs=[], enums=[], diagnostics=[])])
+        else:
+            parsed = parse_layout_manifest(manifest_text)
+            manifests = (manifests) + ([LayoutManifest(structs=parsed.structs, enums=parsed.enums, diagnostics=[])])
+        manifest_index += 1
+    lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts, [])
+    combined = []
+    combined = (combined) + (native_result.diagnostics)
+    combined = (combined) + (lowered.diagnostics)
+    if len(combined) > 0:
+        index = 0
+        while True:
+            if index >= len(combined):
+                break
+            print.warn("[native-llvm] " + combined[index])
+            index += 1
+    return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+
+def compile_to_native_llvm_with_context_with_module(source, module_name, manifest_contents, native_artifacts):
+    # effects: io
+    program = parse_program(source)
+    analysis_result = typecheck_program(program)
+    if len(analysis_result.diagnostics) > 0:
+        report_typecheck_errors(analysis_result.diagnostics, source)
+        messages = format_typecheck_diagnostics(analysis_result.diagnostics, source)
+        return LoweredLLVMResult(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None)
+    native_result = emit_native_with_module_name(program, module_name)
     manifests = []
     manifest_index = 0
     while True:

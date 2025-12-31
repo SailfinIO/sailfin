@@ -126,6 +126,25 @@ def _aot_is_symbol_char(ch):
         return True
     return False
 
+def _aot_sanitize_module_suffix(module_name):
+    out = ""
+    index = 0
+    while True:
+        if index >= len(module_name):
+            break
+        ch = module_name[index]
+        if _aot_is_symbol_char(ch):
+            out = out + ch
+        else:
+            if ch == "/":
+                out = out + "__"
+            else:
+                out = out + "_"
+        index += 1
+    if len(out) == 0:
+        return "module"
+    return out
+
 def _aot_contains_string(values, target):
     index = 0
     while True:
@@ -384,6 +403,7 @@ def prepare_stage2_aot_modules(module_names, module_texts):
             ir = _aot_replace(ir, "@main(", "@stage2_compiler_main(")
         defined_functions = _aot_find_defined_functions(ir)
         defined_globals = _aot_find_defined_globals(ir)
+        safe_module_name = _aot_sanitize_module_suffix(module_name)
         fi = 0
         while True:
             if fi >= len(defined_functions):
@@ -396,9 +416,9 @@ def prepare_stage2_aot_modules(module_names, module_texts):
             counter = 1
             candidate = ""
             while True:
-                suffix = module_name
+                suffix = safe_module_name
                 if counter != 1:
-                    suffix = module_name + "_" + _aot_number_to_string(counter)
+                    suffix = safe_module_name + "_" + _aot_number_to_string(counter)
                 candidate = name + "__" + suffix
                 if not _aot_contains_string(seen_functions, candidate):
                     break
@@ -418,9 +438,9 @@ def prepare_stage2_aot_modules(module_names, module_texts):
             counter = 1
             candidate = ""
             while True:
-                suffix = module_name
+                suffix = safe_module_name
                 if counter != 1:
-                    suffix = module_name + "_" + _aot_number_to_string(counter)
+                    suffix = safe_module_name + "_" + _aot_number_to_string(counter)
                 candidate = name + "__" + suffix
                 if not _aot_contains_string(seen_globals, candidate):
                     break

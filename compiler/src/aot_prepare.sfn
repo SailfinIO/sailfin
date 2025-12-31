@@ -160,6 +160,33 @@ fn _aot_is_symbol_char(ch -> string) -> boolean {
 	return false;
 }
 
+fn _aot_sanitize_module_suffix(module_name -> string) -> string {
+	// Ensure module-derived suffixes are valid unquoted LLVM identifiers.
+	// In particular, module names may contain '/' when preserving directory
+	// structure; LLVM requires such names to be quoted, so we instead
+	// normalize them into a safe identifier fragment.
+	let mut out -> string = "";
+	let mut index -> number = 0;
+	loop {
+		if index >= module_name.length {
+			break;
+		}
+		let ch = module_name[index];
+		if _aot_is_symbol_char(ch) {
+			out = out + ch;
+		} else if ch == "/" {
+			out = out + "__";
+		} else {
+			out = out + "_";
+		}
+		index += 1;
+	}
+	if out.length == 0 {
+		return "module";
+	}
+	return out;
+}
+
 fn _aot_contains_string(values -> string[], target -> string) -> boolean {
 	let mut index -> number = 0;
 	loop {
@@ -519,6 +546,7 @@ fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]
 
 		let defined_functions = _aot_find_defined_functions(ir);
 		let defined_globals = _aot_find_defined_globals(ir);
+		let safe_module_name = _aot_sanitize_module_suffix(module_name);
 
 		// Rename duplicate defined functions.
 		let mut fi -> number = 0;
@@ -536,9 +564,9 @@ fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]
 			let mut counter -> number = 1;
 			let mut candidate -> string = "";
 			loop {
-				let mut suffix -> string = module_name;
+				let mut suffix -> string = safe_module_name;
 				if counter != 1 {
-					suffix = module_name + "_" + _aot_number_to_string(counter);
+					suffix = safe_module_name + "_" + _aot_number_to_string(counter);
 				}
 				candidate = name + "__" + suffix;
 				if !_aot_contains_string(seen_functions, candidate) {
@@ -568,9 +596,9 @@ fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]
 			let mut counter -> number = 1;
 			let mut candidate -> string = "";
 			loop {
-				let mut suffix -> string = module_name;
+				let mut suffix -> string = safe_module_name;
 				if counter != 1 {
-					suffix = module_name + "_" + _aot_number_to_string(counter);
+					suffix = safe_module_name + "_" + _aot_number_to_string(counter);
 				}
 				candidate = name + "__" + suffix;
 				if !_aot_contains_string(seen_globals, candidate) {

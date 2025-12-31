@@ -265,10 +265,16 @@ def _copy_runtime_bundle(archive_root: pathlib.Path) -> None:
     runtime_dst = archive_root / "runtime" / "native"
     shutil.copytree(runtime_src, runtime_dst)
 
-    prelude_obj = REPO_ROOT / "build" / "native" / "obj" / "prelude.o"
+    prelude_obj = REPO_ROOT / "build" / "native" / "obj" / "runtime" / "prelude.o"
     if not prelude_obj.exists():
-        raise Stage2PackageError(
-            f"missing prelude object; expected {prelude_obj}")
+        legacy = REPO_ROOT / "build" / "native" / "obj" / "prelude.o"
+        if legacy.exists():
+            prelude_obj = legacy
+        else:
+            raise Stage2PackageError(
+                "missing prelude object; expected either "
+                f"{prelude_obj} or {legacy}"
+            )
     obj_dir = runtime_dst / "obj"
     obj_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(prelude_obj, obj_dir / "prelude.o")

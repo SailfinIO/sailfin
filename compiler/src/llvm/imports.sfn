@@ -18,6 +18,10 @@ fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[]
 }
 
 fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleContext ![io] {
+    return collect_imported_module_context_for_module(imports, "");
+}
+
+fn collect_imported_module_context_for_module(imports -> NativeImport[], current_module_slug -> string) -> ImportedModuleContext ![io] {
     let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
     if trace {
         print.warn("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
@@ -35,7 +39,7 @@ fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleC
             print.warn("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")");
         }
         let module_path = imports[index].module;
-        let slug = resolve_import_module_slug(module_path);
+        let slug = resolve_import_module_slug_for_module(module_path, current_module_slug);
         if slug.length == 0 {
             index += 1;
             continue;
@@ -88,11 +92,48 @@ fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleC
 // =============================================================================
 
 fn resolve_import_module_slug(module -> string) -> string {
+    return resolve_import_module_slug_for_module(module, "");
+}
+
+fn dirname_for_module_slug(slug -> string) -> string {
+    let mut last_slash -> number = -1;
+    let mut index -> number = 0;
+    loop {
+        if index >= slug.length {
+            break;
+        }
+        if slug[index] == "/" {
+            last_slash = index;
+        }
+        index += 1;
+    }
+    if last_slash < 0 {
+        return "";
+    }
+    return substring(slug, 0, last_slash);
+}
+
+fn resolve_import_module_slug_for_module(module -> string, current_module_slug -> string) -> string {
     let trimmed = trim_text(module);
     if trimmed.length == 0 {
         return "";
     }
-    let normalized = normalize_import_module_path(trimmed);
+
+    let mut normalized = normalize_import_module_path(trimmed);
+
+    // NOTE: "./" imports are treated as compiler-root module paths.
+    // This matches the historical stage0/stage1 convention where "./foo/bar"
+    // refers to module slug "foo/bar" (not relative to the current module).
+    // We keep "../" as truly relative for cases like tests importing via
+    // ../../src/<name>.
+    if starts_with(normalized, "./") {
+        normalized = substring(normalized, 2, normalized.length);
+    } else if starts_with(normalized, "../") {
+        let base_dir = dirname_for_module_slug(current_module_slug);
+        if base_dir.length > 0 {
+            normalized = base_dir + "/" + normalized;
+        }
+    }
 
     // Normalize relative module specifiers (./foo, ../bar, foo/../baz) into
     // a stable slug that matches our build artifact layout under build/stage2.

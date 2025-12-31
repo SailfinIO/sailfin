@@ -33,6 +33,10 @@ def load_imported_layout_manifests(imports):
 
 def collect_imported_module_context(imports):
     # effects: io
+    return collect_imported_module_context_for_module(imports, "")
+
+def collect_imported_module_context_for_module(imports, current_module_slug):
+    # effects: io
     trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
     if trace:
         print.warn("test llvm: collect_imported_module_context start (imports=" + number_to_string(len(imports)) + ")")
@@ -47,7 +51,7 @@ def collect_imported_module_context(imports):
         if trace  and  index > 0  and  index % 50 == 0:
             print.warn("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")")
         module_path = imports[index].module
-        slug = resolve_import_module_slug(module_path)
+        slug = resolve_import_module_slug_for_module(module_path, current_module_slug)
         if len(slug) == 0:
             index += 1
             continue
@@ -79,10 +83,33 @@ def collect_imported_module_context(imports):
     return ImportedModuleContext(manifests=manifests, native_texts=native_texts, diagnostics=diagnostics)
 
 def resolve_import_module_slug(module):
+    return resolve_import_module_slug_for_module(module, "")
+
+def dirname_for_module_slug(slug):
+    last_slash = -1
+    index = 0
+    while True:
+        if index >= len(slug):
+            break
+        if slug[index] == "/":
+            last_slash = index
+        index += 1
+    if last_slash < 0:
+        return ""
+    return substring(slug, 0, last_slash)
+
+def resolve_import_module_slug_for_module(module, current_module_slug):
     trimmed = trim_text(module)
     if len(trimmed) == 0:
         return ""
     normalized = normalize_import_module_path(trimmed)
+    if starts_with(normalized, "./"):
+        normalized = substring(normalized, 2, len(normalized))
+    else:
+        if starts_with(normalized, "../"):
+            base_dir = dirname_for_module_slug(current_module_slug)
+            if len(base_dir) > 0:
+                normalized = base_dir + "/" + normalized
     parts = []
     segment = ""
     index = 0

@@ -62,36 +62,96 @@ fn module_name_from_path(source_path -> string) -> string {
     if source_path.length == 0 {
         return "main";
     }
-    // basename
+
+    // Normalize path separators so we can reason about prefixes.
+    let mut normalized -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= source_path.length {
+            break;
+        }
+        let ch = source_path[index];
+        if ch == "\\" {
+            normalized = normalized + "/";
+        } else {
+            normalized = normalized + ch;
+        }
+        index += 1;
+    }
+
+    // Prefer stable module names rooted at compiler/src or runtime.
+    // - .../compiler/src/parser/mod.sfn -> parser/mod
+    // - .../runtime/prelude.sfn         -> runtime/prelude
+    let compiler_prefix = "compiler/src/";
+    let runtime_prefix = "runtime/";
     let mut start -> number = 0;
-    let mut index -> number = source_path.length;
+
+    let mut last_compiler -> number = -1;
+    index = 0;
     loop {
-        if index <= 0 {
+        if index + compiler_prefix.length > normalized.length {
+            break;
+        }
+        if substring(normalized, index, index + compiler_prefix.length) == compiler_prefix {
+            last_compiler = index;
+        }
+        index += 1;
+    }
+    if last_compiler >= 0 {
+        start = last_compiler + compiler_prefix.length;
+    } else {
+        let mut last_runtime -> number = -1;
+        index = 0;
+        loop {
+            if index + runtime_prefix.length > normalized.length {
+                break;
+            }
+            if substring(normalized, index, index + runtime_prefix.length) == runtime_prefix {
+                last_runtime = index;
+            }
+            index += 1;
+        }
+        if last_runtime >= 0 {
+            // Keep the runtime/ prefix in the module name.
+            start = last_runtime;
+        }
+    }
+
+    // Find the end of the module name by stripping the extension from the last
+    // path segment.
+    let mut last_slash -> number = -1;
+    index = start;
+    loop {
+        if index >= normalized.length {
+            break;
+        }
+        if normalized[index] == "/" {
+            last_slash = index;
+        }
+        index += 1;
+    }
+    let mut end -> number = normalized.length;
+    let mut dot_index -> number = -1;
+    index = normalized.length;
+    let dot_limit = last_slash + 1;
+    loop {
+        if index <= dot_limit {
             break;
         }
         index -= 1;
-        if source_path[index] == "/" {
-            start = index + 1;
+        if normalized[index] == "." {
+            dot_index = index;
             break;
         }
     }
-    let mut end -> number = source_path.length;
-    // strip extension (only last '.')
-    index = source_path.length;
-    loop {
-        if index <= start {
-            break;
-        }
-        index -= 1;
-        if source_path[index] == "." {
-            end = index;
-            break;
-        }
+    if dot_index >= 0 {
+        end = dot_index;
     }
+
     if end <= start {
         return "main";
     }
-    let base = substring(source_path, start, end);
+    let base = substring(normalized, start, end);
     if base.length == 0 {
         return "main";
     }
@@ -145,6 +205,49 @@ struct LoweredLLVMResult {
 
 fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
     let native_result = compile_to_native(source);
+    let lowered = lower_to_llvm(native_result.module);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LoweredLLVMResult {
+        ir: lowered.ir,
+        diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
+    };
+}
+
+fn compile_to_native_llvm_with_module(source -> string, module_name -> string) -> LoweredLLVMResult ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        let messages = format_typecheck_diagnostics(analysis_result.diagnostics, source);
+        return LoweredLLVMResult {
+            ir: "",
+            diagnostics: messages,
+            trait_metadata: null,
+            function_effects: null,
+            lifetime_regions: null,
+            capability_manifest: null,
+            string_constants: null,
+        };
+    }
+
+    let native_result = emit_native_with_module_name(program, module_name);
     let lowered = lower_to_llvm(native_result.module);
     let mut combined -> string[] = [];
     combined = combined.concat(native_result.diagnostics);
@@ -255,11 +358,124 @@ fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] 
     };
 }
 
+fn compile_to_native_llvm_full_with_module(source -> string, module_name -> string) -> LLVMCompilationResult ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        let messages = format_typecheck_diagnostics(analysis_result.diagnostics, source);
+        return LLVMCompilationResult {
+            llvm: LoweredLLVMResult {
+                ir: "",
+                diagnostics: messages,
+                trait_metadata: null,
+                function_effects: null,
+                lifetime_regions: null,
+                capability_manifest: null,
+                string_constants: null,
+            },
+            native_module: null,
+        };
+    }
+
+    let native_result = emit_native_with_module_name(program, module_name);
+    let lowered = lower_to_llvm(native_result.module);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LLVMCompilationResult {
+        llvm: LoweredLLVMResult {
+            ir: lowered.ir,
+            diagnostics: combined,
+            trait_metadata: lowered.trait_metadata,
+            function_effects: lowered.function_effects,
+            lifetime_regions: lowered.lifetime_regions,
+            capability_manifest: lowered.capability_manifest,
+            string_constants: lowered.string_constants,
+        },
+        native_module: native_result.module,
+    };
+}
+
 // Extended lowering entry point that accepts layout manifests and native artifacts for imports
 fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> string[], native_artifacts -> string[]) -> LoweredLLVMResult ![io] {
     let native_result = compile_to_native(source);
     
     // Parse the manifest contents into LayoutManifest structs
+    let mut manifests -> LayoutManifest[] = [];
+    let mut manifest_index -> number = 0;
+    loop {
+        if manifest_index >= manifest_contents.length {
+            break;
+        }
+        let manifest_text = manifest_contents[manifest_index];
+        if manifest_text.length == 0 {
+            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+        } else {
+            let parsed = parse_layout_manifest(manifest_text);
+            manifests = manifests.concat([LayoutManifest {
+                structs: parsed.structs,
+                enums: parsed.enums,
+                diagnostics: [],
+            }]);
+        }
+        manifest_index += 1;
+    }
+
+    let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts, []);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LoweredLLVMResult {
+        ir: lowered.ir,
+        diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
+    };
+}
+
+fn compile_to_native_llvm_with_context_with_module(source -> string, module_name -> string, manifest_contents -> string[], native_artifacts -> string[]) -> LoweredLLVMResult ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        let messages = format_typecheck_diagnostics(analysis_result.diagnostics, source);
+        return LoweredLLVMResult {
+            ir: "",
+            diagnostics: messages,
+            trait_metadata: null,
+            function_effects: null,
+            lifetime_regions: null,
+            capability_manifest: null,
+            string_constants: null,
+        };
+    }
+
+    let native_result = emit_native_with_module_name(program, module_name);
+
     let mut manifests -> LayoutManifest[] = [];
     let mut manifest_index -> number = 0;
     loop {

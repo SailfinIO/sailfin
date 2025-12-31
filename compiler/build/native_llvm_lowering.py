@@ -7,7 +7,7 @@ from compiler.build.string_utils import substring, char_code, char_at, find_char
 from compiler.build.llvm.types import TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo, InterfaceTypeInfo, VTableInfo, VTableEntry, LocalBinding, ParameterBinding, OwnershipInfo, OwnershipConsumption, OwnershipAnalysis, LifetimeRegionMetadata, LifetimeReleaseEvent, ScopeMetadata, LLVMOperand, ExpressionResult, CoercionResult, BlockLoweringResult, LoweredLLVMFunction, LoweredLLVMResult, LetLoweringResult, ModuleGlobalLoweringResult, OperatorMatch, BorrowParseResult, BorrowArgumentParse, TernaryParseResult, AssignmentParseResult, InlineLetParseResult, MemberAccessParse, IndexExpressionParse, RawAddressParseResult, CastParseResult, TraitMetadata, TraitDescriptor, TraitImplementationDescriptor, FunctionEffectEntry, RuntimeHelperDescriptor, CapabilityManifest, CapabilityManifestEntry, StringConstant, LocalMutation, LoopContext, ImportedModuleContext, LayoutManifestApplication, TypeContextBuild, FunctionCallEntry, StringPointerResult, InterpolatedTemplateParse, BodyResult, ParameterPreparation, ArrayLiteralMetadata, TypeAllocationInfo, HeapBoxResult, StructLiteralField, StructLiteralParse, EnumLiteralParse, ExpressionStatementResult, BlockLabelResult, IfStructure, LoopStructure, TryStructure, RangeIterableParse, MatchCaseStructure, MatchStructure, MatchFieldBinding, MatchStructFieldBinding, MatchCaseCondition, ConditionConversion, ComparisonEmission, BinaryAlignmentResult, ThrowLoweringResult, PhiMergeResult, PhiInputEntry, MutationMaterializationResult, PhiStoreEntry, MatchArmMutations, LoadLocalResult
 from compiler.build.llvm.expression_lowering_stage2 import analyze_value_ownership, array_pointer_element_type, array_struct_type_for_element, coerce_operand_to_type, collect_parameter_types, default_return_literal, detect_borrow_conflicts, detect_suspension_conflicts, emit_boolean_and, emit_comparison_instruction, ends_with_pointer_suffix, extract_simple_identifier, find_parameter_binding, format_local_pointer_name, format_span_location, format_temp_name, future_pointer_type_for_return_type, harmonise_operands, is_simple_identifier, is_union_llvm_type, load_local_operand, lower_expression, lower_expression_statement, lower_return_instruction, map_local_type, map_return_type, mark_local_consumed, mark_parameter_consumed, parse_enum_literal, parse_inline_let_expression, parse_range_iterable, parse_struct_pattern, parse_union_payload_types, prepare_parameters, spawn_ctx_symbol_for_return_type, spawn_symbol_for_return_type, starts_with, strip_mut_prefix, strip_pointer_suffix
 from compiler.build.llvm.utils import trim_text, starts_with, ends_with, char_at as utils_char_at, append_string, join_with_separator, string_array_contains, sanitize_symbol, number_to_string, index_of, is_identifier_start_char, is_identifier_part_char, find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings
-from compiler.build.llvm.imports import load_imported_layout_manifests, collect_imported_module_context, resolve_import_module_slug, apply_layout_manifest_to_module
+from compiler.build.llvm.imports import load_imported_layout_manifests, collect_imported_module_context, collect_imported_module_context_for_module, resolve_import_module_slug, apply_layout_manifest_to_module
 from compiler.build.llvm.strings import empty_string_constant_set, append_string_constant, merge_string_constants, find_string_constant, render_string_constants, escape_string_for_llvm
 from compiler.build.llvm.effects import collect_direct_function_effects, collect_function_call_graph, propagate_function_effects, build_capability_manifest, collect_function_borrow_effects, collect_expression_borrow_effects, collect_runtime_helper_targets
 from compiler.build.llvm.runtime_helpers import runtime_helper_descriptors, find_runtime_helper, append_runtime_helper
@@ -101,7 +101,7 @@ def lower_to_llvm(native_module):
     if artifact == None:
         return lower_to_llvm_with_context(native_module, [], [], [])
     parse = parse_native_artifact(artifact.contents)
-    import_context = collect_imported_module_context(parse.imports)
+    import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name)
     return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
 def lower_to_llvm_for_tests(native_module):
@@ -110,7 +110,7 @@ def lower_to_llvm_for_tests(native_module):
     if artifact == None:
         return lower_to_llvm_with_context_for_tests(native_module, [], [], [])
     parse = parse_native_artifact(artifact.contents)
-    import_context = collect_imported_module_context(parse.imports)
+    import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name)
     return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
 def lower_to_llvm_with_manifests(native_module, imported_manifests):

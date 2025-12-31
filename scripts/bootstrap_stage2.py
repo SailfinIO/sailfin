@@ -77,6 +77,26 @@ def _relative_output_path(source_path: pathlib.Path, suffix: str, output_dir: pa
     return output_dir / source_path.with_suffix(suffix).name
 
 
+def _module_name_from_path(module_path: pathlib.Path, output_dir: pathlib.Path) -> str:
+    """Convert module path to a relative module name suitable for AOT compilation.
+
+    For example:
+      build/stage2/llvm/types.ll -> llvm/types
+      build/stage2/parser.ll -> parser
+      build/stage2/parser/mod.ll -> parser/mod
+
+    This preserves directory structure and avoids collisions between modules
+    with the same filename in different directories.
+    """
+    try:
+        relative = module_path.relative_to(output_dir)
+        # Remove the .ll suffix and convert to forward-slash separated string
+        return str(relative.with_suffix("")).replace("\\", "/")
+    except ValueError:
+        # Fallback to stem for safety
+        return module_path.stem
+
+
 def _stage1_fingerprint() -> str:
     """Fingerprint the stage1-generated Python compiler modules.
 
@@ -175,20 +195,26 @@ def prepare_stage2_aot_modules(
 
     Uses the stage1-generated implementation from compiler/src/aot_prepare.sfn.
     Writes rewritten IR modules to build/stage2/aot and returns that directory.
+
+    Module names now preserve directory structure (e.g., "llvm/expressions" instead of
+    just "expressions") to avoid collisions between modules with the same filename
+    in different directories.
     """
 
     aot_dir = output_dir / "aot"
     aot_dir.mkdir(parents=True, exist_ok=True)
 
-    module_names = [p.stem for p in module_paths]
+    # Use relative paths as module names to avoid collisions
+    module_names = [_module_name_from_path(
+        p, output_dir) for p in module_paths]
 
     # Fast path: skip AOT rewriting if inputs are unchanged.
     manifest_path = aot_dir / ".aot-prepare-manifest.json"
     input_hashes: Dict[str, str] = {}
-    for path in module_paths:
+    for path, name in zip(module_paths, module_names):
         digest = hashlib.sha256()
         digest.update(path.read_bytes())
-        input_hashes[path.stem] = digest.hexdigest()
+        input_hashes[name] = digest.hexdigest()
 
     expected_outputs_ok = True
     for name in module_names:
@@ -200,7 +226,7 @@ def prepare_stage2_aot_modules(
             cached = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception:
             cached = None
-        if isinstance(cached, dict) and cached.get("version") == "aot-prepare-v1":
+        if isinstance(cached, dict) and cached.get("version") == "aot-prepare-v3":
             cached_names = cached.get("module_names")
             cached_hashes = cached.get("input_hashes")
             if cached_names == module_names and cached_hashes == input_hashes:
@@ -222,6 +248,7 @@ def prepare_stage2_aot_modules(
         )
 
     for name, ir in zip(module_names, rewritten):
+        # _atomic_write_text handles creating subdirectories
         _atomic_write_text(aot_dir / f"{name}.ll", ir)
 
     _atomic_write_text(aot_dir / "modules.txt", "\n".join(module_names) + "\n")
@@ -229,7 +256,7 @@ def prepare_stage2_aot_modules(
         manifest_path,
         json.dumps(
             {
-                "version": "aot-prepare-v1",
+                "version": "aot-prepare-v3",
                 "module_names": module_names,
                 "input_hashes": input_hashes,
             },
@@ -486,6 +513,75 @@ def _import_basename(import_path: str) -> str:
     return import_path
 
 
+def _module_slug_for_source(source_path: pathlib.Path) -> str:
+    """Return a stable module slug for a source file.
+
+    Examples:
+      compiler/src/parser/mod.sfn -> parser/mod
+      runtime/prelude.sfn         -> runtime/prelude
+    """
+    compiler_src = (REPO_ROOT / "compiler" / "src").resolve()
+    runtime_src = (REPO_ROOT / "runtime").resolve()
+    source_path = source_path.resolve()
+    try:
+        relative = source_path.relative_to(compiler_src)
+        return str(relative.with_suffix("")).replace("\\", "/")
+    except ValueError:
+        pass
+    try:
+        relative = source_path.relative_to(runtime_src)
+        return "runtime/" + str(relative.with_suffix("")).replace("\\", "/")
+    except ValueError:
+        pass
+    return source_path.stem
+
+
+def _normalize_import_path(value: str) -> str:
+    return value.strip().replace("\\", "/")
+
+
+def _dirname_slug(slug: str) -> str:
+    if "/" not in slug:
+        return ""
+    return slug.rsplit("/", 1)[0]
+
+
+def _resolve_import_slug(import_path: str, *, current_module_slug: str) -> str:
+    """Resolve an import path to a slug rooted at build/stage2.
+
+    Handles relative imports inside nested modules, e.g.
+      current=parser/mod, import=./token_utils -> parser/token_utils
+    """
+    normalized = _normalize_import_path(import_path)
+    if not normalized:
+        return ""
+
+    if normalized.startswith("./") or normalized.startswith("../"):
+        base = _dirname_slug(current_module_slug)
+        if base:
+            normalized = f"{base}/{normalized}"
+
+    # Collapse ./ and ../ segments.
+    parts = []
+    for part in normalized.split("/"):
+        if part == "" or part == ".":
+            continue
+        if part == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(part)
+
+    slug = "/".join(parts)
+
+    # Some sources (especially tests) may import via src/ paths.
+    if slug.startswith("src/"):
+        slug = slug[len("src/"):]
+    if slug.startswith("compiler/src/"):
+        slug = slug[len("compiler/src/"):]
+    return slug
+
+
 def _topo_sort_sources(
     sources: Set[pathlib.Path],
     *,
@@ -528,7 +624,7 @@ def _topo_sort_sources(
     return ordered
 
 
-def load_manifest_for_import(import_path: str, output_dir: pathlib.Path) -> str:
+def load_manifest_for_import(import_path: str, output_dir: pathlib.Path, *, current_module_slug: str) -> str:
     """Load a layout manifest for an imported module.
 
     Args:
@@ -542,36 +638,53 @@ def load_manifest_for_import(import_path: str, output_dir: pathlib.Path) -> str:
     # "./ast" -> "ast.layout-manifest"
     # "../runtime/prelude" -> "prelude.layout-manifest"
 
-    module_name = _import_basename(import_path)
+    slug = _resolve_import_slug(
+        import_path, current_module_slug=current_module_slug)
+    if not slug:
+        return ""
 
-    manifest_path = output_dir / f"{module_name}.layout-manifest"
-
+    manifest_path = output_dir / f"{slug}.layout-manifest"
     if manifest_path.exists():
         return manifest_path.read_text(encoding="utf-8")
 
+    # Backwards-compatible fallback for older layouts.
+    module_name = _import_basename(import_path)
+    fallback_path = output_dir / f"{module_name}.layout-manifest"
+    if fallback_path.exists():
+        return fallback_path.read_text(encoding="utf-8")
+
     if "/" in module_name:
-        fallback = module_name.split("/")[-1]
-        fallback_path = output_dir / f"{fallback}.layout-manifest"
-        if fallback_path.exists():
-            return fallback_path.read_text(encoding="utf-8")
+        leaf = module_name.split("/")[-1]
+        leaf_path = output_dir / f"{leaf}.layout-manifest"
+        if leaf_path.exists():
+            return leaf_path.read_text(encoding="utf-8")
 
     return ""
 
 
-def load_native_text_for_import(import_path: str, output_dir: pathlib.Path) -> str:
+def load_native_text_for_import(import_path: str, output_dir: pathlib.Path, *, current_module_slug: str) -> str:
     """Load the native text artifact for an imported module."""
 
-    module_name = _import_basename(import_path)
-    text_path = output_dir / f"{module_name}.sfn-asm"
+    slug = _resolve_import_slug(
+        import_path, current_module_slug=current_module_slug)
+    if not slug:
+        return ""
 
+    text_path = output_dir / f"{slug}.sfn-asm"
     if text_path.exists():
         return text_path.read_text(encoding="utf-8")
 
+    # Backwards-compatible fallback for older layouts.
+    module_name = _import_basename(import_path)
+    fallback_path = output_dir / f"{module_name}.sfn-asm"
+    if fallback_path.exists():
+        return fallback_path.read_text(encoding="utf-8")
+
     if "/" in module_name:
-        fallback = module_name.split("/")[-1]
-        fallback_path = output_dir / f"{fallback}.sfn-asm"
-        if fallback_path.exists():
-            return fallback_path.read_text(encoding="utf-8")
+        leaf = module_name.split("/")[-1]
+        leaf_path = output_dir / f"{leaf}.sfn-asm"
+        if leaf_path.exists():
+            return leaf_path.read_text(encoding="utf-8")
 
     return ""
 
@@ -618,9 +731,15 @@ def compile_compiler_to_stage2(
             f"runtime source directory not found: {runtime_src}")
 
     has_full = hasattr(stage1_main, "compile_to_native_llvm_full")
+    has_full_with_module = hasattr(
+        stage1_main, "compile_to_native_llvm_full_with_module")
     has_manifest = hasattr(
         stage1_main, "compile_to_native_llvm_with_manifests")
     has_context = hasattr(stage1_main, "compile_to_native_llvm_with_context")
+    has_context_with_module = hasattr(
+        stage1_main, "compile_to_native_llvm_with_context_with_module")
+    has_module_entry = hasattr(
+        stage1_main, "compile_to_native_llvm_with_module")
 
     # Collect all Sailfin source files.
     # `compiler/src/aot_prepare.sfn` is used by the stage2 toolchain (and tests)
@@ -676,10 +795,18 @@ def compile_compiler_to_stage2(
         elif prior_stage1 != current_stage1:
             rebuild_all = True
 
-    # Map import basenames -> providing source paths.
+    # Map stable module slugs -> providing source paths (avoids basename collisions).
+    providers_by_slug: Dict[str, pathlib.Path] = {
+        _module_slug_for_source(p): p for p in all_sources
+    }
+    # Backwards-compatible basename map for any legacy imports.
     providers_by_name: Dict[str, pathlib.Path] = {
         p.stem: p for p in all_sources}
     dependents: Dict[pathlib.Path, Set[pathlib.Path]] = defaultdict(set)
+
+    module_slug_cache: Dict[pathlib.Path, str] = {
+        p: _module_slug_for_source(p) for p in all_sources
+    }
 
     # Read sources once up-front and compute import graph.
     source_hash: Dict[pathlib.Path, str] = {}
@@ -689,13 +816,18 @@ def compile_compiler_to_stage2(
         imports = extract_import_paths(source)
         import_cache[source_path] = imports
         source_hash[source_path] = _sha256_text(source)
+        current_slug = module_slug_cache.get(source_path, "")
         for import_path in imports:
-            provider = _resolve_import_provider(
-                import_path, providers_by_name=providers_by_name
-            )
+            resolved_slug = _resolve_import_slug(
+                import_path, current_module_slug=current_slug)
+            provider = providers_by_slug.get(resolved_slug)
             if provider is None:
-                continue
-            dependents[provider].add(source_path)
+                # Fallback to legacy basename mapping.
+                provider = _resolve_import_provider(
+                    import_path, providers_by_name=providers_by_name
+                )
+            if provider is not None:
+                dependents[provider].add(source_path)
 
     # Determine which outputs must exist for a module to be considered reusable.
     def _required_outputs_for(source_path: pathlib.Path) -> List[pathlib.Path]:
@@ -757,6 +889,8 @@ def compile_compiler_to_stage2(
             source = source_cache[source_path]
             imports = import_cache.get(source_path, [])
 
+            module_slug = module_slug_cache.get(source_path, "")
+
             if debug or progress:
                 rel = source_path.relative_to(REPO_ROOT)
                 print(
@@ -766,7 +900,33 @@ def compile_compiler_to_stage2(
 
             start = time.perf_counter() if progress else None
 
-            if has_full:
+            if has_full_with_module:
+                full_result = stage1_main.compile_to_native_llvm_full_with_module(
+                    source, module_slug)
+                first_pass_results[source_path] = full_result
+                native_module = getattr(full_result, "native_module", None)
+                if native_module is not None and hasattr(native_module, "artifacts"):
+                    for artifact in native_module.artifacts:
+                        if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
+                            manifest_path = _relative_output_path(
+                                source_path, ".layout-manifest", output_dir)
+                            manifest_content = getattr(
+                                artifact, "contents", "")
+                            _atomic_write_text(manifest_path, manifest_content)
+                            if debug:
+                                rel_path = manifest_path.relative_to(REPO_ROOT)
+                                print(
+                                    f"[stage2-bootstrap]     wrote {rel_path}")
+                        elif hasattr(artifact, "format") and artifact.format == "sailfin-native-text":
+                            text_path = _relative_output_path(
+                                source_path, ".sfn-asm", output_dir)
+                            text_content = getattr(artifact, "contents", "")
+                            _atomic_write_text(text_path, text_content)
+                            if debug:
+                                rel_text = text_path.relative_to(REPO_ROOT)
+                                print(
+                                    f"[stage2-bootstrap]     wrote {rel_text}")
+            elif has_full:
                 full_result = stage1_main.compile_to_native_llvm_full(source)
                 first_pass_results[source_path] = full_result
                 native_module = getattr(full_result, "native_module", None)
@@ -792,7 +952,11 @@ def compile_compiler_to_stage2(
                                 print(
                                     f"[stage2-bootstrap]     wrote {rel_text}")
             else:
-                lowered = stage1_main.compile_to_native_llvm(source)
+                if has_module_entry:
+                    lowered = stage1_main.compile_to_native_llvm_with_module(
+                        source, module_slug)
+                else:
+                    lowered = stage1_main.compile_to_native_llvm(source)
                 first_pass_results[source_path] = lowered
 
             if start is not None:
@@ -818,6 +982,8 @@ def compile_compiler_to_stage2(
             source = source_cache[source_path]
             import_paths = import_cache.get(source_path, [])
 
+            module_slug = module_slug_cache.get(source_path, "")
+
             if debug or progress:
                 rel = source_path.relative_to(REPO_ROOT)
                 print(
@@ -829,11 +995,12 @@ def compile_compiler_to_stage2(
 
             import_contexts: List[Tuple[str, str]] = []
             if has_manifest:
+                current_slug = module_slug_cache.get(source_path, "")
                 for import_path in import_paths:
                     manifest_content = load_manifest_for_import(
-                        import_path, output_dir)
+                        import_path, output_dir, current_module_slug=current_slug)
                     native_text_content = load_native_text_for_import(
-                        import_path, output_dir)
+                        import_path, output_dir, current_module_slug=current_slug)
                     import_contexts.append((manifest_content,
                                             native_text_content))
                     if debug and manifest_content:
@@ -857,8 +1024,12 @@ def compile_compiler_to_stage2(
             if has_context and import_contexts and (any(ctx[0] for ctx in import_contexts) or any(ctx[1] for ctx in import_contexts)):
                 manifests_payload = [ctx[0] for ctx in import_contexts]
                 native_payload = [ctx[1] for ctx in import_contexts]
-                result = stage1_main.compile_to_native_llvm_with_context(
-                    source, manifests_payload, native_payload)
+                if has_context_with_module:
+                    result = stage1_main.compile_to_native_llvm_with_context_with_module(
+                        source, module_slug, manifests_payload, native_payload)
+                else:
+                    result = stage1_main.compile_to_native_llvm_with_context(
+                        source, manifests_payload, native_payload)
             elif has_manifest:
                 manifest_payload = [ctx[0]
                                     for ctx in import_contexts if ctx[0]]
@@ -959,12 +1130,16 @@ def compile_compiler_to_stage2(
                 f"missing expected output module: {module_path} (source={source_path.name})"
             )
         all_module_paths.append(module_path)
-    module_paths = sorted(all_module_paths, key=lambda p: p.stem)
+    # Sort by relative module name to get deterministic ordering
+    module_paths = sorted(
+        all_module_paths, key=lambda p: _module_name_from_path(p, output_dir))
 
     # Persist a deterministic module list to drive native AOT compilation.
+    # Uses relative paths (e.g., "llvm/expressions") to avoid collisions.
     _atomic_write_text(
         output_dir / "modules.txt",
-        "\n".join(p.stem for p in module_paths) + "\n",
+        "\n".join(_module_name_from_path(p, output_dir)
+                  for p in module_paths) + "\n",
     )
 
     # Prepare collision-free modules for AOT linking.

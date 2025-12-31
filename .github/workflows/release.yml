@@ -143,7 +143,7 @@ jobs:
           mkdir -p "${STAGE_DIR}/runtime"
           cp -R runtime/native "${STAGE_DIR}/runtime/native"
           mkdir -p "${STAGE_DIR}/runtime/native/obj"
-          cp "build/native/obj/prelude.o" "${STAGE_DIR}/runtime/native/obj/prelude.o"
+          cp "build/native/obj/runtime/prelude.o" "${STAGE_DIR}/runtime/native/obj/prelude.o"
 
           ASSET="sailfin-stage2_${VERSION}_${OS}_${ARCH}.tar.gz"
           tar -czf "dist/${ASSET}" -C "${STAGE_DIR}" .
