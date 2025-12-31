@@ -23,8 +23,7 @@ repository.
 1. **Branch & scope** — Keep work focused; reference open issues or roadmap
    items when possible.
 2. **Development commands**
-   - Run tests: `make test` (use `PYTEST_ARGS=-m unit` or
-     `-m integration` to scope).
+   - Run tests: `make test`
    - Compile Sailfin sources: `make compile` (stage1 pipeline).
 3. **Testing expectations**
    - Add or update unit tests under `compiler/tests/` for stage1 changes.

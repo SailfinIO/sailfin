@@ -28,15 +28,10 @@ make install          # Create/update the 'sailfin' Conda environment
 
 ```bash
 make compile          # Build the native sailfin-stage2 compiler (bootstraps through Stage1)
-make test             # Run full pytest suite
+make test             # Run full suite
 make test-unit        # Run fast unit tests (exclude Stage2)
 make test-integration # Run Sailfin-native integration tests
 make test-stage2      # Run LLVM/native backend tests
-
-# Scoped test runs
-make test PYTEST_ARGS="-k test_name"     # Run specific test
-make test PYTEST_ARGS="-m unit"          # Run tests with 'unit' marker
-make test PYTEST_ARGS="compiler/tests/test_stage1_pipeline.py"  # Single file
 ```
 
 ### Build Artifacts

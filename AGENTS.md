@@ -11,7 +11,7 @@
 ## Build, Test, and Development Commands
 
 - `make install` provisions or updates the `sailfin` Conda env defined in `environment.yml`.
-- `make test` runs the pytest suite; pass `PYTEST_ARGS=...` to filter (e.g., `-m integration`, `-m stage2`).
+- `make test` runs all test cases.
 - `make compile` builds the native sailfin-stage2 compiler via the current stage1 → stage2 bootstrap pipeline.
 - `make clean` removes packaged artifacts (`dist/`); use `make clean-stage1` if you intentionally want to delete `compiler/build/` (requires an installed stage1 to rebuild).
 - if you need to do some debugging, use the /scratch directory and run/place scripts there. This is a conda environment so you may have to account for your path to the compiler when running scripts.

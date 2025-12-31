@@ -117,7 +117,7 @@ For now, experiment, record findings, and propose ideas through pull requests.
 ### Local Development
 
 - `make install` — create or update the `sailfin` Conda environment defined in `environment.yml`.
-- `make test` — run the pytest suite; pass `PYTEST_ARGS=...` to scope the run.
+- `make test` — run the suite.
 - `make package` — build the stage1 release artifact (`dist/sailfin-stage1-<version>.zip`).
 - `sailfin-stage1 <paths> --out <dir>` — compile Sailfin sources using the installed stage1 bundle.
 

@@ -320,6 +320,39 @@ fn normalize_import_module(path -> string) -> string {
         remainder = replace_all(remainder, "/", ".");
         return "compiler.build." + remainder;
     }
+
+    // Relative imports ("../...") are used heavily throughout the compiler.
+    // The old implementation replaced '/' with '.', which turns "../" into
+    // "..." and breaks once modules are nested deeper than one directory.
+    //
+    // We instead convert N leading "../" segments into (N + 2) leading dots,
+    // matching the existing convention in generated Python under compiler/build.
+    if starts_with(trimmed, "../") {
+        let mut remainder = trimmed;
+        let mut up_count -> number = 0;
+        loop {
+            if starts_with(remainder, "../") {
+                remainder = substring(remainder, 3, remainder.length);
+                up_count += 1;
+                continue;
+            }
+            break;
+        }
+        remainder = replace_all(remainder, "/", ".");
+
+        let mut dots -> string = "";
+        let mut index -> number = 0;
+        let target = up_count + 2;
+        loop {
+            if index >= target {
+                break;
+            }
+            dots = dots + ".";
+            index += 1;
+        }
+
+        return dots + remainder;
+    }
     return replace_all(trimmed, "/", ".");
 }
 

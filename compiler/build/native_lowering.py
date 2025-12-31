@@ -307,6 +307,25 @@ def normalize_import_module(path):
         remainder = substring(trimmed, 2, len(trimmed))
         remainder = replace_all(remainder, "/", ".")
         return "compiler.build." + remainder
+    if starts_with(trimmed, "../"):
+        remainder = trimmed
+        up_count = 0
+        while True:
+            if starts_with(remainder, "../"):
+                remainder = substring(remainder, 3, len(remainder))
+                up_count += 1
+                continue
+            break
+        remainder = replace_all(remainder, "/", ".")
+        dots = ""
+        index = 0
+        target = up_count + 2
+        while True:
+            if index >= target:
+                break
+            dots = dots + "."
+            index += 1
+        return dots + remainder
     return replace_all(trimmed, "/", ".")
 
 def emit_struct_definitions(builder, structs):

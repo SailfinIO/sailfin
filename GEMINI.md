@@ -39,7 +39,7 @@ The primary workflow for development is as follows:
 The following commands are available for development:
 
 - `make install`: Create or update the Conda environment used for the compiler.
-- `make test`: Run the full pytest suite. You can pass `PYTEST_ARGS` to filter the tests (e.g., `make test PYTEST_ARGS="-m unit"`).
+- `make test`: Run the full suite.
 - `make compile`: Build the native sailfin-stage2 compiler via the current stage1 → stage2 bootstrap pipeline.
 - `make clean`: Remove packaged artifacts (`dist/`).
 - `make native-stage2-debug`: Build native stage2 with debug symbols for lldb.

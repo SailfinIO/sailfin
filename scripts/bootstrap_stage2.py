@@ -479,9 +479,53 @@ def _import_basename(import_path: str) -> str:
     if import_path.startswith("./"):
         return import_path[2:]
     if import_path.startswith("../"):
-        parts = import_path.split("/")
-        return parts[-1] if parts else import_path
+        remainder = import_path
+        while remainder.startswith("../"):
+            remainder = remainder[3:]
+        return remainder
     return import_path
+
+
+def _topo_sort_sources(
+    sources: Set[pathlib.Path],
+    *,
+    dependents: Dict[pathlib.Path, Set[pathlib.Path]],
+) -> List[pathlib.Path]:
+    """Return a stable provider-before-dependent ordering.
+
+    Stage2 compilation needs imported manifests/text to exist when compiling a
+    module. We therefore compile providers first.
+    """
+
+    in_degree: Dict[pathlib.Path, int] = {p: 0 for p in sources}
+    for provider, deps in dependents.items():
+        if provider not in sources:
+            continue
+        for dep in deps:
+            if dep not in sources:
+                continue
+            in_degree[dep] = in_degree.get(dep, 0) + 1
+
+    ready = sorted([p for p, deg in in_degree.items() if deg == 0], key=str)
+    ordered: List[pathlib.Path] = []
+
+    while ready:
+        current = ready.pop(0)
+        ordered.append(current)
+        for dep in dependents.get(current, set()):
+            if dep not in in_degree:
+                continue
+            in_degree[dep] -= 1
+            if in_degree[dep] == 0:
+                ready.append(dep)
+        ready.sort(key=str)
+
+    if len(ordered) != len(sources):
+        remaining = sorted(
+            [p for p in sources if p not in set(ordered)], key=str)
+        ordered.extend(remaining)
+
+    return ordered
 
 
 def load_manifest_for_import(import_path: str, output_dir: pathlib.Path) -> str:
@@ -706,7 +750,7 @@ def compile_compiler_to_stage2(
     if debug:
         print("[stage2-bootstrap] first pass: collecting layout manifests...")
 
-    first_pass_sources = sorted(to_rebuild, key=lambda p: str(p))
+    first_pass_sources = _topo_sort_sources(to_rebuild, dependents=dependents)
     first_pass_total = len(first_pass_sources)
     for index, source_path in enumerate(first_pass_sources):
         try:
@@ -767,7 +811,7 @@ def compile_compiler_to_stage2(
     if debug:
         print("[stage2-bootstrap] second pass: lowering with manifests...")
 
-    second_pass_sources = sorted(to_rebuild, key=lambda p: str(p))
+    second_pass_sources = _topo_sort_sources(to_rebuild, dependents=dependents)
     second_pass_total = len(second_pass_sources)
     for index, source_path in enumerate(second_pass_sources):
         try:
