@@ -67,8 +67,9 @@ def _relative_output_path(source_path: pathlib.Path, suffix: str, output_dir: pa
 
     try:
         relative = source_path.relative_to(runtime_src)
-        # Runtime files go directly in output_dir (no subdirectory)
-        return output_dir / relative.with_suffix(suffix)
+        # Preserve runtime/ directory structure so imports like
+        # `runtime/prelude` map to `build/stage2/runtime/prelude.*`.
+        return output_dir / "runtime" / relative.with_suffix(suffix)
     except ValueError:
         pass
 
@@ -577,13 +578,15 @@ def compile_compiler_to_stage2(
         stage1_main, "compile_to_native_llvm_with_manifests")
     has_context = hasattr(stage1_main, "compile_to_native_llvm_with_context")
 
-    # Collect all Sailfin source files
-    # Note: compiler/src/aot_prepare.sfn is a stage1-only helper (used to rewrite
-    # LLVM text for AOT); it is intentionally excluded from stage2 LLVM output.
-    sources = [p for p in sorted(compiler_src.rglob(
-        "*.sfn")) if p.name != "aot_prepare.sfn"]
+    # Collect all Sailfin source files.
+    # `compiler/src/aot_prepare.sfn` is used by the stage2 toolchain (and tests)
+    # to rewrite LLVM text for AOT. It must be present in the stage2 artifact
+    # set so imports like `../../src/aot_prepare` can resolve.
+    sources = [p for p in sorted(compiler_src.rglob("*.sfn"))]
     runtime_sources = sorted(runtime_src.rglob("*.sfn"))
-    all_sources = sources + runtime_sources
+    # Compile runtime first so compiler modules can import `runtime/*` and find
+    # the corresponding artifacts during lowering.
+    all_sources = runtime_sources + sources
 
     if not all_sources:
         raise Stage2BootstrapError("no Sailfin sources found to compile")

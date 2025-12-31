@@ -781,6 +781,24 @@ static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *tex
         return 0;
     }
 
+    // Guard against non-canonical pointers.
+    // On arm64 macOS the virtual address space is not a full 64-bit range;
+    // mis-tagged values (notably IEEE-754 doubles like 1.0 => 0x3ff0...) can
+    // otherwise be interpreted as pointers and fault on the first read.
+    // Treat these as truncated/invalid instead of crashing.
+    {
+        uintptr_t addr = (uintptr_t)text;
+        uintptr_t high = addr >> 48;
+        if (high != 0u && high != 0xffffu)
+        {
+            if (out_truncated)
+            {
+                *out_truncated = true;
+            }
+            return 0;
+        }
+    }
+
     // Defensive cap: most stage2 compiler strings are tiny, but avoid scanning
     // unbounded memory if we get a wildly unterminated pointer.
     const size_t max_scan = 1u << 20; // 1 MiB
@@ -922,6 +940,19 @@ int64_t sailfin_runtime_string_length(char *text)
     {
         fprintf(stderr, "[stage2-native] string_length: unterminated string at %p; treating length=%lld\n", (void *)text, (long long)length);
         fflush(stderr);
+
+        // Optional, low-volume debugging to track down mis-tagged values being
+        // treated as `char *`.
+        _maybe_print_string_backtrace(
+            "string_length",
+            text,
+            _is_immediate_codepoint_string(text, NULL),
+            _asan_poisoned(text),
+            true,
+            NULL,
+            false,
+            false,
+            false);
     }
 
     static int trace_enabled = -1;
