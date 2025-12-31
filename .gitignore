@@ -91,5 +91,13 @@ runtime/build/
 # should never be committed; use dist/ for release packaging instead.
 build/
 
+# Stage1 bootstrap compiler (checked-in Python).
+# We want CI to have the stage1 llvm support modules, but we do NOT want to
+# commit bytecode caches.
+!compiler/build/llvm/
+!compiler/build/llvm/**/*.py
+compiler/build/llvm/**/__pycache__/
+compiler/build/llvm/**/*.pyc
+
 # Generated native example binaries (produced by stage2-native-run-examples)
 build/native/examples/
