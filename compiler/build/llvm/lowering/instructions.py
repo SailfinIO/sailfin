@@ -1,15 +1,15 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.native_ir import NativeFunction, NativeInstruction, NativeSourceSpan
-from compiler.build.string_utils import substring
-from compiler.build.llvm.types import TypeContext, LocalBinding, ParameterBinding, LLVMOperand, BlockLoweringResult, LetLoweringResult, LoopContext, LifetimeRegionMetadata, LifetimeReleaseEvent, OwnershipInfo, OwnershipConsumption, ScopeMetadata, LocalMutation, StringConstant, IfStructure, TryStructure, LoopStructure, MatchStructure, MatchCaseStructure, MatchCaseCondition, MatchFieldBinding, MatchStructFieldBinding, EnumTypeInfo, EnumVariantInfo, StructTypeInfo, StructFieldInfo, ConditionConversion, BlockLabelResult, MatchArmMutations
-from compiler.build.llvm.utils import trim_text, append_string, number_to_string, index_of, starts_with, merge_parameter_bindings
-from compiler.build.llvm.strings import empty_string_constant_set, merge_string_constants
-from compiler.build.llvm.type_context import find_struct_info_by_name, find_interface_info_by_name, find_enum_info_by_llvm_type, resolve_enum_info_for_literal, resolve_enum_variant_info
-from compiler.build.llvm.expression_lowering_stage2 import append_local_binding, array_pointer_element_type, array_struct_type_for_element, coerce_operand_to_type, detect_suspension_conflicts, default_return_literal, emit_boolean_and, emit_comparison_instruction, extract_simple_identifier, harmonise_operands, is_simple_identifier, is_union_llvm_type, load_local_operand, lower_expression, lower_expression_statement, lower_return_instruction, map_local_type, mark_local_consumed, mark_parameter_consumed, parse_enum_literal, parse_inline_let_expression, parse_range_iterable, parse_struct_pattern, parse_union_payload_types, strip_mut_prefix, analyze_value_ownership, detect_borrow_conflicts
-from compiler.build.llvm.expressions import find_local_binding, find_parameter_binding, format_local_pointer_name, format_temp_name
-from compiler.build.llvm.lifetime import infer_borrow_base_scope, append_lifetime_region, append_lifetime_release_event, mark_lifetime_region_released, apply_lifetime_release_events, make_lifetime_region_metadata, format_root_scope_id, make_child_scope_id
+from ...native_ir import NativeFunction, NativeInstruction, NativeSourceSpan
+from ...string_utils import substring
+from ..types import TypeContext, LocalBinding, ParameterBinding, LLVMOperand, BlockLoweringResult, LetLoweringResult, LoopContext, LifetimeRegionMetadata, LifetimeReleaseEvent, OwnershipInfo, OwnershipConsumption, ScopeMetadata, LocalMutation, StringConstant, IfStructure, TryStructure, LoopStructure, MatchStructure, MatchCaseStructure, MatchCaseCondition, MatchFieldBinding, MatchStructFieldBinding, EnumTypeInfo, EnumVariantInfo, StructTypeInfo, StructFieldInfo, ConditionConversion, BlockLabelResult, MatchArmMutations
+from ..utils import trim_text, append_string, number_to_string, index_of, starts_with, merge_parameter_bindings
+from ..strings import empty_string_constant_set, merge_string_constants
+from ..type_context import find_struct_info_by_name, find_interface_info_by_name, find_enum_info_by_llvm_type, resolve_enum_info_for_literal, resolve_enum_variant_info
+from ..expression_lowering_stage2 import append_local_binding, array_pointer_element_type, array_struct_type_for_element, coerce_operand_to_type, detect_suspension_conflicts, default_return_literal, emit_boolean_and, emit_comparison_instruction, extract_simple_identifier, harmonise_operands, is_simple_identifier, is_union_llvm_type, load_local_operand, lower_expression, lower_expression_statement, lower_return_instruction, map_local_type, mark_local_consumed, mark_parameter_consumed, parse_enum_literal, parse_inline_let_expression, parse_range_iterable, parse_struct_pattern, parse_union_payload_types, strip_mut_prefix, analyze_value_ownership, detect_borrow_conflicts
+from ..expressions import find_local_binding, find_parameter_binding, format_local_pointer_name, format_temp_name
+from ..lifetime import infer_borrow_base_scope, append_lifetime_region, append_lifetime_release_event, mark_lifetime_region_released, apply_lifetime_release_events, make_lifetime_region_metadata, format_root_scope_id, make_child_scope_id
 from compiler.build.llvm.lowering.phi import emit_phi_merges_for_match, emit_phi_merges_for_straight_if, emit_phi_merges_for_if_else, find_last_label, retarget_recent_mutations, materialize_mutation_values_at_exit, collect_mutation_names, find_mutation_for_name
 
 print = runtime.console

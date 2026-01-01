@@ -1,12 +1,12 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from ...native_ir import NativeFunction, NativeParameter, NativeInterfaceSignature, NativeImport
-from ...string_utils import substring, find_last_index_of_char
-from compiler.build.types import TypeContext, TraitMetadata, RuntimeHelperDescriptor
-from compiler.build.utils import trim_text, append_string, join_with_separator, string_array_contains, sanitize_symbol, number_to_string
-from compiler.build.runtime_helpers import runtime_helper_descriptors
-from compiler.build.type_mapping import map_return_type, map_parameter_type, map_struct_type_annotation
+from ..native_ir import NativeFunction, NativeParameter, NativeInterfaceSignature, NativeImport
+from ..string_utils import substring, find_last_index_of_char
+from compiler.build.llvm.types import TypeContext, TraitMetadata, RuntimeHelperDescriptor
+from compiler.build.llvm.utils import trim_text, append_string, join_with_separator, string_array_contains, sanitize_symbol, number_to_string
+from compiler.build.llvm.runtime_helpers import runtime_helper_descriptors
+from compiler.build.llvm.type_mapping import map_return_type, map_parameter_type, map_struct_type_annotation
 
 print = runtime.console
 sleep = runtime.sleep
@@ -437,7 +437,7 @@ def collect_parameter_types(context, parameters, function_name):
             double_colon_pos = find_last_index_of_char(function_name, ":")
             if double_colon_pos > 0  and  substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::":
                 struct_name = substring(function_name, 0, double_colon_pos - 1)
-                struct_type = map_struct_type_annotation(context, struct_name)
+                struct_type = map_struct_type_annotation(struct_name)
                 if len(struct_type) > 0:
                     llvm_type = struct_type + "*"
         if len(llvm_type) == 0:

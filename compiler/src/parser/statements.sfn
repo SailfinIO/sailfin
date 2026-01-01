@@ -3,7 +3,7 @@
 // Block-level statement parsing - control flow, loops, return, throw,
 // try/catch, match statements, and expression statements.
 
-import { Token } from "./token";
+import { Token } from "../token";
 import {
     Block,
     Decorator,
@@ -14,8 +14,8 @@ import {
     ForClause,
     WithClause,
     SourceSpan,
-} from "./ast";
-import { substring, char_code, char_at, strings_equal } from "./string_utils";
+} from "../ast";
+import { substring, char_code, char_at, strings_equal } from "../string_utils";
 import {
     Parser,
     StatementParseResult,
@@ -25,8 +25,8 @@ import {
     MatchCasesParseResult,
     MatchCaseParseResult,
     MatchCaseTokenSplit,
-} from "./parser/types";
-import { trim_text } from "./parser/utils";
+} from "./types";
+import { trim_text } from "./utils";
 import {
     parser_peek_raw,
     parser_advance_raw,
@@ -46,8 +46,8 @@ import {
     append_token,
     find_top_level_identifier,
     split_token_slices_by_comma,
-} from "./parser/token_utils";
-import { expression_from_tokens } from "./parser/expressions";
+} from "./token_utils";
+import { expression_from_tokens } from "./expressions";
 
 // Forward declaration for decorators - will be imported from declarations
 // For now we provide a stub that returns empty decorators

@@ -3,15 +3,15 @@
 // Expression parsing - Pratt parser implementation for expressions including
 // literals, binary/unary operators, member access, calls, lambdas, and more.
 
-import { Token, TokenKind } from "./token";
+import { Token, TokenKind } from "../token";
 import {
     Block,
     Expression,
     ObjectField,
     Parameter,
     TypeAnnotation,
-} from "./ast";
-import { substring, char_code, char_at, strings_equal } from "./string_utils";
+} from "../ast";
+import { substring, char_code, char_at, strings_equal } from "../string_utils";
 import {
     Parser,
     ExpressionTokens,
@@ -26,8 +26,8 @@ import {
     ObjectLiteralParseResult,
     StructTypeNameResult,
     BlockParseResult,
-} from "./parser/types";
-import { trim_text, string_array_contains } from "./parser/utils";
+} from "./types";
+import { trim_text, string_array_contains } from "./utils";
 import {
     identifier_matches,
     symbol_matches,
@@ -42,7 +42,7 @@ import {
     parser_peek_raw,
     parser_advance_raw,
     skip_trivia,
-} from "./parser/token_utils";
+} from "./token_utils";
 
 // ============================================================================
 // Expression State Operations

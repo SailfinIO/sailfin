@@ -1,8 +1,8 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.token import Token
-from compiler.build.ast import Block, Decorator, DecoratorArgument, Expression, FieldDeclaration, FunctionSignature, EnumVariant, MethodDeclaration, ModelProperty, ObjectField, Parameter, Statement, ImportSpecifier, ExportSpecifier, TypeParameter, TypeAnnotation, MatchCase, ElseBranch, WithClause, SourceSpan
+from ..token import Token
+from ..ast import Block, Decorator, DecoratorArgument, Expression, FieldDeclaration, FunctionSignature, EnumVariant, MethodDeclaration, ModelProperty, ObjectField, Parameter, Statement, ImportSpecifier, ExportSpecifier, TypeParameter, TypeAnnotation, MatchCase, ElseBranch, WithClause, SourceSpan
 
 print = runtime.console
 sleep = runtime.sleep

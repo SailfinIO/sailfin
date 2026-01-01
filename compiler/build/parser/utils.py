@@ -1,7 +1,7 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.string_utils import substring, char_code, char_at, strings_equal
+from ..string_utils import substring, char_code, char_at, strings_equal
 
 print = runtime.console
 sleep = runtime.sleep

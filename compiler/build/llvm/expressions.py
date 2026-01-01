@@ -1,11 +1,11 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from ...native_ir import NativeFunction, NativeSourceSpan
-from ...string_utils import substring, char_code, char_at, index_of
-from compiler.build.types import TypeContext, LocalBinding, ParameterBinding, LLVMOperand, ExpressionResult, OperatorMatch, CoercionResult, StringConstant, AssignmentParseResult, InlineLetParseResult, TernaryParseResult, MemberAccessParse, IndexExpressionParse, RawAddressParseResult, CastParseResult
-from compiler.build.utils import trim_text, append_string, starts_with, ends_with, sanitize_symbol, number_to_string, join_with_separator, is_identifier_start_char, is_identifier_part_char
-from compiler.build.strings import empty_string_constant_set, append_string_constant, find_string_constant
+from ..native_ir import NativeFunction, NativeSourceSpan
+from ..string_utils import substring, char_code, char_at, index_of
+from compiler.build.llvm.types import TypeContext, LocalBinding, ParameterBinding, LLVMOperand, ExpressionResult, OperatorMatch, CoercionResult, StringConstant, AssignmentParseResult, InlineLetParseResult, TernaryParseResult, MemberAccessParse, IndexExpressionParse, RawAddressParseResult, CastParseResult
+from compiler.build.llvm.utils import trim_text, append_string, starts_with, ends_with, sanitize_symbol, number_to_string, join_with_separator, is_identifier_start_char, is_identifier_part_char
+from compiler.build.llvm.strings import empty_string_constant_set, append_string_constant, find_string_constant
 
 print = runtime.console
 sleep = runtime.sleep

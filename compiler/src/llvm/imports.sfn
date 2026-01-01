@@ -6,7 +6,7 @@
 import { NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest } from "../native_ir";
 import { substring } from "../string_utils";
 import { ImportedModuleContext, LayoutManifestApplication } from "./types";
-import { trim_text, append_string, string_array_contains, number_to_string, starts_with, join_with_separator } from "./utils";
+import { trim_text, append_string, string_array_contains, number_to_string, starts_with, ends_with, join_with_separator } from "./utils";
 
 // =============================================================================
 // Import Context Collection
@@ -39,7 +39,8 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
             print.warn("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")");
         }
         let module_path = imports[index].module;
-        let slug = resolve_import_module_slug_for_module(module_path, current_module_slug);
+        let base_slug = resolve_import_module_slug_for_module(module_path, current_module_slug);
+        let slug = resolve_import_artifact_slug(base_slug);
         if slug.length == 0 {
             index += 1;
             continue;
@@ -87,6 +88,28 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
     return ImportedModuleContext { manifests: manifests, native_texts: native_texts, diagnostics: diagnostics };
 }
 
+fn resolve_import_artifact_slug(slug -> string) -> string ![io] {
+    if slug.length == 0 {
+        return slug;
+    }
+
+    // Prefer the direct slug if it exists.
+    if fs.exists(layout_manifest_path_for_slug(slug)) {
+        return slug;
+    }
+
+    // Directory imports (e.g. "./parser") resolve to `parser` but the actual
+    // module is typically `parser/mod`. Fall back to that layout.
+    if !ends_with(slug, "/mod") {
+        let mod_slug = slug + "/mod";
+        if fs.exists(layout_manifest_path_for_slug(mod_slug)) {
+            return mod_slug;
+        }
+    }
+
+    return slug;
+}
+
 // =============================================================================
 // Module Path Resolution
 // =============================================================================
@@ -121,14 +144,10 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
 
     let mut normalized = normalize_import_module_path(trimmed);
 
-    // NOTE: "./" imports are treated as compiler-root module paths.
-    // This matches the historical stage0/stage1 convention where "./foo/bar"
-    // refers to module slug "foo/bar" (not relative to the current module).
-    // We keep "../" as truly relative for cases like tests importing via
-    // ../../src/<name>.
-    if starts_with(normalized, "./") {
-        normalized = substring(normalized, 2, normalized.length);
-    } else if starts_with(normalized, "../") {
+    // Resolve relative imports against the importing module's directory.
+    // This is required now that we preserve directory structure for modules
+    // (e.g. `parser/mod` importing `./token_utils`).
+    if starts_with(normalized, "./") || starts_with(normalized, "../") {
         let base_dir = dirname_for_module_slug(current_module_slug);
         if base_dir.length > 0 {
             normalized = base_dir + "/" + normalized;

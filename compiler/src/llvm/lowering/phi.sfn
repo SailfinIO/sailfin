@@ -5,7 +5,7 @@
 // Mechanical extraction from compiler/src/native_llvm_lowering.sfn.
 // Logic should remain identical.
 
-import { substring } from "./string_utils";
+import { substring } from "../../string_utils";
 
 import {
     LocalBinding,
@@ -14,14 +14,14 @@ import {
     PhiStoreEntry,
     MutationMaterializationResult,
     MatchArmMutations,
-} from "./llvm/types";
+} from "../types";
 
-import { append_string } from "./llvm/utils";
+import { append_string } from "../utils";
 
 import {
     find_local_binding,
     format_temp_name,
-} from "./llvm/expressions";
+} from "../expressions";
 
 // Helper: Find preloaded value for a local by name
 fn find_preloaded_value(locals -> LocalBinding[], preloaded_values -> string[], name -> string) -> string? {

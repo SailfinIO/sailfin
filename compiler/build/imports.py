@@ -52,7 +52,8 @@ def collect_imported_module_context(imports):
             print.warn(
                 "test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")")
         module_path = imports[index].module
-        slug = resolve_import_module_slug(module_path)
+        base_slug = resolve_import_module_slug(module_path)
+        slug = resolve_import_artifact_slug(base_slug)
         if len(slug) == 0:
             index += 1
             continue
@@ -86,6 +87,19 @@ def collect_imported_module_context(imports):
         print.warn("test llvm: collect_imported_module_context done (unique_imports=" +
                    number_to_string(len(seen)) + ")")
     return ImportedModuleContext(manifests=manifests, native_texts=native_texts, diagnostics=diagnostics)
+
+
+def resolve_import_artifact_slug(slug):
+    # effects: io
+    if len(slug) == 0:
+        return slug
+    if fs.exists(layout_manifest_path_for_slug(slug)):
+        return slug
+    if not slug.endswith("/mod"):
+        mod_slug = slug + "/mod"
+        if fs.exists(layout_manifest_path_for_slug(mod_slug)):
+            return mod_slug
+    return slug
 
 
 def resolve_import_module_slug(module):

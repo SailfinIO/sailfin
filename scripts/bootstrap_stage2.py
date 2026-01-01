@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -476,10 +477,15 @@ def extract_import_paths(source: str) -> List[str]:
     current: List[str] = []
     collecting = False
 
+    def _starts_dependency_statement(line: str) -> bool:
+        # `export { ... } from "./foo";` behaves like an import for dependency
+        # ordering and layout-manifest availability.
+        return line.startswith("import ") or line.startswith("export ")
+
     for raw_line in source.splitlines():
         line = raw_line.strip()
         if not collecting:
-            if line.startswith("import "):
+            if _starts_dependency_statement(line):
                 current = [line]
                 collecting = True
                 if line.endswith(";"):
@@ -579,6 +585,24 @@ def _resolve_import_slug(import_path: str, *, current_module_slug: str) -> str:
         slug = slug[len("src/"):]
     if slug.startswith("compiler/src/"):
         slug = slug[len("compiler/src/"):]
+
+    # Support directory-style imports that target a `mod.sfn` module.
+    # Example: `import { parse_program } from "./parser";` should resolve to
+    # `compiler/src/parser/mod.sfn` (slug `parser/mod`) when `parser.sfn` does
+    # not exist.
+    if slug and not slug.endswith("/mod"):
+        compiler_src = (REPO_ROOT / "compiler" / "src").resolve()
+        runtime_src = (REPO_ROOT / "runtime").resolve()
+        if slug.startswith("runtime/"):
+            runtime_rel = slug[len("runtime/"):]
+            direct = runtime_src / f"{runtime_rel}.sfn"
+            mod = runtime_src / runtime_rel / "mod.sfn"
+        else:
+            direct = compiler_src / f"{slug}.sfn"
+            mod = compiler_src / slug / "mod.sfn"
+
+        if not direct.exists() and mod.exists():
+            slug = f"{slug}/mod"
     return slug
 
 
@@ -882,95 +906,123 @@ def compile_compiler_to_stage2(
     if debug:
         print("[stage2-bootstrap] first pass: collecting layout manifests...")
 
+    # Pass 1 exists to harvest artifacts (layout manifests/native text). The
+    # stage1 compiler's `compile_to_native_llvm_*` helpers print `[native-llvm]`
+    # warnings directly, but those diagnostics are frequently a byproduct of
+    # compiling without the full cross-module context that pass 2 provides.
+    # Suppress pass1 warning output unless debugging so bootstrap runs stay
+    # readable; pass2 diagnostics still surface via the aggregator.
+    original_stage1_warn = None
+    if not debug:
+        try:
+            original_stage1_warn = getattr(stage1_main.print, "warn", None)
+            stage1_main.print.warn = lambda *_args, **_kwargs: None
+        except Exception:
+            original_stage1_warn = None
+
     first_pass_sources = _topo_sort_sources(to_rebuild, dependents=dependents)
     first_pass_total = len(first_pass_sources)
-    for index, source_path in enumerate(first_pass_sources):
-        try:
-            source = source_cache[source_path]
-            imports = import_cache.get(source_path, [])
+    try:
+        for index, source_path in enumerate(first_pass_sources):
+            try:
+                source = source_cache[source_path]
+                imports = import_cache.get(source_path, [])
 
-            module_slug = module_slug_cache.get(source_path, "")
+                module_slug = module_slug_cache.get(source_path, "")
 
-            if debug or progress:
-                rel = source_path.relative_to(REPO_ROOT)
-                print(
-                    f"[stage2-bootstrap] pass1 {index + 1}/{first_pass_total}: {rel}",
-                    flush=True,
-                )
-
-            start = time.perf_counter() if progress else None
-
-            if has_full_with_module:
-                full_result = stage1_main.compile_to_native_llvm_full_with_module(
-                    source, module_slug)
-                first_pass_results[source_path] = full_result
-                native_module = getattr(full_result, "native_module", None)
-                if native_module is not None and hasattr(native_module, "artifacts"):
-                    for artifact in native_module.artifacts:
-                        if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
-                            manifest_path = _relative_output_path(
-                                source_path, ".layout-manifest", output_dir)
-                            manifest_content = getattr(
-                                artifact, "contents", "")
-                            _atomic_write_text(manifest_path, manifest_content)
-                            if debug:
-                                rel_path = manifest_path.relative_to(REPO_ROOT)
-                                print(
-                                    f"[stage2-bootstrap]     wrote {rel_path}")
-                        elif hasattr(artifact, "format") and artifact.format == "sailfin-native-text":
-                            text_path = _relative_output_path(
-                                source_path, ".sfn-asm", output_dir)
-                            text_content = getattr(artifact, "contents", "")
-                            _atomic_write_text(text_path, text_content)
-                            if debug:
-                                rel_text = text_path.relative_to(REPO_ROOT)
-                                print(
-                                    f"[stage2-bootstrap]     wrote {rel_text}")
-            elif has_full:
-                full_result = stage1_main.compile_to_native_llvm_full(source)
-                first_pass_results[source_path] = full_result
-                native_module = getattr(full_result, "native_module", None)
-                if native_module is not None and hasattr(native_module, "artifacts"):
-                    for artifact in native_module.artifacts:
-                        if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
-                            manifest_path = _relative_output_path(
-                                source_path, ".layout-manifest", output_dir)
-                            manifest_content = getattr(
-                                artifact, "contents", "")
-                            _atomic_write_text(manifest_path, manifest_content)
-                            if debug:
-                                rel_path = manifest_path.relative_to(REPO_ROOT)
-                                print(
-                                    f"[stage2-bootstrap]     wrote {rel_path}")
-                        elif hasattr(artifact, "format") and artifact.format == "sailfin-native-text":
-                            text_path = _relative_output_path(
-                                source_path, ".sfn-asm", output_dir)
-                            text_content = getattr(artifact, "contents", "")
-                            _atomic_write_text(text_path, text_content)
-                            if debug:
-                                rel_text = text_path.relative_to(REPO_ROOT)
-                                print(
-                                    f"[stage2-bootstrap]     wrote {rel_text}")
-            else:
-                if has_module_entry:
-                    lowered = stage1_main.compile_to_native_llvm_with_module(
-                        source, module_slug)
-                else:
-                    lowered = stage1_main.compile_to_native_llvm(source)
-                first_pass_results[source_path] = lowered
-
-            if start is not None:
-                elapsed = time.perf_counter() - start
-                if elapsed >= 2.0:
+                if debug or progress:
+                    rel = source_path.relative_to(REPO_ROOT)
                     print(
-                        f"[stage2-bootstrap] pass1 slow ({elapsed:.1f}s): {source_path.name}",
+                        f"[stage2-bootstrap] pass1 {index + 1}/{first_pass_total}: {rel}",
                         flush=True,
                     )
 
-        except Exception as exc:
-            raise Stage2BootstrapError(
-                f"failed to compile {source_path.name}: {exc}"
-            ) from exc
+                start = time.perf_counter() if progress else None
+
+                if has_full_with_module:
+                    full_result = stage1_main.compile_to_native_llvm_full_with_module(
+                        source, module_slug)
+                    first_pass_results[source_path] = full_result
+                    native_module = getattr(full_result, "native_module", None)
+                    if native_module is not None and hasattr(native_module, "artifacts"):
+                        for artifact in native_module.artifacts:
+                            if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
+                                manifest_path = _relative_output_path(
+                                    source_path, ".layout-manifest", output_dir)
+                                manifest_content = getattr(
+                                    artifact, "contents", "")
+                                _atomic_write_text(
+                                    manifest_path, manifest_content)
+                                if debug:
+                                    rel_path = manifest_path.relative_to(
+                                        REPO_ROOT)
+                                    print(
+                                        f"[stage2-bootstrap]     wrote {rel_path}")
+                            elif hasattr(artifact, "format") and artifact.format == "sailfin-native-text":
+                                text_path = _relative_output_path(
+                                    source_path, ".sfn-asm", output_dir)
+                                text_content = getattr(
+                                    artifact, "contents", "")
+                                _atomic_write_text(text_path, text_content)
+                                if debug:
+                                    rel_text = text_path.relative_to(REPO_ROOT)
+                                    print(
+                                        f"[stage2-bootstrap]     wrote {rel_text}")
+                elif has_full:
+                    full_result = stage1_main.compile_to_native_llvm_full(
+                        source)
+                    first_pass_results[source_path] = full_result
+                    native_module = getattr(full_result, "native_module", None)
+                    if native_module is not None and hasattr(native_module, "artifacts"):
+                        for artifact in native_module.artifacts:
+                            if hasattr(artifact, "format") and artifact.format == "sailfin-layout-manifest":
+                                manifest_path = _relative_output_path(
+                                    source_path, ".layout-manifest", output_dir)
+                                manifest_content = getattr(
+                                    artifact, "contents", "")
+                                _atomic_write_text(
+                                    manifest_path, manifest_content)
+                                if debug:
+                                    rel_path = manifest_path.relative_to(
+                                        REPO_ROOT)
+                                    print(
+                                        f"[stage2-bootstrap]     wrote {rel_path}")
+                            elif hasattr(artifact, "format") and artifact.format == "sailfin-native-text":
+                                text_path = _relative_output_path(
+                                    source_path, ".sfn-asm", output_dir)
+                                text_content = getattr(
+                                    artifact, "contents", "")
+                                _atomic_write_text(text_path, text_content)
+                                if debug:
+                                    rel_text = text_path.relative_to(REPO_ROOT)
+                                    print(
+                                        f"[stage2-bootstrap]     wrote {rel_text}")
+                else:
+                    if has_module_entry:
+                        lowered = stage1_main.compile_to_native_llvm_with_module(
+                            source, module_slug)
+                    else:
+                        lowered = stage1_main.compile_to_native_llvm(source)
+                    first_pass_results[source_path] = lowered
+
+                if start is not None:
+                    elapsed = time.perf_counter() - start
+                    if elapsed >= 2.0:
+                        print(
+                            f"[stage2-bootstrap] pass1 slow ({elapsed:.1f}s): {source_path.name}",
+                            flush=True,
+                        )
+
+            except Exception as exc:
+                raise Stage2BootstrapError(
+                    f"failed to compile {source_path.name}: {exc}"
+                ) from exc
+    finally:
+        if original_stage1_warn is not None:
+            try:
+                stage1_main.print.warn = original_stage1_warn
+            except Exception:
+                pass
 
     if debug:
         print("[stage2-bootstrap] second pass: lowering with manifests...")
@@ -1519,6 +1571,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Main entry point for Stage2 bootstrap script."""
     args = _parse_args(argv)
+
+    # The Sailfin compiler reads stage2 artifacts via relative paths like
+    # `build/stage2/<slug>.layout-manifest`. Ensure those resolve consistently
+    # no matter where this script is invoked from.
+    os.chdir(REPO_ROOT)
 
     try:
         print("[stage2-bootstrap] starting Stage2 self-hosting compilation...")

@@ -3,11 +3,11 @@
 // Token manipulation utilities - functions for working with token arrays,
 // parser state management, trivia handling, and token-to-text conversion.
 
-import { Token } from "./token";
-import { SourceSpan } from "./ast";
-import { substring, char_code, char_at, strings_equal } from "./string_utils";
-import { Parser, CaptureResult, ParenthesizedParseResult, PatternCaptureResult } from "./parser/types";
-import { string_array_contains, trim_text } from "./parser/utils";
+import { Token } from "../token";
+import { SourceSpan } from "../ast";
+import { substring, char_code, char_at, strings_equal } from "../string_utils";
+import { Parser, CaptureResult, ParenthesizedParseResult, PatternCaptureResult } from "./types";
+import { string_array_contains, trim_text } from "./utils";
 
 // ============================================================================
 // Parser State Operations

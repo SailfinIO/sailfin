@@ -1,11 +1,11 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from ...native_ir import NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariantLayout, NativeInterface, NativeFunction, NativeInterfaceSignature
-from ...string_utils import substring
-from compiler.build.types import TypeContext, TypeContextBuild, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo, InterfaceTypeInfo, VTableInfo, VTableEntry, TypeAllocationInfo, ParameterBinding, LocalBinding
-from compiler.build.utils import trim_text, append_string, sanitize_symbol, is_simple_identifier, find_last_index_of_char, index_of, string_array_contains
-from compiler.build.type_mapping import map_type_annotation, map_struct_field_annotation, ends_with_pointer_suffix, strip_pointer_suffix, layout_annotation_base_type, layout_annotation_represents_user_value
+from ..native_ir import NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariantLayout, NativeInterface, NativeFunction, NativeInterfaceSignature
+from ..string_utils import substring
+from compiler.build.llvm.types import TypeContext, TypeContextBuild, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo, InterfaceTypeInfo, VTableInfo, VTableEntry, TypeAllocationInfo, ParameterBinding, LocalBinding
+from compiler.build.llvm.utils import trim_text, append_string, sanitize_symbol, is_simple_identifier, find_last_index_of_char, index_of, string_array_contains
+from compiler.build.llvm.type_mapping import map_type_annotation, map_struct_field_annotation, ends_with_pointer_suffix, strip_pointer_suffix, layout_annotation_base_type, layout_annotation_represents_user_value
 
 print = runtime.console
 sleep = runtime.sleep

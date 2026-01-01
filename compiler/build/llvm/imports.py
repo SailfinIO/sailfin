@@ -1,10 +1,10 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from ...native_ir import NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest
-from ...string_utils import substring
-from compiler.build.types import ImportedModuleContext, LayoutManifestApplication
-from compiler.build.utils import trim_text, append_string, string_array_contains, number_to_string, starts_with, join_with_separator
+from ..native_ir import NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest
+from ..string_utils import substring
+from compiler.build.llvm.types import ImportedModuleContext, LayoutManifestApplication
+from compiler.build.llvm.utils import trim_text, append_string, string_array_contains, number_to_string, starts_with, ends_with, join_with_separator
 
 print = runtime.console
 sleep = runtime.sleep
@@ -51,7 +51,8 @@ def collect_imported_module_context_for_module(imports, current_module_slug):
         if trace  and  index > 0  and  index % 50 == 0:
             print.warn("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")")
         module_path = imports[index].module
-        slug = resolve_import_module_slug_for_module(module_path, current_module_slug)
+        base_slug = resolve_import_module_slug_for_module(module_path, current_module_slug)
+        slug = resolve_import_artifact_slug(base_slug)
         if len(slug) == 0:
             index += 1
             continue
@@ -82,6 +83,18 @@ def collect_imported_module_context_for_module(imports, current_module_slug):
         print.warn("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(len(seen)) + ")")
     return ImportedModuleContext(manifests=manifests, native_texts=native_texts, diagnostics=diagnostics)
 
+def resolve_import_artifact_slug(slug):
+    # effects: io
+    if len(slug) == 0:
+        return slug
+    if fs.exists(layout_manifest_path_for_slug(slug)):
+        return slug
+    if not ends_with(slug, "/mod"):
+        mod_slug = slug + "/mod"
+        if fs.exists(layout_manifest_path_for_slug(mod_slug)):
+            return mod_slug
+    return slug
+
 def resolve_import_module_slug(module):
     return resolve_import_module_slug_for_module(module, "")
 
@@ -103,13 +116,10 @@ def resolve_import_module_slug_for_module(module, current_module_slug):
     if len(trimmed) == 0:
         return ""
     normalized = normalize_import_module_path(trimmed)
-    if starts_with(normalized, "./"):
-        normalized = substring(normalized, 2, len(normalized))
-    else:
-        if starts_with(normalized, "../"):
-            base_dir = dirname_for_module_slug(current_module_slug)
-            if len(base_dir) > 0:
-                normalized = base_dir + "/" + normalized
+    if starts_with(normalized, "./")  or  starts_with(normalized, "../"):
+        base_dir = dirname_for_module_slug(current_module_slug)
+        if len(base_dir) > 0:
+            normalized = base_dir + "/" + normalized
     parts = []
     segment = ""
     index = 0

@@ -1,10 +1,10 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.token import Token
-from compiler.build.ast import Block, Decorator, DecoratorArgument, Expression, FieldDeclaration, FunctionSignature, EnumVariant, MethodDeclaration, ModelProperty, Parameter, Statement, ImportSpecifier, ExportSpecifier, TypeParameter, TypeAnnotation
-from compiler.build.decorator_semantics import evaluate_decorators, infer_effects
-from compiler.build.string_utils import substring, char_code, char_at, strings_equal
+from ..token import Token
+from ..ast import Block, Decorator, DecoratorArgument, Expression, FieldDeclaration, FunctionSignature, EnumVariant, MethodDeclaration, ModelProperty, Parameter, Statement, ImportSpecifier, ExportSpecifier, TypeParameter, TypeAnnotation
+from ..decorator_semantics import evaluate_decorators, infer_effects
+from ..string_utils import substring, char_code, char_at, strings_equal
 from compiler.build.parser.types import Parser, StatementParseResult, ParameterParseResult, ParameterListParseResult, StructFieldParseResult, ModelPropertyParseResult, MethodParseResult, InterfaceMemberParseResult, EnumVariantParseResult, TypeParameterParseResult, ImplementsParseResult, DecoratorParseResult, EffectParseResult, TypeSeparatorParseResult, SpecifierListParseResult, NamedSpecifier, BlockParseResult
 from compiler.build.parser.utils import trim_text, strip_surrounding_quotes, strip_loose_quotes, looks_like_number, normalize_test_name
 from compiler.build.parser.token_utils import parser_peek_raw, parser_advance_raw, skip_trivia, identifier_matches, symbol_matches, identifier_text, string_literal_value, consume_keyword, consume_symbol, advance_to_symbol, collect_until, collect_parenthesized, token_slice, trim_token_edges, filter_trivia, tokens_to_text, source_span_from_tokens, append_token, find_top_level_symbol, find_top_level_colon, split_tokens_by_comma, split_token_slices_by_comma, skip_struct_member, skip_enum_variant_entry, skip_trailing_comma, is_end_of_file

@@ -1,9 +1,9 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.token import Token, TokenKind
-from compiler.build.ast import Block, Expression, ObjectField, Parameter, TypeAnnotation
-from compiler.build.string_utils import substring, char_code, char_at, strings_equal
+from ..token import Token, TokenKind
+from ..ast import Block, Expression, ObjectField, Parameter, TypeAnnotation
+from ..string_utils import substring, char_code, char_at, strings_equal
 from compiler.build.parser.types import Parser, ExpressionTokens, ExpressionParseResult, ExpressionTypeSeparatorParseResult, ExpressionCollectResult, ExpressionBlockParseResult, LambdaParameterParseResult, LambdaParameterListParseResult, CallArgumentsParseResult, ArrayLiteralParseResult, ObjectLiteralParseResult, StructTypeNameResult, BlockParseResult
 from compiler.build.parser.utils import trim_text, string_array_contains
 from compiler.build.parser.token_utils import identifier_matches, symbol_matches, identifier_text, string_literal_value, token_slice, trim_token_edges, filter_trivia, tokens_to_text, source_span_from_tokens, append_token, parser_peek_raw, parser_advance_raw, skip_trivia

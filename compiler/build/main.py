@@ -173,7 +173,7 @@ def module_name_from_path(source_path):
 def compile_to_native_python(source):
     # effects: io
     native_result = compile_to_native(source)
-    lowered = lower_to_python(native_result.module)
+    lowered = lower_to_python(native_result.module, "main")
     combined = []
     combined = (combined) + (native_result.diagnostics)
     combined = (combined) + (lowered.diagnostics)
@@ -396,7 +396,7 @@ def compile_source_at_path(source_path):
         return ModuleCompilationResult(module=None, diagnostics=[ModuleDiagnostics(source_path=source_path, messages=format_typecheck_diagnostics(analysis.diagnostics, source), fatal=True)])
     module_name = module_name_from_path(source_path)
     native_result = emit_native_with_module_name(program, module_name)
-    lowered = lower_to_python(native_result.module)
+    lowered = lower_to_python(native_result.module, module_name)
     messages = (native_result.diagnostics) + (lowered.diagnostics)
     python_source = lowered.source
     entry_list = []

@@ -119,7 +119,7 @@ class PythonBuilder:
     def __repr__(self):
         return runtime.struct_repr('PythonBuilder', [runtime.struct_field('lines', self.lines), runtime.struct_field('indent', self.indent)])
 
-def lower_to_python(native_module):
+def lower_to_python(native_module, current_module_slug):
     diagnostics = []
     artifact = select_text_artifact(native_module.artifacts)
     if artifact == None:
@@ -127,12 +127,12 @@ def lower_to_python(native_module):
         return LoweredPythonResult(source="", diagnostics=diagnostics)
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
-    module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums, parse.bindings)
+    module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums, parse.bindings, current_module_slug)
     diagnostics = (diagnostics) + (module.diagnostics)
     python_source = builder_to_string(module.builder)
     return LoweredPythonResult(source=python_source, diagnostics=diagnostics)
 
-def emit_python_module(functions, imports, structs, enums, bindings):
+def emit_python_module(functions, imports, structs, enums, bindings, current_module_slug):
     builder = builder_new()
     diagnostics = []
     builder = builder_emit(builder, "import asyncio")
@@ -140,7 +140,7 @@ def emit_python_module(functions, imports, structs, enums, bindings):
     export_names = []
     if len(imports) > 0:
         builder = builder_emit_blank(builder)
-        import_emission = emit_python_imports(builder, imports)
+        import_emission = emit_python_imports(builder, imports, current_module_slug)
         builder = import_emission.builder
         export_names = import_emission.exports
     builder = builder_emit_blank(builder)
@@ -213,7 +213,7 @@ def emit_top_level_bindings(builder, bindings):
         index += 1
     return current
 
-def emit_python_imports(builder, imports):
+def emit_python_imports(builder, imports, current_module_slug):
     current = builder
     exports = []
     index = 0
@@ -227,7 +227,7 @@ def emit_python_imports(builder, imports):
             if len(module_text) == 0:
                 index += 1
                 continue
-        line = render_python_import(entry)
+        line = render_python_import(entry, current_module_slug)
         if len(line) > 0:
             current = builder_emit(current, line)
         index += 1
@@ -271,8 +271,8 @@ def render_enum_variant_fields(fields):
         index += 1
     return join_with_separator(rendered, ", ")
 
-def render_python_import(entry):
-    module_path = normalize_import_module(entry.module)
+def render_python_import(entry, current_module_slug):
+    module_path = normalize_import_module(entry.module, current_module_slug)
     if len(module_path) == 0:
         return ""
     if len(entry.specifiers) == 0:
@@ -296,7 +296,23 @@ def render_python_specifier(specifier):
         return base
     return base + " as " + sanitize_identifier(specifier.alias)
 
-def normalize_import_module(path):
+def dirname_for_module_slug(slug):
+    normalized = trim_text(slug)
+    if len(normalized) == 0:
+        return ""
+    last_slash = -1
+    index = 0
+    while True:
+        if index >= len(normalized):
+            break
+        if char_at(normalized, index) == "/":
+            last_slash = index
+        index += 1
+    if last_slash <= 0:
+        return ""
+    return substring(normalized, 0, last_slash)
+
+def normalize_import_module(path, current_module_slug):
     trimmed = trim_text(path)
     if len(trimmed) == 0:
         return trimmed
@@ -305,6 +321,11 @@ def normalize_import_module(path):
         return "compiler.build." + remainder
     if starts_with(trimmed, "./"):
         remainder = substring(trimmed, 2, len(trimmed))
+        base_dir = dirname_for_module_slug(current_module_slug)
+        if len(base_dir) > 0:
+            expected_prefix = base_dir + "/"
+            if not starts_with(remainder, expected_prefix):
+                remainder = base_dir + "/" + remainder
         remainder = replace_all(remainder, "/", ".")
         return "compiler.build." + remainder
     if starts_with(trimmed, "../"):
@@ -319,7 +340,7 @@ def normalize_import_module(path):
         remainder = replace_all(remainder, "/", ".")
         dots = ""
         index = 0
-        target = up_count + 2
+        target = up_count + 1
         while True:
             if index >= target:
                 break

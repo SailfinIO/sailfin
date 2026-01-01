@@ -1,13 +1,13 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from ...native_ir import NativeFunction, NativeSourceSpan
-from ...string_utils import substring, find_char
-from compiler.build.types import LocalBinding, ParameterBinding, OwnershipInfo, OwnershipConsumption, OwnershipAnalysis, LifetimeRegionMetadata, LifetimeReleaseEvent, BorrowParseResult, BorrowArgumentParse, ScopeMetadata, LLVMOperand, ExpressionResult, StringConstant
-from compiler.build.utils import trim_text, append_string, starts_with, ends_with, char_at, sanitize_symbol, is_identifier_start_char, is_identifier_part_char, number_to_string
-from compiler.build.strings import empty_string_constant_set
-from compiler.build.expressions import find_local_binding, find_parameter_binding, is_simple_identifier, is_effect_delimiter, strip_enclosing_parentheses, is_copy_type
-from compiler.build.type_mapping import unwrap_move_wrapper
+from ..native_ir import NativeFunction, NativeSourceSpan
+from ..string_utils import substring, find_char
+from compiler.build.llvm.types import LocalBinding, ParameterBinding, OwnershipInfo, OwnershipConsumption, OwnershipAnalysis, LifetimeRegionMetadata, LifetimeReleaseEvent, BorrowParseResult, BorrowArgumentParse, ScopeMetadata, LLVMOperand, ExpressionResult, StringConstant
+from compiler.build.llvm.utils import trim_text, append_string, starts_with, ends_with, char_at, sanitize_symbol, is_identifier_start_char, is_identifier_part_char, number_to_string
+from compiler.build.llvm.strings import empty_string_constant_set
+from compiler.build.llvm.expressions import find_local_binding, find_parameter_binding, is_simple_identifier, is_effect_delimiter, strip_enclosing_parentheses, is_copy_type
+from compiler.build.llvm.type_mapping import unwrap_move_wrapper
 
 print = runtime.console
 sleep = runtime.sleep

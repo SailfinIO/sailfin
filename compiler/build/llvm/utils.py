@@ -1,8 +1,8 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from ...string_utils import substring, char_code, char_at
-from compiler.build.types import ParameterBinding
+from ..string_utils import substring, char_code, char_at
+from compiler.build.llvm.types import ParameterBinding
 
 print = runtime.console
 sleep = runtime.sleep

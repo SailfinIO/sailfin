@@ -1,8 +1,8 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.types import RuntimeHelperDescriptor
-from compiler.build.utils import trim_text
+from compiler.build.llvm.types import RuntimeHelperDescriptor
+from compiler.build.llvm.utils import trim_text
 
 print = runtime.console
 sleep = runtime.sleep

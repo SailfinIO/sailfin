@@ -1,8 +1,8 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.types import StringConstant
-from compiler.build.utils import number_to_string, append_string
+from compiler.build.llvm.types import StringConstant
+from compiler.build.llvm.utils import number_to_string, append_string
 
 print = runtime.console
 sleep = runtime.sleep

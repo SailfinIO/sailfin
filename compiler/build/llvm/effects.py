@@ -1,11 +1,11 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from ...native_ir import NativeFunction, NativeInstruction
-from ...string_utils import substring, char_at
-from compiler.build.types import FunctionEffectEntry, FunctionCallEntry, CapabilityManifest, CapabilityManifestEntry, RuntimeHelperDescriptor
-from compiler.build.utils import trim_text, append_string, copy_string_array, string_array_contains, string_arrays_equal, is_identifier_start_char, is_identifier_part_char, is_trim_char, is_effect_prefix_char, is_effect_delimiter, index_of, find_last_index_of_char, matches_case_insensitive, matches_keyword, skip_string_literal
-from compiler.build.runtime_helpers import find_runtime_helper
+from ..native_ir import NativeFunction, NativeInstruction
+from ..string_utils import substring, char_at
+from compiler.build.llvm.types import FunctionEffectEntry, FunctionCallEntry, CapabilityManifest, CapabilityManifestEntry, RuntimeHelperDescriptor
+from compiler.build.llvm.utils import trim_text, append_string, copy_string_array, string_array_contains, string_arrays_equal, is_identifier_start_char, is_identifier_part_char, is_trim_char, is_effect_prefix_char, is_effect_delimiter, index_of, find_last_index_of_char, matches_case_insensitive, matches_keyword, skip_string_literal
+from compiler.build.llvm.runtime_helpers import find_runtime_helper
 
 print = runtime.console
 sleep = runtime.sleep

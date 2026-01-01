@@ -64,7 +64,7 @@ struct ExtractedSpan {
     success -> boolean;
 }
 
-fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
+fn lower_to_python(native_module -> NativeModule, current_module_slug -> string) -> LoweredPythonResult {
     let mut diagnostics -> string[] = [];
     let artifact = select_text_artifact(native_module.artifacts);
 
@@ -76,13 +76,13 @@ fn lower_to_python(native_module -> NativeModule) -> LoweredPythonResult {
     let parse = parse_native_artifact(artifact.contents);
     diagnostics = diagnostics.concat(parse.diagnostics);
 
-    let module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums, parse.bindings);
+    let module = emit_python_module(parse.functions, parse.imports, parse.structs, parse.enums, parse.bindings, current_module_slug);
     diagnostics = diagnostics.concat(module.diagnostics);
 
     let python_source = builder_to_string(module.builder);
     return LoweredPythonResult { source: python_source, diagnostics: diagnostics };
 }
-fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[], enums -> NativeEnum[], bindings -> NativeBinding[]) -> PythonModuleEmission {
+fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], structs -> NativeStruct[], enums -> NativeEnum[], bindings -> NativeBinding[], current_module_slug -> string) -> PythonModuleEmission {
     
     let mut builder -> PythonBuilder = builder_new();
     let mut diagnostics -> string[] = [];
@@ -93,7 +93,7 @@ fn emit_python_module(functions -> NativeFunction[], imports -> NativeImport[], 
     let mut export_names -> string[] = [];
     if imports.length > 0 {
         builder = builder_emit_blank(builder);
-        let import_emission = emit_python_imports(builder, imports);
+        let import_emission = emit_python_imports(builder, imports, current_module_slug);
         builder = import_emission.builder;
         export_names = import_emission.exports;
     }
@@ -197,7 +197,7 @@ fn emit_top_level_bindings(builder -> PythonBuilder, bindings -> NativeBinding[]
     return current;
 }
 
-fn emit_python_imports(builder -> PythonBuilder, imports -> NativeImport[]) -> PythonImportEmission {
+fn emit_python_imports(builder -> PythonBuilder, imports -> NativeImport[], current_module_slug -> string) -> PythonImportEmission {
     let mut current = builder;
     let mut exports -> string[] = [];
     let mut index -> number = 0;
@@ -214,7 +214,7 @@ fn emit_python_imports(builder -> PythonBuilder, imports -> NativeImport[]) -> P
                 continue;
             }
         }
-        let line = render_python_import(entry);
+        let line = render_python_import(entry, current_module_slug);
         if line.length > 0 {
             current = builder_emit(current, line);
         }
@@ -273,8 +273,8 @@ fn render_enum_variant_fields(fields -> NativeEnumVariantField[]) -> string {
     return join_with_separator(rendered, ", ");
 }
 
-fn render_python_import(entry -> NativeImport) -> string {
-    let module_path = normalize_import_module(entry.module);
+fn render_python_import(entry -> NativeImport, current_module_slug -> string) -> string {
+    let module_path = normalize_import_module(entry.module, current_module_slug);
     if module_path.length == 0 {
         return "";
     }
@@ -306,7 +306,29 @@ fn render_python_specifier(specifier -> NativeImportSpecifier) -> string {
     return base + " as " + sanitize_identifier(specifier.alias);
 }
 
-fn normalize_import_module(path -> string) -> string {
+fn dirname_for_module_slug(slug -> string) -> string {
+    let normalized = trim_text(slug);
+    if normalized.length == 0 {
+        return "";
+    }
+    let mut last_slash -> number = -1;
+    let mut index -> number = 0;
+    loop {
+        if index >= normalized.length {
+            break;
+        }
+        if char_at(normalized, index) == "/" {
+            last_slash = index;
+        }
+        index += 1;
+    }
+    if last_slash <= 0 {
+        return "";
+    }
+    return substring(normalized, 0, last_slash);
+}
+
+fn normalize_import_module(path -> string, current_module_slug -> string) -> string {
     let trimmed = trim_text(path);
     if trimmed.length == 0 {
         return trimmed;
@@ -316,7 +338,14 @@ fn normalize_import_module(path -> string) -> string {
         return "compiler.build." + remainder;
     }
     if starts_with(trimmed, "./") {
-        let remainder = substring(trimmed, 2, trimmed.length);
+        let mut remainder = substring(trimmed, 2, trimmed.length);
+        let base_dir = dirname_for_module_slug(current_module_slug);
+        if base_dir.length > 0 {
+            let expected_prefix = base_dir + "/";
+            if !starts_with(remainder, expected_prefix) {
+                remainder = base_dir + "/" + remainder;
+            }
+        }
         remainder = replace_all(remainder, "/", ".");
         return "compiler.build." + remainder;
     }
@@ -342,7 +371,7 @@ fn normalize_import_module(path -> string) -> string {
 
         let mut dots -> string = "";
         let mut index -> number = 0;
-        let target = up_count + 2;
+            let target = up_count + 1;
         loop {
             if index >= target {
                 break;

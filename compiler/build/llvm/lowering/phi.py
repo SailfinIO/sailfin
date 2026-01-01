@@ -1,10 +1,10 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.string_utils import substring
-from compiler.build.llvm.types import LocalBinding, LocalMutation, PhiMergeResult, PhiStoreEntry, MutationMaterializationResult, MatchArmMutations
-from compiler.build.llvm.utils import append_string
-from compiler.build.llvm.expressions import find_local_binding, format_temp_name
+from ...string_utils import substring
+from ..types import LocalBinding, LocalMutation, PhiMergeResult, PhiStoreEntry, MutationMaterializationResult, MatchArmMutations
+from ..utils import append_string
+from ..expressions import find_local_binding, format_temp_name
 
 print = runtime.console
 sleep = runtime.sleep

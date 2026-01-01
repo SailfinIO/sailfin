@@ -5,11 +5,8 @@
 // Mechanical extraction from compiler/src/native_llvm_lowering.sfn.
 // Logic should remain identical.
 
-import { NativeFunction, NativeInstruction, NativeSourceSpan } from "./native_ir";
-import { substring } from "./string_utils";
-
-// NOTE: imports in this module are root-relative ("./...") so the stage1
-// Python backend can generate stable imports even in nested folders.
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
+import { substring } from "../../string_utils";
 
 import {
     TypeContext,
@@ -41,7 +38,7 @@ import {
     ConditionConversion,
     BlockLabelResult,
     MatchArmMutations,
-} from "./llvm/types";
+} from "../types";
 
 import {
     trim_text,
@@ -50,12 +47,12 @@ import {
     index_of,
     starts_with,
     merge_parameter_bindings,
-} from "./llvm/utils";
+} from "../utils";
 
 import {
     empty_string_constant_set,
     merge_string_constants,
-} from "./llvm/strings";
+} from "../strings";
 
 import {
     find_struct_info_by_name,
@@ -63,7 +60,7 @@ import {
     find_enum_info_by_llvm_type,
     resolve_enum_info_for_literal,
     resolve_enum_variant_info,
-} from "./llvm/type_context";
+} from "../type_context";
 
 import {
     append_local_binding,
@@ -93,14 +90,14 @@ import {
     strip_mut_prefix,
     analyze_value_ownership,
     detect_borrow_conflicts,
-} from "./llvm/expression_lowering_stage2";
+} from "../expression_lowering_stage2";
 
 import {
     find_local_binding,
     find_parameter_binding,
     format_local_pointer_name,
     format_temp_name,
-} from "./llvm/expressions";
+} from "../expressions";
 
 import {
     infer_borrow_base_scope,
@@ -111,7 +108,7 @@ import {
     make_lifetime_region_metadata,
     format_root_scope_id,
     make_child_scope_id,
-} from "./llvm/lifetime";
+} from "../lifetime";
 
 import {
     emit_phi_merges_for_match,
@@ -122,7 +119,7 @@ import {
     materialize_mutation_values_at_exit,
     collect_mutation_names,
     find_mutation_for_name,
-} from "./llvm/lowering/phi";
+} from "./phi";
 
 fn lower_instruction_range(
     function -> NativeFunction,

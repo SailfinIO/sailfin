@@ -1,9 +1,9 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.token import Token
-from compiler.build.ast import SourceSpan
-from compiler.build.string_utils import substring, char_code, char_at, strings_equal
+from ..token import Token
+from ..ast import SourceSpan
+from ..string_utils import substring, char_code, char_at, strings_equal
 from compiler.build.parser.types import Parser, CaptureResult, ParenthesizedParseResult, PatternCaptureResult
 from compiler.build.parser.utils import string_array_contains, trim_text
 

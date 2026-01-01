@@ -160,7 +160,7 @@ fn module_name_from_path(source_path -> string) -> string {
 
 fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
     let native_result = compile_to_native(source);
-    let lowered = lower_to_python(native_result.module);
+    let lowered = lower_to_python(native_result.module, "main");
     let mut combined -> string[] = [];
     combined = combined.concat(native_result.diagnostics);
     combined = combined.concat(lowered.diagnostics);
@@ -567,7 +567,7 @@ fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io
 
     let module_name = module_name_from_path(source_path);
     let native_result = emit_native_with_module_name(program, module_name);
-    let lowered = lower_to_python(native_result.module);
+    let lowered = lower_to_python(native_result.module, module_name);
     let mut messages -> string[] = native_result.diagnostics.concat(lowered.diagnostics);
     let python_source = lowered.source;
 

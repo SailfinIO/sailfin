@@ -3,7 +3,7 @@
 // Parser utility functions for string manipulation, text processing,
 // and general helpers used throughout the parser.
 
-import { substring, char_code, char_at, strings_equal } from "./string_utils";
+import { substring, char_code, char_at, strings_equal } from "../string_utils";
 
 // ============================================================================
 // String Utilities

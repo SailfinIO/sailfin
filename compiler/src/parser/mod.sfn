@@ -10,13 +10,13 @@
 //   - statements.sfn:   Block statement parsing (control flow, return, match)
 //   - declarations.sfn: Top-level declarations (fn, struct, enum, import, etc.)
 
-import { lex } from "./lexer";
-import { Token, TokenKind } from "./token";
-import { Program, Statement } from "./ast";
+import { lex } from "../lexer";
+import { Token, TokenKind } from "../token";
+import { Program, Statement } from "../ast";
 
 // Import types from submodules
-import { Parser, StatementParseResult } from "./parser/types";
-import { parser_peek_raw, parser_advance_raw, skip_trivia, is_end_of_file, identifier_matches } from "./parser/token_utils";
+import { Parser, StatementParseResult } from "./types";
+import { parser_peek_raw, parser_advance_raw, skip_trivia, is_end_of_file, identifier_matches } from "./token_utils";
 import {
     parse_decorators,
     parse_import,
@@ -33,7 +33,7 @@ import {
     parse_interface,
     parse_enum,
     parse_unknown,
-} from "./parser/declarations";
+} from "./declarations";
 
 // ============================================================================
 // Main Entry Points

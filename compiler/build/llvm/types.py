@@ -1,7 +1,7 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from ...native_ir import NativeInterfaceSignature, NativeSourceSpan, NativeEnum, NativeStruct, LayoutManifest
+from ..native_ir import NativeInterfaceSignature, NativeSourceSpan, NativeEnum, NativeStruct, LayoutManifest
 
 print = runtime.console
 sleep = runtime.sleep

@@ -1,9 +1,9 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from ...string_utils import substring, char_code, char_at
-from compiler.build.types import TypeContext, TypeAllocationInfo
-from compiler.build.utils import trim_text, starts_with, ends_with, index_of, sanitize_symbol
+from ..string_utils import substring, char_code, char_at
+from compiler.build.llvm.types import TypeContext, TypeAllocationInfo
+from compiler.build.llvm.utils import trim_text, starts_with, ends_with, index_of, sanitize_symbol
 
 print = runtime.console
 sleep = runtime.sleep

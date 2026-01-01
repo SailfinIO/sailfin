@@ -3,7 +3,7 @@
 // Top-level declaration parsing - functions, structs, enums, interfaces,
 // imports, exports, models, pipelines, tools, tests, and type aliases.
 
-import { Token } from "./token";
+import { Token } from "../token";
 import {
     Block,
     Decorator,
@@ -20,9 +20,9 @@ import {
     ExportSpecifier,
     TypeParameter,
     TypeAnnotation,
-} from "./ast";
-import { evaluate_decorators, infer_effects } from "./decorator_semantics";
-import { substring, char_code, char_at, strings_equal } from "./string_utils";
+} from "../ast";
+import { evaluate_decorators, infer_effects } from "../decorator_semantics";
+import { substring, char_code, char_at, strings_equal } from "../string_utils";
 import {
     Parser,
     StatementParseResult,
@@ -41,14 +41,14 @@ import {
     SpecifierListParseResult,
     NamedSpecifier,
     BlockParseResult,
-} from "./parser/types";
+} from "./types";
 import {
     trim_text,
     strip_surrounding_quotes,
     strip_loose_quotes,
     looks_like_number,
     normalize_test_name,
-} from "./parser/utils";
+} from "./utils";
 import {
     parser_peek_raw,
     parser_advance_raw,
@@ -76,9 +76,9 @@ import {
     skip_enum_variant_entry,
     skip_trailing_comma,
     is_end_of_file,
-} from "./parser/token_utils";
-import { expression_from_tokens, normalize_expression } from "./parser/expressions";
-import { parse_block } from "./parser/statements";
+} from "./token_utils";
+import { expression_from_tokens, normalize_expression } from "./expressions";
+import { parse_block } from "./statements";
 
 // ============================================================================
 // Type Separator
