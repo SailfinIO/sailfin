@@ -41,9 +41,12 @@ import {
     spawn_symbol_for_return_type,
     spawn_ctx_symbol_for_return_type,
     format_temp_name,
-    default_return_literal,
     append_llvm_operand,
 } from "../expression_lowering_stage2";
+
+import {
+    default_return_literal,
+} from "../expressions";
 
 import {
     make_string_constant_name_for_module,

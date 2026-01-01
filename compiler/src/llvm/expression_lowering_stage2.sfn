@@ -31,22 +31,23 @@ import {
     ConditionConversion, ComparisonEmission, BinaryAlignmentResult,
     ThrowLoweringResult, PhiMergeResult, PhiInputEntry, MutationMaterializationResult,
     PhiStoreEntry, MatchArmMutations, LoadLocalResult
-} from "./llvm/types";
+} from "./types";
 
 // Import utilities
 import {
     trim_text, starts_with, ends_with, char_at as utils_char_at, append_string,
     join_with_separator, string_array_contains, sanitize_symbol, number_to_string,
     index_of, is_identifier_start_char, is_identifier_part_char,
+    contains_text,
     matches_keyword,
     find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings
-} from "./llvm/utils";
+} from "./utils";
 
 // Import string constant management
 import {
     empty_string_constant_set, append_string_constant, merge_string_constants,
     find_string_constant, render_string_constants, escape_string_for_llvm
-} from "./llvm/strings";
+} from "./strings";
 
 // Import effect system
 import {
@@ -54,10 +55,10 @@ import {
     propagate_function_effects, build_capability_manifest,
     collect_function_borrow_effects, collect_expression_borrow_effects,
     collect_runtime_helper_targets
-} from "./llvm/effects";
+} from "./effects";
 
 // Import runtime helpers
-import { runtime_helper_descriptors, find_runtime_helper, append_runtime_helper } from "./llvm/runtime_helpers";
+import { runtime_helper_descriptors, find_runtime_helper, append_runtime_helper } from "./runtime_helpers";
 
 // Import type mapping
 import {
@@ -65,8 +66,10 @@ import {
     map_struct_type_annotation, map_struct_field_annotation, unwrap_move_wrapper,
     ends_with_pointer_suffix, strip_pointer_suffix,
     layout_annotation_requires_pointer, layout_annotation_base_type,
-    annotation_is_array, layout_annotation_represents_user_value
-} from "./llvm/type_mapping";
+    annotation_is_array, layout_annotation_represents_user_value,
+    is_copy_type,
+    array_struct_type_for_element
+} from "./type_mapping";
 
 // Import rendering helpers (type definitions + symbol visibility)
 import {
@@ -79,7 +82,7 @@ import {
     render_vtable_type_definitions,
     render_vtable_constants,
     find_function_by_name
-} from "./llvm/rendering";
+} from "./rendering";
 
 import {
     fixup_enum_layouts,
@@ -98,7 +101,57 @@ import {
     resolve_enum_info_for_literal,
     resolve_enum_variant_info,
     find_variant_field_info
-} from "./llvm/type_context";
+} from "./type_context";
+
+import {
+    format_temp_name,
+    format_local_pointer_name,
+    default_return_literal,
+    strip_mut_prefix,
+    is_simple_identifier,
+} from "./expressions";
+
+import {
+} from "./expression_lowering/bindings";
+
+import {
+    bindings_find_parameter_binding,
+    bindings_mark_parameter_consumed,
+    bindings_mark_local_consumed,
+    bindings_reset_local_consumption,
+    bindings_update_local_ownership,
+} from "./expression_lowering/bindings";
+
+fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
+    return bindings_find_parameter_binding(bindings, name);
+}
+
+fn mark_parameter_consumed(bindings -> ParameterBinding[], name -> string) -> ParameterBinding[] {
+    return bindings_mark_parameter_consumed(bindings, name);
+}
+
+fn mark_local_consumed(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+    return bindings_mark_local_consumed(locals, name);
+}
+
+fn reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+    return bindings_reset_local_consumption(locals, name);
+}
+
+fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership -> OwnershipInfo?) -> LocalBinding[] {
+    return bindings_update_local_ownership(locals, name, ownership);
+}
+
+import {
+    split_array_elements,
+} from "./expression_lowering/splitting";
+
+import {
+    lower_struct_array_concat,
+    lower_array_push_in_place,
+    find_top_level_comma_in_llvm_type,
+    array_pointer_element_type,
+} from "./expression_lowering/arrays";
 
 
 // compiler/src/native_llvm_lowering/expressions_legacy.sfn
@@ -321,6 +374,17 @@ fn lower_expression_statement(
                             current_temp = coerced.temp_index;
                             
                             if coerced.operand != null {
+                                // Coerce the index to i64 for getelementptr.
+                                let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines);
+                                diagnostics = diagnostics.concat(coerced_index.diagnostics);
+                                current_lines = coerced_index.lines;
+                                current_temp = coerced_index.temp_index;
+
+                                if coerced_index.operand == null {
+                                    diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce array index to i64 for `" + parsed_assignment.target + "`");
+                                    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
+                                }
+
                                 // Get array data pointer and compute element address
                                 let data_ptr_temp = format_temp_name(current_temp);
                                 current_temp += 1;
@@ -334,7 +398,7 @@ fn lower_expression_statement(
                                 current_lines = append_string(current_lines, "  " + data_ptr_loaded + " = load " + element_type + "*, " + element_type + "** " + data_ptr_temp);
                                 
                                 // Compute element pointer using getelementptr
-                                current_lines = append_string(current_lines, "  " + elem_ptr_temp + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr_loaded + ", i64 " + index_result.operand.value);
+                                current_lines = append_string(current_lines, "  " + elem_ptr_temp + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr_loaded + ", i64 " + coerced_index.operand.value);
                                 
                                 // Store the value
                                 current_lines = append_string(current_lines, "  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + elem_ptr_temp);
@@ -972,278 +1036,6 @@ fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> strin
     return "{ " + element_type + "*, i64 }*";
 }
 
-fn array_struct_type_for_element(element_type -> string) -> string {
-    return "{ " + element_type + "*, i64 }";
-}
-
-fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_type -> string, lines -> string[], temp_index -> number) -> ExpressionResult {
-    let mut current_lines = lines;
-    let mut current_temp = temp_index;
-    let mut diagnostics -> string[] = [];
-    if element_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: concat requires a concrete element type");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
-    }
-
-    let array_struct_type = array_struct_type_for_element(element_type);
-    if array_struct_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: unsupported concat element type `" + element_type + "`");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
-    }
-
-    let data_pointer_type = element_type + "*";
-    let data_pointer_pointer_type = data_pointer_type + "*";
-
-    let lhs_data_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_data_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 0");
-    let lhs_data_value = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + lhs_data_ptr);
-    let lhs_len_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_len_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 1");
-    let lhs_len_value = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_len_value + " = load i64, i64* " + lhs_len_ptr);
-
-    let rhs_data_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_data_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 0");
-    let rhs_data_value = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + rhs_data_ptr);
-    let rhs_len_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_len_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 1");
-    let rhs_len_value = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_len_value + " = load i64, i64* " + rhs_len_ptr);
-
-    let element_size_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1");
-    let element_size_value = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64");
-
-    let total_length = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + lhs_len_value + ", " + rhs_len_value);
-    let total_bytes = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length);
-
-    let new_raw_buffer = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")");
-    let new_data_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type);
-    let new_data_i8 = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*");
-
-    let lhs_bytes = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_bytes + " = mul i64 " + element_size_value + ", " + lhs_len_value);
-    let lhs_src_i8 = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_src_i8 + " = bitcast " + data_pointer_type + " " + lhs_data_value + " to i8*");
-    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + lhs_src_i8 + ", i64 " + lhs_bytes + ")");
-
-    let rhs_bytes = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_bytes + " = mul i64 " + element_size_value + ", " + rhs_len_value);
-    let rhs_src_i8 = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_src_i8 + " = bitcast " + data_pointer_type + " " + rhs_data_value + " to i8*");
-    let rhs_dest_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + lhs_len_value);
-    let rhs_dest_i8 = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_dest_i8 + " = bitcast " + data_pointer_type + " " + rhs_dest_ptr + " to i8*");
-    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + rhs_dest_i8 + ", i8* " + rhs_src_i8 + ", i64 " + rhs_bytes + ")");
-
-    let struct_size_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + struct_size_ptr + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* null, i32 1");
-    let struct_size_value = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + struct_size_value + " = ptrtoint " + array_struct_type + "* " + struct_size_ptr + " to i64");
-
-    let new_struct_raw = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_struct_raw + " = call i8* @malloc(i64 " + struct_size_value + ")");
-    let new_struct_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_struct_ptr + " = bitcast i8* " + new_struct_raw + " to " + array_struct_type + "*");
-    let new_data_field = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_data_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 0");
-    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + new_data_field);
-    let new_len_field = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_len_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 1");
-    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + new_len_field);
-
-    let result_operand = LLVMOperand { llvm_type: lhs.llvm_type, value: new_struct_ptr };
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
-}
-
-fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element_type -> string, lines -> string[], temp_index -> number) -> ExpressionResult {
-    let mut current_lines = lines;
-    let mut current_temp = temp_index;
-    let mut diagnostics -> string[] = [];
-    if element_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: push requires a concrete element type");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
-    }
-
-    let array_struct_type = array_struct_type_for_element(element_type);
-    if array_struct_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: unsupported push element type `" + element_type + "`");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
-    }
-
-    let data_pointer_type = element_type + "*";
-    let data_pointer_pointer_type = data_pointer_type + "*";
-
-    // Read current array fields.
-    let data_ptr_gep = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + data_ptr_gep + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 0");
-    let data_value = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + data_ptr_gep);
-
-    let len_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + len_ptr + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 1");
-    let len_value = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + len_value + " = load i64, i64* " + len_ptr);
-
-    // Allocate a new backing buffer.
-    let element_size_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1");
-    let element_size_value = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64");
-
-    let total_length = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + len_value + ", 1");
-    let total_bytes = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length);
-
-    let new_raw_buffer = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")");
-    let new_data_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type);
-    let new_data_i8 = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*");
-
-    // Copy existing bytes (no-op if len is 0).
-    let existing_bytes = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + existing_bytes + " = mul i64 " + element_size_value + ", " + len_value);
-    let existing_src_i8 = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + existing_src_i8 + " = bitcast " + data_pointer_type + " " + data_value + " to i8*");
-    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + existing_src_i8 + ", i64 " + existing_bytes + ")");
-
-    // Write new element at index len.
-    let element_dest_ptr = format_temp_name(current_temp);
-    current_temp += 1;
-    current_lines = append_string(current_lines, "  " + element_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + len_value);
-    current_lines = append_string(current_lines, "  store " + element_type + " " + value.value + ", " + element_type + "* " + element_dest_ptr);
-
-    // Mutate array struct fields in-place.
-    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + data_ptr_gep);
-    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + len_ptr);
-
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: array, diagnostics: diagnostics, string_constants: [] };
-}
-
-// Find the top-level comma in an LLVM type string, respecting nested braces.
-// This is needed for parsing array struct types like { { %T*, i64 }*, i64 }
-// where the element type itself contains commas.
-fn find_top_level_comma_in_llvm_type(text -> string) -> number {
-    let mut brace_depth -> number = 0;
-    let mut index -> number = 0;
-    loop {
-        if index >= text.length {
-            break;
-        }
-        let ch = text[index];
-        if ch == "{" {
-            brace_depth += 1;
-            index += 1;
-            continue;
-        }
-        if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
-            index += 1;
-            continue;
-        }
-        if ch == "," {
-            if brace_depth == 0 {
-                return index;
-            }
-        }
-        index += 1;
-    }
-    return -1;
-}
-
-fn array_pointer_element_type(llvm_type -> string) -> string {
-    let trimmed = trim_text(llvm_type);
-    if trimmed.length == 0 {
-        return "";
-    }
-    if trimmed[trimmed.length - 1] != "*" {
-        return "";
-    }
-    let without_pointer = trim_text(substring(trimmed, 0, trimmed.length - 1));
-    if without_pointer.length < 2 {
-        return "";
-    }
-    if without_pointer[0] != "{" {
-        return "";
-    }
-    if without_pointer[without_pointer.length - 1] != "}" {
-        return "";
-    }
-    let inner = trim_text(substring(without_pointer, 1, without_pointer.length - 1));
-    if inner.length == 0 {
-        return "";
-    }
-    let comma_index = find_top_level_comma_in_llvm_type(inner);
-    if comma_index < 0 {
-        return "";
-    }
-    let first_segment = trim_text(substring(inner, 0, comma_index));
-    if first_segment.length == 0 {
-        return "";
-    }
-    if first_segment[first_segment.length - 1] != "*" {
-        return "";
-    }
-    let element = trim_text(substring(first_segment, 0, first_segment.length - 1));
-    if element.length == 0 {
-        return "";
-    }
-    return element;
-}
 
 fn unwrap_move_wrapper(annotation -> string) -> string {
     let trimmed = trim_text(annotation);
@@ -1893,131 +1685,6 @@ fn map_local_type(context -> TypeContext, type_annotation -> string) -> string {
     return "i8*";
 }
 
-fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
-    let mut index -> number = 0;
-    loop {
-        if index >= bindings.length {
-            break;
-        }
-        let binding = bindings[index];
-        if binding.name == name {
-            return binding;
-        }
-        index += 1;
-    }
-    return null;
-}
-
-fn mark_parameter_consumed(bindings -> ParameterBinding[], name -> string) -> ParameterBinding[] {
-    let mut result -> ParameterBinding[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= bindings.length {
-            break;
-        }
-        let binding = bindings[index];
-        if binding.name == name {
-            let updated = ParameterBinding {
-                name: binding.name,
-                llvm_name: binding.llvm_name,
-                llvm_type: binding.llvm_type,
-                type_annotation: binding.type_annotation,
-                consumed: true,
-                span: binding.span,
-            };
-            result = result.concat([updated]);
-        } else {
-            result = result.concat([binding]);
-        }
-        index += 1;
-    }
-    return result;
-}
-
-fn mark_local_consumed(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
-    let mut result -> LocalBinding[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= locals.length {
-            break;
-        }
-        let entry = locals[index];
-        if entry.name == name {
-            let updated = LocalBinding {
-                name: entry.name,
-                pointer: entry.pointer,
-                llvm_type: entry.llvm_type,
-                type_annotation: entry.type_annotation,
-                ownership: entry.ownership,
-                consumed: true,
-                scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
-            };
-            result = result.concat([updated]);
-        } else {
-            result = result.concat([entry]);
-        }
-        index += 1;
-    }
-    return result;
-}
-
-fn reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
-    let mut result -> LocalBinding[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= locals.length {
-            break;
-        }
-        let entry = locals[index];
-        if entry.name == name {
-            let updated = LocalBinding {
-                name: entry.name,
-                pointer: entry.pointer,
-                llvm_type: entry.llvm_type,
-                type_annotation: entry.type_annotation,
-                ownership: entry.ownership,
-                consumed: false,
-                scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
-            };
-            result = result.concat([updated]);
-        } else {
-            result = result.concat([entry]);
-        }
-        index += 1;
-    }
-    return result;
-}
-
-fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership -> OwnershipInfo?) -> LocalBinding[] {
-    let mut result -> LocalBinding[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= locals.length {
-            break;
-        }
-        let entry = locals[index];
-        if entry.name == name {
-            let updated = LocalBinding {
-                name: entry.name,
-                pointer: entry.pointer,
-                llvm_type: entry.llvm_type,
-                type_annotation: entry.type_annotation,
-                ownership: ownership,
-                consumed: entry.consumed,
-                scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
-            };
-            result = result.concat([updated]);
-        } else {
-            result = result.concat([entry]);
-        }
-        index += 1;
-    }
-    return result;
-}
-
 fn lower_logical_not_with_operand(operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
     // Helper function to avoid nested null checks in lower_expression
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines);
@@ -2055,6 +1722,46 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     let stripped = strip_enclosing_parentheses(trimmed);
     if stripped != trimmed {
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    // Literal expressions.
+    if is_boolean_literal(stripped) {
+        let mut value = "0";
+        if matches_case_insensitive(trim_text(stripped), "true") {
+            value = "1";
+        }
+        let operand = LLVMOperand { llvm_type: "i1", value: value };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+    if is_null_literal(stripped) {
+        let trimmed_expected = trim_text(expected_type);
+        let mut null_type = "i8*";
+        if trimmed_expected.length > 0 && ends_with_pointer_suffix(trimmed_expected) {
+            null_type = trimmed_expected;
+        }
+        let operand = LLVMOperand { llvm_type: null_type, value: "null" };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+    if is_number_literal(stripped) {
+        let trimmed_expected = trim_text(expected_type);
+        if (trimmed_expected == "i64" || trimmed_expected == "i32") && is_integer_literal(stripped) {
+            let operand = LLVMOperand { llvm_type: trimmed_expected, value: trim_text(stripped) };
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+        }
+        let normalized = normalise_number_literal(stripped);
+        let operand = LLVMOperand { llvm_type: "double", value: normalized };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+    if is_string_literal(stripped) {
+        let interpolated = try_lower_interpolated_string_literal(stripped, bindings, locals, temp_index, lines, functions, context);
+        if interpolated != null {
+            let result = interpolated;
+            diagnostics = diagnostics.concat(result.diagnostics);
+            return ExpressionResult { lines: result.lines, temp_index: result.temp_index, operand: result.operand, diagnostics: diagnostics, string_constants: result.string_constants };
+        }
+        let literal_result = lower_string_literal(stripped, temp_index, lines);
+        diagnostics = diagnostics.concat(literal_result.diagnostics);
+        return ExpressionResult { lines: literal_result.lines, temp_index: literal_result.temp_index, operand: literal_result.operand, diagnostics: diagnostics, string_constants: literal_result.string_constants };
     }
 
     // `await <expr>` joins a thread-backed future and extracts its value.
@@ -2136,7 +1843,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
 
     let borrow_parse = parse_borrow_expression(stripped);
     if borrow_parse.recognized {
-    return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
+        return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
     }
 
     let logical = find_logical_operator(stripped);
@@ -2204,6 +1911,49 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         let target = trim_text(substring(stripped, 0, call_index));
         let arguments_text = substring(stripped, call_index + 1, stripped.length - 1);
         let argument_entries = split_call_arguments(arguments_text);
+        // Some member calls are syntactic sugar over runtime helpers for arrays.
+        // Rewrite `xs.concat(ys)` into `concat(xs, ys)` early (for simple identifier receivers)
+        // so we don't accidentally sanitize `xs.concat` into an undefined `@xsconcat` symbol.
+        let member_target = parse_member_access(target);
+        if member_target.success && member_target.field == "concat" {
+            let receiver_name = trim_text(member_target.base);
+            if is_simple_identifier(receiver_name) {
+                let local = find_local_binding(locals, receiver_name);
+                if local != null {
+                    let element_type = array_pointer_element_type(local.llvm_type);
+                    // Only rewrite string array concats; the generic runtime helper only supports i8* elements.
+                    if element_type == "i8*" {
+                        let mut rewritten_args -> string[] = [member_target.base];
+                        let mut arg_index -> number = 0;
+                        loop {
+                            if arg_index >= argument_entries.length {
+                                break;
+                            }
+                            rewritten_args = rewritten_args.concat([argument_entries[arg_index]]);
+                            arg_index += 1;
+                        }
+                        return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context);
+                    }
+                } else {
+                    let param = find_parameter_binding(bindings, receiver_name);
+                    if param != null {
+                        let element_type = array_pointer_element_type(param.llvm_type);
+                        if element_type == "i8*" {
+                            let mut rewritten_args -> string[] = [member_target.base];
+                            let mut arg_index -> number = 0;
+                            loop {
+                                if arg_index >= argument_entries.length {
+                                    break;
+                                }
+                                rewritten_args = rewritten_args.concat([argument_entries[arg_index]]);
+                                arg_index += 1;
+                            }
+                            return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context);
+                        }
+                    }
+                }
+            }
+        }
         return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions, context);
     }
 
@@ -2264,165 +2014,92 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return ExpressionResult { lines: load_result.lines, temp_index: load_result.temp_index, operand: load_result.operand, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
-    let literal_candidate = trim_text(stripped);
-    
-    // Handle runtime global as an opaque pointer (it's a Python object in the bootstrap runtime)
-    if literal_candidate == "runtime" {
-        let runtime_result = lower_runtime_global_reference(temp_index, lines);
-        let combined_diagnostics = diagnostics.concat(runtime_result.diagnostics);
-        return ExpressionResult {
-            lines: runtime_result.lines,
-            temp_index: runtime_result.temp_index,
-            operand: runtime_result.operand,
-            diagnostics: combined_diagnostics,
-            string_constants: runtime_result.string_constants,
-        };
-    }
-
-    if literal_candidate == "fs" {
-        let runtime_result = lower_runtime_global_reference(temp_index, lines);
-        diagnostics = diagnostics.concat(runtime_result.diagnostics);
-        if runtime_result.operand == null {
-            return ExpressionResult { lines: runtime_result.lines, temp_index: runtime_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: runtime_result.string_constants };
-        }
-        let field_result = lower_dynamic_member_access("fs", runtime_result.operand, runtime_result.temp_index, runtime_result.lines, diagnostics, runtime_result.string_constants);
-        return ExpressionResult { lines: field_result.lines, temp_index: field_result.temp_index, operand: field_result.operand, diagnostics: field_result.diagnostics, string_constants: field_result.string_constants };
-    }
-
-    if is_string_literal(literal_candidate) {
-        // Check if this is a single-character literal that should be treated as i8
-        if is_character_literal(literal_candidate) {
-            let char_value = get_character_literal_value(literal_candidate);
-            let operand = LLVMOperand { llvm_type: "i8", value: number_to_string(char_value) };
-            return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
-        }
-
-        let interpolated = try_lower_interpolated_string_literal(literal_candidate, bindings, locals, temp_index, lines, functions, context);
-        if interpolated != null {
-            let lowered = interpolated;
-            let combined = diagnostics.concat(lowered.diagnostics);
-            return ExpressionResult {
-                lines: lowered.lines,
-                temp_index: lowered.temp_index,
-                operand: lowered.operand,
-                diagnostics: combined,
-                string_constants: lowered.string_constants,
-            };
-        }
-        return lower_string_literal(literal_candidate, temp_index, lines);
-    }
-
-    if is_boolean_literal(literal_candidate) {
-        let mut value -> string = "0";
-        if matches_case_insensitive(literal_candidate, "true") {
-            value = "1";
-        }
-        let operand = LLVMOperand { llvm_type: "i1", value: value };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
-    }
-
-    if is_null_literal(literal_candidate) {
-        // Represent null as a null pointer (i8* null)
-        // This allows null to be used in optional fields and pointer contexts
-        let operand = LLVMOperand { llvm_type: "i8*", value: "null" };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
-    }
-
-    if is_integer_literal(literal_candidate) {
-        let operand = LLVMOperand { llvm_type: "i64", value: literal_candidate };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
-    }
-
-    if is_number_literal(literal_candidate) {
-        let normalised = normalise_number_literal(literal_candidate);
-        let operand = LLVMOperand { llvm_type: "double", value: normalised };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
-    }
-
-    diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`");
+    diagnostics = append_string(diagnostics, "llvm lowering: unable to lower expression `" + expression + "`");
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
 }
 
-fn parse_borrow_expression(text -> string) -> BorrowParseResult {
-    let trimmed = trim_text(text);
-    let diagnostics -> string[] = [];
+fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
+    let trimmed = trim_text(expression);
+    let mut diagnostics -> string[] = [];
     if trimmed.length == 0 {
         return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
     }
+    // Support both prefix borrows (`&x`, `&mut x`) and the historical built-in
+    // call forms (`borrow(x)`, `borrow_mut(x)`).
+    let mut is_prefix_form -> boolean = false;
+    let mut remainder -> string = "";
+    let mut mutable_flag -> boolean = false;
 
-    if starts_with(trimmed, "borrow") {
-        // Require a token boundary after `borrow` so we don't misinterpret
-        // identifiers like `borrow_span` / `borrow_parse` as borrow expressions.
-        if trimmed.length > 6 {
-            let next = char_at(trimmed, 6);
-            if next != " " && next != "\t" && next != "(" {
-                return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
-            }
+    if starts_with(trimmed, "&") {
+        if starts_with(trimmed, "&&") {
+            return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
         }
-        let mut remainder -> string = trim_text(substring(trimmed, 6, trimmed.length));
-        if remainder.length == 0 {
-            let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
-            return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: issue };
-        }
-        let mut mutable_flag -> boolean = false;
-        if starts_with(remainder, "mut") {
-            let after_mut = substring(remainder, 3, remainder.length);
+        is_prefix_form = true;
+        remainder = trim_text(substring(trimmed, 1, trimmed.length));
+    } else {
+        // Parse `borrow(...)` or `borrow_mut(...)`.
+        // Be conservative: only recognize these exact spellings followed by `(`.
+        let mut after_keyword -> string = "";
+        if starts_with(trimmed, "borrow_mut") {
+            after_keyword = trim_text(substring(trimmed, 10, trimmed.length));
             mutable_flag = true;
+        } else if starts_with(trimmed, "borrow") {
+            after_keyword = trim_text(substring(trimmed, 6, trimmed.length));
+        } else {
+            return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+        }
+        if after_keyword.length == 0 || after_keyword[0] != "(" {
+            return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+        }
+        remainder = after_keyword;
+    }
+
+    // Prefix borrow supports `&mut x`.
+    if is_prefix_form {
+        if starts_with(remainder, "mut") {
+            mutable_flag = true;
+            let after_mut = substring(remainder, 3, remainder.length);
             remainder = trim_text(after_mut);
         }
-        if remainder.length > 0 && remainder[0] == "(" {
-            let argument_parse = extract_borrow_argument(remainder);
-            let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
-            if !argument_parse.success {
-                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
-            }
-            let mut argument_text -> string = argument_parse.argument;
-            if starts_with(argument_text, "mut") {
-                let after_mut = substring(argument_text, 3, argument_text.length);
-                let trimmed_after_mut = trim_text(after_mut);
-                if trimmed_after_mut.length > 0 {
-                    mutable_flag = true;
-                    argument_text = trimmed_after_mut;
-                }
-            }
-            if argument_text.length == 0 {
-                messages = append_string(messages, "llvm lowering: borrow expression missing target");
-                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
-            }
-            if !is_valid_borrow_target(argument_text) {
-                return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
-            }
-            return BorrowParseResult { recognized: true, success: true, target: argument_text, mutable: mutable_flag, diagnostics: messages };
-        }
-
-        let simple_parse = extract_simple_borrow_target(remainder);
-        if !simple_parse.success {
-            return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
-        }
-        if !is_valid_borrow_target(simple_parse.argument) {
-            return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
-        }
-        return BorrowParseResult { recognized: true, success: true, target: simple_parse.argument, mutable: mutable_flag, diagnostics: diagnostics };
-    }
-
-    if !starts_with(trimmed, "&") {
-        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
-    }
-    if starts_with(trimmed, "&&") {
-        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
-    }
-    let mut remainder -> string = trim_text(substring(trimmed, 1, trimmed.length));
-    let mut mutable_flag -> boolean = false;
-    if starts_with(remainder, "mut") {
-        mutable_flag = true;
-        let after_mut = substring(remainder, 3, remainder.length);
-        remainder = trim_text(after_mut);
     }
     if remainder.length == 0 {
         let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
         return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: issue };
     }
-    return BorrowParseResult { recognized: true, success: true, target: trim_text(remainder), mutable: mutable_flag, diagnostics: diagnostics };
+
+    if remainder.length > 0 && remainder[0] == "(" {
+        let argument_parse = extract_borrow_argument(remainder);
+        let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
+        if !argument_parse.success {
+            return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+        }
+        let mut argument_text -> string = argument_parse.argument;
+        if starts_with(argument_text, "mut") {
+            let after_mut = substring(argument_text, 3, argument_text.length);
+            let trimmed_after_mut = trim_text(after_mut);
+            if trimmed_after_mut.length > 0 {
+                mutable_flag = true;
+                argument_text = trimmed_after_mut;
+            }
+        }
+        if argument_text.length == 0 {
+            messages = append_string(messages, "llvm lowering: borrow expression missing target");
+            return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+        }
+        if !is_valid_borrow_target(argument_text) {
+            return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+        }
+        return BorrowParseResult { recognized: true, success: true, target: argument_text, mutable: mutable_flag, diagnostics: messages };
+    }
+
+    let simple_parse = extract_simple_borrow_target(remainder);
+    if !simple_parse.success {
+        return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+    }
+    if !is_valid_borrow_target(simple_parse.argument) {
+        return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+    }
+    return BorrowParseResult { recognized: true, success: true, target: simple_parse.argument, mutable: mutable_flag, diagnostics: diagnostics };
 }
 
 fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
@@ -3240,7 +2917,19 @@ fn lower_logical_and(expression -> string, match -> OperatorMatch, bindings -> P
     diagnostics = diagnostics.concat(right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
-        return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower && RHS in `" + expression + "`");
+
+        // Ensure the merge label exists so earlier branches are valid.
+        // If the RHS produced a terminator (e.g., `ret`), we cannot append another branch in that block.
+        // In either case, emit the merge block and return a conservative `false` operand.
+        let mut fallback_lines = right_result.lines;
+        if !lines_end_with_terminator(fallback_lines) {
+            fallback_lines = append_string(fallback_lines, "  br label %" + merge_label);
+        }
+        fallback_lines = append_string(fallback_lines, "");
+        fallback_lines = append_string(fallback_lines, merge_label + ":");
+        let operand = LLVMOperand { llvm_type: "i1", value: "false" };
+        return ExpressionResult { lines: fallback_lines, temp_index: right_result.temp_index, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
     }
     
     // Coerce right to boolean if needed
@@ -3324,7 +3013,18 @@ fn lower_logical_or(expression -> string, match -> OperatorMatch, bindings -> Pa
     diagnostics = diagnostics.concat(right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
-        return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower || RHS in `" + expression + "`");
+
+        // Ensure the merge label exists so earlier branches are valid.
+        // For a conservative fallback, treat the expression as just the LHS value.
+        let mut fallback_lines = right_result.lines;
+        if !lines_end_with_terminator(fallback_lines) {
+            fallback_lines = append_string(fallback_lines, "  br label %" + merge_label);
+        }
+        fallback_lines = append_string(fallback_lines, "");
+        fallback_lines = append_string(fallback_lines, merge_label + ":");
+        let operand = LLVMOperand { llvm_type: "i1", value: left_bool.operand.value };
+        return ExpressionResult { lines: fallback_lines, temp_index: right_result.temp_index, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
     }
     
     // Coerce right to boolean if needed
@@ -3355,11 +3055,42 @@ fn lower_logical_or(expression -> string, match -> OperatorMatch, bindings -> Pa
     return ExpressionResult { lines: current_lines, temp_index: right_bool.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
 }
 
+fn lines_end_with_terminator(lines -> string[]) -> boolean {
+    let mut index -> number = lines.length - 1;
+    loop {
+        if lines.length == 0 {
+            return false;
+        }
+        if index < 0 {
+            break;
+        }
+        let line = trim_text(lines[index]);
+        if line.length == 0 {
+            index -= 1;
+            continue;
+        }
+        if starts_with(line, "ret") {
+            return true;
+        }
+        if starts_with(line, "br ") {
+            return true;
+        }
+        if starts_with(line, "switch ") {
+            return true;
+        }
+        if line == "unreachable" {
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
 fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let mut diagnostics -> string[] = [];
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
     let empty_constants = empty_string_constant_set();
-    let trimmed_target = trim_text(target);
+    let mut trimmed_target = trim_text(target);
     if trimmed_target.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: call target missing");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
@@ -3426,6 +3157,51 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let mut array_push_element_type -> string = "";
     let mut is_array_push -> boolean = false;
 
+    // Defensive: some front-end rewriting paths can fuse a receiver name into the call
+    // target (e.g. `values.concat(xs)` becomes `valuesconcat(xs)`).
+    // Recover the intended concat by injecting the receiver and calling the runtime
+    // helper `concat` (or inlining for struct arrays).
+    if !contains_text(trimmed_target, ".") && ends_with(trimmed_target, "concat") && trimmed_target.length > 6 {
+        let receiver_name = trim_text(substring(trimmed_target, 0, trimmed_target.length - 6));
+        if receiver_name.length > 0 && is_simple_identifier(receiver_name) {
+            let local = find_local_binding(locals, receiver_name);
+            let parameter = find_parameter_binding(bindings, receiver_name);
+            let mut receiver_operand -> LLVMOperand? = null;
+
+            if local != null {
+                let load_result = load_local_operand(local, current_temp, current_lines);
+                diagnostics = diagnostics.concat(load_result.diagnostics);
+                current_lines = load_result.lines;
+                current_temp = load_result.temp_index;
+                receiver_operand = load_result.operand;
+            } else if parameter != null {
+                receiver_operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
+            }
+
+            if receiver_operand != null {
+                let element_type = array_pointer_element_type(receiver_operand.llvm_type);
+                if element_type.length > 0 {
+                    method_operand = receiver_operand;
+                    injected_argument_count = 1;
+                    trimmed_target = "concat";
+                    is_array_concat = true;
+                    array_concat_element_type = element_type;
+
+                    // Mirror the member-call path: inline concat for non-pointer element arrays.
+                    if !ends_with_pointer_suffix(element_type) {
+                        helper_descriptor = RuntimeHelperDescriptor {
+                            target: "concat",
+                            symbol: "",
+                            return_type: receiver_operand.llvm_type,
+                            parameter_types: [receiver_operand.llvm_type, receiver_operand.llvm_type],
+                            effects: [],
+                        };
+                    }
+                }
+            }
+        }
+    }
+
     let method_parse = parse_member_access(trimmed_target);
     if method_parse.success {
         let method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context);
@@ -3488,58 +3264,73 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
             }
         } else {
-            let helper_candidate = find_runtime_helper(trimmed_target);
-            if helper_candidate != null {
-                helper_descriptor = helper_candidate;
+            // Some member-call spellings are actually qualified runtime helpers (e.g. `print.error(...)`,
+            // `fs.exists(...)`). Prefer those if available; otherwise treat this as a receiver method call.
+            let qualified_helper = find_runtime_helper(trimmed_target);
+            if qualified_helper != null {
+                helper_descriptor = qualified_helper;
             } else {
+                // Member calls to runtime helpers should be detected by the *field* name, not the
+                // full `base.field` target. Otherwise we can fall through and emit a sanitized,
+                // undefined symbol like `@linesconcat` or `@rewrittenconcat`.
+                let field_helper = find_runtime_helper(method_parse.field);
                 let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
                 diagnostics = diagnostics.concat(lowered_self.diagnostics);
                 collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
                 current_lines = lowered_self.lines;
                 current_temp = lowered_self.temp_index;
-                if lowered_self.operand != null {
-                    let base_operand = lowered_self.operand;
-                    let array_element_type = array_pointer_element_type(base_operand.llvm_type);
-                    if array_element_type.length > 0 && method_parse.field == "concat" {
-                        method_operand = base_operand;
-                        trimmed_target = "concat";
-                        injected_argument_count = 1;
-                        array_concat_element_type = array_element_type;
-                        is_array_concat = true;
+                if lowered_self.operand == null {
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                }
 
-                        // For non-pointer element arrays (e.g. `%Token`), the generic runtime concat helper
-                        // `{ i8**, i64 }* -> { i8**, i64 }*` is not applicable. We inline the concat in
-                        // `lower_struct_array_concat`, but we must also keep the typed array signatures
-                        // so argument lowering/coercion doesn't bitcast the operands to `{ i8**, i64 }*`.
-                        if !ends_with_pointer_suffix(array_element_type) {
-                            helper_descriptor = RuntimeHelperDescriptor {
-                                target: "concat",
-                                symbol: "",
-                                return_type: base_operand.llvm_type,
-                                parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
-                                effects: [],
-                            };
-                        }
-                    } else if array_element_type.length > 0 && method_parse.field == "push" {
-                        method_operand = base_operand;
-                        trimmed_target = "push";
-                        injected_argument_count = 1;
-                        array_push_element_type = array_element_type;
-                        is_array_push = true;
+                let base_operand = lowered_self.operand;
+                if field_helper != null {
+                    // Treat `base.helper(args...)` as `helper(base, args...)`.
+                    method_operand = base_operand;
+                    trimmed_target = method_parse.field;
+                    injected_argument_count = 1;
+                    helper_descriptor = field_helper;
+                }
 
-                        // We inline push as an in-place mutation of the array struct fields. We still
-                        // provide a typed signature so argument coercion doesn't bitcast the operands.
+                // Array-specific methods: we may inline for non-pointer element arrays.
+                let array_element_type = array_pointer_element_type(base_operand.llvm_type);
+                if array_element_type.length > 0 && method_parse.field == "concat" {
+                    method_operand = base_operand;
+                    trimmed_target = "concat";
+                    injected_argument_count = 1;
+                    array_concat_element_type = array_element_type;
+                    is_array_concat = true;
+
+                    // For non-pointer element arrays (e.g. `%Token`), the generic runtime concat helper
+                    // `{ i8**, i64 }* -> { i8**, i64 }*` is not applicable. We inline the concat in
+                    // `lower_struct_array_concat`, but we must also keep the typed array signatures
+                    // so argument lowering/coercion doesn't bitcast the operands to `{ i8**, i64 }*`.
+                    if !ends_with_pointer_suffix(array_element_type) {
                         helper_descriptor = RuntimeHelperDescriptor {
-                            target: "push",
+                            target: "concat",
                             symbol: "",
                             return_type: base_operand.llvm_type,
-                            parameter_types: [base_operand.llvm_type, array_element_type],
+                            parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
                             effects: [],
                         };
                     }
-                } else {
-                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                } else if array_element_type.length > 0 && method_parse.field == "push" {
+                    method_operand = base_operand;
+                    trimmed_target = "push";
+                    injected_argument_count = 1;
+                    array_push_element_type = array_element_type;
+                    is_array_push = true;
+
+                    // We inline push as an in-place mutation of the array struct fields. We still
+                    // provide a typed signature so argument coercion doesn't bitcast the operands.
+                    helper_descriptor = RuntimeHelperDescriptor {
+                        target: "push",
+                        symbol: "",
+                        return_type: base_operand.llvm_type,
+                        parameter_types: [base_operand.llvm_type, array_element_type],
+                        effects: [],
+                    };
                 }
             }
         }
@@ -3663,6 +3454,31 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     if operands.length != expected_operand_count {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+
+    // If concat is invoked as a plain function (e.g. via an early rewrite from `xs.concat(ys)` to
+    // `concat(xs, ys)`), we still want the array-special casing that normally comes from the
+    // member-call path.
+    if trimmed_target == "concat" && operands.length >= 2 {
+        let inferred_element_type = array_pointer_element_type(operands[0].llvm_type);
+        if inferred_element_type.length > 0 {
+            is_array_concat = true;
+            array_concat_element_type = inferred_element_type;
+
+            // Inline concat for non-pointer element arrays; keep a typed signature so coercion
+            // doesn't bitcast operands to the generic `{ i8**, i64 }*` ABI.
+            if !ends_with_pointer_suffix(inferred_element_type) {
+                llvm_return = operands[0].llvm_type;
+                expected_params = [operands[0].llvm_type, operands[0].llvm_type];
+                helper_descriptor = RuntimeHelperDescriptor {
+                    target: "concat",
+                    symbol: "",
+                    return_type: operands[0].llvm_type,
+                    parameter_types: expected_params,
+                    effects: [],
+                };
+            }
+        }
     }
 
     // Fill omitted trailing arguments using defaults from the callee signature.
@@ -4602,15 +4418,32 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
         let operand = LLVMOperand { llvm_type: element_type, value: element_value };
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     } else if is_string {
-        // Strings are lowered as contiguous UTF-8 bytes (i8*), so address and materialize the requested code unit.
-        let char_pointer = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + char_pointer + " = getelementptr i8, i8* " + base_operand.value + ", i64 " + coerced_index.value);
+        // Strings are represented as i8*. Indexing produces a one-character string.
+        // Implement this without introducing new runtime helper dependencies by allocating
+        // a 2-byte buffer and copying the byte plus NUL terminator.
+        let char_ptr = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + char_ptr + " = getelementptr i8, i8* " + base_operand.value + ", i64 " + coerced_index.value);
         current_temp += 1;
-        let loaded_char = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + loaded_char + " = load i8, i8* " + char_pointer);
+        let ch_value = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + ch_value + " = load i8, i8* " + char_ptr);
         current_temp += 1;
-        let operand = LLVMOperand { llvm_type: "i8", value: loaded_char };
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+
+        let buf = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + buf + " = call i8* @malloc(i64 2)");
+        current_temp += 1;
+
+        let buf0 = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + buf0 + " = getelementptr i8, i8* " + buf + ", i64 0");
+        current_temp += 1;
+        current_lines = append_string(current_lines, "  store i8 " + ch_value + ", i8* " + buf0);
+
+        let buf1 = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + buf1 + " = getelementptr i8, i8* " + buf + ", i64 1");
+        current_temp += 1;
+        current_lines = append_string(current_lines, "  store i8 0, i8* " + buf1);
+
+        let operand = LLVMOperand { llvm_type: "i8*", value: buf };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
     
     // If we get here, unsupported array type
@@ -7530,109 +7363,6 @@ fn split_call_arguments(text -> string) -> string[] {
     return entries;
 }
 
-fn split_array_elements(text -> string) -> string[] {
-    let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return [];
-    }
-    let mut entries -> string[] = [];
-    let mut current -> string = "";
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut index -> number = 0;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
-    loop {
-        if index >= text.length {
-            break;
-        }
-        let ch = char_at(text, index);
-        if in_double {
-            current = current + ch;
-            if escape {
-                escape = false;
-            } else if ch == "\\" {
-                escape = true;
-            } else if ch == "\"" {
-                in_double = false;
-            }
-            index += 1;
-            continue;
-        }
-        if in_single {
-            current = current + ch;
-            if escape {
-                escape = false;
-            } else if ch == "\\" {
-                escape = true;
-            } else if ch == "'" {
-                in_single = false;
-            }
-            index += 1;
-            continue;
-        }
-        if ch == "\"" {
-            in_double = true;
-            current = current + ch;
-            index += 1;
-            continue;
-        }
-        if ch == "'" {
-            in_single = true;
-            current = current + ch;
-            index += 1;
-            continue;
-        }
-        if ch == "(" {
-            paren_depth += 1;
-        } else if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
-        } else if ch == "[" {
-            bracket_depth += 1;
-        } else if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
-        } else if ch == "{" {
-            brace_depth += 1;
-        } else if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
-        }
-
-        if ch == "," && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-            entries = append_string(entries, trim_text(current));
-            current = "";
-        } else {
-            current = current + ch;
-        }
-        index += 1;
-    }
-
-    if current.length > 0 {
-        entries = append_string(entries, trim_text(current));
-    }
-
-    let mut filtered -> string[] = [];
-    index = 0;
-    loop {
-        if index >= entries.length {
-            break;
-        }
-        let entry = trim_text(entries[index]);
-        if entry.length > 0 {
-            filtered = append_string(filtered, entry);
-        }
-        index += 1;
-    }
-    return filtered;
-}
-
 fn parse_array_literal_metadata(entries -> string[], context -> TypeContext) -> ArrayLiteralMetadata {
     if entries.length == 0 {
         return ArrayLiteralMetadata { element_type: "", start_index: 0 };
@@ -7714,166 +7444,8 @@ fn operation_name_for_symbol(symbol -> string, llvm_type -> string) -> string {
     return "add";
 }
 
-fn format_temp_name(index -> number) -> string {
-    return "%t" + number_to_string(index);
-}
-
-fn format_local_pointer_name(index -> number) -> string {
-    return "%l" + number_to_string(index);
-}
-
 fn format_typed_operand(operand -> LLVMOperand) -> string {
     return operand.llvm_type + " " + operand.value;
-}
-
-fn ends_with_pointer_suffix(value -> string) -> boolean {
-    let trimmed = trim_text(value);
-    if trimmed.length == 0 {
-        return false;
-    }
-    return trimmed[trimmed.length - 1] == "*";
-}
-
-fn strip_pointer_suffix(value -> string) -> string {
-    let trimmed = trim_text(value);
-    if trimmed.length == 0 {
-        return trimmed;
-    }
-    if trimmed[trimmed.length - 1] != "*" {
-        return trimmed;
-    }
-    return trim_text(substring(trimmed, 0, trimmed.length - 1));
-}
-
-fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
-    let trimmed = trim_text(type_annotation);
-    if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
-        return false;
-    }
-    if trimmed == "Affine" || trimmed == "Linear" {
-        return false;
-    }
-    if llvm_type == "double" {
-        return true;
-    }
-    if llvm_type == "i32" {
-        return true;
-    }
-    if llvm_type == "i64" {
-        return true;
-    }
-    if llvm_type == "i1" {
-        return true;
-    }
-    if ends_with_pointer_suffix(llvm_type) {
-        return true;
-    }
-    if trimmed.length == 0 {
-        return true;
-    }
-    if trimmed[0] == "&" {
-        return true;
-    }
-    if starts_with(trimmed, "mut ") {
-        let stripped = strip_mut_prefix(trimmed);
-        if stripped.length > 0 {
-            if stripped[0] == "&" {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-fn default_return_literal(llvm_type -> string) -> string {
-    if llvm_type == "double" {
-        return "0.0";
-    }
-    if llvm_type == "i32" {
-        return "0";
-    }
-    if llvm_type == "i64" {
-        return "0";
-    }
-    if llvm_type == "i1" {
-        return "false";
-    }
-    if ends_with_pointer_suffix(llvm_type) {
-        return "null";
-    }
-    return "zeroinitializer";
-}
-
-fn starts_with(value -> string, prefix -> string) -> boolean {
-    if prefix.length == 0 {
-        return true;
-    }
-    if value.length < prefix.length {
-        return false;
-    }
-    let head = substring(value, 0, prefix.length);
-    return head == prefix;
-}
-
-fn ends_with(value -> string, suffix -> string) -> boolean {
-    if suffix.length == 0 {
-        return true;
-    }
-    if value.length < suffix.length {
-        return false;
-    }
-    let start_index = value.length - suffix.length;
-    let tail = substring(value, start_index, value.length);
-    return tail == suffix;
-}
-
-fn contains_text(haystack -> string, needle -> string) -> boolean {
-    if needle.length == 0 {
-        return true;
-    }
-    if haystack.length < needle.length {
-        return false;
-    }
-    let mut index -> number = 0;
-    loop {
-        if index + needle.length > haystack.length {
-            break;
-        }
-        let candidate = substring(haystack, index, index + needle.length);
-        if candidate == needle {
-            return true;
-        }
-        index += 1;
-    }
-    return false;
-}
-
-fn strip_mut_prefix(value -> string) -> string {
-    let trimmed = trim_text(value);
-    if trimmed.length < 4 {
-        return trimmed;
-    }
-    let prefix = substring(trimmed, 0, 4);
-    if prefix == "mut " {
-        return trim_text(substring(trimmed, 4, trimmed.length));
-    }
-    return trimmed;
-}
-
-fn is_simple_identifier(value -> string) -> boolean {
-    let trimmed = trim_text(value);
-    if trimmed.length == 0 {
-        return false;
-    }
-    let first = trimmed[0];
-    if first >= "0" && first <= "9" {
-        return false;
-    }
-    let sanitized = sanitize_symbol(trimmed);
-    if sanitized != trimmed {
-        return false;
-    }
-    return true;
 }
 
 fn find_top_level_range_separator(value -> string) -> number {
@@ -8585,6 +8157,35 @@ fn is_string_literal(text -> string) -> boolean {
         return false;
     }
     if char_code_at_text(trimmed, trimmed.length - 1) != char_code("\"") {
+        return false;
+    }
+
+    // Guard against misclassifying expressions like `"a" + "b"` as a single
+    // string literal. Only accept if every interior `"` is escaped.
+    let mut escape -> boolean = false;
+    let mut index -> number = 1;
+    loop {
+        if index >= trimmed.length - 1 {
+            break;
+        }
+        let ch = char_at(trimmed, index);
+        if escape {
+            escape = false;
+            index += 1;
+            continue;
+        }
+        if ch == "\\" {
+            escape = true;
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            return false;
+        }
+        index += 1;
+    }
+    // A trailing backslash would escape the closing quote, so reject.
+    if escape {
         return false;
     }
     return true;

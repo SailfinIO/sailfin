@@ -24,9 +24,18 @@ export {
     coerce_operand_to_type,
     detect_suspension_conflicts,
     analyze_value_ownership,
+} from "./llvm/expression_lowering_stage2";
+
+export {
     mark_local_consumed,
     mark_parameter_consumed,
-} from "./llvm/expression_lowering_stage2";
+    reset_local_consumption,
+    find_parameter_binding,
+} from "./llvm/expressions";
+
+export {
+    update_local_ownership,
+} from "./llvm/lifetime";
 
 export {
     unescape_string_literal,

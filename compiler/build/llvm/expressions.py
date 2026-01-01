@@ -180,6 +180,25 @@ def is_string_literal(text):
         return False
     if char_code_at_text(trimmed, len(trimmed) - 1) != char_code("\""):
         return False
+    escape = False
+    index = 1
+    while True:
+        if index >= len(trimmed) - 1:
+            break
+        ch = char_at(trimmed, index)
+        if escape:
+            escape = False
+            index += 1
+            continue
+        if ch == "\\":
+            escape = True
+            index += 1
+            continue
+        if ch == "\"":
+            return False
+        index += 1
+    if escape:
+        return False
     return True
 
 def is_character_literal(text):

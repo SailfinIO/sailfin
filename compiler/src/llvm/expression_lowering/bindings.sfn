@@ -1,0 +1,137 @@
+// compiler/src/llvm/expression_lowering/bindings.sfn
+//
+// Local/parameter binding helpers used by expression lowering.
+//
+// Mechanical extraction from compiler/src/llvm/expression_lowering_stage2.sfn.
+// Logic should remain identical.
+
+import {
+    LocalBinding,
+    ParameterBinding,
+    OwnershipInfo,
+} from "../types";
+
+fn bindings_find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
+    let mut index -> number = 0;
+    loop {
+        if index >= bindings.length {
+            break;
+        }
+        let binding = bindings[index];
+        if binding.name == name {
+            return binding;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn bindings_mark_parameter_consumed(bindings -> ParameterBinding[], name -> string) -> ParameterBinding[] {
+    let mut result -> ParameterBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= bindings.length {
+            break;
+        }
+        let binding = bindings[index];
+        if binding.name == name {
+            let updated = ParameterBinding {
+                name: binding.name,
+                llvm_name: binding.llvm_name,
+                llvm_type: binding.llvm_type,
+                type_annotation: binding.type_annotation,
+                consumed: true,
+                span: binding.span,
+            };
+            result = result.concat([updated]);
+        } else {
+            result = result.concat([binding]);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn bindings_mark_local_consumed(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let entry = locals[index];
+        if entry.name == name {
+            let updated = LocalBinding {
+                name: entry.name,
+                pointer: entry.pointer,
+                llvm_type: entry.llvm_type,
+                type_annotation: entry.type_annotation,
+                ownership: entry.ownership,
+                consumed: true,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
+            };
+            result = result.concat([updated]);
+        } else {
+            result = result.concat([entry]);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn bindings_reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let entry = locals[index];
+        if entry.name == name {
+            let updated = LocalBinding {
+                name: entry.name,
+                pointer: entry.pointer,
+                llvm_type: entry.llvm_type,
+                type_annotation: entry.type_annotation,
+                ownership: entry.ownership,
+                consumed: false,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
+            };
+            result = result.concat([updated]);
+        } else {
+            result = result.concat([entry]);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn bindings_update_local_ownership(locals -> LocalBinding[], name -> string, ownership -> OwnershipInfo?) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let entry = locals[index];
+        if entry.name == name {
+            let updated = LocalBinding {
+                name: entry.name,
+                pointer: entry.pointer,
+                llvm_type: entry.llvm_type,
+                type_annotation: entry.type_annotation,
+                ownership: ownership,
+                consumed: entry.consumed,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
+            };
+            result = result.concat([updated]);
+        } else {
+            result = result.concat([entry]);
+        }
+        index += 1;
+    }
+    return result;
+}

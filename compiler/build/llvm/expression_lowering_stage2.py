@@ -5,13 +5,18 @@ from ..emit_native import NativeModule
 from ..native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest, NativeBinding
 from ..string_utils import substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of
 from compiler.build.llvm.types import TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo, InterfaceTypeInfo, VTableInfo, VTableEntry, LocalBinding, ParameterBinding, OwnershipInfo, OwnershipConsumption, OwnershipAnalysis, LifetimeRegionMetadata, LifetimeReleaseEvent, ScopeMetadata, LLVMOperand, ExpressionResult, CoercionResult, BlockLoweringResult, LoweredLLVMFunction, LoweredLLVMResult, LetLoweringResult, ModuleGlobalLoweringResult, OperatorMatch, BorrowParseResult, BorrowArgumentParse, TernaryParseResult, AssignmentParseResult, InlineLetParseResult, MemberAccessParse, IndexExpressionParse, RawAddressParseResult, CastParseResult, TraitMetadata, TraitDescriptor, TraitImplementationDescriptor, FunctionEffectEntry, RuntimeHelperDescriptor, CapabilityManifest, CapabilityManifestEntry, StringConstant, LocalMutation, LoopContext, ImportedModuleContext, LayoutManifestApplication, TypeContextBuild, FunctionCallEntry, StringPointerResult, InterpolatedTemplateParse, BodyResult, ParameterPreparation, ArrayLiteralMetadata, TypeAllocationInfo, HeapBoxResult, StructLiteralField, StructLiteralParse, EnumLiteralParse, ExpressionStatementResult, BlockLabelResult, IfStructure, LoopStructure, TryStructure, RangeIterableParse, MatchCaseStructure, MatchStructure, MatchFieldBinding, MatchStructFieldBinding, MatchCaseCondition, ConditionConversion, ComparisonEmission, BinaryAlignmentResult, ThrowLoweringResult, PhiMergeResult, PhiInputEntry, MutationMaterializationResult, PhiStoreEntry, MatchArmMutations, LoadLocalResult
-from compiler.build.llvm.utils import trim_text, starts_with, ends_with, char_at as utils_char_at, append_string, join_with_separator, string_array_contains, sanitize_symbol, number_to_string, index_of, is_identifier_start_char, is_identifier_part_char, matches_keyword, find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings
+from compiler.build.llvm.utils import trim_text, starts_with, ends_with, char_at as utils_char_at, append_string, join_with_separator, string_array_contains, sanitize_symbol, number_to_string, index_of, is_identifier_start_char, is_identifier_part_char, contains_text, matches_keyword, find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings
 from compiler.build.llvm.strings import empty_string_constant_set, append_string_constant, merge_string_constants, find_string_constant, render_string_constants, escape_string_for_llvm
 from compiler.build.llvm.effects import collect_direct_function_effects, collect_function_call_graph, propagate_function_effects, build_capability_manifest, collect_function_borrow_effects, collect_expression_borrow_effects, collect_runtime_helper_targets
 from compiler.build.llvm.runtime_helpers import runtime_helper_descriptors, find_runtime_helper, append_runtime_helper
-from compiler.build.llvm.type_mapping import map_type_annotation, map_return_type, map_parameter_type, map_local_type, map_struct_type_annotation, map_struct_field_annotation, unwrap_move_wrapper, ends_with_pointer_suffix, strip_pointer_suffix, layout_annotation_requires_pointer, layout_annotation_base_type, annotation_is_array, layout_annotation_represents_user_value
+from compiler.build.llvm.type_mapping import map_type_annotation, map_return_type, map_parameter_type, map_local_type, map_struct_type_annotation, map_struct_field_annotation, unwrap_move_wrapper, ends_with_pointer_suffix, strip_pointer_suffix, layout_annotation_requires_pointer, layout_annotation_base_type, annotation_is_array, layout_annotation_represents_user_value, is_copy_type, array_struct_type_for_element
 from compiler.build.llvm.rendering import render_test_harness_main, collect_exported_symbol_names, should_internalize_function, render_struct_type_definitions, render_enum_type_definitions, render_interface_type_definitions, render_vtable_type_definitions, render_vtable_constants, find_function_by_name
 from compiler.build.llvm.type_context import fixup_enum_layouts, find_struct_info_by_name, find_interface_info_by_name, find_vtable_for_struct_interface, find_struct_info_by_llvm_type, find_struct_field_index, find_struct_field_info, find_enum_info_by_llvm_type, resolve_struct_info_from_llvm_type, lookup_allocation_info, resolve_struct_info_for_literal, resolve_struct_info_for_method_target, resolve_interface_info_for_method_target, resolve_enum_info_for_literal, resolve_enum_variant_info, find_variant_field_info
+from compiler.build.llvm.expressions import format_temp_name, format_local_pointer_name, default_return_literal, strip_mut_prefix, is_simple_identifier
+import compiler.build.llvm.expression_lowering.bindings
+from compiler.build.llvm.expression_lowering.bindings import bindings_find_parameter_binding, bindings_mark_parameter_consumed, bindings_mark_local_consumed, bindings_reset_local_consumption, bindings_update_local_ownership
+from compiler.build.llvm.expression_lowering.splitting import split_array_elements
+from compiler.build.llvm.expression_lowering.arrays import lower_struct_array_concat, lower_array_push_in_place, find_top_level_comma_in_llvm_type, array_pointer_element_type
 
 print = runtime.console
 sleep = runtime.sleep
@@ -32,6 +37,21 @@ is_whitespace_char = runtime.is_whitespace_char
 is_alpha_char = runtime.is_alpha_char
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
+
+def find_parameter_binding(bindings, name):
+    return bindings_find_parameter_binding(bindings, name)
+
+def mark_parameter_consumed(bindings, name):
+    return bindings_mark_parameter_consumed(bindings, name)
+
+def mark_local_consumed(locals, name):
+    return bindings_mark_local_consumed(locals, name)
+
+def reset_local_consumption(locals, name):
+    return bindings_reset_local_consumption(locals, name)
+
+def update_local_ownership(locals, name, ownership):
+    return bindings_update_local_ownership(locals, name, ownership)
 
 def lower_expression_statement(function_name, instruction, expression, bindings, locals, temp_index, lines, next_region_id, scope_id, scope_depth, functions, context, current_label):
     suspension_span = None
@@ -179,6 +199,13 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
                             current_lines = coerced.lines
                             current_temp = coerced.temp_index
                             if coerced.operand != None:
+                                coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines)
+                                diagnostics = (diagnostics) + (coerced_index.diagnostics)
+                                current_lines = coerced_index.lines
+                                current_temp = coerced_index.temp_index
+                                if coerced_index.operand == None:
+                                    diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce array index to i64 for `" + parsed_assignment.target + "`")
+                                    return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
                                 data_ptr_temp = format_temp_name(current_temp)
                                 current_temp += 1
                                 elem_ptr_temp = format_temp_name(current_temp)
@@ -187,7 +214,7 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
                                 data_ptr_loaded = format_temp_name(current_temp)
                                 current_temp += 1
                                 current_lines = append_string(current_lines, "  " + data_ptr_loaded + " = load " + element_type + "*, " + element_type + "** " + data_ptr_temp)
-                                current_lines = append_string(current_lines, "  " + elem_ptr_temp + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr_loaded + ", i64 " + index_result.operand.value)
+                                current_lines = append_string(current_lines, "  " + elem_ptr_temp + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr_loaded + ", i64 " + coerced_index.operand.value)
                                 current_lines = append_string(current_lines, "  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + elem_ptr_temp)
             return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
         binding = find_local_binding(current_locals, parsed_assignment.target)
@@ -621,222 +648,6 @@ def map_array_pointer_type(context, annotation):
         if len(stripped_element) > 0:
             element_type = stripped_element
     return "{ " + element_type + "*, i64 }*"
-
-def array_struct_type_for_element(element_type):
-    return "{ " + element_type + "*, i64 }"
-
-def lower_struct_array_concat(lhs, rhs, element_type, lines, temp_index):
-    current_lines = lines
-    current_temp = temp_index
-    diagnostics = []
-    if len(element_type) == 0:
-        diagnostics = append_string(diagnostics, "llvm lowering: concat requires a concrete element type")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=[])
-    array_struct_type = array_struct_type_for_element(element_type)
-    if len(array_struct_type) == 0:
-        diagnostics = append_string(diagnostics, "llvm lowering: unsupported concat element type `" + element_type + "`")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=[])
-    data_pointer_type = element_type + "*"
-    data_pointer_pointer_type = data_pointer_type + "*"
-    lhs_data_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + lhs_data_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 0")
-    lhs_data_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + lhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + lhs_data_ptr)
-    lhs_len_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + lhs_len_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 1")
-    lhs_len_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + lhs_len_value + " = load i64, i64* " + lhs_len_ptr)
-    rhs_data_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + rhs_data_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 0")
-    rhs_data_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + rhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + rhs_data_ptr)
-    rhs_len_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + rhs_len_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 1")
-    rhs_len_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + rhs_len_value + " = load i64, i64* " + rhs_len_ptr)
-    element_size_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1")
-    element_size_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64")
-    total_length = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + lhs_len_value + ", " + rhs_len_value)
-    total_bytes = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length)
-    new_raw_buffer = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")")
-    new_data_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type)
-    new_data_i8 = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*")
-    lhs_bytes = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + lhs_bytes + " = mul i64 " + element_size_value + ", " + lhs_len_value)
-    lhs_src_i8 = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + lhs_src_i8 + " = bitcast " + data_pointer_type + " " + lhs_data_value + " to i8*")
-    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + lhs_src_i8 + ", i64 " + lhs_bytes + ")")
-    rhs_bytes = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + rhs_bytes + " = mul i64 " + element_size_value + ", " + rhs_len_value)
-    rhs_src_i8 = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + rhs_src_i8 + " = bitcast " + data_pointer_type + " " + rhs_data_value + " to i8*")
-    rhs_dest_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + rhs_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + lhs_len_value)
-    rhs_dest_i8 = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + rhs_dest_i8 + " = bitcast " + data_pointer_type + " " + rhs_dest_ptr + " to i8*")
-    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + rhs_dest_i8 + ", i8* " + rhs_src_i8 + ", i64 " + rhs_bytes + ")")
-    struct_size_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + struct_size_ptr + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* null, i32 1")
-    struct_size_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + struct_size_value + " = ptrtoint " + array_struct_type + "* " + struct_size_ptr + " to i64")
-    new_struct_raw = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_struct_raw + " = call i8* @malloc(i64 " + struct_size_value + ")")
-    new_struct_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_struct_ptr + " = bitcast i8* " + new_struct_raw + " to " + array_struct_type + "*")
-    new_data_field = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_data_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 0")
-    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + new_data_field)
-    new_len_field = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_len_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 1")
-    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + new_len_field)
-    result_operand = LLVMOperand(llvm_type=lhs.llvm_type, value=new_struct_ptr)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=result_operand, diagnostics=diagnostics, string_constants=[])
-
-def lower_array_push_in_place(array, value, element_type, lines, temp_index):
-    current_lines = lines
-    current_temp = temp_index
-    diagnostics = []
-    if len(element_type) == 0:
-        diagnostics = append_string(diagnostics, "llvm lowering: push requires a concrete element type")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=[])
-    array_struct_type = array_struct_type_for_element(element_type)
-    if len(array_struct_type) == 0:
-        diagnostics = append_string(diagnostics, "llvm lowering: unsupported push element type `" + element_type + "`")
-        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=[])
-    data_pointer_type = element_type + "*"
-    data_pointer_pointer_type = data_pointer_type + "*"
-    data_ptr_gep = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + data_ptr_gep + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 0")
-    data_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + data_ptr_gep)
-    len_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + len_ptr + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 1")
-    len_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + len_value + " = load i64, i64* " + len_ptr)
-    element_size_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1")
-    element_size_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64")
-    total_length = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + len_value + ", 1")
-    total_bytes = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length)
-    new_raw_buffer = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")")
-    new_data_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type)
-    new_data_i8 = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*")
-    existing_bytes = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + existing_bytes + " = mul i64 " + element_size_value + ", " + len_value)
-    existing_src_i8 = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + existing_src_i8 + " = bitcast " + data_pointer_type + " " + data_value + " to i8*")
-    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + existing_src_i8 + ", i64 " + existing_bytes + ")")
-    element_dest_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + element_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + len_value)
-    current_lines = append_string(current_lines, "  store " + element_type + " " + value.value + ", " + element_type + "* " + element_dest_ptr)
-    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + data_ptr_gep)
-    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + len_ptr)
-    return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=array, diagnostics=diagnostics, string_constants=[])
-
-def find_top_level_comma_in_llvm_type(text):
-    brace_depth = 0
-    index = 0
-    while True:
-        if index >= len(text):
-            break
-        ch = text[index]
-        if ch == "{":
-            brace_depth += 1
-            index += 1
-            continue
-        if ch == "}":
-            if brace_depth > 0:
-                brace_depth -= 1
-            index += 1
-            continue
-        if ch == ",":
-            if brace_depth == 0:
-                return index
-        index += 1
-    return -1
-
-def array_pointer_element_type(llvm_type):
-    trimmed = trim_text(llvm_type)
-    if len(trimmed) == 0:
-        return ""
-    if trimmed[len(trimmed) - 1] != "*":
-        return ""
-    without_pointer = trim_text(substring(trimmed, 0, len(trimmed) - 1))
-    if len(without_pointer) < 2:
-        return ""
-    if without_pointer[0] != "{":
-        return ""
-    if without_pointer[len(without_pointer) - 1] != "}":
-        return ""
-    inner = trim_text(substring(without_pointer, 1, len(without_pointer) - 1))
-    if len(inner) == 0:
-        return ""
-    comma_index = find_top_level_comma_in_llvm_type(inner)
-    if comma_index < 0:
-        return ""
-    first_segment = trim_text(substring(inner, 0, comma_index))
-    if len(first_segment) == 0:
-        return ""
-    if first_segment[len(first_segment) - 1] != "*":
-        return ""
-    element = trim_text(substring(first_segment, 0, len(first_segment) - 1))
-    if len(element) == 0:
-        return ""
-    return element
 
 def unwrap_move_wrapper(annotation):
     trimmed = trim_text(annotation)
@@ -1304,77 +1115,6 @@ def map_local_type(context, type_annotation):
         return primitive_type
     return "i8*"
 
-def find_parameter_binding(bindings, name):
-    index = 0
-    while True:
-        if index >= len(bindings):
-            break
-        binding = bindings[index]
-        if binding.name == name:
-            return binding
-        index += 1
-    return None
-
-def mark_parameter_consumed(bindings, name):
-    result = []
-    index = 0
-    while True:
-        if index >= len(bindings):
-            break
-        binding = bindings[index]
-        if binding.name == name:
-            updated = ParameterBinding(name=binding.name, llvm_name=binding.llvm_name, llvm_type=binding.llvm_type, type_annotation=binding.type_annotation, consumed=True, span=binding.span)
-            result = (result) + ([updated])
-        else:
-            result = (result) + ([binding])
-        index += 1
-    return result
-
-def mark_local_consumed(locals, name):
-    result = []
-    index = 0
-    while True:
-        if index >= len(locals):
-            break
-        entry = locals[index]
-        if entry.name == name:
-            updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=entry.ownership, consumed=True, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
-            result = (result) + ([updated])
-        else:
-            result = (result) + ([entry])
-        index += 1
-    return result
-
-def reset_local_consumption(locals, name):
-    result = []
-    index = 0
-    while True:
-        if index >= len(locals):
-            break
-        entry = locals[index]
-        if entry.name == name:
-            updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=entry.ownership, consumed=False, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
-            result = (result) + ([updated])
-        else:
-            result = (result) + ([entry])
-        index += 1
-    return result
-
-def update_local_ownership(locals, name, ownership):
-    result = []
-    index = 0
-    while True:
-        if index >= len(locals):
-            break
-        entry = locals[index]
-        if entry.name == name:
-            updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=ownership, consumed=entry.consumed, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
-            result = (result) + ([updated])
-        else:
-            result = (result) + ([entry])
-        index += 1
-    return result
-
 def lower_logical_not_with_operand(operand, temp_index, lines, diagnostics, string_constants):
     coerced = coerce_operand_to_type(operand, "i1", temp_index, lines)
     current_diagnostics = (diagnostics) + (coerced.diagnostics)
@@ -1405,6 +1145,36 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
     stripped = strip_enclosing_parentheses(trimmed)
     if stripped != trimmed:
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type)
+    if is_boolean_literal(stripped):
+        value = "0"
+        if matches_case_insensitive(trim_text(stripped), "true"):
+            value = "1"
+        operand = LLVMOperand(llvm_type="i1", value=value)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
+    if is_null_literal(stripped):
+        trimmed_expected = trim_text(expected_type)
+        null_type = "i8*"
+        if len(trimmed_expected) > 0  and  ends_with_pointer_suffix(trimmed_expected):
+            null_type = trimmed_expected
+        operand = LLVMOperand(llvm_type=null_type, value="null")
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
+    if is_number_literal(stripped):
+        trimmed_expected = trim_text(expected_type)
+        if trimmed_expected == "i64"  or  trimmed_expected == "i32"  and  is_integer_literal(stripped):
+            operand = LLVMOperand(llvm_type=trimmed_expected, value=trim_text(stripped))
+            return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
+        normalized = normalise_number_literal(stripped)
+        operand = LLVMOperand(llvm_type="double", value=normalized)
+        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
+    if is_string_literal(stripped):
+        interpolated = try_lower_interpolated_string_literal(stripped, bindings, locals, temp_index, lines, functions, context)
+        if interpolated != None:
+            result = interpolated
+            diagnostics = (diagnostics) + (result.diagnostics)
+            return ExpressionResult(lines=result.lines, temp_index=result.temp_index, operand=result.operand, diagnostics=diagnostics, string_constants=result.string_constants)
+        literal_result = lower_string_literal(stripped, temp_index, lines)
+        diagnostics = (diagnostics) + (literal_result.diagnostics)
+        return ExpressionResult(lines=literal_result.lines, temp_index=literal_result.temp_index, operand=literal_result.operand, diagnostics=diagnostics, string_constants=literal_result.string_constants)
     if starts_with(stripped, "await"):
         if len(stripped) == 5:
             diagnostics = append_string(diagnostics, "llvm lowering: await expression missing operand")
@@ -1504,6 +1274,35 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         target = trim_text(substring(stripped, 0, call_index))
         arguments_text = substring(stripped, call_index + 1, len(stripped) - 1)
         argument_entries = split_call_arguments(arguments_text)
+        member_target = parse_member_access(target)
+        if member_target.success  and  member_target.field == "concat":
+            receiver_name = trim_text(member_target.base)
+            if is_simple_identifier(receiver_name):
+                local = find_local_binding(locals, receiver_name)
+                if local != None:
+                    element_type = array_pointer_element_type(local.llvm_type)
+                    if element_type == "i8*":
+                        rewritten_args = [member_target.base]
+                        arg_index = 0
+                        while True:
+                            if arg_index >= len(argument_entries):
+                                break
+                            rewritten_args = (rewritten_args) + ([argument_entries[arg_index]])
+                            arg_index += 1
+                        return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context)
+                else:
+                    param = find_parameter_binding(bindings, receiver_name)
+                    if param != None:
+                        element_type = array_pointer_element_type(param.llvm_type)
+                        if element_type == "i8*":
+                            rewritten_args = [member_target.base]
+                            arg_index = 0
+                            while True:
+                                if arg_index >= len(argument_entries):
+                                    break
+                                rewritten_args = (rewritten_args) + ([argument_entries[arg_index]])
+                                arg_index += 1
+                            return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context)
         return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions, context)
     if len(stripped) >= 2:
         first_code = char_code_at_text(stripped, 0)
@@ -1540,105 +1339,67 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         load_result = load_local_operand(local, temp_index, lines)
         diagnostics = (diagnostics) + (load_result.diagnostics)
         return ExpressionResult(lines=load_result.lines, temp_index=load_result.temp_index, operand=load_result.operand, diagnostics=diagnostics, string_constants=empty_constants)
-    literal_candidate = trim_text(stripped)
-    if literal_candidate == "runtime":
-        runtime_result = lower_runtime_global_reference(temp_index, lines)
-        combined_diagnostics = (diagnostics) + (runtime_result.diagnostics)
-        return ExpressionResult(lines=runtime_result.lines, temp_index=runtime_result.temp_index, operand=runtime_result.operand, diagnostics=combined_diagnostics, string_constants=runtime_result.string_constants)
-    if literal_candidate == "fs":
-        runtime_result = lower_runtime_global_reference(temp_index, lines)
-        diagnostics = (diagnostics) + (runtime_result.diagnostics)
-        if runtime_result.operand == None:
-            return ExpressionResult(lines=runtime_result.lines, temp_index=runtime_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=runtime_result.string_constants)
-        field_result = lower_dynamic_member_access("fs", runtime_result.operand, runtime_result.temp_index, runtime_result.lines, diagnostics, runtime_result.string_constants)
-        return ExpressionResult(lines=field_result.lines, temp_index=field_result.temp_index, operand=field_result.operand, diagnostics=field_result.diagnostics, string_constants=field_result.string_constants)
-    if is_string_literal(literal_candidate):
-        if is_character_literal(literal_candidate):
-            char_value = get_character_literal_value(literal_candidate)
-            operand = LLVMOperand(llvm_type="i8", value=number_to_string(char_value))
-            return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
-        interpolated = try_lower_interpolated_string_literal(literal_candidate, bindings, locals, temp_index, lines, functions, context)
-        if interpolated != None:
-            lowered = interpolated
-            combined = (diagnostics) + (lowered.diagnostics)
-            return ExpressionResult(lines=lowered.lines, temp_index=lowered.temp_index, operand=lowered.operand, diagnostics=combined, string_constants=lowered.string_constants)
-        return lower_string_literal(literal_candidate, temp_index, lines)
-    if is_boolean_literal(literal_candidate):
-        value = "0"
-        if matches_case_insensitive(literal_candidate, "true"):
-            value = "1"
-        operand = LLVMOperand(llvm_type="i1", value=value)
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
-    if is_null_literal(literal_candidate):
-        operand = LLVMOperand(llvm_type="i8*", value="null")
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
-    if is_integer_literal(literal_candidate):
-        operand = LLVMOperand(llvm_type="i64", value=literal_candidate)
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
-    if is_number_literal(literal_candidate):
-        normalised = normalise_number_literal(literal_candidate)
-        operand = LLVMOperand(llvm_type="double", value=normalised)
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
-    diagnostics = append_string(diagnostics, "llvm lowering: unsupported expression `" + literal_candidate + "`")
+    diagnostics = append_string(diagnostics, "llvm lowering: unable to lower expression `" + expression + "`")
     return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
 
-def parse_borrow_expression(text):
-    trimmed = trim_text(text)
+def parse_borrow_expression(expression):
+    trimmed = trim_text(expression)
     diagnostics = []
     if len(trimmed) == 0:
         return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
-    if starts_with(trimmed, "borrow"):
-        if len(trimmed) > 6:
-            next = char_at(trimmed, 6)
-            if next != " "  and  next != "\t"  and  next != "(":
-                return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
-        remainder = trim_text(substring(trimmed, 6, len(trimmed)))
-        if len(remainder) == 0:
-            issue = append_string(diagnostics, "llvm lowering: borrow expression missing target")
-            return BorrowParseResult(recognized=True, success=False, target="", mutable=False, diagnostics=issue)
-        mutable_flag = False
-        if starts_with(remainder, "mut"):
-            after_mut = substring(remainder, 3, len(remainder))
-            mutable_flag = True
-            remainder = trim_text(after_mut)
-        if len(remainder) > 0  and  remainder[0] == "(":
-            argument_parse = extract_borrow_argument(remainder)
-            messages = (diagnostics) + (argument_parse.diagnostics)
-            if not argument_parse.success:
-                return BorrowParseResult(recognized=True, success=False, target="", mutable=mutable_flag, diagnostics=messages)
-            argument_text = argument_parse.argument
-            if starts_with(argument_text, "mut"):
-                after_mut = substring(argument_text, 3, len(argument_text))
-                trimmed_after_mut = trim_text(after_mut)
-                if len(trimmed_after_mut) > 0:
-                    mutable_flag = True
-                    argument_text = trimmed_after_mut
-            if len(argument_text) == 0:
-                messages = append_string(messages, "llvm lowering: borrow expression missing target")
-                return BorrowParseResult(recognized=True, success=False, target="", mutable=mutable_flag, diagnostics=messages)
-            if not is_valid_borrow_target(argument_text):
-                return BorrowParseResult(recognized=False, success=False, target="", mutable=mutable_flag, diagnostics=diagnostics)
-            return BorrowParseResult(recognized=True, success=True, target=argument_text, mutable=mutable_flag, diagnostics=messages)
-        simple_parse = extract_simple_borrow_target(remainder)
-        if not simple_parse.success:
-            return BorrowParseResult(recognized=False, success=False, target="", mutable=mutable_flag, diagnostics=diagnostics)
-        if not is_valid_borrow_target(simple_parse.argument):
-            return BorrowParseResult(recognized=False, success=False, target="", mutable=mutable_flag, diagnostics=diagnostics)
-        return BorrowParseResult(recognized=True, success=True, target=simple_parse.argument, mutable=mutable_flag, diagnostics=diagnostics)
-    if not starts_with(trimmed, "&"):
-        return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
-    if starts_with(trimmed, "&&"):
-        return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
-    remainder = trim_text(substring(trimmed, 1, len(trimmed)))
+    is_prefix_form = False
+    remainder = ""
     mutable_flag = False
-    if starts_with(remainder, "mut"):
-        mutable_flag = True
-        after_mut = substring(remainder, 3, len(remainder))
-        remainder = trim_text(after_mut)
+    if starts_with(trimmed, "&"):
+        if starts_with(trimmed, "&&"):
+            return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
+        is_prefix_form = True
+        remainder = trim_text(substring(trimmed, 1, len(trimmed)))
+    else:
+        after_keyword = ""
+        if starts_with(trimmed, "borrow_mut"):
+            after_keyword = trim_text(substring(trimmed, 10, len(trimmed)))
+            mutable_flag = True
+        else:
+            if starts_with(trimmed, "borrow"):
+                after_keyword = trim_text(substring(trimmed, 6, len(trimmed)))
+            else:
+                return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
+        if len(after_keyword) == 0  or  after_keyword[0] != "(":
+            return BorrowParseResult(recognized=False, success=False, target="", mutable=False, diagnostics=diagnostics)
+        remainder = after_keyword
+    if is_prefix_form:
+        if starts_with(remainder, "mut"):
+            mutable_flag = True
+            after_mut = substring(remainder, 3, len(remainder))
+            remainder = trim_text(after_mut)
     if len(remainder) == 0:
         issue = append_string(diagnostics, "llvm lowering: borrow expression missing target")
         return BorrowParseResult(recognized=True, success=False, target="", mutable=mutable_flag, diagnostics=issue)
-    return BorrowParseResult(recognized=True, success=True, target=trim_text(remainder), mutable=mutable_flag, diagnostics=diagnostics)
+    if len(remainder) > 0  and  remainder[0] == "(":
+        argument_parse = extract_borrow_argument(remainder)
+        messages = (diagnostics) + (argument_parse.diagnostics)
+        if not argument_parse.success:
+            return BorrowParseResult(recognized=True, success=False, target="", mutable=mutable_flag, diagnostics=messages)
+        argument_text = argument_parse.argument
+        if starts_with(argument_text, "mut"):
+            after_mut = substring(argument_text, 3, len(argument_text))
+            trimmed_after_mut = trim_text(after_mut)
+            if len(trimmed_after_mut) > 0:
+                mutable_flag = True
+                argument_text = trimmed_after_mut
+        if len(argument_text) == 0:
+            messages = append_string(messages, "llvm lowering: borrow expression missing target")
+            return BorrowParseResult(recognized=True, success=False, target="", mutable=mutable_flag, diagnostics=messages)
+        if not is_valid_borrow_target(argument_text):
+            return BorrowParseResult(recognized=False, success=False, target="", mutable=mutable_flag, diagnostics=diagnostics)
+        return BorrowParseResult(recognized=True, success=True, target=argument_text, mutable=mutable_flag, diagnostics=messages)
+    simple_parse = extract_simple_borrow_target(remainder)
+    if not simple_parse.success:
+        return BorrowParseResult(recognized=False, success=False, target="", mutable=mutable_flag, diagnostics=diagnostics)
+    if not is_valid_borrow_target(simple_parse.argument):
+        return BorrowParseResult(recognized=False, success=False, target="", mutable=mutable_flag, diagnostics=diagnostics)
+    return BorrowParseResult(recognized=True, success=True, target=simple_parse.argument, mutable=mutable_flag, diagnostics=diagnostics)
 
 def extract_borrow_argument(text):
     diagnostics = []
@@ -2214,7 +1975,14 @@ def lower_logical_and(expression, match, bindings, locals, temp_index, lines, fu
     diagnostics = (diagnostics) + (right_result.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_result.operand == None:
-        return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower && RHS in `" + expression + "`")
+        fallback_lines = right_result.lines
+        if not lines_end_with_terminator(fallback_lines):
+            fallback_lines = append_string(fallback_lines, "  br label %" + merge_label)
+        fallback_lines = append_string(fallback_lines, "")
+        fallback_lines = append_string(fallback_lines, merge_label + ":")
+        operand = LLVMOperand(llvm_type="i1", value="false")
+        return ExpressionResult(lines=fallback_lines, temp_index=right_result.temp_index, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
     right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines)
     diagnostics = (diagnostics) + (right_bool.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
@@ -2267,7 +2035,14 @@ def lower_logical_or(expression, match, bindings, locals, temp_index, lines, fun
     diagnostics = (diagnostics) + (right_result.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_result.operand == None:
-        return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower || RHS in `" + expression + "`")
+        fallback_lines = right_result.lines
+        if not lines_end_with_terminator(fallback_lines):
+            fallback_lines = append_string(fallback_lines, "  br label %" + merge_label)
+        fallback_lines = append_string(fallback_lines, "")
+        fallback_lines = append_string(fallback_lines, merge_label + ":")
+        operand = LLVMOperand(llvm_type="i1", value=left_bool.operand.value)
+        return ExpressionResult(lines=fallback_lines, temp_index=right_result.temp_index, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
     right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines)
     diagnostics = (diagnostics) + (right_bool.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
@@ -2284,6 +2059,28 @@ def lower_logical_or(expression, match, bindings, locals, temp_index, lines, fun
     current_lines = append_string(current_lines, "  " + result_temp + " = phi i1 [ true, %" + entry_label + " ], [ " + right_bool.operand.value + ", %" + right_end_label + " ]")
     operand = LLVMOperand(llvm_type="i1", value=result_temp)
     return ExpressionResult(lines=current_lines, temp_index=right_bool.temp_index + 1, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
+
+def lines_end_with_terminator(lines):
+    index = len(lines) - 1
+    while True:
+        if len(lines) == 0:
+            return False
+        if index < 0:
+            break
+        line = trim_text(lines[index])
+        if len(line) == 0:
+            index -= 1
+            continue
+        if starts_with(line, "ret"):
+            return True
+        if starts_with(line, "br "):
+            return True
+        if starts_with(line, "switch "):
+            return True
+        if line == "unreachable":
+            return True
+        return False
+    return False
 
 def lower_call_expression(target, arguments, bindings, locals, temp_index, lines, functions, context):
     diagnostics = []
@@ -2324,6 +2121,31 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     is_array_concat = False
     array_push_element_type = ""
     is_array_push = False
+    if not contains_text(trimmed_target, ".")  and  ends_with(trimmed_target, "concat")  and  len(trimmed_target) > 6:
+        receiver_name = trim_text(substring(trimmed_target, 0, len(trimmed_target) - 6))
+        if len(receiver_name) > 0  and  is_simple_identifier(receiver_name):
+            local = find_local_binding(locals, receiver_name)
+            parameter = find_parameter_binding(bindings, receiver_name)
+            receiver_operand = None
+            if local != None:
+                load_result = load_local_operand(local, current_temp, current_lines)
+                diagnostics = (diagnostics) + (load_result.diagnostics)
+                current_lines = load_result.lines
+                current_temp = load_result.temp_index
+                receiver_operand = load_result.operand
+            else:
+                if parameter != None:
+                    receiver_operand = LLVMOperand(llvm_type=parameter.llvm_type, value=parameter.llvm_name)
+            if receiver_operand != None:
+                element_type = array_pointer_element_type(receiver_operand.llvm_type)
+                if len(element_type) > 0:
+                    method_operand = receiver_operand
+                    injected_argument_count = 1
+                    trimmed_target = "concat"
+                    is_array_concat = True
+                    array_concat_element_type = element_type
+                    if not ends_with_pointer_suffix(element_type):
+                        helper_descriptor = RuntimeHelperDescriptor(target="concat", symbol="", return_type=receiver_operand.llvm_type, parameter_types=[receiver_operand.llvm_type, receiver_operand.llvm_type], effects=[])
     method_parse = parse_member_access(trimmed_target)
     if method_parse.success:
         method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context)
@@ -2377,37 +2199,42 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                     diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
                     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
             else:
-                helper_candidate = find_runtime_helper(trimmed_target)
-                if helper_candidate != None:
-                    helper_descriptor = helper_candidate
+                qualified_helper = find_runtime_helper(trimmed_target)
+                if qualified_helper != None:
+                    helper_descriptor = qualified_helper
                 else:
+                    field_helper = find_runtime_helper(method_parse.field)
                     lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "")
                     diagnostics = (diagnostics) + (lowered_self.diagnostics)
                     collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants)
                     current_lines = lowered_self.lines
                     current_temp = lowered_self.temp_index
-                    if lowered_self.operand != None:
-                        base_operand = lowered_self.operand
-                        array_element_type = array_pointer_element_type(base_operand.llvm_type)
-                        if len(array_element_type) > 0  and  method_parse.field == "concat":
-                            method_operand = base_operand
-                            trimmed_target = "concat"
-                            injected_argument_count = 1
-                            array_concat_element_type = array_element_type
-                            is_array_concat = True
-                            if not ends_with_pointer_suffix(array_element_type):
-                                helper_descriptor = RuntimeHelperDescriptor(target="concat", symbol="", return_type=base_operand.llvm_type, parameter_types=[base_operand.llvm_type, base_operand.llvm_type], effects=[])
-                        else:
-                            if len(array_element_type) > 0  and  method_parse.field == "push":
-                                method_operand = base_operand
-                                trimmed_target = "push"
-                                injected_argument_count = 1
-                                array_push_element_type = array_element_type
-                                is_array_push = True
-                                helper_descriptor = RuntimeHelperDescriptor(target="push", symbol="", return_type=base_operand.llvm_type, parameter_types=[base_operand.llvm_type, array_element_type], effects=[])
-                    else:
+                    if lowered_self.operand == None:
                         diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value")
                         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+                    base_operand = lowered_self.operand
+                    if field_helper != None:
+                        method_operand = base_operand
+                        trimmed_target = method_parse.field
+                        injected_argument_count = 1
+                        helper_descriptor = field_helper
+                    array_element_type = array_pointer_element_type(base_operand.llvm_type)
+                    if len(array_element_type) > 0  and  method_parse.field == "concat":
+                        method_operand = base_operand
+                        trimmed_target = "concat"
+                        injected_argument_count = 1
+                        array_concat_element_type = array_element_type
+                        is_array_concat = True
+                        if not ends_with_pointer_suffix(array_element_type):
+                            helper_descriptor = RuntimeHelperDescriptor(target="concat", symbol="", return_type=base_operand.llvm_type, parameter_types=[base_operand.llvm_type, base_operand.llvm_type], effects=[])
+                    else:
+                        if len(array_element_type) > 0  and  method_parse.field == "push":
+                            method_operand = base_operand
+                            trimmed_target = "push"
+                            injected_argument_count = 1
+                            array_push_element_type = array_element_type
+                            is_array_push = True
+                            helper_descriptor = RuntimeHelperDescriptor(target="push", symbol="", return_type=base_operand.llvm_type, parameter_types=[base_operand.llvm_type, array_element_type], effects=[])
     function_entry = None
     llvm_return = "double"
     expected_params = []
@@ -2496,6 +2323,15 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
     if len(operands) != expected_operand_count:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors")
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
+    if trimmed_target == "concat"  and  len(operands) >= 2:
+        inferred_element_type = array_pointer_element_type(operands[0].llvm_type)
+        if len(inferred_element_type) > 0:
+            is_array_concat = True
+            array_concat_element_type = inferred_element_type
+            if not ends_with_pointer_suffix(inferred_element_type):
+                llvm_return = operands[0].llvm_type
+                expected_params = [operands[0].llvm_type, operands[0].llvm_type]
+                helper_descriptor = RuntimeHelperDescriptor(target="concat", symbol="", return_type=operands[0].llvm_type, parameter_types=expected_params, effects=[])
     if function_entry != None  and  len(operands) < len(expected_params):
         param_index = len(operands)
         while True:
@@ -3170,13 +3006,24 @@ def lower_index_expression(parse, bindings, locals, temp_index, lines, functions
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     else:
         if is_string:
-            char_pointer = format_temp_name(current_temp)
-            current_lines = append_string(current_lines, "  " + char_pointer + " = getelementptr i8, i8* " + base_operand.value + ", i64 " + coerced_index.value)
+            char_ptr = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + char_ptr + " = getelementptr i8, i8* " + base_operand.value + ", i64 " + coerced_index.value)
             current_temp += 1
-            loaded_char = format_temp_name(current_temp)
-            current_lines = append_string(current_lines, "  " + loaded_char + " = load i8, i8* " + char_pointer)
+            ch_value = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + ch_value + " = load i8, i8* " + char_ptr)
             current_temp += 1
-            operand = LLVMOperand(llvm_type="i8", value=loaded_char)
+            buf = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + buf + " = call i8* @malloc(i64 2)")
+            current_temp += 1
+            buf0 = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + buf0 + " = getelementptr i8, i8* " + buf + ", i64 0")
+            current_temp += 1
+            current_lines = append_string(current_lines, "  store i8 " + ch_value + ", i8* " + buf0)
+            buf1 = format_temp_name(current_temp)
+            current_lines = append_string(current_lines, "  " + buf1 + " = getelementptr i8, i8* " + buf + ", i64 1")
+            current_temp += 1
+            current_lines = append_string(current_lines, "  store i8 0, i8* " + buf1)
+            operand = LLVMOperand(llvm_type="i8*", value=buf)
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=collected_string_constants)
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported array type for indexing: `" + array_type + "`")
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
@@ -5355,96 +5202,6 @@ def split_call_arguments(text):
     entries = append_string(entries, trim_text(current))
     return entries
 
-def split_array_elements(text):
-    trimmed = trim_text(text)
-    if len(trimmed) == 0:
-        return []
-    entries = []
-    current = ""
-    paren_depth = 0
-    bracket_depth = 0
-    brace_depth = 0
-    index = 0
-    in_single = False
-    in_double = False
-    escape = False
-    while True:
-        if index >= len(text):
-            break
-        ch = char_at(text, index)
-        if in_double:
-            current = current + ch
-            if escape:
-                escape = False
-            else:
-                if ch == "\\":
-                    escape = True
-                else:
-                    if ch == "\"":
-                        in_double = False
-            index += 1
-            continue
-        if in_single:
-            current = current + ch
-            if escape:
-                escape = False
-            else:
-                if ch == "\\":
-                    escape = True
-                else:
-                    if ch == "'":
-                        in_single = False
-            index += 1
-            continue
-        if ch == "\"":
-            in_double = True
-            current = current + ch
-            index += 1
-            continue
-        if ch == "'":
-            in_single = True
-            current = current + ch
-            index += 1
-            continue
-        if ch == "(":
-            paren_depth += 1
-        else:
-            if ch == ")":
-                if paren_depth > 0:
-                    paren_depth -= 1
-            else:
-                if ch == "[":
-                    bracket_depth += 1
-                else:
-                    if ch == "]":
-                        if bracket_depth > 0:
-                            bracket_depth -= 1
-                    else:
-                        if ch == "{":
-                            brace_depth += 1
-                        else:
-                            if ch == "}":
-                                if brace_depth > 0:
-                                    brace_depth -= 1
-        if ch == ","  and  paren_depth == 0  and  bracket_depth == 0  and  brace_depth == 0:
-            entries = append_string(entries, trim_text(current))
-            current = ""
-        else:
-            current = current + ch
-        index += 1
-    if len(current) > 0:
-        entries = append_string(entries, trim_text(current))
-    filtered = []
-    index = 0
-    while True:
-        if index >= len(entries):
-            break
-        entry = trim_text(entries[index])
-        if len(entry) > 0:
-            filtered = append_string(filtered, entry)
-        index += 1
-    return filtered
-
 def parse_array_literal_metadata(entries, context):
     if len(entries) == 0:
         return ArrayLiteralMetadata(element_type="", start_index=0)
@@ -5502,121 +5259,8 @@ def operation_name_for_symbol(symbol, llvm_type):
         return "srem"
     return "add"
 
-def format_temp_name(index):
-    return "%t" + number_to_string(index)
-
-def format_local_pointer_name(index):
-    return "%l" + number_to_string(index)
-
 def format_typed_operand(operand):
     return operand.llvm_type + " " + operand.value
-
-def ends_with_pointer_suffix(value):
-    trimmed = trim_text(value)
-    if len(trimmed) == 0:
-        return False
-    return trimmed[len(trimmed) - 1] == "*"
-
-def strip_pointer_suffix(value):
-    trimmed = trim_text(value)
-    if len(trimmed) == 0:
-        return trimmed
-    if trimmed[len(trimmed) - 1] != "*":
-        return trimmed
-    return trim_text(substring(trimmed, 0, len(trimmed) - 1))
-
-def is_copy_type(type_annotation, llvm_type):
-    trimmed = trim_text(type_annotation)
-    if starts_with(trimmed, "Affine<")  or  starts_with(trimmed, "Linear<"):
-        return False
-    if trimmed == "Affine"  or  trimmed == "Linear":
-        return False
-    if llvm_type == "double":
-        return True
-    if llvm_type == "i32":
-        return True
-    if llvm_type == "i64":
-        return True
-    if llvm_type == "i1":
-        return True
-    if ends_with_pointer_suffix(llvm_type):
-        return True
-    if len(trimmed) == 0:
-        return True
-    if trimmed[0] == "&":
-        return True
-    if starts_with(trimmed, "mut "):
-        stripped = strip_mut_prefix(trimmed)
-        if len(stripped) > 0:
-            if stripped[0] == "&":
-                return True
-    return False
-
-def default_return_literal(llvm_type):
-    if llvm_type == "double":
-        return "0.0"
-    if llvm_type == "i32":
-        return "0"
-    if llvm_type == "i64":
-        return "0"
-    if llvm_type == "i1":
-        return "false"
-    if ends_with_pointer_suffix(llvm_type):
-        return "null"
-    return "zeroinitializer"
-
-def starts_with(value, prefix):
-    if len(prefix) == 0:
-        return True
-    if len(value) < len(prefix):
-        return False
-    head = substring(value, 0, len(prefix))
-    return head == prefix
-
-def ends_with(value, suffix):
-    if len(suffix) == 0:
-        return True
-    if len(value) < len(suffix):
-        return False
-    start_index = len(value) - len(suffix)
-    tail = substring(value, start_index, len(value))
-    return tail == suffix
-
-def contains_text(haystack, needle):
-    if len(needle) == 0:
-        return True
-    if len(haystack) < len(needle):
-        return False
-    index = 0
-    while True:
-        if index + len(needle) > len(haystack):
-            break
-        candidate = substring(haystack, index, index + len(needle))
-        if candidate == needle:
-            return True
-        index += 1
-    return False
-
-def strip_mut_prefix(value):
-    trimmed = trim_text(value)
-    if len(trimmed) < 4:
-        return trimmed
-    prefix = substring(trimmed, 0, 4)
-    if prefix == "mut ":
-        return trim_text(substring(trimmed, 4, len(trimmed)))
-    return trimmed
-
-def is_simple_identifier(value):
-    trimmed = trim_text(value)
-    if len(trimmed) == 0:
-        return False
-    first = trimmed[0]
-    if first >= "0"  and  first <= "9":
-        return False
-    sanitized = sanitize_symbol(trimmed)
-    if sanitized != trimmed:
-        return False
-    return True
 
 def find_top_level_range_separator(value):
     paren_depth = 0
@@ -6120,6 +5764,25 @@ def is_string_literal(text):
     if char_code_at_text(trimmed, 0) != char_code("\""):
         return False
     if char_code_at_text(trimmed, len(trimmed) - 1) != char_code("\""):
+        return False
+    escape = False
+    index = 1
+    while True:
+        if index >= len(trimmed) - 1:
+            break
+        ch = char_at(trimmed, index)
+        if escape:
+            escape = False
+            index += 1
+            continue
+        if ch == "\\":
+            escape = True
+            index += 1
+            continue
+        if ch == "\"":
+            return False
+        index += 1
+    if escape:
         return False
     return True
 

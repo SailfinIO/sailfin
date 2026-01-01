@@ -248,6 +248,34 @@ fn is_string_literal(text -> string) -> boolean {
     if char_code_at_text(trimmed, trimmed.length - 1) != char_code("\"") {
         return false;
     }
+
+    // Avoid treating concatenation expressions like `"a" + "b"` as a single
+    // string literal. Require all interior quotes to be escaped.
+    let mut escape -> boolean = false;
+    let mut index -> number = 1;
+    loop {
+        if index >= trimmed.length - 1 {
+            break;
+        }
+        let ch = char_at(trimmed, index);
+        if escape {
+            escape = false;
+            index += 1;
+            continue;
+        }
+        if ch == "\\" {
+            escape = true;
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            return false;
+        }
+        index += 1;
+    }
+    if escape {
+        return false;
+    }
     return true;
 }
 

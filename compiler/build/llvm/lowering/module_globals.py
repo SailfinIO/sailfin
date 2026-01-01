@@ -4,10 +4,10 @@ from runtime import runtime_support as runtime
 from ...native_ir import NativeBinding, NativeFunction
 from ..types import TypeContext, LocalBinding, ParameterBinding, ModuleGlobalLoweringResult, StringConstant
 from ..utils import append_string, trim_text, number_to_string, matches_case_insensitive, is_number_literal, is_integer_literal, is_boolean_literal, sanitize_symbol
-from ..expressions import is_string_literal, normalise_number_literal
+from ..expressions import is_string_literal, normalise_number_literal, default_return_literal
 from ..strings import empty_string_constant_set, merge_string_constants
 from ..type_mapping import map_local_type
-from ..expression_lowering_stage2 import default_return_literal, lower_expression, coerce_operand_to_type, append_local_binding, find_local_binding
+from ..expression_lowering_stage2 import lower_expression, coerce_operand_to_type, append_local_binding, find_local_binding
 from ..lifetime import format_root_scope_id
 
 print = runtime.console

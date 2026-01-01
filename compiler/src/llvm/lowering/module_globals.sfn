@@ -29,6 +29,7 @@ import {
 import {
     is_string_literal,
     normalise_number_literal,
+    default_return_literal,
 } from "../expressions";
 
 import {
@@ -41,7 +42,6 @@ import {
 } from "../type_mapping";
 
 import {
-    default_return_literal,
     lower_expression,
     coerce_operand_to_type,
     append_local_binding,

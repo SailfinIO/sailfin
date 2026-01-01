@@ -4,11 +4,13 @@ from runtime import runtime_support as runtime
 from ...native_ir import NativeFunction, NativeInstruction, NativeSourceSpan
 from ...string_utils import substring
 from ..types import TypeContext, LocalBinding, ParameterBinding, LLVMOperand, BlockLoweringResult, LetLoweringResult, LoopContext, LifetimeRegionMetadata, LifetimeReleaseEvent, OwnershipInfo, OwnershipConsumption, ScopeMetadata, LocalMutation, StringConstant, IfStructure, TryStructure, LoopStructure, MatchStructure, MatchCaseStructure, MatchCaseCondition, MatchFieldBinding, MatchStructFieldBinding, EnumTypeInfo, EnumVariantInfo, StructTypeInfo, StructFieldInfo, ConditionConversion, BlockLabelResult, MatchArmMutations
-from ..utils import trim_text, append_string, number_to_string, index_of, starts_with, merge_parameter_bindings
+from ..utils import trim_text, append_string, number_to_string, index_of, starts_with, strip_mut_prefix, is_simple_identifier, merge_parameter_bindings
 from ..strings import empty_string_constant_set, merge_string_constants
 from ..type_context import find_struct_info_by_name, find_interface_info_by_name, find_enum_info_by_llvm_type, resolve_enum_info_for_literal, resolve_enum_variant_info
-from ..expression_lowering_stage2 import append_local_binding, array_pointer_element_type, array_struct_type_for_element, coerce_operand_to_type, detect_suspension_conflicts, default_return_literal, emit_boolean_and, emit_comparison_instruction, extract_simple_identifier, harmonise_operands, is_simple_identifier, is_union_llvm_type, load_local_operand, lower_expression, lower_expression_statement, lower_return_instruction, map_local_type, mark_local_consumed, mark_parameter_consumed, parse_enum_literal, parse_inline_let_expression, parse_range_iterable, parse_struct_pattern, parse_union_payload_types, strip_mut_prefix, analyze_value_ownership, detect_borrow_conflicts
-from ..expressions import find_local_binding, find_parameter_binding, format_local_pointer_name, format_temp_name
+from ..expression_lowering_stage2 import append_local_binding, coerce_operand_to_type, detect_suspension_conflicts, emit_boolean_and, emit_comparison_instruction, extract_simple_identifier, harmonise_operands, is_union_llvm_type, load_local_operand, lower_expression, lower_expression_statement, lower_return_instruction, map_local_type, parse_enum_literal, parse_inline_let_expression, parse_range_iterable, parse_struct_pattern, parse_union_payload_types, analyze_value_ownership, detect_borrow_conflicts
+from ..expression_lowering.arrays import array_pointer_element_type
+from ..type_mapping import array_struct_type_for_element
+from ..expressions import find_local_binding, find_parameter_binding, mark_local_consumed, mark_parameter_consumed, default_return_literal, format_local_pointer_name, format_temp_name
 from ..lifetime import infer_borrow_base_scope, append_lifetime_region, append_lifetime_release_event, mark_lifetime_region_released, apply_lifetime_release_events, make_lifetime_region_metadata, format_root_scope_id, make_child_scope_id
 from compiler.build.llvm.lowering.phi import emit_phi_merges_for_match, emit_phi_merges_for_straight_if, emit_phi_merges_for_if_else, find_last_label, retarget_recent_mutations, materialize_mutation_values_at_exit, collect_mutation_names, find_mutation_for_name
 
@@ -1976,9 +1978,11 @@ def lower_if_instruction(function, start_index, llvm_return, bindings, locals, a
     collected_mutations = []
     structure = collect_if_structure(function.instructions, start_index, end, function.name)
     diagnostics = (diagnostics) + (structure.diagnostics)
+    rendered_condition_source = trim_text(function.instructions[start_index].condition)
+    sanitized_condition_source = sanitize_if_condition_text(rendered_condition_source)
     condition = lower_condition_to_i1(
 function.name,
-function.instructions[start_index].condition,
+sanitized_condition_source,
 bindings,
 current_locals,
 current_temp,
@@ -1991,7 +1995,7 @@ context
     current_temp = condition.temp_index
     collected_string_constants = condition.string_constants
     if condition.operand == None:
-        rendered_condition = trim_text(function.instructions[start_index].condition)
+        rendered_condition = sanitized_condition_source
         if len(rendered_condition) == 0:
             diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "`")
         else:
@@ -2168,6 +2172,71 @@ current_temp
         if not else_terminated:
             merged_bindings = merge_parameter_bindings(merged_bindings, else_bindings)
     return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=merged_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=terminated, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=collected_mutations, string_constants=collected_string_constants)
+
+def sanitize_if_condition_text(condition):
+    trimmed = trim_text(condition)
+    if len(trimmed) == 0:
+        return trimmed
+    if starts_with(trimmed, "{"):
+        return trimmed
+    paren_depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    in_string = False
+    escape_next = False
+    index = 0
+    while True:
+        if index >= len(trimmed):
+            break
+        ch = substring(trimmed, index, index + 1)
+        if in_string:
+            if escape_next:
+                escape_next = False
+                index += 1
+                continue
+            if ch == "\\":
+                escape_next = True
+                index += 1
+                continue
+            if ch == "\"":
+                in_string = False
+            index += 1
+            continue
+        if ch == "\"":
+            in_string = True
+            index += 1
+            continue
+        if ch == "(":
+            paren_depth += 1
+            index += 1
+            continue
+        if ch == ")":
+            if paren_depth > 0:
+                paren_depth -= 1
+            index += 1
+            continue
+        if ch == "[":
+            bracket_depth += 1
+            index += 1
+            continue
+        if ch == "]":
+            if bracket_depth > 0:
+                bracket_depth -= 1
+            index += 1
+            continue
+        if ch == "{":
+            if paren_depth == 0  and  bracket_depth == 0  and  brace_depth == 0  and  index > 0:
+                return trim_text(substring(trimmed, 0, index))
+            brace_depth += 1
+            index += 1
+            continue
+        if ch == "}":
+            if brace_depth > 0:
+                brace_depth -= 1
+            index += 1
+            continue
+        index += 1
+    return trimmed
 
 def lower_let_instruction(function, instruction, bindings, locals, allocas, lines, temp_index, next_local_id, next_region_id, functions, context, scope_id, scope_depth, current_label):
     diagnostics = []
