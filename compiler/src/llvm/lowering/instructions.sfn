@@ -67,7 +67,6 @@ import {
 import {
     append_local_binding,
     coerce_operand_to_type,
-    detect_suspension_conflicts,
     emit_boolean_and,
     emit_comparison_instruction,
     extract_simple_identifier,
@@ -75,17 +74,21 @@ import {
     is_union_llvm_type,
     load_local_operand,
     lower_expression,
-    lower_expression_statement,
-    lower_return_instruction,
-    map_local_type,
     parse_enum_literal,
-    parse_inline_let_expression,
     parse_range_iterable,
     parse_struct_pattern,
     parse_union_payload_types,
     analyze_value_ownership,
     detect_borrow_conflicts,
-} from "../expression_lowering_stage2";
+} from "../expression_lowering_stage2/core";
+
+import {
+    detect_suspension_conflicts,
+    lower_expression_statement,
+    lower_return_instruction,
+    map_local_type,
+    parse_inline_let_expression,
+} from "../expression_lowering_stage2/statement";
 
 import {
     array_pointer_element_type,

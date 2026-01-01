@@ -90,6 +90,14 @@ def compile_stage1(sources: Iterable[pathlib.Path], output_dir: pathlib.Path) ->
                 conflicting_dir = output_dir / entry.stem
                 if conflicting_dir.is_dir():
                     shutil.rmtree(conflicting_dir)
+        # Symmetric case: a previous run may have left behind a module file that
+        # conflicts with a generated package directory (e.g. `foo.py` vs `foo/`).
+        # In that scenario imports like `from pkg.foo.bar import ...` will fail.
+        for entry in output_dir.rglob("*"):
+            if entry.is_dir():
+                conflicting_file = entry.parent / f"{entry.name}.py"
+                if conflicting_file.is_file():
+                    conflicting_file.unlink()
     except Exception as exc:
         raise Stage1CompileError(
             f"failed to clean stale output directories under {output_dir}: {exc}") from exc

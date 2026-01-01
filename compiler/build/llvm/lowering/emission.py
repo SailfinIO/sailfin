@@ -6,9 +6,9 @@ from ..types import TypeContext, LocalBinding, ParameterBinding, LoweredLLVMFunc
 from ..utils import append_string, join_with_separator, sanitize_symbol, number_to_string, matches_case_insensitive
 from ..strings import empty_string_constant_set, append_string_constant, merge_string_constants
 from ..type_mapping import map_return_type
-from ..expression_lowering_stage2 import prepare_parameters, future_pointer_type_for_return_type, spawn_symbol_for_return_type, spawn_ctx_symbol_for_return_type, format_temp_name, append_llvm_operand
-from ..expressions import default_return_literal
-from ..expression_lowering_stage2 import make_string_constant_name_for_module
+from ..expression_lowering_stage2.statement import prepare_parameters, future_pointer_type_for_return_type, spawn_symbol_for_return_type, spawn_ctx_symbol_for_return_type
+from ..expression_lowering_stage2.core import append_llvm_operand, make_string_constant_name_for_module
+from ..expressions import default_return_literal, format_temp_name
 from ..lifetime import validate_borrow_lifetimes, format_root_scope_id
 from ..rendering import should_internalize_function
 from compiler.build.llvm.lowering.instructions import lower_instruction_range

@@ -46,7 +46,7 @@ import {
     coerce_operand_to_type,
     append_local_binding,
     find_local_binding,
-} from "../expression_lowering_stage2";
+} from "../expression_lowering_stage2/core";
 
 import {
     format_root_scope_id,

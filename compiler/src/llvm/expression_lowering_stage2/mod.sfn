@@ -1,0 +1,64 @@
+// compiler/src/llvm/expression_lowering_stage2/mod.sfn
+//
+// Compatibility facade.
+//
+// The original lowering implementation grew very large and became expensive to
+// recompile. The implementation is split into submodules in this directory.
+//
+// This module re-exports the stable surface area used by the rest of the
+// compiler and by stage1/bootstrap shims.
+
+export {
+    // Statement + entrypoint helpers
+    lower_expression_statement,
+    lower_return_instruction,
+    parse_assignment_expression,
+    parse_inline_let_expression,
+    detect_suspension_conflicts,
+    prepare_parameters,
+
+    // Async lowering ABI helpers
+    future_pointer_type_for_return_type,
+    spawn_symbol_for_return_type,
+    spawn_ctx_symbol_for_return_type,
+
+    // Type mapping helper consumed by instruction lowering
+    map_local_type,
+} from "./statement";
+
+export {
+    // Expression lowering core surface
+    lower_expression,
+    coerce_operand_to_type,
+    harmonise_operands,
+    emit_boolean_and,
+    emit_comparison_instruction,
+    load_local_operand,
+
+    // Locals/bindings helpers used by other passes
+    append_local_binding,
+    find_local_binding,
+    append_llvm_operand,
+
+    // Parsing helpers used by instruction lowering
+    parse_enum_literal,
+    parse_struct_pattern,
+    parse_range_iterable,
+
+    // Union helpers shared across lowering
+    parse_union_payload_types,
+    is_union_llvm_type,
+    extract_simple_identifier,
+
+    // Ownership/borrow analysis helpers used across lowering
+    analyze_value_ownership,
+    detect_borrow_conflicts,
+
+    // String helpers used by bootstrap shims
+    unescape_string_literal,
+    make_string_constant_name,
+    make_string_constant_name_for_module,
+} from "./core";
+
+// Historically consumers imported these via expression_lowering_stage2.
+export { format_temp_name } from "../expressions";

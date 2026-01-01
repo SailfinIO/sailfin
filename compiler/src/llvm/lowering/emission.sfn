@@ -40,17 +40,17 @@ import {
     future_pointer_type_for_return_type,
     spawn_symbol_for_return_type,
     spawn_ctx_symbol_for_return_type,
-    format_temp_name,
+} from "../expression_lowering_stage2/statement";
+
+import {
     append_llvm_operand,
-} from "../expression_lowering_stage2";
+    make_string_constant_name_for_module,
+} from "../expression_lowering_stage2/core";
 
 import {
     default_return_literal,
+    format_temp_name,
 } from "../expressions";
-
-import {
-    make_string_constant_name_for_module,
-} from "../expression_lowering_stage2";
 
 import {
     validate_borrow_lifetimes,
