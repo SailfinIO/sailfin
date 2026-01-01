@@ -6,7 +6,7 @@ from compiler.build.ast import Program
 from compiler.build.emitter_sailfin import emit_program
 from compiler.build.emit_native import emit_native, emit_native_with_module_name, EmitNativeResult, NativeModule
 from compiler.build.native_lowering import lower_to_python, LoweredPythonResult
-from compiler.build.native_llvm_lowering import lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context
+from compiler.build.llvm.lowering.entrypoints import lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context
 from compiler.build.native_ir import LayoutManifest, parse_layout_manifest
 from compiler.build.string_utils import substring
 from compiler.build.token import Token
