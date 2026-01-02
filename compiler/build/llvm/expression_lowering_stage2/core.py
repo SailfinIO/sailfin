@@ -13,7 +13,7 @@ from compiler.build.llvm.expression_lowering_stage2.core_operands import emit_co
 from compiler.build.llvm.expression_lowering_stage2.core_operands import emit_comparison_instruction, emit_boolean_and, load_local_operand, coerce_operand_to_type, dominant_type, is_string_pointer_type, harmonise_operands
 from compiler.build.llvm.expression_lowering_stage2.core_scopes import find_local_binding, infer_borrow_base_scope, append_lifetime_region, append_lifetime_release_event, apply_lifetime_release_events, make_lifetime_region_metadata, format_root_scope_id, make_child_scope_id, is_scope_descendant, append_local_binding, append_llvm_operand, append_struct_literal_field, append_native_struct, append_native_enum, replace_llvm_operand
 from compiler.build.llvm.expression_lowering_stage2.core_scopes import find_local_binding, infer_borrow_base_scope, append_lifetime_region, append_lifetime_release_event, apply_lifetime_release_events, make_lifetime_region_metadata, format_root_scope_id, make_child_scope_id, is_scope_descendant, append_local_binding, append_llvm_operand, append_struct_literal_field, append_native_struct, append_native_enum, replace_llvm_operand
-from ..strings import empty_string_constant_set, append_string_constant, merge_string_constants, find_string_constant, render_string_constants, escape_string_for_llvm
+from ..strings import empty_string_constant_set, append_string_constant, merge_string_constants, find_string_constant, find_string_constant_by_name, render_string_constants, escape_string_for_llvm
 from ..type_mapping import map_type_annotation, ends_with_pointer_suffix, strip_pointer_suffix, layout_annotation_requires_pointer, layout_annotation_base_type, annotation_is_array, layout_annotation_represents_user_value, is_copy_type, array_struct_type_for_element
 from ..type_context import fixup_enum_layouts, find_struct_info_by_name, find_interface_info_by_name, find_vtable_for_struct_interface, find_struct_info_by_llvm_type, find_struct_field_index, find_struct_field_info, find_enum_info_by_llvm_type, resolve_struct_info_from_llvm_type, lookup_allocation_info, resolve_struct_info_for_literal, resolve_struct_info_for_method_target, resolve_interface_info_for_method_target, resolve_enum_info_for_literal, resolve_enum_variant_info, find_variant_field_info
 from ..rendering import find_function_by_name
@@ -23,6 +23,7 @@ from compiler.build.llvm.expression_lowering_stage2.core_bindings_stage2 import 
 from compiler.build.llvm.expression_lowering_stage2.core_type_mapping_stage2 import map_struct_type_annotation_ctx, map_enum_type_annotation, map_interface_type_annotation, map_primitive_type, map_optional_type, map_reference_inner_type, map_reference_type, map_array_pointer_type, unwrap_move_wrapper, find_top_level_union_separator, split_union_annotations, is_union_annotation, map_union_type, map_return_type, future_pointer_type_for_return_type, await_symbol_for_future_pointer_type, map_parameter_type
 from compiler.build.llvm.expression_lowering_stage2.core_parsing_stage2 import parse_borrow_expression, extract_borrow_argument, extract_simple_borrow_target, is_valid_borrow_target, parse_ternary_expression, parse_raw_address_expression, parse_cast_expression, parse_array_literal_metadata, map_metadata_annotation
 from compiler.build.llvm.expression_lowering_stage2.core_operators_stage2 import strip_enclosing_parentheses, find_top_level_operator, find_comparison_operator, find_logical_operator, lines_end_with_terminator
+from compiler.build.llvm.expression_lowering_stage2.core_strings_stage2 import lower_string_literal, emit_string_concat, coerce_operand_to_string
 from compiler.build.llvm.expression_lowering_stage2.core_ownership_stage2 import analyze_value_ownership_impl, detect_borrow_conflicts_impl, format_suspension_location_impl, resolve_borrow_base_impl
 from ..expression_lowering.splitting import split_array_elements
 from ..expression_lowering.arrays import lower_struct_array_concat, lower_array_push_in_place, find_top_level_comma_in_llvm_type, array_pointer_element_type
@@ -2199,28 +2200,6 @@ def lower_cast_expression(parse, bindings, locals, temp_index, lines, functions,
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported cast from `" + operand.llvm_type + "` to `" + target_type + "`")
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=lowered.string_constants)
 
-def find_previous_non_space_char(value, index):
-    position = index
-    while True:
-        if position <= 0:
-            break
-        position -= 1
-        ch = char_at(value, position)
-        if not is_trim_char(ch):
-            return ch
-    return None
-
-def find_next_non_space_char(value, index):
-    position = index + 1
-    while True:
-        if position >= len(value):
-            break
-        ch = char_at(value, position)
-        if not is_trim_char(ch):
-            return ch
-        position += 1
-    return None
-
 def find_call_site(expression):
     depth = 0
     index = 0
@@ -2326,39 +2305,6 @@ def split_call_arguments(text):
     entries = append_string(entries, trim_text(current))
     return entries
 
-def parse_array_literal_metadata(entries, context):
-    if len(entries) == 0:
-        return ArrayLiteralMetadata(element_type="", start_index=0)
-    first = trim_text(entries[0])
-    if len(first) < 9:
-        return ArrayLiteralMetadata(element_type="", start_index=0)
-    prefix = substring(first, 0, 9)
-    if prefix != "#element:":
-        return ArrayLiteralMetadata(element_type="", start_index=0)
-    annotation = trim_text(substring(first, 9, len(first)))
-    if len(annotation) == 0:
-        return ArrayLiteralMetadata(element_type="", start_index=1)
-    mapped = map_metadata_annotation(context, annotation)
-    return ArrayLiteralMetadata(element_type=mapped, start_index=1)
-
-def map_metadata_annotation(context, annotation):
-    trimmed = trim_text(annotation)
-    if len(trimmed) == 0:
-        return ""
-    primitive = map_primitive_type(context, trimmed)
-    if len(primitive) > 0:
-        return primitive
-    if len(trimmed) > 2:
-        suffix = substring(trimmed, len(trimmed) - 2, len(trimmed))
-        if suffix == "[]":
-            inner_annotation = trim_text(substring(trimmed, 0, len(trimmed) - 2))
-            inner_type = map_metadata_annotation(context, inner_annotation)
-            if len(inner_type) == 0:
-                return ""
-            struct_type = array_struct_type_for_element(inner_type)
-            return struct_type + "*"
-    return ""
-
 def operation_name_for_symbol(symbol, llvm_type):
     if llvm_type == "double":
         if symbol == "+":
@@ -2385,21 +2331,6 @@ def operation_name_for_symbol(symbol, llvm_type):
 
 def format_typed_operand(operand):
     return operand.llvm_type + " " + operand.value
-
-def lower_string_literal(literal, temp_index, lines):
-    content = unescape_string_literal(literal)
-    escaped = escape_string_for_llvm(content)
-    array_length = len(content) + 1
-    array_type = "[" + number_to_string(array_length) + " x i8]"
-    current_lines = lines
-    malloc_temp = format_temp_name(temp_index)
-    current_lines = append_string(current_lines, "  " + malloc_temp + " = call i8* @malloc(i64 " + number_to_string(array_length) + ")")
-    cast_temp = format_temp_name(temp_index + 1)
-    current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + array_type + "*")
-    current_lines = append_string(current_lines, "  store " + array_type + " c\"" + escaped + "\\00\", " + array_type + "* " + cast_temp)
-    operand = LLVMOperand(llvm_type="i8*", value=malloc_temp)
-    empty_constants = empty_string_constant_set()
-    return ExpressionResult(lines=current_lines, temp_index=temp_index + 2, operand=operand, diagnostics=[], string_constants=empty_constants)
 
 def try_lower_interpolated_string_literal(literal, bindings, locals, temp_index, lines, functions, context):
     content = unescape_string_literal(literal)
@@ -2469,182 +2400,8 @@ def try_lower_interpolated_string_literal(literal, bindings, locals, temp_index,
         index += 1
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=current_operand, diagnostics=diagnostics, string_constants=collected_string_constants)
 
-def emit_string_concat(left, right, temp_index, lines):
-    harmonised = harmonise_operands(left, right, temp_index, lines)
-    if harmonised.left == None  or  harmonised.right == None:
-        return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=None, diagnostics=harmonised.diagnostics, string_constants=empty_string_constant_set())
-    left_aligned = coerce_operand_to_type(harmonised.left, "i8*", harmonised.temp_index, harmonised.lines)
-    diagnostics = (harmonised.diagnostics) + (left_aligned.diagnostics)
-    right_aligned = coerce_operand_to_type(harmonised.right, "i8*", left_aligned.temp_index, left_aligned.lines)
-    diagnostics = (diagnostics) + (right_aligned.diagnostics)
-    if left_aligned.operand == None  or  right_aligned.operand == None:
-        return ExpressionResult(lines=right_aligned.lines, temp_index=right_aligned.temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_string_constant_set())
-    temp_name = format_temp_name(right_aligned.temp_index)
-    line = "  " + temp_name + " = call i8* @sailfin_runtime_string_concat(i8* " + left_aligned.operand.value + ", i8* " + right_aligned.operand.value + ")"
-    out_lines = append_string(right_aligned.lines, line)
-    operand = LLVMOperand(llvm_type="i8*", value=temp_name)
-    return ExpressionResult(lines=out_lines, temp_index=right_aligned.temp_index + 1, operand=operand, diagnostics=diagnostics, string_constants=empty_string_constant_set())
-
-def coerce_operand_to_string(operand, temp_index, lines):
-    empty_constants = empty_string_constant_set()
-    if operand.llvm_type == "i8*":
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=[], string_constants=empty_constants)
-    if operand.llvm_type == "double":
-        temp_name = format_temp_name(temp_index)
-        out_lines = append_string(lines, "  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")")
-        out_operand = LLVMOperand(llvm_type="i8*", value=temp_name)
-        return ExpressionResult(lines=out_lines, temp_index=temp_index + 1, operand=out_operand, diagnostics=[], string_constants=empty_constants)
-    if operand.llvm_type == "i64":
-        cast_temp = format_temp_name(temp_index)
-        out_lines = append_string(lines, "  " + cast_temp + " = sitofp i64 " + operand.value + " to double")
-        call_temp = format_temp_name(temp_index + 1)
-        out_lines = append_string(out_lines, "  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")")
-        out_operand = LLVMOperand(llvm_type="i8*", value=call_temp)
-        return ExpressionResult(lines=out_lines, temp_index=temp_index + 2, operand=out_operand, diagnostics=[], string_constants=empty_constants)
-    if operand.llvm_type == "i32":
-        cast_temp = format_temp_name(temp_index)
-        out_lines = append_string(lines, "  " + cast_temp + " = sitofp i32 " + operand.value + " to double")
-        call_temp = format_temp_name(temp_index + 1)
-        out_lines = append_string(out_lines, "  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")")
-        out_operand = LLVMOperand(llvm_type="i8*", value=call_temp)
-        return ExpressionResult(lines=out_lines, temp_index=temp_index + 2, operand=out_operand, diagnostics=[], string_constants=empty_constants)
-    if operand.llvm_type == "i8":
-        as_i64 = format_temp_name(temp_index)
-        as_double = format_temp_name(temp_index + 1)
-        as_string = format_temp_name(temp_index + 2)
-        out_lines = append_string(lines, "  " + as_i64 + " = sext i8 " + operand.value + " to i64")
-        out_lines = append_string(out_lines, "  " + as_double + " = sitofp i64 " + as_i64 + " to double")
-        out_lines = append_string(out_lines, "  " + as_string + " = call i8* @sailfin_runtime_number_to_string(double " + as_double + ")")
-        out_operand = LLVMOperand(llvm_type="i8*", value=as_string)
-        return ExpressionResult(lines=out_lines, temp_index=temp_index + 3, operand=out_operand, diagnostics=[], string_constants=empty_constants)
-    if operand.llvm_type == "i1":
-        true_lit = lower_string_literal("\"true\"", temp_index, lines)
-        if true_lit.operand == None:
-            return ExpressionResult(lines=true_lit.lines, temp_index=true_lit.temp_index, operand=None, diagnostics=[], string_constants=empty_constants)
-        false_lit = lower_string_literal("\"false\"", true_lit.temp_index, true_lit.lines)
-        if false_lit.operand == None:
-            return ExpressionResult(lines=false_lit.lines, temp_index=false_lit.temp_index, operand=None, diagnostics=[], string_constants=empty_constants)
-        select_temp = format_temp_name(false_lit.temp_index)
-        out_lines = append_string(false_lit.lines, "  " + select_temp + " = select i1 " + operand.value + ", i8* " + true_lit.operand.value + ", i8* " + false_lit.operand.value)
-        out_operand = LLVMOperand(llvm_type="i8*", value=select_temp)
-        return ExpressionResult(lines=out_lines, temp_index=false_lit.temp_index + 1, operand=out_operand, diagnostics=[], string_constants=empty_constants)
-    diagnostics = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"]
-    return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
-
 def append_match_arm_mutations(list, arm):
     list.append(arm)
     return list
-
-def merge_parameter_bindings(first, second):
-    result = []
-    index = 0
-    while True:
-        if index >= len(first):
-            break
-        primary = first[index]
-        consumed_flag = primary.consumed
-        counterpart = find_parameter_binding(second, primary.name)
-        if counterpart != None:
-            consumed_flag = consumed_flag  or  counterpart.consumed
-        result = append_parameter_binding(result, ParameterBinding(name=primary.name, llvm_name=primary.llvm_name, llvm_type=primary.llvm_type, type_annotation=primary.type_annotation, consumed=consumed_flag, span=primary.span))
-        index += 1
-    return result
-
-def append_parameter_binding(bindings, binding):
-    return (bindings) + ([binding])
-
-def empty_string_constant_set():
-    return []
-
-def string_constant_singleton(constant):
-    return [constant]
-
-def clone_string_constants(constants):
-    copy = []
-    index = 0
-    while True:
-        if index >= len(constants):
-            break
-        copy = append_string_constant(copy, constants[index])
-        index += 1
-    return copy
-
-def append_string_constant(set, constant):
-    return (set) + ([constant])
-
-def merge_string_constants(existing, new_constants):
-    result = existing
-    index = 0
-    while True:
-        if index >= len(new_constants):
-            break
-        candidate = new_constants[index]
-        found_by_name = find_string_constant_by_name(result, candidate.name)
-        if found_by_name == None:
-            result = append_string_constant(result, candidate)
-        index += 1
-    return result
-
-def find_string_constant(constants, content):
-    index = 0
-    while True:
-        if index >= len(constants):
-            break
-        candidate = constants[index]
-        if candidate.content == content:
-            return candidate
-        index += 1
-    return None
-
-def find_string_constant_by_name(constants, name):
-    index = 0
-    while True:
-        if index >= len(constants):
-            break
-        candidate = constants[index]
-        if candidate.name == name:
-            return candidate
-        index += 1
-    return None
-
-def render_string_constants(constants):
-    lines = []
-    index = 0
-    while True:
-        if index >= len(constants):
-            break
-        constant = constants[index]
-        escaped = escape_string_for_llvm(constant.content)
-        length_str = number_to_string(constant.byte_count + 1)
-        declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\""
-        lines = append_string(lines, declaration)
-        index += 1
-    return lines
-
-def escape_string_for_llvm(content):
-    result = ""
-    index = 0
-    while True:
-        if index >= len(content):
-            break
-        ch = content[index]
-        if ch == "\n":
-            result = result + "\\0A"
-        else:
-            if ch == "\r":
-                result = result + "\\0D"
-            else:
-                if ch == "\t":
-                    result = result + "\\09"
-                else:
-                    if ch == "\"":
-                        result = result + "\\22"
-                    else:
-                        if ch == "\\":
-                            result = result + "\\5C"
-                        else:
-                            result = result + ch
-        index += 1
-    return result
 
 __all__ = ["parse_union_payload_types", "is_union_llvm_type", "extract_simple_identifier", "unescape_string_literal", "make_string_constant_name", "make_string_constant_name_for_module", "parse_struct_literal", "parse_struct_pattern", "parse_enum_literal", "parse_member_access", "parse_index_expression", "parse_range_iterable", "emit_comparison_instruction", "emit_boolean_and", "load_local_operand", "coerce_operand_to_type", "dominant_type", "is_string_pointer_type", "harmonise_operands", "find_local_binding", "infer_borrow_base_scope", "append_lifetime_region", "append_lifetime_release_event", "apply_lifetime_release_events", "make_lifetime_region_metadata", "format_root_scope_id", "make_child_scope_id", "is_scope_descendant", "append_local_binding", "append_llvm_operand", "append_struct_literal_field", "append_native_struct", "append_native_enum", "replace_llvm_operand"]
