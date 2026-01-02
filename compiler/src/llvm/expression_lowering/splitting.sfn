@@ -1,9 +1,10 @@
 // compiler/src/llvm/expression_lowering/splitting.sfn
 //
-// Shared expression-text splitting helpers.
+// Expression text splitting utilities for LLVM lowering.
 //
-// Mechanical extraction from compiler/src/llvm/expression_lowering_stage2.sfn.
-// Logic should remain identical.
+// Provides delimiter-aware splitting of expression text, handling nested
+// parentheses, brackets, braces, and string literals. Used to parse array
+// elements, function arguments, and other comma-separated constructs.
 
 import { char_at } from "../../string_utils";
 

@@ -1,9 +1,10 @@
 // compiler/src/llvm/expression_lowering/arrays.sfn
 //
-// Array helpers for LLVM expression lowering.
+// Array operation lowering for LLVM backend.
 //
-// Mechanical extraction from compiler/src/llvm/expression_lowering_stage2.sfn.
-// Logic should remain identical.
+// Implements LLVM IR generation for array operations: concatenation
+// (`lower_struct_array_concat`), element type extraction from array pointer
+// types, and array struct type mapping.
 
 import { substring } from "../../string_utils";
 

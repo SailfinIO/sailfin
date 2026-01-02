@@ -1,10 +1,11 @@
-// compiler/src/native_llvm_lowering.sfn
+// compiler/src/llvm/expression_lowering_stage2/statement.sfn
 //
-// LLVM IR lowering module. Converts textual `.sfn-asm` artifacts into
-// LLVM IR for native code generation.
+// Statement lowering and type mapping for LLVM backend.
 //
-// This module orchestrates the lowering process by importing modular components
-// from the ./llvm/ directory.
+// Implements statement-level lowering (`lower_expression_statement`,
+// `lower_return_instruction`), "assignment"/"let" parsing, parameter preparation,
+// type annotation mapping to LLVM types (`map_local_type`, `map_return_type`),
+// and suspension conflict detection for async code.
 
 import { NativeModule } from "../../emit_native";
 import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest, NativeBinding } from "../../native_ir";

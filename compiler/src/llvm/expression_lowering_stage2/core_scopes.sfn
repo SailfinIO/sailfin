@@ -1,9 +1,11 @@
 // compiler/src/llvm/expression_lowering_stage2/core_scopes.sfn
 //
-// Scope + locals + lifetime helper utilities extracted from ./core.sfn.
+// Scope, local bindings, and lifetime tracking for expression lowering.
 //
-// Mechanical split from compiler/src/llvm/expression_lowering_stage2/core.sfn.
-// Logic should remain identical.
+// Manages the symbol tables and lifetime metadata used during LLVM lowering:
+// `find_local_binding`, `find_parameter_binding`, `append_local_binding`,
+// `infer_borrow_base_scope`, lifetime region creation/release, and scope ID
+// construction (`format_root_scope_id`, `make_child_scope_id`).
 
 import { NativeStruct, NativeEnum } from "../../native_ir";
 

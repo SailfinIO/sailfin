@@ -1,9 +1,11 @@
 // compiler/src/llvm/expression_lowering_stage2/core_text.sfn
 //
-// Text + string helper utilities extracted from ./core.sfn.
+// Text and string utilities for expression lowering.
 //
-// Mechanical split from compiler/src/llvm/expression_lowering_stage2/core.sfn.
-// Logic should remain identical.
+// Provides low-level string manipulation helpers used throughout the lowering
+// pipeline: `number_to_string`, `trim_text`, `matches_case_insensitive`,
+// `sanitize_symbol`, character classification, and LLVM type string inspection
+// (e.g., `is_union_llvm_type`, `parse_union_payload_types`).
 
 import { substring, char_code, char_at } from "../../string_utils";
 

@@ -1,9 +1,11 @@
 // compiler/src/llvm/expression_lowering_stage2/core_parse.sfn
 //
-// Parsing helpers extracted from ./core.sfn.
+// Expression parsing helpers for LLVM lowering.
 //
-// Mechanical split from compiler/src/llvm/expression_lowering_stage2/core.sfn.
-// Logic should remain identical.
+// Implements textual parsing of expression sub-forms during lowering:
+// struct/enum literal parsing, member access (`parse_member_access`),
+// index expressions (`parse_index_expression`), range iterables, and
+// brace/bracket/paren balancing utilities.
 
 import { substring, char_code, char_at } from "../../string_utils";
 

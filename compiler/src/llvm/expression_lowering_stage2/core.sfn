@@ -1,9 +1,11 @@
 // compiler/src/llvm/expression_lowering_stage2/core.sfn
 //
-// Core expression lowering + helpers.
+// Core expression lowering for Stage2 LLVM backend.
 //
-// Mechanical split from compiler/src/llvm/expression_lowering_stage2.sfn.
-// Logic should remain identical.
+// This module implements the primary `lower_expression` entry point that
+// transforms Sailfin expressions into LLVM IR. It handles ownership/borrow
+// analysis (`analyze_value_ownership`, `detect_borrow_conflicts`) and
+// orchestrates calls to helper modules for operands, scopes, parsing, and text.
 
 import { NativeFunction, NativeSourceSpan, NativeStruct, NativeEnum } from "../../native_ir";
 import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "../../string_utils";

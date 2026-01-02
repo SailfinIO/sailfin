@@ -1,9 +1,10 @@
 // compiler/src/llvm/expression_lowering/bindings.sfn
 //
-// Local/parameter binding helpers used by expression lowering.
+// Parameter and local binding management for LLVM lowering.
 //
-// Mechanical extraction from compiler/src/llvm/expression_lowering_stage2.sfn.
-// Logic should remain identical.
+// Provides lookup and mutation helpers for parameter/local bindings during
+// expression lowering: finding bindings by name, marking consumption state,
+// resetting consumption, and updating ownership metadata.
 
 import {
     LocalBinding,

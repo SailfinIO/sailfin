@@ -1,9 +1,11 @@
 // compiler/src/llvm/expression_lowering_stage2/core_operands.sfn
 //
-// Operand coercion + comparison helpers extracted from ./core.sfn.
+// LLVM operand coercion and comparison emission.
 //
-// Mechanical split from compiler/src/llvm/expression_lowering_stage2/core.sfn.
-// Logic should remain identical.
+// Handles type coercion between LLVM operands (`coerce_operand_to_type`,
+// `harmonise_operands`), emits comparison instructions for equality and
+// relational operators (`emit_comparison_instruction`, `emit_boolean_and`),
+// and provides local variable loading (`load_local_operand`).
 
 import { char_code } from "../../string_utils";
 
