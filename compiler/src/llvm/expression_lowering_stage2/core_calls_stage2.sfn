@@ -1,0 +1,124 @@
+// compiler/src/llvm/expression_lowering_stage2/core_calls_stage2.sfn
+//
+// Call parsing helpers for Stage2 expression lowering.
+
+import { char_at } from "../../string_utils";
+
+import {
+    trim_text,
+    append_string,
+} from "../utils";
+
+fn find_call_site(expression -> string) -> number {
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = char_at(expression, index);
+        if ch == "(" {
+            if depth == 0 {
+                return index;
+            }
+            depth += 1;
+        } else if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn split_call_arguments(text -> string) -> string[] {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return [];
+    }
+    let mut entries -> string[] = [];
+    let mut current -> string = "";
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = char_at(text, index);
+        if in_double {
+            current = current + ch;
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            current = current + ch;
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            current = current + ch;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            current = current + ch;
+        } else if ch == "[" {
+            bracket_depth += 1;
+            current = current + ch;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            current = current + ch;
+        } else if ch == "{" {
+            brace_depth += 1;
+            current = current + ch;
+        } else if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            current = current + ch;
+        } else if ch == "," && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+            entries = append_string(entries, trim_text(current));
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    entries = append_string(entries, trim_text(current));
+    return entries;
+}

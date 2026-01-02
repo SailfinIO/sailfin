@@ -18,12 +18,14 @@ from ..type_mapping import map_type_annotation, ends_with_pointer_suffix, strip_
 from ..type_context import fixup_enum_layouts, find_struct_info_by_name, find_interface_info_by_name, find_vtable_for_struct_interface, find_struct_info_by_llvm_type, find_struct_field_index, find_struct_field_info, find_enum_info_by_llvm_type, resolve_struct_info_from_llvm_type, lookup_allocation_info, resolve_struct_info_for_literal, resolve_struct_info_for_method_target, resolve_interface_info_for_method_target, resolve_enum_info_for_literal, resolve_enum_variant_info, find_variant_field_info
 from ..rendering import find_function_by_name
 from ..runtime_helpers import find_runtime_helper
-from ..expressions import format_temp_name, format_local_pointer_name, default_return_literal, strip_mut_prefix, is_simple_identifier
+from ..expressions import format_temp_name, format_local_pointer_name, format_typed_operand, default_return_literal, strip_mut_prefix, is_simple_identifier
 from compiler.build.llvm.expression_lowering_stage2.core_bindings_stage2 import find_parameter_binding, mark_parameter_consumed, mark_local_consumed, reset_local_consumption, update_local_ownership
 from compiler.build.llvm.expression_lowering_stage2.core_type_mapping_stage2 import map_struct_type_annotation_ctx, map_enum_type_annotation, map_interface_type_annotation, map_primitive_type, map_optional_type, map_reference_inner_type, map_reference_type, map_array_pointer_type, unwrap_move_wrapper, find_top_level_union_separator, split_union_annotations, is_union_annotation, map_union_type, map_return_type, future_pointer_type_for_return_type, await_symbol_for_future_pointer_type, map_parameter_type
 from compiler.build.llvm.expression_lowering_stage2.core_parsing_stage2 import parse_borrow_expression, extract_borrow_argument, extract_simple_borrow_target, is_valid_borrow_target, parse_ternary_expression, parse_raw_address_expression, parse_cast_expression, parse_array_literal_metadata, map_metadata_annotation
 from compiler.build.llvm.expression_lowering_stage2.core_operators_stage2 import strip_enclosing_parentheses, find_top_level_operator, find_comparison_operator, find_logical_operator, lines_end_with_terminator
 from compiler.build.llvm.expression_lowering_stage2.core_strings_stage2 import lower_string_literal, emit_string_concat, coerce_operand_to_string
+from compiler.build.llvm.expression_lowering_stage2.core_calls_stage2 import find_call_site, split_call_arguments
+from compiler.build.llvm.expression_lowering_stage2.core_addressing_stage2 import lower_raw_address_expression
 from compiler.build.llvm.expression_lowering_stage2.core_ownership_stage2 import analyze_value_ownership_impl, detect_borrow_conflicts_impl, format_suspension_location_impl, resolve_borrow_base_impl
 from ..expression_lowering.splitting import split_array_elements
 from ..expression_lowering.arrays import lower_struct_array_concat, lower_array_push_in_place, find_top_level_comma_in_llvm_type, array_pointer_element_type
@@ -2145,26 +2147,6 @@ def collect_parameter_types(context, parameters, function_name):
         index += 1
     return types
 
-def lower_raw_address_expression(parse, bindings, locals, temp_index, lines):
-    diagnostics = parse.diagnostics
-    empty_constants = empty_string_constant_set()
-    if not parse.success:
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
-    target = trim_text(parse.target)
-    if not is_simple_identifier(target):
-        diagnostics = append_string(diagnostics, "llvm lowering: &raw currently supports only simple identifiers (got `" + target + "`)")
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
-    local = find_local_binding(locals, target)
-    if local != None:
-        operand = LLVMOperand(llvm_type=local.llvm_type + "*", value=local.pointer)
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=operand, diagnostics=diagnostics, string_constants=empty_constants)
-    param = find_parameter_binding(bindings, target)
-    if param != None:
-        diagnostics = append_string(diagnostics, "llvm lowering: cannot take raw address of parameter `" + target + "` yet")
-        return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
-    diagnostics = append_string(diagnostics, "llvm lowering: &raw target `" + target + "` is not a local")
-    return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
-
 def lower_cast_expression(parse, bindings, locals, temp_index, lines, functions, context):
     diagnostics = parse.diagnostics
     empty_constants = empty_string_constant_set()
@@ -2200,111 +2182,6 @@ def lower_cast_expression(parse, bindings, locals, temp_index, lines, functions,
     diagnostics = append_string(diagnostics, "llvm lowering: unsupported cast from `" + operand.llvm_type + "` to `" + target_type + "`")
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=lowered.string_constants)
 
-def find_call_site(expression):
-    depth = 0
-    index = 0
-    while True:
-        if index >= len(expression):
-            break
-        ch = char_at(expression, index)
-        if ch == "(":
-            if depth == 0:
-                return index
-            depth += 1
-        else:
-            if ch == ")":
-                if depth > 0:
-                    depth -= 1
-        index += 1
-    return -1
-
-def split_call_arguments(text):
-    trimmed = trim_text(text)
-    if len(trimmed) == 0:
-        return []
-    entries = []
-    current = ""
-    paren_depth = 0
-    bracket_depth = 0
-    brace_depth = 0
-    in_single = False
-    in_double = False
-    escape = False
-    index = 0
-    while True:
-        if index >= len(text):
-            break
-        ch = char_at(text, index)
-        if in_double:
-            current = current + ch
-            if escape:
-                escape = False
-            else:
-                if ch == "\\":
-                    escape = True
-                else:
-                    if ch == "\"":
-                        in_double = False
-            index += 1
-            continue
-        if in_single:
-            current = current + ch
-            if escape:
-                escape = False
-            else:
-                if ch == "\\":
-                    escape = True
-                else:
-                    if ch == "'":
-                        in_single = False
-            index += 1
-            continue
-        if ch == "\"":
-            in_double = True
-            current = current + ch
-            index += 1
-            continue
-        if ch == "'":
-            in_single = True
-            current = current + ch
-            index += 1
-            continue
-        if ch == "(":
-            paren_depth += 1
-            current = current + ch
-        else:
-            if ch == ")":
-                if paren_depth > 0:
-                    paren_depth -= 1
-                current = current + ch
-            else:
-                if ch == "[":
-                    bracket_depth += 1
-                    current = current + ch
-                else:
-                    if ch == "]":
-                        if bracket_depth > 0:
-                            bracket_depth -= 1
-                        current = current + ch
-                    else:
-                        if ch == "{":
-                            brace_depth += 1
-                            current = current + ch
-                        else:
-                            if ch == "}":
-                                if brace_depth > 0:
-                                    brace_depth -= 1
-                                current = current + ch
-                            else:
-                                if ch == ","  and  paren_depth == 0  and  bracket_depth == 0  and  brace_depth == 0:
-                                    entries = append_string(entries, trim_text(current))
-                                    current = ""
-                                else:
-                                    current = current + ch
-        index += 1
-    entries = append_string(entries, trim_text(current))
-    return entries
-
 def operation_name_for_symbol(symbol, llvm_type):
     if llvm_type == "double":
         if symbol == "+":
@@ -2328,9 +2205,6 @@ def operation_name_for_symbol(symbol, llvm_type):
     if symbol == "%":
         return "srem"
     return "add"
-
-def format_typed_operand(operand):
-    return operand.llvm_type + " " + operand.value
 
 def try_lower_interpolated_string_literal(literal, bindings, locals, temp_index, lines, functions, context):
     content = unescape_string_literal(literal)
