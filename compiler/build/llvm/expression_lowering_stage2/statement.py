@@ -4,7 +4,7 @@ from runtime import runtime_support as runtime
 from ...emit_native import NativeModule
 from ...native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest, NativeBinding
 from ...string_utils import substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of
-from compiler.build.llvm.expression_lowering_stage2.core import lower_expression, analyze_value_ownership, detect_borrow_conflicts
+from compiler.build.llvm.expression_lowering_stage2.core import lower_expression, analyze_value_ownership, detect_borrow_conflicts, format_suspension_location
 from compiler.build.llvm.expression_lowering_stage2.core_operands import coerce_operand_to_type
 from compiler.build.llvm.expression_lowering_stage2.core_parse import parse_member_access, parse_index_expression
 from compiler.build.llvm.expression_lowering_stage2.core_scopes import find_local_binding, infer_borrow_base_scope, append_lifetime_region, append_lifetime_release_event, make_lifetime_region_metadata

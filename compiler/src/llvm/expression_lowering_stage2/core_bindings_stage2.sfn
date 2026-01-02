@@ -1,0 +1,33 @@
+// compiler/src/llvm/expression_lowering_stage2/core_bindings_stage2.sfn
+//
+// Small Stage2-specific binding helpers extracted from core.sfn.
+
+import { LocalBinding, ParameterBinding, OwnershipInfo } from "../types";
+
+import {
+    bindings_find_parameter_binding,
+    bindings_mark_parameter_consumed,
+    bindings_mark_local_consumed,
+    bindings_reset_local_consumption,
+    bindings_update_local_ownership,
+} from "../expression_lowering/bindings";
+
+fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
+    return bindings_find_parameter_binding(bindings, name);
+}
+
+fn mark_parameter_consumed(bindings -> ParameterBinding[], name -> string) -> ParameterBinding[] {
+    return bindings_mark_parameter_consumed(bindings, name);
+}
+
+fn mark_local_consumed(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+    return bindings_mark_local_consumed(locals, name);
+}
+
+fn reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+    return bindings_reset_local_consumption(locals, name);
+}
+
+fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership -> OwnershipInfo?) -> LocalBinding[] {
+    return bindings_update_local_ownership(locals, name, ownership);
+}
