@@ -1,6 +1,70 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.87 (2026-01-02)
+
+### Bug Fixes
+
+- Borrowing
+  ([`e230324`](https://github.com/SailfinIO/sailfin/commit/e23032445997b3ee1183d29dabc78977a39ba57a))
+
+- Breakout bindings, operators, ownership, parsing, type mapping
+  ([`60be595`](https://github.com/SailfinIO/sailfin/commit/60be59511405dfb2a03ae1d550a0c1a56c2819a4))
+
+- Checkin llvm stage1
+  ([`7aecc10`](https://github.com/SailfinIO/sailfin/commit/7aecc102af13625a339a50bfe5e5938492c52601))
+
+- Compiler build check in
+  ([`77973cd`](https://github.com/SailfinIO/sailfin/commit/77973cdf55e9b21e299a2c6042d0da7cc04d223a))
+
+- Emitter collision and missing type import
+  ([`b987fec`](https://github.com/SailfinIO/sailfin/commit/b987fecdfa5698ea317267d3a63933bfcfd21f14))
+
+- Lifetime releases restore
+  ([`3156a75`](https://github.com/SailfinIO/sailfin/commit/3156a7575a5ae10786b9cc52c8df52b6f6c69295))
+
+- Lowering after module refactor
+  ([`896fd59`](https://github.com/SailfinIO/sailfin/commit/896fd597493766f467a918174db0b821469d4ba8))
+
+- Lowering after module refactor
+  ([`1debf40`](https://github.com/SailfinIO/sailfin/commit/1debf400ed4434a2d54e3f37f5e7a6a9e1e25633))
+
+- Lowering calls and addressing
+  ([`fea7759`](https://github.com/SailfinIO/sailfin/commit/fea7759be56e46a3ea52b2838987d3c82f3eccec))
+
+- Lowering for new modules
+  ([`8722b76`](https://github.com/SailfinIO/sailfin/commit/8722b7663ec7f7f938c70ffd8d5d938523b502cc))
+
+- Lowering operands, parse, scopes
+  ([`9ac6846`](https://github.com/SailfinIO/sailfin/commit/9ac6846a1e07e5f03367ed55ab1544f09eff3c81))
+
+- Lowering strings
+  ([`85e025a`](https://github.com/SailfinIO/sailfin/commit/85e025a1624fc135ac36e0511b3df2ccfc3d1a5f))
+
+- Paser refactor
+  ([`6caaabf`](https://github.com/SailfinIO/sailfin/commit/6caaabf0ca8e87dfff113478383fb0c397c34d1c))
+
+- Re add missing llvm sub dir
+  ([`9d88930`](https://github.com/SailfinIO/sailfin/commit/9d88930a014a7d32ae31902369974794a93bd888))
+
+- Recompiling after parser split
+  ([`c672ee3`](https://github.com/SailfinIO/sailfin/commit/c672ee3e05396dd8aedfd533c8c6645cdf1dfe0d))
+
+- Setup llvm refactor
+  ([`edc7826`](https://github.com/SailfinIO/sailfin/commit/edc782638bb6e714b79fae59e7c940f563926699))
+
+- Use imports and remove duplicates in llvm lowering
+  ([`d3bcda1`](https://github.com/SailfinIO/sailfin/commit/d3bcda16348052107ad38cd78ef33ce878229dd2))
+
+- Work on refactoring native llvm lowering
+  ([`1b9c057`](https://github.com/SailfinIO/sailfin/commit/1b9c05782d399f76c06e1524cc81543b4f60d2bc))
+
+### Documentation
+
+- Aot improvement assesment
+  ([`2d1d5c6`](https://github.com/SailfinIO/sailfin/commit/2d1d5c6016e7322349b89fc394cba6cdb19c5c90))
+
+
 ## v0.1.1-alpha.86 (2025-12-30)
 
 ### Bug Fixes
