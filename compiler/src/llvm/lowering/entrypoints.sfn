@@ -530,7 +530,15 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
         lifetime_regions = lifetime_regions.concat(lowered.lifetime_regions);
         all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants);
         if lowered.lines.length > 0 {
-            function_lines = function_lines.concat(lowered.lines);
+            // NOTE: Avoid concatenating onto an empty array here.
+            // Some runtime builds have exhibited corruption when concatenating
+            // an empty lhs with a non-empty rhs, which can drop the first
+            // emitted lines of the first function (breaking LLVM IR validity).
+            if function_lines.length == 0 {
+                function_lines = lowered.lines;
+            } else {
+                function_lines = function_lines.concat(lowered.lines);
+            }
             if index + 1 < local_functions.length {
                 function_lines = append_string(function_lines, "");
             }

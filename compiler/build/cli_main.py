@@ -268,7 +268,7 @@ def _inline_relative_imports(source, base_dir, depth, visited):
         if index >= len(specs):
             break
         if fs.exists("build/sailfin/.dump_test_sources"):
-            print.warn("test import inlining: base=" + base_dir + " spec=" + specs[index])
+            print.info("test import inlining: base=" + base_dir + " spec=" + specs[index])
         dep_path = _resolve_import_path(base_dir, specs[index])
         if not _string_list_contains(next_visited, dep_path):
             if not fs.exists(dep_path):
@@ -425,6 +425,9 @@ def sailfin_cli_main(argv):
     if len(args) == 3  and  _is_flag(args[0], "--emit"):
         mode = args[1]
         path = args[2]
+        if not fs.exists(path):
+            print.error("file not found: " + path)
+            return 1
         source = fs.readFile(path)
         module_name = module_name_from_path(path)
         if mode == "llvm":
@@ -452,6 +455,9 @@ def sailfin_cli_main(argv):
             return 2
         mode = args[1]
         path = args[2]
+        if not fs.exists(path):
+            print.error("file not found: " + path)
+            return 1
         source = fs.readFile(path)
         module_name = module_name_from_path(path)
         if mode == "llvm":
@@ -478,6 +484,9 @@ def sailfin_cli_main(argv):
             else:
                 print.error(_usage())
                 return 2
+        if not fs.exists(input_path):
+            print.error("file not found: " + input_path)
+            return 1
         source = fs.readFile(input_path)
         module_name = module_name_from_path(input_path)
         llvm = compile_to_llvm_with_module(source, module_name)
@@ -499,6 +508,9 @@ def sailfin_cli_main(argv):
         input_path = args[1]
         if not _ends_with(input_path, ".sfn"):
             return process.run([input_path])
+        if not fs.exists(input_path):
+            print.error("file not found: " + input_path)
+            return 1
         source = fs.readFile(input_path)
         module_name = module_name_from_path(input_path)
         llvm = compile_to_llvm_with_module(source, module_name)
@@ -543,36 +555,37 @@ def sailfin_cli_main(argv):
             source = fs.readFile(path)
             base_dir = _dirname(path)
             if trace_runner:
-                print.warn("test runner: inlining start")
+                print.info("test runner: inlining start")
             combined_source = _inline_relative_imports(source, base_dir, 10, [])
             if trace_runner:
-                print.warn("test runner: inlining done (bytes=" + number_to_string(len(combined_source)) + ")")
+                print.info("test runner: inlining done (bytes=" + number_to_string(len(combined_source)) + ")")
             if dump_sources:
                 safe = _sanitize_filename(path)
                 _write_text("build/sailfin/test-source-" + safe + ".sfn", combined_source)
             if trace_runner:
-                print.warn("test runner: compile start")
+                print.info("test runner: compile start")
             llvm = compile_tests_to_llvm(combined_source)
             if trace_runner:
-                print.warn("test runner: compile done (bytes=" + number_to_string(len(llvm)) + ")")
+                print.info("test runner: compile done (bytes=" + number_to_string(len(llvm)) + ")")
             if len(llvm) == 0:
                 print.error("test compile failed: " + path)
                 fs.deleteFile(test_runner_active_path)
                 return 1
-            _write_text(ll_path, llvm)
+            cleaned = _strip_stage2_log_prefixes(llvm)
+            _write_text(ll_path, cleaned)
             if trace_runner:
-                print.warn("test runner: link start")
+                print.info("test runner: link start")
             link_rc = _clang_link_test(ll_path, exe_path, runtime_root)
             if link_rc != 0:
                 print.error("link failed (clang exit=" + number_to_string(link_rc) + ")")
                 fs.deleteFile(test_runner_active_path)
                 return link_rc
             if trace_runner:
-                print.warn("test runner: link done")
-                print.warn("test runner: exec start")
+                print.info("test runner: link done")
+                print.info("test runner: exec start")
             run_rc = process.run([exe_path])
             if trace_runner:
-                print.warn("test runner: exec done (exit=" + number_to_string(run_rc) + ")")
+                print.info("test runner: exec done (exit=" + number_to_string(run_rc) + ")")
             if run_rc != 0:
                 print.error("test failed: " + path)
                 fs.deleteFile(test_runner_active_path)
@@ -590,3 +603,75 @@ def sailfin_cli_main(argv):
 def stage2_cli_main(argv):
     # effects: io
     return sailfin_cli_main(argv)
+
+def _join_with_separator_cli(values, separator):
+    if len(values) == 0:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    parts = values
+    while True:
+        if len(parts) <= 1:
+            break
+        next = []
+        index = 0
+        while True:
+            if index >= len(parts):
+                break
+            if index + 1 < len(parts):
+                combined = parts[index] + separator + parts[index + 1]
+                next = (next) + ([combined])
+                index += 2
+                continue
+            next = (next) + ([parts[index]])
+            index += 1
+        parts = next
+    return parts[0]
+
+def _strip_stage2_log_prefixes(text):
+    if len(text) >= 6:
+        head7 = substring(text, 0, 7)
+        if head7 != "[info] "  and  head7 != "[warn] ":
+            if len(text) >= 8:
+                head8 = substring(text, 0, 8)
+                if head8 != "[error] ":
+                    return text
+            else:
+                return text
+    else:
+        return text
+    out = []
+    start = 0
+    while True:
+        if start > len(text):
+            break
+        end = start
+        while True:
+            if end >= len(text):
+                break
+            if text[end] == "\n":
+                break
+            end += 1
+        line = substring(text, start, end)
+        if len(line) >= 7:
+            prefix7 = substring(line, 0, 7)
+            if prefix7 == "[info] ":
+                line = substring(line, 7, len(line))
+            else:
+                if prefix7 == "[warn] ":
+                    line = substring(line, 7, len(line))
+                else:
+                    if len(line) >= 8:
+                        prefix8 = substring(line, 0, 8)
+                        if prefix8 == "[error] ":
+                            line = substring(line, 8, len(line))
+        else:
+            if len(line) >= 8:
+                prefix8 = substring(line, 0, 8)
+                if prefix8 == "[error] ":
+                    line = substring(line, 8, len(line))
+        out = append_string(out, line)
+        if end >= len(text):
+            break
+        start = end + 1
+    return _join_with_separator_cli(out, "\n") + "\n"

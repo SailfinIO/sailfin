@@ -362,7 +362,7 @@ fn _inline_relative_imports(source -> string, base_dir -> string, depth -> numbe
             break;
         }
         if fs.exists("build/sailfin/.dump_test_sources") {
-            print.warn("test import inlining: base=" + base_dir + " spec=" + specs[index]);
+            print.info("test import inlining: base=" + base_dir + " spec=" + specs[index]);
         }
         let dep_path = _resolve_import_path(base_dir, specs[index]);
         if !_string_list_contains(next_visited, dep_path) {
@@ -608,6 +608,10 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     if args.length == 3 && _is_flag(args[0], "--emit") {
         let mode = args[1];
         let path = args[2];
+        if !fs.exists(path) {
+            print.error("file not found: " + path);
+            return 1;
+        }
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
         if mode == "llvm" {
@@ -645,6 +649,10 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         let mode = args[1];
         let path = args[2];
+        if !fs.exists(path) {
+            print.error("file not found: " + path);
+            return 1;
+        }
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
         if mode == "llvm" {
@@ -679,6 +687,11 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 2;
         }
 
+        if !fs.exists(input_path) {
+            print.error("file not found: " + input_path);
+            return 1;
+        }
+
         let source = fs.readFile(input_path);
         let module_name = module_name_from_path(input_path);
         let llvm = compile_to_llvm_with_module(source, module_name);
@@ -709,6 +722,11 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         // If the argument doesn't look like Sailfin source, treat it as an executable.
         if !_ends_with(input_path, ".sfn") {
             return process.run([input_path]);
+        }
+
+        if !fs.exists(input_path) {
+            print.error("file not found: " + input_path);
+            return 1;
         }
 
         // compile + link into build/sailfin/run then execute
@@ -775,11 +793,11 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             // This avoids duplicate symbols when linking multiple LLVM modules.
             let base_dir = _dirname(path);
             if trace_runner {
-                print.warn("test runner: inlining start");
+                print.info("test runner: inlining start");
             }
             let combined_source = _inline_relative_imports(source, base_dir, 10, []);
             if trace_runner {
-                print.warn("test runner: inlining done (bytes=" + number_to_string(combined_source.length) + ")");
+                print.info("test runner: inlining done (bytes=" + number_to_string(combined_source.length) + ")");
             }
 
             if dump_sources {
@@ -788,21 +806,22 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             }
 
             if trace_runner {
-                print.warn("test runner: compile start");
+                print.info("test runner: compile start");
             }
             let llvm = compile_tests_to_llvm(combined_source);
             if trace_runner {
-                print.warn("test runner: compile done (bytes=" + number_to_string(llvm.length) + ")");
+                print.info("test runner: compile done (bytes=" + number_to_string(llvm.length) + ")");
             }
             if llvm.length == 0 {
                 print.error("test compile failed: " + path);
                 fs.deleteFile(test_runner_active_path);
                 return 1;
             }
-            _write_text(ll_path, llvm);
+            let cleaned = _strip_stage2_log_prefixes(llvm);
+            _write_text(ll_path, cleaned);
 
             if trace_runner {
-                print.warn("test runner: link start");
+                print.info("test runner: link start");
             }
             let link_rc = _clang_link_test(ll_path, exe_path, runtime_root);
             if link_rc != 0 {
@@ -811,12 +830,12 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
                 return link_rc;
             }
             if trace_runner {
-                print.warn("test runner: link done");
-                print.warn("test runner: exec start");
+                print.info("test runner: link done");
+                print.info("test runner: exec start");
             }
             let run_rc = process.run([exe_path]);
             if trace_runner {
-                print.warn("test runner: exec done (exit=" + number_to_string(run_rc) + ")");
+                print.info("test runner: exec done (exit=" + number_to_string(run_rc) + ")");
             }
             if run_rc != 0 {
                 print.error("test failed: " + path);
@@ -842,4 +861,103 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 // Exported entrypoint for the native stage2 argv shim.
 fn stage2_cli_main(argv -> string[]) -> number ![io] {
     return sailfin_cli_main(argv);
+}
+
+fn _join_with_separator_cli(values -> string[], separator -> string) -> string {
+    if values.length == 0 {
+        return "";
+    }
+    if values.length == 1 {
+        return values[0];
+    }
+    let mut parts -> string[] = values;
+    loop {
+        if parts.length <= 1 {
+            break;
+        }
+        let mut next -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= parts.length {
+                break;
+            }
+            if index + 1 < parts.length {
+                let combined = parts[index] + separator + parts[index + 1];
+                next = next.concat([combined]);
+                index += 2;
+                continue;
+            }
+            next = next.concat([parts[index]]);
+            index += 1;
+        }
+        parts = next;
+    }
+    return parts[0];
+}
+
+fn _strip_stage2_log_prefixes(text -> string) -> string {
+    // Some stage2 builds annotate LLVM output lines with a log-level prefix.
+    // Strip those prefixes so clang can parse the IR.
+    // Fast path: avoid touching large IR blobs unless we see a prefix.
+    if text.length >= 6 {
+        // Only detect at start-of-text; full scan is expensive.
+        let head7 = substring(text, 0, 7);
+        if head7 != "[info] " && head7 != "[warn] " {
+            if text.length >= 8 {
+                let head8 = substring(text, 0, 8);
+                if head8 != "[error] " {
+                    return text;
+                }
+            } else {
+                return text;
+            }
+        }
+    } else {
+        return text;
+    }
+
+    let mut out -> string[] = [];
+    let mut start -> number = 0;
+    loop {
+        if start > text.length {
+            break;
+        }
+        let mut end -> number = start;
+        loop {
+            if end >= text.length {
+                break;
+            }
+            if text[end] == "\n" {
+                break;
+            }
+            end += 1;
+        }
+
+        let mut line = substring(text, start, end);
+        if line.length >= 7 {
+            let prefix7 = substring(line, 0, 7);
+            if prefix7 == "[info] " {
+                line = substring(line, 7, line.length);
+            } else if prefix7 == "[warn] " {
+                line = substring(line, 7, line.length);
+            } else if line.length >= 8 {
+                let prefix8 = substring(line, 0, 8);
+                if prefix8 == "[error] " {
+                    line = substring(line, 8, line.length);
+                }
+            }
+        } else if line.length >= 8 {
+            let prefix8 = substring(line, 0, 8);
+            if prefix8 == "[error] " {
+                line = substring(line, 8, line.length);
+            }
+        }
+        out = append_string(out, line);
+
+        if end >= text.length {
+            break;
+        }
+        start = end + 1;
+    }
+    return _join_with_separator_cli(out, "\n") + "\n";
 }

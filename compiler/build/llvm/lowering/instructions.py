@@ -7,7 +7,8 @@ from ..types import TypeContext, LocalBinding, ParameterBinding, LLVMOperand, Bl
 from ..utils import trim_text, append_string, number_to_string, index_of, starts_with, strip_mut_prefix, is_simple_identifier, merge_parameter_bindings
 from ..strings import empty_string_constant_set, merge_string_constants
 from ..type_context import find_struct_info_by_name, find_interface_info_by_name, find_enum_info_by_llvm_type, resolve_enum_info_for_literal, resolve_enum_variant_info
-from ..expression_lowering_stage2.core import append_local_binding, coerce_operand_to_type, emit_boolean_and, emit_comparison_instruction, extract_simple_identifier, harmonise_operands, is_union_llvm_type, load_local_operand, lower_expression, parse_enum_literal, parse_range_iterable, parse_struct_pattern, parse_union_payload_types, analyze_value_ownership, detect_borrow_conflicts
+from ..expression_lowering_stage2.core import append_local_binding, coerce_operand_to_type, emit_boolean_and, emit_comparison_instruction, harmonise_operands, load_local_operand, lower_expression, parse_enum_literal, parse_range_iterable, parse_struct_pattern, analyze_value_ownership, detect_borrow_conflicts
+from ..expression_lowering_stage2.core_text import extract_simple_identifier, is_union_llvm_type, parse_union_payload_types
 from ..expression_lowering_stage2.statement import detect_suspension_conflicts, lower_expression_statement, lower_return_instruction, map_local_type, parse_inline_let_expression
 from ..expression_lowering.arrays import array_pointer_element_type
 from ..type_mapping import array_struct_type_for_element

@@ -347,11 +347,11 @@ fn map_type_annotation(annotation -> string) -> string {
             if element_type.length == 0 {
                 return "i8*";
             }
-            if !annotation_is_array(element_annotation) && layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
-                let stripped_element = strip_pointer_suffix(element_type);
-                if stripped_element.length > 0 {
-                    element_type = stripped_element;
-                }
+            // Arrays of user-value types (enums + inline structs) store the value inline.
+            // `map_type_annotation` defaults user types to pointers, so strip that layer
+            // when the surface syntax represents a value type.
+            if layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
+                element_type = strip_pointer_suffix(element_type);
             }
             let aggregate = array_struct_type_for_element(element_type);
             return aggregate + "*";
@@ -393,7 +393,10 @@ fn map_struct_type_annotation(annotation -> string) -> string {
 }
 
 fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> string {
-    let mapped = map_type_annotation(parameter_type);
+    // Parameters should use the same context-aware mapping rules as returns.
+    // Otherwise user-defined value types (like enums) can incorrectly become pointers,
+    // causing ABI mismatches and memory corruption.
+    let mapped = map_return_type(context, parameter_type);
     if mapped == "void" {
         return "";
     }
@@ -401,7 +404,8 @@ fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> strin
 }
 
 fn map_local_type(context -> TypeContext, annotation -> string) -> string {
-    let mapped = map_type_annotation(annotation);
+    // Locals should mirror the context-aware mapping used for returns.
+    let mapped = map_return_type(context, annotation);
     if mapped == "void" {
         return "";
     }
@@ -598,11 +602,9 @@ fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> strin
     if element_type.length == 0 {
         return "i8*";
     }
-    if !annotation_is_array(element_annotation) && layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
-        let stripped = strip_pointer_suffix(element_type);
-        if stripped.length > 0 {
-            element_type = stripped;
-        }
+    // Arrays of user-value types store the value inline.
+    if layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
+        element_type = strip_pointer_suffix(element_type);
     }
     return array_pointer_type_for_element(element_type);
 }

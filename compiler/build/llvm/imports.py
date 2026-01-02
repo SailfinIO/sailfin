@@ -39,7 +39,7 @@ def collect_imported_module_context_for_module(imports, current_module_slug):
     # effects: io
     trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
     if trace:
-        print.warn("test llvm: collect_imported_module_context start (imports=" + number_to_string(len(imports)) + ")")
+        print.info("test llvm: collect_imported_module_context start (imports=" + number_to_string(len(imports)) + ")")
     manifests = []
     native_texts = []
     diagnostics = []
@@ -49,7 +49,7 @@ def collect_imported_module_context_for_module(imports, current_module_slug):
         if index >= len(imports):
             break
         if trace  and  index > 0  and  index % 50 == 0:
-            print.warn("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")")
+            print.info("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")")
         module_path = imports[index].module
         base_slug = resolve_import_module_slug_for_module(module_path, current_module_slug)
         slug = resolve_import_artifact_slug(base_slug)
@@ -80,7 +80,7 @@ def collect_imported_module_context_for_module(imports, current_module_slug):
         native_texts = (native_texts) + ([native_text])
         index += 1
     if trace:
-        print.warn("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(len(seen)) + ")")
+        print.info("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(len(seen)) + ")")
     return ImportedModuleContext(manifests=manifests, native_texts=native_texts, diagnostics=diagnostics)
 
 def resolve_import_artifact_slug(slug):

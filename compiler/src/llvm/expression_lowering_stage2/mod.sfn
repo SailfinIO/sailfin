@@ -45,20 +45,23 @@ export {
     parse_struct_pattern,
     parse_range_iterable,
 
+    // Ownership/borrow analysis helpers used across lowering
+    analyze_value_ownership,
+    detect_borrow_conflicts,
+
+} from "./core";
+
+export {
     // Union helpers shared across lowering
     parse_union_payload_types,
     is_union_llvm_type,
     extract_simple_identifier,
 
-    // Ownership/borrow analysis helpers used across lowering
-    analyze_value_ownership,
-    detect_borrow_conflicts,
-
     // String helpers used by bootstrap shims
     unescape_string_literal,
     make_string_constant_name,
     make_string_constant_name_for_module,
-} from "./core";
+} from "./core_text";
 
 // Historically consumers imported these via expression_lowering_stage2.
 export { format_temp_name } from "../expressions";

@@ -244,14 +244,14 @@ def compile_tests_to_llvm(source):
     # effects: io
     trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
     if trace:
-        print.warn("test compiler: compile_to_native start")
+        print.info("test compiler: compile_to_native start")
     native_result = compile_to_native(source)
     if trace:
-        print.warn("test compiler: compile_to_native done (diagnostics=" + number_to_string(len(native_result.diagnostics)) + ")")
-        print.warn("test compiler: lower_to_llvm_for_tests start")
+        print.info("test compiler: compile_to_native done (diagnostics=" + number_to_string(len(native_result.diagnostics)) + ")")
+        print.info("test compiler: lower_to_llvm_for_tests start")
     lowered = lower_to_llvm_for_tests(native_result.module)
     if trace:
-        print.warn("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(len(lowered.ir)) + ")")
+        print.info("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(len(lowered.ir)) + ")")
     return lowered.ir
 
 def compile_to_native_text(source):

@@ -44,8 +44,11 @@ import {
 
 import {
     append_llvm_operand,
-    make_string_constant_name_for_module,
 } from "../expression_lowering_stage2/core";
+
+import {
+    make_string_constant_name_for_module,
+} from "../expression_lowering_stage2/core_text";
 
 import {
     default_return_literal,

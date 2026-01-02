@@ -317,7 +317,10 @@ module_globals.needs_init_call
         lifetime_regions = (lifetime_regions) + (lowered.lifetime_regions)
         all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants)
         if len(lowered.lines) > 0:
-            function_lines = (function_lines) + (lowered.lines)
+            if len(function_lines) == 0:
+                function_lines = lowered.lines
+            else:
+                function_lines = (function_lines) + (lowered.lines)
             if index + 1 < len(local_functions):
                 function_lines = append_string(function_lines, "")
         index += 1

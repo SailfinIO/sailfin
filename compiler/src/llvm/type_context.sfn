@@ -987,11 +987,20 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
                 break;
             }
             if index + 1 < parts.length {
-                next = next.concat([parts[index] + separator + parts[index + 1]]);
+                let combined = parts[index] + separator + parts[index + 1];
+                if next.length == 0 {
+                    next = [combined];
+                } else {
+                    next = next.concat([combined]);
+                }
                 index += 2;
                 continue;
             }
-            next = next.concat([parts[index]]);
+            if next.length == 0 {
+                next = [parts[index]];
+            } else {
+                next = next.concat([parts[index]]);
+            }
             index += 1;
         }
         parts = next;

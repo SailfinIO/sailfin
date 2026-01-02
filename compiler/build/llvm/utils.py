@@ -395,10 +395,17 @@ def join_with_separator(values, separator):
             if index >= len(parts):
                 break
             if index + 1 < len(parts):
-                next = (next) + ([parts[index] + separator + parts[index + 1]])
+                combined = parts[index] + separator + parts[index + 1]
+                if len(next) == 0:
+                    next = [combined]
+                else:
+                    next = (next) + ([combined])
                 index += 2
                 continue
-            next = (next) + ([parts[index]])
+            if len(next) == 0:
+                next = [parts[index]]
+            else:
+                next = (next) + ([parts[index]])
             index += 1
         parts = next
     return parts[0]

@@ -69,18 +69,21 @@ import {
     coerce_operand_to_type,
     emit_boolean_and,
     emit_comparison_instruction,
-    extract_simple_identifier,
     harmonise_operands,
-    is_union_llvm_type,
     load_local_operand,
     lower_expression,
     parse_enum_literal,
     parse_range_iterable,
     parse_struct_pattern,
-    parse_union_payload_types,
     analyze_value_ownership,
     detect_borrow_conflicts,
 } from "../expression_lowering_stage2/core";
+
+import {
+    extract_simple_identifier,
+    is_union_llvm_type,
+    parse_union_payload_types,
+} from "../expression_lowering_stage2/core_text";
 
 import {
     detect_suspension_conflicts,

@@ -240,10 +240,8 @@ def map_type_annotation(annotation):
             element_type = map_type_annotation(element_annotation)
             if len(element_type) == 0:
                 return "i8*"
-            if not annotation_is_array(element_annotation)  and  layout_annotation_represents_user_value(element_annotation)  and  ends_with_pointer_suffix(element_type):
-                stripped_element = strip_pointer_suffix(element_type)
-                if len(stripped_element) > 0:
-                    element_type = stripped_element
+            if layout_annotation_represents_user_value(element_annotation)  and  ends_with_pointer_suffix(element_type):
+                element_type = strip_pointer_suffix(element_type)
             aggregate = array_struct_type_for_element(element_type)
             return aggregate + "*"
     if looks_like_user_type(normalized):
@@ -272,13 +270,13 @@ def map_struct_type_annotation(annotation):
     return mapped
 
 def map_parameter_type(context, parameter_type):
-    mapped = map_type_annotation(parameter_type)
+    mapped = map_return_type(context, parameter_type)
     if mapped == "void":
         return ""
     return mapped
 
 def map_local_type(context, annotation):
-    mapped = map_type_annotation(annotation)
+    mapped = map_return_type(context, annotation)
     if mapped == "void":
         return ""
     return mapped
@@ -409,10 +407,8 @@ def map_array_pointer_type(context, annotation):
     element_type = map_type_annotation(element_annotation)
     if len(element_type) == 0:
         return "i8*"
-    if not annotation_is_array(element_annotation)  and  layout_annotation_represents_user_value(element_annotation)  and  ends_with_pointer_suffix(element_type):
-        stripped = strip_pointer_suffix(element_type)
-        if len(stripped) > 0:
-            element_type = stripped
+    if layout_annotation_represents_user_value(element_annotation)  and  ends_with_pointer_suffix(element_type):
+        element_type = strip_pointer_suffix(element_type)
     return array_pointer_type_for_element(element_type)
 
 def map_primitive_type(context, annotation):
