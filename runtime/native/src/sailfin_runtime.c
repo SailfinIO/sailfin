@@ -1956,6 +1956,23 @@ char *sailfin_runtime_grapheme_at(char *text, double index)
         return "";
     }
 
+    // Immediate-codepoint pseudo-strings are tagged pointers and must never be
+    // dereferenced. Treat them as a single grapheme at index 0.
+    uint32_t immediate_codepoint = 0;
+    if (_is_immediate_codepoint_string(text, &immediate_codepoint))
+    {
+        int64_t idx = (int64_t)index;
+        if ((double)idx != index)
+        {
+            return "";
+        }
+        if (idx == 0)
+        {
+            return text;
+        }
+        return "";
+    }
+
     int64_t len = sailfin_runtime_string_length(text);
     if (len <= 0)
     {

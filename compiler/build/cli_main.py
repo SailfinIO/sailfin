@@ -319,6 +319,22 @@ def _ensure_dir(path):
     # effects: io
     fs.createDirectory(path, True)
 
+def _clear_cache_dir(path):
+    # effects: io
+    if len(path) == 0:
+        return
+    if not fs.exists(path):
+        return
+    entries = fs.listDirectory(path)
+    index = 0
+    while True:
+        if index >= len(entries):
+            break
+        entry = entries[index]
+        full = _path_join(path, entry)
+        fs.deleteFile(full)
+        index += 1
+
 def _runtime_bundle_exists(root):
     # effects: io
     if len(root) == 0:
@@ -535,6 +551,7 @@ def sailfin_cli_main(argv):
                 return 2
         _ensure_dir("build")
         _ensure_dir("build/sailfin")
+        _clear_cache_dir("build/sailfin/test-o0")
         test_runner_active_path = "build/sailfin/.test_runner_active"
         _write_text(test_runner_active_path, "")
         test_files = _collect_test_files(root, 25)

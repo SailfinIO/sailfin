@@ -7,7 +7,9 @@ from ..utils import append_string, trim_text, number_to_string, matches_case_ins
 from ..expressions import is_string_literal, normalise_number_literal, default_return_literal
 from ..strings import empty_string_constant_set, merge_string_constants
 from ..type_mapping import map_local_type
-from ..expression_lowering_stage2.core import lower_expression, coerce_operand_to_type, append_local_binding, find_local_binding
+from ..expression_lowering_stage2.core import lower_expression
+from ..expression_lowering_stage2.core_operands import coerce_operand_to_type
+from ..expression_lowering_stage2.core_scopes import append_local_binding, find_local_binding
 from ..lifetime import format_root_scope_id
 
 print = runtime.console

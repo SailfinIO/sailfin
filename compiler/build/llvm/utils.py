@@ -396,16 +396,10 @@ def join_with_separator(values, separator):
                 break
             if index + 1 < len(parts):
                 combined = parts[index] + separator + parts[index + 1]
-                if len(next) == 0:
-                    next = [combined]
-                else:
-                    next = (next) + ([combined])
+                next = append_string(next, combined)
                 index += 2
                 continue
-            if len(next) == 0:
-                next = [parts[index]]
-            else:
-                next = (next) + ([parts[index]])
+            next = append_string(next, parts[index])
             index += 1
         parts = next
     return parts[0]

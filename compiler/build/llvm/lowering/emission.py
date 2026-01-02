@@ -7,7 +7,7 @@ from ..utils import append_string, join_with_separator, sanitize_symbol, number_
 from ..strings import empty_string_constant_set, append_string_constant, merge_string_constants
 from ..type_mapping import map_return_type
 from ..expression_lowering_stage2.statement import prepare_parameters, future_pointer_type_for_return_type, spawn_symbol_for_return_type, spawn_ctx_symbol_for_return_type
-from ..expression_lowering_stage2.core import append_llvm_operand
+from ..expression_lowering_stage2.core_scopes import append_llvm_operand
 from ..expression_lowering_stage2.core_text import make_string_constant_name_for_module
 from ..expressions import default_return_literal, format_temp_name
 from ..lifetime import validate_borrow_lifetimes, format_root_scope_id

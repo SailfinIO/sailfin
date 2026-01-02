@@ -81,6 +81,7 @@ def render_runtime_helper_declarations(used_targets, local_functions):
         local_symbols = append_string(local_symbols, sanitize_symbol(local_functions[local_index].name))
         local_index += 1
     lines = []
+    declared_symbols = []
     descriptors = runtime_helper_descriptors()
     index = 0
     while True:
@@ -91,6 +92,9 @@ def render_runtime_helper_declarations(used_targets, local_functions):
             if string_array_contains(local_symbols, descriptor.symbol):
                 index += 1
                 continue
+            if string_array_contains(declared_symbols, descriptor.symbol):
+                index += 1
+                continue
             if len(descriptor.effects) > 0:
                 effects_text = join_with_separator(descriptor.effects, ", ")
                 lines = append_string(lines, "; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]")
@@ -99,6 +103,7 @@ def render_runtime_helper_declarations(used_targets, local_functions):
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ")
             line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")"
             lines = append_string(lines, line)
+            declared_symbols = append_string(declared_symbols, descriptor.symbol)
         index += 1
     return lines
 

@@ -1,0 +1,1109 @@
+// compiler/src/llvm/expression_lowering_stage2/core_parse.sfn
+//
+// Parsing helpers extracted from ./core.sfn.
+//
+// Mechanical split from compiler/src/llvm/expression_lowering_stage2/core.sfn.
+// Logic should remain identical.
+
+import { substring, char_code, char_at } from "../../string_utils";
+
+import {
+    trim_text,
+    append_string,
+    string_array_contains,
+    index_of,
+    char_code_at_text,
+    is_digit_char,
+} from "./core_text";
+
+import { ends_with, is_identifier_start_char } from "../utils";
+
+import { is_simple_identifier } from "../expressions";
+
+import { split_array_elements } from "../expression_lowering/splitting";
+
+import {
+    StructLiteralParse,
+    StructLiteralField,
+    EnumLiteralParse,
+    MemberAccessParse,
+    IndexExpressionParse,
+    RangeIterableParse,
+} from "../types";
+
+fn find_matching_closing_brace(text -> string, open_index -> number) -> number {
+    let mut depth -> number = 0;
+    let mut index -> number = open_index;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            depth += 1;
+        } else if ch == "}" {
+            if depth > 0 {
+                depth -= 1;
+                if depth == 0 {
+                    return index;
+                }
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_top_level_colon(text -> string) -> number {
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "<" {
+            angle_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == ":" {
+            if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
+                return index;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn parse_struct_literal(text -> string) -> StructLiteralParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let first = trimmed[0];
+    if !is_identifier_start_char(first) {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut index -> number = 0;
+    let mut open_index -> number = -1;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+        } else if ch == "[" {
+            bracket_depth += 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+        } else if ch == "<" {
+            angle_depth += 1;
+        } else if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+        } else if ch == "{" {
+            if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+                open_index = index;
+                break;
+            }
+        }
+        index += 1;
+    }
+
+    if open_index < 0 {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut fatal -> boolean = false;
+    let close_index = find_matching_closing_brace(trimmed, open_index);
+    if close_index < 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: struct literal missing closing `}`");
+        let mut snippet -> string = trimmed;
+        if snippet.length > 120 {
+            snippet = substring(snippet, 0, 117) + "...";
+        }
+        diagnostics = append_string(diagnostics, "llvm lowering: struct literal context `" + snippet + "`");
+        fatal = true;
+    }
+
+    let mut type_name -> string = trim_text(substring(trimmed, 0, open_index));
+    if type_name.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: struct literal missing type name");
+        fatal = true;
+    }
+
+    let mut fields -> StructLiteralField[] = [];
+    if !fatal && close_index >= 0 {
+        let body = substring(trimmed, open_index + 1, close_index);
+        let entries = split_array_elements(body);
+        let mut seen -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= entries.length {
+                break;
+            }
+            let entry = trim_text(entries[entry_index]);
+            entry_index += 1;
+            if entry.length == 0 {
+                continue;
+            }
+            let colon_index = find_top_level_colon(entry);
+            if colon_index < 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + entry + "` missing `:`");
+                continue;
+            }
+            let field_name = trim_text(substring(entry, 0, colon_index));
+            let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
+            if field_name.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field missing name");
+                continue;
+            }
+            if string_array_contains(seen, field_name) {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + field_name + "` repeated");
+                continue;
+            }
+            if value_text.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + field_name + "` missing value");
+                continue;
+            }
+            seen = append_string(seen, field_name);
+            fields = fields.concat([StructLiteralField { name: field_name, value: value_text }]);
+        }
+    }
+
+    if !fatal && close_index >= 0 {
+        let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
+        if remainder.length > 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: struct literal trailing content `" + remainder + "`");
+            fatal = true;
+        }
+    }
+
+    if fatal {
+        fields = [];
+    }
+
+    return StructLiteralParse { recognized: true, success: !fatal, type_name: type_name, fields: fields, diagnostics: diagnostics };
+}
+
+fn parse_struct_pattern(text -> string) -> StructLiteralParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let first = trimmed[0];
+    if !is_identifier_start_char(first) {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut index -> number = 0;
+    let mut open_index -> number = -1;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+        } else if ch == "[" {
+            bracket_depth += 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+        } else if ch == "<" {
+            angle_depth += 1;
+        } else if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+        } else if ch == "{" {
+            if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+                open_index = index;
+                break;
+            }
+        }
+        index += 1;
+    }
+
+    if open_index < 0 {
+        return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut fatal -> boolean = false;
+    let close_index = find_matching_closing_brace(trimmed, open_index);
+    if close_index < 0 {
+        fatal = true;
+    }
+
+    let mut type_name -> string = trim_text(substring(trimmed, 0, open_index));
+    if type_name.length == 0 {
+        fatal = true;
+    }
+
+    let mut fields -> StructLiteralField[] = [];
+    if !fatal && close_index >= 0 {
+        let body = substring(trimmed, open_index + 1, close_index);
+        let entries = split_array_elements(body);
+        let mut seen -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= entries.length {
+                break;
+            }
+            let entry = trim_text(entries[entry_index]);
+            entry_index += 1;
+            if entry.length == 0 {
+                continue;
+            }
+            let colon_index = find_top_level_colon(entry);
+            if colon_index < 0 {
+                let field_name = trim_text(entry);
+                if field_name.length == 0 {
+                    continue;
+                }
+                if string_array_contains(seen, field_name) {
+                    continue;
+                }
+                seen = append_string(seen, field_name);
+                // Empty value indicates a binding pattern.
+                fields = fields.concat([StructLiteralField { name: field_name, value: "" }]);
+                continue;
+            }
+            let field_name = trim_text(substring(entry, 0, colon_index));
+            let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
+            if field_name.length == 0 {
+                continue;
+            }
+            if string_array_contains(seen, field_name) {
+                continue;
+            }
+            if value_text.length == 0 {
+                continue;
+            }
+            seen = append_string(seen, field_name);
+            fields = fields.concat([StructLiteralField { name: field_name, value: value_text }]);
+        }
+    }
+
+    if fatal {
+        fields = [];
+    }
+
+    return StructLiteralParse { recognized: true, success: !fatal, type_name: type_name, fields: fields, diagnostics: diagnostics };
+}
+
+fn parse_enum_literal(text -> string) -> EnumLiteralParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let first = trimmed[0];
+    if !is_identifier_start_char(first) {
+        return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    // Look for EnumName.VariantName pattern
+    let dot_index = index_of(trimmed, ".");
+    if dot_index < 0 {
+        return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let enum_name_part = trim_text(substring(trimmed, 0, dot_index));
+    if enum_name_part.length == 0 {
+        return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+    }
+
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut index -> number = dot_index + 1;
+    let mut open_index -> number = -1;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+        } else if ch == "[" {
+            bracket_depth += 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+        } else if ch == "<" {
+            angle_depth += 1;
+        } else if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+        } else if ch == "{" {
+            if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+                open_index = index;
+                break;
+            }
+        }
+        index += 1;
+    }
+
+    // If no opening brace found, this might be a unit variant (no payload)
+    // like Color.Red or Color.Red() instead of Shape.Circle { radius: 5.0 }
+    if open_index < 0 {
+        let mut variant_name_part = trim_text(substring(trimmed, dot_index + 1, trimmed.length));
+        if variant_name_part.length == 0 {
+            return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+        }
+
+        // Reject member-access chains like Enum.Variant().field so they can be
+        // handled by parse_member_access instead of being mis-parsed here.
+        let mut paren_depth -> number = 0;
+        let mut bracket_depth -> number = 0;
+        let mut angle_depth -> number = 0;
+        let mut in_single -> boolean = false;
+        let mut in_double -> boolean = false;
+        let mut escape -> boolean = false;
+        let mut dot_seen -> boolean = false;
+        let mut scan_index -> number = 0;
+        loop {
+            if scan_index >= variant_name_part.length {
+                break;
+            }
+            let ch = variant_name_part[scan_index];
+            if in_double {
+                if escape {
+                    escape = false;
+                } else if ch == "\\" {
+                    escape = true;
+                } else if ch == "\"" {
+                    in_double = false;
+                }
+                scan_index += 1;
+                continue;
+            }
+            if in_single {
+                if escape {
+                    escape = false;
+                } else if ch == "\\" {
+                    escape = true;
+                } else if ch == "'" {
+                    in_single = false;
+                }
+                scan_index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_double = true;
+                scan_index += 1;
+                continue;
+            }
+            if ch == "'" {
+                in_single = true;
+                scan_index += 1;
+                continue;
+            }
+            if ch == "(" {
+                paren_depth += 1;
+            } else if ch == ")" {
+                if paren_depth > 0 {
+                    paren_depth -= 1;
+                }
+            } else if ch == "[" {
+                bracket_depth += 1;
+            } else if ch == "]" {
+                if bracket_depth > 0 {
+                    bracket_depth -= 1;
+                }
+            } else if ch == "<" {
+                angle_depth += 1;
+            } else if ch == ">" {
+                if angle_depth > 0 {
+                    angle_depth -= 1;
+                }
+            } else if ch == "." {
+                if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
+                    dot_seen = true;
+                    break;
+                }
+            }
+            scan_index += 1;
+        }
+
+        if dot_seen {
+            return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+        }
+
+        // Accept empty-argument unit-variant constructors like Enum.Variant()
+        if ends_with(variant_name_part, "()") {
+            variant_name_part = trim_text(substring(variant_name_part, 0, variant_name_part.length - 2));
+        }
+
+        if variant_name_part.length == 0 {
+            return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+        }
+
+        if !is_simple_identifier(variant_name_part) {
+            return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
+        }
+
+        // This is a unit variant - no payload fields
+        return EnumLiteralParse { recognized: true, success: true, enum_name: enum_name_part, variant_name: variant_name_part, fields: [], diagnostics: diagnostics };
+    }
+
+    let mut fatal -> boolean = false;
+    let close_index = find_matching_closing_brace(trimmed, open_index);
+    if close_index < 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: enum literal missing closing `}`");
+        fatal = true;
+    }
+
+    let variant_name_part = trim_text(substring(trimmed, dot_index + 1, open_index));
+    if variant_name_part.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: enum literal missing variant name");
+        fatal = true;
+    }
+
+    let mut fields -> StructLiteralField[] = [];
+    if !fatal && close_index >= 0 {
+        let body = substring(trimmed, open_index + 1, close_index);
+        let entries = split_array_elements(body);
+        let mut seen -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= entries.length {
+                break;
+            }
+            let entry = trim_text(entries[entry_index]);
+            entry_index += 1;
+            if entry.length == 0 {
+                continue;
+            }
+            let colon_index = find_top_level_colon(entry);
+            if colon_index < 0 {
+                // No colon - this might be shorthand syntax for match patterns like { radius }
+                // which means bind the field value to a local variable with the same name
+                let field_name = trim_text(entry);
+                if field_name.length == 0 {
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum literal field missing name");
+                    continue;
+                }
+                if string_array_contains(seen, field_name) {
+                    diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` repeated");
+                    continue;
+                }
+                seen = append_string(seen, field_name);
+                // Use empty string as value to indicate this is a binding pattern (not a literal value)
+                fields = fields.concat([StructLiteralField { name: field_name, value: "" }]);
+                continue;
+            }
+            let field_name = trim_text(substring(entry, 0, colon_index));
+            let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
+            if field_name.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field missing name");
+                continue;
+            }
+            if string_array_contains(seen, field_name) {
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` repeated");
+                continue;
+            }
+            if value_text.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` missing value");
+                continue;
+            }
+            seen = append_string(seen, field_name);
+            fields = fields.concat([StructLiteralField { name: field_name, value: value_text }]);
+        }
+    }
+
+    if !fatal && close_index >= 0 {
+        let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
+        if remainder.length > 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: enum literal trailing content `" + remainder + "`");
+            fatal = true;
+        }
+    }
+
+    if fatal {
+        fields = [];
+    }
+
+    return EnumLiteralParse { recognized: true, success: !fatal, enum_name: enum_name_part, variant_name: variant_name_part, fields: fields, diagnostics: diagnostics };
+}
+
+fn find_top_level_range_separator(value -> string) -> number {
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "." {
+            if index + 1 < value.length {
+                if value[index + 1] == "." {
+                    if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+                        return index;
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_top_level_range_separator_from(value -> string, start_index -> number) -> number {
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "(" {
+            paren_depth += 1;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+        } else if ch == "[" {
+            bracket_depth += 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+        } else if ch == "{" {
+            brace_depth += 1;
+        } else if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+        }
+        if index >= start_index {
+            if ch == "." {
+                if index + 1 < value.length {
+                    if value[index + 1] == "." {
+                        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+                            return index;
+                        }
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_member_access_separator(value -> string) -> number {
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape -> boolean = false;
+    let mut index -> number = 0;
+    let mut last_index -> number = -1;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = char_at(value, index);
+        if in_single {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_double {
+            if escape {
+                escape = false;
+            } else if ch == "\\" {
+                escape = true;
+            } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+            if ch == "." {
+                if index > 0 {
+                    let previous = char_at(value, index - 1);
+                    if previous == "." {
+                        index += 1;
+                        continue;
+                    }
+                    if is_digit_char(previous) {
+                        if index + 1 < value.length {
+                            let next_digit = char_at(value, index + 1);
+                            if is_digit_char(next_digit) {
+                                index += 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if index + 1 < value.length {
+                    let next_char = char_at(value, index + 1);
+                    if next_char == "." {
+                        index += 1;
+                        continue;
+                    }
+                }
+                last_index = index;
+            }
+        }
+        index += 1;
+    }
+    return last_index;
+}
+
+fn parse_member_access(expression -> string) -> MemberAccessParse {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        return MemberAccessParse { success: false, base: "", field: "" };
+    }
+    let separator = find_member_access_separator(trimmed);
+    if separator < 0 {
+        return MemberAccessParse { success: false, base: "", field: "" };
+    }
+    let base = trim_text(substring(trimmed, 0, separator));
+    let field = trim_text(substring(trimmed, separator + 1, trimmed.length));
+    if base.length == 0 || field.length == 0 {
+        return MemberAccessParse { success: false, base: "", field: "" };
+    }
+    if !is_simple_identifier(field) {
+        return MemberAccessParse { success: false, base: "", field: "" };
+    }
+    return MemberAccessParse { success: true, base: base, field: field };
+}
+
+fn parse_index_expression(expression -> string) -> IndexExpressionParse {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        return IndexExpressionParse { success: false, base: "", index: "" };
+    }
+    
+    // Look for the last '[' that is not inside nested brackets
+    let mut bracket_depth -> number = 0;
+    let mut index_position -> number = -1;
+    let mut i -> number = trimmed.length - 1;
+    
+    // Start from the end to find the outermost closing bracket
+    if char_code_at_text(trimmed, trimmed.length - 1) != char_code("]") {
+        return IndexExpressionParse { success: false, base: "", index: "" };
+    }
+    
+    // Now walk backwards to find the matching opening bracket
+    bracket_depth = 1;
+    i = trimmed.length - 2;
+    loop {
+        if i < 0 {
+            break;
+        }
+        let ch = char_at(trimmed, i);
+        if ch == "]" {
+            bracket_depth += 1;
+        }
+        if ch == "[" {
+            bracket_depth -= 1;
+            if bracket_depth == 0 {
+                index_position = i;
+                break;
+            }
+        }
+        i -= 1;
+    }
+    
+    if index_position < 0 {
+        return IndexExpressionParse { success: false, base: "", index: "" };
+    }
+    
+    let base = trim_text(substring(trimmed, 0, index_position));
+    let index = trim_text(substring(trimmed, index_position + 1, trimmed.length - 1));
+    
+    if base.length == 0 || index.length == 0 {
+        return IndexExpressionParse { success: false, base: "", index: "" };
+    }
+    
+    return IndexExpressionParse { success: true, base: base, index: index };
+}
+
+fn parse_range_iterable(iterable -> string) -> RangeIterableParse {
+    let trimmed = trim_text(iterable);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: `.for` iterable expression is empty");
+        return RangeIterableParse { success: false, start: "", end: "", stride: "", diagnostics: diagnostics };
+    }
+    let first_separator = find_top_level_range_separator(trimmed);
+    let mut has_stride -> boolean = false;
+    let mut stride_text -> string = "";
+    if first_separator < 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: `.for` iterable must use `start..end` range syntax");
+        return RangeIterableParse { success: false, start: "", end: "", stride: "", diagnostics: diagnostics };
+    }
+    let second_separator = find_top_level_range_separator_from(trimmed, first_separator + 2);
+    let start_text = trim_text(substring(trimmed, 0, first_separator));
+    let mut end_text = trim_text(substring(trimmed, first_separator + 2, trimmed.length));
+    if second_separator >= 0 {
+        end_text = trim_text(substring(trimmed, first_separator + 2, second_separator));
+        stride_text = trim_text(substring(trimmed, second_separator + 2, trimmed.length));
+        has_stride = stride_text.length > 0;
+    }
+    if start_text.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: `.for` range missing start expression");
+    }
+    if end_text.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: `.for` range missing end expression");
+    }
+    if has_stride && stride_text.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: `.for` range missing stride expression");
+    }
+    let success = start_text.length > 0 && end_text.length > 0 && (!has_stride || stride_text.length > 0);
+    return RangeIterableParse { success: success, start: start_text, end: end_text, stride: stride_text, diagnostics: diagnostics };
+}

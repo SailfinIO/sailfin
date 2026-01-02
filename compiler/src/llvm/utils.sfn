@@ -550,19 +550,11 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             }
             if index + 1 < parts.length {
                 let combined = parts[index] + separator + parts[index + 1];
-                if next.length == 0 {
-                    next = [combined];
-                } else {
-                    next = next.concat([combined]);
-                }
+                next = append_string(next, combined);
                 index += 2;
                 continue;
             }
-            if next.length == 0 {
-                next = [parts[index]];
-            } else {
-                next = next.concat([parts[index]]);
-            }
+            next = append_string(next, parts[index]);
             index += 1;
         }
         parts = next;

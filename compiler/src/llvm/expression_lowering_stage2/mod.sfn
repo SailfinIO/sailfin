@@ -29,27 +29,31 @@ export {
 export {
     // Expression lowering core surface
     lower_expression,
-    coerce_operand_to_type,
-    harmonise_operands,
-    emit_boolean_and,
-    emit_comparison_instruction,
-    load_local_operand,
-
-    // Locals/bindings helpers used by other passes
-    append_local_binding,
-    find_local_binding,
-    append_llvm_operand,
-
-    // Parsing helpers used by instruction lowering
-    parse_enum_literal,
-    parse_struct_pattern,
-    parse_range_iterable,
-
     // Ownership/borrow analysis helpers used across lowering
     analyze_value_ownership,
     detect_borrow_conflicts,
 
 } from "./core";
+
+export {
+    coerce_operand_to_type,
+    harmonise_operands,
+    emit_boolean_and,
+    emit_comparison_instruction,
+    load_local_operand,
+} from "./core_operands";
+
+export {
+    append_local_binding,
+    find_local_binding,
+    append_llvm_operand,
+} from "./core_scopes";
+
+export {
+    parse_enum_literal,
+    parse_struct_pattern,
+    parse_range_iterable,
+} from "./core_parse";
 
 export {
     // Union helpers shared across lowering

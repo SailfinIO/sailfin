@@ -224,6 +224,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     runtime_helpers = collect_runtime_helper_targets(local_functions)
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field")
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat")
+    runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at")
     runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string")
     runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal")
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check")

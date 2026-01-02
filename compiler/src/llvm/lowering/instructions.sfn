@@ -64,20 +64,25 @@ import {
     resolve_enum_variant_info,
 } from "../type_context";
 
+import { lower_expression, analyze_value_ownership, detect_borrow_conflicts } from "../expression_lowering_stage2/core";
+
 import {
-    append_local_binding,
     coerce_operand_to_type,
     emit_boolean_and,
     emit_comparison_instruction,
     harmonise_operands,
     load_local_operand,
-    lower_expression,
+} from "../expression_lowering_stage2/core_operands";
+
+import {
+    append_local_binding,
+} from "../expression_lowering_stage2/core_scopes";
+
+import {
     parse_enum_literal,
     parse_range_iterable,
     parse_struct_pattern,
-    analyze_value_ownership,
-    detect_borrow_conflicts,
-} from "../expression_lowering_stage2/core";
+} from "../expression_lowering_stage2/core_parse";
 
 import {
     extract_simple_identifier,

@@ -41,12 +41,9 @@ import {
     map_local_type,
 } from "../type_mapping";
 
-import {
-    lower_expression,
-    coerce_operand_to_type,
-    append_local_binding,
-    find_local_binding,
-} from "../expression_lowering_stage2/core";
+import { lower_expression } from "../expression_lowering_stage2/core";
+import { coerce_operand_to_type } from "../expression_lowering_stage2/core_operands";
+import { append_local_binding, find_local_binding } from "../expression_lowering_stage2/core_scopes";
 
 import {
     format_root_scope_id,

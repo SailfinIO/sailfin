@@ -433,6 +433,27 @@ fn _ensure_dir(path -> string) ![io] {
     fs.createDirectory(path, true);
 }
 
+fn _clear_cache_dir(path -> string) ![io] {
+    if path.length == 0 {
+        return;
+    }
+    if !fs.exists(path) {
+        return;
+    }
+    let entries = fs.listDirectory(path);
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let entry = entries[index];
+        let full = _path_join(path, entry);
+        // Best-effort: only delete files; ignore failures.
+        fs.deleteFile(full);
+        index += 1;
+    }
+}
+
 fn _runtime_bundle_exists(root -> string) -> boolean ![io] {
     if root.length == 0 {
         return false;
@@ -764,6 +785,11 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
         _ensure_dir("build");
         _ensure_dir("build/sailfin");
+
+        // Clear cached runtime compilation artifacts once per test run.
+        // The cache is purely an optimization and can otherwise reuse stale
+        // object files after runtime/native changes.
+        _clear_cache_dir("build/sailfin/test-o0");
 
         let test_runner_active_path = "build/sailfin/.test_runner_active";
         _write_text(test_runner_active_path, "");

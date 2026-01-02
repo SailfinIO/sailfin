@@ -91,6 +91,7 @@ fn render_runtime_helper_declarations(used_targets -> string[], local_functions 
     }
 
     let mut lines -> string[] = [];
+    let mut declared_symbols -> string[] = [];
     let descriptors = runtime_helper_descriptors();
     let mut index -> number = 0;
     loop {
@@ -101,6 +102,12 @@ fn render_runtime_helper_declarations(used_targets -> string[], local_functions 
         if string_array_contains(used_targets, descriptor.target) {
             // Skip if this helper is actually defined locally (not just a runtime intrinsic)
             if string_array_contains(local_symbols, descriptor.symbol) {
+                index += 1;
+                continue;
+            }
+            // Some helper targets intentionally alias the same runtime symbol.
+            // Avoid emitting duplicate declarations for the same symbol.
+            if string_array_contains(declared_symbols, descriptor.symbol) {
                 index += 1;
                 continue;
             }
@@ -115,6 +122,7 @@ fn render_runtime_helper_declarations(used_targets -> string[], local_functions 
             }
             let line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")";
             lines = append_string(lines, line);
+            declared_symbols = append_string(declared_symbols, descriptor.symbol);
         }
         index += 1;
     }
