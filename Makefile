@@ -22,7 +22,7 @@ NATIVE_OBJ_DIR ?= build/native/obj
 NATIVE_OUT ?= build/native/sailfin-stage2
 NATIVE_LINK_EXTRA ?=
 
-.PHONY: help install test test-unit test-integration test-e2e compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism
+.PHONY: help install test test-unit test-integration test-e2e compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
 
 # Rebuild a fresh native stage2 using an existing *native* stage2 seed compiler.
 # This is the self-hosting check CI ultimately needs (no stage1, no bootstrap).
@@ -184,6 +184,28 @@ check-native-stage2-determinism:
 		shasum -a 256 build/native-diff-a/sailfin-stage2 build/native-diff-b/sailfin-stage2; \
 		exit 1)
 	@echo "[check-native-stage2-determinism] OK (byte-identical)"
+
+# Canary check for the current self-host blocker: flaky/malformed LLVM emission.
+# Validates LLVM by compiling it with clang.
+check-seed-llvm-emission:
+	@if [ ! -x build/native/sailfin-stage2 ]; then \
+		echo "[check-seed-llvm-emission] missing build/native/sailfin-stage2; running make compile"; \
+		$(MAKE) compile; \
+	fi
+	@python tools/check_seed_llvm_emission.py --seed build/native/sailfin-stage2 --input compiler/src/effect_checker.sfn --attempts 10 --timeout 5 --no-clang --disable-string-free
+
+native-stage2-o1: compile
+	@mkdir -p build/native/o1-obj
+	@rm -rf build/native/o1-obj/*
+	$(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/o1-obj/sailfin_runtime.o
+	$(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/o1-obj/stage2_driver.o
+	$(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/o1-obj/runtime_globals.o
+	@while IFS= read -r m ; do \
+	  [ -z "$$m" ] && continue; \
+	  mkdir -p "$$(dirname build/native/o1-obj/$$m.o)"; \
+	  $(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/o1-obj/$$m.o; \
+	done < build/stage2/aot/modules.txt
+	$(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-o1 build/native/o1-obj/sailfin_runtime.o build/native/o1-obj/stage2_driver.o build/native/o1-obj/runtime_globals.o $$(sed 's|^|build/native/o1-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
 
 native-stage2-debug: compile
 	@mkdir -p build/native/debug-obj

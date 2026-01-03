@@ -1264,6 +1264,45 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     bool a_immediate = _is_immediate_codepoint_string(a, &a_codepoint);
     bool b_immediate = _is_immediate_codepoint_string(b, &b_codepoint);
 
+    static int trace_immediate = -1;
+    if (trace_immediate < 0)
+    {
+        trace_immediate = _env_enabled("SAILFIN_TRACE_IMMEDIATE_STRINGS") ? 1 : 0;
+    }
+
+    if (trace_immediate && (a_immediate || b_immediate))
+    {
+        static int immediate_budget = 64;
+        if (immediate_budget > 0)
+        {
+            immediate_budget--;
+            fprintf(
+                stderr,
+                "[stage2-native] string_concat immediate arg(s): a=%p%s cp=%u (0x%x) b=%p%s cp=%u (0x%x)\n",
+                (void *)a,
+                a_immediate ? " immediate" : "",
+                (unsigned)a_codepoint,
+                (unsigned)a_codepoint,
+                (void *)b,
+                b_immediate ? " immediate" : "",
+                (unsigned)b_codepoint,
+                (unsigned)b_codepoint);
+            fflush(stderr);
+
+            // Backtrace is gated separately to keep noise low by default.
+            _maybe_print_string_backtrace(
+                "string_concat immediate",
+                a,
+                a_immediate,
+                false,
+                false,
+                b,
+                b_immediate,
+                false,
+                false);
+        }
+    }
+
     bool a_poisoned = (!a_immediate && _asan_poisoned(a));
     bool b_poisoned = (!b_immediate && _asan_poisoned(b));
     if (a_poisoned || b_poisoned)
@@ -2333,10 +2372,23 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
         return;
     }
 
-    size_t len = strlen(contents_str);
-    if (len > 0)
+    uint32_t codepoint = 0;
+    if (_is_immediate_codepoint_string(contents_str, &codepoint))
     {
-        (void)fwrite(contents_str, 1, len, f);
+        unsigned char buf[5] = {0};
+        size_t len = _utf8_encode(codepoint, buf);
+        if (len > 0)
+        {
+            (void)fwrite(buf, 1, len, f);
+        }
+    }
+    else
+    {
+        int64_t len64 = sailfin_runtime_string_length((char *)contents_str);
+        if (len64 > 0)
+        {
+            (void)fwrite(contents_str, 1, (size_t)len64, f);
+        }
     }
     fclose(f);
 }

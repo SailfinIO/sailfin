@@ -477,6 +477,11 @@ fn sanitize_symbol(name -> string) -> string {
 // =============================================================================
 
 fn append_string(values -> string[], value -> string) -> string[] {
+    // Avoid concatenating onto an empty array: some runtime builds have
+    // exhibited corruption when `[].concat(non_empty)` is lowered/executed.
+    if values.length == 0 {
+        return [value];
+    }
     return values.concat([value]);
 }
 
@@ -549,11 +554,11 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             }
             if index + 1 < parts.length {
                 let combined = parts[index] + separator + parts[index + 1];
-                next = append_string(next, combined);
+                next.push(combined);
                 index += 2;
                 continue;
             }
-            next = append_string(next, parts[index]);
+            next.push(parts[index]);
             index += 1;
         }
         parts = next;

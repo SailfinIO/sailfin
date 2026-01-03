@@ -345,6 +345,8 @@ def sanitize_symbol(name):
     return result
 
 def append_string(values, value):
+    if len(values) == 0:
+        return [value]
     return (values) + ([value])
 
 def copy_string_array(values):
@@ -395,10 +397,10 @@ def join_with_separator(values, separator):
                 break
             if index + 1 < len(parts):
                 combined = parts[index] + separator + parts[index + 1]
-                next = append_string(next, combined)
+                next.append(combined)
                 index += 2
                 continue
-            next = append_string(next, parts[index])
+            next.append(parts[index])
             index += 1
         parts = next
     return parts[0]
