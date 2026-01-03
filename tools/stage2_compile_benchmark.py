@@ -30,7 +30,10 @@ def run_one(stage2: pathlib.Path, path: pathlib.Path, timeout_s: float, emit: st
     start = time.monotonic()
     try:
         proc = subprocess.run(
-            [str(stage2), "--emit", emit, str(path)],
+            # Match the CLI shape used by scripts/selfhost_native_stage2.py.
+            # (Older invocations used a --emit flag; the subcommand is the
+            # stable interface and tends to give clearer failures.)
+            [str(stage2), "emit", emit, str(path)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
@@ -75,7 +78,21 @@ def main() -> int:
         default=10,
         help="How many slowest files to print (default: 10)",
     )
+    parser.add_argument(
+        "--max-failures",
+        type=int,
+        default=1,
+        help="Stop after this many failures/timeouts (default: 1)",
+    )
+    parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Alias for --max-failures=1",
+    )
     args = parser.parse_args()
+
+    if args.fail_fast:
+        args.max_failures = 1
 
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     stage2 = (repo_root / args.stage2).resolve()
@@ -90,17 +107,25 @@ def main() -> int:
         return 2
 
     results: list[Result] = []
+    failures_seen = 0
     total_start = time.monotonic()
     for path in files:
         res = run_one(stage2, path, timeout_s=args.timeout, emit=args.emit)
         results.append(res)
         if res.timed_out:
             print(f"TIMEOUT  {res.seconds:8.3f}s  {path}")
+            failures_seen += 1
         elif res.returncode != 0:
             print(
                 f"FAIL     {res.seconds:8.3f}s  {path}  (rc={res.returncode})")
+            failures_seen += 1
         else:
             print(f"OK       {res.seconds:8.3f}s  {path}")
+
+        if args.max_failures is not None and args.max_failures > 0 and failures_seen >= args.max_failures:
+            print(
+                f"\n[benchmark] stopping early after {failures_seen} failure(s)")
+            break
 
     total_end = time.monotonic()
 

@@ -53,7 +53,8 @@ fn collect_function_effect_entry(function -> NativeFunction) -> FunctionEffectEn
 }
 
 fn append_function_effect_entry(values -> FunctionEffectEntry[], entry -> FunctionEffectEntry) -> FunctionEffectEntry[] {
-    return values.concat([entry]);
+    values.push(entry);
+    return values;
 }
 
 fn merge_effect_lists(base -> string[], extras -> string[]) -> string[] {
@@ -88,7 +89,8 @@ fn append_unique_effect(effects -> string[], effect -> string) -> string[] {
     if string_array_contains(effects, effect) {
         return effects;
     }
-    return effects.concat([effect]);
+    effects.push(effect);
+    return effects;
 }
 
 // =============================================================================
@@ -245,7 +247,8 @@ fn collect_function_names(functions -> NativeFunction[]) -> string[] {
 }
 
 fn append_function_call_entry(entries -> FunctionCallEntry[], entry -> FunctionCallEntry) -> FunctionCallEntry[] {
-    return entries.concat([entry]);
+    entries.push(entry);
+    return entries;
 }
 
 // =============================================================================
@@ -678,10 +681,33 @@ fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_grap
         if index >= direct_effects.length {
             break;
         }
-        aggregated = aggregated.concat([
-            FunctionEffectEntry { name: direct_effects[index].name, effects: copy_string_array(direct_effects[index].effects) }
-        ]);
+        aggregated.push(FunctionEffectEntry { name: direct_effects[index].name, effects: copy_string_array(direct_effects[index].effects) });
         index += 1;
+    }
+
+    // Pre-compute call graph indices once so the fixed-point propagation loop
+    // avoids repeated O(n) string lookups.
+    let mut call_targets -> number[] = [];
+    let mut call_callee_indices -> number[][] = [];
+    let mut call_index -> number = 0;
+    loop {
+        if call_index >= call_graph.length {
+            break;
+        }
+        let call_entry = call_graph[call_index];
+        call_targets.push(find_function_effect_entry_index(aggregated, call_entry.name));
+
+        let mut callees -> number[] = [];
+        let mut callee_index -> number = 0;
+        loop {
+            if callee_index >= call_entry.callees.length {
+                break;
+            }
+            callees.push(find_function_effect_entry_index(aggregated, call_entry.callees[callee_index]));
+            callee_index += 1;
+        }
+        call_callee_indices.push(callees);
+        call_index += 1;
     }
 
     let mut changed -> boolean = true;
@@ -690,23 +716,23 @@ fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_grap
             break;
         }
         changed = false;
-        let mut call_index -> number = 0;
+        call_index = 0;
         loop {
             if call_index >= call_graph.length {
                 break;
             }
-            let call_entry = call_graph[call_index];
-            let target_index = find_function_effect_entry_index(aggregated, call_entry.name);
+            let target_index = call_targets[call_index];
             if target_index >= 0 {
                 let target_entry = aggregated[target_index];
                 let mut merged -> string[] = copy_string_array(target_entry.effects);
+
+                let callees = call_callee_indices[call_index];
                 let mut callee_index -> number = 0;
                 loop {
-                    if callee_index >= call_entry.callees.length {
+                    if callee_index >= callees.length {
                         break;
                     }
-                    let callee_name = call_entry.callees[callee_index];
-                    let callee_pos = find_function_effect_entry_index(aggregated, callee_name);
+                    let callee_pos = callees[callee_index];
                     if callee_pos >= 0 {
                         let callee_entry = aggregated[callee_pos];
                         let mut effect_index -> number = 0;
@@ -720,9 +746,9 @@ fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_grap
                     }
                     callee_index += 1;
                 }
+
                 if !string_arrays_equal(merged, target_entry.effects) {
-                    let updated_entry = FunctionEffectEntry { name: target_entry.name, effects: merged };
-                    aggregated = replace_function_effect_entry(aggregated, target_index, updated_entry);
+                    aggregated[target_index] = FunctionEffectEntry { name: target_entry.name, effects: merged };
                     changed = true;
                 }
             }
@@ -763,9 +789,9 @@ fn replace_function_effect_entry(entries -> FunctionEffectEntry[], position -> n
             break;
         }
         if index == position {
-            result = result.concat([entry]);
+            result.push(entry);
         } else {
-            result = result.concat([entries[index]]);
+            result.push(entries[index]);
         }
         index += 1;
     }
@@ -796,5 +822,6 @@ fn build_capability_manifest(entry_points -> string[], function_effects -> Funct
 }
 
 fn append_manifest_entry(entries -> CapabilityManifestEntry[], entry -> CapabilityManifestEntry) -> CapabilityManifestEntry[] {
-    return entries.concat([entry]);
+    entries.push(entry);
+    return entries;
 }

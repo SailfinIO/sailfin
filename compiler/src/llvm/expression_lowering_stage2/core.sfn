@@ -552,7 +552,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
                             if arg_index >= argument_entries.length {
                                 break;
                             }
-                            rewritten_args = rewritten_args.concat([argument_entries[arg_index]]);
+                            rewritten_args.push(argument_entries[arg_index]);
                             arg_index += 1;
                         }
                         return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context);
@@ -568,7 +568,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
                                 if arg_index >= argument_entries.length {
                                     break;
                                 }
-                                rewritten_args = rewritten_args.concat([argument_entries[arg_index]]);
+                                rewritten_args.push(argument_entries[arg_index]);
                                 arg_index += 1;
                             }
                             return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context);
@@ -2329,8 +2329,31 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         let candidate_variant = enum_info.variants[variant_check_index];
         let candidate_field = find_variant_field_info(candidate_variant, parse.field);
         if candidate_field != null {
-            matched_variants = matched_variants.concat([candidate_variant]);
-            matched_fields = matched_fields.concat([candidate_field]);
+            let mut resolved_field = candidate_field;
+            if resolved_field.llvm_type.length == 0 {
+                let mut mapped = map_type_annotation(resolved_field.type_annotation);
+                if mapped == "void" {
+                    mapped = "";
+                }
+                if mapped.length == 0 {
+                    mapped = "i8*";
+                }
+                if layout_annotation_represents_user_value(resolved_field.type_annotation) && ends_with_pointer_suffix(mapped) {
+                    let stripped = strip_pointer_suffix(mapped);
+                    if stripped.length > 0 {
+                        mapped = stripped;
+                    }
+                }
+                resolved_field = StructFieldInfo {
+                    name: resolved_field.name,
+                    llvm_type: mapped,
+                    type_annotation: resolved_field.type_annotation,
+                    index: resolved_field.index,
+                    offset: resolved_field.offset,
+                };
+            }
+            matched_variants.push(candidate_variant);
+            matched_fields.push(resolved_field);
         }
         variant_check_index += 1;
     }
@@ -2353,8 +2376,8 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
             }
             let candidate_field = matched_fields[selection_index];
             if candidate_field.llvm_type == expected_type {
-                filtered_variants = filtered_variants.concat([matched_variants[selection_index]]);
-                filtered_fields = filtered_fields.concat([candidate_field]);
+                filtered_variants.push(matched_variants[selection_index]);
+                filtered_fields.push(candidate_field);
             }
             selection_index += 1;
         }
@@ -2425,6 +2448,22 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     }
 
     let mut field_type -> string = selected_fields[0].llvm_type;
+    if field_type.length == 0 {
+        let mut mapped = map_type_annotation(selected_fields[0].type_annotation);
+        if mapped == "void" {
+            mapped = "";
+        }
+        if mapped.length == 0 {
+            mapped = "i8*";
+        }
+        if layout_annotation_represents_user_value(selected_fields[0].type_annotation) && ends_with_pointer_suffix(mapped) {
+            let stripped = strip_pointer_suffix(mapped);
+            if stripped.length > 0 {
+                mapped = stripped;
+            }
+        }
+        field_type = mapped;
+    }
     let mut pointer_coercion -> boolean = false;
     if pointer_depth_mismatch {
         if (max_pointer_depth - min_pointer_depth == 1) && base_type.length > 0 && base_type[0] == "%" {
@@ -2472,7 +2511,23 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
             field_ptr_temp = offset_ptr_temp;
         }
 
-        let storage_type = field_info.llvm_type;
+        let mut storage_type = field_info.llvm_type;
+        if storage_type.length == 0 {
+            let mut mapped = map_type_annotation(field_info.type_annotation);
+            if mapped == "void" {
+                mapped = "";
+            }
+            if mapped.length == 0 {
+                mapped = "i8*";
+            }
+            if layout_annotation_represents_user_value(field_info.type_annotation) && ends_with_pointer_suffix(mapped) {
+                let stripped = strip_pointer_suffix(mapped);
+                if stripped.length > 0 {
+                    mapped = stripped;
+                }
+            }
+            storage_type = mapped;
+        }
         let typed_ptr_temp = format_temp_name(current_temp);
         current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + storage_type + "*");
         current_temp += 1;

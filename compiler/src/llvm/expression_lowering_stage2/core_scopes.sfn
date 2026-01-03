@@ -88,9 +88,9 @@ fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id 
                 end_scope_depth: scope_depth,
                 released: true,
             };
-            result = append_lifetime_region(result, updated);
+            result.push(updated);
         } else {
-            result = append_lifetime_region(result, entry);
+            result.push(entry);
         }
         index += 1;
     }
@@ -195,9 +195,9 @@ fn replace_llvm_operand(values -> LLVMOperand[], index -> number, value -> LLVMO
             break;
         }
         if current == index {
-            result = append_llvm_operand(result, value);
+            result.push(value);
         } else {
-            result = append_llvm_operand(result, values[current]);
+            result.push(values[current]);
         }
         current += 1;
     }

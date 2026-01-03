@@ -21,6 +21,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 
 from aot_prepare import prepare_stage2_aot_modules
 
@@ -36,6 +37,23 @@ def _run(cmd: list[str], *, cwd: pathlib.Path, stdout_path: pathlib.Path | None 
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     with stdout_path.open("wb") as f:
         subprocess.run(cmd, cwd=str(cwd), check=True, stdout=f)
+
+
+def _seed_supports_emit_llvm_file(seed: pathlib.Path) -> bool:
+    proc = subprocess.run(
+        [str(seed), "emit-llvm-file"],
+        cwd=str(REPO_ROOT),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    stderr = proc.stderr.decode("utf-8", errors="replace")
+    # When the command exists, stage2 prints usage for missing args.
+    if "emit-llvm-file" in stderr or "usage" in stderr:
+        return True
+    # If the command does not exist, stage2 reports an unknown command.
+    if "unknown" in stderr and "emit-llvm-file" in stderr:
+        return False
+    return proc.returncode != 0
 
 
 def _strip_stage2_log_prefixes(text: str) -> str:
@@ -58,6 +76,31 @@ def _strip_stage2_log_prefixes(text: str) -> str:
             continue
         out_lines.append(line)
     return "\n".join(out_lines) + "\n"
+
+
+def _looks_like_llvm_module(text: str) -> bool:
+    # Stage2 `emit llvm` output should begin with top-level LLVM entities.
+    # We've seen rare cases where the seed compiler emits a truncated suffix
+    # that starts with indented instructions (e.g. "  store ..."), which clang
+    # rejects as "expected top-level entity".
+    for line in text.splitlines()[:100]:
+        if not line.strip():
+            continue
+        if line[:1].isspace():
+            return False
+        return line.startswith((
+            "source_filename =",
+            "; ModuleID =",
+            "target ",
+            "declare ",
+            "define ",
+            "%",
+            "@",
+            ";",
+            "!",
+            "attributes ",
+        ))
+    return False
 
 
 def _collect_stage2_sources(repo_root: pathlib.Path) -> list[pathlib.Path]:
@@ -86,6 +129,18 @@ def main(argv: list[str]) -> int:
         type=pathlib.Path,
         default=REPO_ROOT / "build/native/sailfin-stage2",
         help="Path to the seed native sailfin-stage2 binary",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=50,
+        help="Max attempts per module when seed output is malformed (default: 50)",
+    )
+    parser.add_argument(
+        "--attempt-sleep",
+        type=float,
+        default=0.0,
+        help="Seconds to sleep between attempts for a flaky module (default: 0)",
     )
     parser.add_argument(
         "--compiler-entry",
@@ -144,28 +199,69 @@ def main(argv: list[str]) -> int:
     module_names: list[str] = []
     module_texts: list[str] = []
 
+    use_emit_llvm_file = _seed_supports_emit_llvm_file(seed)
+    seed_env = os.environ.copy()
+    seed_env["SAILFIN_DISABLE_STRING_FREE"] = "1"
+
     for idx, source_path in enumerate(sources):
         module_name = source_path.stem
-        proc = subprocess.run(
-            [str(seed), "emit", "llvm", str(source_path)],
-            cwd=str(REPO_ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        if proc.returncode != 0:
+        max_attempts = max(1, int(args.max_attempts))
+        cleaned = ""
+        last_stderr = ""
+        last_rc: int | None = None
+        for attempt in range(1, max_attempts + 1):
+            attempt_path = raw_dir / f"{module_name}.attempt{attempt}.ll"
+            if use_emit_llvm_file:
+                proc = subprocess.run(
+                    [str(seed), "emit-llvm-file",
+                     str(source_path), str(attempt_path)],
+                    cwd=str(REPO_ROOT),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    close_fds=False,
+                    env=seed_env,
+                )
+            else:
+                # NOTE: Some seed compilers have been observed to emit truncated LLVM
+                # when stdout is a pipe (e.g. via subprocess stdout=PIPE). Writing to
+                # a real file sidesteps that runtime issue.
+                with attempt_path.open("wb") as out:
+                    proc = subprocess.run(
+                        [str(seed), "emit", "llvm", str(source_path)],
+                        cwd=str(REPO_ROOT),
+                        stdout=out,
+                        stderr=subprocess.PIPE,
+                        close_fds=False,
+                        env=seed_env,
+                    )
+            last_rc = proc.returncode
+            last_stderr = proc.stderr.decode("utf-8", errors="replace")
+            if proc.returncode != 0:
+                if args.attempt_sleep > 0:
+                    time.sleep(args.attempt_sleep)
+                continue
+
+            raw = attempt_path.read_text(encoding="utf-8", errors="replace")
+            candidate = raw if use_emit_llvm_file else _strip_stage2_log_prefixes(
+                raw)
+            if _looks_like_llvm_module(candidate):
+                cleaned = candidate
+                break
+
+            if args.attempt_sleep > 0:
+                time.sleep(args.attempt_sleep)
+
+        if not cleaned:
             try:
                 rel = source_path.relative_to(REPO_ROOT)
             except ValueError:
                 rel = source_path
-            stderr_text = proc.stderr.decode("utf-8", errors="replace")
             raise SystemExit(
                 "selfhost: seed compiler failed compiling module "
-                f"{idx + 1}/{len(sources)} {rel} (rc={proc.returncode})\n"
-                + stderr_text
+                f"{idx + 1}/{len(sources)} {rel} (rc={last_rc})\n"
+                + last_stderr
             )
 
-        raw = proc.stdout.decode("utf-8", errors="replace")
-        cleaned = _strip_stage2_log_prefixes(raw)
         (raw_dir / f"{module_name}.ll").write_text(cleaned, encoding="utf-8")
         module_names.append(module_name)
         module_texts.append(cleaned)

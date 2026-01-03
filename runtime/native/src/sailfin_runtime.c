@@ -166,6 +166,23 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
 
     uintptr_t raw = (uintptr_t)text;
 
+    // Secondary encoding: sometimes a single-byte grapheme leaks through as a
+    // near-null pointer (e.g. 0x2e for '.'). Treat ASCII values as immediate
+    // codepoints so we never attempt to dereference them as C strings.
+    if (raw < 4096u)
+    {
+        uint32_t codepoint = (uint32_t)raw;
+        if (codepoint > 0 && codepoint <= 0x7fu)
+        {
+            if (out_codepoint)
+            {
+                *out_codepoint = codepoint;
+            }
+            return true;
+        }
+        return false;
+    }
+
     // Heuristic: sometimes a "string" leaks as an integer codepoint shifted
     // into the upper 32 bits (e.g., 0x0000003c00000000). Treat that as a
     // single-codepoint UTF-8 string.
@@ -803,6 +820,18 @@ static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *tex
     // unbounded memory if we get a wildly unterminated pointer.
     const size_t max_scan = 1u << 20; // 1 MiB
 
+#if !defined(SAILFIN_WITH_ASAN)
+    // Fast path for non-ASAN builds: rely on libc's bounded scan.
+    // We keep the pointer plausibility guards above to avoid the most common
+    // "mis-tagged value as char*" crashes, but we don't pay per-byte overhead.
+    size_t n = strnlen(text, max_scan);
+    if (out_truncated)
+    {
+        *out_truncated = (n == max_scan);
+    }
+    return n;
+#else
+
     for (size_t i = 0; i < max_scan; i++)
     {
         const char *p = text + i;
@@ -840,6 +869,7 @@ static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *tex
         *out_truncated = true;
     }
     return max_scan;
+#endif
 }
 
 #if defined(SAILFIN_WITH_ASAN)
@@ -877,6 +907,29 @@ void sailfin_runtime_mark_persistent(char *ptr)
 
 void sailfin_runtime_string_drop(char *text)
 {
+    static int free_enabled = -1;
+    if (free_enabled < 0)
+    {
+        // Stage2 currently lacks a precise ownership/RC model for strings.
+        // In particular, strings are frequently stored inside arrays while the
+        // original locals are still dropped, leading to use-after-free.
+        //
+        // Default to *not* freeing strings to keep compiler output correct.
+        // You can opt in to freeing for debugging/profiling experiments.
+        if (_env_enabled("SAILFIN_DISABLE_STRING_FREE"))
+        {
+            free_enabled = 0;
+        }
+        else
+        {
+            free_enabled = _env_enabled("SAILFIN_ENABLE_STRING_FREE") ? 1 : 0;
+        }
+    }
+    if (!free_enabled)
+    {
+        return;
+    }
+
     if (!text)
     {
         return;
@@ -885,6 +938,21 @@ void sailfin_runtime_string_drop(char *text)
     {
         return;
     }
+
+    // Defensive: the stage2 compiler produces some very large strings (notably
+    // full LLVM modules). We've observed nondeterministic corruption when such
+    // strings are dropped and their storage is reused while still in use.
+    // Instead of freeing large strings, mark them persistent for the lifetime
+    // of the process.
+    bool truncated = false;
+    size_t n = _safe_strlen_asan(text, &truncated);
+    (void)truncated;
+    if (n >= (64u * 1024u))
+    {
+        sailfin_runtime_mark_persistent(text);
+        return;
+    }
+
     if (_is_persistent_ptr(text))
     {
         return;
@@ -1142,6 +1210,27 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
     if (end < start)
     {
         end = start;
+    }
+
+    // Even though this is the "unchecked" variant (used on hot paths), we've
+    // seen cases where the stage2 compiler can pass invalid bounds. Allowing
+    // out-of-bounds reads here introduces nondeterminism and can corrupt
+    // downstream output (e.g. malformed LLVM IR). Clamp to the actual string
+    // length to keep the runtime safe.
+    bool truncated = false;
+    int64_t n = (int64_t)_safe_strlen_asan(text, &truncated);
+    if (truncated)
+    {
+        fprintf(stderr, "[stage2-native] substring_unchecked: unterminated string at %p; treating length=%lld\n", (void *)text, (long long)n);
+        fflush(stderr);
+    }
+    if (start > n)
+    {
+        start = n;
+    }
+    if (end > n)
+    {
+        end = n;
     }
 
     int64_t length = end - start;
@@ -1973,22 +2062,45 @@ char *sailfin_runtime_grapheme_at(char *text, double index)
         return "";
     }
 
-    int64_t len = sailfin_runtime_string_length(text);
-    if (len <= 0)
-    {
-        return "";
-    }
-
     int64_t idx = (int64_t)index;
     if ((double)idx != index)
     {
         // Non-integer indexes aren't meaningful here.
         return "";
     }
-    if (idx < 0 || idx >= len)
+
+    if (idx < 0)
     {
         return "";
     }
+
+    int64_t len = sailfin_runtime_string_length(text);
+    if (len <= 0)
+    {
+        return "";
+    }
+    if (idx >= len)
+    {
+        return "";
+    }
+
+    // Keep the same pointer plausibility guards as `_safe_strlen_asan`.
+    // The stage2 compiler occasionally carries mis-tagged values that can be
+    // interpreted as `char*`; avoid crashing on the first dereference.
+    if ((uintptr_t)text < 4096u)
+    {
+        return "";
+    }
+    {
+        uintptr_t addr = (uintptr_t)text;
+        uintptr_t high = addr >> 48;
+        if (high != 0u && high != 0xffffu)
+        {
+            return "";
+        }
+    }
+
+    unsigned char byte = (unsigned char)text[idx];
 
     // Bootstrap implementation: treat each UTF-8 byte as a grapheme.
     // To avoid allocating on hot paths (compiler parsing), return an
@@ -1997,7 +2109,6 @@ char *sailfin_runtime_grapheme_at(char *text, double index)
     // NOTE: For bytes >= 0x80 we preserve legacy behaviour (a raw single-byte
     // C string) because immediate-codepoint strings are interpreted as Unicode
     // codepoints by other runtime helpers.
-    unsigned char byte = (unsigned char)text[idx];
     if (byte <= 0x7fu)
     {
         uintptr_t packed = ((uintptr_t)byte) << 32;

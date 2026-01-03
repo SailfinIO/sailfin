@@ -36,6 +36,7 @@ import {
     join_with_separator,
     number_to_string,
     sanitize_symbol,
+    string_array_contains,
     starts_with,
     trim_text,
     index_of,
@@ -195,6 +196,15 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
 }
 
+// Convenience wrapper for tool/driver entrypoints that only need the emitted
+// LLVM text. Returning a plain string avoids carrying the full `LoweredLLVMResult`
+// struct across compilation boundaries (stage1 Python + stage2 native), which
+// has historically caused layout/ABI mismatches and nondeterministic output.
+fn lower_to_llvm_ir(native_module -> NativeModule) -> string ![io] {
+    let lowered = lower_to_llvm(native_module);
+    return lowered.ir;
+}
+
 fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
@@ -203,6 +213,11 @@ fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult !
     let parse = parse_native_artifact(artifact.contents);
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
     return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+}
+
+fn lower_to_llvm_ir_for_tests(native_module -> NativeModule) -> string ![io] {
+    let lowered = lower_to_llvm_for_tests(native_module);
+    return lowered.ir;
 }
 
 fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifests -> LayoutManifest[]) -> LoweredLLVMResult {
@@ -371,6 +386,12 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     context_functions = concat_native_functions(context_functions, imported_struct_methods);
 
     let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
+    // Some lowering paths (e.g. array lowering) emit direct calls to
+    // `@sailfin_runtime_copy_bytes` that do not appear in Native IR call targets.
+    // Ensure the declaration is always present to keep per-module clang compiles valid.
+    if !string_array_contains(runtime_helpers, "copy_bytes") {
+        runtime_helpers = append_string(runtime_helpers, "copy_bytes");
+    }
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
     runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at");
@@ -390,30 +411,30 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
 
     let trait_lines = render_trait_metadata_comments(trait_metadata);
     if trait_lines.length > 0 {
-        lines = lines.concat(trait_lines);
+        lines = extend_string_lines(lines, trait_lines);
         lines = append_string(lines, "");
     }
 
     let struct_type_lines = render_struct_type_definitions(type_context, context_functions);
     if struct_type_lines.length > 0 {
-        lines = lines.concat(struct_type_lines);
+        lines = extend_string_lines(lines, struct_type_lines);
         lines = append_string(lines, "");
     }
 
     let enum_type_lines = render_enum_type_definitions(type_context);
     if enum_type_lines.length > 0 {
-        lines = lines.concat(enum_type_lines);
+        lines = extend_string_lines(lines, enum_type_lines);
         lines = append_string(lines, "");
     }
 
     let interface_type_lines = render_interface_type_definitions(type_context);
     if interface_type_lines.length > 0 {
-        lines = lines.concat(interface_type_lines);
+        lines = extend_string_lines(lines, interface_type_lines);
         lines = append_string(lines, "");
     }
 
     // Async/future runtime types (opaque in LLVM; implemented by the native runtime).
-    lines = lines.concat([
+    lines = extend_string_lines(lines, [
         "%SailfinFutureNumber = type opaque",
         "%SailfinFutureBool = type opaque",
         "%SailfinFuturePtr = type opaque",
@@ -440,26 +461,26 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
 
     let vtable_type_lines = render_vtable_type_definitions(type_context);
     if vtable_type_lines.length > 0 {
-        lines = lines.concat(vtable_type_lines);
+        lines = extend_string_lines(lines, vtable_type_lines);
         lines = append_string(lines, "");
     }
 
     let vtable_const_lines = render_vtable_constants(type_context);
     if vtable_const_lines.length > 0 {
-        lines = lines.concat(vtable_const_lines);
+        lines = extend_string_lines(lines, vtable_const_lines);
         lines = append_string(lines, "");
     }
 
     let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
     if helper_declarations.length > 0 {
-        lines = lines.concat(helper_declarations);
+        lines = extend_string_lines(lines, helper_declarations);
         lines = append_string(lines, "");
     }
 
     // Declare imported functions from other modules (excluding local functions)
     let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
     if imported_declarations.length > 0 {
-        lines = lines.concat(imported_declarations);
+        lines = extend_string_lines(lines, imported_declarations);
         lines = append_string(lines, "");
     }
 
@@ -480,7 +501,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name);
     diagnostics = diagnostics.concat(module_globals.diagnostics);
     if module_globals.preamble_lines.length > 0 {
-        lines = lines.concat(module_globals.preamble_lines);
+        lines = extend_string_lines(lines, module_globals.preamble_lines);
         lines = append_string(lines, "");
     }
 
@@ -488,7 +509,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let mut function_lines -> string[] = [];
 
     if module_globals.init_function_lines.length > 0 {
-        function_lines = function_lines.concat(module_globals.init_function_lines);
+        function_lines = extend_string_lines(function_lines, module_globals.init_function_lines);
         function_lines = append_string(function_lines, "");
     }
 
@@ -538,7 +559,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
             if function_lines.length == 0 {
                 function_lines = lowered.lines;
             } else {
-                function_lines = function_lines.concat(lowered.lines);
+                function_lines = extend_string_lines(function_lines, lowered.lines);
             }
             if index + 1 < local_functions.length {
                 function_lines = append_string(function_lines, "");
@@ -551,7 +572,7 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
         if function_lines.length > 0 {
             function_lines = append_string(function_lines, "");
         }
-        function_lines = function_lines.concat([
+        function_lines = extend_string_lines(function_lines, [
             "define internal double @add(double %a, double %b) {",
             "entry:",
             "  %t0 = fadd double %a, %b",
@@ -563,10 +584,10 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     let string_constant_lines = render_string_constants(all_string_constants);
     let mut final_lines -> string[] = preamble_lines;
     if string_constant_lines.length > 0 {
-        final_lines = final_lines.concat(string_constant_lines);
+        final_lines = extend_string_lines(final_lines, string_constant_lines);
         final_lines = append_string(final_lines, "");
     }
-    final_lines = final_lines.concat(function_lines);
+    final_lines = extend_string_lines(final_lines, function_lines);
     final_lines = ensure_intrinsic_declarations(final_lines);
 
     let ir = join_with_separator(final_lines, "\n");
@@ -584,6 +605,19 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
         capability_manifest: manifest,
         string_constants: all_string_constants,
     };
+}
+
+fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
+    let mut out = values;
+    let mut index -> number = 0;
+    loop {
+        if index >= extras.length {
+            break;
+        }
+        out = append_string(out, extras[index]);
+        index += 1;
+    }
+    return out;
 }
 
 fn module_source_filename(module_name -> string) -> string {

@@ -26,7 +26,7 @@ globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
 def _usage():
-    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit llvm|sailfin|native <file.sfn>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n"
+    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit llvm|sailfin|native <file.sfn>\n" + "  sfn emit-llvm-file <file.sfn> <out.ll>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n"
 
 def _ends_with(value, suffix):
     if len(suffix) == 0:
@@ -487,6 +487,20 @@ def sailfin_cli_main(argv):
             return 0
         print.error("unknown emit mode: " + mode)
         return 2
+    if cmd == "emit-llvm-file":
+        if len(args) != 3:
+            print.error(_usage())
+            return 2
+        path = args[1]
+        out_path = args[2]
+        if not fs.exists(path):
+            print.error("file not found: " + path)
+            return 1
+        source = fs.readFile(path)
+        module_name = module_name_from_path(path)
+        llvm = compile_to_llvm_with_module(source, module_name)
+        _write_text(out_path, llvm)
+        return 0
     if cmd == "build":
         out_path = ""
         input_path = ""

@@ -45,7 +45,8 @@ def collect_function_effect_entry(function):
     return FunctionEffectEntry(name=function.name, effects=combined)
 
 def append_function_effect_entry(values, entry):
-    return (values) + ([entry])
+    values.append(entry)
+    return values
 
 def merge_effect_lists(base, extras):
     result = []
@@ -68,7 +69,8 @@ def append_unique_effect(effects, effect):
         return effects
     if string_array_contains(effects, effect):
         return effects
-    return (effects) + ([effect])
+    effects.append(effect)
+    return effects
 
 def collect_function_borrow_effects(function):
     effects = []
@@ -182,7 +184,8 @@ def collect_function_names(functions):
     return names
 
 def append_function_call_entry(entries, entry):
-    return (entries) + ([entry])
+    entries.append(entry)
+    return entries
 
 def collect_instruction_calls(instruction, function_names):
     callees = []
@@ -501,8 +504,25 @@ def propagate_function_effects(direct_effects, call_graph):
     while True:
         if index >= len(direct_effects):
             break
-        aggregated = (aggregated) + ([FunctionEffectEntry(name=direct_effects[index].name, effects=copy_string_array(direct_effects[index].effects))])
+        aggregated.append(FunctionEffectEntry(name=direct_effects[index].name, effects=copy_string_array(direct_effects[index].effects)))
         index += 1
+    call_targets = []
+    call_callee_indices = []
+    call_index = 0
+    while True:
+        if call_index >= len(call_graph):
+            break
+        call_entry = call_graph[call_index]
+        call_targets.append(find_function_effect_entry_index(aggregated, call_entry.name))
+        callees = []
+        callee_index = 0
+        while True:
+            if callee_index >= len(call_entry.callees):
+                break
+            callees.append(find_function_effect_entry_index(aggregated, call_entry.callees[callee_index]))
+            callee_index += 1
+        call_callee_indices.append(callees)
+        call_index += 1
     changed = True
     while True:
         if not changed:
@@ -512,17 +532,16 @@ def propagate_function_effects(direct_effects, call_graph):
         while True:
             if call_index >= len(call_graph):
                 break
-            call_entry = call_graph[call_index]
-            target_index = find_function_effect_entry_index(aggregated, call_entry.name)
+            target_index = call_targets[call_index]
             if target_index >= 0:
                 target_entry = aggregated[target_index]
                 merged = copy_string_array(target_entry.effects)
+                callees = call_callee_indices[call_index]
                 callee_index = 0
                 while True:
-                    if callee_index >= len(call_entry.callees):
+                    if callee_index >= len(callees):
                         break
-                    callee_name = call_entry.callees[callee_index]
-                    callee_pos = find_function_effect_entry_index(aggregated, callee_name)
+                    callee_pos = callees[callee_index]
                     if callee_pos >= 0:
                         callee_entry = aggregated[callee_pos]
                         effect_index = 0
@@ -533,8 +552,7 @@ def propagate_function_effects(direct_effects, call_graph):
                             effect_index += 1
                     callee_index += 1
                 if not string_arrays_equal(merged, target_entry.effects):
-                    updated_entry = FunctionEffectEntry(name=target_entry.name, effects=merged)
-                    aggregated = replace_function_effect_entry(aggregated, target_index, updated_entry)
+                    aggregated[target_index] = FunctionEffectEntry(name=target_entry.name, effects=merged)
                     changed = True
             call_index += 1
     return aggregated
@@ -562,9 +580,9 @@ def replace_function_effect_entry(entries, position, entry):
         if index >= len(entries):
             break
         if index == position:
-            result = (result) + ([entry])
+            result.append(entry)
         else:
-            result = (result) + ([entries[index]])
+            result.append(entries[index])
         index += 1
     return result
 
@@ -584,4 +602,5 @@ def build_capability_manifest(entry_points, function_effects):
     return CapabilityManifest(entries=entries)
 
 def append_manifest_entry(entries, entry):
-    return (entries) + ([entry])
+    entries.append(entry)
+    return entries

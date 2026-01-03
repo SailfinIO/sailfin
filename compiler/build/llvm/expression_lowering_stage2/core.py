@@ -234,7 +234,7 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
                         while True:
                             if arg_index >= len(argument_entries):
                                 break
-                            rewritten_args = (rewritten_args) + ([argument_entries[arg_index]])
+                            rewritten_args.append(argument_entries[arg_index])
                             arg_index += 1
                         return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context)
                 else:
@@ -247,7 +247,7 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
                             while True:
                                 if arg_index >= len(argument_entries):
                                     break
-                                rewritten_args = (rewritten_args) + ([argument_entries[arg_index]])
+                                rewritten_args.append(argument_entries[arg_index])
                                 arg_index += 1
                             return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context)
         return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions, context)
@@ -1413,8 +1413,20 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         candidate_variant = enum_info.variants[variant_check_index]
         candidate_field = find_variant_field_info(candidate_variant, parse.field)
         if candidate_field != None:
-            matched_variants = (matched_variants) + ([candidate_variant])
-            matched_fields = (matched_fields) + ([candidate_field])
+            resolved_field = candidate_field
+            if len(resolved_field.llvm_type) == 0:
+                mapped = map_type_annotation(resolved_field.type_annotation)
+                if mapped == "void":
+                    mapped = ""
+                if len(mapped) == 0:
+                    mapped = "i8*"
+                if layout_annotation_represents_user_value(resolved_field.type_annotation)  and  ends_with_pointer_suffix(mapped):
+                    stripped = strip_pointer_suffix(mapped)
+                    if len(stripped) > 0:
+                        mapped = stripped
+                resolved_field = StructFieldInfo(name=resolved_field.name, llvm_type=mapped, type_annotation=resolved_field.type_annotation, index=resolved_field.index, offset=resolved_field.offset)
+            matched_variants.append(candidate_variant)
+            matched_fields.append(resolved_field)
         variant_check_index += 1
     if len(matched_variants) == 0:
         messages = append_string(messages, "llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` on any variant")
@@ -1430,8 +1442,8 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
                 break
             candidate_field = matched_fields[selection_index]
             if candidate_field.llvm_type == expected_type:
-                filtered_variants = (filtered_variants) + ([matched_variants[selection_index]])
-                filtered_fields = (filtered_fields) + ([candidate_field])
+                filtered_variants.append(matched_variants[selection_index])
+                filtered_fields.append(candidate_field)
             selection_index += 1
         if len(filtered_variants) > 0:
             selected_variants = filtered_variants
@@ -1480,6 +1492,17 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants")
         return make_expression_result(current_lines, current_temp, None, messages, enum_string_constants)
     field_type = selected_fields[0].llvm_type
+    if len(field_type) == 0:
+        mapped = map_type_annotation(selected_fields[0].type_annotation)
+        if mapped == "void":
+            mapped = ""
+        if len(mapped) == 0:
+            mapped = "i8*"
+        if layout_annotation_represents_user_value(selected_fields[0].type_annotation)  and  ends_with_pointer_suffix(mapped):
+            stripped = strip_pointer_suffix(mapped)
+            if len(stripped) > 0:
+                mapped = stripped
+        field_type = mapped
     pointer_coercion = False
     if pointer_depth_mismatch:
         if max_pointer_depth - min_pointer_depth == 1  and  len(base_type) > 0  and  base_type[0] == "%":
@@ -1517,6 +1540,17 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
             current_temp += 1
             field_ptr_temp = offset_ptr_temp
         storage_type = field_info.llvm_type
+        if len(storage_type) == 0:
+            mapped = map_type_annotation(field_info.type_annotation)
+            if mapped == "void":
+                mapped = ""
+            if len(mapped) == 0:
+                mapped = "i8*"
+            if layout_annotation_represents_user_value(field_info.type_annotation)  and  ends_with_pointer_suffix(mapped):
+                stripped = strip_pointer_suffix(mapped)
+                if len(stripped) > 0:
+                    mapped = stripped
+            storage_type = mapped
         typed_ptr_temp = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + storage_type + "*")
         current_temp += 1

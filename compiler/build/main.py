@@ -6,7 +6,7 @@ from compiler.build.ast import Program
 from compiler.build.emitter_sailfin import emit_program
 from compiler.build.emit_native import emit_native, emit_native_with_module_name, EmitNativeResult, NativeModule
 from compiler.build.native_lowering import lower_to_python, LoweredPythonResult
-from compiler.build.llvm.lowering.entrypoints import lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context
+from compiler.build.llvm.lowering.entrypoints import lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_ir, lower_to_llvm_ir_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context
 from compiler.build.native_ir import LayoutManifest, parse_layout_manifest
 from compiler.build.string_utils import substring
 from compiler.build.token import Token
@@ -226,8 +226,8 @@ def compile_to_native_llvm_with_module(source, module_name):
 
 def compile_to_llvm(source):
     # effects: io
-    lowered = compile_to_native_llvm(source)
-    return lowered.ir
+    native_result = compile_to_native(source)
+    return lower_to_llvm_ir(native_result.module)
 
 def compile_to_llvm_with_module(source, module_name):
     # effects: io
@@ -237,8 +237,7 @@ def compile_to_llvm_with_module(source, module_name):
         report_typecheck_errors(analysis_result.diagnostics, source)
         return ""
     native_result = emit_native_with_module_name(program, module_name)
-    lowered = lower_to_llvm(native_result.module)
-    return lowered.ir
+    return lower_to_llvm_ir(native_result.module)
 
 def compile_tests_to_llvm(source):
     # effects: io
@@ -249,10 +248,10 @@ def compile_tests_to_llvm(source):
     if trace:
         print.info("test compiler: compile_to_native done (diagnostics=" + number_to_string(len(native_result.diagnostics)) + ")")
         print.info("test compiler: lower_to_llvm_for_tests start")
-    lowered = lower_to_llvm_for_tests(native_result.module)
+    ir = lower_to_llvm_ir_for_tests(native_result.module)
     if trace:
-        print.info("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(len(lowered.ir)) + ")")
-    return lowered.ir
+        print.info("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(len(ir)) + ")")
+    return ir
 
 def compile_to_native_text(source):
     # effects: io

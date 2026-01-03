@@ -247,7 +247,7 @@ fn format_import_specifiers(specifiers -> ImportSpecifier[]) -> string {
             break;
         }
         let entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias);
-        parts = append_string(parts, entry);
+        parts.push(entry);
         index += 1;
     }
     return join_with_separator(parts, ", ");
@@ -261,7 +261,7 @@ fn format_export_specifiers(specifiers -> ExportSpecifier[]) -> string {
             break;
         }
         let entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias);
-        parts = append_string(parts, entry);
+        parts.push(entry);
         index += 1;
     }
     return join_with_separator(parts, ", ");
@@ -1090,7 +1090,7 @@ fn tokens_to_source(tokens -> Token[]) -> string {
         if index >= tokens.length {
             break;
         }
-        parts = append_string(parts, tokens[index].lexeme);
+        parts.push(tokens[index].lexeme);
         index += 1;
     }
     return collapse_whitespace(join_with_separator(parts, ""));
@@ -1111,13 +1111,15 @@ fn builder_emit_line(builder -> TextBuilder, line -> string) -> TextBuilder {
         count += 1;
     }
     let full_line = prefix + trim_right(line);
-    let lines = append_string(builder.lines, full_line);
-    return TextBuilder { lines: lines, indent: builder.indent };
+    let mut current = builder;
+    current.lines.push(full_line);
+    return current;
 }
 
 fn builder_emit_blank(builder -> TextBuilder) -> TextBuilder {
-    let lines = append_string(builder.lines, "");
-    return TextBuilder { lines: lines, indent: builder.indent };
+    let mut current = builder;
+    current.lines.push("");
+    return current;
 }
 
 fn builder_push_indent(builder -> TextBuilder) -> TextBuilder {

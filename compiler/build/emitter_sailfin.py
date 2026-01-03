@@ -176,7 +176,7 @@ def format_import_specifiers(specifiers):
         if index >= len(specifiers):
             break
         entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias)
-        parts = append_string(parts, entry)
+        parts.append(entry)
         index += 1
     return join_with_separator(parts, ", ")
 
@@ -187,7 +187,7 @@ def format_export_specifiers(specifiers):
         if index >= len(specifiers):
             break
         entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias)
-        parts = append_string(parts, entry)
+        parts.append(entry)
         index += 1
     return join_with_separator(parts, ", ")
 
@@ -815,7 +815,7 @@ def tokens_to_source(tokens):
     while True:
         if index >= len(tokens):
             break
-        parts = append_string(parts, tokens[index].lexeme)
+        parts.append(tokens[index].lexeme)
         index += 1
     return collapse_whitespace(join_with_separator(parts, ""))
 
@@ -831,12 +831,14 @@ def builder_emit_line(builder, line):
         prefix = prefix + "    "
         count += 1
     full_line = prefix + trim_right(line)
-    lines = append_string(builder.lines, full_line)
-    return TextBuilder(lines=lines, indent=builder.indent)
+    current = builder
+    current.lines.append(full_line)
+    return current
 
 def builder_emit_blank(builder):
-    lines = append_string(builder.lines, "")
-    return TextBuilder(lines=lines, indent=builder.indent)
+    current = builder
+    current.lines.append("")
+    return current
 
 def builder_push_indent(builder):
     return TextBuilder(lines=builder.lines, indent=builder.indent + 1)

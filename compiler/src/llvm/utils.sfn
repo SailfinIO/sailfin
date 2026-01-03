@@ -477,8 +477,7 @@ fn sanitize_symbol(name -> string) -> string {
 // =============================================================================
 
 fn append_string(values -> string[], value -> string) -> string[] {
-    values.push(value);
-    return values;
+    return values.concat([value]);
 }
 
 fn copy_string_array(values -> string[]) -> string[] {

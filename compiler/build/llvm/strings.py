@@ -36,7 +36,7 @@ def clone_string_constants(constants):
     while True:
         if index >= len(constants):
             break
-        copy = append_string_constant(copy, constants[index])
+        copy.append(constants[index])
         index += 1
     return copy
 
@@ -44,7 +44,7 @@ def append_string_constant(set, constant):
     return (set) + ([constant])
 
 def merge_string_constants(existing, new_constants):
-    result = existing
+    result = clone_string_constants(existing)
     index = 0
     while True:
         if index >= len(new_constants):
@@ -52,7 +52,7 @@ def merge_string_constants(existing, new_constants):
         candidate = new_constants[index]
         found_by_name = find_string_constant_by_name(result, candidate.name)
         if found_by_name == None:
-            result = append_string_constant(result, candidate)
+            result.append(candidate)
         index += 1
     return result
 

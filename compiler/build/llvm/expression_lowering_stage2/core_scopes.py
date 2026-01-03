@@ -65,9 +65,9 @@ def mark_lifetime_region_released(regions, region_id, scope_id, scope_depth):
         entry = regions[index]
         if entry.id == region_id:
             updated = LifetimeRegionMetadata(id=entry.id, binding=entry.binding, base=entry.base, mutable=entry.mutable, start_span=entry.start_span, scope_id=entry.scope_id, scope_depth=entry.scope_depth, base_scope_id=entry.base_scope_id, base_scope_depth=entry.base_scope_depth, end_scope_id=scope_id, end_scope_depth=scope_depth, released=True)
-            result = append_lifetime_region(result, updated)
+            result.append(updated)
         else:
-            result = append_lifetime_region(result, entry)
+            result.append(entry)
         index += 1
     return result
 
@@ -135,8 +135,8 @@ def replace_llvm_operand(values, index, value):
         if current >= len(values):
             break
         if current == index:
-            result = append_llvm_operand(result, value)
+            result.append(value)
         else:
-            result = append_llvm_operand(result, values[current])
+            result.append(values[current])
         current += 1
     return result

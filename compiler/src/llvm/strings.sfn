@@ -25,7 +25,7 @@ fn clone_string_constants(constants -> StringConstant[]) -> StringConstant[] {
         if index >= constants.length {
             break;
         }
-        copy = append_string_constant(copy, constants[index]);
+        copy.push(constants[index]);
         index += 1;
     }
     return copy;
@@ -36,7 +36,7 @@ fn append_string_constant(set -> StringConstant[], constant -> StringConstant) -
 }
 
 fn merge_string_constants(existing -> StringConstant[], new_constants -> StringConstant[]) -> StringConstant[] {
-    let mut result -> StringConstant[] = existing;
+    let mut result -> StringConstant[] = clone_string_constants(existing);
     let mut index -> number = 0;
     loop {
         if index >= new_constants.length {
@@ -45,7 +45,7 @@ fn merge_string_constants(existing -> StringConstant[], new_constants -> StringC
         let candidate = new_constants[index];
         let found_by_name = find_string_constant_by_name(result, candidate.name);
         if found_by_name == null {
-            result = append_string_constant(result, candidate);
+            result.push(candidate);
         }
         index += 1;
     }

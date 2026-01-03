@@ -1821,7 +1821,16 @@ def lower_match_case_condition(function_name, subject_operand, case, bindings, l
                                     break
                                 variant_field_idx += 1
                             if found_field != None:
-                                field_bindings = (field_bindings) + ([MatchFieldBinding(field_name=pattern_field.name, field_type=found_field.llvm_type, field_offset=found_field.offset)])
+                                llvm_field_type = found_field.llvm_type
+                                if len(llvm_field_type) == 0:
+                                    llvm_field_type = map_struct_field_annotation(found_field.type_annotation)
+                                    if len(llvm_field_type) == 0:
+                                        llvm_field_type = "i8*"
+                                    if layout_annotation_represents_user_value(found_field.type_annotation)  and  ends_with_pointer_suffix(llvm_field_type):
+                                        stripped = strip_pointer_suffix(llvm_field_type)
+                                        if len(stripped) > 0:
+                                            llvm_field_type = stripped
+                                field_bindings = (field_bindings) + ([MatchFieldBinding(field_name=pattern_field.name, field_type=llvm_field_type, field_offset=found_field.offset)])
                             else:
                                 diagnostics = append_string(diagnostics, "llvm lowering: match pattern field `" + pattern_field.name + "` not found in variant `" + enum_parse.enum_name + "." + enum_parse.variant_name + "`")
                             field_idx += 1

@@ -5,7 +5,7 @@ from ...emit_native import NativeModule
 from ...native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInterface, NativeStruct, NativeEnum, LayoutManifest
 from ...string_utils import substring
 from ..types import TypeContext, TraitMetadata, TraitDescriptor, TraitImplementationDescriptor, LoweredLLVMResult, FunctionEffectEntry, LifetimeRegionMetadata, StringConstant, CapabilityManifest
-from ..utils import append_string, join_with_separator, number_to_string, sanitize_symbol, starts_with, trim_text, index_of
+from ..utils import append_string, join_with_separator, number_to_string, sanitize_symbol, string_array_contains, starts_with, trim_text, index_of
 from ..strings import empty_string_constant_set, merge_string_constants, render_string_constants
 from ..effects import collect_direct_function_effects, collect_function_call_graph, propagate_function_effects, build_capability_manifest, collect_runtime_helper_targets, append_unique_effect, find_function_effect_entry
 from ..rendering import render_test_harness_main, collect_exported_symbol_names, render_struct_type_definitions, render_enum_type_definitions, render_interface_type_definitions, render_vtable_type_definitions, render_vtable_constants, render_trait_metadata_comments, render_runtime_helper_declarations, render_imported_function_declarations, collect_exported_symbol_names, should_internalize_function, find_function_by_name
@@ -101,6 +101,11 @@ def lower_to_llvm(native_module):
     import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name)
     return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
+def lower_to_llvm_ir(native_module):
+    # effects: io
+    lowered = lower_to_llvm(native_module)
+    return lowered.ir
+
 def lower_to_llvm_for_tests(native_module):
     # effects: io
     artifact = select_text_artifact(native_module.artifacts)
@@ -109,6 +114,11 @@ def lower_to_llvm_for_tests(native_module):
     parse = parse_native_artifact(artifact.contents)
     import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name)
     return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
+
+def lower_to_llvm_ir_for_tests(native_module):
+    # effects: io
+    lowered = lower_to_llvm_for_tests(native_module)
+    return lowered.ir
 
 def lower_to_llvm_with_manifests(native_module, imported_manifests):
     return lower_to_llvm_with_context(native_module, imported_manifests, [], [])
@@ -222,6 +232,8 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     context_functions = concat_native_functions(local_functions, imported_functions)
     context_functions = concat_native_functions(context_functions, imported_struct_methods)
     runtime_helpers = collect_runtime_helper_targets(local_functions)
+    if not string_array_contains(runtime_helpers, "copy_bytes"):
+        runtime_helpers = append_string(runtime_helpers, "copy_bytes")
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field")
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat")
     runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at")
@@ -239,36 +251,36 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     lines = append_string(lines, "")
     trait_lines = render_trait_metadata_comments(trait_metadata)
     if len(trait_lines) > 0:
-        lines = (lines) + (trait_lines)
+        lines = extend_string_lines(lines, trait_lines)
         lines = append_string(lines, "")
     struct_type_lines = render_struct_type_definitions(type_context, context_functions)
     if len(struct_type_lines) > 0:
-        lines = (lines) + (struct_type_lines)
+        lines = extend_string_lines(lines, struct_type_lines)
         lines = append_string(lines, "")
     enum_type_lines = render_enum_type_definitions(type_context)
     if len(enum_type_lines) > 0:
-        lines = (lines) + (enum_type_lines)
+        lines = extend_string_lines(lines, enum_type_lines)
         lines = append_string(lines, "")
     interface_type_lines = render_interface_type_definitions(type_context)
     if len(interface_type_lines) > 0:
-        lines = (lines) + (interface_type_lines)
+        lines = extend_string_lines(lines, interface_type_lines)
         lines = append_string(lines, "")
-    lines = (lines) + (["%SailfinFutureNumber = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFuturePtr = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)", "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
+    lines = extend_string_lines(lines, ["%SailfinFutureNumber = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFuturePtr = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)", "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", ""])
     vtable_type_lines = render_vtable_type_definitions(type_context)
     if len(vtable_type_lines) > 0:
-        lines = (lines) + (vtable_type_lines)
+        lines = extend_string_lines(lines, vtable_type_lines)
         lines = append_string(lines, "")
     vtable_const_lines = render_vtable_constants(type_context)
     if len(vtable_const_lines) > 0:
-        lines = (lines) + (vtable_const_lines)
+        lines = extend_string_lines(lines, vtable_const_lines)
         lines = append_string(lines, "")
     helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions)
     if len(helper_declarations) > 0:
-        lines = (lines) + (helper_declarations)
+        lines = extend_string_lines(lines, helper_declarations)
         lines = append_string(lines, "")
     imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context)
     if len(imported_declarations) > 0:
-        lines = (lines) + (imported_declarations)
+        lines = extend_string_lines(lines, imported_declarations)
         lines = append_string(lines, "")
     if find_function_by_name(context_functions, "malloc") == None:
         lines = append_string(lines, "declare noalias i8* @malloc(i64)")
@@ -280,12 +292,12 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name)
     diagnostics = (diagnostics) + (module_globals.diagnostics)
     if len(module_globals.preamble_lines) > 0:
-        lines = (lines) + (module_globals.preamble_lines)
+        lines = extend_string_lines(lines, module_globals.preamble_lines)
         lines = append_string(lines, "")
     preamble_lines = lines
     function_lines = []
     if len(module_globals.init_function_lines) > 0:
-        function_lines = (function_lines) + (module_globals.init_function_lines)
+        function_lines = extend_string_lines(function_lines, module_globals.init_function_lines)
         function_lines = append_string(function_lines, "")
     index = 0
     has_add_function = False
@@ -321,20 +333,20 @@ module_globals.needs_init_call
             if len(function_lines) == 0:
                 function_lines = lowered.lines
             else:
-                function_lines = (function_lines) + (lowered.lines)
+                function_lines = extend_string_lines(function_lines, lowered.lines)
             if index + 1 < len(local_functions):
                 function_lines = append_string(function_lines, "")
         index += 1
     if not has_add_function:
         if len(function_lines) > 0:
             function_lines = append_string(function_lines, "")
-        function_lines = (function_lines) + (["define internal double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
+        function_lines = extend_string_lines(function_lines, ["define internal double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
     string_constant_lines = render_string_constants(all_string_constants)
     final_lines = preamble_lines
     if len(string_constant_lines) > 0:
-        final_lines = (final_lines) + (string_constant_lines)
+        final_lines = extend_string_lines(final_lines, string_constant_lines)
         final_lines = append_string(final_lines, "")
-    final_lines = (final_lines) + (function_lines)
+    final_lines = extend_string_lines(final_lines, function_lines)
     final_lines = ensure_intrinsic_declarations(final_lines)
     ir = join_with_separator(final_lines, "\n")
     manifest = build_capability_manifest(native_module.entry_points, function_effects)
@@ -342,6 +354,16 @@ module_globals.needs_init_call
     if len(output) > 0:
         output = output + "\n"
     return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects, lifetime_regions=lifetime_regions, capability_manifest=manifest, string_constants=all_string_constants)
+
+def extend_string_lines(values, extras):
+    out = values
+    index = 0
+    while True:
+        if index >= len(extras):
+            break
+        out = append_string(out, extras[index])
+        index += 1
+    return out
 
 def module_source_filename(module_name):
     if len(module_name) == 0:

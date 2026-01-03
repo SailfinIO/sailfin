@@ -123,7 +123,7 @@ needs_module_init_call
                 loaded = format_temp_name(tramp_temp)
                 tramp_temp += 1
                 wrapper_lines = append_string(wrapper_lines, "  " + loaded + " = load " + binding.llvm_type + ", " + binding.llvm_type + "* " + field_ptr)
-                loaded_args = append_llvm_operand(loaded_args, LLVMOperand(llvm_type=binding.llvm_type, value=loaded))
+                loaded_args.append(LLVMOperand(llvm_type=binding.llvm_type, value=loaded))
                 load_index += 1
             arg_texts = []
             arg_i = 0
@@ -224,7 +224,7 @@ needs_module_init_call
             content = function.name
             constant_name = make_string_constant_name_for_module(module_name, content)
             constant = StringConstant(name=constant_name, content=content, byte_count=len(content))
-            decorator_string_constants = append_string_constant(decorator_string_constants, constant)
+            decorator_string_constants.append(constant)
             array_length = len(content) + 1
             array_type = "[" + number_to_string(array_length) + " x i8]"
             call_line = "  call i8* @sailfin_runtime_log_execution(i8* getelementptr inbounds (" + array_type + ", " + array_type + "* " + constant_name + ", i32 0, i32 0))"
