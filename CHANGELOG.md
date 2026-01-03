@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.88 (2026-01-03)
+
+### Bug Fixes
+
+- Lowering calls and addressing
+  ([`7b823dd`](https://github.com/SailfinIO/sailfin/commit/7b823dd736cece2349654a5e6c7a5f053af034e2))
+
+
 ## v0.1.1-alpha.87 (2026-01-02)
 
 ### Bug Fixes
