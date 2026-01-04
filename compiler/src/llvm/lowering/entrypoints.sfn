@@ -505,7 +505,6 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
         lines = append_string(lines, "");
     }
 
-    let mut preamble_lines -> string[] = lines;
     let mut function_lines -> string[] = [];
 
     if module_globals.init_function_lines.length > 0 {
@@ -582,12 +581,14 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
     }
 
     let string_constant_lines = render_string_constants(all_string_constants);
-    let mut final_lines -> string[] = preamble_lines;
+    let mut final_lines -> string[] = lines;
     if string_constant_lines.length > 0 {
-        final_lines = extend_string_lines(final_lines, string_constant_lines);
+        final_lines = final_lines.concat(string_constant_lines);
         final_lines = append_string(final_lines, "");
     }
-    final_lines = extend_string_lines(final_lines, function_lines);
+    if function_lines.length > 0 {
+        final_lines = final_lines.concat(function_lines);
+    }
     final_lines = ensure_intrinsic_declarations(final_lines);
 
     let ir = join_with_separator(final_lines, "\n");

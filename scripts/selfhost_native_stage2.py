@@ -143,6 +143,18 @@ def main(argv: list[str]) -> int:
         help="Seconds to sleep between attempts for a flaky module (default: 0)",
     )
     parser.add_argument(
+        "--seed-timeout",
+        type=float,
+        default=120.0,
+        help="Timeout (seconds) per seed emit attempt (default: 120)",
+    )
+    parser.add_argument(
+        "--clang-validate-timeout",
+        type=float,
+        default=60.0,
+        help="Timeout (seconds) for per-module clang validation (default: 60)",
+    )
+    parser.add_argument(
         "--compiler-entry",
         type=pathlib.Path,
         default=REPO_ROOT / "compiler/src/cli_main.sfn",
@@ -173,8 +185,22 @@ def main(argv: list[str]) -> int:
 
     args = parser.parse_args(argv)
 
+    # The non-sanitized seed has exhibited nondeterministic malformed LLVM
+    # emission. When available, prefer the ASAN seed by default because it has
+    # proven significantly more reliable in practice.
+    default_seed = REPO_ROOT / "build/native/sailfin-stage2"
+    asan_seed = REPO_ROOT / "build/native/sailfin-stage2-asan"
+    if args.seed.resolve() == default_seed.resolve() and asan_seed.exists():
+        print(f"[selfhost] using ASAN seed: {asan_seed}")
+        args.seed = asan_seed
+
     seed = args.seed
     out_path = args.out
+
+    clang = args.clang
+    clang_flags: list[str] = [args.opt]
+    if args.wno_override_module:
+        clang_flags.append("-Wno-override-module")
 
     if not seed.exists():
         raise SystemExit(f"missing seed compiler: {seed}")
@@ -203,6 +229,13 @@ def main(argv: list[str]) -> int:
     seed_env = os.environ.copy()
     seed_env["SAILFIN_DISABLE_STRING_FREE"] = "1"
 
+    seed_timeout = None
+    if args.seed_timeout and args.seed_timeout > 0:
+        seed_timeout = float(args.seed_timeout)
+    clang_validate_timeout = None
+    if args.clang_validate_timeout and args.clang_validate_timeout > 0:
+        clang_validate_timeout = float(args.clang_validate_timeout)
+
     for idx, source_path in enumerate(sources):
         module_name = source_path.stem
         max_attempts = max(1, int(args.max_attempts))
@@ -210,30 +243,67 @@ def main(argv: list[str]) -> int:
         last_stderr = ""
         last_rc: int | None = None
         for attempt in range(1, max_attempts + 1):
+            print(
+                f"[selfhost] module {idx + 1}/{len(sources)} {module_name} attempt {attempt}/{max_attempts}",
+                flush=True,
+            )
             attempt_path = raw_dir / f"{module_name}.attempt{attempt}.ll"
+            cleaned_attempt_path = raw_dir / \
+                f"{module_name}.attempt{attempt}.clean.ll"
+            clang_stderr_path = raw_dir / \
+                f"{module_name}.attempt{attempt}.clang.stderr"
+
+            for stale in (attempt_path, cleaned_attempt_path, clang_stderr_path):
+                try:
+                    stale.unlink()
+                except FileNotFoundError:
+                    pass
+
             if use_emit_llvm_file:
-                proc = subprocess.run(
-                    [str(seed), "emit-llvm-file",
-                     str(source_path), str(attempt_path)],
-                    cwd=str(REPO_ROOT),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    close_fds=False,
-                    env=seed_env,
-                )
+                try:
+                    proc = subprocess.run(
+                        [
+                            str(seed),
+                            "emit-llvm-file",
+                            str(source_path),
+                            str(attempt_path),
+                        ],
+                        cwd=str(REPO_ROOT),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        close_fds=False,
+                        env=seed_env,
+                        timeout=seed_timeout,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    last_rc = 124
+                    last_stderr = (exc.stderr or b"").decode(
+                        "utf-8", errors="replace")
+                    if args.attempt_sleep > 0:
+                        time.sleep(args.attempt_sleep)
+                    continue
             else:
                 # NOTE: Some seed compilers have been observed to emit truncated LLVM
                 # when stdout is a pipe (e.g. via subprocess stdout=PIPE). Writing to
                 # a real file sidesteps that runtime issue.
                 with attempt_path.open("wb") as out:
-                    proc = subprocess.run(
-                        [str(seed), "emit", "llvm", str(source_path)],
-                        cwd=str(REPO_ROOT),
-                        stdout=out,
-                        stderr=subprocess.PIPE,
-                        close_fds=False,
-                        env=seed_env,
-                    )
+                    try:
+                        proc = subprocess.run(
+                            [str(seed), "emit", "llvm", str(source_path)],
+                            cwd=str(REPO_ROOT),
+                            stdout=out,
+                            stderr=subprocess.PIPE,
+                            close_fds=False,
+                            env=seed_env,
+                            timeout=seed_timeout,
+                        )
+                    except subprocess.TimeoutExpired as exc:
+                        last_rc = 124
+                        last_stderr = (exc.stderr or b"").decode(
+                            "utf-8", errors="replace")
+                        if args.attempt_sleep > 0:
+                            time.sleep(args.attempt_sleep)
+                        continue
             last_rc = proc.returncode
             last_stderr = proc.stderr.decode("utf-8", errors="replace")
             if proc.returncode != 0:
@@ -244,9 +314,39 @@ def main(argv: list[str]) -> int:
             raw = attempt_path.read_text(encoding="utf-8", errors="replace")
             candidate = raw if use_emit_llvm_file else _strip_stage2_log_prefixes(
                 raw)
+
             if _looks_like_llvm_module(candidate):
-                cleaned = candidate
-                break
+                # Validate with clang to catch truncated/malformed modules that
+                # still have a valid-looking header.
+                cleaned_attempt_path.write_text(candidate, encoding="utf-8")
+                validate_obj = raw_dir / f"{module_name}.attempt{attempt}.o"
+                try:
+                    validate_obj.unlink()
+                except FileNotFoundError:
+                    pass
+
+                clang_proc = subprocess.run(
+                    [
+                        clang,
+                        *clang_flags,
+                        "-fPIC",
+                        "-c",
+                        str(cleaned_attempt_path),
+                        "-o",
+                        str(validate_obj),
+                    ],
+                    cwd=str(REPO_ROOT),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=clang_validate_timeout,
+                )
+                clang_stderr_path.write_text(
+                    clang_proc.stderr or "", encoding="utf-8")
+
+                if clang_proc.returncode == 0:
+                    cleaned = candidate
+                    break
 
             if args.attempt_sleep > 0:
                 time.sleep(args.attempt_sleep)
@@ -277,11 +377,6 @@ def main(argv: list[str]) -> int:
         (aot_dir / f"{name}.ll").write_text(ir if ir.endswith("\n")
                                             else ir + "\n", encoding="utf-8")
     (aot_dir / "modules.txt").write_text("\n".join(module_names) + "\n", encoding="utf-8")
-
-    clang = args.clang
-    clang_flags: list[str] = [args.opt]
-    if args.wno_override_module:
-        clang_flags.append("-Wno-override-module")
 
     runtime_c = REPO_ROOT / "runtime/native/src/sailfin_runtime.c"
     driver_c = REPO_ROOT / "runtime/native/src/stage2_driver.c"

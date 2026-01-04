@@ -8,6 +8,11 @@
 #include <unistd.h>
 #include <spawn.h>
 #include <sys/wait.h>
+
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
 #include <errno.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -196,6 +201,111 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
     {
         return false;
     }
+
+#if defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)
+    // On macOS it is possible (though rare) to have a real, mapped pointer
+    // whose low 32 bits are zero. The upper-32-bit heuristic would wrongly
+    // classify that as an "immediate" codepoint string, causing subtle memory
+    // corruption when the value is later treated as a C string.
+    //
+    // Guard: only treat this encoding as immediate when the address is not
+    // mapped as a readable region.
+    {
+        // Cache the (rare but expensive) address mapping check.
+        // Immediate-codepoint pseudo strings repeat heavily (e.g. '/', '.',
+        // letters when building paths), so without caching this guard can
+        // dominate runtime and cause timeouts.
+        enum
+        {
+            MAP_CACHE_SIZE = 256,
+            MAP_CACHE_PROBES = 8
+        };
+        static uintptr_t map_cache_keys[MAP_CACHE_SIZE];
+        static uint8_t map_cache_vals[MAP_CACHE_SIZE];
+        // vals: 0 empty, 1 mapped+readable, 2 not-mapped-or-not-readable
+
+        uintptr_t key = raw;
+        uint32_t h = (uint32_t)(key ^ (key >> 32) ^ (key >> 12));
+        uint32_t slot = h & (MAP_CACHE_SIZE - 1);
+
+        uint8_t cached_val = 0;
+        for (uint32_t probe = 0; probe < MAP_CACHE_PROBES; probe++)
+        {
+            uint32_t idx = (slot + probe) & (MAP_CACHE_SIZE - 1);
+            uintptr_t existing = map_cache_keys[idx];
+            uint8_t existing_val = map_cache_vals[idx];
+            if (existing == key && existing_val != 0)
+            {
+                cached_val = existing_val;
+                break;
+            }
+            if (existing_val == 0)
+            {
+                break;
+            }
+        }
+
+        if (cached_val == 1)
+        {
+            return false;
+        }
+        if (cached_val == 2)
+        {
+            // Known-unmapped immediate; skip the expensive kernel query.
+            goto apple_upper32_immediate_done;
+        }
+
+        bool mapped_readable = false;
+        {
+            mach_vm_address_t query = (mach_vm_address_t)(uintptr_t)text;
+            mach_vm_address_t region = query;
+            mach_vm_size_t region_size = 0;
+            vm_region_basic_info_data_64_t info;
+            mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+            mach_port_t object_name = MACH_PORT_NULL;
+
+            kern_return_t kr = mach_vm_region(
+                mach_task_self(),
+                &region,
+                &region_size,
+                VM_REGION_BASIC_INFO_64,
+                (vm_region_info_t)&info,
+                &count,
+                &object_name);
+
+            if (object_name != MACH_PORT_NULL)
+            {
+                mach_port_deallocate(mach_task_self(), object_name);
+            }
+
+            if (kr == KERN_SUCCESS)
+            {
+                bool readable = (info.protection & VM_PROT_READ) != 0;
+                bool contains = (query >= region) && (query < (region + region_size));
+                mapped_readable = readable && contains;
+            }
+        }
+
+        // Store the result.
+        for (uint32_t probe = 0; probe < MAP_CACHE_PROBES; probe++)
+        {
+            uint32_t idx = (slot + probe) & (MAP_CACHE_SIZE - 1);
+            if (map_cache_vals[idx] == 0 || map_cache_keys[idx] == key)
+            {
+                map_cache_keys[idx] = key;
+                map_cache_vals[idx] = mapped_readable ? 1 : 2;
+                break;
+            }
+        }
+
+        if (mapped_readable)
+        {
+            return false;
+        }
+    }
+
+apple_upper32_immediate_done:
+#endif
 
     if (out_codepoint)
     {
@@ -721,6 +831,27 @@ static int _env_int(const char *name, int fallback)
         return 1000;
     }
     return (int)parsed;
+}
+
+static size_t _env_sizet(const char *name, size_t fallback)
+{
+    const char *value = getenv(name);
+    if (!value || value[0] == '\0')
+    {
+        return fallback;
+    }
+
+    char *end = NULL;
+    unsigned long long parsed = strtoull(value, &end, 10);
+    if (end == value)
+    {
+        return fallback;
+    }
+    if (parsed > (unsigned long long)SIZE_MAX)
+    {
+        return (size_t)SIZE_MAX;
+    }
+    return (size_t)parsed;
 }
 
 static void _maybe_print_string_backtrace(
@@ -1250,12 +1381,32 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
 
 char *sailfin_runtime_string_concat(char *a, char *b)
 {
+    static int strict_strings = -1;
+    if (strict_strings < 0)
+    {
+        strict_strings = _env_enabled("SAILFIN_STRICT_STRINGS") ? 1 : 0;
+    }
+
+    char *a_in = a;
+    char *b_in = b;
     if (!a)
     {
+        if (strict_strings)
+        {
+            fprintf(stderr, "[stage2-native] string_concat got NULL lhs\n");
+            fflush(stderr);
+            abort();
+        }
         a = "";
     }
     if (!b)
     {
+        if (strict_strings)
+        {
+            fprintf(stderr, "[stage2-native] string_concat got NULL rhs\n");
+            fflush(stderr);
+            abort();
+        }
         b = "";
     }
 
@@ -1352,6 +1503,51 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     size_t alen = a_immediate ? _utf8_encode(a_codepoint, a_buf) : _safe_strlen_asan(a, &a_truncated);
     size_t blen = b_immediate ? _utf8_encode(b_codepoint, b_buf) : _safe_strlen_asan(b, &b_truncated);
 
+    static int trace_min_len_init = 0;
+    static size_t trace_min_len = 0;
+    if (!trace_min_len_init)
+    {
+        trace_min_len_init = 1;
+        trace_min_len = _env_sizet("SAILFIN_TRACE_STRING_CONCAT_MIN_LEN", 0);
+    }
+
+    if (trace_min_len > 0)
+    {
+        size_t total_len = alen + blen;
+        if (total_len >= trace_min_len)
+        {
+            fprintf(
+                stderr,
+                "[stage2-native] string_concat large total=%zu alen=%zu blen=%zu a=%p%s%s cp=%u b=%p%s%s cp=%u\n",
+                total_len,
+                alen,
+                blen,
+                (void *)a,
+                a_immediate ? " immediate" : "",
+                a_truncated ? " truncated" : "",
+                (unsigned)a_codepoint,
+                (void *)b,
+                b_immediate ? " immediate" : "",
+                b_truncated ? " truncated" : "",
+                (unsigned)b_codepoint);
+            fflush(stderr);
+
+            if ((a_immediate || b_immediate) || (a_truncated || b_truncated))
+            {
+                _maybe_print_string_backtrace(
+                    "string_concat large",
+                    a,
+                    a_immediate,
+                    a_poisoned,
+                    a_truncated,
+                    b,
+                    b_immediate,
+                    b_poisoned,
+                    b_truncated);
+            }
+        }
+    }
+
     if (a_poisoned || b_poisoned || (uintptr_t)a < 4096 || (uintptr_t)b < 4096)
     {
         _maybe_print_string_backtrace(
@@ -1390,6 +1586,21 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     char *out = (char *)malloc(alen + blen + 1 + pad);
     if (!out)
     {
+        fprintf(
+            stderr,
+            "[stage2-native] string_concat OOM (alen=%zu blen=%zu total=%zu) a=%p b=%p a_in=%p b_in=%p\n",
+            alen,
+            blen,
+            alen + blen + 1 + pad,
+            (void *)a,
+            (void *)b,
+            (void *)a_in,
+            (void *)b_in);
+        fflush(stderr);
+        if (strict_strings)
+        {
+            abort();
+        }
         return NULL;
     }
 
@@ -1413,6 +1624,146 @@ char *sailfin_runtime_string_concat(char *a, char *b)
 
     memset(out + alen + blen, 0, 1 + pad);
     _track_owned_string(out);
+
+    static int trace_llvm_prefix_init = 0;
+    static int trace_llvm_prefix_enabled = 0;
+    static size_t trace_llvm_prefix_min_len = 0;
+    static int trace_llvm_prefix_budget = 0;
+    if (!trace_llvm_prefix_init)
+    {
+        trace_llvm_prefix_init = 1;
+        trace_llvm_prefix_enabled = _env_enabled("SAILFIN_TRACE_LLVM_CORRUPT_PREFIX") ? 1 : 0;
+        trace_llvm_prefix_min_len = _env_sizet("SAILFIN_TRACE_LLVM_CORRUPT_PREFIX_MIN_LEN", 0);
+        trace_llvm_prefix_budget = _env_int("SAILFIN_TRACE_LLVM_CORRUPT_PREFIX_BUDGET", 5);
+    }
+
+    if (trace_llvm_prefix_enabled)
+    {
+        size_t total_len = alen + blen;
+        if (total_len >= trace_llvm_prefix_min_len && total_len >= 5)
+        {
+            // Observed corrupt output tends to start with a stray 'r' followed
+            // by whitespace and then an indented instruction.
+            // Example prefixes:
+            //   "r\n  %t..."
+            //   "r\n  br ..."
+            //   "r  %t..."
+            int k = 1;
+            while (k < 10 && (out[k] == ' ' || out[k] == '\n' || out[k] == '\r' || out[k] == '\t'))
+            {
+                k++;
+            }
+            unsigned char next = (k < 10) ? (unsigned char)out[k] : 0;
+            bool looks_like_instr = (next == '%') || (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z');
+            if (out[0] == 'r' && k < 10 && looks_like_instr)
+            {
+                if (trace_llvm_prefix_budget > 0)
+                {
+                    trace_llvm_prefix_budget--;
+                    char a_preview[40];
+                    char b_preview[40];
+                    a_preview[0] = '\0';
+                    b_preview[0] = '\0';
+
+                    if (a)
+                    {
+                        if (a_immediate)
+                        {
+                            unsigned char tmp[5] = {0};
+                            size_t n = _utf8_encode(a_codepoint, tmp);
+                            size_t take = n < 32 ? n : 32;
+                            if (take > 0)
+                            {
+                                memcpy(a_preview, tmp, take);
+                            }
+                            a_preview[take] = '\0';
+                        }
+                        else
+                        {
+                            bool truncated = false;
+                            size_t n = _safe_strlen_asan(a, &truncated);
+                            size_t take = n < 32 ? n : 32;
+                            if (take > 0)
+                            {
+                                memcpy(a_preview, a, take);
+                            }
+                            a_preview[take] = '\0';
+                        }
+                    }
+                    if (b)
+                    {
+                        if (b_immediate)
+                        {
+                            unsigned char tmp[5] = {0};
+                            size_t n = _utf8_encode(b_codepoint, tmp);
+                            size_t take = n < 32 ? n : 32;
+                            if (take > 0)
+                            {
+                                memcpy(b_preview, tmp, take);
+                            }
+                            b_preview[take] = '\0';
+                        }
+                        else
+                        {
+                            bool truncated = false;
+                            size_t n = _safe_strlen_asan(b, &truncated);
+                            size_t take = n < 32 ? n : 32;
+                            if (take > 0)
+                            {
+                                memcpy(b_preview, b, take);
+                            }
+                            b_preview[take] = '\0';
+                        }
+                    }
+
+                    fprintf(
+                        stderr,
+                        "[stage2-native] suspicious llvm output prefix from string_concat out=%p len=%zu alen=%zu blen=%zu a_preview=\"%s\" b_preview=\"%s\"\n",
+                        (void *)out,
+                        total_len,
+                        alen,
+                        blen,
+                        a_preview,
+                        b_preview);
+                    fflush(stderr);
+                }
+
+                _maybe_print_string_backtrace(
+                    "llvm_corrupt_prefix",
+                    a,
+                    a_immediate,
+                    a_poisoned,
+                    a_truncated,
+                    b,
+                    b_immediate,
+                    b_poisoned,
+                    b_truncated);
+            }
+        }
+    }
+
+    if (trace_min_len > 0)
+    {
+        size_t total_len = alen + blen;
+        if (total_len >= trace_min_len)
+        {
+            char preview_buf[40];
+            preview_buf[0] = '\0';
+            size_t take = total_len < 32 ? total_len : 32;
+            if (take > 0)
+            {
+                memcpy(preview_buf, out, take);
+            }
+            preview_buf[take] = '\0';
+            fprintf(
+                stderr,
+                "[stage2-native] string_concat large out=%p preview=\"%s\"\n",
+                (void *)out,
+                preview_buf);
+            fflush(stderr);
+        }
+    }
+
     return out;
 }
 
@@ -1496,6 +1847,16 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
         return NULL;
     }
 
+    static int trace_arrays_init = 0;
+    static size_t trace_arrays_min_len = 0;
+    static int trace_arrays_budget = 0;
+    if (!trace_arrays_init)
+    {
+        trace_arrays_init = 1;
+        trace_arrays_min_len = _env_sizet("SAILFIN_TRACE_ARRAY_CONCAT_MIN_LEN", 0);
+        trace_arrays_budget = _env_int("SAILFIN_TRACE_ARRAY_CONCAT_BUDGET", 64);
+    }
+
     int64_t i = 0;
     if (a && a->data)
     {
@@ -1509,6 +1870,64 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
         for (int64_t j = 0; j < blen; j++)
         {
             out->data[i + j] = b->data[j];
+        }
+    }
+
+    if (trace_arrays_min_len > 0 && trace_arrays_budget > 0)
+    {
+        size_t total = (size_t)((alen >= 0 ? alen : 0) + (blen >= 0 ? blen : 0));
+        if (total >= trace_arrays_min_len)
+        {
+            trace_arrays_budget--;
+            char *first = NULL;
+            if (out->len > 0 && out->data)
+            {
+                first = out->data[0];
+            }
+            uint32_t first_cp = 0;
+            bool first_immediate = _is_immediate_codepoint_string(first, &first_cp);
+
+            char preview_buf[40];
+            preview_buf[0] = '\0';
+            if (first)
+            {
+                if (first_immediate)
+                {
+                    unsigned char tmp[5] = {0};
+                    size_t n = _utf8_encode(first_cp, tmp);
+                    size_t take = n < (sizeof(preview_buf) - 1) ? n : (sizeof(preview_buf) - 1);
+                    if (take > 0)
+                    {
+                        memcpy(preview_buf, tmp, take);
+                    }
+                    preview_buf[take] = '\0';
+                }
+                else
+                {
+                    bool preview_truncated = false;
+                    size_t n = _safe_strlen_asan(first, &preview_truncated);
+                    size_t take = n < 32 ? n : 32;
+                    if (take > 0)
+                    {
+                        memcpy(preview_buf, first, take);
+                    }
+                    preview_buf[take] = '\0';
+                }
+            }
+            fprintf(
+                stderr,
+                "[stage2-native] array_concat large alen=%lld blen=%lld total=%zu a=%p b=%p out=%p first=%p%s cp=%u preview=\"%s\"\n",
+                (long long)alen,
+                (long long)blen,
+                total,
+                (void *)a,
+                (void *)b,
+                (void *)out,
+                (void *)first,
+                first_immediate ? " immediate" : "",
+                (unsigned)first_cp,
+                preview_buf);
+            fflush(stderr);
         }
     }
 
@@ -1532,6 +1951,34 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
         out->data[i] = (a && a->data) ? a->data[i] : NULL;
     }
     out->data[alen] = text;
+
+    static int trace_append_init = 0;
+    static size_t trace_append_min_len = 0;
+    if (!trace_append_init)
+    {
+        trace_append_init = 1;
+        trace_append_min_len = _env_sizet("SAILFIN_TRACE_ARRAY_APPEND_MIN_LEN", 0);
+    }
+    if (trace_append_min_len > 0)
+    {
+        size_t total = (size_t)((alen >= 0 ? alen : 0) + 1);
+        if (total >= trace_append_min_len)
+        {
+            uint32_t cp = 0;
+            bool imm = _is_immediate_codepoint_string(text, &cp);
+            fprintf(
+                stderr,
+                "[stage2-native] array_append large len=%lld total=%zu a=%p out=%p text=%p%s cp=%u\n",
+                (long long)alen,
+                total,
+                (void *)a,
+                (void *)out,
+                (void *)text,
+                imm ? " immediate" : "",
+                (unsigned)cp);
+            fflush(stderr);
+        }
+    }
     return out;
 }
 
@@ -1541,6 +1988,16 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
     if (len < 0)
     {
         len = 0;
+    }
+
+    static int trace_push_init = 0;
+    static size_t trace_push_min_len = 0;
+    static int trace_push_budget = 0;
+    if (!trace_push_init)
+    {
+        trace_push_init = 1;
+        trace_push_min_len = _env_sizet("SAILFIN_TRACE_ARRAY_PUSH_MIN_LEN", 0);
+        trace_push_budget = _env_int("SAILFIN_TRACE_ARRAY_PUSH_BUDGET", 64);
     }
 
     SailfinPtrArray *out = _alloc_array(len + 1);
@@ -1554,6 +2011,93 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
         out->data[i] = (array && array->data) ? array->data[i] : NULL;
     }
     out->data[len] = value;
+
+    if (trace_push_min_len > 0 && (size_t)(len + 1) >= trace_push_min_len && trace_push_budget > 0)
+    {
+        trace_push_budget--;
+        char *first = NULL;
+        if (out->len > 0 && out->data)
+        {
+            first = out->data[0];
+        }
+
+        uint32_t first_cp = 0;
+        bool first_immediate = _is_immediate_codepoint_string(first, &first_cp);
+        uint32_t value_cp = 0;
+        bool value_immediate = _is_immediate_codepoint_string(value, &value_cp);
+
+        char first_preview[40];
+        first_preview[0] = '\0';
+        if (first)
+        {
+            if (first_immediate)
+            {
+                unsigned char tmp[5] = {0};
+                size_t n = _utf8_encode(first_cp, tmp);
+                size_t take = n < 32 ? n : 32;
+                if (take > 0)
+                {
+                    memcpy(first_preview, tmp, take);
+                }
+                first_preview[take] = '\0';
+            }
+            else
+            {
+                bool truncated = false;
+                size_t n = _safe_strlen_asan(first, &truncated);
+                size_t take = n < 32 ? n : 32;
+                if (take > 0)
+                {
+                    memcpy(first_preview, first, take);
+                }
+                first_preview[take] = '\0';
+            }
+        }
+
+        char value_preview[40];
+        value_preview[0] = '\0';
+        if (value)
+        {
+            if (value_immediate)
+            {
+                unsigned char tmp[5] = {0};
+                size_t n = _utf8_encode(value_cp, tmp);
+                size_t take = n < 32 ? n : 32;
+                if (take > 0)
+                {
+                    memcpy(value_preview, tmp, take);
+                }
+                value_preview[take] = '\0';
+            }
+            else
+            {
+                bool truncated = false;
+                size_t n = _safe_strlen_asan(value, &truncated);
+                size_t take = n < 32 ? n : 32;
+                if (take > 0)
+                {
+                    memcpy(value_preview, value, take);
+                }
+                value_preview[take] = '\0';
+            }
+        }
+
+        fprintf(
+            stderr,
+            "[stage2-native] array_push len=%lld out=%p first=%p%s cp=%u first_preview=\"%s\" value=%p%s cp=%u value_preview=\"%s\"\n",
+            (long long)len,
+            (void *)out,
+            (void *)first,
+            first_immediate ? " immediate" : "",
+            (unsigned)first_cp,
+            first_preview,
+            (void *)value,
+            value_immediate ? " immediate" : "",
+            (unsigned)value_cp,
+            value_preview);
+        fflush(stderr);
+    }
+
     return out;
 }
 
@@ -2270,13 +2814,19 @@ bool sailfin_runtime_instance_of(char *value, char *type_descriptor)
 
 double sailfin_runtime_char_code(char *text)
 {
+    if (!text)
+    {
+        return -1.0;
+    }
+
     uint32_t codepoint = 0;
     if (_is_immediate_codepoint_string(text, &codepoint))
     {
         return (double)codepoint;
     }
 
-    if (!text || !text[0])
+    unsigned char first = (unsigned char)text[0];
+    if (first == 0)
     {
         return -1.0;
     }
@@ -2284,8 +2834,7 @@ double sailfin_runtime_char_code(char *text)
     // Stage2 currently uses a legacy UTF-8 C-string ABI; most compiler logic
     // assumes ASCII punctuation/operators. Match Python's `ord(text[0])` for
     // the first byte.
-    unsigned char ch = (unsigned char)text[0];
-    return (double)ch;
+    return (double)first;
 }
 
 // ---- Stubs / placeholders ----
@@ -2365,6 +2914,15 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
         return;
     }
 
+    static int trace_write_init = 0;
+    static int trace_write_enabled = 0;
+    if (!trace_write_init)
+    {
+        trace_write_init = 1;
+        const char *v = getenv("SAILFIN_TRACE_FS_WRITE_FILE");
+        trace_write_enabled = (v && v[0] && v[0] != '0') ? 1 : 0;
+    }
+
     FILE *f = fopen(path_str, "wb");
     if (!f)
     {
@@ -2373,7 +2931,51 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
     }
 
     uint32_t codepoint = 0;
-    if (_is_immediate_codepoint_string(contents_str, &codepoint))
+    bool immediate = _is_immediate_codepoint_string(contents_str, &codepoint);
+    if (trace_write_enabled)
+    {
+        char preview_buf[40];
+        preview_buf[0] = '\0';
+        int64_t len64 = -1;
+
+        if (immediate)
+        {
+            unsigned char tmp[5] = {0};
+            size_t n = _utf8_encode(codepoint, tmp);
+            size_t take = n < 32 ? n : 32;
+            if (take > 0)
+            {
+                memcpy(preview_buf, tmp, take);
+            }
+            preview_buf[take] = '\0';
+            len64 = (int64_t)n;
+        }
+        else
+        {
+            len64 = sailfin_runtime_string_length((char *)contents_str);
+            bool truncated = false;
+            size_t n = _safe_strlen_asan(contents_str, &truncated);
+            size_t take = n < 32 ? n : 32;
+            if (take > 0)
+            {
+                memcpy(preview_buf, contents_str, take);
+            }
+            preview_buf[take] = '\0';
+        }
+
+        fprintf(
+            stderr,
+            "[stage2-native] fs.writeFile path=%s contents=%p%s cp=%u len=%lld preview=\"%s\"\n",
+            path_str,
+            (void *)contents_str,
+            immediate ? " immediate" : "",
+            (unsigned)codepoint,
+            (long long)len64,
+            preview_buf);
+        fflush(stderr);
+    }
+
+    if (immediate)
     {
         unsigned char buf[5] = {0};
         size_t len = _utf8_encode(codepoint, buf);

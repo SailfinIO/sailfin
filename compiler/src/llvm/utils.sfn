@@ -554,11 +554,11 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             }
             if index + 1 < parts.length {
                 let combined = parts[index] + separator + parts[index + 1];
-                next.push(combined);
+                next = append_string(next, combined);
                 index += 2;
                 continue;
             }
-            next.push(parts[index]);
+            next = append_string(next, parts[index]);
             index += 1;
         }
         parts = next;

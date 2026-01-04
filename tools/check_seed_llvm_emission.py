@@ -100,6 +100,7 @@ class AttemptResult:
     reason: str
     raw_path: pathlib.Path
     cleaned_path: pathlib.Path
+    seed_stderr_path: pathlib.Path
     clang_stderr_path: pathlib.Path
 
 
@@ -256,8 +257,9 @@ def main(argv: list[str]) -> int:
     raw_dir = out_dir / "raw"
     cleaned_dir = out_dir / "cleaned"
     obj_dir = out_dir / "obj"
+    seed_err_dir = out_dir / "seed-stderr"
     clang_err_dir = out_dir / "clang"
-    for d in (raw_dir, cleaned_dir, obj_dir, clang_err_dir):
+    for d in (raw_dir, cleaned_dir, obj_dir, seed_err_dir, clang_err_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     # Prepare env.
@@ -289,7 +291,17 @@ def main(argv: list[str]) -> int:
         print(f"[seed-llvm-check] attempt {attempt}/{attempts}", flush=True)
         raw_path = raw_dir / f"attempt{attempt}.ll"
         cleaned_path = cleaned_dir / f"attempt{attempt}.ll"
+        seed_stderr_path = seed_err_dir / f"attempt{attempt}.stderr"
         clang_stderr_path = clang_err_dir / f"attempt{attempt}.stderr"
+
+        # Important: remove any stale artifacts from prior runs.
+        # When a run times out or the seed crashes early, the output file may not
+        # be overwritten, which can lead to misleading diagnostics.
+        for stale in (raw_path, cleaned_path, seed_stderr_path, clang_stderr_path):
+            try:
+                stale.unlink()
+            except FileNotFoundError:
+                pass
 
         rc, stderr_text = _run_emit(
             seed=seed,
@@ -300,9 +312,10 @@ def main(argv: list[str]) -> int:
             timeout_s=timeout_s,
         )
 
-        # Always preserve stderr alongside the attempt so runtime diagnostics are
-        # visible even when the seed returns success but emits malformed IR.
-        clang_stderr_path.write_text(stderr_text or "", encoding="utf-8")
+        # Always preserve seed stderr alongside the attempt so runtime
+        # diagnostics are visible even when the seed returns success but emits
+        # malformed IR.
+        seed_stderr_path.write_text(stderr_text or "", encoding="utf-8")
 
         if rc != 0:
             failures.append(
@@ -312,6 +325,7 @@ def main(argv: list[str]) -> int:
                     reason=f"seed returned rc={rc}; stderr saved",
                     raw_path=raw_path,
                     cleaned_path=cleaned_path,
+                    seed_stderr_path=seed_stderr_path,
                     clang_stderr_path=clang_stderr_path,
                 )
             )
@@ -332,6 +346,7 @@ def main(argv: list[str]) -> int:
                     reason="LLVM does not look like a module header (likely truncated)",
                     raw_path=raw_path,
                     cleaned_path=cleaned_path,
+                    seed_stderr_path=seed_stderr_path,
                     clang_stderr_path=clang_stderr_path,
                 )
             )
@@ -356,6 +371,7 @@ def main(argv: list[str]) -> int:
                         reason=f"clang failed rc={clang_rc} (see stderr)",
                         raw_path=raw_path,
                         cleaned_path=cleaned_path,
+                        seed_stderr_path=seed_stderr_path,
                         clang_stderr_path=clang_stderr_path,
                     )
                 )
@@ -382,7 +398,8 @@ def main(argv: list[str]) -> int:
         print(f"  reason:  {first.reason}")
         print(f"  raw:     {first.raw_path}")
         print(f"  cleaned: {first.cleaned_path}")
-        print(f"  stderr:  {first.clang_stderr_path}")
+        print(f"  seed stderr:  {first.seed_stderr_path}")
+        print(f"  clang stderr: {first.clang_stderr_path}")
         return 1
 
     return 0

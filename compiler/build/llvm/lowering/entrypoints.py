@@ -294,7 +294,6 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if len(module_globals.preamble_lines) > 0:
         lines = extend_string_lines(lines, module_globals.preamble_lines)
         lines = append_string(lines, "")
-    preamble_lines = lines
     function_lines = []
     if len(module_globals.init_function_lines) > 0:
         function_lines = extend_string_lines(function_lines, module_globals.init_function_lines)
@@ -342,11 +341,12 @@ module_globals.needs_init_call
             function_lines = append_string(function_lines, "")
         function_lines = extend_string_lines(function_lines, ["define internal double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
     string_constant_lines = render_string_constants(all_string_constants)
-    final_lines = preamble_lines
+    final_lines = lines
     if len(string_constant_lines) > 0:
-        final_lines = extend_string_lines(final_lines, string_constant_lines)
+        final_lines = (final_lines) + (string_constant_lines)
         final_lines = append_string(final_lines, "")
-    final_lines = extend_string_lines(final_lines, function_lines)
+    if len(function_lines) > 0:
+        final_lines = (final_lines) + (function_lines)
     final_lines = ensure_intrinsic_declarations(final_lines)
     ir = join_with_separator(final_lines, "\n")
     manifest = build_capability_manifest(native_module.entry_points, function_effects)
