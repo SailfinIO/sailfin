@@ -1,8 +1,10 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.main import compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_to_sailfin, number_to_string, module_name_from_path
+from compiler.build.main import compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_tests_to_llvm_with_module, compile_to_sailfin, number_to_string, module_name_from_path
 from compiler.build.main import compile_to_native_text
+from compiler.build.aot_prepare import _aot_apply_symbol_renames_lines, _aot_ensure_intrinsic_decls_lines, _aot_find_defined_functions_fast, _aot_find_defined_globals_fast, _aot_number_to_string, _aot_replace, _aot_sanitize_module_suffix, _aot_split_lines, _aot_bucket_set_contains, _aot_bucket_set_insert, _aot_bucket_set_make
+from compiler.build.native_ir import split_lines
 from compiler.build.version import sailfin_stage2_version
 
 print = runtime.console
@@ -25,8 +27,17 @@ is_alpha_char = runtime.is_alpha_char
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
+class _RelativeImportSpan:
+    def __init__(self, start, end, spec):
+        self.start = start
+        self.end = end
+        self.spec = spec
+
+    def __repr__(self):
+        return runtime.struct_repr('_RelativeImportSpan', [runtime.struct_field('start', self.start), runtime.struct_field('end', self.end), runtime.struct_field('spec', self.spec)])
+
 def _usage():
-    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit llvm|sailfin|native <file.sfn>\n" + "  sfn emit-llvm-file <file.sfn> <out.ll>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n"
+    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit llvm|sailfin|native <file.sfn>\n" + "  sfn emit-llvm-file <file.sfn> <out.ll>\n" + "  sfn aot-prepare-dir <modules.txt> <raw-dir> <out-dir>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n"
 
 def _ends_with(value, suffix):
     if len(suffix) == 0:
@@ -55,6 +66,23 @@ def _path_pop_last(parts):
         if index + 1 >= len(parts):
             break
         out = (out) + ([parts[index]])
+        index += 1
+    return out
+
+def _read_non_empty_lines(path):
+    # effects: io
+    if not fs.exists(path):
+        return []
+    text = fs.readFile(path)
+    lines = split_lines(text)
+    out = []
+    index = 0
+    while True:
+        if index >= len(lines):
+            break
+        line = lines[index]
+        if len(line) > 0:
+            out = (out) + ([line])
         index += 1
     return out
 
@@ -145,27 +173,187 @@ def _dirname(path):
         return "/"
     return substring(path, 0, last_slash)
 
-def _extract_relative_import_specs(source):
-    specs = []
+def _is_ident_char(ch):
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+    return _string_contains(allowed, ch)
+
+def _word_matches(source, index, word):
+    if len(word) == 0:
+        return False
+    if index < 0:
+        return False
+    if index + len(word) > len(source):
+        return False
+    if substring_unchecked(source, index, index + len(word)) != word:
+        return False
+    if index > 0:
+        if _is_ident_char(source[index - 1]):
+            return False
+    if index + len(word) < len(source):
+        if _is_ident_char(source[index + len(word)]):
+            return False
+    return True
+
+def _collect_relative_import_spans(source):
+    spans = []
     i = 0
+    in_string = False
+    escaping = False
+    in_line_comment = False
+    in_block_comment = False
     while True:
-        if i + 6 >= len(source):
+        if i >= len(source):
             break
-        if source[i] == "f"  and  source[i + 1] == "r"  and  source[i + 2] == "o"  and  source[i + 3] == "m"  and  source[i + 4] == " "  and  source[i + 5] == "\"":
-            start = i + 6
-            j = start
+        ch = source[i]
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+        if in_block_comment:
+            if ch == "*"  and  i + 1 < len(source)  and  source[i + 1] == "/":
+                in_block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if in_string:
+            if escaping:
+                escaping = False
+                i += 1
+                continue
+            if ch == "\\":
+                escaping = True
+                i += 1
+                continue
+            if ch == "\"":
+                in_string = False
+                i += 1
+                continue
+            i += 1
+            continue
+        if ch == "/"  and  i + 1 < len(source):
+            next = source[i + 1]
+            if next == "/":
+                in_line_comment = True
+                i += 2
+                continue
+            if next == "*":
+                in_block_comment = True
+                i += 2
+                continue
+        if ch == "\"":
+            in_string = True
+            i += 1
+            continue
+        if _word_matches(source, i, "import"):
+            stmt_start = i
+            j = i
+            stmt_in_string = False
+            stmt_escaping = False
+            stmt_in_line_comment = False
+            stmt_in_block_comment = False
+            spec = ""
+            stmt_end = -1
             while True:
                 if j >= len(source):
                     break
-                if source[j] == "\"":
+                cj = source[j]
+                if stmt_in_line_comment:
+                    if cj == "\n":
+                        stmt_in_line_comment = False
+                    j += 1
+                    continue
+                if stmt_in_block_comment:
+                    if cj == "*"  and  j + 1 < len(source)  and  source[j + 1] == "/":
+                        stmt_in_block_comment = False
+                        j += 2
+                        continue
+                    j += 1
+                    continue
+                if stmt_in_string:
+                    if stmt_escaping:
+                        stmt_escaping = False
+                        j += 1
+                        continue
+                    if cj == "\\":
+                        stmt_escaping = True
+                        j += 1
+                        continue
+                    if cj == "\"":
+                        stmt_in_string = False
+                        j += 1
+                        continue
+                    j += 1
+                    continue
+                if cj == "/"  and  j + 1 < len(source):
+                    nextj = source[j + 1]
+                    if nextj == "/":
+                        stmt_in_line_comment = True
+                        j += 2
+                        continue
+                    if nextj == "*":
+                        stmt_in_block_comment = True
+                        j += 2
+                        continue
+                if cj == "\"":
+                    stmt_in_string = True
+                    j += 1
+                    continue
+                if len(spec) == 0  and  _word_matches(source, j, "from"):
+                    k = j + 4
+                    while True:
+                        if k >= len(source):
+                            break
+                        wk = source[k]
+                        if wk == " "  or  wk == "\t"  or  wk == "\n"  or  wk == "\r":
+                            k += 1
+                            continue
+                        break
+                    if k < len(source)  and  source[k] == "\"":
+                        k += 1
+                        start = k
+                        esc = False
+                        while True:
+                            if k >= len(source):
+                                break
+                            sk = source[k]
+                            if esc:
+                                esc = False
+                                k += 1
+                                continue
+                            if sk == "\\":
+                                esc = True
+                                k += 1
+                                continue
+                            if sk == "\"":
+                                spec = substring_unchecked(source, start, k)
+                                break
+                            k += 1
+                if cj == ";":
+                    stmt_end = j + 1
                     break
                 j += 1
-            if j > start  and  j < len(source):
-                spec = substring(source, start, j)
+            if stmt_end > 0  and  len(spec) > 0:
                 if _has_prefix(spec, "./")  or  _has_prefix(spec, "../"):
-                    specs = (specs) + ([spec])
-                i = j
+                    spans.append(_RelativeImportSpan(start=stmt_start, end=stmt_end, spec=spec))
+            if stmt_end > 0:
+                i = stmt_end
+                continue
         i += 1
+    return spans
+
+def _extract_relative_import_specs(source):
+    spans = _collect_relative_import_spans(source)
+    if len(spans) == 0:
+        return []
+    specs = []
+    index = 0
+    while True:
+        if index >= len(spans):
+            break
+        specs = (specs) + ([spans[index].spec])
+        index += 1
     return specs
 
 def _resolve_import_path(base_dir, spec):
@@ -227,63 +415,72 @@ def _sanitize_filename(value):
     return out
 
 def _strip_relative_import_lines(source):
-    source_len = len(source)
+    spans = _collect_relative_import_spans(source)
+    if len(spans) == 0:
+        return source
     out = ""
-    i = 0
-    line_start = 0
     keep_start = 0
+    index = 0
     while True:
-        if i >= source_len:
+        if index >= len(spans):
             break
-        if source[i] == "\n":
-            line_end = i + 1
-            line = substring_unchecked(source, line_start, line_end)
-            specs = _extract_relative_import_specs(line)
-            if len(specs) > 0:
-                if keep_start < line_start:
-                    out = out + substring_unchecked(source, keep_start, line_start)
-                keep_start = line_end
-            line_start = line_end
-        i += 1
-    if line_start < source_len:
-        tail = substring_unchecked(source, line_start, source_len)
-        specs = _extract_relative_import_specs(tail)
-        if len(specs) > 0:
-            if keep_start < line_start:
-                out = out + substring_unchecked(source, keep_start, line_start)
-            keep_start = source_len
-    if keep_start < source_len:
-        out = out + substring_unchecked(source, keep_start, source_len)
+        span = spans[index]
+        if span.start > keep_start:
+            out = out + substring_unchecked(source, keep_start, span.start)
+        keep_start = span.end
+        index += 1
+    if keep_start < len(source):
+        out = out + substring_unchecked(source, keep_start, len(source))
     return out
 
 def _inline_relative_imports(source, base_dir, depth, visited):
     # effects: io
     if depth <= 0:
         return _strip_relative_import_lines(source)
-    specs = _extract_relative_import_specs(source)
+    spans = _collect_relative_import_spans(source)
     combined = ""
     next_visited = visited
+    remove = []
     index = 0
     while True:
-        if index >= len(specs):
+        if index >= len(spans):
             break
         if fs.exists("build/sailfin/.dump_test_sources"):
-            print.info("test import inlining: base=" + base_dir + " spec=" + specs[index])
-        dep_path = _resolve_import_path(base_dir, specs[index])
-        if not _string_list_contains(next_visited, dep_path):
-            if not fs.exists(dep_path):
-                print.warn("test import inlining: missing dependency: " + dep_path)
-                index += 1
-                continue
-            dep_source = fs.readFile(dep_path)
-            if len(dep_source) == 0:
-                print.warn("test import inlining: empty dependency source: " + dep_path)
-            next_visited = (next_visited) + ([dep_path])
-            dep_base = _dirname(dep_path)
-            inlined_dep = _inline_relative_imports(dep_source, dep_base, depth - 1, next_visited)
-            combined = combined + inlined_dep + "\n"
+            print.info("test import inlining: base=" + base_dir + " spec=" + spans[index].spec)
+        dep_path = _resolve_import_path(base_dir, spans[index].spec)
+        is_prebuilt = _has_prefix(dep_path, "compiler/src/")  or  _has_prefix(dep_path, "runtime/")
+        if not is_prebuilt:
+            if not _string_list_contains(next_visited, dep_path):
+                if not fs.exists(dep_path):
+                    print.warn("test import inlining: missing dependency: " + dep_path)
+                    index += 1
+                    continue
+                dep_source = fs.readFile(dep_path)
+                if len(dep_source) == 0:
+                    print.warn("test import inlining: empty dependency source: " + dep_path)
+                next_visited = (next_visited) + ([dep_path])
+                dep_base = _dirname(dep_path)
+                inlined_dep = _inline_relative_imports(dep_source, dep_base, depth - 1, next_visited)
+                combined = combined + inlined_dep + "\n"
+            remove.append(spans[index])
         index += 1
-    combined = combined + _strip_relative_import_lines(source)
+    stripped = source
+    if len(remove) > 0:
+        out = ""
+        keep_start = 0
+        index = 0
+        while True:
+            if index >= len(remove):
+                break
+            span = remove[index]
+            if span.start > keep_start:
+                out = out + substring_unchecked(source, keep_start, span.start)
+            keep_start = span.end
+            index += 1
+        if keep_start < len(source):
+            out = out + substring_unchecked(source, keep_start, len(source))
+        stripped = out
+    combined = combined + stripped
     return combined
 
 def _looks_like_test_file(name):
@@ -415,7 +612,42 @@ def _clang_link(ll_path, out_path, runtime_root):
 
 def _clang_link_test(ll_path, out_path, runtime_root):
     # effects: io
-    return _clang_link_with_opt(ll_path, out_path, runtime_root, "-O0", "build/sailfin/test-o0")
+    if len(runtime_root) == 0:
+        print.error("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary")
+        return 1
+    if not _runtime_bundle_exists(runtime_root):
+        print.error("runtime bundle missing expected files under: " + runtime_root)
+        return 1
+    _ensure_dir("build")
+    _ensure_dir("build/sailfin")
+    cache_dir = "build/sailfin/test-o0"
+    _ensure_dir(cache_dir)
+    cached = _clang_compile_runtime_objects(runtime_root, cache_dir, "-O0")
+    runtime_obj = cached[0]
+    globals_obj = cached[1]
+    prelude_obj = cached[2]
+    if len(runtime_obj) == 0  or  len(globals_obj) == 0  or  len(prelude_obj) == 0:
+        print.error("failed to build cached runtime objects")
+        return 1
+    module_objs = []
+    modules = _read_non_empty_lines("build/stage2/aot/modules.txt")
+    if len(modules) > 0:
+        index = 0
+        while True:
+            if index >= len(modules):
+                break
+            if _has_prefix(modules[index], "runtime/"):
+                index += 1
+                continue
+            obj = "build/native/obj/" + modules[index] + ".o"
+            if fs.exists(obj):
+                module_objs.append(obj)
+            index += 1
+    args = ["clang", "-O0", "-Wno-override-module", runtime_obj, globals_obj, prelude_obj]
+    if len(module_objs) > 0:
+        args = (args) + (module_objs)
+    args = (args) + ([ll_path, "-o", out_path, "-lm"])
+    return process.run(args)
 
 def sailfin_cli_main(argv):
     # effects: io
@@ -505,6 +737,100 @@ def sailfin_cli_main(argv):
         lines = compile_to_llvm_lines_with_module(source, module_name)
         _write_lines(out_path, lines)
         return 0
+    if cmd == "aot-prepare-dir":
+        if len(args) != 4:
+            print.error(_usage())
+            return 2
+        modules_path = args[1]
+        raw_dir = args[2]
+        out_dir = args[3]
+        if not fs.exists(modules_path):
+            print.error("file not found: " + modules_path)
+            return 1
+        if not fs.exists(raw_dir):
+            print.error("directory not found: " + raw_dir)
+            return 1
+        module_names = _read_non_empty_lines(modules_path)
+        if len(module_names) == 0:
+            print.error("no module names found: " + modules_path)
+            return 1
+        _ensure_dir(out_dir)
+        seen_functions = _aot_bucket_set_make()
+        seen_globals = _aot_bucket_set_make()
+        out_index = 0
+        while True:
+            if out_index >= len(module_names):
+                break
+            name = module_names[out_index]
+            if out_index % 5 == 0:
+                print.info("aot-prepare-dir: rewriting " + number_to_string(out_index + 1) + "/" + number_to_string(len(module_names)) + "...")
+            ll_path = _path_join(raw_dir, name + ".ll")
+            if not fs.exists(ll_path):
+                print.error("file not found: " + ll_path)
+                return 1
+            ir = fs.readFile(ll_path)
+            if name == "main":
+                ir = _aot_replace(ir, "@main(", "@stage2_compiler_main(")
+            lines = _aot_split_lines(ir)
+            defined_functions = _aot_find_defined_functions_fast(ir)
+            defined_globals = _aot_find_defined_globals_fast(ir)
+            safe_module_name = _aot_sanitize_module_suffix(name)
+            rename_old = []
+            rename_new = []
+            fi = 0
+            while True:
+                if fi >= len(defined_functions):
+                    break
+                fname = defined_functions[fi]
+                if not _aot_bucket_set_contains(seen_functions, fname):
+                    seen_functions = _aot_bucket_set_insert(seen_functions, fname)
+                    fi += 1
+                    continue
+                counter = 1
+                candidate = ""
+                while True:
+                    suffix = safe_module_name
+                    if counter != 1:
+                        suffix = safe_module_name + "_" + _aot_number_to_string(counter)
+                    candidate = fname + "__" + suffix
+                    if not _aot_bucket_set_contains(seen_functions, candidate):
+                        break
+                    counter += 1
+                seen_functions = _aot_bucket_set_insert(seen_functions, candidate)
+                rename_old.append(fname)
+                rename_new.append(candidate)
+                fi += 1
+            gi = 0
+            while True:
+                if gi >= len(defined_globals):
+                    break
+                gname = defined_globals[gi]
+                if not _aot_bucket_set_contains(seen_globals, gname):
+                    seen_globals = _aot_bucket_set_insert(seen_globals, gname)
+                    gi += 1
+                    continue
+                counter = 1
+                candidate = ""
+                while True:
+                    suffix = safe_module_name
+                    if counter != 1:
+                        suffix = safe_module_name + "_" + _aot_number_to_string(counter)
+                    candidate = gname + "__" + suffix
+                    if not _aot_bucket_set_contains(seen_globals, candidate):
+                        break
+                    counter += 1
+                seen_globals = _aot_bucket_set_insert(seen_globals, candidate)
+                rename_old.append(gname)
+                rename_new.append(candidate)
+                gi += 1
+            if len(rename_old) > 0:
+                lines = _aot_apply_symbol_renames_lines(lines, rename_old, rename_new)
+            lines = _aot_ensure_intrinsic_decls_lines(lines)
+            out_ll = _path_join(out_dir, name + ".ll")
+            _write_lines(out_ll, lines)
+            out_index += 1
+        _write_text(_path_join(out_dir, "modules.txt"), fs.readFile(modules_path))
+        return 0
     if cmd == "build":
         out_path = ""
         input_path = ""
@@ -588,6 +914,7 @@ def sailfin_cli_main(argv):
             path = test_files[index]
             print.info("test: " + path)
             source = fs.readFile(path)
+            module_name = module_name_from_path(path)
             base_dir = _dirname(path)
             if trace_runner:
                 print.info("test runner: inlining start")
@@ -599,7 +926,7 @@ def sailfin_cli_main(argv):
                 _write_text("build/sailfin/test-source-" + safe + ".sfn", combined_source)
             if trace_runner:
                 print.info("test runner: compile start")
-            llvm = compile_tests_to_llvm(combined_source)
+            llvm = compile_tests_to_llvm_with_module(combined_source, module_name)
             if trace_runner:
                 print.info("test runner: compile done (bytes=" + number_to_string(len(llvm)) + ")")
             if len(llvm) == 0:

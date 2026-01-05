@@ -279,6 +279,53 @@ class Stage2BootstrapError(RuntimeError):
     pass
 
 
+def _canonicalize_exception_decl_order(ir_text: str) -> str:
+    """Stabilize ordering of runtime exception declarations.
+
+    Stage2-native lowering has exhibited occasional nondeterministic ordering of
+    these `declare` lines between bootstrap runs. LLVM IR semantics do not
+    depend on their relative order, but our determinism checks do.
+    """
+
+    if not ir_text:
+        return ir_text
+
+    decl_symbols = [
+        "sailfin_runtime_clear_exception",
+        "sailfin_runtime_has_exception",
+        "sailfin_runtime_set_exception",
+        "sailfin_runtime_take_exception",
+    ]
+
+    lines = ir_text.splitlines()
+    found: Dict[str, str] = {}
+    indices: List[int] = []
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("declare "):
+            continue
+        for sym in decl_symbols:
+            if f"@{sym}(" in stripped:
+                found[sym] = line
+                indices.append(i)
+                break
+
+    if not indices:
+        return ir_text
+
+    # Remove any of the tracked declare lines we saw.
+    remove_set = set(indices)
+    remaining = [line for i, line in enumerate(lines) if i not in remove_set]
+
+    # Re-insert at the earliest removed index, in canonical order, but only for
+    # the symbols that were present.
+    insert_at = min(indices)
+    ordered = [found[sym] for sym in decl_symbols if sym in found]
+    rewritten = remaining[:insert_at] + ordered + remaining[insert_at:]
+    return "\n".join(rewritten) + ("\n" if ir_text.endswith("\n") else "")
+
+
 class DiagnosticAggregator:
     """Aggregates and categorizes diagnostics from Stage2 compilation."""
 
@@ -1121,6 +1168,8 @@ def compile_compiler_to_stage2(
             if ir is None:
                 raise Stage2BootstrapError(
                     f"no LLVM IR generated for {source_path.name}")
+
+            ir = _canonicalize_exception_decl_order(ir)
 
             output_path = _relative_output_path(source_path, ".ll", output_dir)
             _atomic_write_text(output_path, ir)

@@ -263,6 +263,23 @@ def compile_tests_to_llvm(source):
         print.info("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(len(ir)) + ")")
     return ir
 
+def compile_tests_to_llvm_with_module(source, module_name):
+    # effects: io
+    trace = fs.exists("build/sailfin/.trace_test_runner")  and  fs.exists("build/sailfin/.test_runner_active")
+    if trace:
+        print.info("test compiler: parse_program start")
+    program = parse_program(source)
+    analysis_result = typecheck_program(program)
+    if len(analysis_result.diagnostics) > 0:
+        report_typecheck_errors(analysis_result.diagnostics, source)
+        return ""
+    if trace:
+        print.info("test compiler: emit_native_with_module_name start (module=" + module_name + ")")
+    native_result = emit_native_with_module_name(program, module_name)
+    if trace:
+        print.info("test compiler: lower_to_llvm_for_tests start")
+    return lower_to_llvm_ir_for_tests(native_result.module)
+
 def compile_to_native_text(source):
     # effects: io
     native_result = compile_to_native(source)

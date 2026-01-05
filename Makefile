@@ -134,6 +134,7 @@ selfhost-native-stage2: native-stage2-asan
 	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --out build/native/sailfin-stage2-selfhost
 	@echo "[selfhost-native-stage2] built build/native/sailfin-stage2-selfhost"
 
+
 _build-native-stage2:
 	@if [ ! -f $(STAGE2_AOT_MODULES_FILE) ]; then \
 		echo "[_build-native-stage2] missing $(STAGE2_AOT_MODULES_FILE); run make compile first"; \

@@ -1,0 +1,56 @@
+fn _min(a -> number, b -> number) -> number {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn _starts_with(haystack -> string, needle -> string) -> boolean {
+    if needle.length == 0 {
+        return true;
+    }
+    if haystack.length < needle.length {
+        return false;
+    }
+    let mut i -> number = 0;
+    loop {
+        if i >= needle.length {
+            break;
+        }
+        if haystack[i] != needle[i] {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+test "stage2: emit-llvm-file writes module preamble" ![io] {
+    // Regression test for prior stage2-native corruption where emitted LLVM
+    // started mid-body with a stray leading character and was missing the
+    // `source_filename = ...` preamble entirely.
+
+    let compiler = "./build/native/sailfin-stage2";
+    let input = "compiler/src/llvm/lowering/instructions.sfn";
+    let out_dir = "build/sailfin";
+    let out_path = "build/sailfin/emit_llvm_file_preamble_test.ll";
+
+    // Best-effort: ensure output dir exists and remove stale file.
+    fs.createDirectory(out_dir, true);
+    fs.deleteFile(out_path);
+
+    assert fs.exists(compiler);
+    assert fs.exists(input);
+
+    let rc = process.run([compiler, "emit-llvm-file", input, out_path]);
+    assert rc == 0;
+    assert fs.exists(out_path);
+
+    // Validate the preamble without reading the entire file into a Sailfin string.
+    // (The runtime currently guards `string_length` with a 1MiB scan cap.)
+    let python = "/usr/bin/python3";
+    assert fs.exists(python);
+    let code = "import sys; p=sys.argv[1]; data=open(p,'rb').read(128); expected=b'source_filename = \"llvm/lowering/instructions.sfn\"\\n\\n'; sys.exit(0 if data.startswith(expected) else 1)";
+    let check = process.run([python, "-c", code, out_path]);
+    assert check == 0;
+}

@@ -117,12 +117,21 @@ jobs:
 
           ls -la build/native | sed -n '1,200p'
 
+      - name: Self-host rebuild Stage2 (release binary)
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          conda run -n sailfin python scripts/selfhost_native_stage2.py \
+            --seed build/native/sailfin-stage2${{ matrix.exe_ext }} \
+            --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
+            --max-attempts 10
+
       - name: Verify embedded CLI version matches release tag
         shell: bash -l {0}
         run: |
           set -euo pipefail
           VERSION="${{ steps.rel.outputs.version }}"
-          OUT="$(build/native/sailfin-stage2 --version | tr -d '\r' | head -n 1)"
+          OUT="$(build/native/sailfin-stage2-selfhost --version | tr -d '\r' | head -n 1)"
           echo "$OUT"
           echo "$OUT" | grep -F "sfn ${VERSION}" >/dev/null
 
@@ -138,8 +147,8 @@ jobs:
           mkdir -p dist
           STAGE_DIR="$(mktemp -d)"
           mkdir -p "${STAGE_DIR}/bin"
-          cp "build/native/sailfin-stage2${EXE_EXT}" "${STAGE_DIR}/bin/sailfin-stage2${EXE_EXT}"
-          cp "build/native/sailfin-stage2${EXE_EXT}" "${STAGE_DIR}/bin/sfn${EXE_EXT}"
+          cp "build/native/sailfin-stage2-selfhost${EXE_EXT}" "${STAGE_DIR}/bin/sailfin-stage2${EXE_EXT}"
+          cp "build/native/sailfin-stage2-selfhost${EXE_EXT}" "${STAGE_DIR}/bin/sfn${EXE_EXT}"
           mkdir -p "${STAGE_DIR}/runtime"
           cp -R runtime/native "${STAGE_DIR}/runtime/native"
           mkdir -p "${STAGE_DIR}/runtime/native/obj"

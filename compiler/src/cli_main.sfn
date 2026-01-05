@@ -2,8 +2,22 @@
 //
 // Sailfin-native CLI entrypoint invoked by the stage2 C shim.
 
-import { compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_to_sailfin, number_to_string, module_name_from_path } from "./main";
+import { compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_tests_to_llvm_with_module, compile_to_sailfin, number_to_string, module_name_from_path } from "./main";
 import { compile_to_native_text } from "./main";
+import {
+    _aot_apply_symbol_renames_lines,
+    _aot_ensure_intrinsic_decls_lines,
+    _aot_find_defined_functions_fast,
+    _aot_find_defined_globals_fast,
+    _aot_number_to_string,
+    _aot_replace,
+    _aot_sanitize_module_suffix,
+    _aot_split_lines,
+    _aot_bucket_set_contains,
+    _aot_bucket_set_insert,
+    _aot_bucket_set_make,
+} from "./aot_prepare";
+import { split_lines } from "./native_ir";
 import { sailfin_stage2_version } from "./version";
 
 fn _usage() -> string {
@@ -12,6 +26,7 @@ fn _usage() -> string {
         "  sfn version\n" +
         "  sfn emit llvm|sailfin|native <file.sfn>\n" +
         "  sfn emit-llvm-file <file.sfn> <out.ll>\n" +
+        "  sfn aot-prepare-dir <modules.txt> <raw-dir> <out-dir>\n" +
         "  sfn build [-o OUTPUT] <file.sfn>\n" +
         "  sfn run <file.sfn>\n" +
         "  sfn run <exe>\n" +
@@ -61,6 +76,27 @@ fn _path_pop_last(parts -> string[]) -> string[] {
             break;
         }
         out = out.concat([parts[index]]);
+        index += 1;
+    }
+    return out;
+}
+
+fn _read_non_empty_lines(path -> string) -> string[] ![io] {
+    if !fs.exists(path) {
+        return [];
+    }
+    let text = fs.readFile(path);
+    let lines = split_lines(text);
+    let mut out -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = lines[index];
+        if line.length > 0 {
+            out = out.concat([line]);
+        }
         index += 1;
     }
     return out;
@@ -182,36 +218,273 @@ fn _dirname(path -> string) -> string {
     return substring(path, 0, last_slash);
 }
 
-fn _extract_relative_import_specs(source -> string) -> string[] {
-    // Very small import scanner: looks for `from "..."` in the source.
-    // Only returns relative specs (./ or ../) and ignores runtime imports.
-    let mut specs -> string[] = [];
+struct _RelativeImportSpan {
+    start -> number;
+    end -> number;
+    spec -> string;
+}
+
+fn _is_ident_char(ch -> string) -> boolean {
+    // ASCII identifier-ish predicate: [A-Za-z0-9_]
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return _string_contains(allowed, ch);
+}
+
+fn _word_matches(source -> string, index -> number, word -> string) -> boolean {
+    if word.length == 0 {
+        return false;
+    }
+    if index < 0 {
+        return false;
+    }
+    if index + word.length > source.length {
+        return false;
+    }
+    if substring_unchecked(source, index, index + word.length) != word {
+        return false;
+    }
+    if index > 0 {
+        if _is_ident_char(source[index - 1]) {
+            return false;
+        }
+    }
+    if index + word.length < source.length {
+        if _is_ident_char(source[index + word.length]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
+    // Scan for actual `import {..} from "./...";` statements, ignoring occurrences
+    // inside strings/comments. Returns the full statement spans to remove.
+    let mut spans -> _RelativeImportSpan[] = [];
+
     let mut i -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut escaping -> boolean = false;
+    let mut in_line_comment -> boolean = false;
+    let mut in_block_comment -> boolean = false;
+
     loop {
-        if i + 6 >= source.length {
+        if i >= source.length {
             break;
         }
-        if source[i] == "f" && source[i + 1] == "r" && source[i + 2] == "o" && source[i + 3] == "m" && source[i + 4] == " " && source[i + 5] == "\"" {
-            let start = i + 6;
-            let mut j -> number = start;
+        let ch = source[i];
+
+        if in_line_comment {
+            if ch == "\n" {
+                in_line_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if in_block_comment {
+            if ch == "*" && i + 1 < source.length && source[i + 1] == "/" {
+                in_block_comment = false;
+                i += 2;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Not inside string/comment.
+        if ch == "/" && i + 1 < source.length {
+            let next = source[i + 1];
+            if next == "/" {
+                in_line_comment = true;
+                i += 2;
+                continue;
+            }
+            if next == "*" {
+                in_block_comment = true;
+                i += 2;
+                continue;
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+
+        if _word_matches(source, i, "import") {
+            let stmt_start = i;
+            let mut j -> number = i;
+
+            let mut stmt_in_string -> boolean = false;
+            let mut stmt_escaping -> boolean = false;
+            let mut stmt_in_line_comment -> boolean = false;
+            let mut stmt_in_block_comment -> boolean = false;
+
+            let mut spec -> string = "";
+            let mut stmt_end -> number = -1;
+
             loop {
                 if j >= source.length {
                     break;
                 }
-                if source[j] == "\"" {
+                let cj = source[j];
+
+                if stmt_in_line_comment {
+                    if cj == "\n" {
+                        stmt_in_line_comment = false;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if stmt_in_block_comment {
+                    if cj == "*" && j + 1 < source.length && source[j + 1] == "/" {
+                        stmt_in_block_comment = false;
+                        j += 2;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if stmt_in_string {
+                    if stmt_escaping {
+                        stmt_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        stmt_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        stmt_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+
+                if cj == "/" && j + 1 < source.length {
+                    let nextj = source[j + 1];
+                    if nextj == "/" {
+                        stmt_in_line_comment = true;
+                        j += 2;
+                        continue;
+                    }
+                    if nextj == "*" {
+                        stmt_in_block_comment = true;
+                        j += 2;
+                        continue;
+                    }
+                }
+                if cj == "\"" {
+                    stmt_in_string = true;
+                    j += 1;
+                    continue;
+                }
+
+                if spec.length == 0 && _word_matches(source, j, "from") {
+                    let mut k = j + 4;
+                    // skip whitespace
+                    loop {
+                        if k >= source.length {
+                            break;
+                        }
+                        let wk = source[k];
+                        if wk == " " || wk == "\t" || wk == "\n" || wk == "\r" {
+                            k += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    if k < source.length && source[k] == "\"" {
+                        // parse string literal value
+                        k += 1;
+                        let mut start = k;
+                        let mut esc -> boolean = false;
+                        loop {
+                            if k >= source.length {
+                                break;
+                            }
+                            let sk = source[k];
+                            if esc {
+                                esc = false;
+                                k += 1;
+                                continue;
+                            }
+                            if sk == "\\" {
+                                esc = true;
+                                k += 1;
+                                continue;
+                            }
+                            if sk == "\"" {
+                                spec = substring_unchecked(source, start, k);
+                                break;
+                            }
+                            k += 1;
+                        }
+                    }
+                }
+
+                if cj == ";" {
+                    stmt_end = j + 1;
                     break;
                 }
                 j += 1;
             }
-            if j > start && j < source.length {
-                let spec = substring(source, start, j);
+
+            if stmt_end > 0 && spec.length > 0 {
                 if _has_prefix(spec, "./") || _has_prefix(spec, "../") {
-                    specs = specs.concat([spec]);
+                    spans.push(_RelativeImportSpan { start: stmt_start, end: stmt_end, spec: spec });
                 }
-                i = j;
+            }
+
+            if stmt_end > 0 {
+                i = stmt_end;
+                continue;
             }
         }
+
         i += 1;
+    }
+
+    return spans;
+}
+
+fn _extract_relative_import_specs(source -> string) -> string[] {
+    let spans = _collect_relative_import_spans(source);
+    if spans.length == 0 {
+        return [];
+    }
+    let mut specs -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= spans.length {
+            break;
+        }
+        specs = specs.concat([spans[index].spec]);
+        index += 1;
     }
     return specs;
 }
@@ -299,52 +572,30 @@ fn _sanitize_filename(value -> string) -> string {
 }
 
 fn _strip_relative_import_lines(source -> string) -> string {
-    // Drop lines that contain relative `from "./..."` / `from "../..."` imports.
-    // Important: avoid quadratic behaviour from repeated `out = out + line`.
-    // Instead, splice together the large kept segments between removed lines.
+    // Remove whole relative import statements; safe for multi-line imports and
+    // avoids matching `from "./..."` that appears inside strings/comments.
+    let spans = _collect_relative_import_spans(source);
+    if spans.length == 0 {
+        return source;
+    }
 
-    let source_len = source.length;
     let mut out -> string = "";
-    let mut i -> number = 0;
-    let mut line_start -> number = 0;
     let mut keep_start -> number = 0;
-
+    let mut index -> number = 0;
     loop {
-        if i >= source_len {
+        if index >= spans.length {
             break;
         }
-        if source[i] == "\n" {
-            let line_end = i + 1;
-            let line = substring_unchecked(source, line_start, line_end);
-            let specs = _extract_relative_import_specs(line);
-            if specs.length > 0 {
-                // Flush the kept segment before this import line.
-                if keep_start < line_start {
-                    out = out + substring_unchecked(source, keep_start, line_start);
-                }
-                keep_start = line_end;
-            }
-            line_start = line_end;
+        let span = spans[index];
+        if span.start > keep_start {
+            out = out + substring_unchecked(source, keep_start, span.start);
         }
-        i += 1;
+        keep_start = span.end;
+        index += 1;
     }
-
-    // Handle trailing line with no newline.
-    if line_start < source_len {
-        let tail = substring_unchecked(source, line_start, source_len);
-        let specs = _extract_relative_import_specs(tail);
-        if specs.length > 0 {
-            if keep_start < line_start {
-                out = out + substring_unchecked(source, keep_start, line_start);
-            }
-            keep_start = source_len;
-        }
+    if keep_start < source.length {
+        out = out + substring_unchecked(source, keep_start, source.length);
     }
-
-    if keep_start < source_len {
-        out = out + substring_unchecked(source, keep_start, source_len);
-    }
-
     return out;
 }
 
@@ -353,38 +604,66 @@ fn _inline_relative_imports(source -> string, base_dir -> string, depth -> numbe
         return _strip_relative_import_lines(source);
     }
 
-    let specs = _extract_relative_import_specs(source);
+    let spans = _collect_relative_import_spans(source);
     let mut combined -> string = "";
     let mut next_visited = visited;
+    let mut remove -> _RelativeImportSpan[] = [];
 
     let mut index -> number = 0;
     loop {
-        if index >= specs.length {
+        if index >= spans.length {
             break;
         }
         if fs.exists("build/sailfin/.dump_test_sources") {
-            print.info("test import inlining: base=" + base_dir + " spec=" + specs[index]);
+            print.info("test import inlining: base=" + base_dir + " spec=" + spans[index].spec);
         }
-        let dep_path = _resolve_import_path(base_dir, specs[index]);
-        if !_string_list_contains(next_visited, dep_path) {
-            if !fs.exists(dep_path) {
-                print.warn("test import inlining: missing dependency: " + dep_path);
-                index += 1;
-                continue;
+        let dep_path = _resolve_import_path(base_dir, spans[index].spec);
+        let is_prebuilt = _has_prefix(dep_path, "compiler/src/") || _has_prefix(dep_path, "runtime/");
+        if !is_prebuilt {
+            if !_string_list_contains(next_visited, dep_path) {
+                if !fs.exists(dep_path) {
+                    print.warn("test import inlining: missing dependency: " + dep_path);
+                    index += 1;
+                    continue;
+                }
+                let dep_source = fs.readFile(dep_path);
+                if dep_source.length == 0 {
+                    print.warn("test import inlining: empty dependency source: " + dep_path);
+                }
+                next_visited = next_visited.concat([dep_path]);
+                let dep_base = _dirname(dep_path);
+                let inlined_dep = _inline_relative_imports(dep_source, dep_base, depth - 1, next_visited);
+                combined = combined + inlined_dep + "\n";
             }
-            let dep_source = fs.readFile(dep_path);
-            if dep_source.length == 0 {
-                print.warn("test import inlining: empty dependency source: " + dep_path);
-            }
-            next_visited = next_visited.concat([dep_path]);
-            let dep_base = _dirname(dep_path);
-            let inlined_dep = _inline_relative_imports(dep_source, dep_base, depth - 1, next_visited);
-            combined = combined + inlined_dep + "\n";
+            // Only remove the statement when we actually inline it.
+            remove.push(spans[index]);
         }
         index += 1;
     }
 
-    combined = combined + _strip_relative_import_lines(source);
+    let mut stripped = source;
+    if remove.length > 0 {
+        let mut out -> string = "";
+        let mut keep_start -> number = 0;
+        index = 0;
+        loop {
+            if index >= remove.length {
+                break;
+            }
+            let span = remove[index];
+            if span.start > keep_start {
+                out = out + substring_unchecked(source, keep_start, span.start);
+            }
+            keep_start = span.end;
+            index += 1;
+        }
+        if keep_start < source.length {
+            out = out + substring_unchecked(source, keep_start, source.length);
+        }
+        stripped = out;
+    }
+
+    combined = combined + stripped;
     return combined;
 }
 
@@ -592,7 +871,72 @@ fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) ->
 
 fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
     // Tests prioritize compile/link latency over runtime performance.
-    return _clang_link_with_opt(ll_path, out_path, runtime_root, "-O0", "build/sailfin/test-o0");
+    // Unit tests often import compiler modules (compiler/src/...), which are already
+    // compiled as part of stage2. Link against those objects to satisfy symbols.
+
+    if runtime_root.length == 0 {
+        print.error("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary");
+        return 1;
+    }
+    if !_runtime_bundle_exists(runtime_root) {
+        print.error("runtime bundle missing expected files under: " + runtime_root);
+        return 1;
+    }
+
+    _ensure_dir("build");
+    _ensure_dir("build/sailfin");
+    let cache_dir = "build/sailfin/test-o0";
+    _ensure_dir(cache_dir);
+    let cached = _clang_compile_runtime_objects(runtime_root, cache_dir, "-O0");
+    let runtime_obj = cached[0];
+    let globals_obj = cached[1];
+    let prelude_obj = cached[2];
+    if runtime_obj.length == 0 || globals_obj.length == 0 || prelude_obj.length == 0 {
+        print.error("failed to build cached runtime objects");
+        return 1;
+    }
+
+    // Best-effort: include stage2 module objects if present.
+    let mut module_objs -> string[] = [];
+    let modules = _read_non_empty_lines("build/stage2/aot/modules.txt");
+    if modules.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= modules.length {
+                break;
+            }
+            // Do not link the stage2 runtime modules here; the test link already
+            // includes the runtime bundle objects (including prelude.o).
+            if _has_prefix(modules[index], "runtime/") {
+                index += 1;
+                continue;
+            }
+            let obj = "build/native/obj/" + modules[index] + ".o";
+            if fs.exists(obj) {
+                module_objs.push(obj);
+            }
+            index += 1;
+        }
+    }
+
+    let mut args -> string[] = [
+        "clang",
+        "-O0",
+        "-Wno-override-module",
+        runtime_obj,
+        globals_obj,
+        prelude_obj,
+    ];
+    if module_objs.length > 0 {
+        args = args.concat(module_objs);
+    }
+    args = args.concat([
+        ll_path,
+        "-o",
+        out_path,
+        "-lm",
+    ]);
+    return process.run(args);
 }
 
 fn sailfin_cli_main(argv -> string[]) -> number ![io] {
@@ -713,6 +1057,153 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let module_name = module_name_from_path(path);
         let lines = compile_to_llvm_lines_with_module(source, module_name);
         _write_lines(out_path, lines);
+        return 0;
+    }
+
+    if cmd == "aot-prepare-dir" {
+        // aot-prepare-dir <modules.txt> <raw-dir> <out-dir>
+        if args.length != 4 {
+            print.error(_usage());
+            return 2;
+        }
+        let modules_path = args[1];
+        let raw_dir = args[2];
+        let out_dir = args[3];
+
+        if !fs.exists(modules_path) {
+            print.error("file not found: " + modules_path);
+            return 1;
+        }
+        if !fs.exists(raw_dir) {
+            print.error("directory not found: " + raw_dir);
+            return 1;
+        }
+
+        let module_names = _read_non_empty_lines(modules_path);
+        if module_names.length == 0 {
+            print.error("no module names found: " + modules_path);
+            return 1;
+        }
+
+        _ensure_dir(out_dir);
+        let mut seen_functions = _aot_bucket_set_make();
+        let mut seen_globals = _aot_bucket_set_make();
+
+        let mut out_index -> number = 0;
+        loop {
+            if out_index >= module_names.length {
+                break;
+            }
+            let name = module_names[out_index];
+            if (out_index % 5) == 0 {
+                print.info(
+                    "aot-prepare-dir: rewriting " +
+                    number_to_string(out_index + 1) + "/" +
+                    number_to_string(module_names.length) +
+                    "..."
+                );
+            }
+
+            let ll_path = _path_join(raw_dir, name + ".ll");
+            if !fs.exists(ll_path) {
+                print.error("file not found: " + ll_path);
+                return 1;
+            }
+
+            let mut ir = fs.readFile(ll_path);
+
+            // Avoid colliding with the native C driver `main`.
+            if name == "main" {
+                ir = _aot_replace(ir, "@main(", "@stage2_compiler_main(");
+            }
+
+            let mut lines = _aot_split_lines(ir);
+
+            let defined_functions = _aot_find_defined_functions_fast(ir);
+            let defined_globals = _aot_find_defined_globals_fast(ir);
+            let safe_module_name = _aot_sanitize_module_suffix(name);
+
+            let mut rename_old -> string[] = [];
+            let mut rename_new -> string[] = [];
+
+            // Rename duplicate defined functions.
+            let mut fi -> number = 0;
+            loop {
+                if fi >= defined_functions.length {
+                    break;
+                }
+                let fname = defined_functions[fi];
+                if !_aot_bucket_set_contains(seen_functions, fname) {
+                    seen_functions = _aot_bucket_set_insert(seen_functions, fname);
+                    fi += 1;
+                    continue;
+                }
+
+                let mut counter -> number = 1;
+                let mut candidate -> string = "";
+                loop {
+                    let mut suffix -> string = safe_module_name;
+                    if counter != 1 {
+                        suffix = safe_module_name + "_" + _aot_number_to_string(counter);
+                    }
+                    candidate = fname + "__" + suffix;
+                    if !_aot_bucket_set_contains(seen_functions, candidate) {
+                        break;
+                    }
+                    counter += 1;
+                }
+
+                seen_functions = _aot_bucket_set_insert(seen_functions, candidate);
+                rename_old.push(fname);
+                rename_new.push(candidate);
+                fi += 1;
+            }
+
+            // Rename duplicate defined globals.
+            let mut gi -> number = 0;
+            loop {
+                if gi >= defined_globals.length {
+                    break;
+                }
+                let gname = defined_globals[gi];
+                if !_aot_bucket_set_contains(seen_globals, gname) {
+                    seen_globals = _aot_bucket_set_insert(seen_globals, gname);
+                    gi += 1;
+                    continue;
+                }
+
+                let mut counter -> number = 1;
+                let mut candidate -> string = "";
+                loop {
+                    let mut suffix -> string = safe_module_name;
+                    if counter != 1 {
+                        suffix = safe_module_name + "_" + _aot_number_to_string(counter);
+                    }
+                    candidate = gname + "__" + suffix;
+                    if !_aot_bucket_set_contains(seen_globals, candidate) {
+                        break;
+                    }
+                    counter += 1;
+                }
+
+                seen_globals = _aot_bucket_set_insert(seen_globals, candidate);
+                rename_old.push(gname);
+                rename_new.push(candidate);
+                gi += 1;
+            }
+
+            if rename_old.length > 0 {
+                lines = _aot_apply_symbol_renames_lines(lines, rename_old, rename_new);
+            }
+
+            // Ensure intrinsic declarations on the line representation.
+            lines = _aot_ensure_intrinsic_decls_lines(lines);
+
+            let out_ll = _path_join(out_dir, name + ".ll");
+            _write_lines(out_ll, lines);
+            out_index += 1;
+        }
+        _write_text(_path_join(out_dir, "modules.txt"), fs.readFile(modules_path));
         return 0;
     }
 
@@ -838,6 +1329,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             let path = test_files[index];
             print.info("test: " + path);
             let source = fs.readFile(path);
+            let module_name = module_name_from_path(path);
 
             // Inline relative imports (../ and ./) into a single compilation unit.
             // This avoids duplicate symbols when linking multiple LLVM modules.
@@ -858,7 +1350,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             if trace_runner {
                 print.info("test runner: compile start");
             }
-            let llvm = compile_tests_to_llvm(combined_source);
+            let llvm = compile_tests_to_llvm_with_module(combined_source, module_name);
             if trace_runner {
                 print.info("test runner: compile done (bytes=" + number_to_string(llvm.length) + ")");
             }

@@ -11,6 +11,69 @@
 // - Avoid rewriting inside LLVM IR string literals (c"...").
 
 import { substring } from "./string_utils";
+import { char_code } from "./native_ir";
+
+fn _aot_bucket_index(key -> string) -> number {
+	if key.length == 0 {
+		return 0;
+	}
+	return char_code(key[0]) % 256;
+}
+
+fn _aot_bucket_set_make() -> string[][] {
+	let mut buckets -> string[][] = [];
+	let mut i -> number = 0;
+	loop {
+		if i >= 256 {
+			break;
+		}
+		buckets.push([]);
+		i += 1;
+	}
+	return buckets;
+}
+
+fn _aot_bucket_set_contains(buckets -> string[][], key -> string) -> boolean {
+	let idx = _aot_bucket_index(key);
+	return _aot_contains_string(buckets[idx], key);
+}
+
+fn _aot_bucket_set_insert(buckets -> string[][], key -> string) -> string[][] {
+	if key.length == 0 {
+		return buckets;
+	}
+	let idx = _aot_bucket_index(key);
+	let mut existing = buckets[idx];
+	if _aot_contains_string(existing, key) {
+		return buckets;
+	}
+	existing.push(key);
+	let mut out -> string[][] = buckets;
+	out[idx] = existing;
+	return out;
+}
+
+fn _aot_apply_symbol_renames_lines(lines -> string[], olds -> string[], news -> string[]) -> string[] {
+	let mut out -> string[] = lines;
+	let mut i -> number = 0;
+	loop {
+		if i >= out.length {
+			break;
+		}
+		let mut updated = out[i];
+		let mut j -> number = 0;
+		loop {
+			if j >= olds.length {
+				break;
+			}
+			updated = _aot_rename_symbol_refs(updated, olds[j], news[j]);
+			j += 1;
+		}
+		out[i] = updated;
+		i += 1;
+	}
+	return out;
+}
 
 fn _aot_number_to_string(value -> number) -> string {
 	if value == 0 {
@@ -205,7 +268,9 @@ fn _aot_append_unique(values -> string[], value -> string) -> string[] {
 	if _aot_contains_string(values, value) {
 		return values;
 	}
-	return values.concat([value]);
+	let mut out -> string[] = values;
+	out.push(value);
+	return out;
 }
 
 fn _aot_starts_with_at(text -> string, start -> number, prefix -> string) -> boolean {
@@ -259,6 +324,7 @@ fn _aot_rename_symbol_refs(ir -> string, old -> string, fresh -> string) -> stri
 	}
 	let ir_len = ir.length;
 	let mut out -> string = "";
+	let mut changed -> boolean = false;
 	let mut i -> number = 0;
 	let mut last_emit -> number = 0;
 	let mut in_quote -> boolean = false;
@@ -282,6 +348,7 @@ fn _aot_rename_symbol_refs(ir -> string, old -> string, fresh -> string) -> stri
 				let end = i + 1 + old_len;
 				if end >= ir_len || !_aot_is_symbol_char(ir[end]) {
 					out = out + substring(ir, last_emit, i) + "@" + fresh;
+					changed = true;
 					i = end;
 					last_emit = i;
 					continue;
@@ -290,7 +357,100 @@ fn _aot_rename_symbol_refs(ir -> string, old -> string, fresh -> string) -> stri
 		}
 		i += 1;
 	}
+	if !changed {
+		return ir;
+	}
 	out = out + substring(ir, last_emit, ir_len);
+	return out;
+}
+
+fn _aot_replace_lines(lines -> string[], needle -> string, replacement -> string) -> string[] {
+	if needle.length == 0 {
+		return lines;
+	}
+	let mut out -> string[] = [];
+	let mut i -> number = 0;
+	loop {
+		if i >= lines.length {
+			break;
+		}
+		out.push(_aot_replace(lines[i], needle, replacement));
+		i += 1;
+	}
+	return out;
+}
+
+fn _aot_rename_symbol_refs_lines(lines -> string[], old -> string, fresh -> string) -> string[] {
+	if old.length == 0 {
+		return lines;
+	}
+	let mut out -> string[] = [];
+	let mut i -> number = 0;
+	loop {
+		if i >= lines.length {
+			break;
+		}
+		out.push(_aot_rename_symbol_refs(lines[i], old, fresh));
+		i += 1;
+	}
+	return out;
+}
+
+fn _aot_ensure_intrinsic_decls_lines(lines -> string[]) -> string[] {
+	// Line-based equivalent of _aot_ensure_intrinsic_decls.
+	let round_marker = "@round(double";
+	let round_decl = "declare double @round(double)";
+	let mut needs_round -> boolean = false;
+	let mut has_round_decl -> boolean = false;
+	let mut source_idx -> number = -1;
+	let mut i -> number = 0;
+	loop {
+		if i >= lines.length {
+			break;
+		}
+		let line = lines[i];
+		if source_idx < 0 {
+			if _aot_matches_at(line, 0, "source_filename") {
+				source_idx = i;
+			}
+		}
+		if !needs_round {
+			if _aot_find_substring_from(line, round_marker, 0) >= 0 {
+				needs_round = true;
+			}
+		}
+		if !has_round_decl {
+			if _aot_find_substring_from(line, round_decl, 0) >= 0 {
+				has_round_decl = true;
+			}
+		}
+		i += 1;
+	}
+	if !needs_round || has_round_decl {
+		return lines;
+	}
+
+	// Insert after source_filename when possible, otherwise prepend.
+	let mut insert_at -> number = 0;
+	if source_idx >= 0 {
+		insert_at = source_idx + 1;
+	}
+
+	let mut out -> string[] = [];
+	let mut idx -> number = 0;
+	loop {
+		if idx >= lines.length {
+			break;
+		}
+		if idx == insert_at {
+			out.push(round_decl);
+		}
+		out.push(lines[idx]);
+		idx += 1;
+	}
+	if insert_at >= lines.length {
+		out.push(round_decl);
+	}
 	return out;
 }
 
@@ -431,14 +591,144 @@ fn _aot_split_lines(text -> string) -> string[] {
 			break;
 		}
 		if text[index] == "\n" {
-			lines = lines.concat([substring(text, start, index)]);
+			lines.push(substring(text, start, index));
 			start = index + 1;
 		}
 		index += 1;
 	}
 	// last line
-	lines = lines.concat([substring(text, start, text_len)]);
+	lines.push(substring(text, start, text_len));
 	return lines;
+}
+
+fn _aot_skip_line_ws(text -> string, start -> number, end -> number) -> number {
+	let mut i -> number = start;
+	loop {
+		if i >= end {
+			break;
+		}
+		let ch = text[i];
+		if ch == " " || ch == "\t" || ch == "\r" {
+			i += 1;
+			continue;
+		}
+		break;
+	}
+	return i;
+}
+
+fn _aot_line_has_global_or_constant(text -> string, start -> number, end -> number) -> boolean {
+	let mut i -> number = start;
+	let mut saw_equals -> boolean = false;
+	loop {
+		if i >= end {
+			break;
+		}
+		let ch = text[i];
+		if ch == "=" {
+			saw_equals = true;
+			i += 1;
+			continue;
+		}
+		if _aot_matches_at(text, i, " global") {
+			return saw_equals;
+		}
+		if _aot_matches_at(text, i, " constant") {
+			return saw_equals;
+		}
+		i += 1;
+	}
+	return false;
+}
+
+fn _aot_find_defined_functions_fast(ir -> string) -> string[] {
+	let mut functions -> string[] = [];
+	let mut line_start -> number = 0;
+	let mut i -> number = 0;
+	let ir_len = ir.length;
+	loop {
+		if i > ir_len {
+			break;
+		}
+		let at_end = i == ir_len;
+		if !at_end && ir[i] != "\n" {
+			i += 1;
+			continue;
+		}
+
+		let line_end = i;
+		let start = _aot_skip_line_ws(ir, line_start, line_end);
+		if _aot_matches_at(ir, start, "define") {
+			let mut j -> number = start;
+			loop {
+				if j >= line_end {
+					break;
+				}
+				if ir[j] == "@" {
+					let name_start = j + 1;
+					let mut k -> number = name_start;
+					loop {
+						if k >= line_end {
+							break;
+						}
+						if !_aot_is_symbol_char(ir[k]) {
+							break;
+						}
+						k += 1;
+					}
+					if k > name_start {
+						functions.push(substring(ir, name_start, k));
+					}
+					break;
+				}
+				j += 1;
+			}
+		}
+
+		line_start = i + 1;
+		i += 1;
+	}
+	return functions;
+}
+
+fn _aot_find_defined_globals_fast(ir -> string) -> string[] {
+	let mut globals -> string[] = [];
+	let mut line_start -> number = 0;
+	let mut i -> number = 0;
+	let ir_len = ir.length;
+	loop {
+		if i > ir_len {
+			break;
+		}
+		let at_end = i == ir_len;
+		if !at_end && ir[i] != "\n" {
+			i += 1;
+			continue;
+		}
+		let line_end = i;
+		let start = _aot_skip_line_ws(ir, line_start, line_end);
+		if start < line_end && ir[start] == "@" {
+			let name_start = start + 1;
+			let mut k -> number = name_start;
+			loop {
+				if k >= line_end {
+					break;
+				}
+				if !_aot_is_symbol_char(ir[k]) {
+					break;
+				}
+				k += 1;
+			}
+			if k > name_start {
+				if _aot_line_has_global_or_constant(ir, k, line_end) {
+					globals.push(substring(ir, name_start, k));
+				}
+			}
+		}
+		line_start = i + 1;
+		i += 1;
+	}
+	return globals;
 }
 
 fn _aot_find_defined_functions(ir -> string) -> string[] {
@@ -451,7 +741,9 @@ fn _aot_find_defined_functions(ir -> string) -> string[] {
 		}
 		let fun = _aot_parse_defined_function_name(lines[i]);
 		if fun.length > 0 {
-			functions = _aot_append_unique(functions, fun);
+			if !_aot_contains_string(functions, fun) {
+				functions.push(fun);
+			}
 		}
 		i += 1;
 	}
@@ -468,7 +760,9 @@ fn _aot_find_defined_globals(ir -> string) -> string[] {
 		}
 		let glob = _aot_parse_defined_global_name(lines[i]);
 		if glob.length > 0 {
-			globals = _aot_append_unique(globals, glob);
+			if !_aot_contains_string(globals, glob) {
+				globals.push(glob);
+			}
 		}
 		i += 1;
 	}
@@ -528,8 +822,8 @@ fn _aot_find_substring_from(haystack -> string, needle -> string, start -> numbe
 
 fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]) -> string[] {
 	let mut rewritten -> string[] = [];
-	let mut seen_functions -> string[] = [];
-	let mut seen_globals -> string[] = [];
+	let mut seen_functions = _aot_bucket_set_make();
+	let mut seen_globals = _aot_bucket_set_make();
 
 	let mut module_index -> number = 0;
 	loop {
@@ -544,8 +838,8 @@ fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]
 			ir = _aot_replace(ir, "@main(", "@stage2_compiler_main(");
 		}
 
-		let defined_functions = _aot_find_defined_functions(ir);
-		let defined_globals = _aot_find_defined_globals(ir);
+		let defined_functions = _aot_find_defined_functions_fast(ir);
+		let defined_globals = _aot_find_defined_globals_fast(ir);
 		let safe_module_name = _aot_sanitize_module_suffix(module_name);
 
 		// Rename duplicate defined functions.
@@ -555,8 +849,8 @@ fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]
 				break;
 			}
 			let name = defined_functions[fi];
-			if !_aot_contains_string(seen_functions, name) {
-				seen_functions = _aot_append_unique(seen_functions, name);
+			if !_aot_bucket_set_contains(seen_functions, name) {
+				seen_functions = _aot_bucket_set_insert(seen_functions, name);
 				fi += 1;
 				continue;
 			}
@@ -569,14 +863,14 @@ fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]
 					suffix = safe_module_name + "_" + _aot_number_to_string(counter);
 				}
 				candidate = name + "__" + suffix;
-				if !_aot_contains_string(seen_functions, candidate) {
+				if !_aot_bucket_set_contains(seen_functions, candidate) {
 					break;
 				}
 				counter += 1;
 			}
 
 			ir = _aot_rename_symbol_refs(ir, name, candidate);
-			seen_functions = _aot_append_unique(seen_functions, candidate);
+			seen_functions = _aot_bucket_set_insert(seen_functions, candidate);
 			fi += 1;
 		}
 
@@ -587,8 +881,8 @@ fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]
 				break;
 			}
 			let name = defined_globals[gi];
-			if !_aot_contains_string(seen_globals, name) {
-				seen_globals = _aot_append_unique(seen_globals, name);
+			if !_aot_bucket_set_contains(seen_globals, name) {
+				seen_globals = _aot_bucket_set_insert(seen_globals, name);
 				gi += 1;
 				continue;
 			}
@@ -601,20 +895,20 @@ fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]
 					suffix = safe_module_name + "_" + _aot_number_to_string(counter);
 				}
 				candidate = name + "__" + suffix;
-				if !_aot_contains_string(seen_globals, candidate) {
+				if !_aot_bucket_set_contains(seen_globals, candidate) {
 					break;
 				}
 				counter += 1;
 			}
 
 			ir = _aot_rename_symbol_refs(ir, name, candidate);
-			seen_globals = _aot_append_unique(seen_globals, candidate);
+			seen_globals = _aot_bucket_set_insert(seen_globals, candidate);
 			gi += 1;
 		}
 
 		ir = _aot_ensure_intrinsic_decls(ir);
 
-		rewritten = rewritten.concat([ir]);
+		rewritten.push(ir);
 		module_index += 1;
 	}
 

@@ -2,6 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.string_utils import substring
+from compiler.build.native_ir import char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -22,6 +23,54 @@ is_whitespace_char = runtime.is_whitespace_char
 is_alpha_char = runtime.is_alpha_char
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
+
+def _aot_bucket_index(key):
+    if len(key) == 0:
+        return 0
+    return char_code(key[0]) % 256
+
+def _aot_bucket_set_make():
+    buckets = []
+    i = 0
+    while True:
+        if i >= 256:
+            break
+        buckets.append([])
+        i += 1
+    return buckets
+
+def _aot_bucket_set_contains(buckets, key):
+    idx = _aot_bucket_index(key)
+    return _aot_contains_string(buckets[idx], key)
+
+def _aot_bucket_set_insert(buckets, key):
+    if len(key) == 0:
+        return buckets
+    idx = _aot_bucket_index(key)
+    existing = buckets[idx]
+    if _aot_contains_string(existing, key):
+        return buckets
+    existing.append(key)
+    out = buckets
+    out[idx] = existing
+    return out
+
+def _aot_apply_symbol_renames_lines(lines, olds, news):
+    out = lines
+    i = 0
+    while True:
+        if i >= len(out):
+            break
+        updated = out[i]
+        j = 0
+        while True:
+            if j >= len(olds):
+                break
+            updated = _aot_rename_symbol_refs(updated, olds[j], news[j])
+            j += 1
+        out[i] = updated
+        i += 1
+    return out
 
 def _aot_number_to_string(value):
     if value == 0:
@@ -158,7 +207,9 @@ def _aot_contains_string(values, target):
 def _aot_append_unique(values, value):
     if _aot_contains_string(values, value):
         return values
-    return (values) + ([value])
+    out = values
+    out.append(value)
+    return out
 
 def _aot_starts_with_at(text, start, prefix):
     prefix_len = len(prefix)
@@ -196,6 +247,7 @@ def _aot_rename_symbol_refs(ir, old, fresh):
         return ir
     ir_len = len(ir)
     out = ""
+    changed = False
     i = 0
     last_emit = 0
     in_quote = False
@@ -214,11 +266,77 @@ def _aot_rename_symbol_refs(ir, old, fresh):
                 end = i + 1 + old_len
                 if end >= ir_len  or  not _aot_is_symbol_char(ir[end]):
                     out = out + substring(ir, last_emit, i) + "@" + fresh
+                    changed = True
                     i = end
                     last_emit = i
                     continue
         i += 1
+    if not changed:
+        return ir
     out = out + substring(ir, last_emit, ir_len)
+    return out
+
+def _aot_replace_lines(lines, needle, replacement):
+    if len(needle) == 0:
+        return lines
+    out = []
+    i = 0
+    while True:
+        if i >= len(lines):
+            break
+        out.append(_aot_replace(lines[i], needle, replacement))
+        i += 1
+    return out
+
+def _aot_rename_symbol_refs_lines(lines, old, fresh):
+    if len(old) == 0:
+        return lines
+    out = []
+    i = 0
+    while True:
+        if i >= len(lines):
+            break
+        out.append(_aot_rename_symbol_refs(lines[i], old, fresh))
+        i += 1
+    return out
+
+def _aot_ensure_intrinsic_decls_lines(lines):
+    round_marker = "@round(double"
+    round_decl = "declare double @round(double)"
+    needs_round = False
+    has_round_decl = False
+    source_idx = -1
+    i = 0
+    while True:
+        if i >= len(lines):
+            break
+        line = lines[i]
+        if source_idx < 0:
+            if _aot_matches_at(line, 0, "source_filename"):
+                source_idx = i
+        if not needs_round:
+            if _aot_find_substring_from(line, round_marker, 0) >= 0:
+                needs_round = True
+        if not has_round_decl:
+            if _aot_find_substring_from(line, round_decl, 0) >= 0:
+                has_round_decl = True
+        i += 1
+    if not needs_round  or  has_round_decl:
+        return lines
+    insert_at = 0
+    if source_idx >= 0:
+        insert_at = source_idx + 1
+    out = []
+    idx = 0
+    while True:
+        if idx >= len(lines):
+            break
+        if idx == insert_at:
+            out.append(round_decl)
+        out.append(lines[idx])
+        idx += 1
+    if insert_at >= len(lines):
+        out.append(round_decl)
     return out
 
 def _aot_trim_text(value):
@@ -319,11 +437,107 @@ def _aot_split_lines(text):
         if index >= text_len:
             break
         if text[index] == "\n":
-            lines = (lines) + ([substring(text, start, index)])
+            lines.append(substring(text, start, index))
             start = index + 1
         index += 1
-    lines = (lines) + ([substring(text, start, text_len)])
+    lines.append(substring(text, start, text_len))
     return lines
+
+def _aot_skip_line_ws(text, start, end):
+    i = start
+    while True:
+        if i >= end:
+            break
+        ch = text[i]
+        if ch == " "  or  ch == "\t"  or  ch == "\r":
+            i += 1
+            continue
+        break
+    return i
+
+def _aot_line_has_global_or_constant(text, start, end):
+    i = start
+    saw_equals = False
+    while True:
+        if i >= end:
+            break
+        ch = text[i]
+        if ch == "=":
+            saw_equals = True
+            i += 1
+            continue
+        if _aot_matches_at(text, i, " global"):
+            return saw_equals
+        if _aot_matches_at(text, i, " constant"):
+            return saw_equals
+        i += 1
+    return False
+
+def _aot_find_defined_functions_fast(ir):
+    functions = []
+    line_start = 0
+    i = 0
+    ir_len = len(ir)
+    while True:
+        if i > ir_len:
+            break
+        at_end = i == ir_len
+        if not at_end  and  ir[i] != "\n":
+            i += 1
+            continue
+        line_end = i
+        start = _aot_skip_line_ws(ir, line_start, line_end)
+        if _aot_matches_at(ir, start, "define"):
+            j = start
+            while True:
+                if j >= line_end:
+                    break
+                if ir[j] == "@":
+                    name_start = j + 1
+                    k = name_start
+                    while True:
+                        if k >= line_end:
+                            break
+                        if not _aot_is_symbol_char(ir[k]):
+                            break
+                        k += 1
+                    if k > name_start:
+                        functions.append(substring(ir, name_start, k))
+                    break
+                j += 1
+        line_start = i + 1
+        i += 1
+    return functions
+
+def _aot_find_defined_globals_fast(ir):
+    globals = []
+    line_start = 0
+    i = 0
+    ir_len = len(ir)
+    while True:
+        if i > ir_len:
+            break
+        at_end = i == ir_len
+        if not at_end  and  ir[i] != "\n":
+            i += 1
+            continue
+        line_end = i
+        start = _aot_skip_line_ws(ir, line_start, line_end)
+        if start < line_end  and  ir[start] == "@":
+            name_start = start + 1
+            k = name_start
+            while True:
+                if k >= line_end:
+                    break
+                if not _aot_is_symbol_char(ir[k]):
+                    break
+                k += 1
+            if k > name_start:
+                if _aot_line_has_global_or_constant(ir, k, line_end):
+                    globals.append(substring(ir, name_start, k))
+        line_start = i + 1
+        i += 1
+    return globals
 
 def _aot_find_defined_functions(ir):
     lines = _aot_split_lines(ir)
@@ -334,7 +548,8 @@ def _aot_find_defined_functions(ir):
             break
         fun = _aot_parse_defined_function_name(lines[i])
         if len(fun) > 0:
-            functions = _aot_append_unique(functions, fun)
+            if not _aot_contains_string(functions, fun):
+                functions.append(fun)
         i += 1
     return functions
 
@@ -347,7 +562,8 @@ def _aot_find_defined_globals(ir):
             break
         glob = _aot_parse_defined_global_name(lines[i])
         if len(glob) > 0:
-            globals = _aot_append_unique(globals, glob)
+            if not _aot_contains_string(globals, glob):
+                globals.append(glob)
         i += 1
     return globals
 
@@ -391,8 +607,8 @@ def _aot_find_substring_from(haystack, needle, start):
 
 def prepare_stage2_aot_modules(module_names, module_texts):
     rewritten = []
-    seen_functions = []
-    seen_globals = []
+    seen_functions = _aot_bucket_set_make()
+    seen_globals = _aot_bucket_set_make()
     module_index = 0
     while True:
         if module_index >= len(module_names)  or  module_index >= len(module_texts):
@@ -401,16 +617,16 @@ def prepare_stage2_aot_modules(module_names, module_texts):
         ir = module_texts[module_index]
         if module_name == "main":
             ir = _aot_replace(ir, "@main(", "@stage2_compiler_main(")
-        defined_functions = _aot_find_defined_functions(ir)
-        defined_globals = _aot_find_defined_globals(ir)
+        defined_functions = _aot_find_defined_functions_fast(ir)
+        defined_globals = _aot_find_defined_globals_fast(ir)
         safe_module_name = _aot_sanitize_module_suffix(module_name)
         fi = 0
         while True:
             if fi >= len(defined_functions):
                 break
             name = defined_functions[fi]
-            if not _aot_contains_string(seen_functions, name):
-                seen_functions = _aot_append_unique(seen_functions, name)
+            if not _aot_bucket_set_contains(seen_functions, name):
+                seen_functions = _aot_bucket_set_insert(seen_functions, name)
                 fi += 1
                 continue
             counter = 1
@@ -420,19 +636,19 @@ def prepare_stage2_aot_modules(module_names, module_texts):
                 if counter != 1:
                     suffix = safe_module_name + "_" + _aot_number_to_string(counter)
                 candidate = name + "__" + suffix
-                if not _aot_contains_string(seen_functions, candidate):
+                if not _aot_bucket_set_contains(seen_functions, candidate):
                     break
                 counter += 1
             ir = _aot_rename_symbol_refs(ir, name, candidate)
-            seen_functions = _aot_append_unique(seen_functions, candidate)
+            seen_functions = _aot_bucket_set_insert(seen_functions, candidate)
             fi += 1
         gi = 0
         while True:
             if gi >= len(defined_globals):
                 break
             name = defined_globals[gi]
-            if not _aot_contains_string(seen_globals, name):
-                seen_globals = _aot_append_unique(seen_globals, name)
+            if not _aot_bucket_set_contains(seen_globals, name):
+                seen_globals = _aot_bucket_set_insert(seen_globals, name)
                 gi += 1
                 continue
             counter = 1
@@ -442,13 +658,13 @@ def prepare_stage2_aot_modules(module_names, module_texts):
                 if counter != 1:
                     suffix = safe_module_name + "_" + _aot_number_to_string(counter)
                 candidate = name + "__" + suffix
-                if not _aot_contains_string(seen_globals, candidate):
+                if not _aot_bucket_set_contains(seen_globals, candidate):
                     break
                 counter += 1
             ir = _aot_rename_symbol_refs(ir, name, candidate)
-            seen_globals = _aot_append_unique(seen_globals, candidate)
+            seen_globals = _aot_bucket_set_insert(seen_globals, candidate)
             gi += 1
         ir = _aot_ensure_intrinsic_decls(ir)
-        rewritten = (rewritten) + ([ir])
+        rewritten.append(ir)
         module_index += 1
     return rewritten

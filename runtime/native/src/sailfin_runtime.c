@@ -1055,9 +1055,19 @@ static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *tex
         }
     }
 
-    // Defensive cap: most stage2 compiler strings are tiny, but avoid scanning
-    // unbounded memory if we get a wildly unterminated pointer.
-    const size_t max_scan = 1u << 20; // 1 MiB
+    // Defensive cap: most stage2 compiler strings are tiny, but the compiler
+    // also manipulates large strings (notably full LLVM modules) that can
+    // exceed 1 MiB. Keep a bounded scan to avoid runaway reads for invalid
+    // pointers, but allow a higher default and make it configurable.
+    size_t max_scan = _env_sizet("SAILFIN_MAX_STRLEN_SCAN", 16u * 1024u * 1024u);
+    if (max_scan < 4096u)
+    {
+        max_scan = 4096u;
+    }
+    if (max_scan > (512u * 1024u * 1024u))
+    {
+        max_scan = (512u * 1024u * 1024u);
+    }
 
 #if !defined(SAILFIN_WITH_ASAN)
     // Fast path for non-ASAN builds: rely on libc's bounded scan.

@@ -58,6 +58,22 @@ jobs:
         run: |
           CONDA=$(which conda) make compile
 
+      - name: Self-host fixed-point rebuild (linux-x86_64)
+        if: matrix.package_label == 'linux-x86_64'
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          conda run -n sailfin python scripts/selfhost_native_stage2.py \
+            --seed build/native/sailfin-stage2 \
+            --out build/native/sailfin-stage2-selfhost1 \
+            --max-attempts 10
+          conda run -n sailfin python scripts/selfhost_native_stage2.py \
+            --seed build/native/sailfin-stage2-selfhost1 \
+            --out build/native/sailfin-stage2-selfhost2 \
+            --max-attempts 3 \
+            --skip-clang-validate
+          cmp -s build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2
+
       - name: Run Sailfin-native tests
         shell: bash -l {0}
         run: |
