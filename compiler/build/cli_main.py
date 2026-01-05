@@ -1,7 +1,7 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.main import compile_to_llvm, compile_to_llvm_with_module, compile_tests_to_llvm, compile_to_sailfin, number_to_string, module_name_from_path
+from compiler.build.main import compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_to_sailfin, number_to_string, module_name_from_path
 from compiler.build.main import compile_to_native_text
 from compiler.build.version import sailfin_stage2_version
 
@@ -315,6 +315,10 @@ def _write_text(path, text):
     # effects: io
     fs.writeFile(path, text)
 
+def _write_lines(path, lines):
+    # effects: io
+    fs.writeLines(path, lines)
+
 def _ensure_dir(path):
     # effects: io
     fs.createDirectory(path, True)
@@ -498,8 +502,8 @@ def sailfin_cli_main(argv):
             return 1
         source = fs.readFile(path)
         module_name = module_name_from_path(path)
-        llvm = compile_to_llvm_with_module(source, module_name)
-        _write_text(out_path, llvm)
+        lines = compile_to_llvm_lines_with_module(source, module_name)
+        _write_lines(out_path, lines)
         return 0
     if cmd == "build":
         out_path = ""
@@ -519,11 +523,11 @@ def sailfin_cli_main(argv):
             return 1
         source = fs.readFile(input_path)
         module_name = module_name_from_path(input_path)
-        llvm = compile_to_llvm_with_module(source, module_name)
+        lines = compile_to_llvm_lines_with_module(source, module_name)
         _ensure_dir("build")
         _ensure_dir("build/sailfin")
         ll_path = "build/sailfin/program.ll"
-        _write_text(ll_path, llvm)
+        _write_lines(ll_path, lines)
         exe_path = out_path
         rc = _clang_link(ll_path, exe_path, runtime_root)
         if rc != 0:

@@ -345,9 +345,9 @@ def sanitize_symbol(name):
     return result
 
 def append_string(values, value):
-    if len(values) == 0:
-        return [value]
-    return (values) + ([value])
+    out = values
+    out.append(value)
+    return out
 
 def copy_string_array(values):
     result = []

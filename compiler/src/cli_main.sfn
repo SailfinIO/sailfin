@@ -2,7 +2,7 @@
 //
 // Sailfin-native CLI entrypoint invoked by the stage2 C shim.
 
-import { compile_to_llvm, compile_to_llvm_with_module, compile_tests_to_llvm, compile_to_sailfin, number_to_string, module_name_from_path } from "./main";
+import { compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_to_sailfin, number_to_string, module_name_from_path } from "./main";
 import { compile_to_native_text } from "./main";
 import { sailfin_stage2_version } from "./version";
 
@@ -429,6 +429,10 @@ fn _write_text(path -> string, text -> string) ![io] {
     fs.writeFile(path, text);
 }
 
+fn _write_lines(path -> string, lines -> string[]) ![io] {
+    fs.writeLines(path, lines);
+}
+
 fn _ensure_dir(path -> string) ![io] {
     // best-effort; ignore false.
     fs.createDirectory(path, true);
@@ -707,8 +711,8 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
-        let llvm = compile_to_llvm_with_module(source, module_name);
-        _write_text(out_path, llvm);
+        let lines = compile_to_llvm_lines_with_module(source, module_name);
+        _write_lines(out_path, lines);
         return 0;
     }
 
@@ -735,13 +739,13 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
         let source = fs.readFile(input_path);
         let module_name = module_name_from_path(input_path);
-        let llvm = compile_to_llvm_with_module(source, module_name);
+        let lines = compile_to_llvm_lines_with_module(source, module_name);
 
         _ensure_dir("build");
         _ensure_dir("build/sailfin");
 
         let ll_path = "build/sailfin/program.ll";
-        _write_text(ll_path, llvm);
+        _write_lines(ll_path, lines);
 
         let exe_path = out_path;
         let rc = _clang_link(ll_path, exe_path, runtime_root);

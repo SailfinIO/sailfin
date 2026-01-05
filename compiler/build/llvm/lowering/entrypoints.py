@@ -4,7 +4,7 @@ from runtime import runtime_support as runtime
 from ...emit_native import NativeModule
 from ...native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInterface, NativeStruct, NativeEnum, LayoutManifest
 from ...string_utils import substring
-from ..types import TypeContext, TraitMetadata, TraitDescriptor, TraitImplementationDescriptor, LoweredLLVMResult, FunctionEffectEntry, LifetimeRegionMetadata, StringConstant, CapabilityManifest
+from ..types import TypeContext, TraitMetadata, TraitDescriptor, TraitImplementationDescriptor, LoweredLLVMResult, LoweredLLVMLinesResult, FunctionEffectEntry, LifetimeRegionMetadata, StringConstant, CapabilityManifest
 from ..utils import append_string, join_with_separator, number_to_string, sanitize_symbol, string_array_contains, starts_with, trim_text, index_of
 from ..strings import empty_string_constant_set, merge_string_constants, render_string_constants
 from ..effects import collect_direct_function_effects, collect_function_call_graph, propagate_function_effects, build_capability_manifest, collect_runtime_helper_targets, append_unique_effect, find_function_effect_entry
@@ -101,6 +101,20 @@ def lower_to_llvm(native_module):
     import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name)
     return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
+def lower_to_llvm_lines(native_module):
+    # effects: io
+    artifact = select_text_artifact(native_module.artifacts)
+    if artifact == None:
+        return lower_to_llvm_lines_with_context(native_module, [], [], [])
+    parse = parse_native_artifact(artifact.contents)
+    import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name)
+    return lower_to_llvm_lines_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
+
+def lower_to_llvm_lines_only(native_module):
+    # effects: io
+    lowered = lower_to_llvm_lines(native_module)
+    return lowered.lines
+
 def lower_to_llvm_ir(native_module):
     # effects: io
     lowered = lower_to_llvm(native_module)
@@ -157,6 +171,14 @@ def lower_to_llvm_with_context_for_tests(native_module, imported_manifests, impo
     return updated
 
 def lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
+    lowered = lower_to_llvm_lines_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics)
+    ir = join_with_separator(lowered.lines, "\n")
+    output = ir
+    if len(output) > 0:
+        output = output + "\n"
+    return LoweredLLVMResult(ir=output, diagnostics=lowered.diagnostics, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+
+def lower_to_llvm_lines_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics):
     diagnostics = []
     if len(imported_diagnostics) > 0:
         diagnostics = (diagnostics) + (imported_diagnostics)
@@ -164,7 +186,7 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if artifact == None:
         diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present")
         empty_constants = empty_string_constant_set()
-        return LoweredLLVMResult(ir="", diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=empty_constants)
+        return LoweredLLVMLinesResult(lines=[], diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=empty_constants)
     parse = parse_native_artifact(artifact.contents)
     diagnostics = (diagnostics) + (parse.diagnostics)
     exported_symbols = collect_exported_symbol_names(parse.imports)
@@ -294,10 +316,9 @@ def lower_to_llvm_with_context(native_module, imported_manifests, imported_nativ
     if len(module_globals.preamble_lines) > 0:
         lines = extend_string_lines(lines, module_globals.preamble_lines)
         lines = append_string(lines, "")
-    function_lines = []
     if len(module_globals.init_function_lines) > 0:
-        function_lines = extend_string_lines(function_lines, module_globals.init_function_lines)
-        function_lines = append_string(function_lines, "")
+        lines = extend_string_lines(lines, module_globals.init_function_lines)
+        lines = append_string(lines, "")
     index = 0
     has_add_function = False
     all_string_constants = module_globals.string_constants
@@ -329,31 +350,21 @@ module_globals.needs_init_call
         lifetime_regions = (lifetime_regions) + (lowered.lifetime_regions)
         all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants)
         if len(lowered.lines) > 0:
-            if len(function_lines) == 0:
-                function_lines = lowered.lines
-            else:
-                function_lines = extend_string_lines(function_lines, lowered.lines)
+            lines = extend_string_lines(lines, lowered.lines)
             if index + 1 < len(local_functions):
-                function_lines = append_string(function_lines, "")
+                lines = append_string(lines, "")
         index += 1
     if not has_add_function:
-        if len(function_lines) > 0:
-            function_lines = append_string(function_lines, "")
-        function_lines = extend_string_lines(function_lines, ["define internal double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
+        lines = append_string(lines, "")
+        lines = extend_string_lines(lines, ["define internal double @add(double %a, double %b) {", "entry:", "  %t0 = fadd double %a, %b", "  ret double %t0", "}"])
     string_constant_lines = render_string_constants(all_string_constants)
-    final_lines = lines
     if len(string_constant_lines) > 0:
-        final_lines = (final_lines) + (string_constant_lines)
-        final_lines = append_string(final_lines, "")
-    if len(function_lines) > 0:
-        final_lines = (final_lines) + (function_lines)
-    final_lines = ensure_intrinsic_declarations(final_lines)
-    ir = join_with_separator(final_lines, "\n")
+        lines = append_string(lines, "")
+        lines = extend_string_lines(lines, string_constant_lines)
+        lines = append_string(lines, "")
+    lines = ensure_intrinsic_declarations(lines)
     manifest = build_capability_manifest(native_module.entry_points, function_effects)
-    output = ir
-    if len(output) > 0:
-        output = output + "\n"
-    return LoweredLLVMResult(ir=output, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects, lifetime_regions=lifetime_regions, capability_manifest=manifest, string_constants=all_string_constants)
+    return LoweredLLVMLinesResult(lines=lines, diagnostics=diagnostics, trait_metadata=trait_metadata, function_effects=function_effects, lifetime_regions=lifetime_regions, capability_manifest=manifest, string_constants=all_string_constants)
 
 def extend_string_lines(values, extras):
     out = values
@@ -390,7 +401,10 @@ def ensure_intrinsic_declarations(lines):
         index += 1
     if not uses_round  or  has_round_decl:
         return lines
-    return insert_string_at(lines, 1, "declare double @round(double)")
+    out = lines
+    out = append_string(out, "")
+    out = append_string(out, "declare double @round(double)")
+    return out
 
 def insert_string_at(values, insert_index, value):
     out = []

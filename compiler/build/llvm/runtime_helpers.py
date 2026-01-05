@@ -69,6 +69,8 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.readFile", symbol="sailfin_adapter_fs_read_file", return_type="i8*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_write_file", symbol="sailfin_adapter_fs_write_file", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.writeFile", symbol="sailfin_adapter_fs_write_file", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_write_lines", symbol="sailfin_adapter_fs_write_lines", return_type="void", parameter_types=["i8*", "{ i8**, i64 }*"], effects=["io"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.writeLines", symbol="sailfin_adapter_fs_write_lines", return_type="void", parameter_types=["i8*", "{ i8**, i64 }*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_list_directory", symbol="sailfin_adapter_fs_list_directory", return_type="{ i8**, i64 }*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs.listDirectory", symbol="sailfin_adapter_fs_list_directory", return_type="{ i8**, i64 }*", parameter_types=["i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="fs_delete_file", symbol="sailfin_adapter_fs_delete_file", return_type="i1", parameter_types=["i8*"], effects=["io"]))

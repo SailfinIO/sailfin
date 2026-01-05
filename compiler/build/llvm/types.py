@@ -138,6 +138,19 @@ class LoweredLLVMResult:
     def __repr__(self):
         return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest), runtime.struct_field('string_constants', self.string_constants)])
 
+class LoweredLLVMLinesResult:
+    def __init__(self, lines, diagnostics, trait_metadata, function_effects, lifetime_regions, capability_manifest, string_constants):
+        self.lines = lines
+        self.diagnostics = diagnostics
+        self.trait_metadata = trait_metadata
+        self.function_effects = function_effects
+        self.lifetime_regions = lifetime_regions
+        self.capability_manifest = capability_manifest
+        self.string_constants = string_constants
+
+    def __repr__(self):
+        return runtime.struct_repr('LoweredLLVMLinesResult', [runtime.struct_field('lines', self.lines), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest), runtime.struct_field('string_constants', self.string_constants)])
+
 class LayoutManifestApplication:
     def __init__(self, structs, enums, diagnostics):
         self.structs = structs

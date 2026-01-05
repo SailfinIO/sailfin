@@ -6,7 +6,7 @@ from compiler.build.ast import Program
 from compiler.build.emitter_sailfin import emit_program
 from compiler.build.emit_native import emit_native, emit_native_with_module_name, EmitNativeResult, NativeModule
 from compiler.build.native_lowering import lower_to_python, LoweredPythonResult
-from compiler.build.llvm.lowering.entrypoints import lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_ir, lower_to_llvm_ir_for_tests, lower_to_llvm_with_manifests, lower_to_llvm_with_context
+from compiler.build.llvm.lowering.entrypoints import lower_to_llvm, lower_to_llvm_for_tests, lower_to_llvm_ir, lower_to_llvm_ir_for_tests, lower_to_llvm_lines_only, lower_to_llvm_with_manifests, lower_to_llvm_with_context
 from compiler.build.native_ir import LayoutManifest, parse_layout_manifest
 from compiler.build.string_utils import substring
 from compiler.build.token import Token
@@ -238,6 +238,16 @@ def compile_to_llvm_with_module(source, module_name):
         return ""
     native_result = emit_native_with_module_name(program, module_name)
     return lower_to_llvm_ir(native_result.module)
+
+def compile_to_llvm_lines_with_module(source, module_name):
+    # effects: io
+    program = parse_program(source)
+    analysis_result = typecheck_program(program)
+    if len(analysis_result.diagnostics) > 0:
+        report_typecheck_errors(analysis_result.diagnostics, source)
+        return []
+    native_result = emit_native_with_module_name(program, module_name)
+    return lower_to_llvm_lines_only(native_result.module)
 
 def compile_tests_to_llvm(source):
     # effects: io

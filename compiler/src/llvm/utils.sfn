@@ -477,12 +477,9 @@ fn sanitize_symbol(name -> string) -> string {
 // =============================================================================
 
 fn append_string(values -> string[], value -> string) -> string[] {
-    // Avoid concatenating onto an empty array: some runtime builds have
-    // exhibited corruption when `[].concat(non_empty)` is lowered/executed.
-    if values.length == 0 {
-        return [value];
-    }
-    return values.concat([value]);
+    let mut out = values;
+    out.push(value);
+    return out;
 }
 
 fn copy_string_array(values -> string[]) -> string[] {

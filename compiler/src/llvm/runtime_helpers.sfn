@@ -329,6 +329,20 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_write_lines",
+        symbol: "sailfin_adapter_fs_write_lines",
+        return_type: "void",
+        parameter_types: ["i8*", "{ i8**, i64 }*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.writeLines",
+        symbol: "sailfin_adapter_fs_write_lines",
+        return_type: "void",
+        parameter_types: ["i8*", "{ i8**, i64 }*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_list_directory",
         symbol: "sailfin_adapter_fs_list_directory",
         return_type: "{ i8**, i64 }*",

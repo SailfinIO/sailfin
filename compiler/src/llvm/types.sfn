@@ -106,6 +106,16 @@ struct LoweredLLVMResult {
     string_constants -> StringConstant[];
 }
 
+struct LoweredLLVMLinesResult {
+    lines -> string[];
+    diagnostics -> string[];
+    trait_metadata -> TraitMetadata;
+    function_effects -> FunctionEffectEntry[];
+    lifetime_regions -> LifetimeRegionMetadata[];
+    capability_manifest -> CapabilityManifest;
+    string_constants -> StringConstant[];
+}
+
 struct LayoutManifestApplication {
     structs -> NativeStruct[];
     enums -> NativeEnum[];

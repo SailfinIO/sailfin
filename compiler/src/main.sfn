@@ -13,6 +13,7 @@ import {
     lower_to_llvm_for_tests,
     lower_to_llvm_ir,
     lower_to_llvm_ir_for_tests,
+    lower_to_llvm_lines_only,
     lower_to_llvm_with_manifests,
     lower_to_llvm_with_context,
 } from "./llvm/lowering/entrypoints";
@@ -297,6 +298,17 @@ fn compile_to_llvm_with_module(source -> string, module_name -> string) -> strin
     }
     let native_result = emit_native_with_module_name(program, module_name);
     return lower_to_llvm_ir(native_result.module);
+}
+
+fn compile_to_llvm_lines_with_module(source -> string, module_name -> string) -> string[] ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        return [];
+    }
+    let native_result = emit_native_with_module_name(program, module_name);
+    return lower_to_llvm_lines_only(native_result.module);
 }
 
 // Emit LLVM IR that runs all `test ... {}` declarations in the module.

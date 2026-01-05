@@ -343,6 +343,114 @@ static size_t _sailfin_owned_table_cap = 0;
 static size_t _sailfin_owned_table_len = 0;
 static size_t _sailfin_owned_table_tombstones = 0;
 
+// =============================================================================
+// Recent string allocation tracking (debugging aid)
+// =============================================================================
+
+struct SailfinRecentString
+{
+    const char *base;
+    size_t len;
+};
+
+static pthread_mutex_t _sailfin_recent_string_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct SailfinRecentString _sailfin_recent_strings[4096];
+static size_t _sailfin_recent_string_cursor = 0;
+
+// Debugging: track a specific LLVM module header string pointer once seen.
+// If later array ops drop it, that strongly implicates array length/ABI bugs.
+static pthread_mutex_t _sailfin_trace_header_lock = PTHREAD_MUTEX_INITIALIZER;
+static const char *_sailfin_tracked_source_filename = NULL;
+static int _sailfin_tracked_source_budget = -1;
+
+// Recent array allocation tracking (data pointer ring).
+static pthread_mutex_t _sailfin_recent_array_lock = PTHREAD_MUTEX_INITIALIZER;
+static const void *_sailfin_recent_arrays[65536];
+static size_t _sailfin_recent_array_cursor = 0;
+
+static void _recent_array_record(const void *data)
+{
+    if (!data)
+    {
+        return;
+    }
+    pthread_mutex_lock(&_sailfin_recent_array_lock);
+    _sailfin_recent_arrays[_sailfin_recent_array_cursor] = data;
+    _sailfin_recent_array_cursor = (_sailfin_recent_array_cursor + 1) % (sizeof(_sailfin_recent_arrays) / sizeof(_sailfin_recent_arrays[0]));
+    pthread_mutex_unlock(&_sailfin_recent_array_lock);
+}
+
+static bool _recent_array_contains(const void *data)
+{
+    if (!data)
+    {
+        return false;
+    }
+    pthread_mutex_lock(&_sailfin_recent_array_lock);
+    const size_t cap = sizeof(_sailfin_recent_arrays) / sizeof(_sailfin_recent_arrays[0]);
+    for (size_t i = 0; i < cap; i++)
+    {
+        if (_sailfin_recent_arrays[i] == data)
+        {
+            pthread_mutex_unlock(&_sailfin_recent_array_lock);
+            return true;
+        }
+    }
+    pthread_mutex_unlock(&_sailfin_recent_array_lock);
+    return false;
+}
+
+static void _recent_string_record(const char *base, size_t len)
+{
+    if (!base || len == 0)
+    {
+        return;
+    }
+    pthread_mutex_lock(&_sailfin_recent_string_lock);
+    _sailfin_recent_strings[_sailfin_recent_string_cursor].base = base;
+    _sailfin_recent_strings[_sailfin_recent_string_cursor].len = len;
+    _sailfin_recent_string_cursor = (_sailfin_recent_string_cursor + 1) % (sizeof(_sailfin_recent_strings) / sizeof(_sailfin_recent_strings[0]));
+    pthread_mutex_unlock(&_sailfin_recent_string_lock);
+}
+
+static bool _recent_string_find_range(const char *ptr, const char **out_base, size_t *out_len, size_t *out_offset)
+{
+    if (!ptr)
+    {
+        return false;
+    }
+    pthread_mutex_lock(&_sailfin_recent_string_lock);
+    const size_t cap = sizeof(_sailfin_recent_strings) / sizeof(_sailfin_recent_strings[0]);
+    for (size_t i = 0; i < cap; i++)
+    {
+        const char *base = _sailfin_recent_strings[i].base;
+        size_t len = _sailfin_recent_strings[i].len;
+        if (!base || len == 0)
+        {
+            continue;
+        }
+        if (ptr >= base && ptr < (base + len))
+        {
+            if (out_base)
+            {
+                *out_base = base;
+            }
+            if (out_len)
+            {
+                *out_len = len;
+            }
+            if (out_offset)
+            {
+                *out_offset = (size_t)(ptr - base);
+            }
+            pthread_mutex_unlock(&_sailfin_recent_string_lock);
+            return true;
+        }
+    }
+    pthread_mutex_unlock(&_sailfin_recent_string_lock);
+    return false;
+}
+
 #define SAILFIN_TOMBSTONE_PTR ((char *)1)
 
 static bool _ptr_list_contains(char **list, size_t len, const char *ptr)
@@ -1625,6 +1733,14 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     memset(out + alen + blen, 0, 1 + pad);
     _track_owned_string(out);
 
+    // Record recent large string allocations to help debug cases where
+    // downstream code accidentally returns a pointer into the middle of a
+    // concatenated buffer (dropping prefixes like the LLVM module header).
+    if (alen + blen >= 1024)
+    {
+        _recent_string_record(out, alen + blen);
+    }
+
     static int trace_llvm_prefix_init = 0;
     static int trace_llvm_prefix_enabled = 0;
     static size_t trace_llvm_prefix_min_len = 0;
@@ -1642,11 +1758,13 @@ char *sailfin_runtime_string_concat(char *a, char *b)
         size_t total_len = alen + blen;
         if (total_len >= trace_llvm_prefix_min_len && total_len >= 5)
         {
-            // Observed corrupt output tends to start with a stray 'r' followed
-            // by whitespace and then an indented instruction.
+            // Observed corrupt output tends to start with a stray one-letter
+            // prefix (historically 'r', sometimes 'q') followed by whitespace
+            // and then an indented instruction.
             // Example prefixes:
             //   "r\n  %t..."
             //   "r\n  br ..."
+            //   "q\n  store ..."
             //   "r  %t..."
             int k = 1;
             while (k < 10 && (out[k] == ' ' || out[k] == '\n' || out[k] == '\r' || out[k] == '\t'))
@@ -1655,11 +1773,73 @@ char *sailfin_runtime_string_concat(char *a, char *b)
             }
             unsigned char next = (k < 10) ? (unsigned char)out[k] : 0;
             bool looks_like_instr = (next == '%') || (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z');
-            if (out[0] == 'r' && k < 10 && looks_like_instr)
+            // Require at least one whitespace character after the leading
+            // stray prefix to avoid false positives like "raw_target".
+            bool has_ws_after_prefix = (total_len >= 2) && (out[1] == ' ' || out[1] == '\n' || out[1] == '\r' || out[1] == '\t');
+            bool is_stray_prefix = (out[0] == 'r' || out[0] == 'q');
+            if (is_stray_prefix && has_ws_after_prefix && k < 10 && looks_like_instr)
             {
                 if (trace_llvm_prefix_budget > 0)
                 {
                     trace_llvm_prefix_budget--;
+                    long long a_source_at = -1;
+                    long long b_source_at = -1;
+                    long long out_source_at = -1;
+                    {
+                        const char *needle = "source_filename";
+                        size_t needle_len = strlen(needle);
+
+                        if (!a_immediate && a && alen >= needle_len)
+                        {
+                            size_t limit = alen;
+                            if (limit > (size_t)(2 * 1024 * 1024))
+                            {
+                                limit = (size_t)(2 * 1024 * 1024);
+                            }
+                            for (size_t i = 0; i + needle_len <= limit; i++)
+                            {
+                                if (((const char *)a)[i] == needle[0] && memcmp(((const char *)a) + i, needle, needle_len) == 0)
+                                {
+                                    a_source_at = (long long)i;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!b_immediate && b && blen >= needle_len)
+                        {
+                            size_t limit = blen;
+                            if (limit > (size_t)(2 * 1024 * 1024))
+                            {
+                                limit = (size_t)(2 * 1024 * 1024);
+                            }
+                            for (size_t i = 0; i + needle_len <= limit; i++)
+                            {
+                                if (((const char *)b)[i] == needle[0] && memcmp(((const char *)b) + i, needle, needle_len) == 0)
+                                {
+                                    b_source_at = (long long)i;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (out && total_len >= needle_len)
+                        {
+                            size_t limit = total_len;
+                            if (limit > (size_t)(2 * 1024 * 1024))
+                            {
+                                limit = (size_t)(2 * 1024 * 1024);
+                            }
+                            for (size_t i = 0; i + needle_len <= limit; i++)
+                            {
+                                if (((const char *)out)[i] == needle[0] && memcmp(((const char *)out) + i, needle, needle_len) == 0)
+                                {
+                                    out_source_at = (long long)i;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     char a_preview[40];
                     char b_preview[40];
                     a_preview[0] = '\0';
@@ -1718,11 +1898,14 @@ char *sailfin_runtime_string_concat(char *a, char *b)
 
                     fprintf(
                         stderr,
-                        "[stage2-native] suspicious llvm output prefix from string_concat out=%p len=%zu alen=%zu blen=%zu a_preview=\"%s\" b_preview=\"%s\"\n",
+                        "[stage2-native] suspicious llvm output prefix from string_concat out=%p len=%zu alen=%zu blen=%zu a_source_at=%lld b_source_at=%lld out_source_at=%lld a_preview=\"%s\" b_preview=\"%s\"\n",
                         (void *)out,
                         total_len,
                         alen,
                         blen,
+                        a_source_at,
+                        b_source_at,
+                        out_source_at,
                         a_preview,
                         b_preview);
                     fflush(stderr);
@@ -1818,18 +2001,103 @@ static SailfinPtrArray *_alloc_array(int64_t len)
 
     // Stage2 IR frequently uses a non-null backing buffer for empty arrays.
     // Preserve that property to avoid null pointer arithmetic in generated code.
-    size_t slots = (len > 0) ? (size_t)len : 1u;
-    arr->data = (char **)calloc(slots, sizeof(char *));
+    //
+    // IMPORTANT: stage2-native currently exhibits an off-by-one (sometimes off-by-two)
+    // write when constructing/handling arrays. Allocate padding so such writes
+    // do not corrupt adjacent heap objects (which can deterministically drop
+    // prefixes like the LLVM module header).
+    size_t payload_slots = 2u;
+    if (len > 0)
+    {
+        payload_slots = (size_t)len + 2u;
+    }
+
+    // Canary slots catch OOB writes from miscompiled stage2-native code.
+    // The compiler heavily manipulates `{ i8**, i64 }` arrays while lowering.
+    // If any loop writes past the end, it can deterministically drop prefixes
+    // like the LLVM module header.
+    const size_t canary_slots = 4u;
+    const uintptr_t canary_value = (uintptr_t)0x5341494c46494e43ull; // "SAILFINC" tag
+    arr->data = (char **)calloc(payload_slots + canary_slots, sizeof(char *));
     if (!arr->data)
     {
         free(arr);
         return NULL;
     }
+
+    for (size_t i = 0; i < canary_slots; i++)
+    {
+        arr->data[payload_slots + i] = (char *)(canary_value + i);
+    }
+
+    _recent_array_record((const void *)arr->data);
     return arr;
+}
+
+static void _array_check_canary(const char *label, SailfinPtrArray *arr)
+{
+    static int canary_init = 0;
+    static int canary_enabled = 0;
+    if (!canary_init)
+    {
+        canary_init = 1;
+        canary_enabled = _env_enabled("SAILFIN_TRACE_ARRAY_CANARY") ? 1 : 0;
+    }
+    if (!canary_enabled)
+    {
+        return;
+    }
+    if (!arr || !arr->data)
+    {
+        return;
+    }
+
+    // Skip canary validation for arrays not allocated by `_alloc_array`.
+    // Stage2 frequently passes stack-allocated array literals into runtime
+    // helpers; those buffers are not padded with canaries.
+    if (!_recent_array_contains((const void *)arr->data))
+    {
+        return;
+    }
+    int64_t len = arr->len;
+    if (len < 0)
+    {
+        len = 0;
+    }
+    size_t payload_slots = 2u;
+    if (len > 0)
+    {
+        payload_slots = (size_t)len + 2u;
+    }
+    const size_t canary_slots = 4u;
+    const uintptr_t canary_value = (uintptr_t)0x5341494c46494e43ull;
+    for (size_t i = 0; i < canary_slots; i++)
+    {
+        uintptr_t expected = canary_value + i;
+        uintptr_t got = (uintptr_t)arr->data[payload_slots + i];
+        if (got != expected)
+        {
+            fprintf(
+                stderr,
+                "[stage2-native] array_canary CORRUPTED label=%s arr=%p data=%p len=%lld slot=%zu expected=0x%llx got=0x%llx\n",
+                label ? label : "?",
+                (void *)arr,
+                (void *)arr->data,
+                (long long)arr->len,
+                payload_slots + i,
+                (unsigned long long)expected,
+                (unsigned long long)got);
+            fflush(stderr);
+            break;
+        }
+    }
 }
 
 SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 {
+    _array_check_canary("concat.a", a);
+    _array_check_canary("concat.b", b);
+
     int64_t alen = a ? a->len : 0;
     int64_t blen = b ? b->len : 0;
     if (alen < 0)
@@ -1873,12 +2141,91 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
         }
     }
 
+    // If we are tracking a particular source_filename string, detect when
+    // concat drops it from the head.
+    const char *tracked = NULL;
+    pthread_mutex_lock(&_sailfin_trace_header_lock);
+    tracked = _sailfin_tracked_source_filename;
+    pthread_mutex_unlock(&_sailfin_trace_header_lock);
+    if (tracked)
+    {
+        char *a0 = (a && a->data && a->len > 0) ? a->data[0] : NULL;
+        char *b0 = (b && b->data && b->len > 0) ? b->data[0] : NULL;
+        char *o0 = (out && out->data && out->len > 0) ? out->data[0] : NULL;
+        bool a_has = (a0 == tracked);
+        bool b_has = (b0 == tracked);
+        bool out_has = (o0 == tracked);
+
+        // Budgeted breadcrumb so we can confirm whether the tracked header
+        // array flows through concat operations at all.
+        static int track_budget_init = 0;
+        static int track_budget = 0;
+        if (!track_budget_init)
+        {
+            track_budget_init = 1;
+            track_budget = _env_int("SAILFIN_TRACE_ARRAY_TRACK_BUDGET", 0);
+        }
+        if (track_budget > 0 && (a_has || b_has))
+        {
+            track_budget--;
+            fprintf(
+                stderr,
+                "[stage2-native] TRACK source_filename seen in concat: a=%p alen=%lld b=%p blen=%lld out=%p outlen=%lld out_has=%d\n",
+                (void *)a,
+                (long long)(a ? a->len : 0),
+                (void *)b,
+                (long long)(b ? b->len : 0),
+                (void *)out,
+                (long long)(out ? out->len : 0),
+                out_has ? 1 : 0);
+            fflush(stderr);
+        }
+
+        if ((a_has || b_has) && !out_has)
+        {
+            fprintf(
+                stderr,
+                "[stage2-native] TRACK source_filename DROPPED by concat: a=%p alen=%lld a0=%p b=%p blen=%lld b0=%p out=%p outlen=%lld out0=%p tracked=%p\n",
+                (void *)a,
+                (long long)(a ? a->len : 0),
+                (void *)a0,
+                (void *)b,
+                (long long)(b ? b->len : 0),
+                (void *)b0,
+                (void *)out,
+                (long long)(out ? out->len : 0),
+                (void *)o0,
+                (void *)tracked);
+            fflush(stderr);
+        }
+    }
+
     if (trace_arrays_min_len > 0 && trace_arrays_budget > 0)
     {
         size_t total = (size_t)((alen >= 0 ? alen : 0) + (blen >= 0 ? blen : 0));
         if (total >= trace_arrays_min_len)
         {
             trace_arrays_budget--;
+
+            if (a && a->len == 0 && a->data && a->data[0] != NULL)
+            {
+                fprintf(
+                    stderr,
+                    "[stage2-native] array_concat suspicious: a len==0 but a->data[0]=%p (possible len stomp) a=%p\n",
+                    (void *)a->data[0],
+                    (void *)a);
+                fflush(stderr);
+            }
+            if (b && b->len == 0 && b->data && b->data[0] != NULL)
+            {
+                fprintf(
+                    stderr,
+                    "[stage2-native] array_concat suspicious: b len==0 but b->data[0]=%p (possible len stomp) b=%p\n",
+                    (void *)b->data[0],
+                    (void *)b);
+                fflush(stderr);
+            }
+
             char *first = NULL;
             if (out->len > 0 && out->data)
             {
@@ -1928,6 +2275,64 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
                 (unsigned)first_cp,
                 preview_buf);
             fflush(stderr);
+
+            // Optionally scan for key module header markers inside the array.
+            static int trace_markers_init = 0;
+            static int trace_markers_enabled = 0;
+            static size_t trace_markers_limit = 0;
+            if (!trace_markers_init)
+            {
+                trace_markers_init = 1;
+                trace_markers_enabled = _env_enabled("SAILFIN_TRACE_ARRAY_MARKERS") ? 1 : 0;
+                trace_markers_limit = _env_sizet("SAILFIN_TRACE_ARRAY_MARKERS_LIMIT", 64);
+                if (trace_markers_limit == 0)
+                {
+                    trace_markers_limit = 64;
+                }
+            }
+            if (trace_markers_enabled && out && out->data && out->len > 0)
+            {
+                long long source_idx = -1;
+                long long proto_idx = -1;
+                size_t limit = (size_t)out->len;
+                if (limit > trace_markers_limit)
+                {
+                    limit = trace_markers_limit;
+                }
+                for (size_t idx = 0; idx < limit; idx++)
+                {
+                    char *s = out->data[idx];
+                    uint32_t cp = 0;
+                    if (!s)
+                    {
+                        continue;
+                    }
+                    if (_is_immediate_codepoint_string(s, &cp))
+                    {
+                        continue;
+                    }
+                    if (source_idx < 0 && strncmp(s, "source_filename", strlen("source_filename")) == 0)
+                    {
+                        source_idx = (long long)idx;
+                    }
+                    if (proto_idx < 0 && strncmp(s, "; Sailfin Native Prototype", strlen("; Sailfin Native Prototype")) == 0)
+                    {
+                        proto_idx = (long long)idx;
+                    }
+                    if (source_idx >= 0 && proto_idx >= 0)
+                    {
+                        break;
+                    }
+                }
+                fprintf(
+                    stderr,
+                    "[stage2-native] array_markers out=%p len=%lld source_idx=%lld proto_idx=%lld\n",
+                    (void *)out,
+                    (long long)out->len,
+                    source_idx,
+                    proto_idx);
+                fflush(stderr);
+            }
         }
     }
 
@@ -1936,7 +2341,10 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 
 SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
 {
-    int64_t alen = a ? a->len : 0;
+    _array_check_canary("append.in", a);
+
+    int64_t raw_alen = a ? a->len : 0;
+    int64_t alen = raw_alen;
     if (alen < 0)
     {
         alen = 0;
@@ -1952,31 +2360,274 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
     }
     out->data[alen] = text;
 
+    // High-signal hook: report if the LLVM module preamble line is ever
+    // appended into a string array. This lets us distinguish "never added"
+    // from "added then lost" failures.
+    static int trace_append_source_init = 0;
+    static int trace_append_source_enabled = 0;
+    if (!trace_append_source_init)
+    {
+        trace_append_source_init = 1;
+        trace_append_source_enabled = _env_enabled("SAILFIN_TRACE_ARRAY_APPEND_SOURCE") ? 1 : 0;
+    }
+    if (trace_append_source_enabled && text)
+    {
+        uint32_t tcp = 0;
+        if (!_is_immediate_codepoint_string(text, &tcp))
+        {
+            const char *needle = "source_filename";
+            if (strncmp(text, needle, strlen(needle)) == 0)
+            {
+                pthread_mutex_lock(&_sailfin_trace_header_lock);
+                _sailfin_tracked_source_filename = text;
+                pthread_mutex_unlock(&_sailfin_trace_header_lock);
+                fprintf(
+                    stderr,
+                    "[stage2-native] array_append SAW source_filename out=%p len=%lld text=%p\n",
+                    (void *)out,
+                    (long long)out->len,
+                    (void *)text);
+                fflush(stderr);
+            }
+        }
+    }
+
+    // If we are tracking a particular source_filename string, detect when
+    // append drops it from the head (often via a corrupted/incorrect len).
+    const char *tracked = NULL;
+    pthread_mutex_lock(&_sailfin_trace_header_lock);
+    tracked = _sailfin_tracked_source_filename;
+    pthread_mutex_unlock(&_sailfin_trace_header_lock);
+    if (tracked)
+    {
+        char *a0 = (a && a->data && a->len > 0) ? a->data[0] : NULL;
+        char *o0 = (out && out->data && out->len > 0) ? out->data[0] : NULL;
+
+        static int track_budget_init = 0;
+        static int track_budget = 0;
+        if (!track_budget_init)
+        {
+            track_budget_init = 1;
+            track_budget = _env_int("SAILFIN_TRACE_ARRAY_TRACK_BUDGET", 0);
+        }
+        if (track_budget > 0 && a0 == tracked)
+        {
+            track_budget--;
+            fprintf(
+                stderr,
+                "[stage2-native] TRACK source_filename seen in append: a=%p raw_alen=%lld alen=%lld out=%p outlen=%lld out_has=%d\n",
+                (void *)a,
+                (long long)raw_alen,
+                (long long)alen,
+                (void *)out,
+                (long long)(out ? out->len : 0),
+                (o0 == tracked) ? 1 : 0);
+            fflush(stderr);
+        }
+        if (a0 == tracked && o0 != tracked)
+        {
+            fprintf(
+                stderr,
+                "[stage2-native] TRACK source_filename DROPPED by append: a=%p raw_alen=%lld alen=%lld a0=%p out=%p outlen=%lld out0=%p tracked=%p\n",
+                (void *)a,
+                (long long)raw_alen,
+                (long long)alen,
+                (void *)a0,
+                (void *)out,
+                (long long)(out ? out->len : 0),
+                (void *)o0,
+                (void *)tracked);
+            fflush(stderr);
+        }
+
+        if (a && raw_alen == 0 && a->data && a->data[0] == tracked)
+        {
+            fprintf(
+                stderr,
+                "[stage2-native] TRACK source_filename LEN_STOMP? append saw a->len==0 but a->data[0]==tracked a=%p data=%p tracked=%p\n",
+                (void *)a,
+                (void *)a->data,
+                (void *)tracked);
+            fflush(stderr);
+        }
+    }
+
     static int trace_append_init = 0;
     static size_t trace_append_min_len = 0;
+    static int trace_append_budget = 0;
+    static int trace_append_skip_proto = 0;
     if (!trace_append_init)
     {
         trace_append_init = 1;
         trace_append_min_len = _env_sizet("SAILFIN_TRACE_ARRAY_APPEND_MIN_LEN", 0);
+        trace_append_budget = _env_int("SAILFIN_TRACE_ARRAY_APPEND_BUDGET", 64);
+        trace_append_skip_proto = _env_enabled("SAILFIN_TRACE_ARRAY_APPEND_SKIP_PROTO") ? 1 : 0;
     }
-    if (trace_append_min_len > 0)
+    if (trace_append_min_len > 0 && trace_append_budget > 0)
     {
         size_t total = (size_t)((alen >= 0 ? alen : 0) + 1);
         if (total >= trace_append_min_len)
         {
+            char *first = NULL;
+            if (out->len > 0 && out->data)
+            {
+                first = out->data[0];
+            }
+
+            // Many compilation paths build large Sailfin-native text buffers
+            // ("; Sailfin Native Prototype" preamble). Those are very noisy and
+            // not relevant to missing LLVM module headers; optionally skip them.
+            if (trace_append_skip_proto && first)
+            {
+                uint32_t fcp = 0;
+                if (!_is_immediate_codepoint_string(first, &fcp))
+                {
+                    const char *proto = "; Sailfin Native Prototype";
+                    if (strncmp(first, proto, strlen(proto)) == 0)
+                    {
+                        return out;
+                    }
+                }
+            }
+
+            trace_append_budget--;
+
+            uint32_t first_cp = 0;
+            bool first_immediate = _is_immediate_codepoint_string(first, &first_cp);
+            uint32_t value_cp = 0;
+            bool value_immediate = _is_immediate_codepoint_string(text, &value_cp);
+
+            char first_preview[40];
+            first_preview[0] = '\0';
+            if (first)
+            {
+                if (first_immediate)
+                {
+                    unsigned char tmp[5] = {0};
+                    size_t n = _utf8_encode(first_cp, tmp);
+                    size_t take = n < 32 ? n : 32;
+                    if (take > 0)
+                    {
+                        memcpy(first_preview, tmp, take);
+                    }
+                    first_preview[take] = '\0';
+                }
+                else
+                {
+                    bool truncated = false;
+                    size_t n = _safe_strlen_asan(first, &truncated);
+                    size_t take = n < 32 ? n : 32;
+                    if (take > 0)
+                    {
+                        memcpy(first_preview, first, take);
+                    }
+                    first_preview[take] = '\0';
+                }
+            }
+
+            char value_preview[40];
+            value_preview[0] = '\0';
+            if (text)
+            {
+                if (value_immediate)
+                {
+                    unsigned char tmp[5] = {0};
+                    size_t n = _utf8_encode(value_cp, tmp);
+                    size_t take = n < 32 ? n : 32;
+                    if (take > 0)
+                    {
+                        memcpy(value_preview, tmp, take);
+                    }
+                    value_preview[take] = '\0';
+                }
+                else
+                {
+                    bool truncated = false;
+                    size_t n = _safe_strlen_asan(text, &truncated);
+                    size_t take = n < 32 ? n : 32;
+                    if (take > 0)
+                    {
+                        memcpy(value_preview, text, take);
+                    }
+                    value_preview[take] = '\0';
+                }
+            }
+
             uint32_t cp = 0;
             bool imm = _is_immediate_codepoint_string(text, &cp);
             fprintf(
                 stderr,
-                "[stage2-native] array_append large len=%lld total=%zu a=%p out=%p text=%p%s cp=%u\n",
+                "[stage2-native] array_append len=%lld total=%zu a=%p out=%p first=%p%s cp=%u first_preview=\"%s\" value=%p%s cp=%u value_preview=\"%s\"\n",
                 (long long)alen,
                 total,
                 (void *)a,
                 (void *)out,
+                (void *)first,
+                first_immediate ? " immediate" : "",
+                (unsigned)first_cp,
+                first_preview,
                 (void *)text,
                 imm ? " immediate" : "",
-                (unsigned)cp);
+                (unsigned)cp,
+                value_preview);
             fflush(stderr);
+
+            static int trace_markers_init = 0;
+            static int trace_markers_enabled = 0;
+            static size_t trace_markers_limit = 0;
+            if (!trace_markers_init)
+            {
+                trace_markers_init = 1;
+                trace_markers_enabled = _env_enabled("SAILFIN_TRACE_ARRAY_MARKERS") ? 1 : 0;
+                trace_markers_limit = _env_sizet("SAILFIN_TRACE_ARRAY_MARKERS_LIMIT", 64);
+                if (trace_markers_limit == 0)
+                {
+                    trace_markers_limit = 64;
+                }
+            }
+            if (trace_markers_enabled && out && out->data && out->len > 0)
+            {
+                long long source_idx = -1;
+                long long proto_idx = -1;
+                size_t limit = (size_t)out->len;
+                if (limit > trace_markers_limit)
+                {
+                    limit = trace_markers_limit;
+                }
+                for (size_t idx = 0; idx < limit; idx++)
+                {
+                    char *s = out->data[idx];
+                    uint32_t scp = 0;
+                    if (!s)
+                    {
+                        continue;
+                    }
+                    if (_is_immediate_codepoint_string(s, &scp))
+                    {
+                        continue;
+                    }
+                    if (source_idx < 0 && strncmp(s, "source_filename", strlen("source_filename")) == 0)
+                    {
+                        source_idx = (long long)idx;
+                    }
+                    if (proto_idx < 0 && strncmp(s, "; Sailfin Native Prototype", strlen("; Sailfin Native Prototype")) == 0)
+                    {
+                        proto_idx = (long long)idx;
+                    }
+                    if (source_idx >= 0 && proto_idx >= 0)
+                    {
+                        break;
+                    }
+                }
+                fprintf(
+                    stderr,
+                    "[stage2-native] array_append_markers out=%p len=%lld source_idx=%lld proto_idx=%lld\n",
+                    (void *)out,
+                    (long long)out->len,
+                    source_idx,
+                    proto_idx);
+                fflush(stderr);
+            }
         }
     }
     return out;
@@ -1984,6 +2635,8 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
 
 SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
 {
+    _array_check_canary("push.in", array);
+
     int64_t len = array ? array->len : 0;
     if (len < 0)
     {
@@ -2011,6 +2664,16 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
         out->data[i] = (array && array->data) ? array->data[i] : NULL;
     }
     out->data[len] = value;
+
+    if (array && array->len == 0 && array->data && array->data[0] != NULL)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array_push suspicious: in len==0 but in->data[0]=%p (possible len stomp) in=%p\n",
+            (void *)array->data[0],
+            (void *)array);
+        fflush(stderr);
+    }
 
     if (trace_push_min_len > 0 && (size_t)(len + 1) >= trace_push_min_len && trace_push_budget > 0)
     {
@@ -2096,6 +2759,63 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
             (unsigned)value_cp,
             value_preview);
         fflush(stderr);
+
+        static int trace_markers_init = 0;
+        static int trace_markers_enabled = 0;
+        static size_t trace_markers_limit = 0;
+        if (!trace_markers_init)
+        {
+            trace_markers_init = 1;
+            trace_markers_enabled = _env_enabled("SAILFIN_TRACE_ARRAY_MARKERS") ? 1 : 0;
+            trace_markers_limit = _env_sizet("SAILFIN_TRACE_ARRAY_MARKERS_LIMIT", 64);
+            if (trace_markers_limit == 0)
+            {
+                trace_markers_limit = 64;
+            }
+        }
+        if (trace_markers_enabled && out && out->data && out->len > 0)
+        {
+            long long source_idx = -1;
+            long long proto_idx = -1;
+            size_t limit = (size_t)out->len;
+            if (limit > trace_markers_limit)
+            {
+                limit = trace_markers_limit;
+            }
+            for (size_t idx = 0; idx < limit; idx++)
+            {
+                char *s = out->data[idx];
+                uint32_t cp = 0;
+                if (!s)
+                {
+                    continue;
+                }
+                if (_is_immediate_codepoint_string(s, &cp))
+                {
+                    continue;
+                }
+                if (source_idx < 0 && strncmp(s, "source_filename", strlen("source_filename")) == 0)
+                {
+                    source_idx = (long long)idx;
+                }
+                if (proto_idx < 0 && strncmp(s, "; Sailfin Native Prototype", strlen("; Sailfin Native Prototype")) == 0)
+                {
+                    proto_idx = (long long)idx;
+                }
+                if (source_idx >= 0 && proto_idx >= 0)
+                {
+                    break;
+                }
+            }
+            fprintf(
+                stderr,
+                "[stage2-native] array_markers out=%p len=%lld source_idx=%lld proto_idx=%lld\n",
+                (void *)out,
+                (long long)out->len,
+                source_idx,
+                proto_idx);
+            fflush(stderr);
+        }
     }
 
     return out;
@@ -2963,15 +3683,62 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
             preview_buf[take] = '\0';
         }
 
+        long long source_filename_at = -1;
+        long long prototype_at = -1;
+        const char *range_base = NULL;
+        size_t range_len = 0;
+        size_t range_offset = 0;
+        bool in_recent_range = false;
+        if (!immediate && len64 > 0)
+        {
+            const char *hay = contents_str;
+            size_t hay_len = (size_t)len64;
+
+            const char *needle1 = "source_filename";
+            size_t n1 = strlen(needle1);
+            const char *needle2 = "; Sailfin Native Prototype";
+            size_t n2 = strlen(needle2);
+
+            size_t limit = hay_len;
+            if (limit > (size_t)(2 * 1024 * 1024))
+            {
+                limit = (size_t)(2 * 1024 * 1024);
+            }
+
+            for (size_t i = 0; i + n1 <= limit; i++)
+            {
+                if (hay[i] == needle1[0] && memcmp(hay + i, needle1, n1) == 0)
+                {
+                    source_filename_at = (long long)i;
+                    break;
+                }
+            }
+            for (size_t i = 0; i + n2 <= limit; i++)
+            {
+                if (hay[i] == needle2[0] && memcmp(hay + i, needle2, n2) == 0)
+                {
+                    prototype_at = (long long)i;
+                    break;
+                }
+            }
+
+            in_recent_range = _recent_string_find_range(contents_str, &range_base, &range_len, &range_offset);
+        }
+
         fprintf(
             stderr,
-            "[stage2-native] fs.writeFile path=%s contents=%p%s cp=%u len=%lld preview=\"%s\"\n",
+            "[stage2-native] fs.writeFile path=%s contents=%p%s cp=%u len=%lld preview=\"%s\" marker_source_filename=%lld marker_prototype=%lld range_base=%p range_len=%zu range_offset=%zu\n",
             path_str,
             (void *)contents_str,
             immediate ? " immediate" : "",
             (unsigned)codepoint,
             (long long)len64,
-            preview_buf);
+            preview_buf,
+            source_filename_at,
+            prototype_at,
+            in_recent_range ? (void *)range_base : NULL,
+            in_recent_range ? range_len : 0u,
+            in_recent_range ? range_offset : 0u);
         fflush(stderr);
     }
 
@@ -2992,6 +3759,66 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
             (void)fwrite(contents_str, 1, (size_t)len64, f);
         }
     }
+    fclose(f);
+}
+
+void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
+{
+    const char *path_str = (const char *)path;
+    if (!path_str || !lines)
+    {
+        return;
+    }
+
+    FILE *f = fopen(path_str, "wb");
+    if (!f)
+    {
+        _print_line(stderr, "[stage2-native] fs.writeLines failed", path_str);
+        return;
+    }
+
+    int64_t n = lines->len;
+    if (n < 0)
+    {
+        n = 0;
+    }
+    for (int64_t i = 0; i < n; i++)
+    {
+        const char *line = NULL;
+        if (lines->data)
+        {
+            line = (const char *)lines->data[i];
+        }
+        if (!line)
+        {
+            // Treat missing entries as empty lines.
+            (void)fwrite("\n", 1, 1, f);
+            continue;
+        }
+
+        uint32_t codepoint = 0;
+        bool immediate = _is_immediate_codepoint_string(line, &codepoint);
+        if (immediate)
+        {
+            unsigned char buf[5] = {0};
+            size_t len = _utf8_encode(codepoint, buf);
+            if (len > 0)
+            {
+                (void)fwrite(buf, 1, len, f);
+            }
+        }
+        else
+        {
+            int64_t len64 = sailfin_runtime_string_length((char *)line);
+            if (len64 > 0)
+            {
+                (void)fwrite(line, 1, (size_t)len64, f);
+            }
+        }
+
+        (void)fwrite("\n", 1, 1, f);
+    }
+
     fclose(f);
 }
 
