@@ -3,7 +3,7 @@ from runtime import runtime_support as runtime
 
 from compiler.build.main import compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_tests_to_llvm_with_module, compile_to_sailfin, number_to_string, module_name_from_path
 from compiler.build.main import compile_to_native_text
-from compiler.build.aot_prepare import _aot_apply_symbol_renames_lines, _aot_ensure_intrinsic_decls_lines, _aot_find_defined_functions_fast, _aot_find_defined_globals_fast, _aot_number_to_string, _aot_replace, _aot_sanitize_module_suffix, _aot_split_lines, _aot_bucket_set_contains, _aot_bucket_set_insert, _aot_bucket_set_make
+from compiler.build.aot_prepare import _aot_apply_symbol_renames_lines, _aot_find_defined_functions_fast, _aot_find_defined_globals_fast, _aot_number_to_string, _aot_replace, _aot_sanitize_module_suffix, _aot_split_lines, _aot_bucket_set_contains, _aot_bucket_set_insert, _aot_bucket_set_make
 from compiler.build.native_ir import split_lines
 from compiler.build.version import sailfin_stage2_version
 
@@ -825,7 +825,6 @@ def sailfin_cli_main(argv):
                 gi += 1
             if len(rename_old) > 0:
                 lines = _aot_apply_symbol_renames_lines(lines, rename_old, rename_new)
-            lines = _aot_ensure_intrinsic_decls_lines(lines)
             out_ll = _path_join(out_dir, name + ".ll")
             _write_lines(out_ll, lines)
             out_index += 1

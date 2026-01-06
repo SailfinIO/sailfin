@@ -53,6 +53,39 @@ fn _aot_bucket_set_insert(buckets -> string[][], key -> string) -> string[][] {
 	return out;
 }
 
+fn _aot_join_parts(parts -> string[]) -> string {
+	if parts.length == 0 {
+		return "";
+	}
+	if parts.length == 1 {
+		return parts[0];
+	}
+
+	// Balanced join avoids repeatedly appending onto an ever-growing prefix.
+	let mut current -> string[] = parts;
+	loop {
+		if current.length <= 1 {
+			break;
+		}
+		let mut next -> string[] = [];
+		let mut i -> number = 0;
+		loop {
+			if i >= current.length {
+				break;
+			}
+			if i + 1 < current.length {
+				next.push(current[i] + current[i + 1]);
+				i += 2;
+				continue;
+			}
+			next.push(current[i]);
+			i += 1;
+		}
+		current = next;
+	}
+	return current[0];
+}
+
 fn _aot_apply_symbol_renames_lines(lines -> string[], olds -> string[], news -> string[]) -> string[] {
 	let mut out -> string[] = lines;
 	let mut i -> number = 0;
@@ -131,45 +164,6 @@ fn _aot_matches_at(value -> string, start -> number, pattern -> string) -> boole
 		j += 1;
 	}
 	return true;
-}
-
-fn _aot_ensure_intrinsic_decls(ir -> string) -> string {
-	// When compiling each module independently with clang, some toolchains reject
-	// calls to LLVM intrinsics unless the module also contains a `declare`.
-	// Mirror Legacy/tools/prepare_stage2_aot_text.py behaviour.
-	// Important: do not match inside LLVM IR string literals (c"...").
-
-	let round_marker = "@round(double";
-	let round_decl = "declare double @round(double)";
-	if _aot_find_substring_outside_quotes(ir, round_marker) < 0 {
-		return ir;
-	}
-	if _aot_find_substring_outside_quotes(ir, round_decl) >= 0 {
-		return ir;
-	}
-
-	let decl_line = round_decl + "\n";
-	let source_at = _aot_find_substring_from(ir, "source_filename", 0);
-	if source_at < 0 {
-		return decl_line + ir;
-	}
-
-	// Insert after the `source_filename = ...` line.
-	let mut line_end -> number = source_at;
-	let ir_len = ir.length;
-	loop {
-		if line_end >= ir_len {
-			break;
-		}
-		if ir[line_end] == "\n" {
-			break;
-		}
-		line_end += 1;
-	}
-	if line_end < ir_len {
-		line_end += 1;
-	}
-	return substring(ir, 0, line_end) + decl_line + substring(ir, line_end, ir_len);
 }
 
 fn _aot_find_substring_outside_quotes(text -> string, needle -> string) -> number {
@@ -323,7 +317,7 @@ fn _aot_rename_symbol_refs(ir -> string, old -> string, fresh -> string) -> stri
 		return ir;
 	}
 	let ir_len = ir.length;
-	let mut out -> string = "";
+	let mut parts -> string[] = [];
 	let mut changed -> boolean = false;
 	let mut i -> number = 0;
 	let mut last_emit -> number = 0;
@@ -347,7 +341,8 @@ fn _aot_rename_symbol_refs(ir -> string, old -> string, fresh -> string) -> stri
 			if _aot_starts_with_at(ir, i + 1, old) {
 				let end = i + 1 + old_len;
 				if end >= ir_len || !_aot_is_symbol_char(ir[end]) {
-					out = out + substring(ir, last_emit, i) + "@" + fresh;
+					parts.push(substring(ir, last_emit, i));
+					parts.push("@" + fresh);
 					changed = true;
 					i = end;
 					last_emit = i;
@@ -360,8 +355,8 @@ fn _aot_rename_symbol_refs(ir -> string, old -> string, fresh -> string) -> stri
 	if !changed {
 		return ir;
 	}
-	out = out + substring(ir, last_emit, ir_len);
-	return out;
+	parts.push(substring(ir, last_emit, ir_len));
+	return _aot_join_parts(parts);
 }
 
 fn _aot_replace_lines(lines -> string[], needle -> string, replacement -> string) -> string[] {
@@ -396,63 +391,6 @@ fn _aot_rename_symbol_refs_lines(lines -> string[], old -> string, fresh -> stri
 	return out;
 }
 
-fn _aot_ensure_intrinsic_decls_lines(lines -> string[]) -> string[] {
-	// Line-based equivalent of _aot_ensure_intrinsic_decls.
-	let round_marker = "@round(double";
-	let round_decl = "declare double @round(double)";
-	let mut needs_round -> boolean = false;
-	let mut has_round_decl -> boolean = false;
-	let mut source_idx -> number = -1;
-	let mut i -> number = 0;
-	loop {
-		if i >= lines.length {
-			break;
-		}
-		let line = lines[i];
-		if source_idx < 0 {
-			if _aot_matches_at(line, 0, "source_filename") {
-				source_idx = i;
-			}
-		}
-		if !needs_round {
-			if _aot_find_substring_from(line, round_marker, 0) >= 0 {
-				needs_round = true;
-			}
-		}
-		if !has_round_decl {
-			if _aot_find_substring_from(line, round_decl, 0) >= 0 {
-				has_round_decl = true;
-			}
-		}
-		i += 1;
-	}
-	if !needs_round || has_round_decl {
-		return lines;
-	}
-
-	// Insert after source_filename when possible, otherwise prepend.
-	let mut insert_at -> number = 0;
-	if source_idx >= 0 {
-		insert_at = source_idx + 1;
-	}
-
-	let mut out -> string[] = [];
-	let mut idx -> number = 0;
-	loop {
-		if idx >= lines.length {
-			break;
-		}
-		if idx == insert_at {
-			out.push(round_decl);
-		}
-		out.push(lines[idx]);
-		idx += 1;
-	}
-	if insert_at >= lines.length {
-		out.push(round_decl);
-	}
-	return out;
-}
 
 fn _aot_trim_text(value -> string) -> string {
 	let mut start -> number = 0;
@@ -905,8 +843,6 @@ fn prepare_stage2_aot_modules(module_names -> string[], module_texts -> string[]
 			seen_globals = _aot_bucket_set_insert(seen_globals, candidate);
 			gi += 1;
 		}
-
-		ir = _aot_ensure_intrinsic_decls(ir);
 
 		rewritten.push(ir);
 		module_index += 1;

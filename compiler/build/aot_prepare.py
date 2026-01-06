@@ -55,6 +55,29 @@ def _aot_bucket_set_insert(buckets, key):
     out[idx] = existing
     return out
 
+def _aot_join_parts(parts):
+    if len(parts) == 0:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    current = parts
+    while True:
+        if len(current) <= 1:
+            break
+        next = []
+        i = 0
+        while True:
+            if i >= len(current):
+                break
+            if i + 1 < len(current):
+                next.append(current[i] + current[i + 1])
+                i += 2
+                continue
+            next.append(current[i])
+            i += 1
+        current = next
+    return current[0]
+
 def _aot_apply_symbol_renames_lines(lines, olds, news):
     out = lines
     i = 0
@@ -115,29 +138,6 @@ def _aot_matches_at(value, start, pattern):
             return False
         j += 1
     return True
-
-def _aot_ensure_intrinsic_decls(ir):
-    round_marker = "@round(double"
-    round_decl = "declare double @round(double)"
-    if _aot_find_substring_outside_quotes(ir, round_marker) < 0:
-        return ir
-    if _aot_find_substring_outside_quotes(ir, round_decl) >= 0:
-        return ir
-    decl_line = round_decl + "\n"
-    source_at = _aot_find_substring_from(ir, "source_filename", 0)
-    if source_at < 0:
-        return decl_line + ir
-    line_end = source_at
-    ir_len = len(ir)
-    while True:
-        if line_end >= ir_len:
-            break
-        if ir[line_end] == "\n":
-            break
-        line_end += 1
-    if line_end < ir_len:
-        line_end += 1
-    return substring(ir, 0, line_end) + decl_line + substring(ir, line_end, ir_len)
 
 def _aot_find_substring_outside_quotes(text, needle):
     needle_len = len(needle)
@@ -246,7 +246,7 @@ def _aot_rename_symbol_refs(ir, old, fresh):
     if old_len == 0:
         return ir
     ir_len = len(ir)
-    out = ""
+    parts = []
     changed = False
     i = 0
     last_emit = 0
@@ -265,7 +265,8 @@ def _aot_rename_symbol_refs(ir, old, fresh):
             if _aot_starts_with_at(ir, i + 1, old):
                 end = i + 1 + old_len
                 if end >= ir_len  or  not _aot_is_symbol_char(ir[end]):
-                    out = out + substring(ir, last_emit, i) + "@" + fresh
+                    parts.append(substring(ir, last_emit, i))
+                    parts.append("@" + fresh)
                     changed = True
                     i = end
                     last_emit = i
@@ -273,8 +274,8 @@ def _aot_rename_symbol_refs(ir, old, fresh):
         i += 1
     if not changed:
         return ir
-    out = out + substring(ir, last_emit, ir_len)
-    return out
+    parts.append(substring(ir, last_emit, ir_len))
+    return _aot_join_parts(parts)
 
 def _aot_replace_lines(lines, needle, replacement):
     if len(needle) == 0:
@@ -298,45 +299,6 @@ def _aot_rename_symbol_refs_lines(lines, old, fresh):
             break
         out.append(_aot_rename_symbol_refs(lines[i], old, fresh))
         i += 1
-    return out
-
-def _aot_ensure_intrinsic_decls_lines(lines):
-    round_marker = "@round(double"
-    round_decl = "declare double @round(double)"
-    needs_round = False
-    has_round_decl = False
-    source_idx = -1
-    i = 0
-    while True:
-        if i >= len(lines):
-            break
-        line = lines[i]
-        if source_idx < 0:
-            if _aot_matches_at(line, 0, "source_filename"):
-                source_idx = i
-        if not needs_round:
-            if _aot_find_substring_from(line, round_marker, 0) >= 0:
-                needs_round = True
-        if not has_round_decl:
-            if _aot_find_substring_from(line, round_decl, 0) >= 0:
-                has_round_decl = True
-        i += 1
-    if not needs_round  or  has_round_decl:
-        return lines
-    insert_at = 0
-    if source_idx >= 0:
-        insert_at = source_idx + 1
-    out = []
-    idx = 0
-    while True:
-        if idx >= len(lines):
-            break
-        if idx == insert_at:
-            out.append(round_decl)
-        out.append(lines[idx])
-        idx += 1
-    if insert_at >= len(lines):
-        out.append(round_decl)
     return out
 
 def _aot_trim_text(value):
@@ -664,7 +626,6 @@ def prepare_stage2_aot_modules(module_names, module_texts):
             ir = _aot_rename_symbol_refs(ir, name, candidate)
             seen_globals = _aot_bucket_set_insert(seen_globals, candidate)
             gi += 1
-        ir = _aot_ensure_intrinsic_decls(ir)
         rewritten.append(ir)
         module_index += 1
     return rewritten

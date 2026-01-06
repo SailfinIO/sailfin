@@ -1,4 +1,4 @@
-import { prepare_stage2_aot_modules } from "../../src/aot_prepare";
+import { ensure_intrinsic_declarations } from "../../src/llvm/lowering/entrypoints";
 
 fn _index_of(haystack -> string, needle -> string) -> number {
     if needle.length == 0 {
@@ -37,32 +37,26 @@ fn _contains(haystack -> string, needle -> string) -> boolean {
 }
 
 test "aot_prepare: injects round declare" {
-    // Multi-line concatenation exercises native-text instruction gathering.
-    let ir = "source_filename = \"m1.ll\"\n\n" +
-        "define double @foo(double %x) {\n" +
-        "entry:\n" +
-        "  %y = call double @round(double %x)\n" +
-        "  ret double %y\n" +
-        "}\n";
+    let lines = [
+        "source_filename = \"m1.ll\"",
+        "",
+        "define double @foo(double %x) {",
+        "entry:",
+        "  %y = call double @round(double %x)",
+        "  ret double %y",
+        "}",
+    ];
 
-    let out = prepare_stage2_aot_modules(["m1"], [ir]);
-    if out.length != 1 {
-        runtime_raise_value_error_fn("expected 1 rewritten module");
-    }
-    let rewritten = out[0];
+    let out = ensure_intrinsic_declarations(lines);
 
     let decl = "declare double @round(double)";
-    if !_contains(rewritten, decl) {
+    let mut saw_decl -> boolean = false;
+    for line in out {
+        if line == decl {
+            saw_decl = true;
+        }
+    }
+    if !saw_decl {
         runtime_raise_value_error_fn("missing round decl");
-    }
-
-    // Insert after the source_filename line.
-    let source_at = _index_of(rewritten, "source_filename");
-    let decl_at = _index_of(rewritten, decl);
-    if source_at < 0 {
-        runtime_raise_value_error_fn("missing source_filename");
-    }
-    if decl_at <= source_at {
-        runtime_raise_value_error_fn("decl not after source_filename");
     }
 }
