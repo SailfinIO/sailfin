@@ -1237,17 +1237,21 @@ fn advance_to_symbol_local(parser -> Parser, symbol -> string) -> Parser {
 // ============================================================================
 
 fn append_statement(statements -> Statement[], statement -> Statement) -> Statement[] {
-    return statements.concat([statement]);
+    statements.push(statement);
+    return statements;
 }
 
 fn append_match_case(cases -> MatchCase[], case -> MatchCase) -> MatchCase[] {
-    return cases.concat([case]);
+    cases.push(case);
+    return cases;
 }
 
 fn append_with_clause(clauses -> WithClause[], clause -> WithClause) -> WithClause[] {
-    return clauses.concat([clause]);
+    clauses.push(clause);
+    return clauses;
 }
 
 fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
-    return decorators.concat([decorator]);
+    decorators.push(decorator);
+    return decorators;
 }

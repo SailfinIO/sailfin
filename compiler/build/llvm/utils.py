@@ -349,6 +349,16 @@ def append_string(values, value):
     out.append(value)
     return out
 
+def extend_string_array(values, additions):
+    out = values
+    index = 0
+    while True:
+        if index >= len(additions):
+            break
+        out.append(additions[index])
+        index += 1
+    return out
+
 def copy_string_array(values):
     result = []
     index = 0

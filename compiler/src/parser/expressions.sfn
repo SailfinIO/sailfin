@@ -1103,11 +1103,13 @@ fn is_decimal_digit_expr(ch -> string) -> boolean {
 // ============================================================================
 
 fn append_expression(expressions -> Expression[], expression -> Expression) -> Expression[] {
-    return expressions.concat([expression]);
+    expressions.push(expression);
+    return expressions;
 }
 
 fn append_object_field(fields -> ObjectField[], field -> ObjectField) -> ObjectField[] {
-    return fields.concat([field]);
+    fields.push(field);
+    return fields;
 }
 
 fn append_parameter(parameters -> Parameter[], parameter -> Parameter) -> Parameter[] {

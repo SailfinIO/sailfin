@@ -829,13 +829,16 @@ fn skip_trailing_comma(parser -> Parser) -> Parser {
 // ============================================================================
 
 fn append_token(tokens -> Token[], token -> Token) -> Token[] {
-    return tokens.concat([token]);
+    tokens.push(token);
+    return tokens;
 }
 
 fn append_token_array(collection -> Token[][], tokens -> Token[]) -> Token[][] {
-    return collection.concat([tokens]);
+    collection.push(tokens);
+    return collection;
 }
 
 fn append_string_local(values -> string[], value -> string) -> string[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }

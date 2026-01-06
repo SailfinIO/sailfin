@@ -482,6 +482,19 @@ fn append_string(values -> string[], value -> string) -> string[] {
     return out;
 }
 
+fn extend_string_array(values -> string[], additions -> string[]) -> string[] {
+    let mut out = values;
+    let mut index -> number = 0;
+    loop {
+        if index >= additions.length {
+            break;
+        }
+        out.push(additions[index]);
+        index += 1;
+    }
+    return out;
+}
+
 fn copy_string_array(values -> string[]) -> string[] {
     let mut result -> string[] = [];
     let mut index -> number = 0;

@@ -124,6 +124,7 @@ compile:
 # Notes:
 # - Defaults to the ASAN seed because it's currently the most reliable.
 # - Always runs the orchestrator script via the Conda env Python.
+# - Pass extra flags via SELFHOST_ARGS (e.g. SELFHOST_ARGS="--seed-timeout 300").
 selfhost-native-stage2: native-stage2-asan
 	@seed=$${SEED_STAGE2:-build/native/sailfin-stage2-asan}; \
 	if [ ! -x "$$seed" ]; then \
@@ -131,7 +132,7 @@ selfhost-native-stage2: native-stage2-asan
 		echo "[selfhost-native-stage2] (hint) build one with: make native-stage2-asan"; \
 		exit 1; \
 	fi; \
-	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --out build/native/sailfin-stage2-selfhost
+	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
 	@echo "[selfhost-native-stage2] built build/native/sailfin-stage2-selfhost"
 
 

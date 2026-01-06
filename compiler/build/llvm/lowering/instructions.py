@@ -4,7 +4,7 @@ from runtime import runtime_support as runtime
 from ...native_ir import NativeFunction, NativeInstruction, NativeSourceSpan
 from ...string_utils import substring
 from ..types import TypeContext, LocalBinding, ParameterBinding, LLVMOperand, BlockLoweringResult, LetLoweringResult, LoopContext, LifetimeRegionMetadata, LifetimeReleaseEvent, OwnershipInfo, OwnershipConsumption, ScopeMetadata, LocalMutation, StringConstant, IfStructure, TryStructure, LoopStructure, MatchStructure, MatchCaseStructure, MatchCaseCondition, MatchFieldBinding, MatchStructFieldBinding, EnumTypeInfo, EnumVariantInfo, StructTypeInfo, StructFieldInfo, ConditionConversion, BlockLabelResult, MatchArmMutations
-from ..utils import trim_text, append_string, number_to_string, index_of, starts_with, strip_mut_prefix, is_simple_identifier, merge_parameter_bindings
+from ..utils import trim_text, append_string, extend_string_array, number_to_string, index_of, starts_with, strip_mut_prefix, is_simple_identifier, merge_parameter_bindings
 from ..strings import empty_string_constant_set, merge_string_constants
 from ..type_context import find_struct_info_by_name, find_interface_info_by_name, find_enum_info_by_llvm_type, resolve_enum_info_for_literal, resolve_enum_variant_info
 from ..expression_lowering_stage2.core import lower_expression, analyze_value_ownership, detect_borrow_conflicts
@@ -598,7 +598,7 @@ try_label
     current_block_counter = try_result.block_counter
     current_next_local = try_result.next_local_id
     current_next_region = try_result.next_lifetime_region_id
-    current_lines = (current_lines) + (try_result.lines)
+    current_lines = extend_string_array(current_lines, try_result.lines)
     collected_string_constants = merge_string_constants(collected_string_constants, try_result.string_constants)
     if not try_result.terminated:
         has_exc = format_temp_name(current_temp)
@@ -652,7 +652,7 @@ catch_label
         current_block_counter = catch_result.block_counter
         current_next_local = catch_result.next_local_id
         current_next_region = catch_result.next_lifetime_region_id
-        current_lines = (current_lines) + (catch_result.lines)
+        current_lines = extend_string_array(current_lines, catch_result.lines)
         collected_string_constants = merge_string_constants(collected_string_constants, catch_result.string_constants)
         if not catch_result.terminated:
             target = merge_label
@@ -689,7 +689,7 @@ finally_label
         current_block_counter = finally_result.block_counter
         current_next_local = finally_result.next_local_id
         current_next_region = finally_result.next_lifetime_region_id
-        current_lines = (current_lines) + (finally_result.lines)
+        current_lines = extend_string_array(current_lines, finally_result.lines)
         collected_string_constants = merge_string_constants(collected_string_constants, finally_result.string_constants)
         if not finally_result.terminated:
             current_lines = append_string(current_lines, "  br label %" + merge_label)
@@ -852,7 +852,7 @@ body_label
         mut_idx += 1
     current_lines = append_string(current_lines, "  br label %" + body_label)
     current_lines = append_string(current_lines, body_label + ":")
-    current_lines = (current_lines) + (body_result.lines)
+    current_lines = extend_string_array(current_lines, body_result.lines)
     if not body_result.terminated:
         current_lines = append_string(current_lines, "  br label %" + latch_label)
     current_lines = append_string(current_lines, latch_label + ":")
@@ -909,8 +909,8 @@ body_label
         final_lines = append_string(final_lines, line)
         if not found_header  and  line == header_label + ":":
             found_header = True
-            final_lines = (final_lines) + (header_phis)
-            final_lines = (final_lines) + (phi_stores)
+            final_lines = extend_string_array(final_lines, header_phis)
+            final_lines = extend_string_array(final_lines, phi_stores)
         line_idx += 1
     current_lines = final_lines
     current_lines = append_string(current_lines, exit_label + ":")
@@ -1156,7 +1156,7 @@ loop_body_label
 )
         diagnostics = (diagnostics) + (body_result.diagnostics)
         lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
-        current_lines = (current_lines) + (body_result.lines)
+        current_lines = extend_string_array(current_lines, body_result.lines)
         current_allocas = body_result.allocas
         current_temp = body_result.temp_index
         current_block_counter = body_result.block_counter
@@ -1325,7 +1325,7 @@ loop_body_label
 )
     diagnostics = (diagnostics) + (body_result.diagnostics)
     lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
-    current_lines = (current_lines) + (body_result.lines)
+    current_lines = extend_string_array(current_lines, body_result.lines)
     current_allocas = body_result.allocas
     current_temp = body_result.temp_index
     current_block_counter = body_result.block_counter
@@ -1719,7 +1719,7 @@ body_labels[index]
 )
         diagnostics = (diagnostics) + (body_result.diagnostics)
         lifetime_regions = (lifetime_regions) + (body_result.lifetime_regions)
-        current_lines = (current_lines) + (body_result.lines)
+        current_lines = extend_string_array(current_lines, body_result.lines)
         current_allocas = body_result.allocas
         current_locals = base_locals
         current_temp = body_result.temp_index
@@ -2079,7 +2079,7 @@ then_label
     current_next_local = then_result.next_local_id
     then_bindings = then_result.bindings
     current_next_region = then_result.next_lifetime_region_id
-    current_lines = (current_lines) + (then_result.lines)
+    current_lines = extend_string_array(current_lines, then_result.lines)
     then_exit_label = find_last_label(current_lines, then_label)
     then_mutations = retarget_recent_mutations(then_result.mutations, 0, then_exit_label)
     if not then_result.terminated  and  len(then_mutations) > 0:
@@ -2127,7 +2127,7 @@ else_label
         current_next_local = else_result.next_local_id
         else_bindings = else_result.bindings
         current_next_region = else_result.next_lifetime_region_id
-        current_lines = (current_lines) + (else_result.lines)
+        current_lines = extend_string_array(current_lines, else_result.lines)
         else_terminated = else_result.terminated
         exit_label = find_last_label(current_lines, else_label)
         else_exit_label = exit_label

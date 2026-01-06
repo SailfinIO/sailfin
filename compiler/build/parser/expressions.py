@@ -644,10 +644,12 @@ def is_decimal_digit_expr(ch):
     return ch == "0"  or  ch == "1"  or  ch == "2"  or  ch == "3"  or  ch == "4"  or  ch == "5"  or  ch == "6"  or  ch == "7"  or  ch == "8"  or  ch == "9"
 
 def append_expression(expressions, expression):
-    return (expressions) + ([expression])
+    expressions.append(expression)
+    return expressions
 
 def append_object_field(fields, field):
-    return (fields) + ([field])
+    fields.append(field)
+    return fields
 
 def append_parameter(parameters, parameter):
     return (parameters) + ([parameter])

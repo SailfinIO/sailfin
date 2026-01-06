@@ -216,5 +216,6 @@ fn string_array_contains(values -> string[], target -> string) -> boolean {
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }

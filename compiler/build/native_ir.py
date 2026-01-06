@@ -723,37 +723,48 @@ def parse_source_span(text):
     return NativeSourceSpan(start_line=start_line.value, start_column=start_column.value, end_line=end_line.value, end_column=end_column.value)
 
 def append_function(functions, value):
-    return (functions) + ([value])
+    functions.append(value)
+    return functions
 
 def append_binding(bindings, value):
-    return (bindings) + ([value])
+    bindings.append(value)
+    return bindings
 
 def append_import(imports, value):
-    return (imports) + ([value])
+    imports.append(value)
+    return imports
 
 def append_struct(structs, value):
-    return (structs) + ([value])
+    structs.append(value)
+    return structs
 
 def append_interface(interfaces, value):
-    return (interfaces) + ([value])
+    interfaces.append(value)
+    return interfaces
 
 def append_enum(enums, value):
-    return (enums) + ([value])
+    enums.append(value)
+    return enums
 
 def append_enum_variant(variants, value):
-    return (variants) + ([value])
+    variants.append(value)
+    return variants
 
 def append_enum_variant_field(fields, value):
-    return (fields) + ([value])
+    fields.append(value)
+    return fields
 
 def append_struct_field(fields, field):
-    return (fields) + ([field])
+    fields.append(field)
+    return fields
 
 def append_struct_layout_field(fields, field):
-    return (fields) + ([field])
+    fields.append(field)
+    return fields
 
 def append_enum_variant_layout(variants, value):
-    return (variants) + ([value])
+    variants.append(value)
+    return variants
 
 def find_enum_variant_layout(variants, name):
     index = 0
@@ -785,7 +796,8 @@ def append_parameter(function, parameter):
     return NativeFunction(name=function.name, is_async=function.is_async, parameters=parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=function.is_extern, instructions=function.instructions)
 
 def append_instruction(function, instruction):
-    instructions = (function.instructions) + ([instruction])
+    instructions = function.instructions
+    instructions.append(instruction)
     return NativeFunction(name=function.name, is_async=function.is_async, parameters=function.parameters, return_type=function.return_type, effects=function.effects, decorators=function.decorators, is_extern=function.is_extern, instructions=instructions)
 
 def binding_from_instruction(instruction):
@@ -2761,7 +2773,8 @@ def strip_quotes(value):
     return value
 
 def append_string(values, value):
-    return (values) + ([value])
+    values.append(value)
+    return values
 
 def split_text(value, delimiter):
     if len(delimiter) == 0:
@@ -2787,4 +2800,5 @@ def split_text(value, delimiter):
     return parts
 
 def append_parameter_array(values, parameter):
-    return (values) + ([parameter])
+    values.append(parameter)
+    return values

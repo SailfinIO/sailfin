@@ -234,7 +234,7 @@ def parse_type_parameter_clause(parser):
                     bound = TypeAnnotation(text=bound_text)
                 name_span = source_span_from_tokens(name_tokens)
                 parameter = TypeParameter(name=name_text, bound=bound, span=name_span)
-                parameters = (parameters) + ([parameter])
+                parameters.append(parameter)
         index += 1
     return TypeParameterParseResult(parser=current, parameters=parameters)
 
@@ -403,7 +403,7 @@ def parse_specifier_list(initial_parser):
                 alias = identifier_text(alias_token)
                 parser = parser_advance_raw(parser)
                 parser = skip_trivia(parser)
-        specifiers = (specifiers) + ([NamedSpecifier(name=name, alias=alias)])
+        specifiers.append(NamedSpecifier(name=name, alias=alias))
         separator = parser_peek_raw(parser)
         if symbol_matches(separator, ","):
             parser = parser_advance_raw(parser)
@@ -421,7 +421,7 @@ def build_import_specifiers(values):
         if index >= len(values):
             break
         entry = values[index]
-        result = (result) + ([ImportSpecifier(name=entry.name, alias=entry.alias)])
+        result.append(ImportSpecifier(name=entry.name, alias=entry.alias))
         index += 1
     return result
 
@@ -432,7 +432,7 @@ def build_export_specifiers(values):
         if index >= len(values):
             break
         entry = values[index]
-        result = (result) + ([ExportSpecifier(name=entry.name, alias=entry.alias)])
+        result.append(ExportSpecifier(name=entry.name, alias=entry.alias))
         index += 1
     return result
 
@@ -1234,31 +1234,41 @@ def parse_unknown(initial_parser):
     return StatementParseResult(parser=parser, statement=block)
 
 def append_string(values, value):
-    return (values) + ([value])
+    values.append(value)
+    return values
 
 def append_parameter(parameters, parameter):
-    return (parameters) + ([parameter])
+    parameters.append(parameter)
+    return parameters
 
 def append_field(fields, field):
-    return (fields) + ([field])
+    fields.append(field)
+    return fields
 
 def append_method(methods, method):
-    return (methods) + ([method])
+    methods.append(method)
+    return methods
 
 def append_signature(signatures, signature):
-    return (signatures) + ([signature])
+    signatures.append(signature)
+    return signatures
 
 def append_enum_variant(variants, variant):
-    return (variants) + ([variant])
+    variants.append(variant)
+    return variants
 
 def append_type_annotation(types, item):
-    return (types) + ([item])
+    types.append(item)
+    return types
 
 def append_model_property(properties, property):
-    return (properties) + ([property])
+    properties.append(property)
+    return properties
 
 def append_decorator(decorators, decorator):
-    return (decorators) + ([decorator])
+    decorators.append(decorator)
+    return decorators
 
 def append_decorator_argument(arguments, argument):
-    return (arguments) + ([argument])
+    arguments.append(argument)
+    return arguments

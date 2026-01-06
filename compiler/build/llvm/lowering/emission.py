@@ -3,7 +3,7 @@ from runtime import runtime_support as runtime
 
 from ...native_ir import NativeFunction
 from ..types import TypeContext, LocalBinding, ParameterBinding, LoweredLLVMFunction, LLVMOperand, StringConstant, BodyResult
-from ..utils import append_string, join_with_separator, sanitize_symbol, number_to_string, matches_case_insensitive
+from ..utils import append_string, extend_string_array, join_with_separator, sanitize_symbol, number_to_string, matches_case_insensitive
 from ..strings import empty_string_constant_set, append_string_constant, merge_string_constants
 from ..type_mapping import map_return_type
 from ..expression_lowering_stage2.statement import prepare_parameters, future_pointer_type_for_return_type, spawn_symbol_for_return_type, spawn_ctx_symbol_for_return_type
@@ -231,13 +231,13 @@ needs_module_init_call
             lines = append_string(lines, call_line)
         decorator_index += 1
     body = emit_body(function, llvm_return, preparation.bindings, module_globals, functions, context, entry_label)
-    lines = (lines) + (body.lines)
+    lines = extend_string_array(lines, body.lines)
     diagnostics = (diagnostics) + (body.diagnostics)
     lifetime_diagnostics = validate_borrow_lifetimes(function, body.lifetime_regions)
     diagnostics = (diagnostics) + (lifetime_diagnostics)
     lines = append_string(lines, "}")
     if emit_main_wrapper:
-        lines = (lines) + (["", "define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  call void @" + sanitized + "()", "  ret i32 0", "}"])
+        lines = extend_string_array(lines, ["", "define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  call void @" + sanitized + "()", "  ret i32 0", "}"])
     merged_constants = merge_string_constants(body.string_constants, decorator_string_constants)
     return LoweredLLVMFunction(lines=lines, diagnostics=diagnostics, lifetime_regions=body.lifetime_regions, string_constants=merged_constants)
 
@@ -264,8 +264,8 @@ entry_label
 )
     diagnostics = lowered.diagnostics
     lines = []
-    lines = (lines) + (lowered.allocas)
-    lines = (lines) + (lowered.lines)
+    lines = extend_string_array(lines, lowered.allocas)
+    lines = extend_string_array(lines, lowered.lines)
     if not lowered.terminated:
         if llvm_return == "void":
             lines = append_string(lines, "  ret void")

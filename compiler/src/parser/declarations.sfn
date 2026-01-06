@@ -351,7 +351,7 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
                 }
                 let name_span = source_span_from_tokens(name_tokens);
                 let parameter = TypeParameter { name: name_text, bound: bound, span: name_span };
-                parameters = parameters.concat([parameter]);
+                parameters.push(parameter);
             }
         }
         index += 1;
@@ -604,7 +604,7 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
             }
         }
 
-        specifiers = specifiers.concat([NamedSpecifier { name: name, alias: alias }]);
+        specifiers.push(NamedSpecifier { name: name, alias: alias });
 
         let separator = parser_peek_raw(parser);
         if symbol_matches(separator, ",") {
@@ -630,7 +630,7 @@ fn build_import_specifiers(values -> NamedSpecifier[]) -> ImportSpecifier[] {
             break;
         }
         let entry = values[index];
-        result = result.concat([ImportSpecifier { name: entry.name, alias: entry.alias }]);
+        result.push(ImportSpecifier { name: entry.name, alias: entry.alias });
         index += 1;
     }
     return result;
@@ -644,7 +644,7 @@ fn build_export_specifiers(values -> NamedSpecifier[]) -> ExportSpecifier[] {
             break;
         }
         let entry = values[index];
-        result = result.concat([ExportSpecifier { name: entry.name, alias: entry.alias }]);
+        result.push(ExportSpecifier { name: entry.name, alias: entry.alias });
         index += 1;
     }
     return result;
@@ -1922,41 +1922,51 @@ fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
 // ============================================================================
 
 fn append_string(values -> string[], value -> string) -> string[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn append_parameter(parameters -> Parameter[], parameter -> Parameter) -> Parameter[] {
-    return parameters.concat([parameter]);
+    parameters.push(parameter);
+    return parameters;
 }
 
 fn append_field(fields -> FieldDeclaration[], field -> FieldDeclaration) -> FieldDeclaration[] {
-    return fields.concat([field]);
+    fields.push(field);
+    return fields;
 }
 
 fn append_method(methods -> MethodDeclaration[], method -> MethodDeclaration) -> MethodDeclaration[] {
-    return methods.concat([method]);
+    methods.push(method);
+    return methods;
 }
 
 fn append_signature(signatures -> FunctionSignature[], signature -> FunctionSignature) -> FunctionSignature[] {
-    return signatures.concat([signature]);
+    signatures.push(signature);
+    return signatures;
 }
 
 fn append_enum_variant(variants -> EnumVariant[], variant -> EnumVariant) -> EnumVariant[] {
-    return variants.concat([variant]);
+    variants.push(variant);
+    return variants;
 }
 
 fn append_type_annotation(types -> TypeAnnotation[], item -> TypeAnnotation) -> TypeAnnotation[] {
-    return types.concat([item]);
+    types.push(item);
+    return types;
 }
 
 fn append_model_property(properties -> ModelProperty[], property -> ModelProperty) -> ModelProperty[] {
-    return properties.concat([property]);
+    properties.push(property);
+    return properties;
 }
 
 fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
-    return decorators.concat([decorator]);
+    decorators.push(decorator);
+    return decorators;
 }
 
 fn append_decorator_argument(arguments -> DecoratorArgument[], argument -> DecoratorArgument) -> DecoratorArgument[] {
-    return arguments.concat([argument]);
+    arguments.push(argument);
+    return arguments;
 }

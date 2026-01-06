@@ -729,47 +729,58 @@ fn parse_source_span(text -> string) -> NativeSourceSpan? {
 }
 
 fn append_function(functions -> NativeFunction[], value -> NativeFunction) -> NativeFunction[] {
-    return functions.concat([value]);
+    functions.push(value);
+    return functions;
 }
 
 fn append_binding(bindings -> NativeBinding[], value -> NativeBinding) -> NativeBinding[] {
-    return bindings.concat([value]);
+    bindings.push(value);
+    return bindings;
 }
 
 fn append_import(imports -> NativeImport[], value -> NativeImport) -> NativeImport[] {
-    return imports.concat([value]);
+    imports.push(value);
+    return imports;
 }
 
 fn append_struct(structs -> NativeStruct[], value -> NativeStruct) -> NativeStruct[] {
-    return structs.concat([value]);
+    structs.push(value);
+    return structs;
 }
 
 fn append_interface(interfaces -> NativeInterface[], value -> NativeInterface) -> NativeInterface[] {
-    return interfaces.concat([value]);
+    interfaces.push(value);
+    return interfaces;
 }
 
 fn append_enum(enums -> NativeEnum[], value -> NativeEnum) -> NativeEnum[] {
-    return enums.concat([value]);
+    enums.push(value);
+    return enums;
 }
 
 fn append_enum_variant(variants -> NativeEnumVariant[], value -> NativeEnumVariant) -> NativeEnumVariant[] {
-    return variants.concat([value]);
+    variants.push(value);
+    return variants;
 }
 
 fn append_enum_variant_field(fields -> NativeEnumVariantField[], value -> NativeEnumVariantField) -> NativeEnumVariantField[] {
-    return fields.concat([value]);
+    fields.push(value);
+    return fields;
 }
 
 fn append_struct_field(fields -> NativeStructField[], field -> NativeStructField) -> NativeStructField[] {
-    return fields.concat([field]);
+    fields.push(field);
+    return fields;
 }
 
 fn append_struct_layout_field(fields -> NativeStructLayoutField[], field -> NativeStructLayoutField) -> NativeStructLayoutField[] {
-    return fields.concat([field]);
+    fields.push(field);
+    return fields;
 }
 
 fn append_enum_variant_layout(variants -> NativeEnumVariantLayout[], value -> NativeEnumVariantLayout) -> NativeEnumVariantLayout[] {
-    return variants.concat([value]);
+    variants.push(value);
+    return variants;
 }
 
 fn find_enum_variant_layout(variants -> NativeEnumVariantLayout[], name -> string) -> number {
@@ -827,7 +838,8 @@ fn append_parameter(function -> NativeFunction, parameter -> NativeParameter) ->
 }
 
 fn append_instruction(function -> NativeFunction, instruction -> NativeInstruction) -> NativeFunction {
-    let instructions = function.instructions.concat([instruction]);
+    let instructions = function.instructions;
+    instructions.push(instruction);
     return NativeFunction {
         name: function.name,
         is_async: function.is_async,
@@ -3581,7 +3593,8 @@ fn strip_quotes(value -> string) -> string {
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn split_text(value -> string, delimiter -> string) -> string[] {
@@ -3616,5 +3629,6 @@ fn split_text(value -> string, delimiter -> string) -> string[] {
 }
 
 fn append_parameter_array(values -> NativeParameter[], parameter -> NativeParameter) -> NativeParameter[] {
-    return values.concat([parameter]);
+    values.push(parameter);
+    return values;
 }

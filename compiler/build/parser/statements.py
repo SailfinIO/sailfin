@@ -764,13 +764,17 @@ def advance_to_symbol_local(parser, symbol):
     return current
 
 def append_statement(statements, statement):
-    return (statements) + ([statement])
+    statements.append(statement)
+    return statements
 
 def append_match_case(cases, case):
-    return (cases) + ([case])
+    cases.append(case)
+    return cases
 
 def append_with_clause(clauses, clause):
-    return (clauses) + ([clause])
+    clauses.append(clause)
+    return clauses
 
 def append_decorator(decorators, decorator):
-    return (decorators) + ([decorator])
+    decorators.append(decorator)
+    return decorators

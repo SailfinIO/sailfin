@@ -167,4 +167,5 @@ def string_array_contains(values, target):
     return False
 
 def append_string(values, value):
-    return (values) + ([value])
+    values.append(value)
+    return values

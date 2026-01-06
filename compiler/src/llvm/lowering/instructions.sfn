@@ -43,6 +43,7 @@ import {
 import {
     trim_text,
     append_string,
+    extend_string_array,
     number_to_string,
     index_of,
     starts_with,
@@ -866,7 +867,7 @@ fn lower_try_instruction(
     current_block_counter = try_result.block_counter;
     current_next_local = try_result.next_local_id;
     current_next_region = try_result.next_lifetime_region_id;
-    current_lines = current_lines.concat(try_result.lines);
+    current_lines = extend_string_array(current_lines, try_result.lines);
     collected_string_constants = merge_string_constants(collected_string_constants, try_result.string_constants);
 
     if !try_result.terminated {
@@ -940,7 +941,7 @@ fn lower_try_instruction(
         current_block_counter = catch_result.block_counter;
         current_next_local = catch_result.next_local_id;
         current_next_region = catch_result.next_lifetime_region_id;
-        current_lines = current_lines.concat(catch_result.lines);
+        current_lines = extend_string_array(current_lines, catch_result.lines);
         collected_string_constants = merge_string_constants(collected_string_constants, catch_result.string_constants);
 
         if !catch_result.terminated {
@@ -982,7 +983,7 @@ fn lower_try_instruction(
         current_block_counter = finally_result.block_counter;
         current_next_local = finally_result.next_local_id;
         current_next_region = finally_result.next_lifetime_region_id;
-        current_lines = current_lines.concat(finally_result.lines);
+        current_lines = extend_string_array(current_lines, finally_result.lines);
         collected_string_constants = merge_string_constants(collected_string_constants, finally_result.string_constants);
 
         if !finally_result.terminated {
@@ -1255,7 +1256,7 @@ fn lower_loop_instruction(
     current_lines = append_string(current_lines, body_label + ":");
 
     // Append body lines
-    current_lines = current_lines.concat(body_result.lines);
+    current_lines = extend_string_array(current_lines, body_result.lines);
 
     // If body doesn't terminate, branch to latch
     if !body_result.terminated {
@@ -1348,8 +1349,8 @@ fn lower_loop_instruction(
         // Insert phi nodes right after header label
         if !found_header && line == header_label + ":" {
             found_header = true;
-            final_lines = final_lines.concat(header_phis);
-            final_lines = final_lines.concat(phi_stores);
+            final_lines = extend_string_array(final_lines, header_phis);
+            final_lines = extend_string_array(final_lines, phi_stores);
         }
         line_idx += 1;
     }
@@ -1890,7 +1891,7 @@ fn lower_for_instruction(
 
         diagnostics = diagnostics.concat(body_result.diagnostics);
         lifetime_regions = lifetime_regions.concat(body_result.lifetime_regions);
-        current_lines = current_lines.concat(body_result.lines);
+        current_lines = extend_string_array(current_lines, body_result.lines);
         current_allocas = body_result.allocas;
         current_temp = body_result.temp_index;
         current_block_counter = body_result.block_counter;
@@ -2157,7 +2158,7 @@ fn lower_for_instruction(
 
     diagnostics = diagnostics.concat(body_result.diagnostics);
     lifetime_regions = lifetime_regions.concat(body_result.lifetime_regions);
-    current_lines = current_lines.concat(body_result.lines);
+    current_lines = extend_string_array(current_lines, body_result.lines);
     current_allocas = body_result.allocas;
     current_temp = body_result.temp_index;
     current_block_counter = body_result.block_counter;
@@ -2808,7 +2809,7 @@ fn lower_match_instruction(
 
         diagnostics = diagnostics.concat(body_result.diagnostics);
         lifetime_regions = lifetime_regions.concat(body_result.lifetime_regions);
-        current_lines = current_lines.concat(body_result.lines);
+        current_lines = extend_string_array(current_lines, body_result.lines);
         current_allocas = body_result.allocas;
         current_locals = base_locals;
         current_temp = body_result.temp_index;
@@ -3389,7 +3390,7 @@ fn lower_if_instruction(
     current_next_local = then_result.next_local_id;
     then_bindings = then_result.bindings;
     current_next_region = then_result.next_lifetime_region_id;
-    current_lines = current_lines.concat(then_result.lines);
+    current_lines = extend_string_array(current_lines, then_result.lines);
     let then_exit_label = find_last_label(current_lines, then_label);
     let mut then_mutations = retarget_recent_mutations(then_result.mutations, 0, then_exit_label);
     if !then_result.terminated && then_mutations.length > 0 {
@@ -3440,7 +3441,7 @@ fn lower_if_instruction(
         current_next_local = else_result.next_local_id;
         else_bindings = else_result.bindings;
         current_next_region = else_result.next_lifetime_region_id;
-        current_lines = current_lines.concat(else_result.lines);
+        current_lines = extend_string_array(current_lines, else_result.lines);
         else_terminated = else_result.terminated;
         let exit_label = find_last_label(current_lines, else_label);
         else_exit_label = exit_label;

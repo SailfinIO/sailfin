@@ -19,6 +19,7 @@ import {
 
 import {
     append_string,
+    extend_string_array,
     join_with_separator,
     sanitize_symbol,
     number_to_string,
@@ -365,7 +366,7 @@ fn emit_llvm_function(
     }
 
     let body = emit_body(function, llvm_return, preparation.bindings, module_globals, functions, context, entry_label);
-    lines = lines.concat(body.lines);
+    lines = extend_string_array(lines, body.lines);
     diagnostics = diagnostics.concat(body.diagnostics);
     let lifetime_diagnostics = validate_borrow_lifetimes(function, body.lifetime_regions);
     diagnostics = diagnostics.concat(lifetime_diagnostics);
@@ -373,7 +374,7 @@ fn emit_llvm_function(
 
     if emit_main_wrapper {
         // C ABI wrapper. Always returns 0 (success) after invoking the Sailfin main.
-        lines = lines.concat([
+        lines = extend_string_array(lines, [
             "",
             "define i32 @main(i32 %argc, i8** %argv) {",
             "entry:",
@@ -418,8 +419,8 @@ fn emit_body(
     );
     let mut diagnostics -> string[] = lowered.diagnostics;
     let mut lines -> string[] = [];
-    lines = lines.concat(lowered.allocas);
-    lines = lines.concat(lowered.lines);
+    lines = extend_string_array(lines, lowered.allocas);
+    lines = extend_string_array(lines, lowered.lines);
 
     if !lowered.terminated {
         if llvm_return == "void" {

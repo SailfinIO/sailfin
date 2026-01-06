@@ -165,7 +165,8 @@ fn parse_statement(initial_parser -> Parser) -> StatementParseResult {
 // ============================================================================
 
 fn append_statement(statements -> Statement[], statement -> Statement) -> Statement[] {
-    return statements.concat([statement]);
+    statements.push(statement);
+    return statements;
 }
 
 // ============================================================================

@@ -648,10 +648,13 @@ def skip_trailing_comma(parser):
     return current
 
 def append_token(tokens, token):
-    return (tokens) + ([token])
+    tokens.append(token)
+    return tokens
 
 def append_token_array(collection, tokens):
-    return (collection) + ([tokens])
+    collection.append(tokens)
+    return collection
 
 def append_string_local(values, value):
-    return (values) + ([value])
+    values.append(value)
+    return values
