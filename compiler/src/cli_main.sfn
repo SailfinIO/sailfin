@@ -4,18 +4,6 @@
 
 import { compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_tests_to_llvm_with_module, compile_to_sailfin, number_to_string, module_name_from_path } from "./main";
 import { compile_to_native_text } from "./main";
-import {
-    _aot_apply_symbol_renames_lines,
-    _aot_find_defined_functions_fast,
-    _aot_find_defined_globals_fast,
-    _aot_number_to_string,
-    _aot_replace,
-    _aot_sanitize_module_suffix,
-    _aot_split_lines,
-    _aot_bucket_set_contains,
-    _aot_bucket_set_insert,
-    _aot_bucket_set_make,
-} from "./aot_prepare";
 import { split_lines } from "./native_ir";
 import { sailfin_stage2_version } from "./version";
 
@@ -25,7 +13,6 @@ fn _usage() -> string {
         "  sfn version\n" +
         "  sfn emit llvm|sailfin|native <file.sfn>\n" +
         "  sfn emit-llvm-file <file.sfn> <out.ll>\n" +
-        "  sfn aot-prepare-dir <modules.txt> <raw-dir> <out-dir>\n" +
         "  sfn build [-o OUTPUT] <file.sfn>\n" +
         "  sfn run <file.sfn>\n" +
         "  sfn run <exe>\n" +
@@ -1056,150 +1043,6 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let module_name = module_name_from_path(path);
         let lines = compile_to_llvm_lines_with_module(source, module_name);
         _write_lines(out_path, lines);
-        return 0;
-    }
-
-    if cmd == "aot-prepare-dir" {
-        // aot-prepare-dir <modules.txt> <raw-dir> <out-dir>
-        if args.length != 4 {
-            print.error(_usage());
-            return 2;
-        }
-        let modules_path = args[1];
-        let raw_dir = args[2];
-        let out_dir = args[3];
-
-        if !fs.exists(modules_path) {
-            print.error("file not found: " + modules_path);
-            return 1;
-        }
-        if !fs.exists(raw_dir) {
-            print.error("directory not found: " + raw_dir);
-            return 1;
-        }
-
-        let module_names = _read_non_empty_lines(modules_path);
-        if module_names.length == 0 {
-            print.error("no module names found: " + modules_path);
-            return 1;
-        }
-
-        _ensure_dir(out_dir);
-        let mut seen_functions = _aot_bucket_set_make();
-        let mut seen_globals = _aot_bucket_set_make();
-
-        let mut out_index -> number = 0;
-        loop {
-            if out_index >= module_names.length {
-                break;
-            }
-            let name = module_names[out_index];
-            if (out_index % 5) == 0 {
-                print.info(
-                    "aot-prepare-dir: rewriting " +
-                    number_to_string(out_index + 1) + "/" +
-                    number_to_string(module_names.length) +
-                    "..."
-                );
-            }
-
-            let ll_path = _path_join(raw_dir, name + ".ll");
-            if !fs.exists(ll_path) {
-                print.error("file not found: " + ll_path);
-                return 1;
-            }
-
-            let mut ir = fs.readFile(ll_path);
-
-            // Avoid colliding with the native C driver `main`.
-            if name == "main" {
-                ir = _aot_replace(ir, "@main(", "@stage2_compiler_main(");
-            }
-
-            let mut lines = _aot_split_lines(ir);
-
-            let defined_functions = _aot_find_defined_functions_fast(ir);
-            let defined_globals = _aot_find_defined_globals_fast(ir);
-            let safe_module_name = _aot_sanitize_module_suffix(name);
-
-            let mut rename_old -> string[] = [];
-            let mut rename_new -> string[] = [];
-
-            // Rename duplicate defined functions.
-            let mut fi -> number = 0;
-            loop {
-                if fi >= defined_functions.length {
-                    break;
-                }
-                let fname = defined_functions[fi];
-                if !_aot_bucket_set_contains(seen_functions, fname) {
-                    seen_functions = _aot_bucket_set_insert(seen_functions, fname);
-                    fi += 1;
-                    continue;
-                }
-
-                let mut counter -> number = 1;
-                let mut candidate -> string = "";
-                loop {
-                    let mut suffix -> string = safe_module_name;
-                    if counter != 1 {
-                        suffix = safe_module_name + "_" + _aot_number_to_string(counter);
-                    }
-                    candidate = fname + "__" + suffix;
-                    if !_aot_bucket_set_contains(seen_functions, candidate) {
-                        break;
-                    }
-                    counter += 1;
-                }
-
-                seen_functions = _aot_bucket_set_insert(seen_functions, candidate);
-                rename_old.push(fname);
-                rename_new.push(candidate);
-                fi += 1;
-            }
-
-            // Rename duplicate defined globals.
-            let mut gi -> number = 0;
-            loop {
-                if gi >= defined_globals.length {
-                    break;
-                }
-                let gname = defined_globals[gi];
-                if !_aot_bucket_set_contains(seen_globals, gname) {
-                    seen_globals = _aot_bucket_set_insert(seen_globals, gname);
-                    gi += 1;
-                    continue;
-                }
-
-                let mut counter -> number = 1;
-                let mut candidate -> string = "";
-                loop {
-                    let mut suffix -> string = safe_module_name;
-                    if counter != 1 {
-                        suffix = safe_module_name + "_" + _aot_number_to_string(counter);
-                    }
-                    candidate = gname + "__" + suffix;
-                    if !_aot_bucket_set_contains(seen_globals, candidate) {
-                        break;
-                    }
-                    counter += 1;
-                }
-
-                seen_globals = _aot_bucket_set_insert(seen_globals, candidate);
-                rename_old.push(gname);
-                rename_new.push(candidate);
-                gi += 1;
-            }
-
-            if rename_old.length > 0 {
-                lines = _aot_apply_symbol_renames_lines(lines, rename_old, rename_new);
-            }
-
-            let out_ll = _path_join(out_dir, name + ".ll");
-            _write_lines(out_ll, lines);
-            out_index += 1;
-        }
-        _write_text(_path_join(out_dir, "modules.txt"), fs.readFile(modules_path));
         return 0;
     }
 

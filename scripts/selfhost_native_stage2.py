@@ -80,21 +80,6 @@ def _seed_supports_emit_llvm_file(seed: pathlib.Path) -> bool:
     return proc.returncode != 0
 
 
-def _seed_supports_aot_prepare_dir(seed: pathlib.Path) -> bool:
-    proc = subprocess.run(
-        [str(seed), "aot-prepare-dir"],
-        cwd=str(REPO_ROOT),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-    )
-    stderr = proc.stderr.decode("utf-8", errors="replace")
-    if "aot-prepare-dir" in stderr or "usage" in stderr:
-        return True
-    if "unknown" in stderr and "aot-prepare-dir" in stderr:
-        return False
-    return proc.returncode != 0
-
-
 def _strip_stage2_log_prefixes(text: str) -> str:
     """Remove leading stage2 log prefixes like '[info] ' from LLVM text.
 
@@ -221,13 +206,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--seed-timeout",
         type=float,
-        default=180.0,
-        help="Timeout (seconds) per seed emit attempt (default: 180)",
+        default=None,
+        help="Timeout (seconds) per seed emit attempt (default: 180; 600 when auto-using ASAN seed)",
     )
     parser.add_argument(
         "--clang-validate-timeout",
         type=float,
-        default=30.0,
+        default=None,
         help="Timeout (seconds) for per-module clang validation (default: 30)",
     )
     parser.add_argument(
@@ -322,6 +307,13 @@ def main(argv: list[str]) -> int:
         print(f"[selfhost] using ASAN seed: {asan_seed}")
         seed = asan_seed
 
+    # Default timeouts: ASAN seeds can be much slower and may spuriously hit the
+    # standard per-module timeout, leading to repeated retries.
+    if args.seed_timeout is None:
+        args.seed_timeout = 600.0 if seed.name.endswith("-asan") else 180.0
+    if args.clang_validate_timeout is None:
+        args.clang_validate_timeout = 30.0
+
     clang = args.clang
     clang_flags: list[str] = [args.opt]
     if args.wno_override_module:
@@ -345,7 +337,6 @@ def main(argv: list[str]) -> int:
     def _build_once(*, seed_bin: pathlib.Path, out_path: pathlib.Path, pass_name: str) -> tuple[pathlib.Path, list[str]]:
         seed_emit_s = 0.0
         clang_validate_s = 0.0
-        aot_prepare_s = 0.0
         clang_compile_s = 0.0
         clang_link_s = 0.0
         seed_attempts_total = 0
@@ -358,11 +349,9 @@ def main(argv: list[str]) -> int:
         work_dir = args.work_dir
         stage2_dir = work_dir / pass_name
         raw_dir = stage2_dir / "raw"
-        aot_dir = stage2_dir / "aot"
         obj_dir = stage2_dir / "obj"
 
         raw_dir.mkdir(parents=True, exist_ok=True)
-        aot_dir.mkdir(parents=True, exist_ok=True)
         obj_dir.mkdir(parents=True, exist_ok=True)
 
         for p in obj_dir.rglob("*.o"):
@@ -707,7 +696,6 @@ def main(argv: list[str]) -> int:
         if not args.skip_clang_validate:
             print(
                 f"[selfhost] clang validate: {clang_validate_s:.2f}s", flush=True)
-        print(f"[selfhost] aot prepare: {aot_prepare_s:.2f}s", flush=True)
         print(f"[selfhost] clang compile: {clang_compile_s:.2f}s", flush=True)
         print(f"[selfhost] clang link: {clang_link_s:.2f}s", flush=True)
         return used_ir_dir, module_names

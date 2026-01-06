@@ -28,8 +28,6 @@ if str(REPO_ROOT) not in sys.path:
 
 _STAGE1_LOWERING = None
 
-_STAGE1_AOT_PREPARE = None
-
 
 _STAGE2_BOOTSTRAP_CACHE_VERSION = "stage2-bootstrap-cache-v1"
 
@@ -179,13 +177,14 @@ def _stage1_lowering_module():
 
 
 def _stage1_aot_prepare_module():
-    """Deprecated: stage2 bootstrap no longer uses aot-prepare rewriting."""
+    """Deprecated stub kept for older callers.
 
-    global _STAGE1_AOT_PREPARE
-    if _STAGE1_AOT_PREPARE is None:
-        _STAGE1_AOT_PREPARE = importlib.import_module(
-            "compiler.build.aot_prepare")
-    return _STAGE1_AOT_PREPARE
+    Stage2 bootstrap no longer uses any aot-prepare rewriting.
+    """
+
+    raise Stage2BootstrapError(
+        "aot-prepare has been retired; bootstrap_stage2 no longer provides it"
+    )
 
 
 def prepare_stage2_aot_modules(
@@ -895,9 +894,6 @@ def compile_compiler_to_stage2(
         stage1_main, "compile_to_native_llvm_with_module")
 
     # Collect all Sailfin source files.
-    # `compiler/src/aot_prepare.sfn` is used by the stage2 toolchain (and tests)
-    # to rewrite LLVM text for AOT. It must be present in the stage2 artifact
-    # set so imports like `../../src/aot_prepare` can resolve.
     sources = [p for p in sorted(compiler_src.rglob("*.sfn"))]
     runtime_sources = sorted(runtime_src.rglob("*.sfn"))
     # Compile runtime first so compiler modules can import `runtime/*` and find

@@ -24,7 +24,7 @@ Use the format:
 
 - `test "<area>: <behavior>" { ... }`
 
-Where `<area>` is a stable subsystem name (e.g. `token`, `string`, `async`, `aot_prepare`, `test_runner`).
+Where `<area>` is a stable subsystem name (e.g. `token`, `string`, `async`, `test_runner`).
 Avoid encoding the suite (`unit`, `integration`, `e2e`) in the test name; the folder already communicates that.
 
 ## Helper functions

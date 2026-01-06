@@ -1,3 +1,28 @@
+test "llvm: injects round declare when used" {
+    let lines = [
+        "source_filename = \"m1.ll\"",
+        "",
+        "define double @foo(double %x) {",
+        "entry:",
+        "  %y = call double @round(double %x)",
+        "  ret double %y",
+        "}",
+    ];
+
+    let out = ensure_intrinsic_declarations(lines);
+
+    let decl = "declare double @round(double)";
+    let mut saw_decl -> boolean = false;
+    for line in out {
+        if line == decl {
+            saw_decl = true;
+        }
+    }
+    if !saw_decl {
+        runtime_raise_value_error_fn("missing round decl");
+    }
+}
+
 fn _index_of(haystack -> string, needle -> string) -> number {
     if needle.length == 0 {
         return 0;
@@ -88,29 +113,4 @@ fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
     out.push("");
     out.push(decl);
     return out;
-}
-
-test "aot_prepare: injects round declare" {
-    let lines = [
-        "source_filename = \"m1.ll\"",
-        "",
-        "define double @foo(double %x) {",
-        "entry:",
-        "  %y = call double @round(double %x)",
-        "  ret double %y",
-        "}",
-    ];
-
-    let out = ensure_intrinsic_declarations(lines);
-
-    let decl = "declare double @round(double)";
-    let mut saw_decl -> boolean = false;
-    for line in out {
-        if line == decl {
-            saw_decl = true;
-        }
-    }
-    if !saw_decl {
-        runtime_raise_value_error_fn("missing round decl");
-    }
 }

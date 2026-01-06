@@ -10,7 +10,7 @@ This document tracks what works today and what is in progress.
 - Stage1 Python lowering no longer blocks compilation on heuristic fallback checks; diagnostics still surface.
 - CI uses the Stage2 build/release workflows (`.github/workflows/build.yml`, `.github/workflows/release.yml`); Stage1 release workflow has been retired.
 - Stage2 self-hosted tests live in `compiler/tests/{unit,integration,e2e}` and run via `sailfin-stage2 test` (`make test-unit`, `make test-integration`, `make test-e2e`).
-- LLVM lowering emits module `let` bindings as `internal global` to avoid cross-module symbol collisions during native AOT linking (part of the ongoing work to retire the `aot-prepare` text rewrite step).
+- Native AOT builds do not rely on any `aot-prepare` text rewrite step; stage2 emits link-safe LLVM IR directly.
 
 ## Runtime (Current)
 

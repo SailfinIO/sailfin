@@ -3,7 +3,6 @@ from runtime import runtime_support as runtime
 
 from compiler.build.main import compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_tests_to_llvm_with_module, compile_to_sailfin, number_to_string, module_name_from_path
 from compiler.build.main import compile_to_native_text
-from compiler.build.aot_prepare import _aot_apply_symbol_renames_lines, _aot_find_defined_functions_fast, _aot_find_defined_globals_fast, _aot_number_to_string, _aot_replace, _aot_sanitize_module_suffix, _aot_split_lines, _aot_bucket_set_contains, _aot_bucket_set_insert, _aot_bucket_set_make
 from compiler.build.native_ir import split_lines
 from compiler.build.version import sailfin_stage2_version
 
@@ -37,7 +36,7 @@ class _RelativeImportSpan:
         return runtime.struct_repr('_RelativeImportSpan', [runtime.struct_field('start', self.start), runtime.struct_field('end', self.end), runtime.struct_field('spec', self.spec)])
 
 def _usage():
-    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit llvm|sailfin|native <file.sfn>\n" + "  sfn emit-llvm-file <file.sfn> <out.ll>\n" + "  sfn aot-prepare-dir <modules.txt> <raw-dir> <out-dir>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n"
+    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit llvm|sailfin|native <file.sfn>\n" + "  sfn emit-llvm-file <file.sfn> <out.ll>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n"
 
 def _ends_with(value, suffix):
     if len(suffix) == 0:
@@ -736,99 +735,6 @@ def sailfin_cli_main(argv):
         module_name = module_name_from_path(path)
         lines = compile_to_llvm_lines_with_module(source, module_name)
         _write_lines(out_path, lines)
-        return 0
-    if cmd == "aot-prepare-dir":
-        if len(args) != 4:
-            print.error(_usage())
-            return 2
-        modules_path = args[1]
-        raw_dir = args[2]
-        out_dir = args[3]
-        if not fs.exists(modules_path):
-            print.error("file not found: " + modules_path)
-            return 1
-        if not fs.exists(raw_dir):
-            print.error("directory not found: " + raw_dir)
-            return 1
-        module_names = _read_non_empty_lines(modules_path)
-        if len(module_names) == 0:
-            print.error("no module names found: " + modules_path)
-            return 1
-        _ensure_dir(out_dir)
-        seen_functions = _aot_bucket_set_make()
-        seen_globals = _aot_bucket_set_make()
-        out_index = 0
-        while True:
-            if out_index >= len(module_names):
-                break
-            name = module_names[out_index]
-            if out_index % 5 == 0:
-                print.info("aot-prepare-dir: rewriting " + number_to_string(out_index + 1) + "/" + number_to_string(len(module_names)) + "...")
-            ll_path = _path_join(raw_dir, name + ".ll")
-            if not fs.exists(ll_path):
-                print.error("file not found: " + ll_path)
-                return 1
-            ir = fs.readFile(ll_path)
-            if name == "main":
-                ir = _aot_replace(ir, "@main(", "@stage2_compiler_main(")
-            lines = _aot_split_lines(ir)
-            defined_functions = _aot_find_defined_functions_fast(ir)
-            defined_globals = _aot_find_defined_globals_fast(ir)
-            safe_module_name = _aot_sanitize_module_suffix(name)
-            rename_old = []
-            rename_new = []
-            fi = 0
-            while True:
-                if fi >= len(defined_functions):
-                    break
-                fname = defined_functions[fi]
-                if not _aot_bucket_set_contains(seen_functions, fname):
-                    seen_functions = _aot_bucket_set_insert(seen_functions, fname)
-                    fi += 1
-                    continue
-                counter = 1
-                candidate = ""
-                while True:
-                    suffix = safe_module_name
-                    if counter != 1:
-                        suffix = safe_module_name + "_" + _aot_number_to_string(counter)
-                    candidate = fname + "__" + suffix
-                    if not _aot_bucket_set_contains(seen_functions, candidate):
-                        break
-                    counter += 1
-                seen_functions = _aot_bucket_set_insert(seen_functions, candidate)
-                rename_old.append(fname)
-                rename_new.append(candidate)
-                fi += 1
-            gi = 0
-            while True:
-                if gi >= len(defined_globals):
-                    break
-                gname = defined_globals[gi]
-                if not _aot_bucket_set_contains(seen_globals, gname):
-                    seen_globals = _aot_bucket_set_insert(seen_globals, gname)
-                    gi += 1
-                    continue
-                counter = 1
-                candidate = ""
-                while True:
-                    suffix = safe_module_name
-                    if counter != 1:
-                        suffix = safe_module_name + "_" + _aot_number_to_string(counter)
-                    candidate = gname + "__" + suffix
-                    if not _aot_bucket_set_contains(seen_globals, candidate):
-                        break
-                    counter += 1
-                seen_globals = _aot_bucket_set_insert(seen_globals, candidate)
-                rename_old.append(gname)
-                rename_new.append(candidate)
-                gi += 1
-            if len(rename_old) > 0:
-                lines = _aot_apply_symbol_renames_lines(lines, rename_old, rename_new)
-            out_ll = _path_join(out_dir, name + ".ll")
-            _write_lines(out_ll, lines)
-            out_index += 1
-        _write_text(_path_join(out_dir, "modules.txt"), fs.readFile(modules_path))
         return 0
     if cmd == "build":
         out_path = ""
