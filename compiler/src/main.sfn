@@ -560,6 +560,83 @@ fn compile_to_native_llvm_with_context_with_module(source -> string, module_name
     };
 }
 
+fn compile_to_native_llvm_with_context_with_module_and_entry_points(
+    source -> string,
+    module_name -> string,
+    manifest_contents -> string[],
+    native_artifacts -> string[],
+    entry_points -> string[]
+) -> LoweredLLVMResult ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        let messages = format_typecheck_diagnostics(analysis_result.diagnostics, source);
+        return LoweredLLVMResult {
+            ir: "",
+            diagnostics: messages,
+            trait_metadata: null,
+            function_effects: null,
+            lifetime_regions: null,
+            capability_manifest: null,
+            string_constants: null,
+        };
+    }
+
+    let native_result = emit_native_with_module_name(program, module_name);
+    let overridden_module = NativeModule {
+        module_name: native_result.module.module_name,
+        artifacts: native_result.module.artifacts,
+        entry_points: entry_points,
+        symbol_count: native_result.module.symbol_count,
+    };
+
+    let mut manifests -> LayoutManifest[] = [];
+    let mut manifest_index -> number = 0;
+    loop {
+        if manifest_index >= manifest_contents.length {
+            break;
+        }
+        let manifest_text = manifest_contents[manifest_index];
+        if manifest_text.length == 0 {
+            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+        } else {
+            let parsed = parse_layout_manifest(manifest_text);
+            manifests = manifests.concat([LayoutManifest {
+                structs: parsed.structs,
+                enums: parsed.enums,
+                diagnostics: [],
+            }]);
+        }
+        manifest_index += 1;
+    }
+
+    let lowered = lower_to_llvm_with_context(overridden_module, manifests, native_artifacts, []);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+
+    return LoweredLLVMResult {
+        ir: lowered.ir,
+        diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
+    };
+}
+
 // Backwards-compatible shim that only supplies layout manifests
 fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> string[]) -> LoweredLLVMResult ![io] {
     return compile_to_native_llvm_with_context(source, manifest_contents, []);

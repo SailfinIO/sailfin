@@ -6,8 +6,10 @@ from ...string_utils import substring
 from ..types import TypeContext, LocalBinding, ParameterBinding, LLVMOperand, BlockLoweringResult, LetLoweringResult, LoopContext, LifetimeRegionMetadata, LifetimeReleaseEvent, OwnershipInfo, OwnershipConsumption, ScopeMetadata, LocalMutation, StringConstant, IfStructure, TryStructure, LoopStructure, MatchStructure, MatchCaseStructure, MatchCaseCondition, MatchFieldBinding, MatchStructFieldBinding, EnumTypeInfo, EnumVariantInfo, StructTypeInfo, StructFieldInfo, ConditionConversion, BlockLabelResult, MatchArmMutations
 from ..utils import trim_text, append_string, extend_string_array, number_to_string, index_of, starts_with, strip_mut_prefix, is_simple_identifier, merge_parameter_bindings
 from ..strings import empty_string_constant_set, merge_string_constants
-from ..type_context import find_struct_info_by_name, find_interface_info_by_name, find_enum_info_by_llvm_type, resolve_enum_info_for_literal, resolve_enum_variant_info
-from ..expression_lowering_stage2.core import lower_expression, analyze_value_ownership, detect_borrow_conflicts
+from ..type_context import find_struct_info_by_name, find_interface_info_by_name, find_enum_info_by_llvm_type, resolve_enum_info_for_literal, resolve_enum_variant_info, find_struct_info_by_llvm_type, find_vtable_for_struct_interface
+from ..type_mapping import ends_with_pointer_suffix, strip_pointer_suffix, layout_annotation_represents_user_value, map_struct_field_annotation
+from ..expressions import is_number_literal, normalise_number_literal
+from ..expression_lowering_stage2.core import lower_expression, analyze_value_ownership, detect_borrow_conflicts, append_match_arm_mutations
 from ..expression_lowering_stage2.core_operands import coerce_operand_to_type, emit_boolean_and, emit_comparison_instruction, harmonise_operands, load_local_operand
 from ..expression_lowering_stage2.core_scopes import append_local_binding
 from ..expression_lowering_stage2.core_parse import parse_enum_literal, parse_range_iterable, parse_struct_pattern

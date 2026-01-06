@@ -179,6 +179,8 @@ def _stage1_lowering_module():
 
 
 def _stage1_aot_prepare_module():
+    """Deprecated: stage2 bootstrap no longer uses aot-prepare rewriting."""
+
     global _STAGE1_AOT_PREPARE
     if _STAGE1_AOT_PREPARE is None:
         _STAGE1_AOT_PREPARE = importlib.import_module(
@@ -192,14 +194,11 @@ def prepare_stage2_aot_modules(
     output_dir: pathlib.Path,
     debug: bool = False,
 ) -> pathlib.Path:
-    """Rewrite stage2 *.ll modules into an AOT-safe, collision-free set.
+    """Prepare stage2 *.ll modules for the native AOT build.
 
-    Uses the stage1-generated implementation from compiler/src/aot_prepare.sfn.
-    Writes rewritten IR modules to build/stage2/aot and returns that directory.
-
-    Module names now preserve directory structure (e.g., "llvm/expressions" instead of
-    just "expressions") to avoid collisions between modules with the same filename
-    in different directories.
+    NOTE: This no longer runs the `aot_prepare` text rewrite step. Instead, the
+    bootstrap populates `build/stage2/aot/` as a stable directory layout
+    containing the raw, compiler-emitted IR.
     """
 
     aot_dir = output_dir / "aot"
@@ -209,7 +208,7 @@ def prepare_stage2_aot_modules(
     module_names = [_module_name_from_path(
         p, output_dir) for p in module_paths]
 
-    # Fast path: skip AOT rewriting if inputs are unchanged.
+    # Fast path: skip copying if inputs are unchanged.
     manifest_path = aot_dir / ".aot-prepare-manifest.json"
     input_hashes: Dict[str, str] = {}
     for path, name in zip(module_paths, module_names):
@@ -227,7 +226,7 @@ def prepare_stage2_aot_modules(
             cached = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception:
             cached = None
-        if isinstance(cached, dict) and cached.get("version") == "aot-prepare-v3":
+        if isinstance(cached, dict) and cached.get("version") == "aot-prepare-disabled-v1":
             cached_names = cached.get("module_names")
             cached_hashes = cached.get("input_hashes")
             if cached_names == module_names and cached_hashes == input_hashes:
@@ -237,27 +236,28 @@ def prepare_stage2_aot_modules(
                         f"[stage2-bootstrap] reused AOT-rewritten modules in {rel}")
                 return aot_dir
 
-    module_texts = [p.read_text(encoding="utf-8") for p in module_paths]
+    for name, source_path in zip(module_names, module_paths):
+        # Preserve directory structure under `aot/`.
+        target = aot_dir / f"{name}.ll"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if target.exists():
+                target.unlink()
+        except FileNotFoundError:
+            pass
 
-    aot_prepare = _stage1_aot_prepare_module()
-    rewritten = aot_prepare.prepare_stage2_aot_modules(
-        module_names, module_texts)
-    if len(rewritten) != len(module_names):
-        raise Stage2BootstrapError(
-            "stage1 aot_prepare returned unexpected module count: "
-            f"{len(rewritten)} (expected {len(module_names)})"
-        )
-
-    for name, ir in zip(module_names, rewritten):
-        # _atomic_write_text handles creating subdirectories
-        _atomic_write_text(aot_dir / f"{name}.ll", ir)
+        # Prefer hardlinks (cheap) but fall back to copying.
+        try:
+            os.link(source_path, target)
+        except OSError:
+            target.write_bytes(source_path.read_bytes())
 
     _atomic_write_text(aot_dir / "modules.txt", "\n".join(module_names) + "\n")
     _atomic_write_text(
         manifest_path,
         json.dumps(
             {
-                "version": "aot-prepare-v3",
+                "version": "aot-prepare-disabled-v1",
                 "module_names": module_names,
                 "input_hashes": input_hashes,
             },
@@ -555,6 +555,86 @@ def extract_import_paths(source: str) -> List[str]:
     return import_paths
 
 
+def extract_import_specifiers(source: str) -> List[Tuple[str, List[str]]]:
+    """Extract imported symbol names per import path.
+
+    Returns tuples of (import_path, exported_symbol_names).
+
+    Example:
+      import { foo, bar as baz } from "./utils";
+    yields:
+      [("./utils", ["foo", "bar"])].
+
+    This intentionally ignores namespace/star imports for now.
+    """
+
+    def _extract_from_stmt(stmt: str) -> Tuple[str | None, List[str]]:
+        marker = " from "
+        pos = stmt.rfind(marker)
+        if pos < 0:
+            return None, []
+        before = stmt[:pos]
+        after = stmt[pos + len(marker):]
+        after = after.strip().rstrip(";").strip()
+        if not after:
+            return None, []
+        quote = after[0]
+        if quote not in ('"', "'"):
+            return None, []
+        end = after.find(quote, 1)
+        if end < 0:
+            return None, []
+        import_path = after[1:end]
+
+        if "{" not in before or "}" not in before:
+            return import_path, []
+        inside = before.split("{", 1)[1].rsplit("}", 1)[0]
+        names: List[str] = []
+        for raw in inside.split(","):
+            part = raw.strip()
+            if not part:
+                continue
+            # "foo as bar" -> needs symbol "foo" from provider
+            if " as " in part:
+                part = part.split(" as ", 1)[0].strip()
+            # Ignore wildcard-ish entries if they appear.
+            if part == "*":
+                continue
+            names.append(part)
+        return import_path, names
+
+    results: List[Tuple[str, List[str]]] = []
+    current: List[str] = []
+    collecting = False
+
+    def _starts_import(line: str) -> bool:
+        return line.lstrip().startswith("import ")
+
+    for raw_line in source.splitlines():
+        line = raw_line.strip()
+        if not collecting:
+            if _starts_import(line):
+                collecting = True
+                current = [line]
+                if ";" in line:
+                    collecting = False
+                    stmt = " ".join(current)
+                    path, names = _extract_from_stmt(stmt)
+                    if path:
+                        results.append((path, names))
+            continue
+
+        current.append(line)
+        if ";" in line:
+            collecting = False
+            stmt = " ".join(current)
+            path, names = _extract_from_stmt(stmt)
+            if path:
+                results.append((path, names))
+
+    return results
+
+
 def _import_basename(import_path: str) -> str:
     if import_path.startswith("./"):
         return import_path[2:]
@@ -809,6 +889,8 @@ def compile_compiler_to_stage2(
     has_context = hasattr(stage1_main, "compile_to_native_llvm_with_context")
     has_context_with_module = hasattr(
         stage1_main, "compile_to_native_llvm_with_context_with_module")
+    has_context_with_module_entrypoints = hasattr(
+        stage1_main, "compile_to_native_llvm_with_context_with_module_and_entry_points")
     has_module_entry = hasattr(
         stage1_main, "compile_to_native_llvm_with_module")
 
@@ -838,6 +920,7 @@ def compile_compiler_to_stage2(
 
     source_cache: Dict[pathlib.Path, str] = {}
     import_cache: Dict[pathlib.Path, List[str]] = {}
+    import_spec_cache: Dict[pathlib.Path, List[Tuple[str, List[str]]]] = {}
     first_pass_results: Dict[pathlib.Path, Any] = {}
 
     # --- Incremental planning -------------------------------------------------
@@ -879,6 +962,8 @@ def compile_compiler_to_stage2(
         p: _module_slug_for_source(p) for p in all_sources
     }
 
+    exports_needed_by_slug: Dict[str, Set[str]] = defaultdict(set)
+
     # Read sources once up-front and compute import graph.
     source_hash: Dict[pathlib.Path, str] = {}
     for source_path in all_sources:
@@ -886,6 +971,8 @@ def compile_compiler_to_stage2(
         source_cache[source_path] = source
         imports = extract_import_paths(source)
         import_cache[source_path] = imports
+        import_specifiers = extract_import_specifiers(source)
+        import_spec_cache[source_path] = import_specifiers
         source_hash[source_path] = _sha256_text(source)
         current_slug = module_slug_cache.get(source_path, "")
         for import_path in imports:
@@ -899,6 +986,28 @@ def compile_compiler_to_stage2(
                 )
             if provider is not None:
                 dependents[provider].add(source_path)
+
+        # Track which symbols each imported module must export so link-time
+        # internalization doesn't hide cross-module calls.
+        for import_path, names in import_specifiers:
+            resolved_slug = _resolve_import_slug(
+                import_path, current_module_slug=current_slug)
+            if not resolved_slug:
+                continue
+
+            provider = providers_by_slug.get(resolved_slug)
+            if provider is None and not resolved_slug.endswith("/mod"):
+                provider = providers_by_slug.get(resolved_slug + "/mod")
+            if provider is None:
+                provider = _resolve_import_provider(
+                    import_path, providers_by_name=providers_by_name
+                )
+            if provider is None:
+                continue
+
+            provider_slug = module_slug_cache.get(provider, resolved_slug)
+            for name in names:
+                exports_needed_by_slug[provider_slug].add(name)
 
     # Determine which outputs must exist for a module to be considered reusable.
     def _required_outputs_for(source_path: pathlib.Path) -> List[pathlib.Path]:
@@ -1093,7 +1202,7 @@ def compile_compiler_to_stage2(
             start = time.perf_counter() if progress else None
 
             import_contexts: List[Tuple[str, str]] = []
-            if has_manifest:
+            if has_context or has_manifest:
                 current_slug = module_slug_cache.get(source_path, "")
                 for import_path in import_paths:
                     manifest_content = load_manifest_for_import(
@@ -1120,10 +1229,23 @@ def compile_compiler_to_stage2(
                 cached_result, "native_module", None) if has_full else None
             native_module = None
 
-            if has_context and import_contexts and (any(ctx[0] for ctx in import_contexts) or any(ctx[1] for ctx in import_contexts)):
+            if has_context:
                 manifests_payload = [ctx[0] for ctx in import_contexts]
                 native_payload = [ctx[1] for ctx in import_contexts]
-                if has_context_with_module:
+                if has_context_with_module and has_context_with_module_entrypoints:
+                    # Entry points here are the set of symbols that must remain
+                    # externally visible for cross-module linking.
+                    entry_points = sorted(
+                        exports_needed_by_slug.get(module_slug, set()))
+                    # Keep the native stage2 driver ABI visible.
+                    entry_points.extend([
+                        "stage2_cli_main",
+                        "compile_to_sailfin",
+                        "compile_to_llvm",
+                    ])
+                    result = stage1_main.compile_to_native_llvm_with_context_with_module_and_entry_points(
+                        source, module_slug, manifests_payload, native_payload, entry_points)
+                elif has_context_with_module:
                     result = stage1_main.compile_to_native_llvm_with_context_with_module(
                         source, module_slug, manifests_payload, native_payload)
                 else:

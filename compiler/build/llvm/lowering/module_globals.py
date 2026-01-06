@@ -77,7 +77,7 @@ def lower_module_bindings_to_globals(bindings, context, module_name):
             diagnostics = append_string(diagnostics, "llvm lowering: module binding `" + name + "` has unsupported type annotation `" + effective_type_annotation + "`")
             llvm_type = "double"
         if llvm_type == "i8*":
-            preamble_lines = append_string(preamble_lines, global_name + " = global i8* null")
+            preamble_lines = append_string(preamble_lines, global_name + " = internal global i8* null")
             if binding.value != None:
                 needs_init = True
         else:
@@ -99,7 +99,7 @@ def lower_module_bindings_to_globals(bindings, context, module_name):
                                     initializer_text = "1"
                             else:
                                 needs_init = True
-            preamble_lines = append_string(preamble_lines, global_name + " = global " + llvm_type + " " + initializer_text)
+            preamble_lines = append_string(preamble_lines, global_name + " = internal global " + llvm_type + " " + initializer_text)
         locals = append_local_binding(locals, LocalBinding(name=name, pointer=global_name, llvm_type=llvm_type, type_annotation=effective_type_annotation, ownership=None, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
         index += 1
     if not needs_init:

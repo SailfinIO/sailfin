@@ -7,7 +7,8 @@ This is the self-host check CI ultimately needs:
 - Compile the full stage2 module set (compiler + runtime Sailfin sources) to
     separate LLVM modules.
 - Apply AOT preparation (symbol deconfliction) so the modules can be linked
-    together.
+- Does not run `aot-prepare-dir`. The selfhost pipeline is expected to produce
+    link-safe IR without text rewriting.
 - Compile/link a fresh native `sailfin-stage2`.
 
 This does NOT import stage1-generated Python compiler artifacts and does NOT run
@@ -543,6 +544,64 @@ def main(argv: list[str]) -> int:
 
                     clang_validation_failures += 1
 
+                    # `emit-llvm-file` has historically produced malformed output
+                    # for some large modules. If validation fails and we used
+                    # `emit-llvm-file`, retry once in this attempt using the
+                    # streaming `emit llvm` path.
+                    if use_emit_llvm_file:
+                        with attempt_path.open("wb") as out:
+                            try:
+                                t0 = time.perf_counter()
+                                proc = subprocess.run(
+                                    [str(seed_bin), "emit",
+                                     "llvm", str(source_path)],
+                                    cwd=str(REPO_ROOT),
+                                    stdout=out,
+                                    stderr=subprocess.PIPE,
+                                    close_fds=False,
+                                    env=seed_env,
+                                    timeout=seed_timeout,
+                                )
+                                seed_emit_s += time.perf_counter() - t0
+                            except subprocess.TimeoutExpired as exc:
+                                last_rc = 124
+                                seed_timeouts += 1
+                                last_stderr = (exc.stderr or b"").decode(
+                                    "utf-8", errors="replace")
+                                continue
+
+                        last_rc = proc.returncode
+                        last_stderr = proc.stderr.decode(
+                            "utf-8", errors="replace")
+                        if proc.returncode != 0:
+                            seed_failures += 1
+                            continue
+
+                        raw = attempt_path.read_text(
+                            encoding="utf-8", errors="replace")
+                        candidate = _strip_stage2_log_prefixes(raw)
+                        if _looks_like_llvm_module(candidate):
+                            cleaned_attempt_path.write_text(
+                                candidate, encoding="utf-8")
+                            clang_validations += 1
+                            t0 = time.perf_counter()
+                            clang_proc = subprocess.run(
+                                [clang, *clang_flags, "-fPIC", "-c",
+                                 str(cleaned_attempt_path), "-o", str(validate_obj)],
+                                cwd=str(REPO_ROOT),
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                timeout=clang_validate_timeout,
+                            )
+                            clang_validate_s += time.perf_counter() - t0
+                            clang_stderr_path.write_text(
+                                clang_proc.stderr or "", encoding="utf-8")
+
+                            if clang_proc.returncode == 0:
+                                cleaned = candidate
+                                break
+
                 if args.attempt_sleep > 0:
                     time.sleep(args.attempt_sleep)
 
@@ -571,40 +630,6 @@ def main(argv: list[str]) -> int:
         modules_path.write_text(
             "\n".join(module_names) + "\n", encoding="utf-8")
 
-        if not _seed_supports_aot_prepare_dir(seed_bin):
-            raise SystemExit(
-                "selfhost: seed compiler does not support 'aot-prepare-dir'. "
-                "Rebuild the seed stage2 (e.g. `make compile`) and retry."
-            )
-
-        t0 = time.perf_counter()
-        aot_timeout = _remaining_budget_seconds(
-            total_start=t_total_start,
-            max_total_seconds=float(args.max_total_seconds),
-        )
-        if aot_timeout is not None and aot_timeout <= 0:
-            raise SystemExit(
-                "selfhost: exceeded wall-clock budget before aot-prepare-dir")
-        try:
-            subprocess.run(
-                [
-                    str(seed_bin),
-                    "aot-prepare-dir",
-                    str(modules_path),
-                    str(raw_dir),
-                    str(aot_dir),
-                ],
-                cwd=str(REPO_ROOT),
-                check=True,
-                timeout=aot_timeout,
-            )
-        except subprocess.TimeoutExpired:
-            raise SystemExit(
-                f"selfhost: aot-prepare-dir timed out after {aot_timeout:.2f}s "
-                "(increase --max-total-seconds or investigate aot-prepare performance)"
-            )
-        aot_prepare_s += time.perf_counter() - t0
-
         runtime_c = REPO_ROOT / "runtime/native/src/sailfin_runtime.c"
         driver_c = REPO_ROOT / "runtime/native/src/stage2_driver.c"
         globals_ll = REPO_ROOT / "runtime/native/ir/runtime_globals.ll"
@@ -614,56 +639,62 @@ def main(argv: list[str]) -> int:
         driver_o = obj_dir / "stage2_driver.o"
         globals_o = obj_dir / "runtime_globals.o"
 
-        aot_objects: list[pathlib.Path] = []
+        def _compile_objects_and_link(*, ll_dir: pathlib.Path) -> None:
+            nonlocal clang_compile_s, clang_link_s
+            aot_objects: list[pathlib.Path] = []
 
-        t0 = time.perf_counter()
-        _run([clang, *clang_flags, "-I", str(include_dir), "-c",
-             str(runtime_c), "-o", str(runtime_o)], cwd=REPO_ROOT)
-        clang_compile_s += time.perf_counter() - t0
-        t0 = time.perf_counter()
-        _run([clang, *clang_flags, "-I", str(include_dir), "-c",
-             str(driver_c), "-o", str(driver_o)], cwd=REPO_ROOT)
-        clang_compile_s += time.perf_counter() - t0
-        t0 = time.perf_counter()
-        _run([clang, *clang_flags, "-c", str(globals_ll),
-             "-o", str(globals_o)], cwd=REPO_ROOT)
-        clang_compile_s += time.perf_counter() - t0
-
-        for name in module_names:
-            _check_budget()
-            ll_path = aot_dir / f"{name}.ll"
-            out_o = obj_dir / f"{name}.o"
-            out_o.parent.mkdir(parents=True, exist_ok=True)
             t0 = time.perf_counter()
-            _run([clang, *clang_flags, "-fPIC", "-c",
-                 str(ll_path), "-o", str(out_o)], cwd=REPO_ROOT)
+            _run([clang, *clang_flags, "-I", str(include_dir), "-c",
+                 str(runtime_c), "-o", str(runtime_o)], cwd=REPO_ROOT)
             clang_compile_s += time.perf_counter() - t0
-            aot_objects.append(out_o)
+            t0 = time.perf_counter()
+            _run([clang, *clang_flags, "-I", str(include_dir), "-c",
+                 str(driver_c), "-o", str(driver_o)], cwd=REPO_ROOT)
+            clang_compile_s += time.perf_counter() - t0
+            t0 = time.perf_counter()
+            _run([clang, *clang_flags, "-c", str(globals_ll),
+                 "-o", str(globals_o)], cwd=REPO_ROOT)
+            clang_compile_s += time.perf_counter() - t0
 
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        if out_path.exists():
-            out_path.unlink()
+            for name in module_names:
+                _check_budget()
+                ll_path = ll_dir / f"{name}.ll"
+                out_o = obj_dir / f"{name}.o"
+                out_o.parent.mkdir(parents=True, exist_ok=True)
+                t0 = time.perf_counter()
+                _run([clang, *clang_flags, "-fPIC", "-c",
+                     str(ll_path), "-o", str(out_o)], cwd=REPO_ROOT)
+                clang_compile_s += time.perf_counter() - t0
+                aot_objects.append(out_o)
 
-        link_extra: list[str] = []
-        if args.deterministic_link:
-            link_extra.extend(_deterministic_link_flags())
-        link_extra.extend(_platform_link_libs())
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            if out_path.exists():
+                out_path.unlink()
 
-        link_cmd = [
-            clang,
-            *clang_flags,
-            "-o",
-            str(out_path),
-            str(runtime_o),
-            str(driver_o),
-            str(globals_o),
-            *[str(p) for p in aot_objects],
-            *link_extra,
-        ]
+            link_extra: list[str] = []
+            if args.deterministic_link:
+                link_extra.extend(_deterministic_link_flags())
+            link_extra.extend(_platform_link_libs())
 
-        t0 = time.perf_counter()
-        _run(link_cmd, cwd=REPO_ROOT)
-        clang_link_s += time.perf_counter() - t0
+            link_cmd = [
+                clang,
+                *clang_flags,
+                "-o",
+                str(out_path),
+                str(runtime_o),
+                str(driver_o),
+                str(globals_o),
+                *[str(p) for p in aot_objects],
+                *link_extra,
+            ]
+
+            t0 = time.perf_counter()
+            _run(link_cmd, cwd=REPO_ROOT)
+            clang_link_s += time.perf_counter() - t0
+
+        # Compile/link directly from the raw IR modules.
+        used_ir_dir = raw_dir
+        _compile_objects_and_link(ll_dir=used_ir_dir)
 
         print(f"[selfhost] ({pass_name}) timing summary:", flush=True)
         print(
@@ -680,7 +711,7 @@ def main(argv: list[str]) -> int:
         print(f"[selfhost] aot prepare: {aot_prepare_s:.2f}s", flush=True)
         print(f"[selfhost] clang compile: {clang_compile_s:.2f}s", flush=True)
         print(f"[selfhost] clang link: {clang_link_s:.2f}s", flush=True)
-        return aot_dir, module_names
+        return used_ir_dir, module_names
 
     out_path1 = args.out
     aot_dir1, module_names1 = _build_once(

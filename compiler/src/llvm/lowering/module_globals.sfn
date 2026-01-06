@@ -116,7 +116,7 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
         }
 
         if llvm_type == "i8*" {
-            preamble_lines = append_string(preamble_lines, global_name + " = global i8* null");
+            preamble_lines = append_string(preamble_lines, global_name + " = internal global i8* null");
             if binding.value != null {
                 needs_init = true;
             }
@@ -139,7 +139,7 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
                     needs_init = true;
                 }
             }
-            preamble_lines = append_string(preamble_lines, global_name + " = global " + llvm_type + " " + initializer_text);
+            preamble_lines = append_string(preamble_lines, global_name + " = internal global " + llvm_type + " " + initializer_text);
         }
 
         locals = append_local_binding(locals, LocalBinding {
