@@ -100,6 +100,37 @@ fn empty_trait_metadata() -> TraitMetadata {
     return TraitMetadata { interfaces: [], implementations: [] };
 }
 
+fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug -> string) -> string[] {
+    let mut lines -> string[] = [];
+    lines = lines.concat([
+        "define i32 @main(i32 %argc, i8** %argv) {",
+        "entry:",
+    ]);
+
+    let should_mangle = !starts_with(module_slug, "runtime/");
+    let module_suffix = sanitize_module_suffix(module_slug);
+
+    let mut index -> number = 0;
+    loop {
+        if index >= tests.length {
+            break;
+        }
+        let mut sym = sanitize_symbol(tests[index].name);
+        if should_mangle {
+            if index_of(sym, "__") < 0 {
+                sym = sym + "__" + module_suffix;
+            }
+        }
+        lines = append_string(lines, "  call void @" + sym + "()");
+        index += 1;
+    }
+    lines = lines.concat([
+        "  ret i32 0",
+        "}",
+    ]);
+    return lines;
+}
+
 struct MangledModuleResult {
     lines -> string[];
     diagnostics -> string[];
@@ -864,7 +895,7 @@ fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_
         return updated;
     }
 
-    let harness = render_test_harness_main(tests);
+    let harness = render_test_harness_main_for_module(tests, native_module.module_name);
     let mut updated = base;
     if updated.ir.length > 0 {
         updated.ir = updated.ir + "\n";

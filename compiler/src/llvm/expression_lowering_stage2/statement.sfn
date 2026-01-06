@@ -76,8 +76,7 @@ import { runtime_helper_descriptors, find_runtime_helper, append_runtime_helper 
 
 // Import type mapping
 import {
-    map_type_annotation, map_return_type, map_parameter_type, map_local_type,
-    map_struct_type_annotation, map_struct_field_annotation, unwrap_move_wrapper,
+    map_type_annotation, map_struct_field_annotation,
     ends_with_pointer_suffix, strip_pointer_suffix,
     layout_annotation_requires_pointer, layout_annotation_base_type,
     annotation_is_array, layout_annotation_represents_user_value,

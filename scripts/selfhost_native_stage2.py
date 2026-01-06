@@ -6,9 +6,8 @@ This is the self-host check CI ultimately needs:
 - Start from a *seed* native `sailfin-stage2` binary.
 - Compile the full stage2 module set (compiler + runtime Sailfin sources) to
     separate LLVM modules.
-- Apply AOT preparation (symbol deconfliction) so the modules can be linked
-- Does not run `aot-prepare-dir`. The selfhost pipeline is expected to produce
-    link-safe IR without text rewriting.
+- The selfhost pipeline is expected to produce link-safe IR without text rewriting
+    (no `aot-prepare-dir`).
 - Compile/link a fresh native `sailfin-stage2`.
 
 This does NOT import stage1-generated Python compiler artifacts and does NOT run

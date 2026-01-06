@@ -1,5 +1,3 @@
-import { ensure_intrinsic_declarations } from "../../src/llvm/lowering/entrypoints";
-
 fn _index_of(haystack -> string, needle -> string) -> number {
     if needle.length == 0 {
         return 0;
@@ -34,6 +32,62 @@ fn _index_of(haystack -> string, needle -> string) -> number {
 
 fn _contains(haystack -> string, needle -> string) -> boolean {
     return _index_of(haystack, needle) >= 0;
+}
+
+fn _trim(value -> string) -> string {
+    if value.length == 0 {
+        return value;
+    }
+    let mut start -> number = 0;
+    loop {
+        if start >= value.length {
+            break;
+        }
+        let ch = value[start];
+        if ch != " " && ch != "\t" && ch != "\n" && ch != "\r" {
+            break;
+        }
+        start += 1;
+    }
+    let mut end -> number = value.length;
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if ch != " " && ch != "\t" && ch != "\n" && ch != "\r" {
+            break;
+        }
+        end -= 1;
+    }
+    if start == 0 && end == value.length {
+        return value;
+    }
+    return value[start:end];
+}
+
+fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
+    let mut uses_round -> boolean = false;
+    let mut has_round_decl -> boolean = false;
+    let decl = "declare double @round(double)";
+
+    for line in lines {
+        if _contains(line, "call double @round(") {
+            uses_round = true;
+        }
+        if _trim(line) == decl {
+            has_round_decl = true;
+        }
+    }
+
+    if !uses_round || has_round_decl {
+        return lines;
+    }
+
+    let mut out = lines;
+    out.push("");
+    out.push(decl);
+    return out;
 }
 
 test "aot_prepare: injects round declare" {
