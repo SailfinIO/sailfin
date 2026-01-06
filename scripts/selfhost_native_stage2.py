@@ -43,14 +43,21 @@ def _platform_link_libs() -> list[str]:
     return []
 
 
-def _run(cmd: list[str], *, cwd: pathlib.Path, stdout_path: pathlib.Path | None = None) -> None:
+def _run(
+    cmd: list[str],
+    *,
+    cwd: pathlib.Path,
+    stdout_path: pathlib.Path | None = None,
+    timeout: float | None = None,
+) -> None:
     if stdout_path is None:
-        subprocess.run(cmd, cwd=str(cwd), check=True)
+        subprocess.run(cmd, cwd=str(cwd), check=True, timeout=timeout)
         return
 
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     with stdout_path.open("wb") as f:
-        subprocess.run(cmd, cwd=str(cwd), check=True, stdout=f)
+        subprocess.run(cmd, cwd=str(cwd), check=True,
+                       stdout=f, timeout=timeout)
 
 
 def _remaining_budget_seconds(*, total_start: float, max_total_seconds: float) -> float | None:
@@ -69,6 +76,7 @@ def _seed_supports_emit_llvm_file(seed: pathlib.Path) -> bool:
         cwd=str(REPO_ROOT),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
+        timeout=10,
     )
     stderr = proc.stderr.decode("utf-8", errors="replace")
     # When the command exists, stage2 prints usage for missing args.
@@ -633,16 +641,37 @@ def main(argv: list[str]) -> int:
             prelude_obj: pathlib.Path | None = None
 
             t0 = time.perf_counter()
-            _run([clang, *clang_flags, "-I", str(include_dir), "-c",
-                 str(runtime_c), "-o", str(runtime_o)], cwd=REPO_ROOT)
+            _run(
+                [clang, *clang_flags, "-I",
+                    str(include_dir), "-c", str(runtime_c), "-o", str(runtime_o)],
+                cwd=REPO_ROOT,
+                timeout=_remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                if args.max_total_seconds > 0
+                else None,
+            )
             clang_compile_s += time.perf_counter() - t0
             t0 = time.perf_counter()
-            _run([clang, *clang_flags, "-I", str(include_dir), "-c",
-                 str(driver_c), "-o", str(driver_o)], cwd=REPO_ROOT)
+            _run(
+                [clang, *clang_flags, "-I",
+                    str(include_dir), "-c", str(driver_c), "-o", str(driver_o)],
+                cwd=REPO_ROOT,
+                timeout=_remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                if args.max_total_seconds > 0
+                else None,
+            )
             clang_compile_s += time.perf_counter() - t0
             t0 = time.perf_counter()
-            _run([clang, *clang_flags, "-c", str(globals_ll),
-                 "-o", str(globals_o)], cwd=REPO_ROOT)
+            _run(
+                [clang, *clang_flags, "-c",
+                    str(globals_ll), "-o", str(globals_o)],
+                cwd=REPO_ROOT,
+                timeout=_remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                if args.max_total_seconds > 0
+                else None,
+            )
             clang_compile_s += time.perf_counter() - t0
 
             for name in module_names:
@@ -651,8 +680,15 @@ def main(argv: list[str]) -> int:
                 out_o = obj_dir / f"{name}.o"
                 out_o.parent.mkdir(parents=True, exist_ok=True)
                 t0 = time.perf_counter()
-                _run([clang, *clang_flags, "-fPIC", "-c",
-                     str(ll_path), "-o", str(out_o)], cwd=REPO_ROOT)
+                _run(
+                    [clang, *clang_flags, "-fPIC", "-c",
+                        str(ll_path), "-o", str(out_o)],
+                    cwd=REPO_ROOT,
+                    timeout=_remaining_budget_seconds(
+                        total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                    if args.max_total_seconds > 0
+                    else None,
+                )
                 clang_compile_s += time.perf_counter() - t0
                 aot_objects.append(out_o)
 
@@ -662,8 +698,15 @@ def main(argv: list[str]) -> int:
                     canonical = obj_dir / "runtime" / "prelude.o"
                     canonical.parent.mkdir(parents=True, exist_ok=True)
                     t0 = time.perf_counter()
-                    _run([clang, *clang_flags, "-fPIC", "-c",
-                          str(ll_path), "-o", str(canonical)], cwd=REPO_ROOT)
+                    _run(
+                        [clang, *clang_flags, "-fPIC", "-c",
+                            str(ll_path), "-o", str(canonical)],
+                        cwd=REPO_ROOT,
+                        timeout=_remaining_budget_seconds(
+                            total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                        if args.max_total_seconds > 0
+                        else None,
+                    )
                     clang_compile_s += time.perf_counter() - t0
                     prelude_obj = canonical
 
@@ -689,7 +732,14 @@ def main(argv: list[str]) -> int:
             ]
 
             t0 = time.perf_counter()
-            _run(link_cmd, cwd=REPO_ROOT)
+            _run(
+                link_cmd,
+                cwd=REPO_ROOT,
+                timeout=_remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                if args.max_total_seconds > 0
+                else None,
+            )
             clang_link_s += time.perf_counter() - t0
 
             if prelude_obj is None:
@@ -720,16 +770,24 @@ def main(argv: list[str]) -> int:
     out_path1 = args.out
     aot_dir1, module_names1 = _build_once(
         seed_bin=seed, out_path=out_path1, pass_name="stage2")
-    subprocess.run([str(out_path1), "--version"],
-                   cwd=str(REPO_ROOT), check=True)
+    subprocess.run(
+        [str(out_path1), "--version"],
+        cwd=str(REPO_ROOT),
+        check=True,
+        timeout=30,
+    )
 
     if args.fixed_point:
         _check_budget()
         out_path2 = args.out.with_name(args.out.name + "-fp2")
         aot_dir2, module_names2 = _build_once(
             seed_bin=out_path1, out_path=out_path2, pass_name="stage2_fp2")
-        subprocess.run([str(out_path2), "--version"],
-                       cwd=str(REPO_ROOT), check=True)
+        subprocess.run(
+            [str(out_path2), "--version"],
+            cwd=str(REPO_ROOT),
+            check=True,
+            timeout=30,
+        )
 
         if module_names1 != module_names2:
             raise SystemExit(

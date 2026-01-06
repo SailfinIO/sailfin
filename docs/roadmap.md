@@ -15,7 +15,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
 - [ ] Self-hosted release pipeline
 
-  - [ ] Promote the Stage2 bootstrap job to the primary release workflow so every merge runs the Stage2->Stage2 rebuild and archives the native artifacts.
+  - [x] Promote the Stage2 bootstrap job to the primary release workflow so every merge runs the Stage2->Stage2 rebuild and archives the native artifacts.
   - [x] Add a `build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the Stage2 smoke suite, and uploads artifacts for downstream jobs.
     - [x] Initial workflow scaffolds Stage2 bootstrap/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged LLVM artifacts via `tools/package_stage2.py`.
   - [x] Add a `release.yml` workflow that builds native Stage2 binaries on release publish (macOS arm64/x86_64, Linux x86_64) and uploads release assets.
