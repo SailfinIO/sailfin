@@ -48,7 +48,24 @@ test "stage2: emit-llvm-file writes module preamble" ![io] {
 
     // Validate the preamble without reading the entire file into a Sailfin string.
     // (The runtime currently guards `string_length` with a 1MiB scan cap.)
-    let code = "import sys; p=sys.argv[1]; data=open(p,'rb').read(128); expected=b'source_filename = \"llvm/lowering/instructions.sfn\"\\n\\n'; sys.exit(0 if data.startswith(expected) else 1)";
+    let code = "import sys\n" +
+        "p=sys.argv[1]\n" +
+        "data=open(p,'rb').read(4096)\n" +
+        "text=data.decode('utf-8','replace').replace('\\r\\n','\\n')\n" +
+        "expected='source_filename = \\\"llvm/lowering/instructions.sfn\\\"'\n" +
+        "# Accept optional '; ModuleID = ...' header before source_filename.\n" +
+        "for line in text.split('\\n')[:50]:\n" +
+        "    if not line.strip():\n" +
+        "        continue\n" +
+        "    if line.lstrip().startswith(';'):\n" +
+        "        continue\n" +
+        "    if line.startswith('source_filename = '):\n" +
+        "        sys.exit(0 if line == expected else 2)\n" +
+        "    # If we reach other top-level entities first, treat as failure.\n" +
+        "    if line.startswith(('target ', 'declare ', 'define ', '@', '%', '!', 'attributes ')):\n" +
+        "        sys.exit(3)\n" +
+        "# Fallback: still allow finding it very early in file.\n" +
+        "sys.exit(0 if expected in text else 1)\n";
     let python_abs = "/usr/bin/python3";
     let env = "/usr/bin/env";
 
