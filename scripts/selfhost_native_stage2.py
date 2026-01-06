@@ -630,6 +630,7 @@ def main(argv: list[str]) -> int:
         def _compile_objects_and_link(*, ll_dir: pathlib.Path) -> None:
             nonlocal clang_compile_s, clang_link_s
             aot_objects: list[pathlib.Path] = []
+            prelude_obj: pathlib.Path | None = None
 
             t0 = time.perf_counter()
             _run([clang, *clang_flags, "-I", str(include_dir), "-c",
@@ -655,6 +656,17 @@ def main(argv: list[str]) -> int:
                 clang_compile_s += time.perf_counter() - t0
                 aot_objects.append(out_o)
 
+                # Also emit the runtime prelude object in the canonical runtime
+                # bundle location expected by the Stage2 CLI packaging.
+                if name == "runtime__prelude":
+                    canonical = obj_dir / "runtime" / "prelude.o"
+                    canonical.parent.mkdir(parents=True, exist_ok=True)
+                    t0 = time.perf_counter()
+                    _run([clang, *clang_flags, "-fPIC", "-c",
+                          str(ll_path), "-o", str(canonical)], cwd=REPO_ROOT)
+                    clang_compile_s += time.perf_counter() - t0
+                    prelude_obj = canonical
+
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if out_path.exists():
                 out_path.unlink()
@@ -679,6 +691,11 @@ def main(argv: list[str]) -> int:
             t0 = time.perf_counter()
             _run(link_cmd, cwd=REPO_ROOT)
             clang_link_s += time.perf_counter() - t0
+
+            if prelude_obj is None:
+                raise SystemExit(
+                    "selfhost: missing runtime prelude module; expected to compile runtime/prelude.sfn"
+                )
 
         # Compile/link directly from the raw IR modules.
         used_ir_dir = raw_dir

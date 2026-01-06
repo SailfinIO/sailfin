@@ -74,57 +74,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang
 
-      - name: Build Stage2 artifacts
+      - name: Download previous release seed (Stage2)
+        id: seed
         shell: bash -l {0}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          conda run -n sailfin python tools/compile_with_stage1.py
-          conda run -n sailfin python scripts/bootstrap_stage2.py --no-validate
+          TAG="${{ steps.rel.outputs.tag }}"
+          seed_path=$(conda run -n sailfin python tools/download_stage2_seed.py \
+            --previous-of "$TAG" \
+            --os "${{ matrix.asset_os }}" \
+            --arch "${{ matrix.asset_arch }}" \
+            --out build/seed | tail -n 1)
+          echo "seed_path=$seed_path" >> "$GITHUB_OUTPUT"
 
-      - name: Build native Stage2 binary
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-
-          mkdir -p build/native/obj
-          rm -f build/native/obj/* || true
-
-          OBJ_EXT="o"
-          CLANG_BIN="clang"
-          EXE_EXT="${{ matrix.exe_ext }}"
-          LM_FLAGS=""
-          if [ "${{ matrix.asset_os }}" = "linux" ]; then
-            LM_FLAGS="-lm"
-          fi
-
-          ${CLANG_BIN} -O2 -Wno-override-module -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/obj/sailfin_runtime.${OBJ_EXT}
-          ${CLANG_BIN} -O2 -Wno-override-module -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/obj/stage2_driver.${OBJ_EXT}
-          ${CLANG_BIN} -O2 -Wno-override-module -c runtime/native/ir/runtime_globals.ll -o build/native/obj/runtime_globals.${OBJ_EXT}
-
-          while IFS= read -r m ; do
-            [ -z "$m" ] && continue
-            ${CLANG_BIN} -O2 -Wno-override-module -fPIC -c "build/stage2/aot/${m}.ll" -o "build/native/obj/${m}.${OBJ_EXT}"
-          done < build/stage2/aot/modules.txt
-
-          # Link
-          objs=$(sed 's|^|build/native/obj/|; s|$|.'"${OBJ_EXT}"'|' build/stage2/aot/modules.txt | tr '\n' ' ')
-          ${CLANG_BIN} -O2 -Wno-override-module -o "build/native/sailfin-stage2${EXE_EXT}" \
-            build/native/obj/sailfin_runtime.${OBJ_EXT} \
-            build/native/obj/stage2_driver.${OBJ_EXT} \
-            build/native/obj/runtime_globals.${OBJ_EXT} \
-            $objs \
-            $LM_FLAGS
-
-          ls -la build/native | sed -n '1,200p'
-
-      - name: Self-host rebuild Stage2 (release binary)
+      - name: Self-host rebuild Stage2 from previous release seed
         shell: bash -l {0}
         run: |
           set -euo pipefail
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --seed build/native/sailfin-stage2${{ matrix.exe_ext }} \
+            --seed "${{ steps.seed.outputs.seed_path }}" \
+            --no-prefer-asan-seed \
             --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
-            --max-attempts 10
+            --max-attempts 10 \
+            --max-total-seconds 3600
 
       - name: Verify embedded CLI version matches release tag
         shell: bash -l {0}
@@ -152,7 +126,7 @@ jobs:
           mkdir -p "${STAGE_DIR}/runtime"
           cp -R runtime/native "${STAGE_DIR}/runtime/native"
           mkdir -p "${STAGE_DIR}/runtime/native/obj"
-          cp "build/native/obj/runtime/prelude.o" "${STAGE_DIR}/runtime/native/obj/prelude.o"
+          cp "build/selfhost/stage2/obj/runtime/prelude.o" "${STAGE_DIR}/runtime/native/obj/prelude.o"
 
           ASSET="sailfin-stage2_${VERSION}_${OS}_${ARCH}.tar.gz"
           tar -czf "dist/${ASSET}" -C "${STAGE_DIR}" .

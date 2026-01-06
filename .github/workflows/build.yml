@@ -92,6 +92,77 @@ jobs:
             dist/sailfin-stage2-${{ matrix.package_label }}-*.manifest.json
           if-no-files-found: error
 
+  selfhost-from-release-seed:
+    name: Selfhost From Release Seed (${{ matrix.package_label }})
+    if: >-
+      github.event_name != 'push' ||
+      (
+        github.event.head_commit.author.name != 'semantic-release' &&
+        github.event.head_commit.author.name != 'Sailfin Release Bot' &&
+        !contains(github.event.head_commit.author.email, 'semantic-release')
+      )
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            package_label: macos-arm64
+            asset_os: macos
+            asset_arch: arm64
+          - os: ubuntu-22.04
+            package_label: linux-x86_64
+            asset_os: linux
+            asset_arch: x86_64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: sailfin
+          environment-file: environment.yml
+          auto-update-conda: false
+          use-mamba: true
+
+      - name: Install clang (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+
+      - name: Download latest released Stage2 seed
+        shell: bash -l {0}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          seed_path=$(conda run -n sailfin python tools/download_stage2_seed.py \
+            --os "${{ matrix.asset_os }}" \
+            --arch "${{ matrix.asset_arch }}" \
+            --out build/seed | tail -n 1)
+          echo "SEED_STAGE2=$seed_path" >> "$GITHUB_ENV"
+
+      - name: Self-host rebuild Stage2 from released seed
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          conda run -n sailfin python scripts/selfhost_native_stage2.py \
+            --seed "$SEED_STAGE2" \
+            --no-prefer-asan-seed \
+            --out build/native/sailfin-stage2 \
+            --max-attempts 10 \
+            --max-total-seconds 1800
+
+      - name: Run Sailfin-native tests (selfhosted compiler)
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          CONDA=$(which conda) make test
+
   semantic-release:
     needs: stage2
     if: github.event_name == 'push'
