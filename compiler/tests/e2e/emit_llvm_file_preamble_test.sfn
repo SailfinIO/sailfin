@@ -48,9 +48,9 @@ test "stage2: emit-llvm-file writes module preamble" ![io] {
 
     // Validate the preamble without reading the entire file into a Sailfin string.
     // (The runtime currently guards `string_length` with a 1MiB scan cap.)
-    let python = "/usr/bin/python3";
-    assert fs.exists(python);
+    let env = "/usr/bin/env";
+    assert fs.exists(env);
     let code = "import sys; p=sys.argv[1]; data=open(p,'rb').read(128); expected=b'source_filename = \"llvm/lowering/instructions.sfn\"\\n\\n'; sys.exit(0 if data.startswith(expected) else 1)";
-    let check = process.run([python, "-c", code, out_path]);
+    let check = process.run([env, "python3", "-c", code, out_path]);
     assert check == 0;
 }

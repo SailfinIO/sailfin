@@ -82,6 +82,13 @@ fn looks_like_user_type(annotation -> string) -> boolean {
     if is_ascii_uppercase(first) {
         return true;
     }
+    // Allow internal/user types prefixed with an underscore, e.g. `_Foo`.
+    if first == "_" && trimmed.length > 1 {
+        let second = trimmed[1];
+        if is_ascii_uppercase(second) {
+            return true;
+        }
+    }
     let mut index -> number = 1;
     loop {
         if index >= trimmed.length {
@@ -92,6 +99,12 @@ fn looks_like_user_type(annotation -> string) -> boolean {
             let next = trimmed[index + 1];
             if is_ascii_uppercase(next) {
                 return true;
+            }
+            if next == "_" && index + 2 < trimmed.length {
+                let after = trimmed[index + 2];
+                if is_ascii_uppercase(after) {
+                    return true;
+                }
             }
         }
         index += 1;

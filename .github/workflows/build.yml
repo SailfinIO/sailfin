@@ -51,7 +51,12 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang
+          sudo apt-get install -y clang jq
+
+      - name: Install jq (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install jq
 
       - name: Build native Stage2 compiler
         shell: bash -l {0}
@@ -132,19 +137,26 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang
+          sudo apt-get install -y clang jq
 
-      - name: Download latest released Stage2 seed
+      - name: Install jq (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install jq
+
+      - name: Install latest released Stage2 seed (via install.sh)
         shell: bash -l {0}
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          VERSION: latest
+          GLOBAL_BIN_DIR: ${{ github.workspace }}/build/seed/bin
+          INSTALL_BASE: ${{ github.workspace }}/build/seed/versions
         run: |
           set -euo pipefail
-          seed_path=$(conda run -n sailfin python tools/download_stage2_seed.py \
-            --os "${{ matrix.asset_os }}" \
-            --arch "${{ matrix.asset_arch }}" \
-            --out build/seed | tail -n 1)
-          echo "SEED_STAGE2=$seed_path" >> "$GITHUB_ENV"
+          ./install.sh
+          echo "SEED_STAGE2=${GLOBAL_BIN_DIR}/sailfin-stage2" >> "$GITHUB_ENV"
 
       - name: Self-host rebuild Stage2 from released seed
         shell: bash -l {0}

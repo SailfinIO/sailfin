@@ -64,6 +64,10 @@ def looks_like_user_type(annotation):
     first = trimmed[0]
     if is_ascii_uppercase(first):
         return True
+    if first == "_"  and  len(trimmed) > 1:
+        second = trimmed[1]
+        if is_ascii_uppercase(second):
+            return True
     index = 1
     while True:
         if index >= len(trimmed):
@@ -73,6 +77,10 @@ def looks_like_user_type(annotation):
             next = trimmed[index + 1]
             if is_ascii_uppercase(next):
                 return True
+            if next == "_"  and  index + 2 < len(trimmed):
+                after = trimmed[index + 2]
+                if is_ascii_uppercase(after):
+                    return True
         index += 1
     return False
 

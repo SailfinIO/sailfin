@@ -72,22 +72,43 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang
+          sudo apt-get install -y clang jq
 
-      - name: Download previous release seed (Stage2)
+      - name: Install jq (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install jq
+
+      - name: Install previous release seed (Stage2) via install.sh
         id: seed
         shell: bash -l {0}
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="${{ steps.rel.outputs.tag }}"
-          seed_path=$(conda run -n sailfin python tools/download_stage2_seed.py \
-            --previous-of "$TAG" \
-            --os "${{ matrix.asset_os }}" \
-            --arch "${{ matrix.asset_arch }}" \
-            --out build/seed | tail -n 1)
-          echo "seed_path=$seed_path" >> "$GITHUB_OUTPUT"
+          REPO="${{ github.repository }}"
+          CUR_TAG="${{ steps.rel.outputs.tag }}"
+
+          releases_json=$(curl --fail -sSL \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/releases?per_page=50")
+
+          prev_tag=$(printf '%s' "$releases_json" | jq -r --arg cur "$CUR_TAG" '[.[].tag_name] | map(select(. != $cur)) | .[0]')
+          if [ -z "$prev_tag" ] || [ "$prev_tag" = "null" ]; then
+            echo "No previous release found; cannot selfhost release from prior seed." >&2
+            exit 1
+          fi
+
+          prev_version="${prev_tag#v}"
+          export REPO
+          export VERSION="$prev_version"
+          export GLOBAL_BIN_DIR="${{ github.workspace }}/build/seed/bin"
+          export INSTALL_BASE="${{ github.workspace }}/build/seed/versions"
+
+          ./install.sh
+          echo "seed_path=${GLOBAL_BIN_DIR}/sailfin-stage2" >> "$GITHUB_OUTPUT"
 
       - name: Self-host rebuild Stage2 from previous release seed
         shell: bash -l {0}
