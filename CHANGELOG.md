@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.96 (2026-01-07)
+
+### Bug Fixes
+
+- Use Stage1 seed for self-hosting to break bootstrap deadlock
+  ([`5e4a78a`](https://github.com/SailfinIO/sailfin/commit/5e4a78ab10e760cb678c09dcfd03ae46dcd7a283))
+
+- Replace broken alpha.92 download with Stage1-compiled binary - Fixes bootstrap chicken-and-egg
+  where old release can't compile new code - Enables first successful self-hosted release build
+
+
 ## v0.1.1-alpha.95 (2026-01-07)
 
 ### Bug Fixes
