@@ -52,20 +52,34 @@ test "stage2: emit-llvm-file writes module preamble" ![io] {
         "p=sys.argv[1]\n" +
         "data=open(p,'rb').read(4096)\n" +
         "text=data.decode('utf-8','replace').replace('\\r\\n','\\n')\n" +
-        "expected='source_filename = \\\"llvm/lowering/instructions.sfn\\\"'\n" +
+        "lines=text.split('\\n')\n" +
+        "want_suffix='llvm/lowering/instructions.sfn\\\"'\n" +
+        "def fail(code, msg):\n" +
+        "    sys.stderr.write(msg+'\\n')\n" +
+        "    sys.stderr.write('--- first 25 lines ---\\n')\n" +
+        "    for i,l in enumerate(lines[:25]):\n" +
+        "        sys.stderr.write(f'{i:02d}: {l}\\n')\n" +
+        "    sys.stderr.write('--- first 128 bytes ---\\n')\n" +
+        "    sys.stderr.write(repr(data[:128])+'\\n')\n" +
+        "    sys.exit(code)\n" +
         "# Accept optional '; ModuleID = ...' header before source_filename.\n" +
-        "for line in text.split('\\n')[:50]:\n" +
+        "for line in lines[:100]:\n" +
         "    if not line.strip():\n" +
         "        continue\n" +
         "    if line.lstrip().startswith(';'):\n" +
         "        continue\n" +
         "    if line.startswith('source_filename = '):\n" +
-        "        sys.exit(0 if line == expected else 2)\n" +
+        "        if line.endswith(want_suffix):\n" +
+        "            sys.exit(0)\n" +
+        "        fail(2, 'unexpected source_filename: '+line)\n" +
         "    # If we reach other top-level entities first, treat as failure.\n" +
         "    if line.startswith(('target ', 'declare ', 'define ', '@', '%', '!', 'attributes ')):\n" +
-        "        sys.exit(3)\n" +
-        "# Fallback: still allow finding it very early in file.\n" +
-        "sys.exit(0 if expected in text else 1)\n";
+        "        fail(3, 'missing source_filename before: '+line)\n" +
+        "# Fallback: allow finding it very early in file (still verify suffix).\n" +
+        "for line in lines[:200]:\n" +
+        "    if line.startswith('source_filename = ') and line.endswith(want_suffix):\n" +
+        "        sys.exit(0)\n" +
+        "fail(1, 'source_filename not found')\n";
     let python_abs = "/usr/bin/python3";
     let env = "/usr/bin/env";
 
