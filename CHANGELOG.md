@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.90 (2026-01-07)
+
+### Bug Fixes
+
+- Install and release for missing assets
+  ([`4abf31f`](https://github.com/SailfinIO/sailfin/commit/4abf31fad47fcc9d3f5cfb04e5ed6322a9088c58))
+
+
 ## v0.1.1-alpha.89 (2026-01-07)
 
 ### Bug Fixes
