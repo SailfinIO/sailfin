@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from ...emit_native import NativeModule
-from ...native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeImport, NativeImportSpecifier, NativeFunction, NativeInterface, NativeStruct, NativeEnum, LayoutManifest
+from ...native_ir import select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_native_artifact_for_import_context, parse_layout_manifest, NativeImport, NativeImportSpecifier, NativeFunction, NativeInterface, NativeStruct, NativeEnum, LayoutManifest, ParseNativeResult
 from ...string_utils import substring, char_code
 from ..types import TypeContext, TraitMetadata, TraitDescriptor, TraitImplementationDescriptor, LoweredLLVMResult, LoweredLLVMLinesResult, FunctionEffectEntry, LifetimeRegionMetadata, StringConstant, CapabilityManifest
 from ..utils import append_string, join_with_separator, number_to_string, sanitize_symbol, string_array_contains, starts_with, trim_text, index_of
@@ -124,21 +124,26 @@ def should_keep_unmangled_abi_symbol(symbol):
 def extract_module_name_from_native_text(native_text):
     if len(native_text) == 0:
         return ""
-    index = 0
-    line = ""
+    module_index = index_of(native_text, ".module ")
+    if module_index < 0:
+        return ""
+    start = module_index + 8
     while True:
-        if index > len(native_text):
+        if start >= len(native_text):
             break
-        if index == len(native_text)  or  native_text[index] == "\n":
-            trimmed = trim_text(line)
-            if starts_with(trimmed, ".module "):
-                return trim_text(substring(trimmed, 8, len(trimmed)))
-            line = ""
-            index += 1
+        ch = native_text[start]
+        if ch == " "  or  ch == "\t":
+            start += 1
             continue
-        line = line + native_text[index]
-        index += 1
-    return ""
+        break
+    end = start
+    while True:
+        if end >= len(native_text):
+            break
+        if native_text[end] == "\n":
+            break
+        end += 1
+    return trim_text(substring(native_text, start, end))
 
 def collect_available_import_module_names(imported_native_texts):
     names = []
@@ -533,7 +538,7 @@ def lower_to_llvm(native_module):
         return lower_to_llvm_with_context(native_module, [], [], [])
     parse = parse_native_artifact(artifact.contents)
     import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name)
-    return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
+    return lower_to_llvm_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
 def lower_to_llvm_lines(native_module):
     # effects: io
@@ -542,7 +547,7 @@ def lower_to_llvm_lines(native_module):
         return lower_to_llvm_lines_with_context(native_module, [], [], [])
     parse = parse_native_artifact(artifact.contents)
     import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name)
-    return lower_to_llvm_lines_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
+    return lower_to_llvm_lines_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
 def lower_to_llvm_lines_only(native_module):
     # effects: io
@@ -561,7 +566,7 @@ def lower_to_llvm_for_tests(native_module):
         return lower_to_llvm_with_context_for_tests(native_module, [], [], [])
     parse = parse_native_artifact(artifact.contents)
     import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name)
-    return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics)
+    return lower_to_llvm_with_parsed_context_for_tests(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics)
 
 def lower_to_llvm_ir_for_tests(native_module):
     # effects: io
@@ -579,6 +584,43 @@ def lower_to_llvm_with_context_for_tests(native_module, imported_manifests, impo
     if artifact == None:
         return base
     parse = parse_native_artifact(artifact.contents)
+    tests = []
+    has_main = False
+    index = 0
+    while True:
+        if index >= len(parse.functions):
+            break
+        fun = parse.functions[index]
+        if fun.name == "main":
+            has_main = True
+        if len(fun.name) >= 5  and  substring(fun.name, 0, 5) == "test:":
+            tests = (tests) + ([fun])
+        index += 1
+    if len(tests) == 0:
+        return base
+    if has_main:
+        updated = base
+        updated.diagnostics = (updated.diagnostics) + (["llvm lowering (test): module defines `main`; skipping synthesized test harness"])
+        return updated
+    harness = render_test_harness_main_for_module(tests, native_module.module_name)
+    updated = base
+    if len(updated.ir) > 0:
+        updated.ir = updated.ir + "\n"
+    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n"
+    return updated
+
+def lower_to_llvm_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics):
+    lowered = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics)
+    ir = join_with_separator(lowered.lines, "\n")
+    output = ir
+    if len(output) > 0:
+        output = output + "\n"
+    return LoweredLLVMResult(ir=output, diagnostics=lowered.diagnostics, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+
+def lower_to_llvm_with_parsed_context_for_tests(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics):
+    base = lower_to_llvm_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics)
+    if len(base.ir) == 0:
+        return base
     tests = []
     has_main = False
     index = 0
@@ -622,7 +664,10 @@ def lower_to_llvm_lines_with_context(native_module, imported_manifests, imported
         empty_constants = empty_string_constant_set()
         return LoweredLLVMLinesResult(lines=[], diagnostics=diagnostics, trait_metadata=empty_trait_metadata(), function_effects=[], lifetime_regions=[], capability_manifest=empty_capability_manifest(), string_constants=empty_constants)
     parse = parse_native_artifact(artifact.contents)
-    diagnostics = (diagnostics) + (parse.diagnostics)
+    return lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, diagnostics)
+
+def lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, diagnostics_in):
+    diagnostics = (diagnostics_in) + (parse.diagnostics)
     exported_symbols = collect_exported_symbol_names(parse.imports)
     manifest_artifact = select_layout_manifest_artifact(native_module.artifacts)
     module_manifest = None
@@ -656,7 +701,7 @@ def lower_to_llvm_lines_with_context(native_module, imported_manifests, imported
                 imported_enums = (imported_enums) + (manifest_only.enums)
             text_index += 1
             continue
-        imported_parse = parse_native_artifact(native_text)
+        imported_parse = parse_native_artifact_for_import_context(native_text)
         applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module)
         imported_structs = (imported_structs) + (applied_import.structs)
         imported_enums = (imported_enums) + (applied_import.enums)

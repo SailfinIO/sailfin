@@ -436,6 +436,12 @@ def select_layout_manifest_artifact(artifacts):
     return None
 
 def parse_native_artifact(text):
+    return parse_native_artifact_impl(text, True, True)
+
+def parse_native_artifact_for_import_context(text):
+    return parse_native_artifact_impl(text, False, False)
+
+def parse_native_artifact_impl(text, include_instructions, include_top_level_bindings):
     lines = split_lines(text)
     diagnostics = []
     functions = []
@@ -499,7 +505,7 @@ def parse_native_artifact(text):
             if len(pending_decorators) > 0:
                 diagnostics = append_string(diagnostics, "dangling decorator directives before struct definition")
                 pending_decorators = []
-            struct_result = parse_struct_definition(lines, index)
+            struct_result = parse_struct_definition(lines, index, include_instructions)
             diagnostics = (diagnostics) + (struct_result.diagnostics)
             if struct_result.definition != None:
                 structs = append_struct(structs, struct_result.definition)
@@ -664,6 +670,11 @@ def parse_native_artifact(text):
                 diagnostics = append_string(diagnostics, "parameter outside function body: " + line)
             index += 1
             continue
+        if not include_instructions:
+            pending_span = None
+            pending_value_span = None
+            index += 1
+            continue
         gather = gather_instruction(lines, index)
         line = gather.text
         index += gather.lines_consumed
@@ -682,10 +693,11 @@ def parse_native_artifact(text):
                 diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + line)
                 pending_value_span = None
         if current == None:
-            if len(instructions) == 1  and  instructions[0].variant == "Let":
-                bindings = append_binding(bindings, binding_from_instruction(instructions[0]))
-            else:
-                diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line)
+            if include_top_level_bindings:
+                if len(instructions) == 1  and  instructions[0].variant == "Let":
+                    bindings = append_binding(bindings, binding_from_instruction(instructions[0]))
+                else:
+                    diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line)
             index += 1
             continue
         instruction_index = 0
@@ -1119,7 +1131,7 @@ def parse_single_specifier(entry):
         return NativeImportSpecifier(name=name, alias=None)
     return NativeImportSpecifier(name=name, alias=alias_text)
 
-def parse_struct_definition(lines, start_index):
+def parse_struct_definition(lines, start_index, include_instructions):
     diagnostics = []
     header = trim_text(lines[start_index])
     name_text = trim_text(strip_prefix(header, ".struct "))
@@ -1201,6 +1213,11 @@ def parse_struct_definition(lines, start_index):
                     diagnostics = append_string(diagnostics, "unable to parse initializer span metadata: " + raw_line)
                 else:
                     method_pending_value_span = parsed_method_init_span
+                index += 1
+                continue
+            if not include_instructions:
+                method_pending_span = None
+                method_pending_value_span = None
                 index += 1
                 continue
             method_instruction_result = parse_instruction(raw_line, method_pending_span, method_pending_value_span)

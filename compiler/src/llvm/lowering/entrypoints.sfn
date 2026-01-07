@@ -10,6 +10,7 @@ import {
     select_text_artifact,
     select_layout_manifest_artifact,
     parse_native_artifact,
+    parse_native_artifact_for_import_context,
     parse_layout_manifest,
     NativeImport,
     NativeImportSpecifier,
@@ -18,6 +19,7 @@ import {
     NativeStruct,
     NativeEnum,
     LayoutManifest,
+    ParseNativeResult,
 } from "../../native_ir";
 import { substring, char_code } from "../../string_utils";
 
@@ -214,25 +216,40 @@ fn extract_module_name_from_native_text(native_text -> string) -> string {
     if native_text.length == 0 {
         return "";
     }
-    let mut index -> number = 0;
-    let mut line -> string = "";
+
+    // Avoid building lines via repeated string concatenation (quadratic cost on large modules).
+    // We only need the `.module <name>` header and can find it via a linear scan.
+    let module_index = index_of(native_text, ".module ");
+    if module_index < 0 {
+        return "";
+    }
+
+    let mut start = module_index + 8;
+    // Skip any extra whitespace after `.module `.
     loop {
-        if index > native_text.length {
+        if start >= native_text.length {
             break;
         }
-        if index == native_text.length || native_text[index] == "\n" {
-            let trimmed = trim_text(line);
-            if starts_with(trimmed, ".module ") {
-                return trim_text(substring(trimmed, 8, trimmed.length));
-            }
-            line = "";
-            index += 1;
+        let ch = native_text[start];
+        if ch == " " || ch == "\t" {
+            start += 1;
             continue;
         }
-        line = line + native_text[index];
-        index += 1;
+        break;
     }
-    return "";
+
+    let mut end = start;
+    loop {
+        if end >= native_text.length {
+            break;
+        }
+        if native_text[end] == "\n" {
+            break;
+        }
+        end += 1;
+    }
+
+    return trim_text(substring(native_text, start, end));
 }
 
 fn collect_available_import_module_names(imported_native_texts -> string[]) -> string[] {
@@ -804,9 +821,16 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     if artifact == null {
         return lower_to_llvm_with_context(native_module, [], [], []);
     }
+    // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
     let parse = parse_native_artifact(artifact.contents);
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    return lower_to_llvm_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+    return lower_to_llvm_with_parsed_context(
+        native_module,
+        parse,
+        import_context.manifests,
+        import_context.native_texts,
+        import_context.diagnostics
+    );
 }
 
 fn lower_to_llvm_lines(native_module -> NativeModule) -> LoweredLLVMLinesResult ![io] {
@@ -814,9 +838,16 @@ fn lower_to_llvm_lines(native_module -> NativeModule) -> LoweredLLVMLinesResult 
     if artifact == null {
         return lower_to_llvm_lines_with_context(native_module, [], [], []);
     }
+    // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
     let parse = parse_native_artifact(artifact.contents);
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    return lower_to_llvm_lines_with_context(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+    return lower_to_llvm_lines_with_parsed_context(
+        native_module,
+        parse,
+        import_context.manifests,
+        import_context.native_texts,
+        import_context.diagnostics
+    );
 }
 
 fn lower_to_llvm_lines_only(native_module -> NativeModule) -> string[] ![io] {
@@ -838,9 +869,16 @@ fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult !
     if artifact == null {
         return lower_to_llvm_with_context_for_tests(native_module, [], [], []);
     }
+    // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
     let parse = parse_native_artifact(artifact.contents);
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    return lower_to_llvm_with_context_for_tests(native_module, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+    return lower_to_llvm_with_parsed_context_for_tests(
+        native_module,
+        parse,
+        import_context.manifests,
+        import_context.native_texts,
+        import_context.diagnostics
+    );
 }
 
 fn lower_to_llvm_ir_for_tests(native_module -> NativeModule) -> string ![io] {
@@ -864,6 +902,70 @@ fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_
     }
 
     let parse = parse_native_artifact(artifact.contents);
+    let mut tests -> NativeFunction[] = [];
+    let mut has_main -> boolean = false;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= parse.functions.length {
+            break;
+        }
+        let fun = parse.functions[index];
+        if fun.name == "main" {
+            has_main = true;
+        }
+        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
+            tests = tests.concat([fun]);
+        }
+        index += 1;
+    }
+
+    if tests.length == 0 {
+        return base;
+    }
+
+    // For now we only synthesize `main` when no user-provided `main` exists.
+    if has_main {
+        let mut updated = base;
+        updated.diagnostics = updated.diagnostics.concat([
+            "llvm lowering (test): module defines `main`; skipping synthesized test harness",
+        ]);
+        return updated;
+    }
+
+    let harness = render_test_harness_main_for_module(tests, native_module.module_name);
+    let mut updated = base;
+    if updated.ir.length > 0 {
+        updated.ir = updated.ir + "\n";
+    }
+    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
+    return updated;
+}
+
+fn lower_to_llvm_with_parsed_context(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+    let lowered = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics);
+    let ir = join_with_separator(lowered.lines, "\n");
+    let mut output -> string = ir;
+    if output.length > 0 {
+        output = output + "\n";
+    }
+    return LoweredLLVMResult {
+        ir: output,
+        diagnostics: lowered.diagnostics,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
+    };
+}
+
+fn lower_to_llvm_with_parsed_context_for_tests(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+    let base = lower_to_llvm_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics);
+    if base.ir.length == 0 {
+        return base;
+    }
+
     let mut tests -> NativeFunction[] = [];
     let mut has_main -> boolean = false;
 
@@ -943,7 +1045,11 @@ fn lower_to_llvm_lines_with_context(native_module -> NativeModule, imported_mani
     }
 
     let parse = parse_native_artifact(artifact.contents);
-    diagnostics = diagnostics.concat(parse.diagnostics);
+    return lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, diagnostics);
+}
+
+fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], diagnostics_in -> string[]) -> LoweredLLVMLinesResult {
+    let mut diagnostics = diagnostics_in.concat(parse.diagnostics);
 
     // Only exported symbols should keep external linkage across modules.
     let exported_symbols = collect_exported_symbol_names(parse.imports);
@@ -990,7 +1096,7 @@ fn lower_to_llvm_lines_with_context(native_module -> NativeModule, imported_mani
             continue;
         }
 
-        let imported_parse = parse_native_artifact(native_text);
+        let imported_parse = parse_native_artifact_for_import_context(native_text);
         let applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module);
 
         imported_structs = imported_structs.concat(applied_import.structs);

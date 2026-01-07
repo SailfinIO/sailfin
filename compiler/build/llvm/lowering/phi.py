@@ -3,7 +3,7 @@ from runtime import runtime_support as runtime
 
 from ...string_utils import substring
 from ..types import LocalBinding, LocalMutation, PhiMergeResult, PhiStoreEntry, MutationMaterializationResult, MatchArmMutations
-from ..utils import append_string
+from ..utils import append_string, join_with_separator
 from ..expressions import find_local_binding, format_temp_name
 
 print = runtime.console
@@ -69,16 +69,7 @@ def find_mutation_for_name(mutations, name):
     return None
 
 def join_strings(strings, separator):
-    result = ""
-    index = 0
-    while True:
-        if index >= len(strings):
-            break
-        if index > 0:
-            result = result + separator
-        result = result + strings[index]
-        index += 1
-    return result
+    return join_with_separator(strings, separator)
 
 def build_phi_and_store(local, llvm_type, phi_inputs, temp_index):
     phi_temp = format_temp_name(temp_index)

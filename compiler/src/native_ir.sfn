@@ -335,6 +335,18 @@ fn select_layout_manifest_artifact(artifacts -> NativeArtifact[]) -> NativeArtif
 }
 
 fn parse_native_artifact(text -> string) -> ParseNativeResult {
+    return parse_native_artifact_impl(text, true, true);
+}
+
+// Parse a native artifact in a mode suitable for import context:
+// - Keeps signatures, struct/method headers, and interface definitions.
+// - Skips instruction bodies (significant speedup for large imported modules).
+// - Skips top-level bindings (imports do not require them for lowering).
+fn parse_native_artifact_for_import_context(text -> string) -> ParseNativeResult {
+    return parse_native_artifact_impl(text, false, false);
+}
+
+fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, include_top_level_bindings -> boolean) -> ParseNativeResult {
     let lines = split_lines(text);
     let mut diagnostics -> string[] = [];
     let mut functions -> NativeFunction[] = [];
@@ -412,7 +424,7 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
                 diagnostics = append_string(diagnostics, "dangling decorator directives before struct definition");
                 pending_decorators = [];
             }
-            let struct_result = parse_struct_definition(lines, index);
+            let struct_result = parse_struct_definition(lines, index, include_instructions);
             diagnostics = diagnostics.concat(struct_result.diagnostics);
             if struct_result.definition != null {
                 structs = append_struct(structs, struct_result.definition);
@@ -646,6 +658,16 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
             index += 1;
             continue;
         }
+        // Instruction line (or top-level binding) handling.
+        // In import-context mode we intentionally skip instruction bodies to avoid
+        // expensive instruction parsing for large imported modules.
+        if !include_instructions {
+            pending_span = null;
+            pending_value_span = null;
+            index += 1;
+            continue;
+        }
+
     let gather = gather_instruction(lines, index);
     line = gather.text;
     index += gather.lines_consumed;
@@ -665,10 +687,12 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
         }
 
         if current == null {
-            if instructions.length == 1 && instructions[0].variant == "Let" {
-                bindings = append_binding(bindings, binding_from_instruction(instructions[0]));
-            } else {
-                diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line);
+            if include_top_level_bindings {
+                if instructions.length == 1 && instructions[0].variant == "Let" {
+                    bindings = append_binding(bindings, binding_from_instruction(instructions[0]));
+                } else {
+                    diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line);
+                }
             }
             index += 1;
             continue;
@@ -1352,7 +1376,7 @@ fn parse_single_specifier(entry -> string) -> NativeImportSpecifier {
     return NativeImportSpecifier { name: name, alias: alias_text };
 }
 
-fn parse_struct_definition(lines -> string[], start_index -> number) -> StructParseResult {
+fn parse_struct_definition(lines -> string[], start_index -> number, include_instructions -> boolean) -> StructParseResult {
     let mut diagnostics -> string[] = [];
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".struct "));
@@ -1456,6 +1480,14 @@ fn parse_struct_definition(lines -> string[], start_index -> number) -> StructPa
                 index += 1;
                 continue;
             }
+            if !include_instructions {
+                // Skip method body instructions for import-context parses.
+                method_pending_span = null;
+                method_pending_value_span = null;
+                index += 1;
+                continue;
+            }
+
             let method_instruction_result = parse_instruction(raw_line, method_pending_span, method_pending_value_span);
             if method_instruction_result.span_consumed {
                 method_pending_span = null;

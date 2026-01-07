@@ -16,7 +16,7 @@ import {
     MatchArmMutations,
 } from "../types";
 
-import { append_string } from "../utils";
+import { append_string, join_with_separator } from "../utils";
 
 import {
     find_local_binding,
@@ -85,19 +85,7 @@ fn find_mutation_for_name(mutations -> LocalMutation[], name -> string) -> Local
 
 // Helper: Join string array with separator
 fn join_strings(strings -> string[], separator -> string) -> string {
-    let mut result -> string = "";
-    let mut index -> number = 0;
-    loop {
-        if index >= strings.length {
-            break;
-        }
-        if index > 0 {
-            result = result + separator;
-        }
-        result = result + strings[index];
-        index += 1;
-    }
-    return result;
+    return join_with_separator(strings, separator);
 }
 
 // Helper: Create phi and store lines for a single local (returns both lines separately)
