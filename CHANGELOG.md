@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.94 (2026-01-07)
+
+### Bug Fixes
+
+- Log lines
+  ([`c15bd7d`](https://github.com/SailfinIO/sailfin/commit/c15bd7dd2a0b5bf7fe9b65a183bb79a7db1627a4))
+
+
 ## v0.1.1-alpha.93 (2026-01-07)
 
 ### Bug Fixes
