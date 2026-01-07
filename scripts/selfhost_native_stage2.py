@@ -135,6 +135,24 @@ def _looks_like_llvm_module(text: str) -> bool:
     return False
 
 
+def _trim_to_llvm_module_start(text: str) -> str:
+    """Drop any leading non-LLVM lines before the module header.
+
+    Some seed compilers print log output before emitting the LLVM module.
+    This makes the output invalid for clang, but the LLVM payload is still
+    present later in the stream.
+    """
+
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines[:400]):
+        # Most stable anchors across LLVM versions.
+        if line.startswith("source_filename ="):
+            return "".join(lines[i:])
+        if line.startswith("; ModuleID ="):
+            return "".join(lines[i:])
+    return text
+
+
 def _collect_stage2_sources(repo_root: pathlib.Path) -> list[pathlib.Path]:
     compiler_src = repo_root / "compiler" / "src"
     runtime_src = repo_root / "runtime"
@@ -476,6 +494,7 @@ def main(argv: list[str]) -> int:
                     encoding="utf-8", errors="replace")
                 candidate = raw if use_emit_llvm_file else _strip_stage2_log_prefixes(
                     raw)
+                candidate = _trim_to_llvm_module_start(candidate)
 
                 if use_emit_llvm_file and "@listpush" in candidate:
                     with attempt_path.open("wb") as out:
@@ -512,11 +531,30 @@ def main(argv: list[str]) -> int:
                     raw = attempt_path.read_text(
                         encoding="utf-8", errors="replace")
                     candidate = _strip_stage2_log_prefixes(raw)
+                    candidate = _trim_to_llvm_module_start(candidate)
 
-                if _looks_like_llvm_module(candidate):
-                    if args.skip_clang_validate:
-                        cleaned = candidate
-                        break
+                if not _looks_like_llvm_module(candidate):
+                    # Common CI failure mode: seed exits 0 but emits log lines
+                    # before the LLVM module header. Retrying won't help unless
+                    # output is genuinely flaky, but we keep retries for now.
+                    try:
+                        size = attempt_path.stat().st_size
+                    except OSError:
+                        size = -1
+                    preview = "\n".join(candidate.splitlines()[:25])
+                    print(
+                        f"[selfhost][warn] malformed seed output for {module_name} (rc=0, bytes={size})\n"
+                        f"[selfhost][warn] first lines:\n{preview}\n",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    if args.attempt_sleep > 0:
+                        time.sleep(args.attempt_sleep)
+                    continue
+
+                if args.skip_clang_validate:
+                    cleaned = candidate
+                    break
 
                     cleaned_attempt_path.write_text(
                         candidate, encoding="utf-8")
