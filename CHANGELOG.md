@@ -1,6 +1,53 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.89 (2026-01-07)
+
+### Bug Fixes
+
+- Add self host seed installer
+  ([`95f089d`](https://github.com/SailfinIO/sailfin/commit/95f089d55540f04865eeffe87dc8afc8c696402e))
+
+- Aot prepare
+  ([`7c2551f`](https://github.com/SailfinIO/sailfin/commit/7c2551fdbd6d77e575890556e76336a720df7c4a))
+
+- Aot prepare
+  ([`4e99da7`](https://github.com/SailfinIO/sailfin/commit/4e99da7be831af4f6c45686800c95e813edf7484))
+
+- Aot prepare
+  ([`9e79d44`](https://github.com/SailfinIO/sailfin/commit/9e79d4484d7106ebd44ca9da6824b20b2609e7a3))
+
+- Aot prepare declare rounds
+  ([`d56b4cd`](https://github.com/SailfinIO/sailfin/commit/d56b4cd7978ec81398cd9b5b084964a1cde51ed0))
+
+- Ci failure and use install script
+  ([`148c9cf`](https://github.com/SailfinIO/sailfin/commit/148c9cf0a9358974a3ef45e13407beaa75667aee))
+
+- Env gate tracing
+  ([`94da7df`](https://github.com/SailfinIO/sailfin/commit/94da7dfe5b20517dc162eb017299dc5c1cc822d2))
+
+- Linux fixed point and test failure
+  ([`917e40f`](https://github.com/SailfinIO/sailfin/commit/917e40f46c22447874de7d3b6ab8f596d293a28c))
+
+- Relative import handling
+  ([`b1ccf8f`](https://github.com/SailfinIO/sailfin/commit/b1ccf8f1f8e2a30771156dee39200620c91bf686))
+
+- Remove e2e
+  ([`f70ce32`](https://github.com/SailfinIO/sailfin/commit/f70ce321bc479f9ffcb5f28416c50cdb073fbb8a))
+
+- Stage2
+  ([`28268ee`](https://github.com/SailfinIO/sailfin/commit/28268eeedf43f6cb30a0580f1dfeedc49f5c52d4))
+
+- Stage2 asan
+  ([`3981b2a`](https://github.com/SailfinIO/sailfin/commit/3981b2afc60f467ab8155683330833a028075138))
+
+- Test strictness
+  ([`441fb4d`](https://github.com/SailfinIO/sailfin/commit/441fb4d96e9629255bb1ef86274fb28a0ad5ec77))
+
+- Write lines
+  ([`f1da48c`](https://github.com/SailfinIO/sailfin/commit/f1da48cc09061df879164cd65946b44a64e999b8))
+
+
 ## v0.1.1-alpha.88 (2026-01-03)
 
 ### Bug Fixes
