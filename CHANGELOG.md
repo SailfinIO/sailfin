@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.93 (2026-01-07)
+
+### Bug Fixes
+
+- Emit llvm truncation
+  ([`05425cd`](https://github.com/SailfinIO/sailfin/commit/05425cdf3b8f26a9f29f903a1388e5ddd5b1794a))
+
+
 ## v0.1.1-alpha.92 (2026-01-07)
 
 ### Bug Fixes
