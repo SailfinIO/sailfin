@@ -116,27 +116,20 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          echo "Release seed could not selfhost current compiler; falling back to stage1 seed." >&2
+          echo "Release seed could not selfhost current compiler; bootstrapping via stage1 (no selfhost) to publish first good seed." >&2
           CONDA=$(which conda) make compile
-
-      - name: Self-host rebuild Stage2 from stage1-built seed (bootstrap fallback)
-        if: steps.selfhost_seed.outcome == 'failure'
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --seed build/native/sailfin-stage2 \
-            --no-prefer-asan-seed \
-            --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
-            --max-attempts 10 \
-            --max-total-seconds 3600
 
       - name: Verify embedded CLI version matches release tag
         shell: bash -l {0}
         run: |
           set -euo pipefail
           VERSION="${{ steps.rel.outputs.version }}"
-          OUT="$(build/native/sailfin-stage2-selfhost --version | tr -d '\r' | head -n 1)"
+          if [ "${{ steps.selfhost_seed.outcome }}" = "success" ]; then
+            BIN="build/native/sailfin-stage2-selfhost"
+          else
+            BIN="build/native/sailfin-stage2"
+          fi
+          OUT="$($BIN --version | tr -d '\r' | head -n 1)"
           echo "$OUT"
           echo "$OUT" | grep -F "sfn ${VERSION}" >/dev/null
 
@@ -149,15 +142,35 @@ jobs:
           ARCH="${{ matrix.asset_arch }}"
           EXE_EXT="${{ matrix.exe_ext }}"
 
+          if [ "${{ steps.selfhost_seed.outcome }}" = "success" ]; then
+            BIN_SRC="build/native/sailfin-stage2-selfhost${EXE_EXT}"
+            PRELUDE_OBJ="build/selfhost/stage2/obj/runtime/prelude.o"
+          else
+            BIN_SRC="build/native/sailfin-stage2${EXE_EXT}"
+            PRELUDE_OBJ="build/native/obj/runtime/prelude.o"
+            if [ ! -f "$PRELUDE_OBJ" ]; then
+              PRELUDE_OBJ="build/native/obj/prelude.o"
+            fi
+          fi
+
+          if [ ! -f "$BIN_SRC" ]; then
+            echo "Missing compiler binary at $BIN_SRC" >&2
+            exit 1
+          fi
+          if [ ! -f "$PRELUDE_OBJ" ]; then
+            echo "Missing prelude object at $PRELUDE_OBJ" >&2
+            exit 1
+          fi
+
           mkdir -p dist
           STAGE_DIR="$(mktemp -d)"
           mkdir -p "${STAGE_DIR}/bin"
-          cp "build/native/sailfin-stage2-selfhost${EXE_EXT}" "${STAGE_DIR}/bin/sailfin-stage2${EXE_EXT}"
-          cp "build/native/sailfin-stage2-selfhost${EXE_EXT}" "${STAGE_DIR}/bin/sfn${EXE_EXT}"
+          cp "$BIN_SRC" "${STAGE_DIR}/bin/sailfin-stage2${EXE_EXT}"
+          cp "$BIN_SRC" "${STAGE_DIR}/bin/sfn${EXE_EXT}"
           mkdir -p "${STAGE_DIR}/runtime"
           cp -R runtime/native "${STAGE_DIR}/runtime/native"
           mkdir -p "${STAGE_DIR}/runtime/native/obj"
-          cp "build/selfhost/stage2/obj/runtime/prelude.o" "${STAGE_DIR}/runtime/native/obj/prelude.o"
+          cp "$PRELUDE_OBJ" "${STAGE_DIR}/runtime/native/obj/prelude.o"
 
           ASSET="sailfin-stage2_${VERSION}_${OS}_${ARCH}.tar.gz"
           tar -czf "dist/${ASSET}" -C "${STAGE_DIR}" .

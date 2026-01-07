@@ -163,18 +163,6 @@ jobs:
           echo "Released seed could not selfhost current compiler; falling back to stage1 seed." >&2
           CONDA=$(which conda) make compile
 
-      - name: Self-host rebuild Stage2 from stage1-built seed (bootstrap fallback)
-        if: steps.selfhost_seed.outcome == 'failure'
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --seed build/native/sailfin-stage2 \
-            --no-prefer-asan-seed \
-            --out build/native/sailfin-stage2 \
-            --max-attempts 10 \
-            --max-total-seconds 1800
-
       - name: Self-host fixed-point rebuild (linux-x86_64)
         if: matrix.package_label == 'linux-x86_64'
         shell: bash -l {0}
