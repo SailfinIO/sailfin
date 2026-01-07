@@ -2246,7 +2246,6 @@ fn lower_runtime_global_reference(temp_index -> number, lines -> string[]) -> Ex
     return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: empty_constants };
 }
 
-
 fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInfo, base_operand -> LLVMOperand, pointer_available -> boolean, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[], expected_type -> string) -> ExpressionResult {
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
