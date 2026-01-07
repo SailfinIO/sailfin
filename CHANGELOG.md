@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.97 (2026-01-07)
+
+### Bug Fixes
+
+- Timing addition to cli
+  ([`b4649ed`](https://github.com/SailfinIO/sailfin/commit/b4649ed6ddeb4a71fea9dbca67261ebc098c9294))
+
+
 ## v0.1.1-alpha.96 (2026-01-07)
 
 ### Bug Fixes
