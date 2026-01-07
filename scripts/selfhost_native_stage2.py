@@ -229,6 +229,14 @@ def main(argv: list[str]) -> int:
         help="Skip per-module clang validation (not recommended)",
     )
     parser.add_argument(
+        "--use-emit-llvm-file",
+        action="store_true",
+        help=(
+            "Use the seed compiler's 'emit-llvm-file' command when available. "
+            "Disabled by default because some seeds can silently truncate output."
+        ),
+    )
+    parser.add_argument(
         "--force-clang-validate",
         action="store_true",
         help="Force per-module clang validation (overrides presets)",
@@ -368,7 +376,8 @@ def main(argv: list[str]) -> int:
         sources = _collect_stage2_sources(REPO_ROOT)
         module_names: list[str] = []
 
-        use_emit_llvm_file = _seed_supports_emit_llvm_file(seed_bin)
+        use_emit_llvm_file = args.use_emit_llvm_file and _seed_supports_emit_llvm_file(
+            seed_bin)
         seed_env = os.environ.copy()
         seed_env["SAILFIN_DISABLE_STRING_FREE"] = "1"
 

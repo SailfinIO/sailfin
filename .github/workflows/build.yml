@@ -143,8 +143,6 @@ jobs:
           echo "SEED_STAGE2=${GLOBAL_BIN_DIR}/sailfin-stage2" >> "$GITHUB_ENV"
 
       - name: Self-host rebuild Stage2 from released seed
-        id: selfhost_seed
-        continue-on-error: true
         shell: bash -l {0}
         run: |
           set -euo pipefail
@@ -154,14 +152,6 @@ jobs:
             --out build/native/sailfin-stage2 \
             --max-attempts 10 \
             --max-total-seconds 1800
-
-      - name: Build Stage2 seed via stage1 (bootstrap fallback)
-        if: steps.selfhost_seed.outcome == 'failure'
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          echo "Released seed could not selfhost current compiler; falling back to stage1 seed." >&2
-          CONDA=$(which conda) make compile
 
       - name: Self-host fixed-point rebuild (linux-x86_64)
         if: matrix.package_label == 'linux-x86_64'
