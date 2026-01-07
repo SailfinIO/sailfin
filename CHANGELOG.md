@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.95 (2026-01-07)
+
+### Bug Fixes
+
+- Core refactor
+  ([`0eb0996`](https://github.com/SailfinIO/sailfin/commit/0eb0996e78944f2cf9d65f165d4c2c61ae6d882a))
+
+- Use non asan
+  ([`cfc3f15`](https://github.com/SailfinIO/sailfin/commit/cfc3f15b9657fd0d957277210edb47869061ba4a))
+
+- Work on core refactor
+  ([`22598fc`](https://github.com/SailfinIO/sailfin/commit/22598fc74781e358b6d9069a1a46906113ac7d6e))
+
+- Work on core refactor
+  ([`337535a`](https://github.com/SailfinIO/sailfin/commit/337535a6fc86d0d39ff3cc07cd73b46c4736f75c))
+
+
 ## v0.1.1-alpha.94 (2026-01-07)
 
 ### Bug Fixes
