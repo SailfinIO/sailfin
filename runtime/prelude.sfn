@@ -14,6 +14,7 @@ let runtime_create_filesystem_bridge = runtime.create_filesystem_bridge;
 let runtime_create_http_bridge = runtime.create_http_bridge;
 let runtime_create_model_bridge = runtime.create_model_bridge;
 let runtime_sleep_fn = runtime.sleep;
+let runtime_monotonic_millis_fn = runtime.monotonic_millis;
 let runtime_channel_fn = runtime.channel;
 let runtime_spawn_fn = runtime.spawn;
 let runtime_log_execution_fn = runtime.logExecution;
@@ -86,6 +87,10 @@ struct TypeDescriptor {
 
 fn sleep(milliseconds -> number) ![clock] {
     runtime_sleep_fn(milliseconds);
+}
+
+fn monotonic_millis() -> number ![clock] {
+    return runtime_monotonic_millis_fn();
 }
 
 fn channel<T>(capacity -> number = 0) -> any ![io] {

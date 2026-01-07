@@ -86,6 +86,16 @@ class LoweredLLVMResult:
     def __repr__(self):
         return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest), runtime.struct_field('string_constants', self.string_constants)])
 
+def _ms_since(start_ms):
+    end_ms = monotonic_millis()
+    delta = end_ms - start_ms
+    if delta < 0:
+        return 0
+    return delta
+
+def _timing_line(module_name, phase, elapsed_ms):
+    return "[timing] module=" + module_name + " phase=" + phase + " ms=" + number_to_string(elapsed_ms)
+
 def compile_to_sailfin(source):
     # effects: io
     program = parse_program(source)
@@ -239,6 +249,32 @@ def compile_to_llvm_with_module(source, module_name):
     native_result = emit_native_with_module_name(program, module_name)
     return lower_to_llvm_ir(native_result.module)
 
+def compile_to_llvm_with_module_timed(source, module_name):
+    # effects: io, clock
+    t0 = monotonic_millis()
+    program = parse_program(source)
+    t_parse = _ms_since(t0)
+    t1 = monotonic_millis()
+    analysis_result = typecheck_program(program)
+    t_typecheck = _ms_since(t1)
+    if len(analysis_result.diagnostics) > 0:
+        report_typecheck_errors(analysis_result.diagnostics, source)
+        print.warn(_timing_line(module_name, "parse", t_parse))
+        print.warn(_timing_line(module_name, "typecheck", t_typecheck))
+        return ""
+    t2 = monotonic_millis()
+    native_result = emit_native_with_module_name(program, module_name)
+    t_emit_native = _ms_since(t2)
+    t3 = monotonic_millis()
+    ir = lower_to_llvm_ir(native_result.module)
+    t_lower_llvm = _ms_since(t3)
+    print.warn(_timing_line(module_name, "parse", t_parse))
+    print.warn(_timing_line(module_name, "typecheck", t_typecheck))
+    print.warn(_timing_line(module_name, "emit_native", t_emit_native))
+    print.warn(_timing_line(module_name, "lower_llvm", t_lower_llvm))
+    print.warn(_timing_line(module_name, "total", _ms_since(t0)))
+    return ir
+
 def compile_to_llvm_lines_with_module(source, module_name):
     # effects: io
     program = parse_program(source)
@@ -248,6 +284,32 @@ def compile_to_llvm_lines_with_module(source, module_name):
         return []
     native_result = emit_native_with_module_name(program, module_name)
     return lower_to_llvm_lines_only(native_result.module)
+
+def compile_to_llvm_lines_with_module_timed(source, module_name):
+    # effects: io, clock
+    t0 = monotonic_millis()
+    program = parse_program(source)
+    t_parse = _ms_since(t0)
+    t1 = monotonic_millis()
+    analysis_result = typecheck_program(program)
+    t_typecheck = _ms_since(t1)
+    if len(analysis_result.diagnostics) > 0:
+        report_typecheck_errors(analysis_result.diagnostics, source)
+        print.warn(_timing_line(module_name, "parse", t_parse))
+        print.warn(_timing_line(module_name, "typecheck", t_typecheck))
+        return []
+    t2 = monotonic_millis()
+    native_result = emit_native_with_module_name(program, module_name)
+    t_emit_native = _ms_since(t2)
+    t3 = monotonic_millis()
+    lines = lower_to_llvm_lines_only(native_result.module)
+    t_lower_llvm = _ms_since(t3)
+    print.warn(_timing_line(module_name, "parse", t_parse))
+    print.warn(_timing_line(module_name, "typecheck", t_typecheck))
+    print.warn(_timing_line(module_name, "emit_native", t_emit_native))
+    print.warn(_timing_line(module_name, "lower_llvm", t_lower_llvm))
+    print.warn(_timing_line(module_name, "total", _ms_since(t0)))
+    return lines
 
 def compile_tests_to_llvm(source):
     # effects: io

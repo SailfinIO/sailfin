@@ -20,9 +20,11 @@ import argparse
 import hashlib
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import time
+import re
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -108,6 +110,31 @@ def _strip_stage2_log_prefixes(text: str) -> str:
                 continue
         out_lines.append(line)
     return "\n".join(out_lines) + "\n"
+
+
+_TIMING_LINE_RE = re.compile(
+    r"\[timing\]\s+module=(?P<module>\S+)\s+phase=(?P<phase>\S+)\s+ms=(?P<ms>-?\d+)"
+)
+
+
+def _extract_timing_lines(stderr_text: str) -> list[tuple[str, str, int]]:
+    """Extract timing triples (module, phase, ms) from stage2 stderr output."""
+
+    out: list[tuple[str, str, int]] = []
+    for raw_line in stderr_text.splitlines():
+        line = raw_line.strip()
+        # Handle runtime prefixes like: "[warn] [timing] ..."
+        if "[timing]" not in line:
+            continue
+        m = _TIMING_LINE_RE.search(line)
+        if not m:
+            continue
+        try:
+            ms = int(m.group("ms"))
+        except ValueError:
+            continue
+        out.append((m.group("module"), m.group("phase"), ms))
+    return out
 
 
 def _looks_like_llvm_module(text: str) -> bool:
@@ -254,6 +281,15 @@ def main(argv: list[str]) -> int:
             "Disabled by default because some seeds can silently truncate output."
         ),
     )
+
+    parser.add_argument(
+        "--timing",
+        action="store_true",
+        help=(
+            "Ask the seed compiler to emit per-phase timing to stderr (requires a seed that supports it). "
+            "The selfhost script will summarize the slowest modules."
+        ),
+    )
     parser.add_argument(
         "--force-clang-validate",
         action="store_true",
@@ -380,6 +416,9 @@ def main(argv: list[str]) -> int:
         clang_validations = 0
         clang_validation_failures = 0
 
+        # Timing aggregation keyed by module_name.
+        timing_by_module: dict[str, dict[str, int]] = {}
+
         work_dir = args.work_dir
         stage2_dir = work_dir / pass_name
         raw_dir = stage2_dir / "raw"
@@ -409,6 +448,12 @@ def main(argv: list[str]) -> int:
         for idx, source_path in enumerate(sources):
             _check_budget()
             module_name = _module_name_from_source_path(source_path)
+            final_obj_path = obj_dir / f"{module_name}.o"
+            final_obj_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                final_obj_path.unlink()
+            except FileNotFoundError:
+                pass
             max_attempts = max(1, int(args.max_attempts))
             cleaned = ""
             last_stderr = ""
@@ -449,9 +494,12 @@ def main(argv: list[str]) -> int:
                 if use_emit_llvm_file:
                     try:
                         t0 = time.perf_counter()
+                        cmd = [str(seed_bin), "emit-llvm-file"]
+                        if args.timing:
+                            cmd.append("--timing")
+                        cmd.extend([str(source_path), str(attempt_path)])
                         proc = subprocess.run(
-                            [str(seed_bin), "emit-llvm-file",
-                             str(source_path), str(attempt_path)],
+                            cmd,
                             cwd=str(REPO_ROOT),
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.PIPE,
@@ -459,6 +507,14 @@ def main(argv: list[str]) -> int:
                             env=seed_env,
                             timeout=attempt_seed_timeout,
                         )
+                        if args.timing:
+                            stderr_text = proc.stderr.decode(
+                                "utf-8", errors="replace")
+                            for mod, phase, ms in _extract_timing_lines(stderr_text):
+                                if mod != module_name:
+                                    continue
+                                timing_by_module.setdefault(
+                                    module_name, {})[phase] = ms
                         seed_emit_s += time.perf_counter() - t0
                     except subprocess.TimeoutExpired as exc:
                         last_rc = 124
@@ -472,9 +528,12 @@ def main(argv: list[str]) -> int:
                     with attempt_path.open("wb") as out:
                         try:
                             t0 = time.perf_counter()
+                            cmd = [str(seed_bin), "emit"]
+                            if args.timing:
+                                cmd.append("--timing")
+                            cmd.extend(["llvm", str(source_path)])
                             proc = subprocess.run(
-                                [str(seed_bin), "emit",
-                                 "llvm", str(source_path)],
+                                cmd,
                                 cwd=str(REPO_ROOT),
                                 stdout=out,
                                 stderr=subprocess.PIPE,
@@ -482,6 +541,14 @@ def main(argv: list[str]) -> int:
                                 env=seed_env,
                                 timeout=attempt_seed_timeout,
                             )
+                            if args.timing:
+                                stderr_text = proc.stderr.decode(
+                                    "utf-8", errors="replace")
+                                for mod, phase, ms in _extract_timing_lines(stderr_text):
+                                    if mod != module_name:
+                                        continue
+                                    timing_by_module.setdefault(
+                                        module_name, {})[phase] = ms
                             seed_emit_s += time.perf_counter() - t0
                         except subprocess.TimeoutExpired as exc:
                             last_rc = 124
@@ -510,9 +577,12 @@ def main(argv: list[str]) -> int:
                     with attempt_path.open("wb") as out:
                         try:
                             t0 = time.perf_counter()
+                            cmd = [str(seed_bin), "emit"]
+                            if args.timing:
+                                cmd.append("--timing")
+                            cmd.extend(["llvm", str(source_path)])
                             proc = subprocess.run(
-                                [str(seed_bin), "emit",
-                                 "llvm", str(source_path)],
+                                cmd,
                                 cwd=str(REPO_ROOT),
                                 stdout=out,
                                 stderr=subprocess.PIPE,
@@ -520,6 +590,14 @@ def main(argv: list[str]) -> int:
                                 env=seed_env,
                                 timeout=attempt_seed_timeout,
                             )
+                            if args.timing:
+                                stderr_text = proc.stderr.decode(
+                                    "utf-8", errors="replace")
+                                for mod, phase, ms in _extract_timing_lines(stderr_text):
+                                    if mod != module_name:
+                                        continue
+                                    timing_by_module.setdefault(
+                                        module_name, {})[phase] = ms
                             seed_emit_s += time.perf_counter() - t0
                         except subprocess.TimeoutExpired as exc:
                             last_rc = 124
@@ -591,6 +669,17 @@ def main(argv: list[str]) -> int:
 
                 if clang_proc.returncode == 0:
                     cleaned = candidate
+
+                    # Reuse the validated object for the final link step.
+                    # This avoids compiling each module twice (validate + compile).
+                    try:
+                        try:
+                            final_obj_path.unlink()
+                        except FileNotFoundError:
+                            pass
+                        validate_obj.replace(final_obj_path)
+                    except OSError:
+                        shutil.copy2(validate_obj, final_obj_path)
                     break
 
                 clang_validation_failures += 1
@@ -604,8 +693,8 @@ def main(argv: list[str]) -> int:
                         try:
                             t0 = time.perf_counter()
                             proc = subprocess.run(
-                                [str(seed_bin), "emit",
-                                 "llvm", str(source_path)],
+                                ([str(seed_bin), "emit", "--timing", "llvm", str(source_path)]
+                                 if args.timing else [str(seed_bin), "emit", "llvm", str(source_path)]),
                                 cwd=str(REPO_ROOT),
                                 stdout=out,
                                 stderr=subprocess.PIPE,
@@ -613,6 +702,14 @@ def main(argv: list[str]) -> int:
                                 env=seed_env,
                                 timeout=attempt_seed_timeout,
                             )
+                            if args.timing:
+                                stderr_text = proc.stderr.decode(
+                                    "utf-8", errors="replace")
+                                for mod, phase, ms in _extract_timing_lines(stderr_text):
+                                    if mod != module_name:
+                                        continue
+                                    timing_by_module.setdefault(
+                                        module_name, {})[phase] = ms
                             seed_emit_s += time.perf_counter() - t0
                         except subprocess.TimeoutExpired as exc:
                             last_rc = 124
@@ -659,6 +756,16 @@ def main(argv: list[str]) -> int:
 
                         if clang_proc.returncode == 0:
                             cleaned = candidate
+
+                            # Reuse the validated object for the final link step.
+                            try:
+                                try:
+                                    final_obj_path.unlink()
+                                except FileNotFoundError:
+                                    pass
+                                validate_obj.replace(final_obj_path)
+                            except OSError:
+                                shutil.copy2(validate_obj, final_obj_path)
                             break
 
                 if args.attempt_sleep > 0:
@@ -742,28 +849,11 @@ def main(argv: list[str]) -> int:
                 ll_path = ll_dir / f"{name}.ll"
                 out_o = obj_dir / f"{name}.o"
                 out_o.parent.mkdir(parents=True, exist_ok=True)
-                t0 = time.perf_counter()
-                _run(
-                    [clang, *clang_flags, "-fPIC", "-c",
-                        str(ll_path), "-o", str(out_o)],
-                    cwd=REPO_ROOT,
-                    timeout=_remaining_budget_seconds(
-                        total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
-                    if args.max_total_seconds > 0
-                    else None,
-                )
-                clang_compile_s += time.perf_counter() - t0
-                aot_objects.append(out_o)
-
-                # Also emit the runtime prelude object in the canonical runtime
-                # bundle location expected by the Stage2 CLI packaging.
-                if name == "runtime__prelude":
-                    canonical = obj_dir / "runtime" / "prelude.o"
-                    canonical.parent.mkdir(parents=True, exist_ok=True)
+                if not out_o.exists():
                     t0 = time.perf_counter()
                     _run(
                         [clang, *clang_flags, "-fPIC", "-c",
-                            str(ll_path), "-o", str(canonical)],
+                            str(ll_path), "-o", str(out_o)],
                         cwd=REPO_ROOT,
                         timeout=_remaining_budget_seconds(
                             total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
@@ -771,6 +861,32 @@ def main(argv: list[str]) -> int:
                         else None,
                     )
                     clang_compile_s += time.perf_counter() - t0
+                aot_objects.append(out_o)
+
+                # Also emit the runtime prelude object in the canonical runtime
+                # bundle location expected by the Stage2 CLI packaging.
+                if name == "runtime__prelude":
+                    canonical = obj_dir / "runtime" / "prelude.o"
+                    canonical.parent.mkdir(parents=True, exist_ok=True)
+                    if canonical.exists():
+                        canonical.unlink()
+                    if out_o.exists():
+                        try:
+                            os.link(out_o, canonical)
+                        except OSError:
+                            shutil.copy2(out_o, canonical)
+                    else:
+                        t0 = time.perf_counter()
+                        _run(
+                            [clang, *clang_flags, "-fPIC", "-c",
+                                str(ll_path), "-o", str(canonical)],
+                            cwd=REPO_ROOT,
+                            timeout=_remaining_budget_seconds(
+                                total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                            if args.max_total_seconds > 0
+                            else None,
+                        )
+                        clang_compile_s += time.perf_counter() - t0
                     prelude_obj = canonical
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -828,6 +944,31 @@ def main(argv: list[str]) -> int:
                 f"[selfhost] clang validate: {clang_validate_s:.2f}s", flush=True)
         print(f"[selfhost] clang compile: {clang_compile_s:.2f}s", flush=True)
         print(f"[selfhost] clang link: {clang_link_s:.2f}s", flush=True)
+
+        if args.timing and timing_by_module:
+            def _phase_ms(name: str, phase: str) -> int:
+                return int(timing_by_module.get(name, {}).get(phase, 0))
+
+            ranked = sorted(
+                module_names,
+                key=lambda n: _phase_ms(n, "lower_llvm"),
+                reverse=True,
+            )
+
+            print(
+                f"[selfhost] ({pass_name}) slowest modules by lower_llvm (ms):", flush=True)
+            for name in ranked[:20]:
+                phases = timing_by_module.get(name, {})
+                parse_ms = phases.get("parse", 0)
+                type_ms = phases.get("typecheck", 0)
+                emit_ms = phases.get("emit_native", 0)
+                lower_ms = phases.get("lower_llvm", 0)
+                total_ms = phases.get("total", 0)
+                print(
+                    "[selfhost] "
+                    f"{name} parse={parse_ms} typecheck={type_ms} emit_native={emit_ms} lower_llvm={lower_ms} total={total_ms}",
+                    flush=True,
+                )
         return used_ir_dir, module_names
 
     out_path1 = args.out

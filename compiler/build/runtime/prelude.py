@@ -31,6 +31,7 @@ runtime_create_filesystem_bridge = runtime.create_filesystem_bridge
 runtime_create_http_bridge = runtime.create_http_bridge
 runtime_create_model_bridge = runtime.create_model_bridge
 runtime_sleep_fn = runtime.sleep
+runtime_monotonic_millis_fn = runtime.monotonic_millis
 runtime_channel_fn = runtime.channel
 runtime_spawn_fn = runtime.spawn
 runtime_log_execution_fn = runtime.logExecution
@@ -129,6 +130,10 @@ def model_bridge(grant):
 def sleep(milliseconds):
     # effects: clock
     runtime_sleep_fn(milliseconds)
+
+def monotonic_millis():
+    # effects: clock
+    return runtime_monotonic_millis_fn()
 
 def channel(capacity = 0):
     # effects: io

@@ -9,9 +9,14 @@
 #include <spawn.h>
 #include <sys/wait.h>
 
+#if !defined(__APPLE__)
+#include <time.h>
+#endif
+
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
+#include <mach/mach_time.h>
 #endif
 #include <errno.h>
 #include <sys/stat.h>
@@ -35,6 +40,31 @@ typedef struct SailfinTryContext
 
 static _Thread_local SailfinTryContext *_sailfin_try_stack = NULL;
 static _Thread_local char *_sailfin_exception_message = NULL;
+
+double sailfin_runtime_monotonic_millis(void)
+{
+#if defined(__APPLE__)
+    // Use the same clock as other macOS codepaths in this runtime.
+    // mach_absolute_time is monotonic.
+    static mach_timebase_info_data_t timebase;
+    if (timebase.denom == 0)
+    {
+        mach_timebase_info(&timebase);
+    }
+    uint64_t t = mach_absolute_time();
+    // Convert to nanoseconds.
+    uint64_t ns = (t * (uint64_t)timebase.numer) / (uint64_t)timebase.denom;
+    return (double)(ns / 1000000ull);
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    {
+        return 0.0;
+    }
+    uint64_t ms = (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
+    return (double)ms;
+#endif
+}
 
 void sailfin_runtime_set_exception(char *message)
 {

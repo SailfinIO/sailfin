@@ -142,6 +142,23 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         parameter_types: ["double"],
         effects: ["clock"],
     });
+
+    // Monotonic clock for profiling/timing.
+    // Support both the prelude binding name and direct calls.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_monotonic_millis_fn",
+        symbol: "sailfin_runtime_monotonic_millis",
+        return_type: "double",
+        parameter_types: [],
+        effects: ["clock"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "monotonic_millis",
+        symbol: "sailfin_runtime_monotonic_millis",
+        return_type: "double",
+        parameter_types: [],
+        effects: ["clock"],
+    });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_channel_fn",
         symbol: "sailfin_runtime_channel",

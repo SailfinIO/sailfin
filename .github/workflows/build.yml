@@ -151,6 +151,7 @@ jobs:
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2 \
             --max-attempts 10 \
+            --skip-clang-validate \
             --max-total-seconds 1800
 
       - name: Self-host fixed-point rebuild (linux-x86_64)

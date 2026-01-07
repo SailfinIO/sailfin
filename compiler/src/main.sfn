@@ -22,6 +22,21 @@ import { substring } from "./string_utils";
 import { Token } from "./token";
 import { typecheck_program } from "./typecheck";
 
+fn _ms_since(start_ms -> number) -> number {
+    let end_ms = monotonic_millis();
+    let delta = end_ms - start_ms;
+    if delta < 0 {
+        return 0;
+    }
+    return delta;
+}
+
+fn _timing_line(module_name -> string, phase -> string, elapsed_ms -> number) -> string {
+    // Format is stable and grep/awk-friendly.
+    // Emit to stderr via print.warn.
+    return "[timing] module=" + module_name + " phase=" + phase + " ms=" + number_to_string(elapsed_ms);
+}
+
 struct CompiledModule {
     source_path -> string;
     python_source -> string;
@@ -300,6 +315,37 @@ fn compile_to_llvm_with_module(source -> string, module_name -> string) -> strin
     return lower_to_llvm_ir(native_result.module);
 }
 
+fn compile_to_llvm_with_module_timed(source -> string, module_name -> string) -> string ![io, clock] {
+    let t0 = monotonic_millis();
+    let program -> Program = parse_program(source);
+    let t_parse = _ms_since(t0);
+
+    let t1 = monotonic_millis();
+    let analysis_result = typecheck_program(program);
+    let t_typecheck = _ms_since(t1);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        print.warn(_timing_line(module_name, "parse", t_parse));
+        print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+        return "";
+    }
+
+    let t2 = monotonic_millis();
+    let native_result = emit_native_with_module_name(program, module_name);
+    let t_emit_native = _ms_since(t2);
+
+    let t3 = monotonic_millis();
+    let ir = lower_to_llvm_ir(native_result.module);
+    let t_lower_llvm = _ms_since(t3);
+
+    print.warn(_timing_line(module_name, "parse", t_parse));
+    print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+    print.warn(_timing_line(module_name, "emit_native", t_emit_native));
+    print.warn(_timing_line(module_name, "lower_llvm", t_lower_llvm));
+    print.warn(_timing_line(module_name, "total", _ms_since(t0)));
+    return ir;
+}
+
 fn compile_to_llvm_lines_with_module(source -> string, module_name -> string) -> string[] ![io] {
     let program -> Program = parse_program(source);
     let analysis_result = typecheck_program(program);
@@ -309,6 +355,37 @@ fn compile_to_llvm_lines_with_module(source -> string, module_name -> string) ->
     }
     let native_result = emit_native_with_module_name(program, module_name);
     return lower_to_llvm_lines_only(native_result.module);
+}
+
+fn compile_to_llvm_lines_with_module_timed(source -> string, module_name -> string) -> string[] ![io, clock] {
+    let t0 = monotonic_millis();
+    let program -> Program = parse_program(source);
+    let t_parse = _ms_since(t0);
+
+    let t1 = monotonic_millis();
+    let analysis_result = typecheck_program(program);
+    let t_typecheck = _ms_since(t1);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        print.warn(_timing_line(module_name, "parse", t_parse));
+        print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+        return [];
+    }
+
+    let t2 = monotonic_millis();
+    let native_result = emit_native_with_module_name(program, module_name);
+    let t_emit_native = _ms_since(t2);
+
+    let t3 = monotonic_millis();
+    let lines = lower_to_llvm_lines_only(native_result.module);
+    let t_lower_llvm = _ms_since(t3);
+
+    print.warn(_timing_line(module_name, "parse", t_parse));
+    print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+    print.warn(_timing_line(module_name, "emit_native", t_emit_native));
+    print.warn(_timing_line(module_name, "lower_llvm", t_lower_llvm));
+    print.warn(_timing_line(module_name, "total", _ms_since(t0)));
+    return lines;
 }
 
 // Emit LLVM IR that runs all `test ... {}` declarations in the module.

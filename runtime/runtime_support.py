@@ -605,6 +605,15 @@ def sleep(milliseconds: int) -> None:
     time.sleep(milliseconds / 1000)
 
 
+def monotonic_millis() -> float:
+    """Monotonic millisecond clock for profiling.
+
+    Returned as float to match the stage2 ABI representation for numbers.
+    """
+
+    return float(time.perf_counter() * 1000.0)
+
+
 @atexit.register
 def _cancel_pending_tasks() -> None:
     if not _TASKS:
@@ -1296,6 +1305,7 @@ __all__ = [
     "ModelBridge",
     "parallel",
     "sleep",
+    "monotonic_millis",
     "serve",
     "check_type",
     "spawn",

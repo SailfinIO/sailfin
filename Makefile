@@ -6,6 +6,10 @@ CLANG_WARN_SUPPRESS ?= -Wno-override-module
 
 CLANG ?= clang
 
+# Parallelism for compiling many Stage2 AOT LLVM modules.
+# Override in CI as needed (e.g. NATIVE_JOBS=2 for smaller runners).
+NATIVE_JOBS ?= $(shell (sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) | head -n 1)
+
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 STAGE2_NATIVE_LIBS ?=
@@ -24,7 +28,7 @@ NATIVE_LINK_EXTRA ?=
 
 .PHONY: help install test test-unit test-integration test-e2e compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
 
-.PHONY: selfhost-native-stage2
+.PHONY: selfhost-native-stage2 selfhost-native-stage2-asan
 
 # Rebuild a fresh native stage2 using an existing *native* stage2 seed compiler.
 # This is the self-hosting check CI ultimately needs (no stage1, no bootstrap).
@@ -122,18 +126,29 @@ compile:
 #   build/native/sailfin-stage2-selfhost
 #
 # Notes:
-# - Defaults to the ASAN seed because it's currently the most reliable.
+# - Defaults to a non-ASAN seed for speed.
+# - Use `make selfhost-native-stage2-asan` for the slower-but-more-diagnostic ASAN seed.
 # - Always runs the orchestrator script via the Conda env Python.
 # - Pass extra flags via SELFHOST_ARGS (e.g. SELFHOST_ARGS="--seed-timeout 300").
-selfhost-native-stage2: native-stage2-asan
-	@seed=$${SEED_STAGE2:-build/native/sailfin-stage2-asan}; \
+selfhost-native-stage2: compile
+	@seed=$${SEED_STAGE2:-build/native/sailfin-stage2}; \
 	if [ ! -x "$$seed" ]; then \
 		echo "[selfhost-native-stage2] missing seed compiler: $$seed"; \
-		echo "[selfhost-native-stage2] (hint) build one with: make native-stage2-asan"; \
+		echo "[selfhost-native-stage2] (hint) build one with: make compile"; \
 		exit 1; \
 	fi; \
 	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
 	@echo "[selfhost-native-stage2] built build/native/sailfin-stage2-selfhost"
+
+selfhost-native-stage2-asan: native-stage2-asan
+	@seed=$${SEED_STAGE2:-build/native/sailfin-stage2-asan}; \
+	if [ ! -x "$$seed" ]; then \
+		echo "[selfhost-native-stage2-asan] missing seed compiler: $$seed"; \
+		echo "[selfhost-native-stage2-asan] (hint) build one with: make native-stage2-asan"; \
+		exit 1; \
+	fi; \
+	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
+	@echo "[selfhost-native-stage2-asan] built build/native/sailfin-stage2-selfhost"
 
 
 _build-native-stage2:
@@ -146,11 +161,10 @@ _build-native-stage2:
 	$(CLANG) -O2 -fno-delete-null-pointer-checks $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o $(NATIVE_OBJ_DIR)/sailfin_runtime.o
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o $(NATIVE_OBJ_DIR)/stage2_driver.o
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o $(NATIVE_OBJ_DIR)/runtime_globals.o
-	@while IFS= read -r m ; do \
-	  [ -z "$$m" ] && continue; \
-	  mkdir -p "$$(dirname $(NATIVE_OBJ_DIR)/$$m.o)"; \
-	  $(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -fPIC -c $(STAGE2_AOT_DIR)/$$m.ll -o $(NATIVE_OBJ_DIR)/$$m.o; \
-	done < $(STAGE2_AOT_MODULES_FILE)
+	@awk 'NF' $(STAGE2_AOT_MODULES_FILE) | \
+	  xargs -I {} -P $(NATIVE_JOBS) sh -c 'm="{}"; \
+	    mkdir -p "$$(dirname "$(NATIVE_OBJ_DIR)/$$m.o")"; \
+	    $(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"'
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -o $(NATIVE_OUT) \
 		$(NATIVE_OBJ_DIR)/sailfin_runtime.o \
 		$(NATIVE_OBJ_DIR)/stage2_driver.o \

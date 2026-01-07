@@ -43,6 +43,8 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="http.post", symbol="sailfin_intrinsic_http_post", return_type="i8*", parameter_types=["i8*", "i8*"], effects=["net"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="sleep", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"], effects=["clock"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_sleep_fn", symbol="sailfin_runtime_sleep", return_type="void", parameter_types=["double"], effects=["clock"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_monotonic_millis_fn", symbol="sailfin_runtime_monotonic_millis", return_type="double", parameter_types=[], effects=["clock"]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="monotonic_millis", symbol="sailfin_runtime_monotonic_millis", return_type="double", parameter_types=[], effects=["clock"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_channel_fn", symbol="sailfin_runtime_channel", return_type="i8*", parameter_types=["double"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_spawn_fn", symbol="sailfin_runtime_spawn", return_type="void", parameter_types=["i8*", "i8*"], effects=["io"]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="runtime_parallel_fn", symbol="sailfin_runtime_parallel", return_type="i8*", parameter_types=["i8*"], effects=["io"]))

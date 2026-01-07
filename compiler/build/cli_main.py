@@ -1,7 +1,7 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.main import compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_lines_with_module, compile_tests_to_llvm, compile_tests_to_llvm_with_module, compile_to_sailfin, number_to_string, module_name_from_path
+from compiler.build.main import compile_to_llvm, compile_to_llvm_with_module, compile_to_llvm_with_module_timed, compile_to_llvm_lines_with_module, compile_to_llvm_lines_with_module_timed, compile_tests_to_llvm, compile_tests_to_llvm_with_module, compile_to_sailfin, number_to_string, module_name_from_path
 from compiler.build.main import compile_to_native_text
 from compiler.build.native_ir import split_lines
 from compiler.build.version import sailfin_stage2_version
@@ -36,7 +36,7 @@ class _RelativeImportSpan:
         return runtime.struct_repr('_RelativeImportSpan', [runtime.struct_field('start', self.start), runtime.struct_field('end', self.end), runtime.struct_field('spec', self.spec)])
 
 def _usage():
-    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit llvm|sailfin|native <file.sfn>\n" + "  sfn emit-llvm-file <file.sfn> <out.ll>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n"
+    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit [--timing] llvm|sailfin|native <file.sfn>\n" + "  sfn emit-llvm-file [--timing] <file.sfn> <out.ll>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n"
 
 def _ends_with(value, suffix):
     if len(suffix) == 0:
@@ -701,18 +701,26 @@ def sailfin_cli_main(argv):
         print.info("sfn " + sailfin_stage2_version())
         return 0
     if cmd == "emit":
-        if len(args) != 3:
+        timing = False
+        base_index = 1
+        if len(args) >= 2  and  _is_flag(args[1], "--timing"):
+            timing = True
+            base_index = 2
+        if len(args) != base_index + 2:
             print.error(_usage())
             return 2
-        mode = args[1]
-        path = args[2]
+        mode = args[base_index]
+        path = args[base_index + 1]
         if not fs.exists(path):
             print.error("file not found: " + path)
             return 1
         source = fs.readFile(path)
         module_name = module_name_from_path(path)
         if mode == "llvm":
-            print.info(compile_to_llvm_with_module(source, module_name))
+            if timing:
+                print.info(compile_to_llvm_with_module_timed(source, module_name))
+            else:
+                print.info(compile_to_llvm_with_module(source, module_name))
             return 0
         if mode == "sailfin":
             print.info(compile_to_sailfin(source))
@@ -723,17 +731,26 @@ def sailfin_cli_main(argv):
         print.error("unknown emit mode: " + mode)
         return 2
     if cmd == "emit-llvm-file":
-        if len(args) != 3:
+        timing = False
+        base_index = 1
+        if len(args) >= 2  and  _is_flag(args[1], "--timing"):
+            timing = True
+            base_index = 2
+        if len(args) != base_index + 2:
             print.error(_usage())
             return 2
-        path = args[1]
-        out_path = args[2]
+        path = args[base_index]
+        out_path = args[base_index + 1]
         if not fs.exists(path):
             print.error("file not found: " + path)
             return 1
         source = fs.readFile(path)
         module_name = module_name_from_path(path)
-        lines = compile_to_llvm_lines_with_module(source, module_name)
+        lines = []
+        if timing:
+            lines = compile_to_llvm_lines_with_module_timed(source, module_name)
+        else:
+            lines = compile_to_llvm_lines_with_module(source, module_name)
         _write_lines(out_path, lines)
         return 0
     if cmd == "build":

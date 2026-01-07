@@ -29,6 +29,10 @@ extern "C"
 
     void sailfin_runtime_sleep(double seconds);
 
+    // Monotonic clock for profiling/timing.
+    // Returns an integer millisecond count as a `double` for stage2 ABI.
+    double sailfin_runtime_monotonic_millis(void);
+
     // ---- String helpers ----
 
     int64_t sailfin_runtime_string_length(char *text);
