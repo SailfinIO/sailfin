@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.92 (2026-01-07)
+
+### Bug Fixes
+
+- Add fallbacks for now
+  ([`065a76b`](https://github.com/SailfinIO/sailfin/commit/065a76bb5b155c29d1342c76dee1a27adb3dcad6))
+
+
 ## v0.1.1-alpha.91 (2026-01-07)
 
 ### Bug Fixes
