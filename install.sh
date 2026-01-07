@@ -21,6 +21,7 @@ set -euo pipefail
 REPO="${REPO:-SailfinIO/sailfin}"
 BINARY="${BINARY:-sailfin-stage2}"
 VERSION="${VERSION:-latest}"
+EXCLUDE_TAG="${EXCLUDE_TAG:-}"
 
 log() {
   printf '[%s] %s\n' "$(date +'%Y-%m-%dT%H:%M:%S%z')" "$*"
@@ -80,29 +81,49 @@ api() {
     "$1"
 }
 
-# Resolve version/tag
 TAG=""
+ASSET=""
+
 if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
-  log "VERSION is 'latest'; resolving most recent release (including prereleases)…"
-  releases_json="$(api "https://api.github.com/repos/${REPO}/releases?per_page=1")"
-  TAG="$(printf '%s' "$releases_json" | jq -r '.[0].tag_name')"
-  [ -n "$TAG" ] && [ "$TAG" != "null" ] || die "Could not determine latest release tag."
+  log "VERSION is 'latest'; resolving most recent release with matching asset (including prereleases)…"
+  releases_json="$(api "https://api.github.com/repos/${REPO}/releases?per_page=50")"
+
+  selected="$(
+    printf '%s' "$releases_json" | jq -c --arg binary "$BINARY" --arg os "$OS" --arg arch "$ARCH" --arg exclude "$EXCLUDE_TAG" '
+      [ .[]
+        | select(($exclude == "") or (.tag_name != $exclude))
+        | . as $rel
+        | ($rel.tag_name | sub("^v"; "")) as $ver
+        | ($binary + "_" + $ver + "_" + $os + "_" + $arch + ".tar.gz") as $asset
+        | select(any((($rel.assets // [])[]); .name == $asset))
+        | {tag: $rel.tag_name, version: $ver, asset: $asset}
+      ][0]
+    '
+  )"
+
+  TAG="$(printf '%s' "$selected" | jq -r '.tag // empty')"
+  VERSION="$(printf '%s' "$selected" | jq -r '.version // empty')"
+  ASSET="$(printf '%s' "$selected" | jq -r '.asset // empty')"
+
+  if [ -z "$TAG" ] || [ -z "$VERSION" ] || [ -z "$ASSET" ]; then
+    if [ -n "$EXCLUDE_TAG" ]; then
+      die "Could not find any release (excluding '${EXCLUDE_TAG}') with asset for ${OS}/${ARCH}."
+    fi
+    die "Could not find any release with asset for ${OS}/${ARCH}."
+  fi
 else
   VERSION="${VERSION#v}"
   VERSION="${VERSION#V}"
   TAG="v${VERSION}"
+  ASSET="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
 fi
 
-# Normalize VERSION from tag
-VERSION="${TAG#v}"
 log "Using release tag: ${TAG}"
 log "Using version: ${VERSION}"
-
-ASSET="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
 log "Expected asset: ${ASSET}"
 
 release_json="$(api "https://api.github.com/repos/${REPO}/releases/tags/${TAG}")"
-asset_id="$(printf '%s' "$release_json" | jq -r '.assets[] | select(.name=="'"$ASSET"'") | .id' | head -n 1)"
+asset_id="$(printf '%s' "$release_json" | jq -r '.assets[]? | select(.name=="'"$ASSET"'") | .id' | head -n 1)"
 
 if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
   die "Could not find asset '${ASSET}' in release '${TAG}'."
