@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.99 (2026-01-12)
+
+### Bug Fixes
+
+- Manginling entrypoints
+  ([`eaa3c45`](https://github.com/SailfinIO/sailfin/commit/eaa3c45cd197aa21575768e3e82a6acb28c76142))
+
+
 ## v0.1.1-alpha.98 (2026-01-08)
 
 ### Bug Fixes
