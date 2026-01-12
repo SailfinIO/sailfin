@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.102 (2026-01-12)
+
+### Bug Fixes
+
+- Timing improvements
+  ([`68a63d8`](https://github.com/SailfinIO/sailfin/commit/68a63d837360c62e7a150c1df275a77fbe17f8a3))
+
+
 ## v0.1.1-alpha.101 (2026-01-12)
 
 ### Bug Fixes
