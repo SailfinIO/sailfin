@@ -30,6 +30,8 @@
 
 extern char **environ;
 
+static bool _env_enabled(const char *name);
+
 static void _print_line(FILE *stream, const char *prefix, const char *msg);
 
 typedef struct SailfinTryContext
@@ -386,6 +388,57 @@ struct SailfinRecentString
 static pthread_mutex_t _sailfin_recent_string_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct SailfinRecentString _sailfin_recent_strings[4096];
 static size_t _sailfin_recent_string_cursor = 0;
+
+// =============================================================================
+// Allocation statistics (debug)
+// =============================================================================
+
+static int _alloc_stats_init = 0;
+static int _alloc_stats_enabled = 0;
+static uint64_t _alloc_stats_string_concat_calls = 0;
+static uint64_t _alloc_stats_string_concat_bytes = 0;
+static uint64_t _alloc_stats_substring_calls = 0;
+static uint64_t _alloc_stats_substring_bytes = 0;
+static uint64_t _alloc_stats_array_alloc_calls = 0;
+static uint64_t _alloc_stats_array_alloc_bytes = 0;
+
+static void _print_alloc_stats(void);
+
+static void _maybe_init_alloc_stats(void)
+{
+    if (_alloc_stats_init)
+    {
+        return;
+    }
+    _alloc_stats_init = 1;
+    _alloc_stats_enabled = _env_enabled("SAILFIN_TRACE_ALLOC_STATS") ? 1 : 0;
+    if (_alloc_stats_enabled)
+    {
+        atexit(_print_alloc_stats);
+    }
+}
+
+static void _print_alloc_stats(void)
+{
+    if (!_alloc_stats_init)
+    {
+        _maybe_init_alloc_stats();
+    }
+    if (!_alloc_stats_enabled)
+    {
+        return;
+    }
+    fprintf(
+        stderr,
+        "[stage2-native] alloc_stats string_concat calls=%llu bytes=%llu substring calls=%llu bytes=%llu array_alloc calls=%llu bytes=%llu\n",
+        (unsigned long long)_alloc_stats_string_concat_calls,
+        (unsigned long long)_alloc_stats_string_concat_bytes,
+        (unsigned long long)_alloc_stats_substring_calls,
+        (unsigned long long)_alloc_stats_substring_bytes,
+        (unsigned long long)_alloc_stats_array_alloc_calls,
+        (unsigned long long)_alloc_stats_array_alloc_bytes);
+    fflush(stderr);
+}
 
 // Debugging: track a specific LLVM module header string pointer once seen.
 // If later array ops drop it, that strongly implicates array length/ABI bugs.
@@ -1343,12 +1396,18 @@ int64_t sailfin_runtime_string_length(char *text)
 
 char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
 {
+    _maybe_init_alloc_stats();
     if (!text)
     {
         char *out = (char *)malloc(1);
         if (out)
         {
             out[0] = '\0';
+        }
+        if (_alloc_stats_enabled && out)
+        {
+            _alloc_stats_substring_calls++;
+            _alloc_stats_substring_bytes += 1;
         }
         _track_owned_string(out);
         return out;
@@ -1387,6 +1446,11 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
             memcpy(out, buf + start, (size_t)length);
         }
         out[length] = '\0';
+        if (_alloc_stats_enabled)
+        {
+            _alloc_stats_substring_calls++;
+            _alloc_stats_substring_bytes += (uint64_t)((size_t)length + 1u);
+        }
         _track_owned_string(out);
         return out;
     }
@@ -1427,18 +1491,29 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
         memcpy(out, text + start, (size_t)length);
     }
     out[length] = '\0';
+    if (_alloc_stats_enabled)
+    {
+        _alloc_stats_substring_calls++;
+        _alloc_stats_substring_bytes += (uint64_t)((size_t)length + 1u);
+    }
     _track_owned_string(out);
     return out;
 }
 
 char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end)
 {
+    _maybe_init_alloc_stats();
     if (!text)
     {
         char *out = (char *)malloc(1);
         if (out)
         {
             out[0] = '\0';
+        }
+        if (_alloc_stats_enabled && out)
+        {
+            _alloc_stats_substring_calls++;
+            _alloc_stats_substring_bytes += 1;
         }
         _track_owned_string(out);
         return out;
@@ -1478,6 +1553,11 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
             memcpy(out, buf + start, (size_t)length);
         }
         out[length] = '\0';
+        if (_alloc_stats_enabled)
+        {
+            _alloc_stats_substring_calls++;
+            _alloc_stats_substring_bytes += (uint64_t)((size_t)length + 1u);
+        }
         _track_owned_string(out);
         return out;
     }
@@ -1523,12 +1603,18 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
         memcpy(out, text + start, (size_t)length);
     }
     out[length] = '\0';
+    if (_alloc_stats_enabled)
+    {
+        _alloc_stats_substring_calls++;
+        _alloc_stats_substring_bytes += (uint64_t)((size_t)length + 1u);
+    }
     _track_owned_string(out);
     return out;
 }
 
 char *sailfin_runtime_string_concat(char *a, char *b)
 {
+    _maybe_init_alloc_stats();
     static int strict_strings = -1;
     if (strict_strings < 0)
     {
@@ -1750,6 +1836,12 @@ char *sailfin_runtime_string_concat(char *a, char *b)
             abort();
         }
         return NULL;
+    }
+
+    if (_alloc_stats_enabled)
+    {
+        _alloc_stats_string_concat_calls++;
+        _alloc_stats_string_concat_bytes += (uint64_t)(alen + blen + 1 + pad);
     }
 
     if (a_immediate)
@@ -2019,11 +2111,19 @@ char *sailfin_runtime_number_to_string(double value)
 
 static SailfinPtrArray *_alloc_array(int64_t len)
 {
+    _maybe_init_alloc_stats();
     SailfinPtrArray *arr = (SailfinPtrArray *)malloc(sizeof(SailfinPtrArray));
     if (!arr)
     {
         return NULL;
     }
+
+    // NOTE: Stage2 arrays are represented in LLVM as `{ i8**, i64 }`.
+    // We cannot extend the struct to store capacity without breaking ABI.
+    // Instead, we store a small header immediately *before* `arr->data`:
+    //   data[-2] = magic tag
+    //   data[-1] = capacity (as an integer cast through a pointer)
+    // Canaries are placed after `capacity` slots.
 
     // Defensive: corrupted lengths can cause OOM and get the process SIGKILLed.
     // Stage2 should never build arrays anywhere near this size.
@@ -2039,35 +2139,61 @@ static SailfinPtrArray *_alloc_array(int64_t len)
 
     arr->len = len;
 
-    // Stage2 IR frequently uses a non-null backing buffer for empty arrays.
-    // Preserve that property to avoid null pointer arithmetic in generated code.
-    //
-    // IMPORTANT: stage2-native currently exhibits an off-by-one (sometimes off-by-two)
-    // write when constructing/handling arrays. Allocate padding so such writes
-    // do not corrupt adjacent heap objects (which can deterministically drop
-    // prefixes like the LLVM module header).
-    size_t payload_slots = 2u;
+    // Preserve the historical "len+2" padding behaviour to tolerate occasional
+    // off-by-one/off-by-two writes from stage2-native code.
+    size_t min_capacity = 2u;
     if (len > 0)
     {
-        payload_slots = (size_t)len + 2u;
+        min_capacity = (size_t)len + 2u;
     }
 
-    // Canary slots catch OOB writes from miscompiled stage2-native code.
-    // The compiler heavily manipulates `{ i8**, i64 }` arrays while lowering.
-    // If any loop writes past the end, it can deterministically drop prefixes
-    // like the LLVM module header.
+    // Capacity policy:
+    // - Small arrays: round up to the next power-of-two (reduces churn).
+    // - Large arrays: allocate close to requested size to avoid large over-allocation
+    //   (which can explode peak RSS during compilation).
+    size_t capacity = min_capacity;
+    if (capacity < 8u)
+    {
+        capacity = 8u;
+    }
+    if (capacity <= 1024u)
+    {
+        size_t pow2 = 8u;
+        while (pow2 < capacity)
+        {
+            pow2 *= 2u;
+        }
+        capacity = pow2;
+    }
+    if (capacity > 10000000u)
+    {
+        capacity = 10000000u;
+    }
+
+    const size_t header_slots = 2u;
     const size_t canary_slots = 4u;
-    const uintptr_t canary_value = (uintptr_t)0x5341494c46494e43ull; // "SAILFINC" tag
-    arr->data = (char **)calloc(payload_slots + canary_slots, sizeof(char *));
-    if (!arr->data)
+    const uintptr_t header_magic = (uintptr_t)0x5341494c46494e43ull; // "SAILFINC" tag
+    char **raw = (char **)calloc(header_slots + capacity + canary_slots, sizeof(char *));
+    if (!raw)
     {
         free(arr);
         return NULL;
     }
 
+    if (_alloc_stats_enabled)
+    {
+        _alloc_stats_array_alloc_calls++;
+        _alloc_stats_array_alloc_bytes += (uint64_t)sizeof(SailfinPtrArray);
+        _alloc_stats_array_alloc_bytes += (uint64_t)((header_slots + capacity + canary_slots) * sizeof(char *));
+    }
+
+    raw[0] = (char *)header_magic;
+    raw[1] = (char *)(uintptr_t)capacity;
+    arr->data = raw + header_slots;
+
     for (size_t i = 0; i < canary_slots; i++)
     {
-        arr->data[payload_slots + i] = (char *)(canary_value + i);
+        arr->data[capacity + i] = (char *)(header_magic + i);
     }
 
     _recent_array_record((const void *)arr->data);
@@ -2099,22 +2225,23 @@ static void _array_check_canary(const char *label, SailfinPtrArray *arr)
     {
         return;
     }
-    int64_t len = arr->len;
-    if (len < 0)
+    // Arrays allocated by `_alloc_array` include a small header at data[-2..-1].
+    const uintptr_t canary_value = (uintptr_t)0x5341494c46494e43ull;
+    uintptr_t magic = (uintptr_t)arr->data[-2];
+    if (magic != canary_value)
     {
-        len = 0;
+        return;
     }
-    size_t payload_slots = 2u;
-    if (len > 0)
+    size_t capacity = (size_t)(uintptr_t)arr->data[-1];
+    if (capacity == 0 || capacity > 10000000u)
     {
-        payload_slots = (size_t)len + 2u;
+        return;
     }
     const size_t canary_slots = 4u;
-    const uintptr_t canary_value = (uintptr_t)0x5341494c46494e43ull;
     for (size_t i = 0; i < canary_slots; i++)
     {
         uintptr_t expected = canary_value + i;
-        uintptr_t got = (uintptr_t)arr->data[payload_slots + i];
+        uintptr_t got = (uintptr_t)arr->data[capacity + i];
         if (got != expected)
         {
             fprintf(
@@ -2124,7 +2251,7 @@ static void _array_check_canary(const char *label, SailfinPtrArray *arr)
                 (void *)arr,
                 (void *)arr->data,
                 (long long)arr->len,
-                payload_slots + i,
+                capacity + i,
                 (unsigned long long)expected,
                 (unsigned long long)got);
             fflush(stderr);
@@ -2677,10 +2804,113 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
 {
     _array_check_canary("push.in", array);
 
-    int64_t len = array ? array->len : 0;
+    if (!array)
+    {
+        return NULL;
+    }
+
+    int64_t len = array->len;
     if (len < 0)
     {
         len = 0;
+        array->len = 0;
+    }
+
+    // Ensure we have a heap backing buffer with capacity metadata.
+    size_t capacity = 0;
+    const uintptr_t header_magic = (uintptr_t)0x5341494c46494e43ull;
+    bool has_header = false;
+    if (array->data && _recent_array_contains((const void *)array->data))
+    {
+        if ((uintptr_t)array->data[-2] == header_magic)
+        {
+            capacity = (size_t)(uintptr_t)array->data[-1];
+            if (capacity > 0 && capacity <= 10000000u)
+            {
+                has_header = true;
+            }
+        }
+    }
+
+    if (!array->data || !has_header)
+    {
+        // Convert unknown/stack buffers to a managed heap allocation.
+        SailfinPtrArray *fresh = _alloc_array(len);
+        if (!fresh)
+        {
+            return NULL;
+        }
+        for (int64_t i = 0; i < len; i++)
+        {
+            fresh->data[i] = (array && array->data) ? array->data[i] : NULL;
+        }
+        array->data = fresh->data;
+        array->len = fresh->len;
+        // Leak the temporary struct; stage2-native does not reliably free arrays.
+        free(fresh);
+
+        capacity = (size_t)(uintptr_t)array->data[-1];
+        has_header = true;
+    }
+
+    if ((size_t)len >= capacity)
+    {
+        // Grow backing store in-place.
+        size_t new_capacity = capacity;
+        if (new_capacity < 8u)
+        {
+            new_capacity = 8u;
+        }
+
+        // For small arrays, doubling is fine; for large arrays, grow by ~25%
+        // to avoid runaway memory amplification.
+        if (new_capacity <= 1024u)
+        {
+            new_capacity *= 2u;
+        }
+        else
+        {
+            new_capacity += (new_capacity / 4u);
+        }
+
+        if (new_capacity < (size_t)len + 2u)
+        {
+            new_capacity = (size_t)len + 2u;
+        }
+        if (new_capacity > 10000000u)
+        {
+            new_capacity = 10000000u;
+        }
+
+        const size_t header_slots = 2u;
+        const size_t canary_slots = 4u;
+        char **raw = array->data - header_slots;
+        char **grown = (char **)realloc(raw, (header_slots + new_capacity + canary_slots) * sizeof(char *));
+        if (!grown)
+        {
+            return NULL;
+        }
+
+        // Zero out newly-added capacity slots.
+        if (new_capacity > capacity)
+        {
+            memset(
+                grown + header_slots + capacity,
+                0,
+                (new_capacity - capacity) * sizeof(char *));
+        }
+
+        grown[0] = (char *)header_magic;
+        grown[1] = (char *)(uintptr_t)new_capacity;
+        array->data = grown + header_slots;
+        capacity = new_capacity;
+
+        for (size_t i = 0; i < canary_slots; i++)
+        {
+            array->data[capacity + i] = (char *)(header_magic + i);
+        }
+
+        _recent_array_record((const void *)array->data);
     }
 
     static int trace_push_init = 0;
@@ -2693,19 +2923,10 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
         trace_push_budget = _env_int("SAILFIN_TRACE_ARRAY_PUSH_BUDGET", 64);
     }
 
-    SailfinPtrArray *out = _alloc_array(len + 1);
-    if (!out)
-    {
-        return NULL;
-    }
+    array->data[len] = value;
+    array->len = len + 1;
 
-    for (int64_t i = 0; i < len; i++)
-    {
-        out->data[i] = (array && array->data) ? array->data[i] : NULL;
-    }
-    out->data[len] = value;
-
-    if (array && array->len == 0 && array->data && array->data[0] != NULL)
+    if (array->len == 0 && array->data && array->data[0] != NULL)
     {
         fprintf(
             stderr,
@@ -2719,9 +2940,9 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
     {
         trace_push_budget--;
         char *first = NULL;
-        if (out->len > 0 && out->data)
+        if (array->len > 0 && array->data)
         {
-            first = out->data[0];
+            first = array->data[0];
         }
 
         uint32_t first_cp = 0;
@@ -2789,7 +3010,7 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
             stderr,
             "[stage2-native] array_push len=%lld out=%p first=%p%s cp=%u first_preview=\"%s\" value=%p%s cp=%u value_preview=\"%s\"\n",
             (long long)len,
-            (void *)out,
+            (void *)array,
             (void *)first,
             first_immediate ? " immediate" : "",
             (unsigned)first_cp,
@@ -2813,18 +3034,18 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
                 trace_markers_limit = 64;
             }
         }
-        if (trace_markers_enabled && out && out->data && out->len > 0)
+        if (trace_markers_enabled && array && array->data && array->len > 0)
         {
             long long source_idx = -1;
             long long proto_idx = -1;
-            size_t limit = (size_t)out->len;
+            size_t limit = (size_t)array->len;
             if (limit > trace_markers_limit)
             {
                 limit = trace_markers_limit;
             }
             for (size_t idx = 0; idx < limit; idx++)
             {
-                char *s = out->data[idx];
+                char *s = array->data[idx];
                 uint32_t cp = 0;
                 if (!s)
                 {
@@ -2850,15 +3071,15 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
             fprintf(
                 stderr,
                 "[stage2-native] array_markers out=%p len=%lld source_idx=%lld proto_idx=%lld\n",
-                (void *)out,
-                (long long)out->len,
+                (void *)array,
+                (long long)array->len,
                 source_idx,
                 proto_idx);
             fflush(stderr);
         }
     }
 
-    return out;
+    return array;
 }
 
 double sailfin_runtime_byte_at(char *text, int64_t index)
