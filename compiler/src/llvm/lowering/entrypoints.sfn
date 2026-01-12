@@ -208,6 +208,11 @@ fn should_keep_unmangled_abi_symbol(symbol -> string) -> boolean {
     if symbol == "compile_to_llvm" {
         return true;
     }
+    // Program entrypoint for `sfn build`/`sfn run`.
+    // The clang toolchain expects an unmangled `main` symbol when linking an executable.
+    if symbol == "main" {
+        return true;
+    }
     return false;
 }
 

@@ -119,6 +119,8 @@ def should_keep_unmangled_abi_symbol(symbol):
         return True
     if symbol == "compile_to_llvm":
         return True
+    if symbol == "main":
+        return True
     return False
 
 def extract_module_name_from_native_text(native_text):
