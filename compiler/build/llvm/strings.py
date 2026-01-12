@@ -44,17 +44,30 @@ def append_string_constant(set, constant):
     return (set) + ([constant])
 
 def merge_string_constants(existing, new_constants):
-    result = clone_string_constants(existing)
+    if len(new_constants) == 0:
+        return existing
+    if len(existing) == 0:
+        return new_constants
     index = 0
     while True:
         if index >= len(new_constants):
             break
         candidate = new_constants[index]
-        found_by_name = find_string_constant_by_name(result, candidate.name)
+        found_by_name = find_string_constant_by_name(existing, candidate.name)
         if found_by_name == None:
-            result.append(candidate)
+            result = clone_string_constants(existing)
+            merge_index = index
+            while True:
+                if merge_index >= len(new_constants):
+                    break
+                merge_candidate = new_constants[merge_index]
+                merge_found = find_string_constant_by_name(result, merge_candidate.name)
+                if merge_found == None:
+                    result.append(merge_candidate)
+                merge_index += 1
+            return result
         index += 1
-    return result
+    return existing
 
 def find_string_constant(constants, content):
     index = 0

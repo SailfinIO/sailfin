@@ -118,10 +118,10 @@ def lower_expression(expression, bindings, locals, temp_index, lines, functions,
         interpolated = try_lower_interpolated_string_literal(stripped, bindings, locals, temp_index, lines, functions, context)
         if interpolated != None:
             result = interpolated
-            diagnostics = (diagnostics) + (result.diagnostics)
+            diagnostics = extend_string_array(diagnostics, result.diagnostics)
             return ExpressionResult(lines=result.lines, temp_index=result.temp_index, operand=result.operand, diagnostics=diagnostics, string_constants=result.string_constants)
         literal_result = lower_string_literal(stripped, temp_index, lines)
-        diagnostics = (diagnostics) + (literal_result.diagnostics)
+        diagnostics = extend_string_array(diagnostics, literal_result.diagnostics)
         return ExpressionResult(lines=literal_result.lines, temp_index=literal_result.temp_index, operand=literal_result.operand, diagnostics=diagnostics, string_constants=literal_result.string_constants)
     if starts_with(stripped, "await"):
         if len(stripped) == 5:
@@ -325,12 +325,12 @@ def lower_ternary_expression(parse, bindings, locals, temp_index, lines, functio
     merge_label = "ternary_merge_" + label_id
     label_temp_offset = temp_index + 1
     cond_result = lower_expression(parse.condition, bindings, locals, label_temp_offset, lines, functions, context, "")
-    diagnostics = (diagnostics) + (cond_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, cond_result.diagnostics)
     string_constants = cond_result.string_constants
     if cond_result.operand == None:
         return ExpressionResult(lines=cond_result.lines, temp_index=cond_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     cond_bool = coerce_operand_to_type(cond_result.operand, "i1", cond_result.temp_index, cond_result.lines)
-    diagnostics = (diagnostics) + (cond_bool.diagnostics)
+    diagnostics = extend_string_array(diagnostics, cond_bool.diagnostics)
     if cond_bool.operand == None:
         return ExpressionResult(lines=cond_bool.lines, temp_index=cond_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     current_lines = cond_bool.lines
@@ -341,7 +341,7 @@ def lower_ternary_expression(parse, bindings, locals, temp_index, lines, functio
     current_lines = append_string(current_lines, "")
     current_lines = append_string(current_lines, then_label + ":")
     then_result = lower_expression(parse.true_value, bindings, locals, cond_bool.temp_index, current_lines, functions, context, expected_type)
-    diagnostics = (diagnostics) + (then_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, then_result.diagnostics)
     string_constants = merge_string_constants(string_constants, then_result.string_constants)
     if then_result.operand == None:
         return ExpressionResult(lines=then_result.lines, temp_index=then_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
@@ -354,7 +354,7 @@ def lower_ternary_expression(parse, bindings, locals, temp_index, lines, functio
     current_lines = append_string(current_lines, "")
     current_lines = append_string(current_lines, else_label + ":")
     else_result = lower_expression(parse.false_value, bindings, locals, then_result.temp_index, current_lines, functions, context, expected_type)
-    diagnostics = (diagnostics) + (else_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, else_result.diagnostics)
     string_constants = merge_string_constants(string_constants, else_result.string_constants)
     if else_result.operand == None:
         return ExpressionResult(lines=else_result.lines, temp_index=else_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
@@ -384,12 +384,12 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
         empty_constants = empty_string_constant_set()
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
     left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "")
-    diagnostics = (diagnostics) + (left_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, left_result.diagnostics)
     string_constants = left_result.string_constants
     if left_result.operand == None:
         return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, "")
-    diagnostics = (diagnostics) + (right_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, right_result.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_result.operand == None:
         return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
@@ -400,7 +400,7 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
             current_lines = right_result.lines
             current_temp = right_result.temp_index
             coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines)
-            diagnostics = (diagnostics) + (coerced.diagnostics)
+            diagnostics = extend_string_array(diagnostics, coerced.diagnostics)
             current_lines = coerced.lines
             current_temp = coerced.temp_index
             if coerced.operand == None:
@@ -414,7 +414,7 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
             current_lines = right_result.lines
             current_temp = right_result.temp_index
             coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines)
-            diagnostics = (diagnostics) + (coerced.diagnostics)
+            diagnostics = extend_string_array(diagnostics, coerced.diagnostics)
             current_lines = coerced.lines
             current_temp = coerced.temp_index
             if coerced.operand == None:
@@ -428,13 +428,13 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
             current_lines = right_result.lines
             current_temp = right_result.temp_index
             lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines)
-            diagnostics = (diagnostics) + (lhs_coerced.diagnostics)
+            diagnostics = extend_string_array(diagnostics, lhs_coerced.diagnostics)
             current_lines = lhs_coerced.lines
             current_temp = lhs_coerced.temp_index
             if lhs_coerced.operand == None:
                 return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=string_constants)
             rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines)
-            diagnostics = (diagnostics) + (rhs_coerced.diagnostics)
+            diagnostics = extend_string_array(diagnostics, rhs_coerced.diagnostics)
             current_lines = rhs_coerced.lines
             current_temp = rhs_coerced.temp_index
             if rhs_coerced.operand == None:
@@ -455,7 +455,7 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
                     rhs_i64 = rhs
                     if rhs.llvm_type != "i64":
                         coerced = coerce_operand_to_type(rhs, "i64", current_temp, current_lines)
-                        diagnostics = (diagnostics) + (coerced.diagnostics)
+                        diagnostics = extend_string_array(diagnostics, coerced.diagnostics)
                         current_lines = coerced.lines
                         current_temp = coerced.temp_index
                         if coerced.operand == None:
@@ -474,7 +474,7 @@ def lower_binary_operation(expression, match, bindings, locals, temp_index, line
                     operand = LLVMOperand(llvm_type=left_type, value=gep_name)
                     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
     harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines)
-    diagnostics = (diagnostics) + (harmonised.diagnostics)
+    diagnostics = extend_string_array(diagnostics, harmonised.diagnostics)
     if harmonised.left == None  or  harmonised.right == None:
         return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     left_aligned = harmonised.left
@@ -502,12 +502,12 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
         empty_constants = empty_string_constant_set()
         return ExpressionResult(lines=lines, temp_index=temp_index, operand=None, diagnostics=diagnostics, string_constants=empty_constants)
     left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "")
-    diagnostics = (diagnostics) + (left_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, left_result.diagnostics)
     string_constants = left_result.string_constants
     if left_result.operand == None:
         return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, "")
-    diagnostics = (diagnostics) + (right_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, right_result.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_result.operand == None:
         return ExpressionResult(lines=right_result.lines, temp_index=right_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
@@ -556,7 +556,7 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
         right_is_pointer = ends_with_pointer_suffix(right_operand.llvm_type)
         if left_is_char  and  right_is_pointer:
             coercion = coerce_operand_to_type(right_operand, "i8", alignment_temp, alignment_lines)
-            diagnostics = (diagnostics) + (coercion.diagnostics)
+            diagnostics = extend_string_array(diagnostics, coercion.diagnostics)
             if coercion.operand == None:
                 return ExpressionResult(lines=coercion.lines, temp_index=coercion.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
             right_operand = coercion.operand
@@ -565,18 +565,18 @@ def lower_comparison_operation(expression, match, bindings, locals, temp_index, 
         else:
             if right_is_char  and  left_is_pointer:
                 coercion = coerce_operand_to_type(left_operand, "i8", alignment_temp, alignment_lines)
-                diagnostics = (diagnostics) + (coercion.diagnostics)
+                diagnostics = extend_string_array(diagnostics, coercion.diagnostics)
                 if coercion.operand == None:
                     return ExpressionResult(lines=coercion.lines, temp_index=coercion.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
                 left_operand = coercion.operand
                 alignment_lines = coercion.lines
                 alignment_temp = coercion.temp_index
     harmonised = harmonise_operands(left_operand, right_operand, alignment_temp, alignment_lines)
-    diagnostics = (diagnostics) + (harmonised.diagnostics)
+    diagnostics = extend_string_array(diagnostics, harmonised.diagnostics)
     if harmonised.left == None  or  harmonised.right == None:
         return ExpressionResult(lines=harmonised.lines, temp_index=harmonised.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     comparison = emit_comparison_instruction(match.symbol, harmonised.left, harmonised.right, harmonised.temp_index, harmonised.lines)
-    diagnostics = (diagnostics) + (comparison.diagnostics)
+    diagnostics = extend_string_array(diagnostics, comparison.diagnostics)
     if comparison.operand == None:
         return ExpressionResult(lines=comparison.lines, temp_index=comparison.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     return ExpressionResult(lines=comparison.lines, temp_index=comparison.temp_index, operand=comparison.operand, diagnostics=diagnostics, string_constants=string_constants)
@@ -596,12 +596,12 @@ def lower_logical_and(expression, match, bindings, locals, temp_index, lines, fu
     merge_label = "logical_and_merge_" + label_id
     label_temp_offset = temp_index + 1
     left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context, "")
-    diagnostics = (diagnostics) + (left_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, left_result.diagnostics)
     string_constants = left_result.string_constants
     if left_result.operand == None:
         return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines)
-    diagnostics = (diagnostics) + (left_bool.diagnostics)
+    diagnostics = extend_string_array(diagnostics, left_bool.diagnostics)
     string_constants = merge_string_constants(string_constants, left_result.string_constants)
     if left_bool.operand == None:
         return ExpressionResult(lines=left_bool.lines, temp_index=left_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
@@ -613,7 +613,7 @@ def lower_logical_and(expression, match, bindings, locals, temp_index, lines, fu
     current_lines = append_string(current_lines, "")
     current_lines = append_string(current_lines, check_right_label + ":")
     right_result = lower_expression(right_text, bindings, locals, left_bool.temp_index, current_lines, functions, context, "")
-    diagnostics = (diagnostics) + (right_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, right_result.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_result.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower && RHS in `" + expression + "`")
@@ -625,7 +625,7 @@ def lower_logical_and(expression, match, bindings, locals, temp_index, lines, fu
         operand = LLVMOperand(llvm_type="i1", value="false")
         return ExpressionResult(lines=fallback_lines, temp_index=right_result.temp_index, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
     right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines)
-    diagnostics = (diagnostics) + (right_bool.diagnostics)
+    diagnostics = extend_string_array(diagnostics, right_bool.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_bool.operand == None:
         return ExpressionResult(lines=right_bool.lines, temp_index=right_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
@@ -656,12 +656,12 @@ def lower_logical_or(expression, match, bindings, locals, temp_index, lines, fun
     merge_label = "logical_or_merge_" + label_id
     label_temp_offset = temp_index + 1
     left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context, "")
-    diagnostics = (diagnostics) + (left_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, left_result.diagnostics)
     string_constants = left_result.string_constants
     if left_result.operand == None:
         return ExpressionResult(lines=left_result.lines, temp_index=left_result.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
     left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines)
-    diagnostics = (diagnostics) + (left_bool.diagnostics)
+    diagnostics = extend_string_array(diagnostics, left_bool.diagnostics)
     string_constants = merge_string_constants(string_constants, left_result.string_constants)
     if left_bool.operand == None:
         return ExpressionResult(lines=left_bool.lines, temp_index=left_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
@@ -673,7 +673,7 @@ def lower_logical_or(expression, match, bindings, locals, temp_index, lines, fun
     current_lines = append_string(current_lines, "")
     current_lines = append_string(current_lines, check_right_label + ":")
     right_result = lower_expression(right_text, bindings, locals, left_bool.temp_index, current_lines, functions, context, "")
-    diagnostics = (diagnostics) + (right_result.diagnostics)
+    diagnostics = extend_string_array(diagnostics, right_result.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_result.operand == None:
         diagnostics = append_string(diagnostics, "llvm lowering: unable to lower || RHS in `" + expression + "`")
@@ -685,7 +685,7 @@ def lower_logical_or(expression, match, bindings, locals, temp_index, lines, fun
         operand = LLVMOperand(llvm_type="i1", value=left_bool.operand.value)
         return ExpressionResult(lines=fallback_lines, temp_index=right_result.temp_index, operand=operand, diagnostics=diagnostics, string_constants=string_constants)
     right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines)
-    diagnostics = (diagnostics) + (right_bool.diagnostics)
+    diagnostics = extend_string_array(diagnostics, right_bool.diagnostics)
     string_constants = merge_string_constants(string_constants, right_result.string_constants)
     if right_bool.operand == None:
         return ExpressionResult(lines=right_bool.lines, temp_index=right_bool.temp_index, operand=None, diagnostics=diagnostics, string_constants=string_constants)
@@ -1014,7 +1014,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
             if lowered_default.operand == None:
                 diagnostics = append_string(diagnostics, "llvm lowering: failed to lower default argument for parameter `" + param.name + "` in call to `" + trimmed_target + "`")
                 break
-            operands = append_llvm_operand(operands, lowered_default.operand)
+            operands.append(lowered_default.operand)
             param_index += 1
     if function_entry != None  and  injected_argument_count == 1:
         if len(operands) > 0  and  len(expected_params) > 0:
