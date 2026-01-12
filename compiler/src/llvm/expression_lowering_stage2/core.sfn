@@ -39,6 +39,7 @@ import {
     matches_keyword,
     find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings,
     is_effect_delimiter,
+    extend_string_array,
 } from "../utils";
 
 import {
@@ -1290,7 +1291,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                             break;
                         }
                         let field_info = variant_info.fields[arg_index];
-                        fields = append_struct_literal_field(fields, StructLiteralField {
+                        fields.push(StructLiteralField {
                             name: field_info.name,
                             value: arguments[arg_index]
                         });
@@ -1688,12 +1689,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             argument_expected_type = expected_params[parameter_index];
         }
         let lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context, argument_expected_type);
-        diagnostics = diagnostics.concat(lowered.diagnostics);
+        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
         if lowered.operand != null {
-            operands = append_llvm_operand(operands, lowered.operand);
+            operands.push(lowered.operand);
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
         }
@@ -1703,13 +1704,13 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     if method_operand != null {
         let operand_value = method_operand;
         let mut combined_operands -> LLVMOperand[] = [];
-        combined_operands = append_llvm_operand(combined_operands, operand_value);
+        combined_operands.push(operand_value);
         let mut operand_index -> number = 0;
         loop {
             if operand_index >= operands.length {
                 break;
             }
-            combined_operands = append_llvm_operand(combined_operands, operands[operand_index]);
+            combined_operands.push(operands[operand_index]);
             operand_index += 1;
         }
         operands = combined_operands;
@@ -1763,7 +1764,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             }
             let expected_type = expected_params[param_index];
             let lowered_default = lower_expression(param.default_value, bindings, locals, current_temp, current_lines, functions, context, expected_type);
-            diagnostics = diagnostics.concat(lowered_default.diagnostics);
+            diagnostics = extend_string_array(diagnostics, lowered_default.diagnostics);
             collected_string_constants = merge_string_constants(collected_string_constants, lowered_default.string_constants);
             current_lines = lowered_default.lines;
             current_temp = lowered_default.temp_index;
@@ -1842,21 +1843,21 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
         // For trait dispatch, skip coercion of the first argument (trait object)
         if is_trait_dispatch && index == 0 {
-            coerced_operands = append_llvm_operand(coerced_operands, operand);
+            coerced_operands.push(operand);
         } else if target_type.length == 0 {
-            coerced_operands = append_llvm_operand(coerced_operands, operand);
+            coerced_operands.push(operand);
         } else {
             let coerced = coerce_operand_to_type(operand, target_type, current_temp, current_lines);
-            diagnostics = diagnostics.concat(coerced.diagnostics);
+            diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
             current_lines = coerced.lines;
             current_temp = coerced.temp_index;
             if coerced.operand == null {
                 diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
                 // Use i8* null as universal placeholder instead of type-specific defaults to reduce cascade errors
                 let placeholder = LLVMOperand { llvm_type: "i8*", value: "null" };
-                coerced_operands = append_llvm_operand(coerced_operands, placeholder);
+                coerced_operands.push(placeholder);
             } else {
-                coerced_operands = append_llvm_operand(coerced_operands, coerced.operand);
+                coerced_operands.push(coerced.operand);
             }
         }
         index += 1;
@@ -2924,7 +2925,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             continue;
         }
         let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, "");
-        diagnostics = diagnostics.concat(lowered.diagnostics);
+        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
@@ -2932,7 +2933,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             diagnostics = append_string(diagnostics, "llvm lowering: array literal element produced no value");
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
-        operands = append_llvm_operand(operands, lowered.operand);
+        operands.push(lowered.operand);
         inferred_element_type = dominant_type(inferred_element_type, lowered.operand.llvm_type);
         index += 1;
     }
@@ -2967,7 +2968,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
         // and crashes native execution when `string_length` calls `strlen`.
         if ends_with_pointer_suffix(element_type) && !ends_with_pointer_suffix(operand.llvm_type) && !is_string_pointer_type(element_type) {
             let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
-            diagnostics = diagnostics.concat(boxed.diagnostics);
+            diagnostics = extend_string_array(diagnostics, boxed.diagnostics);
             current_lines = boxed.lines;
             current_temp = boxed.temp_index;
             if boxed.operand == null {
@@ -2977,14 +2978,14 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             prepared_operand = boxed.operand;
         }
         let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines);
-        diagnostics = diagnostics.concat(coerced.diagnostics);
+        diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
         if coerced.operand == null {
             diagnostics = append_string(diagnostics, "llvm lowering: array literal element could not be coerced to `" + element_type + "`");
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
-        coerced_operands = append_llvm_operand(coerced_operands, coerced.operand);
+        coerced_operands.push(coerced.operand);
         index += 1;
     }
     operands = coerced_operands;

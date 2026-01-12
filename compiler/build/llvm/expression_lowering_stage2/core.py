@@ -4,7 +4,7 @@ from runtime import runtime_support as runtime
 from ...native_ir import NativeFunction, NativeSourceSpan, NativeStruct, NativeEnum
 from ...string_utils import substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of
 from ..types import TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo, InterfaceTypeInfo, VTableInfo, VTableEntry, LocalBinding, ParameterBinding, OwnershipInfo, OwnershipConsumption, OwnershipAnalysis, LifetimeRegionMetadata, LifetimeReleaseEvent, ScopeMetadata, LLVMOperand, ExpressionResult, CoercionResult, BlockLoweringResult, LoweredLLVMFunction, LoweredLLVMResult, LetLoweringResult, ModuleGlobalLoweringResult, OperatorMatch, BorrowParseResult, BorrowArgumentParse, TernaryParseResult, AssignmentParseResult, InlineLetParseResult, MemberAccessParse, IndexExpressionParse, RawAddressParseResult, CastParseResult, TraitMetadata, TraitDescriptor, TraitImplementationDescriptor, FunctionEffectEntry, RuntimeHelperDescriptor, CapabilityManifest, CapabilityManifestEntry, StringConstant, LocalMutation, LoopContext, ImportedModuleContext, LayoutManifestApplication, TypeContextBuild, FunctionCallEntry, StringPointerResult, InterpolatedTemplateParse, BodyResult, ParameterPreparation, ArrayLiteralMetadata, TypeAllocationInfo, HeapBoxResult, StructLiteralField, StructLiteralParse, EnumLiteralParse, ExpressionStatementResult, BlockLabelResult, IfStructure, LoopStructure, TryStructure, RangeIterableParse, MatchCaseStructure, MatchStructure, MatchFieldBinding, MatchStructFieldBinding, MatchCaseCondition, ConditionConversion, ComparisonEmission, BinaryAlignmentResult, ThrowLoweringResult, PhiMergeResult, PhiInputEntry, MutationMaterializationResult, PhiStoreEntry, MatchArmMutations, LoadLocalResult
-from ..utils import starts_with, ends_with, char_at as utils_char_at, is_identifier_start_char, is_identifier_part_char, contains_text, matches_keyword, find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings, is_effect_delimiter
+from ..utils import starts_with, ends_with, char_at as utils_char_at, is_identifier_start_char, is_identifier_part_char, contains_text, matches_keyword, find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings, is_effect_delimiter, extend_string_array
 from compiler.build.llvm.expression_lowering_stage2.core_text import number_to_string, matches_case_insensitive, trim_text, is_trim_char, index_of, find_last_index_of_char, append_string, string_array_contains, join_with_separator, find_substring_from, is_union_llvm_type, parse_union_payload_types, extract_simple_identifier, is_boolean_literal, is_null_literal, is_digit_char, char_code_at_text, is_integer_literal, is_number_literal, normalise_number_literal, is_string_literal, is_character_literal, get_character_literal_value, make_string_constant_name, make_string_constant_name_for_module, compute_string_constant_hash, parse_interpolated_template, encode_string_literal_for_sailfin, escape_string_for_sailfin_literal, unescape_string_literal, sanitize_symbol
 from compiler.build.llvm.expression_lowering_stage2.core_text import parse_union_payload_types, is_union_llvm_type, extract_simple_identifier, unescape_string_literal, make_string_constant_name, make_string_constant_name_for_module
 from compiler.build.llvm.expression_lowering_stage2.core_parse import parse_struct_literal, parse_struct_pattern, parse_enum_literal, parse_member_access, parse_index_expression, parse_range_iterable
@@ -724,7 +724,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                         if arg_index >= len(arguments):
                             break
                         field_info = variant_info.fields[arg_index]
-                        fields = append_struct_literal_field(fields, StructLiteralField(name=field_info.name, value=arguments[arg_index]))
+                        fields.append(StructLiteralField(name=field_info.name, value=arguments[arg_index]))
                         arg_index += 1
                 else:
                     pass
@@ -962,24 +962,24 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         if len(expected_params) > parameter_index:
             argument_expected_type = expected_params[parameter_index]
         lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context, argument_expected_type)
-        diagnostics = (diagnostics) + (lowered.diagnostics)
+        diagnostics = extend_string_array(diagnostics, lowered.diagnostics)
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
         current_lines = lowered.lines
         current_temp = lowered.temp_index
         if lowered.operand != None:
-            operands = append_llvm_operand(operands, lowered.operand)
+            operands.append(lowered.operand)
         else:
             diagnostics = append_string(diagnostics, "llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`")
         index += 1
     if method_operand != None:
         operand_value = method_operand
         combined_operands = []
-        combined_operands = append_llvm_operand(combined_operands, operand_value)
+        combined_operands.append(operand_value)
         operand_index = 0
         while True:
             if operand_index >= len(operands):
                 break
-            combined_operands = append_llvm_operand(combined_operands, operands[operand_index])
+            combined_operands.append(operands[operand_index])
             operand_index += 1
         operands = combined_operands
     expected_operand_count = len(arguments) + injected_argument_count
@@ -1007,7 +1007,7 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
                 break
             expected_type = expected_params[param_index]
             lowered_default = lower_expression(param.default_value, bindings, locals, current_temp, current_lines, functions, context, expected_type)
-            diagnostics = (diagnostics) + (lowered_default.diagnostics)
+            diagnostics = extend_string_array(diagnostics, lowered_default.diagnostics)
             collected_string_constants = merge_string_constants(collected_string_constants, lowered_default.string_constants)
             current_lines = lowered_default.lines
             current_temp = lowered_default.temp_index
@@ -1067,21 +1067,21 @@ def lower_call_expression(target, arguments, bindings, locals, temp_index, lines
         if len(expected_params) > index:
             target_type = expected_params[index]
         if is_trait_dispatch  and  index == 0:
-            coerced_operands = append_llvm_operand(coerced_operands, operand)
+            coerced_operands.append(operand)
         else:
             if len(target_type) == 0:
-                coerced_operands = append_llvm_operand(coerced_operands, operand)
+                coerced_operands.append(operand)
             else:
                 coerced = coerce_operand_to_type(operand, target_type, current_temp, current_lines)
-                diagnostics = (diagnostics) + (coerced.diagnostics)
+                diagnostics = extend_string_array(diagnostics, coerced.diagnostics)
                 current_lines = coerced.lines
                 current_temp = coerced.temp_index
                 if coerced.operand == None:
                     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`")
                     placeholder = LLVMOperand(llvm_type="i8*", value="null")
-                    coerced_operands = append_llvm_operand(coerced_operands, placeholder)
+                    coerced_operands.append(placeholder)
                 else:
-                    coerced_operands = append_llvm_operand(coerced_operands, coerced.operand)
+                    coerced_operands.append(coerced.operand)
         index += 1
     operands = coerced_operands
     if is_array_concat  and  len(array_concat_element_type) > 0  and  not ends_with_pointer_suffix(array_concat_element_type):
@@ -1837,14 +1837,14 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
             index += 1
             continue
         lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, "")
-        diagnostics = (diagnostics) + (lowered.diagnostics)
+        diagnostics = extend_string_array(diagnostics, lowered.diagnostics)
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants)
         current_lines = lowered.lines
         current_temp = lowered.temp_index
         if lowered.operand == None:
             diagnostics = append_string(diagnostics, "llvm lowering: array literal element produced no value")
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
-        operands = append_llvm_operand(operands, lowered.operand)
+        operands.append(lowered.operand)
         inferred_element_type = dominant_type(inferred_element_type, lowered.operand.llvm_type)
         index += 1
     if len(operands) == 0:
@@ -1865,7 +1865,7 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
         prepared_operand = operand
         if ends_with_pointer_suffix(element_type)  and  not ends_with_pointer_suffix(operand.llvm_type)  and  not is_string_pointer_type(element_type):
             boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context)
-            diagnostics = (diagnostics) + (boxed.diagnostics)
+            diagnostics = extend_string_array(diagnostics, boxed.diagnostics)
             current_lines = boxed.lines
             current_temp = boxed.temp_index
             if boxed.operand == None:
@@ -1873,13 +1873,13 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
                 return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
             prepared_operand = boxed.operand
         coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines)
-        diagnostics = (diagnostics) + (coerced.diagnostics)
+        diagnostics = extend_string_array(diagnostics, coerced.diagnostics)
         current_lines = coerced.lines
         current_temp = coerced.temp_index
         if coerced.operand == None:
             diagnostics = append_string(diagnostics, "llvm lowering: array literal element could not be coerced to `" + element_type + "`")
             return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=collected_string_constants)
-        coerced_operands = append_llvm_operand(coerced_operands, coerced.operand)
+        coerced_operands.append(coerced.operand)
         index += 1
     operands = coerced_operands
     length_value = len(operands)
