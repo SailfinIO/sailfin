@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.100 (2026-01-12)
+
+### Bug Fixes
+
+- Join with separator
+  ([`0f03320`](https://github.com/SailfinIO/sailfin/commit/0f03320c93bd5b7ecd669a00dc710ac0eea6550f))
+
+
 ## v0.1.1-alpha.99 (2026-01-12)
 
 ### Bug Fixes
