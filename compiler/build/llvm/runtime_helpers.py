@@ -108,6 +108,7 @@ def runtime_helper_descriptors():
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="append_string", symbol="sailfin_runtime_append_string", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="concat", symbol="sailfin_runtime_concat", return_type="{ i8**, i64 }*", parameter_types=["{ i8**, i64 }*", "{ i8**, i64 }*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="copy_bytes", symbol="sailfin_runtime_copy_bytes", return_type="void", parameter_types=["i8*", "i8*", "i64"], effects=[]))
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="array_push_slot", symbol="sailfin_runtime_array_push_slot", return_type="i8*", parameter_types=["i8**", "i64*", "i64"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="get_field", symbol="sailfin_runtime_get_field", return_type="i8*", parameter_types=["i8*", "i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="mark_persistent", symbol="sailfin_runtime_mark_persistent", return_type="void", parameter_types=["i8*"], effects=[]))
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor(target="set_exception", symbol="sailfin_runtime_set_exception", return_type="void", parameter_types=["i8*"], effects=[]))

@@ -144,49 +144,25 @@ def lower_array_push_in_place(array, value, element_type, lines, temp_index):
     data_ptr_gep = format_temp_name(current_temp)
     current_temp += 1
     current_lines = append_string(current_lines, "  " + data_ptr_gep + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 0")
-    data_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + data_ptr_gep)
     len_ptr = format_temp_name(current_temp)
     current_temp += 1
     current_lines = append_string(current_lines, "  " + len_ptr + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 1")
-    len_value = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + len_value + " = load i64, i64* " + len_ptr)
     element_size_ptr = format_temp_name(current_temp)
     current_temp += 1
     current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1")
     element_size_value = format_temp_name(current_temp)
     current_temp += 1
     current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64")
-    total_length = format_temp_name(current_temp)
+    data_ptr_i8 = format_temp_name(current_temp)
     current_temp += 1
-    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + len_value + ", 1")
-    total_bytes = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + data_ptr_i8 + " = bitcast " + data_pointer_pointer_type + " " + data_ptr_gep + " to i8**")
+    slot_i8 = format_temp_name(current_temp)
     current_temp += 1
-    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length)
-    new_raw_buffer = format_temp_name(current_temp)
+    current_lines = append_string(current_lines, "  " + slot_i8 + " = call i8* @sailfin_runtime_array_push_slot(i8** " + data_ptr_i8 + ", i64* " + len_ptr + ", i64 " + element_size_value + ")")
+    slot_typed = format_temp_name(current_temp)
     current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")")
-    new_data_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type)
-    new_data_i8 = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*")
-    existing_bytes = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + existing_bytes + " = mul i64 " + element_size_value + ", " + len_value)
-    existing_src_i8 = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + existing_src_i8 + " = bitcast " + data_pointer_type + " " + data_value + " to i8*")
-    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + existing_src_i8 + ", i64 " + existing_bytes + ")")
-    element_dest_ptr = format_temp_name(current_temp)
-    current_temp += 1
-    current_lines = append_string(current_lines, "  " + element_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + len_value)
-    current_lines = append_string(current_lines, "  store " + element_type + " " + value.value + ", " + element_type + "* " + element_dest_ptr)
-    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + data_ptr_gep)
-    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + len_ptr)
+    current_lines = append_string(current_lines, "  " + slot_typed + " = bitcast i8* " + slot_i8 + " to " + element_type + "*")
+    current_lines = append_string(current_lines, "  store " + element_type + " " + value.value + ", " + element_type + "* " + slot_typed)
     return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=array, diagnostics=diagnostics, string_constants=[])
 
 def find_top_level_comma_in_llvm_type(text):

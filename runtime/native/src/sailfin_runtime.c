@@ -31,6 +31,7 @@
 extern char **environ;
 
 static bool _env_enabled(const char *name);
+static int _env_int(const char *name, int fallback);
 
 static void _print_line(FILE *stream, const char *prefix, const char *msg);
 
@@ -495,6 +496,47 @@ static void _recent_string_record(const char *base, size_t len)
     _sailfin_recent_string_cursor = (_sailfin_recent_string_cursor + 1) % (sizeof(_sailfin_recent_strings) / sizeof(_sailfin_recent_strings[0]));
     pthread_mutex_unlock(&_sailfin_recent_string_lock);
 }
+
+#if defined(__APPLE__)
+static void _trace_backtrace_budgeted(const char *label)
+{
+    // Optional: emit a backtrace for diagnosing large allocations.
+    // Use a budget so we don't spam logs.
+    static int init = 0;
+    static int enabled = 0;
+    static int budget = 0;
+    if (!init)
+    {
+        init = 1;
+        enabled = _env_enabled("SAILFIN_TRACE_LARGE_ARRAY_BACKTRACE") ? 1 : 0;
+        budget = _env_int("SAILFIN_TRACE_LARGE_ARRAY_BACKTRACE_BUDGET", 8);
+    }
+    if (!enabled || budget <= 0)
+    {
+        return;
+    }
+    budget--;
+
+    void *frames[64];
+    int n = backtrace(frames, (int)(sizeof(frames) / sizeof(frames[0])));
+    char **symbols = backtrace_symbols(frames, n);
+    fprintf(stderr, "[stage2-native] backtrace label=%s frames=%d\n", label ? label : "?", n);
+    if (symbols)
+    {
+        for (int i = 0; i < n; i++)
+        {
+            fprintf(stderr, "  %s\n", symbols[i]);
+        }
+        free(symbols);
+    }
+    fflush(stderr);
+}
+#else
+static void _trace_backtrace_budgeted(const char *label)
+{
+    (void)label;
+}
+#endif
 
 static bool _recent_string_find_range(const char *ptr, const char **out_base, size_t *out_len, size_t *out_offset)
 {
@@ -2197,6 +2239,31 @@ static SailfinPtrArray *_alloc_array(int64_t len)
     }
 
     _recent_array_record((const void *)arr->data);
+
+    // Optional diagnostics: trace very large array allocations.
+    static int trace_large_init = 0;
+    static size_t trace_large_min_cap = 0;
+    static int trace_large_budget = 0;
+    if (!trace_large_init)
+    {
+        trace_large_init = 1;
+        trace_large_min_cap = _env_sizet("SAILFIN_TRACE_LARGE_ARRAY_ALLOC_MIN_CAP", 0);
+        trace_large_budget = _env_int("SAILFIN_TRACE_LARGE_ARRAY_ALLOC_BUDGET", 16);
+    }
+    if (trace_large_min_cap > 0 && trace_large_budget > 0 && capacity >= trace_large_min_cap)
+    {
+        trace_large_budget--;
+        fprintf(
+            stderr,
+            "[stage2-native] large_array_alloc len=%lld cap=%zu arr=%p data=%p\n",
+            (long long)len,
+            capacity,
+            (void *)arr,
+            (void *)arr->data);
+        fflush(stderr);
+        _trace_backtrace_budgeted("large_array_alloc");
+    }
+
     return arr;
 }
 
@@ -2516,16 +2583,25 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
     {
         alen = 0;
     }
-    SailfinPtrArray *out = _alloc_array(alen + 1);
+
+    // Historically, append allocated a fresh array and copied on every call,
+    // which is catastrophically expensive for tight loops like split_lines.
+    // Stage1 semantics (Python list.append) are in-place; match that here.
+    SailfinPtrArray *out = a;
+    if (!out)
+    {
+        out = _alloc_array(0);
+        if (!out)
+        {
+            return NULL;
+        }
+    }
+
+    out = sailfin_runtime_array_push(out, text);
     if (!out)
     {
         return NULL;
     }
-    for (int64_t i = 0; i < alen; i++)
-    {
-        out->data[i] = (a && a->data) ? a->data[i] : NULL;
-    }
-    out->data[alen] = text;
 
     // High-signal hook: report if the LLVM module preamble line is ever
     // appended into a string array. This lets us distinguish "never added"
@@ -2632,7 +2708,7 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
     }
     if (trace_append_min_len > 0 && trace_append_budget > 0)
     {
-        size_t total = (size_t)((alen >= 0 ? alen : 0) + 1);
+        size_t total = (size_t)(out && out->len >= 0 ? out->len : 0);
         if (total >= trace_append_min_len)
         {
             char *first = NULL;
@@ -2911,6 +2987,30 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
         }
 
         _recent_array_record((const void *)array->data);
+
+        static int trace_grow_init = 0;
+        static size_t trace_grow_min_cap = 0;
+        static int trace_grow_budget = 0;
+        if (!trace_grow_init)
+        {
+            trace_grow_init = 1;
+            trace_grow_min_cap = _env_sizet("SAILFIN_TRACE_LARGE_ARRAY_GROW_MIN_CAP", 0);
+            trace_grow_budget = _env_int("SAILFIN_TRACE_LARGE_ARRAY_GROW_BUDGET", 16);
+        }
+        if (trace_grow_min_cap > 0 && trace_grow_budget > 0 && new_capacity >= trace_grow_min_cap)
+        {
+            trace_grow_budget--;
+            fprintf(
+                stderr,
+                "[stage2-native] large_array_grow old_cap=%zu new_cap=%zu len=%lld arr=%p data=%p\n",
+                (size_t)(uintptr_t)array->data[-1],
+                new_capacity,
+                (long long)array->len,
+                (void *)array,
+                (void *)array->data);
+            fflush(stderr);
+            _trace_backtrace_budgeted("large_array_grow");
+        }
     }
 
     static int trace_push_init = 0;
@@ -3080,6 +3180,166 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
     }
 
     return array;
+}
+
+char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int64_t elem_size)
+{
+    if (!data_ptr_ptr || !len_ptr)
+    {
+        return NULL;
+    }
+    if (elem_size <= 0 || elem_size > (int64_t)(1024 * 1024))
+    {
+        return NULL;
+    }
+
+    int64_t len = *len_ptr;
+    if (len < 0)
+    {
+        len = 0;
+        *len_ptr = 0;
+    }
+
+    const uint64_t header_magic = 0x5341494c46494e43ull;
+    const size_t header_words = 4u; // magic, capacity, elem_size, reserved
+    const size_t header_bytes = header_words * sizeof(uint64_t);
+    const size_t canary_bytes = 32u;
+
+    uint8_t *data = (uint8_t *)(*data_ptr_ptr);
+    size_t capacity = 0;
+    bool has_header = false;
+
+    if (data && _recent_array_contains((const void *)data))
+    {
+        uint64_t *hdr = (uint64_t *)(data - header_bytes);
+        if (hdr[0] == header_magic)
+        {
+            size_t cap = (size_t)hdr[1];
+            size_t esz = (size_t)hdr[2];
+            if (cap > 0 && cap <= 10000000u && esz == (size_t)elem_size)
+            {
+                capacity = cap;
+                has_header = true;
+            }
+        }
+    }
+
+    if (!data || !has_header)
+    {
+        size_t want = (size_t)len + 1u;
+        size_t new_capacity = want;
+        if (new_capacity < 8u)
+        {
+            new_capacity = 8u;
+        }
+        if (new_capacity <= 1024u)
+        {
+            // round up to power of two
+            size_t p = 1u;
+            while (p < new_capacity)
+            {
+                p <<= 1u;
+            }
+            new_capacity = p;
+        }
+        else
+        {
+            new_capacity += (new_capacity / 4u);
+        }
+        if (new_capacity < want)
+        {
+            new_capacity = want;
+        }
+        if (new_capacity > 10000000u)
+        {
+            new_capacity = 10000000u;
+        }
+
+        size_t payload = new_capacity * (size_t)elem_size;
+        uint8_t *raw = (uint8_t *)calloc(1, header_bytes + payload + canary_bytes);
+        if (!raw)
+        {
+            return NULL;
+        }
+        uint64_t *hdr = (uint64_t *)raw;
+        hdr[0] = header_magic;
+        hdr[1] = (uint64_t)new_capacity;
+        hdr[2] = (uint64_t)elem_size;
+        hdr[3] = 0;
+
+        uint8_t *new_data = raw + header_bytes;
+        if (data && len > 0)
+        {
+            memcpy(new_data, data, (size_t)len * (size_t)elem_size);
+        }
+        for (size_t i = 0; i < canary_bytes; i++)
+        {
+            new_data[payload + i] = (uint8_t)(0xC3u ^ (uint8_t)i);
+        }
+
+        data = new_data;
+        capacity = new_capacity;
+        has_header = true;
+        *data_ptr_ptr = (char *)data;
+        _recent_array_record((const void *)data);
+    }
+
+    if ((size_t)len >= capacity)
+    {
+        size_t new_capacity = capacity;
+        if (new_capacity < 8u)
+        {
+            new_capacity = 8u;
+        }
+        if (new_capacity <= 1024u)
+        {
+            new_capacity *= 2u;
+        }
+        else
+        {
+            new_capacity += (new_capacity / 4u);
+        }
+        size_t want = (size_t)len + 1u;
+        if (new_capacity < want)
+        {
+            new_capacity = want;
+        }
+        if (new_capacity > 10000000u)
+        {
+            new_capacity = 10000000u;
+        }
+
+        size_t old_payload = capacity * (size_t)elem_size;
+        size_t new_payload = new_capacity * (size_t)elem_size;
+        uint8_t *raw = data - header_bytes;
+        uint8_t *grown = (uint8_t *)realloc(raw, header_bytes + new_payload + canary_bytes);
+        if (!grown)
+        {
+            return NULL;
+        }
+        uint64_t *hdr = (uint64_t *)grown;
+        hdr[0] = header_magic;
+        hdr[1] = (uint64_t)new_capacity;
+        hdr[2] = (uint64_t)elem_size;
+        uint8_t *new_data = grown + header_bytes;
+        if (new_payload > old_payload)
+        {
+            memset(new_data + old_payload, 0, new_payload - old_payload);
+        }
+        for (size_t i = 0; i < canary_bytes; i++)
+        {
+            new_data[new_payload + i] = (uint8_t)(0xC3u ^ (uint8_t)i);
+        }
+
+        data = new_data;
+        capacity = new_capacity;
+        *data_ptr_ptr = (char *)data;
+        _recent_array_record((const void *)data);
+    }
+
+    uint8_t *slot = data + ((size_t)len * (size_t)elem_size);
+    *len_ptr = len + 1;
+    return (char *)slot;
 }
 
 double sailfin_runtime_byte_at(char *text, int64_t index)

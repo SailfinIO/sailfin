@@ -52,6 +52,11 @@ extern "C"
     SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text);
     SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value);
 
+    // Generic (byte-wise) array push for non-pointer element types.
+    // Mutates the backing buffer to ensure capacity and returns a pointer to the
+    // newly appended slot (caller writes the element bytes there).
+    char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int64_t elem_size);
+
     // ---- Byte helpers ----
 
     // Returns the raw byte at `index` as a `number` (double) for stage2.

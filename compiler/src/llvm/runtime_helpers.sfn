@@ -619,6 +619,14 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
 
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "array_push_slot",
+        symbol: "sailfin_runtime_array_push_slot",
+        return_type: "i8*",
+        parameter_types: ["i8**", "i64*", "i64"],
+        effects: [],
+    });
+
     // Generic field accessor for opaque imported types
     // Takes object pointer and field name, returns field value as i8*
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
