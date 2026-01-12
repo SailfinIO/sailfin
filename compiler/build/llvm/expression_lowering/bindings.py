@@ -43,9 +43,9 @@ def bindings_mark_parameter_consumed(bindings, name):
         binding = bindings[index]
         if binding.name == name:
             updated = ParameterBinding(name=binding.name, llvm_name=binding.llvm_name, llvm_type=binding.llvm_type, type_annotation=binding.type_annotation, consumed=True, span=binding.span)
-            result = (result) + ([updated])
+            result.append(updated)
         else:
-            result = (result) + ([binding])
+            result.append(binding)
         index += 1
     return result
 
@@ -58,9 +58,9 @@ def bindings_mark_local_consumed(locals, name):
         entry = locals[index]
         if entry.name == name:
             updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=entry.ownership, consumed=True, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
-            result = (result) + ([updated])
+            result.append(updated)
         else:
-            result = (result) + ([entry])
+            result.append(entry)
         index += 1
     return result
 
@@ -73,9 +73,9 @@ def bindings_reset_local_consumption(locals, name):
         entry = locals[index]
         if entry.name == name:
             updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=entry.ownership, consumed=False, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
-            result = (result) + ([updated])
+            result.append(updated)
         else:
-            result = (result) + ([entry])
+            result.append(entry)
         index += 1
     return result
 
@@ -88,8 +88,8 @@ def bindings_update_local_ownership(locals, name, ownership):
         entry = locals[index]
         if entry.name == name:
             updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=ownership, consumed=entry.consumed, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
-            result = (result) + ([updated])
+            result.append(updated)
         else:
-            result = (result) + ([entry])
+            result.append(entry)
         index += 1
     return result

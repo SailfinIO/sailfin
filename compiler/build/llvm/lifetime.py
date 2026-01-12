@@ -240,9 +240,9 @@ def update_local_ownership(locals, name, ownership):
         entry = locals[index]
         if entry.name == name:
             updated = LocalBinding(name=entry.name, pointer=entry.pointer, llvm_type=entry.llvm_type, type_annotation=entry.type_annotation, ownership=ownership, consumed=entry.consumed, scope_id=entry.scope_id, scope_depth=entry.scope_depth)
-            result = (result) + ([updated])
+            result.append(updated)
         else:
-            result = (result) + ([entry])
+            result.append(entry)
         index += 1
     return result
 

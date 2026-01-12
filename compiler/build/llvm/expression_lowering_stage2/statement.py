@@ -278,7 +278,7 @@ def lower_expression_statement(function_name, instruction, expression, bindings,
                     region = make_lifetime_region_metadata(assignment_ownership.region_id, parsed_assignment.target, assignment_ownership, binding.scope_id, binding.scope_depth, base_scope.scope_id, base_scope.scope_depth)
                     lifetime_regions = append_lifetime_region(lifetime_regions, region)
             mutation = LocalMutation(name=parsed_assignment.target, llvm_type=binding.llvm_type, value_name=stored_value, span=instruction.span, originating_label=current_label)
-            mutations = (mutations) + ([mutation])
+            mutations.append(mutation)
         return ExpressionStatementResult(lines=current_lines, temp_index=current_temp, locals=current_locals, bindings=current_bindings, diagnostics=diagnostics, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)
     ownership_analysis = analyze_value_ownership(expression, instruction.span, current_locals, current_bindings)
     diagnostics = (diagnostics) + (ownership_analysis.diagnostics)

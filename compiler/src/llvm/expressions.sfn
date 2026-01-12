@@ -65,9 +65,9 @@ fn mark_parameter_consumed(bindings -> ParameterBinding[], name -> string) -> Pa
                 consumed: true,
                 span: binding.span,
             };
-            result = result.concat([updated]);
+            result.push(updated);
         } else {
-            result = result.concat([binding]);
+            result.push(binding);
         }
         index += 1;
     }
@@ -93,9 +93,9 @@ fn mark_local_consumed(locals -> LocalBinding[], name -> string) -> LocalBinding
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
             };
-            result = result.concat([updated]);
+            result.push(updated);
         } else {
-            result = result.concat([entry]);
+            result.push(entry);
         }
         index += 1;
     }
@@ -121,9 +121,9 @@ fn reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBin
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
             };
-            result = result.concat([updated]);
+            result.push(updated);
         } else {
-            result = result.concat([entry]);
+            result.push(entry);
         }
         index += 1;
     }

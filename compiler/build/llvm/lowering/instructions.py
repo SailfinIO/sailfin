@@ -955,7 +955,7 @@ body_label
             if len(llvm_type) == 0:
                 llvm_type = "double"
             exit_mutation = LocalMutation(name=name, llvm_type=llvm_type, value_name=exit_value, span=original_span, originating_label=exit_label)
-            exit_mutations = (exit_mutations) + ([exit_mutation])
+            exit_mutations.append(exit_mutation)
         name_idx += 1
     body_scoped_mutations = []
     body_mut_idx = 0
@@ -974,7 +974,7 @@ body_label
                     break
                 seen_idx += 1
             if not already_added:
-                body_scoped_mutations = (body_scoped_mutations) + ([mutation])
+                body_scoped_mutations.append(mutation)
         body_mut_idx += 1
     collected_mutations = (body_scoped_mutations) + (exit_mutations)
     return BlockLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, block_counter=current_block_counter, diagnostics=diagnostics, terminated=False, next_local_id=current_next_local, lifetime_regions=lifetime_regions, next_lifetime_region_id=current_next_region, next_index=structure.next_index + 1, mutations=collected_mutations, string_constants=collected_string_constants)

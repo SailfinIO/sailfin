@@ -517,7 +517,7 @@ fn lower_expression_statement(
                 span: instruction.span,
                 originating_label: current_label,
             };
-            mutations = mutations.concat([mutation]);
+            mutations.push(mutation);
         }
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
     }

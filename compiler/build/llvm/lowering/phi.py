@@ -102,9 +102,9 @@ def retarget_recent_mutations(mutations, start_index, target_label):
         mutation = mutations[index]
         if index >= start_index:
             updated = LocalMutation(name=mutation.name, llvm_type=mutation.llvm_type, value_name=mutation.value_name, span=mutation.span, originating_label=target_label)
-            result = (result) + ([updated])
+            result.append(updated)
         else:
-            result = (result) + ([mutation])
+            result.append(mutation)
         index += 1
     return result
 
@@ -124,9 +124,9 @@ def materialize_mutation_values_at_exit(mutations, locals, lines, temp_index):
             load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
             updated_lines = append_string(updated_lines, load_line)
             updated = LocalMutation(name=mutation.name, llvm_type=mutation.llvm_type, value_name=load_temp, span=mutation.span, originating_label=mutation.originating_label)
-            updated_mutations = (updated_mutations) + ([updated])
+            updated_mutations.append(updated)
         else:
-            updated_mutations = (updated_mutations) + ([mutation])
+            updated_mutations.append(mutation)
         index += 1
     return MutationMaterializationResult(mutations=updated_mutations, lines=updated_lines, temp_index=current_temp)
 

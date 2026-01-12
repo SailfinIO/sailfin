@@ -147,9 +147,9 @@ fn retarget_recent_mutations(
                 span: mutation.span,
                 originating_label: target_label,
             };
-            result = result.concat([updated]);
+            result.push(updated);
         } else {
-            result = result.concat([mutation]);
+            result.push(mutation);
         }
 
         index += 1;
@@ -190,9 +190,9 @@ fn materialize_mutation_values_at_exit(
                 span: mutation.span,
                 originating_label: mutation.originating_label,
             };
-            updated_mutations = updated_mutations.concat([updated]);
+            updated_mutations.push(updated);
         } else {
-            updated_mutations = updated_mutations.concat([mutation]);
+            updated_mutations.push(mutation);
         }
 
         index += 1;

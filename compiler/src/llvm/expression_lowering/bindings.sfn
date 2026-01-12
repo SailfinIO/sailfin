@@ -44,9 +44,9 @@ fn bindings_mark_parameter_consumed(bindings -> ParameterBinding[], name -> stri
                 consumed: true,
                 span: binding.span,
             };
-            result = result.concat([updated]);
+            result.push(updated);
         } else {
-            result = result.concat([binding]);
+            result.push(binding);
         }
         index += 1;
     }
@@ -72,9 +72,9 @@ fn bindings_mark_local_consumed(locals -> LocalBinding[], name -> string) -> Loc
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
             };
-            result = result.concat([updated]);
+            result.push(updated);
         } else {
-            result = result.concat([entry]);
+            result.push(entry);
         }
         index += 1;
     }
@@ -100,9 +100,9 @@ fn bindings_reset_local_consumption(locals -> LocalBinding[], name -> string) ->
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
             };
-            result = result.concat([updated]);
+            result.push(updated);
         } else {
-            result = result.concat([entry]);
+            result.push(entry);
         }
         index += 1;
     }
@@ -128,9 +128,9 @@ fn bindings_update_local_ownership(locals -> LocalBinding[], name -> string, own
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
             };
-            result = result.concat([updated]);
+            result.push(updated);
         } else {
-            result = result.concat([entry]);
+            result.push(entry);
         }
         index += 1;
     }

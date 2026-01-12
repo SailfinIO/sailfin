@@ -325,9 +325,9 @@ fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership ->
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
             };
-            result = result.concat([updated]);
+            result.push(updated);
         } else {
-            result = result.concat([entry]);
+            result.push(entry);
         }
         index += 1;
     }

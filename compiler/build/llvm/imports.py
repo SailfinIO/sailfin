@@ -251,9 +251,9 @@ def replace_native_struct(structs, index, replacement):
         if i >= len(structs):
             break
         if i == index:
-            result = (result) + ([replacement])
+            result.append(replacement)
         else:
-            result = (result) + ([structs[i]])
+            result.append(structs[i])
         i += 1
     return result
 
@@ -264,8 +264,8 @@ def replace_native_enum(enums, index, replacement):
         if i >= len(enums):
             break
         if i == index:
-            result = (result) + ([replacement])
+            result.append(replacement)
         else:
-            result = (result) + ([enums[i]])
+            result.append(enums[i])
         i += 1
     return result

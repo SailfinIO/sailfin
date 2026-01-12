@@ -1436,7 +1436,7 @@ fn lower_loop_instruction(
                 span: original_span,
                 originating_label: exit_label,
             };
-            exit_mutations = exit_mutations.concat([exit_mutation]);
+            exit_mutations.push(exit_mutation);
         }
         name_idx += 1;
     }
@@ -1465,7 +1465,7 @@ fn lower_loop_instruction(
                 seen_idx += 1;
             }
             if !already_added {
-                body_scoped_mutations = body_scoped_mutations.concat([mutation]);
+                body_scoped_mutations.push(mutation);
             }
         }
         body_mut_idx += 1;
