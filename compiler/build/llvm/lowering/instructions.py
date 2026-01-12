@@ -1224,7 +1224,7 @@ loop_body_label
                 if len(llvm_type) == 0:
                     llvm_type = "double"
                 exit_mutation = LocalMutation(name=name, llvm_type=llvm_type, value_name=exit_value, span=original_span, originating_label=loop_exit_label)
-                exit_mutations = (exit_mutations) + ([exit_mutation])
+                exit_mutations.append(exit_mutation)
             exit_idx += 1
         collected_mutations = exit_mutations
         current_locals = locals
@@ -1387,7 +1387,7 @@ loop_body_label
             if len(llvm_type) == 0:
                 llvm_type = "double"
             exit_mutation = LocalMutation(name=name, llvm_type=llvm_type, value_name=exit_value, span=original_span, originating_label=loop_exit_label)
-            exit_mutations = (exit_mutations) + ([exit_mutation])
+            exit_mutations.append(exit_mutation)
         exit_idx += 1
     collected_mutations = exit_mutations
     current_locals = locals
@@ -2369,5 +2369,5 @@ def lower_let_instruction(function, instruction, bindings, locals, allocas, line
         current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer)
     current_locals = append_local_binding(current_locals, LocalBinding(name=instruction.name, pointer=pointer, llvm_type=llvm_type, type_annotation=instruction.type_annotation, ownership=ownership, consumed=False, scope_id=scope_id, scope_depth=scope_depth))
     mutation = LocalMutation(name=instruction.name, llvm_type=llvm_type, value_name=stored_value, span=initializer_span, originating_label=current_label)
-    mutations = (mutations) + ([mutation])
+    mutations.append(mutation)
     return LetLoweringResult(lines=current_lines, allocas=current_allocas, locals=current_locals, bindings=current_bindings, temp_index=current_temp, diagnostics=diagnostics, next_local_id=next_local_id + 1, lifetime_regions=lifetime_regions, lifetime_releases=lifetime_releases, next_region_id=current_next_region, mutations=mutations, string_constants=string_constants)

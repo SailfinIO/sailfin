@@ -2001,7 +2001,7 @@ fn lower_for_instruction(
                     span: original_span,
                     originating_label: loop_exit_label,
                 };
-                exit_mutations = exit_mutations.concat([exit_mutation]);
+                exit_mutations.push(exit_mutation);
             }
             exit_idx += 1;
         }
@@ -2260,7 +2260,7 @@ fn lower_for_instruction(
                     span: original_span,
                     originating_label: loop_exit_label,
                 };
-                exit_mutations = exit_mutations.concat([exit_mutation]);
+                exit_mutations.push(exit_mutation);
             }
             exit_idx += 1;
         }
@@ -3844,7 +3844,7 @@ fn lower_let_instruction(
         span: initializer_span,
         originating_label: current_label,
     };
-    mutations = mutations.concat([mutation]);
+    mutations.push(mutation);
 
     return LetLoweringResult {
         lines: current_lines,
