@@ -3,7 +3,7 @@
 // Stage2 CLI/compiler version string.
 //
 // Release tooling (python-semantic-release) bumps the `__version__` string.
-let __version__ = "0.1.1-alpha.102";
+let __version__ = "0.1.1-alpha.103";
 
 fn sailfin_stage2_version() -> string {
     return __version__;
