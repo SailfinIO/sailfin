@@ -70,7 +70,7 @@ fn number_to_string(value -> number) -> string {
         }
         if started || count > 0 {
             started = true;
-            let ch = substring(digits, count, count + 1);
+            let ch = digits[count];
             output = output + ch;
         }
         index += 1;
@@ -242,19 +242,11 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             }
             if index + 1 < parts.length {
                 let combined = parts[index] + separator + parts[index + 1];
-                if next.length == 0 {
-                    next = [combined];
-                } else {
-                    next = next.concat([combined]);
-                }
+                next.push(combined);
                 index += 2;
                 continue;
             }
-            if next.length == 0 {
-                next = [parts[index]];
-            } else {
-                next = next.concat([parts[index]]);
-            }
+            next.push(parts[index]);
             index += 1;
         }
         parts = next;

@@ -154,7 +154,7 @@ def number_to_string(value):
             count += 1
         if started  or  count > 0:
             started = True
-            ch = substring(digits, count, count + 1)
+            ch = digits[count]
             output = output + ch
         index += 1
     if len(output) == 0:

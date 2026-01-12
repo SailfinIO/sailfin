@@ -204,7 +204,7 @@ fn number_to_string(value -> number) -> string {
         }
         if started || count > 0 {
             started = true;
-            let ch = substring(digits, count, count + 1);
+            let ch = digits[count];
             output = output + ch;
         }
         index += 1;

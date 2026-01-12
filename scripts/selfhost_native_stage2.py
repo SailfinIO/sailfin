@@ -170,12 +170,37 @@ def _trim_to_llvm_module_start(text: str) -> str:
     present later in the stream.
     """
 
-    lines = text.splitlines(keepends=True)
-    for i, line in enumerate(lines[:400]):
+    def _is_plausible_llvm_toplevel(line: str) -> bool:
+        if not line:
+            return False
+        if line[:1].isspace():
+            return False
         # Most stable anchors across LLVM versions.
         if line.startswith("source_filename ="):
-            return "".join(lines[i:])
+            return True
         if line.startswith("; ModuleID ="):
+            return True
+        # Some modules may omit the above and start directly with other
+        # top-level entities.
+        return line.startswith(
+            (
+                "target ",
+                "declare ",
+                "define ",
+                "%",
+                "@",
+                ";",
+                "!",
+                "attributes ",
+            )
+        )
+
+    lines = text.splitlines(keepends=True)
+    for i, raw_line in enumerate(lines[:400]):
+        line = raw_line.rstrip("\n")
+        if not line.strip():
+            continue
+        if _is_plausible_llvm_toplevel(line):
             return "".join(lines[i:])
     return text
 
@@ -419,6 +444,62 @@ def main(argv: list[str]) -> int:
         # Timing aggregation keyed by module_name.
         timing_by_module: dict[str, dict[str, int]] = {}
 
+        def _timing_module_matches(*, timing_module: str, module_name: str) -> bool:
+            if timing_module == module_name:
+                return True
+            # Stage2 timing uses logical module paths like "llvm/foo/bar".
+            # Selfhost uses a collision-free filesystem layout with "__".
+            if timing_module.replace("/", "__").replace("\\", "__") == module_name:
+                return True
+            return False
+
+        def _print_timing_summary(*, header: str, module_list: list[str]) -> None:
+            print(f"[selfhost] ({pass_name}) {header}:", flush=True)
+            print(
+                "[selfhost] "
+                f"timing_enabled={bool(args.timing)} timed_modules={len(timing_by_module)}",
+                flush=True,
+            )
+            print(
+                "[selfhost] "
+                f"attempts={seed_attempts_total} retried_modules={modules_retried} "
+                f"timeouts={seed_timeouts} seed_failures={seed_failures} "
+                f"clang_validations={clang_validations} clang_validation_failures={clang_validation_failures}",
+                flush=True,
+            )
+            print(f"[selfhost] seed emit: {seed_emit_s:.2f}s", flush=True)
+            if not args.skip_clang_validate:
+                print(
+                    f"[selfhost] clang validate: {clang_validate_s:.2f}s", flush=True)
+            print(
+                f"[selfhost] clang compile: {clang_compile_s:.2f}s", flush=True)
+            print(f"[selfhost] clang link: {clang_link_s:.2f}s", flush=True)
+
+            if args.timing and timing_by_module and module_list:
+                def _phase_ms(name: str, phase: str) -> int:
+                    return int(timing_by_module.get(name, {}).get(phase, 0))
+
+                ranked = sorted(
+                    module_list,
+                    key=lambda n: _phase_ms(n, "lower_llvm"),
+                    reverse=True,
+                )
+
+                print(
+                    f"[selfhost] ({pass_name}) slowest modules by lower_llvm (ms):", flush=True)
+                for name in ranked[:20]:
+                    phases = timing_by_module.get(name, {})
+                    parse_ms = phases.get("parse", 0)
+                    type_ms = phases.get("typecheck", 0)
+                    emit_ms = phases.get("emit_native", 0)
+                    lower_ms = phases.get("lower_llvm", 0)
+                    total_ms = phases.get("total", 0)
+                    print(
+                        "[selfhost] "
+                        f"{name} parse={parse_ms} typecheck={type_ms} emit_native={emit_ms} lower_llvm={lower_ms} total={total_ms}",
+                        flush=True,
+                    )
+
         work_dir = args.work_dir
         stage2_dir = work_dir / pass_name
         raw_dir = stage2_dir / "raw"
@@ -445,350 +526,356 @@ def main(argv: list[str]) -> int:
         if args.clang_validate_timeout and args.clang_validate_timeout > 0:
             clang_validate_timeout = float(args.clang_validate_timeout)
 
-        for idx, source_path in enumerate(sources):
-            _check_budget()
-            module_name = _module_name_from_source_path(source_path)
-            final_obj_path = obj_dir / f"{module_name}.o"
-            final_obj_path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                final_obj_path.unlink()
-            except FileNotFoundError:
-                pass
-            max_attempts = max(1, int(args.max_attempts))
-            cleaned = ""
-            last_stderr = ""
-            last_rc: int | None = None
-            used_attempts = 0
-            for attempt in range(1, max_attempts + 1):
-                used_attempts = attempt
-                seed_attempts_total += 1
+        try:
+            for idx, source_path in enumerate(sources):
+                _check_budget()
+                module_name = _module_name_from_source_path(source_path)
+                final_obj_path = obj_dir / f"{module_name}.o"
+                final_obj_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    final_obj_path.unlink()
+                except FileNotFoundError:
+                    pass
+                max_attempts = max(1, int(args.max_attempts))
+                cleaned = ""
+                last_stderr = ""
+                last_rc: int | None = None
+                used_attempts = 0
+                for attempt in range(1, max_attempts + 1):
+                    used_attempts = attempt
+                    seed_attempts_total += 1
 
-                attempt_seed_timeout = seed_timeout
-                if seed_timeout is not None:
-                    # Some modules can legitimately take much longer than the
-                    # default per-module timeout (especially on macOS or when
-                    # the seed is instrumented). Retrying with the same timeout
-                    # just wastes wall time, so back off per attempt.
-                    cap = max(seed_timeout, 1200.0)
-                    attempt_seed_timeout = min(
-                        seed_timeout * (2 ** (attempt - 1)), cap)
-                print(
-                    f"[selfhost] ({pass_name}) module {idx + 1}/{len(sources)} {module_name} attempt {attempt}/{max_attempts}",
-                    flush=True,
-                )
-                attempt_path = raw_dir / f"{module_name}.attempt{attempt}.ll"
-                cleaned_attempt_path = raw_dir / \
-                    f"{module_name}.attempt{attempt}.clean.ll"
-                clang_stderr_path = raw_dir / \
-                    f"{module_name}.attempt{attempt}.clang.stderr"
+                    attempt_seed_timeout = seed_timeout
+                    if seed_timeout is not None:
+                        # Some modules can legitimately take much longer than the
+                        # default per-module timeout (especially on macOS or when
+                        # the seed is instrumented). Retrying with the same timeout
+                        # just wastes wall time, so back off per attempt.
+                        cap = max(seed_timeout, 1200.0)
+                        attempt_seed_timeout = min(
+                            seed_timeout * (2 ** (attempt - 1)), cap)
+                    print(
+                        f"[selfhost] ({pass_name}) module {idx + 1}/{len(sources)} {module_name} attempt {attempt}/{max_attempts}",
+                        flush=True,
+                    )
+                    attempt_path = raw_dir / \
+                        f"{module_name}.attempt{attempt}.ll"
+                    cleaned_attempt_path = raw_dir / \
+                        f"{module_name}.attempt{attempt}.clean.ll"
+                    clang_stderr_path = raw_dir / \
+                        f"{module_name}.attempt{attempt}.clang.stderr"
 
-                for p in (attempt_path, cleaned_attempt_path, clang_stderr_path):
-                    p.parent.mkdir(parents=True, exist_ok=True)
+                    for p in (attempt_path, cleaned_attempt_path, clang_stderr_path):
+                        p.parent.mkdir(parents=True, exist_ok=True)
 
-                for stale in (attempt_path, cleaned_attempt_path, clang_stderr_path):
+                    for stale in (attempt_path, cleaned_attempt_path, clang_stderr_path):
+                        try:
+                            stale.unlink()
+                        except FileNotFoundError:
+                            pass
+
+                    if use_emit_llvm_file:
+                        try:
+                            t0 = time.perf_counter()
+                            cmd = [str(seed_bin), "emit-llvm-file"]
+                            if args.timing:
+                                cmd.append("--timing")
+                            cmd.extend([str(source_path), str(attempt_path)])
+                            proc = subprocess.run(
+                                cmd,
+                                cwd=str(REPO_ROOT),
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE,
+                                close_fds=False,
+                                env=seed_env,
+                                timeout=attempt_seed_timeout,
+                            )
+                            if args.timing:
+                                stderr_text = proc.stderr.decode(
+                                    "utf-8", errors="replace")
+                                for _mod, phase, ms in _extract_timing_lines(stderr_text):
+                                    timing_by_module.setdefault(
+                                        module_name, {})[phase] = ms
+                            seed_emit_s += time.perf_counter() - t0
+                        except subprocess.TimeoutExpired as exc:
+                            last_rc = 124
+                            seed_timeouts += 1
+                            last_stderr = (exc.stderr or b"").decode(
+                                "utf-8", errors="replace")
+                            if args.attempt_sleep > 0:
+                                time.sleep(args.attempt_sleep)
+                            continue
+                    else:
+                        with attempt_path.open("wb") as out:
+                            try:
+                                t0 = time.perf_counter()
+                                cmd = [str(seed_bin), "emit"]
+                                if args.timing:
+                                    cmd.append("--timing")
+                                cmd.extend(["llvm", str(source_path)])
+                                proc = subprocess.run(
+                                    cmd,
+                                    cwd=str(REPO_ROOT),
+                                    stdout=out,
+                                    stderr=subprocess.PIPE,
+                                    close_fds=False,
+                                    env=seed_env,
+                                    timeout=attempt_seed_timeout,
+                                )
+                                if args.timing:
+                                    stderr_text = proc.stderr.decode(
+                                        "utf-8", errors="replace")
+                                    for _mod, phase, ms in _extract_timing_lines(stderr_text):
+                                        timing_by_module.setdefault(
+                                            module_name, {})[phase] = ms
+                                seed_emit_s += time.perf_counter() - t0
+                            except subprocess.TimeoutExpired as exc:
+                                last_rc = 124
+                                seed_timeouts += 1
+                                last_stderr = (exc.stderr or b"").decode(
+                                    "utf-8", errors="replace")
+                                if args.attempt_sleep > 0:
+                                    time.sleep(args.attempt_sleep)
+                                continue
+
+                    last_rc = proc.returncode
+                    last_stderr = proc.stderr.decode("utf-8", errors="replace")
+                    if proc.returncode != 0:
+                        seed_failures += 1
+                        if args.attempt_sleep > 0:
+                            time.sleep(args.attempt_sleep)
+                        continue
+
+                    raw = attempt_path.read_text(
+                        encoding="utf-8", errors="replace")
+                    candidate = raw if use_emit_llvm_file else _strip_stage2_log_prefixes(
+                        raw)
+                    candidate = _trim_to_llvm_module_start(candidate)
+
+                    if use_emit_llvm_file and "@listpush" in candidate:
+                        with attempt_path.open("wb") as out:
+                            try:
+                                t0 = time.perf_counter()
+                                cmd = [str(seed_bin), "emit"]
+                                if args.timing:
+                                    cmd.append("--timing")
+                                cmd.extend(["llvm", str(source_path)])
+                                proc = subprocess.run(
+                                    cmd,
+                                    cwd=str(REPO_ROOT),
+                                    stdout=out,
+                                    stderr=subprocess.PIPE,
+                                    close_fds=False,
+                                    env=seed_env,
+                                    timeout=attempt_seed_timeout,
+                                )
+                                if args.timing:
+                                    stderr_text = proc.stderr.decode(
+                                        "utf-8", errors="replace")
+                                    for _mod, phase, ms in _extract_timing_lines(stderr_text):
+                                        timing_by_module.setdefault(
+                                            module_name, {})[phase] = ms
+                                seed_emit_s += time.perf_counter() - t0
+                            except subprocess.TimeoutExpired as exc:
+                                last_rc = 124
+                                seed_timeouts += 1
+                                last_stderr = (exc.stderr or b"").decode(
+                                    "utf-8", errors="replace")
+                                if args.attempt_sleep > 0:
+                                    time.sleep(args.attempt_sleep)
+                                continue
+
+                        last_rc = proc.returncode
+                        last_stderr = proc.stderr.decode(
+                            "utf-8", errors="replace")
+                        if proc.returncode != 0:
+                            seed_failures += 1
+                            if args.attempt_sleep > 0:
+                                time.sleep(args.attempt_sleep)
+                            continue
+
+                        raw = attempt_path.read_text(
+                            encoding="utf-8", errors="replace")
+                        candidate = _strip_stage2_log_prefixes(raw)
+                        candidate = _trim_to_llvm_module_start(candidate)
+
+                    if not _looks_like_llvm_module(candidate):
+                        # Common CI failure mode: seed exits 0 but emits log lines
+                        # before the LLVM module header. Retrying won't help unless
+                        # output is genuinely flaky, but we keep retries for now.
+                        try:
+                            size = attempt_path.stat().st_size
+                        except OSError:
+                            size = -1
+                        preview = "\n".join(candidate.splitlines()[:25])
+                        print(
+                            f"[selfhost][warn] malformed seed output for {module_name} (rc=0, bytes={size})\n"
+                            f"[selfhost][warn] first lines:\n{preview}\n",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        if args.attempt_sleep > 0:
+                            time.sleep(args.attempt_sleep)
+                        continue
+
+                    if args.skip_clang_validate:
+                        cleaned = candidate
+                        break
+
+                    cleaned_attempt_path.write_text(
+                        candidate, encoding="utf-8")
+                    validate_obj = raw_dir / \
+                        f"{module_name}.attempt{attempt}.o"
+                    validate_obj.parent.mkdir(parents=True, exist_ok=True)
                     try:
-                        stale.unlink()
+                        validate_obj.unlink()
                     except FileNotFoundError:
                         pass
 
-                if use_emit_llvm_file:
-                    try:
-                        t0 = time.perf_counter()
-                        cmd = [str(seed_bin), "emit-llvm-file"]
-                        if args.timing:
-                            cmd.append("--timing")
-                        cmd.extend([str(source_path), str(attempt_path)])
-                        proc = subprocess.run(
-                            cmd,
-                            cwd=str(REPO_ROOT),
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.PIPE,
-                            close_fds=False,
-                            env=seed_env,
-                            timeout=attempt_seed_timeout,
-                        )
-                        if args.timing:
-                            stderr_text = proc.stderr.decode(
-                                "utf-8", errors="replace")
-                            for mod, phase, ms in _extract_timing_lines(stderr_text):
-                                if mod != module_name:
-                                    continue
-                                timing_by_module.setdefault(
-                                    module_name, {})[phase] = ms
-                        seed_emit_s += time.perf_counter() - t0
-                    except subprocess.TimeoutExpired as exc:
-                        last_rc = 124
-                        seed_timeouts += 1
-                        last_stderr = (exc.stderr or b"").decode(
-                            "utf-8", errors="replace")
-                        if args.attempt_sleep > 0:
-                            time.sleep(args.attempt_sleep)
-                        continue
-                else:
-                    with attempt_path.open("wb") as out:
-                        try:
-                            t0 = time.perf_counter()
-                            cmd = [str(seed_bin), "emit"]
-                            if args.timing:
-                                cmd.append("--timing")
-                            cmd.extend(["llvm", str(source_path)])
-                            proc = subprocess.run(
-                                cmd,
-                                cwd=str(REPO_ROOT),
-                                stdout=out,
-                                stderr=subprocess.PIPE,
-                                close_fds=False,
-                                env=seed_env,
-                                timeout=attempt_seed_timeout,
-                            )
-                            if args.timing:
-                                stderr_text = proc.stderr.decode(
-                                    "utf-8", errors="replace")
-                                for mod, phase, ms in _extract_timing_lines(stderr_text):
-                                    if mod != module_name:
-                                        continue
-                                    timing_by_module.setdefault(
-                                        module_name, {})[phase] = ms
-                            seed_emit_s += time.perf_counter() - t0
-                        except subprocess.TimeoutExpired as exc:
-                            last_rc = 124
-                            seed_timeouts += 1
-                            last_stderr = (exc.stderr or b"").decode(
-                                "utf-8", errors="replace")
-                            if args.attempt_sleep > 0:
-                                time.sleep(args.attempt_sleep)
-                            continue
-
-                last_rc = proc.returncode
-                last_stderr = proc.stderr.decode("utf-8", errors="replace")
-                if proc.returncode != 0:
-                    seed_failures += 1
-                    if args.attempt_sleep > 0:
-                        time.sleep(args.attempt_sleep)
-                    continue
-
-                raw = attempt_path.read_text(
-                    encoding="utf-8", errors="replace")
-                candidate = raw if use_emit_llvm_file else _strip_stage2_log_prefixes(
-                    raw)
-                candidate = _trim_to_llvm_module_start(candidate)
-
-                if use_emit_llvm_file and "@listpush" in candidate:
-                    with attempt_path.open("wb") as out:
-                        try:
-                            t0 = time.perf_counter()
-                            cmd = [str(seed_bin), "emit"]
-                            if args.timing:
-                                cmd.append("--timing")
-                            cmd.extend(["llvm", str(source_path)])
-                            proc = subprocess.run(
-                                cmd,
-                                cwd=str(REPO_ROOT),
-                                stdout=out,
-                                stderr=subprocess.PIPE,
-                                close_fds=False,
-                                env=seed_env,
-                                timeout=attempt_seed_timeout,
-                            )
-                            if args.timing:
-                                stderr_text = proc.stderr.decode(
-                                    "utf-8", errors="replace")
-                                for mod, phase, ms in _extract_timing_lines(stderr_text):
-                                    if mod != module_name:
-                                        continue
-                                    timing_by_module.setdefault(
-                                        module_name, {})[phase] = ms
-                            seed_emit_s += time.perf_counter() - t0
-                        except subprocess.TimeoutExpired as exc:
-                            last_rc = 124
-                            seed_timeouts += 1
-                            last_stderr = (exc.stderr or b"").decode(
-                                "utf-8", errors="replace")
-                            if args.attempt_sleep > 0:
-                                time.sleep(args.attempt_sleep)
-                            continue
-
-                    last_rc = proc.returncode
-                    last_stderr = proc.stderr.decode("utf-8", errors="replace")
-                    if proc.returncode != 0:
-                        seed_failures += 1
-                        if args.attempt_sleep > 0:
-                            time.sleep(args.attempt_sleep)
-                        continue
-
-                    raw = attempt_path.read_text(
-                        encoding="utf-8", errors="replace")
-                    candidate = _strip_stage2_log_prefixes(raw)
-                    candidate = _trim_to_llvm_module_start(candidate)
-
-                if not _looks_like_llvm_module(candidate):
-                    # Common CI failure mode: seed exits 0 but emits log lines
-                    # before the LLVM module header. Retrying won't help unless
-                    # output is genuinely flaky, but we keep retries for now.
-                    try:
-                        size = attempt_path.stat().st_size
-                    except OSError:
-                        size = -1
-                    preview = "\n".join(candidate.splitlines()[:25])
-                    print(
-                        f"[selfhost][warn] malformed seed output for {module_name} (rc=0, bytes={size})\n"
-                        f"[selfhost][warn] first lines:\n{preview}\n",
-                        file=sys.stderr,
-                        flush=True,
+                    clang_validations += 1
+                    t0 = time.perf_counter()
+                    clang_proc = subprocess.run(
+                        [clang, *clang_flags, "-fPIC", "-c",
+                            str(cleaned_attempt_path), "-o", str(validate_obj)],
+                        cwd=str(REPO_ROOT),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=clang_validate_timeout,
                     )
-                    if args.attempt_sleep > 0:
-                        time.sleep(args.attempt_sleep)
-                    continue
+                    clang_validate_s += time.perf_counter() - t0
+                    clang_stderr_path.write_text(
+                        clang_proc.stderr or "", encoding="utf-8")
 
-                if args.skip_clang_validate:
-                    cleaned = candidate
-                    break
+                    if clang_proc.returncode == 0:
+                        cleaned = candidate
 
-                cleaned_attempt_path.write_text(candidate, encoding="utf-8")
-                validate_obj = raw_dir / f"{module_name}.attempt{attempt}.o"
-                validate_obj.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    validate_obj.unlink()
-                except FileNotFoundError:
-                    pass
-
-                clang_validations += 1
-                t0 = time.perf_counter()
-                clang_proc = subprocess.run(
-                    [clang, *clang_flags, "-fPIC", "-c",
-                        str(cleaned_attempt_path), "-o", str(validate_obj)],
-                    cwd=str(REPO_ROOT),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    timeout=clang_validate_timeout,
-                )
-                clang_validate_s += time.perf_counter() - t0
-                clang_stderr_path.write_text(
-                    clang_proc.stderr or "", encoding="utf-8")
-
-                if clang_proc.returncode == 0:
-                    cleaned = candidate
-
-                    # Reuse the validated object for the final link step.
-                    # This avoids compiling each module twice (validate + compile).
-                    try:
+                        # Reuse the validated object for the final link step.
+                        # This avoids compiling each module twice (validate + compile).
                         try:
-                            final_obj_path.unlink()
-                        except FileNotFoundError:
-                            pass
-                        validate_obj.replace(final_obj_path)
-                    except OSError:
-                        shutil.copy2(validate_obj, final_obj_path)
-                    break
+                            try:
+                                final_obj_path.unlink()
+                            except FileNotFoundError:
+                                pass
+                            validate_obj.replace(final_obj_path)
+                        except OSError:
+                            shutil.copy2(validate_obj, final_obj_path)
+                        break
 
-                clang_validation_failures += 1
+                    clang_validation_failures += 1
 
-                # `emit-llvm-file` has historically produced malformed output for
-                # some large modules. If validation fails and we used
-                # `emit-llvm-file`, retry once in this attempt using the streaming
-                # `emit llvm` path.
-                if use_emit_llvm_file:
-                    with attempt_path.open("wb") as out:
-                        try:
-                            t0 = time.perf_counter()
-                            proc = subprocess.run(
-                                ([str(seed_bin), "emit", "--timing", "llvm", str(source_path)]
-                                 if args.timing else [str(seed_bin), "emit", "llvm", str(source_path)]),
-                                cwd=str(REPO_ROOT),
-                                stdout=out,
-                                stderr=subprocess.PIPE,
-                                close_fds=False,
-                                env=seed_env,
-                                timeout=attempt_seed_timeout,
-                            )
-                            if args.timing:
-                                stderr_text = proc.stderr.decode(
+                    # `emit-llvm-file` has historically produced malformed output for
+                    # some large modules. If validation fails and we used
+                    # `emit-llvm-file`, retry once in this attempt using the streaming
+                    # `emit llvm` path.
+                    if use_emit_llvm_file:
+                        with attempt_path.open("wb") as out:
+                            try:
+                                t0 = time.perf_counter()
+                                proc = subprocess.run(
+                                    ([str(seed_bin), "emit", "--timing", "llvm", str(source_path)]
+                                     if args.timing else [str(seed_bin), "emit", "llvm", str(source_path)]),
+                                    cwd=str(REPO_ROOT),
+                                    stdout=out,
+                                    stderr=subprocess.PIPE,
+                                    close_fds=False,
+                                    env=seed_env,
+                                    timeout=attempt_seed_timeout,
+                                )
+                                if args.timing:
+                                    stderr_text = proc.stderr.decode(
+                                        "utf-8", errors="replace")
+                                    for _mod, phase, ms in _extract_timing_lines(stderr_text):
+                                        timing_by_module.setdefault(
+                                            module_name, {})[phase] = ms
+                                seed_emit_s += time.perf_counter() - t0
+                            except subprocess.TimeoutExpired as exc:
+                                last_rc = 124
+                                seed_timeouts += 1
+                                last_stderr = (exc.stderr or b"").decode(
                                     "utf-8", errors="replace")
-                                for mod, phase, ms in _extract_timing_lines(stderr_text):
-                                    if mod != module_name:
-                                        continue
-                                    timing_by_module.setdefault(
-                                        module_name, {})[phase] = ms
-                            seed_emit_s += time.perf_counter() - t0
-                        except subprocess.TimeoutExpired as exc:
-                            last_rc = 124
-                            seed_timeouts += 1
-                            last_stderr = (exc.stderr or b"").decode(
-                                "utf-8", errors="replace")
+                                continue
+
+                        last_rc = proc.returncode
+                        last_stderr = proc.stderr.decode(
+                            "utf-8", errors="replace")
+                        if proc.returncode != 0:
+                            seed_failures += 1
                             continue
 
-                    last_rc = proc.returncode
-                    last_stderr = proc.stderr.decode("utf-8", errors="replace")
-                    if proc.returncode != 0:
-                        seed_failures += 1
-                        continue
+                        raw = attempt_path.read_text(
+                            encoding="utf-8", errors="replace")
+                        candidate = _strip_stage2_log_prefixes(raw)
+                        candidate = _trim_to_llvm_module_start(candidate)
+                        if _looks_like_llvm_module(candidate):
+                            cleaned_attempt_path.write_text(
+                                candidate, encoding="utf-8")
 
-                    raw = attempt_path.read_text(
-                        encoding="utf-8", errors="replace")
-                    candidate = _strip_stage2_log_prefixes(raw)
-                    candidate = _trim_to_llvm_module_start(candidate)
-                    if _looks_like_llvm_module(candidate):
-                        cleaned_attempt_path.write_text(
-                            candidate, encoding="utf-8")
+                            clang_validations += 1
+                            t0 = time.perf_counter()
+                            clang_proc = subprocess.run(
+                                [
+                                    clang,
+                                    *clang_flags,
+                                    "-fPIC",
+                                    "-c",
+                                    str(cleaned_attempt_path),
+                                    "-o",
+                                    str(validate_obj),
+                                ],
+                                cwd=str(REPO_ROOT),
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                timeout=clang_validate_timeout,
+                            )
+                            clang_validate_s += time.perf_counter() - t0
+                            clang_stderr_path.write_text(
+                                clang_proc.stderr or "", encoding="utf-8")
 
-                        clang_validations += 1
-                        t0 = time.perf_counter()
-                        clang_proc = subprocess.run(
-                            [
-                                clang,
-                                *clang_flags,
-                                "-fPIC",
-                                "-c",
-                                str(cleaned_attempt_path),
-                                "-o",
-                                str(validate_obj),
-                            ],
-                            cwd=str(REPO_ROOT),
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                            timeout=clang_validate_timeout,
-                        )
-                        clang_validate_s += time.perf_counter() - t0
-                        clang_stderr_path.write_text(
-                            clang_proc.stderr or "", encoding="utf-8")
+                            if clang_proc.returncode == 0:
+                                cleaned = candidate
 
-                        if clang_proc.returncode == 0:
-                            cleaned = candidate
-
-                            # Reuse the validated object for the final link step.
-                            try:
+                                # Reuse the validated object for the final link step.
                                 try:
-                                    final_obj_path.unlink()
-                                except FileNotFoundError:
-                                    pass
-                                validate_obj.replace(final_obj_path)
-                            except OSError:
-                                shutil.copy2(validate_obj, final_obj_path)
-                            break
+                                    try:
+                                        final_obj_path.unlink()
+                                    except FileNotFoundError:
+                                        pass
+                                    validate_obj.replace(final_obj_path)
+                                except OSError:
+                                    shutil.copy2(validate_obj, final_obj_path)
+                                break
 
-                if args.attempt_sleep > 0:
-                    time.sleep(args.attempt_sleep)
+                    if args.attempt_sleep > 0:
+                        time.sleep(args.attempt_sleep)
 
-            if used_attempts > 1:
-                modules_retried += 1
+                if used_attempts > 1:
+                    modules_retried += 1
 
-            if not cleaned:
-                try:
-                    rel = source_path.relative_to(REPO_ROOT)
-                except ValueError:
-                    rel = source_path
-                raise SystemExit(
-                    "selfhost: seed compiler failed compiling module "
-                    f"{idx + 1}/{len(sources)} {rel} (rc={last_rc})\n" +
-                    last_stderr
-                )
+                if not cleaned:
+                    try:
+                        rel = source_path.relative_to(REPO_ROOT)
+                    except ValueError:
+                        rel = source_path
+                    raise SystemExit(
+                        "selfhost: seed compiler failed compiling module "
+                        f"{idx + 1}/{len(sources)} {rel} (rc={last_rc})\n" +
+                        last_stderr
+                    )
 
-            final_ll = raw_dir / f"{module_name}.ll"
-            final_ll.parent.mkdir(parents=True, exist_ok=True)
-            final_ll.write_text(cleaned, encoding="utf-8")
-            module_names.append(module_name)
+                final_ll = raw_dir / f"{module_name}.ll"
+                final_ll.parent.mkdir(parents=True, exist_ok=True)
+                final_ll.write_text(cleaned, encoding="utf-8")
+                module_names.append(module_name)
+
+        except SystemExit as exc:
+            # If we're exiting due to a wall-time budget, print partial timing so
+            # we can still see the current hotspots.
+            if args.max_total_seconds > 0 and "exceeded max wall time" in str(exc):
+                _print_timing_summary(
+                    header="partial timing summary", module_list=module_names)
+            raise
 
         _check_budget()
 
@@ -930,45 +1017,8 @@ def main(argv: list[str]) -> int:
         used_ir_dir = raw_dir
         _compile_objects_and_link(ll_dir=used_ir_dir)
 
-        print(f"[selfhost] ({pass_name}) timing summary:", flush=True)
-        print(
-            "[selfhost] "
-            f"attempts={seed_attempts_total} retried_modules={modules_retried} "
-            f"timeouts={seed_timeouts} seed_failures={seed_failures} "
-            f"clang_validations={clang_validations} clang_validation_failures={clang_validation_failures}",
-            flush=True,
-        )
-        print(f"[selfhost] seed emit: {seed_emit_s:.2f}s", flush=True)
-        if not args.skip_clang_validate:
-            print(
-                f"[selfhost] clang validate: {clang_validate_s:.2f}s", flush=True)
-        print(f"[selfhost] clang compile: {clang_compile_s:.2f}s", flush=True)
-        print(f"[selfhost] clang link: {clang_link_s:.2f}s", flush=True)
-
-        if args.timing and timing_by_module:
-            def _phase_ms(name: str, phase: str) -> int:
-                return int(timing_by_module.get(name, {}).get(phase, 0))
-
-            ranked = sorted(
-                module_names,
-                key=lambda n: _phase_ms(n, "lower_llvm"),
-                reverse=True,
-            )
-
-            print(
-                f"[selfhost] ({pass_name}) slowest modules by lower_llvm (ms):", flush=True)
-            for name in ranked[:20]:
-                phases = timing_by_module.get(name, {})
-                parse_ms = phases.get("parse", 0)
-                type_ms = phases.get("typecheck", 0)
-                emit_ms = phases.get("emit_native", 0)
-                lower_ms = phases.get("lower_llvm", 0)
-                total_ms = phases.get("total", 0)
-                print(
-                    "[selfhost] "
-                    f"{name} parse={parse_ms} typecheck={type_ms} emit_native={emit_ms} lower_llvm={lower_ms} total={total_ms}",
-                    flush=True,
-                )
+        _print_timing_summary(header="timing summary",
+                              module_list=module_names)
         return used_ir_dir, module_names
 
     out_path1 = args.out

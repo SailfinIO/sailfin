@@ -658,15 +658,30 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
             index += 1;
             continue;
         }
-        // Instruction line (or top-level binding) handling.
-        // In import-context mode we intentionally skip instruction bodies to avoid
-        // expensive instruction parsing for large imported modules.
-        if !include_instructions {
+
+        // Import-context fast path: once a function/test header is parsed, skip the body
+        // (instruction lines) in bulk. This preserves meta/param parsing above while
+        // avoiding a per-line walk over potentially huge instruction streams.
+        if !include_instructions && current != null {
+            // We are in a function/test body (or have reached the first instruction).
+            // Fast-forward to the next terminator directive.
             pending_span = null;
             pending_value_span = null;
-            index += 1;
+            let mut scan = index;
+            loop {
+                if scan >= lines.length {
+                    break;
+                }
+                let candidate = trim_text(lines[scan]);
+                if starts_with(candidate, ".endfn") || starts_with(candidate, ".endtest") {
+                    break;
+                }
+                scan += 1;
+            }
+            index = scan;
             continue;
         }
+        // Instruction line (or top-level binding) handling.
 
     let gather = gather_instruction(lines, index);
     line = gather.text;
@@ -1481,10 +1496,21 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                 continue;
             }
             if !include_instructions {
-                // Skip method body instructions for import-context parses.
+                // Import-context fast path: bulk-skip method bodies.
                 method_pending_span = null;
                 method_pending_value_span = null;
-                index += 1;
+                let mut scan = index;
+                loop {
+                    if scan >= lines.length {
+                        break;
+                    }
+                    let candidate = trim_text(lines[scan]);
+                    if candidate == ".endmethod" {
+                        break;
+                    }
+                    scan += 1;
+                }
+                index = scan;
                 continue;
             }
 

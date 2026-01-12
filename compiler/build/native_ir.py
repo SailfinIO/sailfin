@@ -670,10 +670,18 @@ def parse_native_artifact_impl(text, include_instructions, include_top_level_bin
                 diagnostics = append_string(diagnostics, "parameter outside function body: " + line)
             index += 1
             continue
-        if not include_instructions:
+        if not include_instructions  and  current != None:
             pending_span = None
             pending_value_span = None
-            index += 1
+            scan = index
+            while True:
+                if scan >= len(lines):
+                    break
+                candidate = trim_text(lines[scan])
+                if starts_with(candidate, ".endfn")  or  starts_with(candidate, ".endtest"):
+                    break
+                scan += 1
+            index = scan
             continue
         gather = gather_instruction(lines, index)
         line = gather.text
@@ -1218,7 +1226,15 @@ def parse_struct_definition(lines, start_index, include_instructions):
             if not include_instructions:
                 method_pending_span = None
                 method_pending_value_span = None
-                index += 1
+                scan = index
+                while True:
+                    if scan >= len(lines):
+                        break
+                    candidate = trim_text(lines[scan])
+                    if candidate == ".endmethod":
+                        break
+                    scan += 1
+                index = scan
                 continue
             method_instruction_result = parse_instruction(raw_line, method_pending_span, method_pending_value_span)
             if method_instruction_result.span_consumed:
