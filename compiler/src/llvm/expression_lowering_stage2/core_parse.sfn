@@ -336,7 +336,7 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
                 continue;
             }
             seen = append_string(seen, field_name);
-            fields = fields.concat([StructLiteralField { name: field_name, value: value_text }]);
+            fields.push(StructLiteralField { name: field_name, value: value_text });
         }
     }
 
@@ -480,7 +480,7 @@ fn parse_struct_pattern(text -> string) -> StructLiteralParse {
                 }
                 seen = append_string(seen, field_name);
                 // Empty value indicates a binding pattern.
-                fields = fields.concat([StructLiteralField { name: field_name, value: "" }]);
+                fields.push(StructLiteralField { name: field_name, value: "" });
                 continue;
             }
             let field_name = trim_text(substring(entry, 0, colon_index));
@@ -495,7 +495,7 @@ fn parse_struct_pattern(text -> string) -> StructLiteralParse {
                 continue;
             }
             seen = append_string(seen, field_name);
-            fields = fields.concat([StructLiteralField { name: field_name, value: value_text }]);
+            fields.push(StructLiteralField { name: field_name, value: value_text });
         }
     }
 
@@ -747,7 +747,7 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
                 }
                 seen = append_string(seen, field_name);
                 // Use empty string as value to indicate this is a binding pattern (not a literal value)
-                fields = fields.concat([StructLiteralField { name: field_name, value: "" }]);
+                fields.push(StructLiteralField { name: field_name, value: "" });
                 continue;
             }
             let field_name = trim_text(substring(entry, 0, colon_index));
@@ -765,7 +765,7 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
                 continue;
             }
             seen = append_string(seen, field_name);
-            fields = fields.concat([StructLiteralField { name: field_name, value: value_text }]);
+            fields.push(StructLiteralField { name: field_name, value: value_text });
         }
     }
 

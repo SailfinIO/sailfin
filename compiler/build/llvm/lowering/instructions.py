@@ -41,6 +41,16 @@ is_alpha_char = runtime.is_alpha_char
 globals()['t' + 'rue'] = True
 globals()['f' + 'alse'] = False
 
+def clone_local_bindings(values):
+    result = []
+    index = 0
+    while True:
+        if index >= len(values):
+            break
+        result.append(values[index])
+        index += 1
+    return result
+
 def lower_instruction_range(function, start_index, end, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, context, scope_id, scope_depth, current_label):
     diagnostics = []
     current_lines = lines
@@ -1568,7 +1578,7 @@ context
                     break
                 seen_index += 1
             if not seen:
-                matched_union_variants = (matched_union_variants) + ([lowered_condition.union_variant_index])
+                matched_union_variants.append(lowered_condition.union_variant_index)
         if subject_enum_info != None  and  lowered_condition.enum_info != None  and  lowered_condition.variant_info != None  and  not guard_has_text:
             enum_info_val = lowered_condition.enum_info
             variant_info_val = lowered_condition.variant_info
@@ -1584,7 +1594,7 @@ context
                         break
                     tag_index += 1
                 if not seen_tag:
-                    matched_enum_tags = (matched_enum_tags) + ([tag_value])
+                    matched_enum_tags.append(tag_value)
         if lowered_condition.is_default:
             has_unconditional_default = True
             current_lines = append_string(current_lines, "  br label %" + body_labels[index])
@@ -1594,7 +1604,7 @@ context
             else:
                 current_lines = append_string(current_lines, "  br label %" + failure_target)
         current_lines = append_string(current_lines, body_labels[index] + ":")
-        base_locals = current_locals
+        base_locals = clone_local_bindings(current_locals)
         base_allocas = current_allocas
         base_local_id = current_next_local
         if len(lowered_condition.field_bindings) > 0  and  lowered_condition.enum_info != None  and  lowered_condition.variant_info != None  and  subject_operand != None:
@@ -1632,7 +1642,7 @@ context
                 current_temp += 1
                 current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + field_binding.field_type)
                 current_lines = append_string(current_lines, "  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp)
-                base_locals = (base_locals) + ([LocalBinding(name=field_binding.field_name, pointer=local_alloca_temp, llvm_type=field_binding.field_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1)])
+                base_locals.append(LocalBinding(name=field_binding.field_name, pointer=local_alloca_temp, llvm_type=field_binding.field_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1))
                 base_local_id += 1
                 binding_idx += 1
         if lowered_condition.union_variant_index >= 0  and  lowered_condition.union_struct_info != None  and  len(lowered_condition.union_struct_bindings) > 0:
@@ -1665,7 +1675,7 @@ context
                 current_temp += 1
                 current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + binding.field_type)
                 current_lines = append_string(current_lines, "  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp)
-                base_locals = (base_locals) + ([LocalBinding(name=binding.field_name, pointer=local_alloca_temp, llvm_type=binding.field_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1)])
+                base_locals.append(LocalBinding(name=binding.field_name, pointer=local_alloca_temp, llvm_type=binding.field_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1))
                 base_local_id += 1
                 binding_idx += 1
         if lowered_condition.is_default  and  len(union_payload_types) > 0  and  len(subject_name) > 0:
@@ -1684,7 +1694,7 @@ context
                         break
                     mi += 1
                 if not is_matched:
-                    remaining = (remaining) + ([v])
+                    remaining.append(v)
                 v += 1
             if len(remaining) == 1:
                 remaining_index = remaining[0]
@@ -1697,7 +1707,7 @@ context
                 current_temp += 1
                 current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + payload_type)
                 current_lines = append_string(current_lines, "  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp)
-                base_locals = (base_locals) + ([LocalBinding(name=subject_name, pointer=local_alloca_temp, llvm_type=payload_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1)])
+                base_locals.append(LocalBinding(name=subject_name, pointer=local_alloca_temp, llvm_type=payload_type, type_annotation="", ownership=None, consumed=False, scope_id=make_child_scope_id(scope_id, body_labels[index]), scope_depth=scope_depth + 1))
                 base_local_id += 1
         body_result = lower_instruction_range(
 function,

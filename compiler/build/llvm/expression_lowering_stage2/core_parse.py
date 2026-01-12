@@ -284,7 +284,7 @@ def parse_struct_literal(text):
                 diagnostics = append_string(diagnostics, "llvm lowering: struct literal field `" + field_name + "` missing value")
                 continue
             seen = append_string(seen, field_name)
-            fields = (fields) + ([StructLiteralField(name=field_name, value=value_text)])
+            fields.append(StructLiteralField(name=field_name, value=value_text))
     if not fatal  and  close_index >= 0:
         remainder = trim_text(substring(trimmed, close_index + 1, len(trimmed)))
         if len(remainder) > 0:
@@ -400,7 +400,7 @@ def parse_struct_pattern(text):
                 if string_array_contains(seen, field_name):
                     continue
                 seen = append_string(seen, field_name)
-                fields = (fields) + ([StructLiteralField(name=field_name, value="")])
+                fields.append(StructLiteralField(name=field_name, value=""))
                 continue
             field_name = trim_text(substring(entry, 0, colon_index))
             value_text = trim_text(substring(entry, colon_index + 1, len(entry)))
@@ -411,7 +411,7 @@ def parse_struct_pattern(text):
             if len(value_text) == 0:
                 continue
             seen = append_string(seen, field_name)
-            fields = (fields) + ([StructLiteralField(name=field_name, value=value_text)])
+            fields.append(StructLiteralField(name=field_name, value=value_text))
     if fatal:
         fields = []
     return StructLiteralParse(recognized=True, success=not fatal, type_name=type_name, fields=fields, diagnostics=diagnostics)
@@ -611,7 +611,7 @@ def parse_enum_literal(text):
                     diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` repeated")
                     continue
                 seen = append_string(seen, field_name)
-                fields = (fields) + ([StructLiteralField(name=field_name, value="")])
+                fields.append(StructLiteralField(name=field_name, value=""))
                 continue
             field_name = trim_text(substring(entry, 0, colon_index))
             value_text = trim_text(substring(entry, colon_index + 1, len(entry)))
@@ -625,7 +625,7 @@ def parse_enum_literal(text):
                 diagnostics = append_string(diagnostics, "llvm lowering: enum literal field `" + field_name + "` missing value")
                 continue
             seen = append_string(seen, field_name)
-            fields = (fields) + ([StructLiteralField(name=field_name, value=value_text)])
+            fields.append(StructLiteralField(name=field_name, value=value_text))
     if not fatal  and  close_index >= 0:
         remainder = trim_text(substring(trimmed, close_index + 1, len(trimmed)))
         if len(remainder) > 0:

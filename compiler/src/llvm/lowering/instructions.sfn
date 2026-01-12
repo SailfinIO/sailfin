@@ -52,6 +52,19 @@ import {
     merge_parameter_bindings,
 } from "../utils";
 
+fn clone_local_bindings(values -> LocalBinding[]) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        result.push(values[index]);
+        index += 1;
+    }
+    return result;
+}
+
 import {
     empty_string_constant_set,
     merge_string_constants,
@@ -2573,7 +2586,7 @@ fn lower_match_instruction(
                 seen_index += 1;
             }
             if !seen {
-                matched_union_variants = matched_union_variants.concat([lowered_condition.union_variant_index]);
+                matched_union_variants.push(lowered_condition.union_variant_index);
             }
         }
 
@@ -2595,7 +2608,7 @@ fn lower_match_instruction(
                     tag_index += 1;
                 }
                 if !seen_tag {
-                    matched_enum_tags = matched_enum_tags.concat([tag_value]);
+                    matched_enum_tags.push(tag_value);
                 }
             }
         }
@@ -2611,7 +2624,7 @@ fn lower_match_instruction(
 
         current_lines = append_string(current_lines, body_labels[index] + ":");
 
-        let mut base_locals -> LocalBinding[] = current_locals;
+        let mut base_locals -> LocalBinding[] = clone_local_bindings(current_locals);
         let mut base_allocas -> string[] = current_allocas;
         let mut base_local_id -> number = current_next_local;
 
@@ -2677,7 +2690,7 @@ fn lower_match_instruction(
                 current_lines = append_string(current_lines, "  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp);
 
                 // 8. Add to locals so the match arm body can reference it
-                base_locals = base_locals.concat([LocalBinding {
+                base_locals.push(LocalBinding {
                     name: field_binding.field_name,
                     pointer: local_alloca_temp,
                     llvm_type: field_binding.field_type,
@@ -2686,7 +2699,7 @@ fn lower_match_instruction(
                     consumed: false,
                     scope_id: make_child_scope_id(scope_id, body_labels[index]),
                     scope_depth: scope_depth + 1,
-                }]);
+                });
 
                 base_local_id += 1;
                 binding_idx += 1;
@@ -2736,7 +2749,7 @@ fn lower_match_instruction(
                 current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + binding.field_type);
                 current_lines = append_string(current_lines, "  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp);
 
-                base_locals = base_locals.concat([LocalBinding {
+                base_locals.push(LocalBinding {
                     name: binding.field_name,
                     pointer: local_alloca_temp,
                     llvm_type: binding.field_type,
@@ -2745,7 +2758,7 @@ fn lower_match_instruction(
                     consumed: false,
                     scope_id: make_child_scope_id(scope_id, body_labels[index]),
                     scope_depth: scope_depth + 1,
-                }]);
+                });
                 base_local_id += 1;
                 binding_idx += 1;
             }
@@ -2774,7 +2787,7 @@ fn lower_match_instruction(
                     mi += 1;
                 }
                 if !is_matched {
-                    remaining = remaining.concat([v]);
+                    remaining.push(v);
                 }
                 v += 1;
             }
@@ -2791,7 +2804,7 @@ fn lower_match_instruction(
                 current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + payload_type);
                 current_lines = append_string(current_lines, "  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp);
 
-                base_locals = base_locals.concat([LocalBinding {
+                base_locals.push(LocalBinding {
                     name: subject_name,
                     pointer: local_alloca_temp,
                     llvm_type: payload_type,
@@ -2800,7 +2813,7 @@ fn lower_match_instruction(
                     consumed: false,
                     scope_id: make_child_scope_id(scope_id, body_labels[index]),
                     scope_depth: scope_depth + 1,
-                }]);
+                });
                 base_local_id += 1;
             }
         }
