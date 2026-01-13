@@ -100,10 +100,12 @@ jobs:
             package_label: macos-arm64
             asset_os: macos
             asset_arch: arm64
+            max_attempts: 15
           - os: ubuntu-22.04
             package_label: linux-x86_64
             asset_os: linux
             asset_arch: x86_64
+            max_attempts: 10
 
     steps:
       - name: Checkout repository
@@ -134,13 +136,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          VERSION: latest
+          # Optional: set repo variables to pin or exclude a seed during incidents.
+          # - SELFHOST_SEED_VERSION: e.g. 0.1.1-alpha.114 (or 'latest')
+          # - SELFHOST_SEED_EXCLUDE_TAG: e.g. v0.1.1-alpha.999
+          VERSION: ${{ vars.SELFHOST_SEED_VERSION || 'latest' }}
+          EXCLUDE_TAG: ${{ vars.SELFHOST_SEED_EXCLUDE_TAG || '' }}
           GLOBAL_BIN_DIR: ${{ github.workspace }}/build/seed/bin
           INSTALL_BASE: ${{ github.workspace }}/build/seed/versions
         run: |
           set -euo pipefail
           ./install.sh
           echo "SEED_STAGE2=${GLOBAL_BIN_DIR}/sailfin-stage2" >> "$GITHUB_ENV"
+
+      - name: Report installed seed version
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          ls -lh "$SEED_STAGE2"
+          "$SEED_STAGE2" version
 
       - name: Self-host rebuild Stage2 from released seed
         shell: bash -l {0}
@@ -151,7 +164,7 @@ jobs:
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2 \
             --jobs 2 \
-            --max-attempts 10 \
+            --max-attempts ${{ matrix.max_attempts }} \
             --skip-clang-validate \
             --max-total-seconds 1800
 
