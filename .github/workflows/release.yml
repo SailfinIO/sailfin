@@ -80,22 +80,30 @@ jobs:
         run: |
           brew install jq
 
-      - name: Build Stage1-compiled Stage2 binary (seed for self-hosting)
+      - name: Install released Stage2 seed (previous release)
         id: seed
+        shell: bash -l {0}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          VERSION: latest
+          # Exclude the current tag to avoid selecting a release with no assets yet.
+          EXCLUDE_TAG: ${{ steps.rel.outputs.tag }}
+          GLOBAL_BIN_DIR: ${{ github.workspace }}/build/seed/bin
+          INSTALL_BASE: ${{ github.workspace }}/build/seed/versions
+        run: |
+          set -euo pipefail
+          ./install.sh
+          echo "seed_path=${GLOBAL_BIN_DIR}/sailfin-stage2" >> "$GITHUB_OUTPUT"
+
+      - name: Report installed seed version
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          # Use Stage1 Python transpiler to build Stage2 as the seed
-          # This avoids dependency on potentially broken previous releases
-          conda run -n sailfin python tools/compile_with_stage1.py
-          conda run -n sailfin python scripts/bootstrap_stage2.py --no-validate
-          conda run -n sailfin make _build-native-stage2
+          ls -lh "${{ steps.seed.outputs.seed_path }}"
+          "${{ steps.seed.outputs.seed_path }}" version
 
-          mkdir -p "${{ github.workspace }}/build/seed/bin"
-          cp build/native/sailfin-stage2${{ matrix.exe_ext }} "${{ github.workspace }}/build/seed/bin/sailfin-stage2-seed${{ matrix.exe_ext }}"
-          echo "seed_path=${{ github.workspace }}/build/seed/bin/sailfin-stage2-seed${{ matrix.exe_ext }}" >> "$GITHUB_OUTPUT"
-
-      - name: Self-host rebuild Stage2 from Stage1 seed
+      - name: Self-host rebuild Stage2 from released seed
         id: selfhost_seed
         shell: bash -l {0}
         run: |
@@ -113,7 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.rel.outputs.version }}"
-          OUT="$(build/native/sailfin-stage2-selfhost --version | tr -d '\r' | head -n 1)"
+          OUT="$(build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} --version | tr -d '\r' | head -n 1)"
           echo "$OUT"
           echo "$OUT" | grep -F "sfn ${VERSION}" >/dev/null
 

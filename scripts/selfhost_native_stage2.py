@@ -26,6 +26,7 @@ import subprocess
 import sys
 import time
 import re
+import threading
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -34,6 +35,95 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 _IMPORT_FROM_RE = re.compile(r"\bfrom\s+\"(?P<path>[^\"]+)\"")
 _IMPORT_BARE_RE = re.compile(
     r"^\s*import\s+\"(?P<path>[^\"]+)\"\s*;", re.MULTILINE)
+
+
+_LLVM_NAMED_TYPE_DEF_RE = re.compile(
+    r"^(?P<name>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*type\s+(?P<body>.+)$",
+    re.MULTILINE,
+)
+
+
+def _collect_concrete_named_type_defs(llvm_ir: str) -> dict[str, str]:
+    """Return concrete named type definitions found in the LLVM module.
+
+    We use this to patch other modules that declare the same types as
+    `type opaque` under older release seeds.
+    """
+
+    out: dict[str, str] = {}
+    for m in _LLVM_NAMED_TYPE_DEF_RE.finditer(llvm_ir):
+        name = m.group("name")
+        body = m.group("body").strip()
+        if body == "opaque":
+            continue
+        # Keep the original formatting of the definition line.
+        out[name] = f"{name} = type {body}"
+    return out
+
+
+def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple[str, int]:
+    """Replace `type opaque` declarations when a concrete definition is known.
+
+    If the concrete definition references other named types (e.g. `%Token` uses
+    `%TokenKind`), ensure those dependent type definitions are also present in
+    the module before clang validation.
+    """
+
+    if not known_defs:
+        return llvm_ir, 0
+
+    type_decl_re = re.compile(
+        r"^\s*(?P<name>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*type\s+(?P<body>.+)\s*$"
+    )
+    name_ref_re = re.compile(r"%[A-Za-z_.$][A-Za-z0-9_.$]*")
+
+    lines_in = llvm_ir.splitlines()
+    defined: set[str] = set()
+    for line in lines_in:
+        m = type_decl_re.match(line)
+        if m:
+            defined.add(m.group("name"))
+
+    # Names we inserted (so we don't re-insert or loop forever).
+    emitted: set[str] = set()
+
+    def _emit_with_deps(name: str) -> list[str]:
+        if name in emitted or name in defined:
+            return []
+        definition = known_defs.get(name)
+        if definition is None:
+            return []
+        # Recurse into dependencies that we also know how to define.
+        deps: list[str] = []
+        body = definition.split("type", 1)[1]
+        for ref in name_ref_re.findall(body):
+            if ref == name:
+                continue
+            if ref in known_defs and ref not in defined and ref not in emitted:
+                deps.extend(_emit_with_deps(ref))
+        emitted.add(name)
+        defined.add(name)
+        deps.append(definition)
+        return deps
+
+    patched_lines: list[str] = []
+    changed = 0
+    for line in lines_in:
+        stripped = line.strip()
+        if stripped.endswith("= type opaque"):
+            prefix_len = len(line) - len(line.lstrip(" \t"))
+            prefix = line[:prefix_len]
+            name = stripped.split("=", 1)[0].strip()
+            if name in known_defs:
+                injected = _emit_with_deps(name)
+                if injected:
+                    for inj in injected:
+                        patched_lines.append(prefix + inj)
+                    changed += 1
+                    continue
+        patched_lines.append(line)
+
+    return "\n".join(patched_lines) + "\n", changed
 
 
 def _resolve_sailfin_module_path(*, source_path: pathlib.Path, module_ref: str) -> pathlib.Path | None:
@@ -908,6 +998,12 @@ def main(argv: list[str]) -> int:
         sources = _collect_stage2_sources(REPO_ROOT)
         module_names: list[str] = []
 
+        # Shared cache of concrete named LLVM type definitions discovered while
+        # compiling modules. Used to replace `%Foo = type opaque` in other
+        # modules when a concrete definition is known.
+        known_named_type_defs: dict[str, str] = {}
+        known_named_type_defs_lock = threading.Lock()
+
         use_emit_llvm_file = args.use_emit_llvm_file and _seed_supports_emit_llvm_file(
             seed_bin)
         seed_env = os.environ.copy()
@@ -1145,6 +1241,20 @@ def main(argv: list[str]) -> int:
                     # running the clang compile gate to keep selfhost robust.
                     candidate, _ = _inject_missing_function_declarations(
                         candidate)
+
+                    # Learn concrete named type definitions from this module.
+                    discovered = _collect_concrete_named_type_defs(candidate)
+                    if discovered:
+                        with known_named_type_defs_lock:
+                            for name, definition in discovered.items():
+                                known_named_type_defs.setdefault(
+                                    name, definition)
+
+                    # Patch `type opaque` declarations when we know a concrete definition.
+                    with known_named_type_defs_lock:
+                        candidate, _ = _patch_opaque_named_types(
+                            candidate, known_named_type_defs
+                        )
 
                     cleaned_attempt_path.write_text(
                         candidate, encoding="utf-8")

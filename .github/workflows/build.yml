@@ -9,6 +9,12 @@ on:
       - alpha
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_stage1_bootstrap:
+        description: "Also run Stage1/bootstrap pipeline (legacy safety net). Default: false"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: build-${{ github.ref }}
@@ -17,13 +23,11 @@ concurrency:
 jobs:
   stage2:
     name: Stage2 (${{ matrix.package_label }})
+    # Legacy safety net: this job runs the Stage1->Stage2 bootstrap pipeline.
+    # The project goal is full self-hosting, so keep this opt-in only.
     if: >-
-      github.event_name != 'push' ||
-      (
-        github.event.head_commit.author.name != 'semantic-release' &&
-        github.event.head_commit.author.name != 'Sailfin Release Bot' &&
-        !contains(github.event.head_commit.author.email, 'semantic-release')
-      )
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.run_stage1_bootstrap == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
@@ -74,7 +78,7 @@ jobs:
       - name: Upload Stage2 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: stage2-${{ matrix.package_label }}
+          name: stage2-stage1-${{ matrix.package_label }}
           path: |
             dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz
             dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz.sha256
@@ -195,8 +199,21 @@ jobs:
           set -euo pipefail
           CONDA=$(which conda) make test
 
+      - name: Package Stage2 artifacts (selfhosted)
+        run: conda run -n sailfin python tools/package_stage2.py --skip-build --target ${{ matrix.package_label }} --out dist
+
+      - name: Upload Stage2 artifacts (selfhosted)
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2-${{ matrix.package_label }}
+          path: |
+            dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz
+            dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz.sha256
+            dist/sailfin-stage2-${{ matrix.package_label }}-*.manifest.json
+          if-no-files-found: error
+
   semantic-release:
-    needs: stage2
+    needs: selfhost-from-release-seed
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
