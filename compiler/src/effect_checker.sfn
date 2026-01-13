@@ -14,9 +14,9 @@ import {
     MethodDeclaration,
     Program,
     Statement,
+    decorator_names,
 } from "./ast";
 import { Token } from "./token";
-import { evaluate_decorators } from "./decorator_semantics";
 
 struct EffectRequirement {
     effect -> string;
@@ -96,7 +96,7 @@ fn analyze_routine(
     decorators -> Decorator[],
     name -> string
 ) -> EffectViolation[] {
-    let decorator_info = evaluate_decorators(decorators);
+    let names = decorator_names(decorators);
     let mut declared -> string[] = [];
     let mut declared_index -> number = 0;
     loop {
@@ -109,11 +109,11 @@ fn analyze_routine(
     let mut requires_io_from_decorators -> boolean = false;
     let mut decorator_index -> number = 0;
     loop {
-        if decorator_index >= decorator_info.length {
+        if decorator_index >= names.length {
             break;
         }
-        let decorator_entry = decorator_info[decorator_index];
-        if decorator_entry.name == "trace" || decorator_entry.name == "logExecution" || decorator_entry.name == "logexecution" {
+        let decorator_name = names[decorator_index];
+        if decorator_name == "trace" || decorator_name == "logExecution" || decorator_name == "logexecution" {
             requires_io_from_decorators = true;
             break;
         }

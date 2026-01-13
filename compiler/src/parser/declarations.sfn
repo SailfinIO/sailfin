@@ -20,8 +20,9 @@ import {
     ExportSpecifier,
     TypeParameter,
     TypeAnnotation,
+    decorator_names,
 } from "../ast";
-import { evaluate_decorators, infer_effects } from "../decorator_semantics";
+import { infer_effects } from "../decorator_semantics";
 import { substring, char_code, char_at, strings_equal } from "../string_utils";
 import {
     Parser,
@@ -802,8 +803,7 @@ fn parse_function(initial_parser -> Parser, starts_with_async -> boolean, decora
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let decorator_info = evaluate_decorators(decorators);
-    let inferred_effects = infer_effects(parsed_effects, decorator_info);
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
 
     // Allow `fn foo() ![effects] -> T {}` ordering.
     if return_type == null {
@@ -889,8 +889,7 @@ fn parse_extern_function(initial_parser -> Parser, starts_with_unsafe -> boolean
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let decorator_info = evaluate_decorators(decorators);
-    let inferred_effects = infer_effects(parsed_effects, decorator_info);
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
 
     // Allow `extern fn foo() ![effects] -> T;` ordering.
     if return_type == null {
@@ -1119,8 +1118,7 @@ fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodPar
     let effect_result = parse_effect_list(current);
     current = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let decorator_info = evaluate_decorators(decorators);
-    let inferred_effects = infer_effects(parsed_effects, decorator_info);
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
 
     let block_result = parse_block(current);
     current = block_result.parser;
@@ -1467,8 +1465,7 @@ fn parse_interface_member(parser -> Parser, decorators -> Decorator[]) -> Interf
     let effect_result = parse_effect_list(current);
     current = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let decorator_info = evaluate_decorators(decorators);
-    let inferred_effects = infer_effects(parsed_effects, decorator_info);
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
 
     current = skip_trivia(current);
     if current.index < current.tokens.length {
@@ -1705,8 +1702,7 @@ fn parse_pipeline(initial_parser -> Parser, decorators -> Decorator[]) -> Statem
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let decorator_info = evaluate_decorators(decorators);
-    let inferred_effects = infer_effects(parsed_effects, decorator_info);
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
 
     // Allow `pipeline foo() ![effects] -> T {}` ordering.
     if return_type == null {
@@ -1782,8 +1778,7 @@ fn parse_tool(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let decorator_info = evaluate_decorators(decorators);
-    let inferred_effects = infer_effects(parsed_effects, decorator_info);
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
 
     // Allow `tool foo() ![effects] -> T {}` ordering.
     if return_type == null {
@@ -1844,8 +1839,7 @@ fn parse_test(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
     let effect_result = parse_effect_list(parser);
     parser = effect_result.parser;
     let parsed_effects = effect_result.effects;
-    let decorator_info = evaluate_decorators(decorators);
-    let inferred_effects = infer_effects(parsed_effects, decorator_info);
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
 
     let block_result = parse_block(parser);
     parser = block_result.parser;

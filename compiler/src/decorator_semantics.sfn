@@ -1,54 +1,25 @@
 // compiler/src/decorator_semantics.sfn
 //
-// Lightweight helpers for interpreting decorator metadata in the Sailfin
-// self-hosting compiler. The goal is to translate syntactic decorator
-// arguments into conveniently typed values so later semantic passes can
-// consume annotations without reimplementing literal parsing.
+// Helpers for interpreting decorator metadata in the Sailfin self-hosting
+// compiler.
+//
+// Note: released seeds before the Decorator layout fix may treat the `Decorator`
+// struct as opaque when imported into other modules, which makes indexing
+// `Decorator[]` invalid in LLVM (requires a sized element type). Keep this
+// module free of `Decorator` indexing so self-host-from-release-seed remains
+// reliable.
 
-import {
-    Program,
-    Statement,
-    Decorator,
-    Expression,
-    Block,
-    FunctionSignature,
-    Parameter,
-    TypeAnnotation,
-    MatchCase,
-    ElseBranch 
-} from "./ast";
-import { Token, TokenKind } from "./token";
-import { substring, char_at, char_code } from "./string_utils";
-
-enum LiteralValue {
-    String { value -> string },
-    Boolean { value -> string },
-    Number { value -> string },
-    Null,
-    Unsupported,
-}
-
-struct DecoratorArgumentInfo {
-    name -> string?;
-    value -> LiteralValue;
-}
-
-struct DecoratorInfo {
-    name -> string;
-    arguments -> DecoratorArgumentInfo[];
-}
-
-fn infer_effects(existing -> string[], decorators -> DecoratorInfo[]) -> string[] {
+fn infer_effects(existing -> string[], decorator_names -> string[]) -> string[] {
     let mut effects = clone_effects(existing);
     let mut requires_io -> boolean = contains_effect(effects, "io");
 
     let mut index -> number = 0;
     loop {
-        if index >= decorators.length {
+        if index >= decorator_names.length {
             break;
         }
-        let decorator = decorators[index];
-        if decorator.name == "trace" || decorator.name == "logExecution" || decorator.name == "logexecution" {
+        let name = decorator_names[index];
+        if name == "trace" || name == "logExecution" || name == "logexecution" {
             requires_io = true;
         }
         index += 1;
@@ -59,180 +30,6 @@ fn infer_effects(existing -> string[], decorators -> DecoratorInfo[]) -> string[
     }
 
     return effects;
-}
-
-fn evaluate_decorators(decorators -> Decorator[]) -> DecoratorInfo[] {
-    let mut results -> DecoratorInfo[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= decorators.length {
-            break;
-        }
-        let argument_infos = evaluate_arguments(decorators[index].arguments);
-        results = append_decorator_info(results, DecoratorInfo {
-            name: decorators[index].name,
-            arguments: argument_infos,
-        });
-        index += 1;
-    }
-    return results;
-}
-
-fn evaluate_arguments(arguments -> DecoratorArgument[]) -> DecoratorArgumentInfo[] {
-    let mut infos -> DecoratorArgumentInfo[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= arguments.length {
-            break;
-        }
-        let value = evaluate_expression(arguments[index].expression);
-        infos = append_argument_info(infos, DecoratorArgumentInfo {
-            name: arguments[index].name,
-            value: value,
-        });
-        index += 1;
-    }
-    return infos;
-}
-
-fn evaluate_expression(expr -> Expression) -> LiteralValue {
-    if expr.variant == "StringLiteral" {
-        return LiteralValue.String { value: expr.value };
-    }
-    if expr.variant == "BooleanLiteral" {
-        return LiteralValue.Boolean { value: expr.value };
-    }
-    if expr.variant == "NumberLiteral" {
-        // Preserve the original lexeme; callers decide how to interpret scale.
-        return LiteralValue.Number { value: expr.value };
-    }
-    if expr.variant == "NullLiteral" {
-        return LiteralValue.Null();
-    }
-    if expr.variant == "Raw" {
-        let text = trim_whitespace(expr.text);
-        if text.length == 0 {
-            return LiteralValue.Unsupported();
-        }
-        if looks_like_quoted_string(text) {
-            let literal = strip_surrounding_quotes(text);
-            return LiteralValue.String { value: literal };
-        }
-        if text == "true" {
-            return LiteralValue.Boolean { value: "true" };
-        }
-        if text == "false" {
-            return LiteralValue.Boolean { value: "false" };
-        }
-        if looks_like_number(text) {
-            return LiteralValue.Number { value: text };
-        }
-    }
-    return LiteralValue.Unsupported();
-}
-
-fn evaluate_statement_decorators(statement -> Statement) -> DecoratorInfo[] {
-    if statement.variant == "FunctionDeclaration" {
-        return evaluate_decorators(statement.decorators);
-    }
-    if statement.variant == "StructDeclaration" {
-        return evaluate_decorators(statement.decorators);
-    }
-    return [];
-}
-
-fn trim_whitespace(value -> string) -> string {
-    let mut start -> number = 0;
-    let mut end -> number = value.length;
-
-    loop {
-        if start >= end {
-            break;
-        }
-        let ch -> number = char_code(char_at(value, start));
-        if is_whitespace_codepoint(ch) {
-            start += 1;
-            continue;
-        }
-        break;
-    }
-
-    loop {
-        if end <= start {
-            break;
-        }
-        let look_index = end - 1;
-        let ch -> number = char_code(char_at(value, look_index));
-        if is_whitespace_codepoint(ch) {
-            end -= 1;
-            continue;
-        }
-        break;
-    }
-
-    return slice_text(value, start, end);
-}
-
-fn looks_like_quoted_string(text -> string) -> boolean {
-    if text.length < 2 {
-        return false;
-    }
-    let first -> number = char_code(char_at(text, 0));
-    if first != 34 {
-        return false;
-    }
-    let last_index = text.length - 1;
-    let last -> number = char_code(char_at(text, last_index));
-    if last != 34 {
-        return false;
-    }
-    return true;
-}
-
-fn looks_like_number(text -> string) -> boolean {
-    if text.length == 0 {
-        return false;
-    }
-    let mut has_decimal -> boolean = false;
-    let mut index -> number = 0;
-    let first -> number = char_code(char_at(text, 0));
-    if first == 45 {
-        if text.length == 1 {
-            return false;
-        }
-        index = 1;
-    }
-    loop {
-        if index >= text.length {
-            break;
-        }
-        let ch -> number = char_code(char_at(text, index));
-        if ch == 46 {
-            if has_decimal {
-                return false;
-            }
-            has_decimal = true;
-            index += 1;
-            continue;
-        }
-        if !is_decimal_digit_codepoint(ch) {
-            return false;
-        }
-        index += 1;
-    }
-    return true;
-}
-
-fn is_decimal_digit_codepoint(ch -> number) -> boolean {
-    return ch >= 48 && ch <= 57;
-}
-
-fn append_decorator_info(collection -> DecoratorInfo[], item -> DecoratorInfo) -> DecoratorInfo[] {
-    return collection.concat([item]);
-}
-
-fn append_argument_info(collection -> DecoratorArgumentInfo[], item -> DecoratorArgumentInfo) -> DecoratorArgumentInfo[] {
-    return collection.concat([item]);
 }
 
 fn append_string(collection -> string[], item -> string) -> string[] {
@@ -266,20 +63,4 @@ fn contains_effect(effects -> string[], effect -> string) -> boolean {
     return false;
 }
 
-fn is_whitespace_codepoint(ch -> number) -> boolean {
-    return ch == 32
-        || ch == 9
-        || ch == 10
-        || ch == 13;
-}
 
-fn slice_text(text -> string, start -> number, end -> number) -> string {
-    return substring(text, start, end);
-}
-
-fn strip_surrounding_quotes(value -> string) -> string {
-    if value.length < 2 {
-        return value;
-    }
-    return slice_text(value, 1, value.length - 1);
-}

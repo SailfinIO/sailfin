@@ -2,8 +2,8 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from ..token import Token
-from ..ast import Block, Decorator, DecoratorArgument, Expression, FieldDeclaration, FunctionSignature, EnumVariant, MethodDeclaration, ModelProperty, Parameter, Statement, ImportSpecifier, ExportSpecifier, TypeParameter, TypeAnnotation
-from ..decorator_semantics import evaluate_decorators, infer_effects
+from ..ast import Block, Decorator, DecoratorArgument, Expression, FieldDeclaration, FunctionSignature, EnumVariant, MethodDeclaration, ModelProperty, Parameter, Statement, ImportSpecifier, ExportSpecifier, TypeParameter, TypeAnnotation, decorator_names
+from ..decorator_semantics import infer_effects
 from ..string_utils import substring, char_code, char_at, strings_equal
 from compiler.build.parser.types import Parser, StatementParseResult, ParameterParseResult, ParameterListParseResult, StructFieldParseResult, ModelPropertyParseResult, MethodParseResult, InterfaceMemberParseResult, EnumVariantParseResult, TypeParameterParseResult, ImplementsParseResult, DecoratorParseResult, EffectParseResult, TypeSeparatorParseResult, SpecifierListParseResult, NamedSpecifier, BlockParseResult
 from compiler.build.parser.utils import trim_text, strip_surrounding_quotes, strip_loose_quotes, looks_like_number, normalize_test_name
@@ -544,8 +544,7 @@ def parse_function(initial_parser, starts_with_async, decorators):
     effect_result = parse_effect_list(parser)
     parser = effect_result.parser
     parsed_effects = effect_result.effects
-    decorator_info = evaluate_decorators(decorators)
-    inferred_effects = infer_effects(parsed_effects, decorator_info)
+    inferred_effects = infer_effects(parsed_effects, decorator_names(decorators))
     if return_type == None:
         parser = skip_trivia(parser)
         late_sep = consume_type_separator(parser)
@@ -600,8 +599,7 @@ def parse_extern_function(initial_parser, starts_with_unsafe, decorators):
     effect_result = parse_effect_list(parser)
     parser = effect_result.parser
     parsed_effects = effect_result.effects
-    decorator_info = evaluate_decorators(decorators)
-    inferred_effects = infer_effects(parsed_effects, decorator_info)
+    inferred_effects = infer_effects(parsed_effects, decorator_names(decorators))
     if return_type == None:
         parser = skip_trivia(parser)
         late_sep = consume_type_separator(parser)
@@ -741,8 +739,7 @@ def parse_struct_method(parser, decorators):
     effect_result = parse_effect_list(current)
     current = effect_result.parser
     parsed_effects = effect_result.effects
-    decorator_info = evaluate_decorators(decorators)
-    inferred_effects = infer_effects(parsed_effects, decorator_info)
+    inferred_effects = infer_effects(parsed_effects, decorator_names(decorators))
     block_result = parse_block(current)
     current = block_result.parser
     body = block_result.block
@@ -957,8 +954,7 @@ def parse_interface_member(parser, decorators):
     effect_result = parse_effect_list(current)
     current = effect_result.parser
     parsed_effects = effect_result.effects
-    decorator_info = evaluate_decorators(decorators)
-    inferred_effects = infer_effects(parsed_effects, decorator_info)
+    inferred_effects = infer_effects(parsed_effects, decorator_names(decorators))
     current = skip_trivia(current)
     if current.index < len(current.tokens):
         terminator = parser_peek_raw(current)
@@ -1104,8 +1100,7 @@ def parse_pipeline(initial_parser, decorators):
     effect_result = parse_effect_list(parser)
     parser = effect_result.parser
     parsed_effects = effect_result.effects
-    decorator_info = evaluate_decorators(decorators)
-    inferred_effects = infer_effects(parsed_effects, decorator_info)
+    inferred_effects = infer_effects(parsed_effects, decorator_names(decorators))
     if return_type == None:
         parser = skip_trivia(parser)
         late_sep = consume_type_separator(parser)
@@ -1150,8 +1145,7 @@ def parse_tool(initial_parser, decorators):
     effect_result = parse_effect_list(parser)
     parser = effect_result.parser
     parsed_effects = effect_result.effects
-    decorator_info = evaluate_decorators(decorators)
-    inferred_effects = infer_effects(parsed_effects, decorator_info)
+    inferred_effects = infer_effects(parsed_effects, decorator_names(decorators))
     if return_type == None:
         parser = skip_trivia(parser)
         late_sep = consume_type_separator(parser)
@@ -1184,8 +1178,7 @@ def parse_test(initial_parser, decorators):
     effect_result = parse_effect_list(parser)
     parser = effect_result.parser
     parsed_effects = effect_result.effects
-    decorator_info = evaluate_decorators(decorators)
-    inferred_effects = infer_effects(parsed_effects, decorator_info)
+    inferred_effects = infer_effects(parsed_effects, decorator_names(decorators))
     block_result = parse_block(parser)
     parser = block_result.parser
     body = block_result.block

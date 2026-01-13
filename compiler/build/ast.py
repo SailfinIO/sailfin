@@ -285,3 +285,12 @@ class ExportSpecifier:
     def __repr__(self):
         return runtime.struct_repr('ExportSpecifier', [runtime.struct_field('name', self.name), runtime.struct_field('alias', self.alias)])
 
+def decorator_names(decorators):
+    names = []
+    index = 0
+    while True:
+        if index >= len(decorators):
+            break
+        names.append(decorators[index].name)
+        index += 1
+    return names

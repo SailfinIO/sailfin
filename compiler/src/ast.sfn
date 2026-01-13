@@ -158,6 +158,19 @@ struct DecoratorArgument {
     expression -> Expression;
 }
 
+fn decorator_names(decorators -> Decorator[]) -> string[] {
+    let mut names -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= decorators.length {
+            break;
+        }
+        names.push(decorators[index].name);
+        index += 1;
+    }
+    return names;
+}
+
 struct ImportSpecifier {
     name -> string;
     alias -> string?;

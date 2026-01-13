@@ -1,9 +1,8 @@
 import asyncio
 from runtime import runtime_support as runtime
 
-from compiler.build.ast import Block, Decorator, ElseBranch, Expression, MatchCase, FunctionSignature, MethodDeclaration, Program, Statement
+from compiler.build.ast import Block, Decorator, ElseBranch, Expression, MatchCase, FunctionSignature, MethodDeclaration, Program, Statement, decorator_names
 from compiler.build.token import Token
-from compiler.build.decorator_semantics import evaluate_decorators
 
 print = runtime.console
 sleep = runtime.sleep
@@ -85,7 +84,7 @@ analyze_routine(method.signature, method.body, method.decorators, qualified)
     return []
 
 def analyze_routine(signature, body, decorators, name):
-    decorator_info = evaluate_decorators(decorators)
+    names = decorator_names(decorators)
     declared = []
     declared_index = 0
     while True:
@@ -96,10 +95,10 @@ def analyze_routine(signature, body, decorators, name):
     requires_io_from_decorators = False
     decorator_index = 0
     while True:
-        if decorator_index >= len(decorator_info):
+        if decorator_index >= len(names):
             break
-        decorator_entry = decorator_info[decorator_index]
-        if decorator_entry.name == "trace"  or  decorator_entry.name == "logExecution"  or  decorator_entry.name == "logexecution":
+        decorator_name = names[decorator_index]
+        if decorator_name == "trace"  or  decorator_name == "logExecution"  or  decorator_name == "logexecution":
             requires_io_from_decorators = True
             break
         decorator_index += 1
