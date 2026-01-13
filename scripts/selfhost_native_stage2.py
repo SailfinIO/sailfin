@@ -90,6 +90,30 @@ def _seed_supports_emit_llvm_file(seed: pathlib.Path) -> bool:
     return proc.returncode != 0
 
 
+def _seed_supports_aot_prepare_dir(seed: pathlib.Path) -> bool:
+    proc = subprocess.run(
+        [str(seed), "aot-prepare-dir"],
+        cwd=str(REPO_ROOT),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        timeout=10,
+    )
+    stderr = proc.stderr.decode("utf-8", errors="replace")
+    # Some seeds respond to unknown subcommands with the generic CLI usage.
+    # That output can occasionally include the subcommand text, so explicitly
+    # treat the base usage as "not supported".
+    if stderr.startswith("usage: sailfin-stage2 [--emit sailfin|llvm]"):
+        return False
+    # Only treat as supported if the command name appears in output.
+    # Some seeds print a generic usage string even for unknown subcommands.
+    if "aot-prepare-dir" in stderr:
+        return True
+    # If the command does not exist, stage2 reports an unknown command.
+    if "unknown" in stderr and "aot-prepare-dir" in stderr:
+        return False
+    return False
+
+
 def _strip_stage2_log_prefixes(text: str) -> str:
     """Remove leading stage2 log prefixes like '[info] ' from LLVM text.
 
@@ -110,6 +134,301 @@ def _strip_stage2_log_prefixes(text: str) -> str:
                 continue
         out_lines.append(line)
     return "\n".join(out_lines) + "\n"
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    parts: list[str] = []
+    depth_brace = 0
+    depth_bracket = 0
+    depth_paren = 0
+    depth_angle = 0
+    start = 0
+    for i, ch in enumerate(text):
+        if ch == "{":
+            depth_brace += 1
+        elif ch == "}":
+            depth_brace = max(0, depth_brace - 1)
+        elif ch == "[":
+            depth_bracket += 1
+        elif ch == "]":
+            depth_bracket = max(0, depth_bracket - 1)
+        elif ch == "(":
+            depth_paren += 1
+        elif ch == ")":
+            depth_paren = max(0, depth_paren - 1)
+        elif ch == "<":
+            depth_angle += 1
+        elif ch == ">":
+            depth_angle = max(0, depth_angle - 1)
+        elif (
+            ch == ","
+            and depth_brace == 0
+            and depth_bracket == 0
+            and depth_paren == 0
+            and depth_angle == 0
+        ):
+            parts.append(text[start:i].strip())
+            start = i + 1
+    tail = text[start:].strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def _extract_type_group_from_end(text: str) -> str:
+    """Extract trailing LLVM type group from a token string.
+
+    Example:
+      "double" -> "double"
+      "noundef { i8**, i64 }*" -> "{ i8**, i64 }*"
+    """
+    s = text.strip()
+    if not s:
+        return ""
+
+    depth_brace = 0
+    depth_bracket = 0
+    depth_paren = 0
+    depth_angle = 0
+
+    i = len(s) - 1
+    while i >= 0 and s[i].isspace():
+        i -= 1
+    end = i
+
+    while i >= 0:
+        ch = s[i]
+        if ch == "}":
+            depth_brace += 1
+        elif ch == "{":
+            depth_brace = max(0, depth_brace - 1)
+        elif ch == "]":
+            depth_bracket += 1
+        elif ch == "[":
+            depth_bracket = max(0, depth_bracket - 1)
+        elif ch == ")":
+            depth_paren += 1
+        elif ch == "(":
+            depth_paren = max(0, depth_paren - 1)
+        elif ch == ">":
+            depth_angle += 1
+        elif ch == "<":
+            depth_angle = max(0, depth_angle - 1)
+
+        if (
+            ch.isspace()
+            and depth_brace == 0
+            and depth_bracket == 0
+            and depth_paren == 0
+            and depth_angle == 0
+        ):
+            break
+        i -= 1
+
+    return s[i + 1: end + 1].strip()
+
+
+def _split_llvm_arg_type(arg: str) -> str:
+    """Given a call arg like "i8* %x" return its type string."""
+    a = arg.strip()
+    if not a:
+        return ""
+    if a == "...":
+        return "..."
+
+    depth_brace = 0
+    depth_bracket = 0
+    depth_paren = 0
+    depth_angle = 0
+    i = len(a) - 1
+    while i >= 0:
+        ch = a[i]
+        if ch == "}":
+            depth_brace += 1
+        elif ch == "{":
+            depth_brace = max(0, depth_brace - 1)
+        elif ch == "]":
+            depth_bracket += 1
+        elif ch == "[":
+            depth_bracket = max(0, depth_bracket - 1)
+        elif ch == ")":
+            depth_paren += 1
+        elif ch == "(":
+            depth_paren = max(0, depth_paren - 1)
+        elif ch == ">":
+            depth_angle += 1
+        elif ch == "<":
+            depth_angle = max(0, depth_angle - 1)
+
+        if (
+            ch.isspace()
+            and depth_brace == 0
+            and depth_bracket == 0
+            and depth_paren == 0
+            and depth_angle == 0
+        ):
+            return a[:i].strip()
+        i -= 1
+    return a
+
+
+def _inject_missing_function_declarations(llvm_text: str) -> tuple[str, int]:
+    """Insert `declare` lines for called-but-undeclared functions.
+
+    Older release seeds have been observed to emit call sites without a
+    corresponding `declare`, which makes clang reject the module with e.g.
+    "use of undefined value '@foo'".
+
+    Returns (new_text, inserted_count).
+    """
+    lines = llvm_text.splitlines()
+
+    defined_or_declared: set[str] = set()
+    for line in lines:
+        s = line.lstrip()
+        if not (s.startswith("define ") or s.startswith("declare ")):
+            continue
+        at = s.find("@")
+        if at == -1:
+            continue
+        lpar = s.find("(", at)
+        if lpar == -1:
+            continue
+        name = s[at + 1: lpar].strip()
+        if name:
+            defined_or_declared.add(name)
+
+    inferred: dict[str, tuple[str, list[str]]] = {}
+    for line in lines:
+        if "call" not in line or "@" not in line:
+            continue
+        call_idx = line.find("call")
+        if call_idx == -1:
+            continue
+        at = line.find("@", call_idx)
+        if at == -1:
+            continue
+        lpar = line.find("(", at)
+        if lpar == -1:
+            continue
+        rpar = line.rfind(")")
+        if rpar == -1 or rpar < lpar:
+            continue
+
+        name = line[at + 1: lpar].strip()
+        if not name or name in defined_or_declared or name in inferred:
+            continue
+        if name.startswith("llvm."):
+            continue
+
+        ret_chunk = line[call_idx + len("call"): at].strip()
+        ret_type = _extract_type_group_from_end(ret_chunk)
+        if not ret_type:
+            continue
+
+        args_chunk = line[lpar + 1: rpar].strip()
+        arg_types: list[str] = []
+        if args_chunk:
+            for part in _split_top_level_commas(args_chunk):
+                ty = _split_llvm_arg_type(part)
+                if ty:
+                    arg_types.append(ty)
+
+        inferred[name] = (ret_type, arg_types)
+
+    missing = [(n, sig[0], sig[1])
+               for n, sig in inferred.items() if n not in defined_or_declared]
+    if not missing:
+        return llvm_text, 0
+
+    decl_lines = [
+        f"declare {ret} @{name}({', '.join(args)})" for name, ret, args in sorted(missing)
+    ]
+
+    insert_at = None
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("define "):
+            insert_at = i
+            break
+    if insert_at is None:
+        insert_at = len(lines)
+
+    new_lines = lines[:insert_at] + decl_lines + [""] + lines[insert_at:]
+    new_text = "\n".join(new_lines)
+    if llvm_text.endswith("\n"):
+        new_text += "\n"
+    return new_text, len(decl_lines)
+
+
+_UNDEFINED_VALUE_RE = re.compile(r"use of undefined value '@(?P<name>[^']+)'")
+
+
+def _inject_declare_for_symbol(llvm_text: str, symbol: str) -> tuple[str, bool]:
+    """Inject a single `declare` for `symbol`, inferred from a call site."""
+    if not symbol:
+        return llvm_text, False
+
+    lines = llvm_text.splitlines()
+
+    # If it's already declared/defined, nothing to do.
+    for line in lines:
+        s = line.lstrip()
+        if not (s.startswith("define ") or s.startswith("declare ")):
+            continue
+        at = s.find("@")
+        if at == -1:
+            continue
+        lpar = s.find("(", at)
+        if lpar == -1:
+            continue
+        name = s[at + 1: lpar].strip()
+        if name == symbol:
+            return llvm_text, False
+
+    call_line = None
+    needle = f"@{symbol}("
+    for line in lines:
+        if "call" in line and needle in line:
+            call_line = line
+            break
+    if call_line is None:
+        return llvm_text, False
+
+    call_idx = call_line.find("call")
+    at = call_line.find("@", call_idx)
+    lpar = call_line.find("(", at)
+    rpar = call_line.rfind(")")
+    if call_idx == -1 or at == -1 or lpar == -1 or rpar == -1 or rpar < lpar:
+        return llvm_text, False
+
+    ret_chunk = call_line[call_idx + len("call"): at].strip()
+    ret_type = _extract_type_group_from_end(ret_chunk)
+    if not ret_type:
+        return llvm_text, False
+
+    args_chunk = call_line[lpar + 1: rpar].strip()
+    arg_types: list[str] = []
+    if args_chunk:
+        for part in _split_top_level_commas(args_chunk):
+            ty = _split_llvm_arg_type(part)
+            if ty:
+                arg_types.append(ty)
+
+    decl = f"declare {ret_type} @{symbol}({', '.join(arg_types)})"
+
+    insert_at = None
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("define "):
+            insert_at = i
+            break
+    if insert_at is None:
+        insert_at = len(lines)
+
+    new_lines = lines[:insert_at] + [decl, ""] + lines[insert_at:]
+    new_text = "\n".join(new_lines)
+    if llvm_text.endswith("\n"):
+        new_text += "\n"
+    return new_text, True
 
 
 _TIMING_LINE_RE = re.compile(
@@ -296,7 +615,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--skip-clang-validate",
         action="store_true",
-        help="Skip per-module clang validation (not recommended)",
+        help=(
+            "Skip strict per-module clang validation gating. Note: the selfhost pipeline still "
+            "clang-compiles each module to catch invalid IR early and enable retries."
+        ),
     )
     parser.add_argument(
         "--use-emit-llvm-file",
@@ -468,9 +790,9 @@ def main(argv: list[str]) -> int:
                 flush=True,
             )
             print(f"[selfhost] seed emit: {seed_emit_s:.2f}s", flush=True)
-            if not args.skip_clang_validate:
-                print(
-                    f"[selfhost] clang validate: {clang_validate_s:.2f}s", flush=True)
+            print(
+                f"[selfhost] clang module compile: {clang_validate_s:.2f}s", flush=True
+            )
             print(
                 f"[selfhost] clang compile: {clang_compile_s:.2f}s", flush=True)
             print(f"[selfhost] clang link: {clang_link_s:.2f}s", flush=True)
@@ -540,6 +862,8 @@ def main(argv: list[str]) -> int:
                 cleaned = ""
                 last_stderr = ""
                 last_rc: int | None = None
+                last_clang_stderr = ""
+                last_clang_rc: int | None = None
                 used_attempts = 0
                 for attempt in range(1, max_attempts + 1):
                     used_attempts = attempt
@@ -573,6 +897,9 @@ def main(argv: list[str]) -> int:
                             stale.unlink()
                         except FileNotFoundError:
                             pass
+
+                    last_clang_stderr = ""
+                    last_clang_rc = None
 
                     if use_emit_llvm_file:
                         try:
@@ -718,10 +1045,6 @@ def main(argv: list[str]) -> int:
                             time.sleep(args.attempt_sleep)
                         continue
 
-                    if args.skip_clang_validate:
-                        cleaned = candidate
-                        break
-
                     cleaned_attempt_path.write_text(
                         candidate, encoding="utf-8")
                     validate_obj = raw_dir / \
@@ -732,6 +1055,9 @@ def main(argv: list[str]) -> int:
                     except FileNotFoundError:
                         pass
 
+                    # Even when `--skip-clang-validate` is requested (release CI
+                    # mode), we still need to compile/parse the module with clang
+                    # here so we can retry flaky/invalid seed output.
                     clang_validations += 1
                     t0 = time.perf_counter()
                     clang_proc = subprocess.run(
@@ -746,12 +1072,13 @@ def main(argv: list[str]) -> int:
                     clang_validate_s += time.perf_counter() - t0
                     clang_stderr_path.write_text(
                         clang_proc.stderr or "", encoding="utf-8")
+                    last_clang_stderr = clang_proc.stderr or ""
+                    last_clang_rc = int(clang_proc.returncode)
 
                     if clang_proc.returncode == 0:
                         cleaned = candidate
 
-                        # Reuse the validated object for the final link step.
-                        # This avoids compiling each module twice (validate + compile).
+                        # Reuse the compiled object for the final link step.
                         try:
                             try:
                                 final_obj_path.unlink()
@@ -763,6 +1090,58 @@ def main(argv: list[str]) -> int:
                         break
 
                     clang_validation_failures += 1
+
+                    # If the seed omitted a declaration for an already-mangled
+                    # cross-module function, clang reports "use of undefined value".
+                    # Retrying the seed may not help if the omission is deterministic,
+                    # so inject a single `declare` inferred from the call site and
+                    # retry compilation once.
+                    m = _UNDEFINED_VALUE_RE.search(clang_proc.stderr or "")
+                    if m:
+                        missing = m.group("name")
+                        if "__" in missing:
+                            patched, did_patch = _inject_declare_for_symbol(
+                                candidate, missing)
+                            if did_patch:
+                                cleaned_attempt_path.write_text(
+                                    patched, encoding="utf-8")
+                                try:
+                                    validate_obj.unlink()
+                                except FileNotFoundError:
+                                    pass
+                                clang_proc2 = subprocess.run(
+                                    [
+                                        clang,
+                                        *clang_flags,
+                                        "-fPIC",
+                                        "-c",
+                                        str(cleaned_attempt_path),
+                                        "-o",
+                                        str(validate_obj),
+                                    ],
+                                    cwd=str(REPO_ROOT),
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE,
+                                    text=True,
+                                    timeout=clang_validate_timeout,
+                                )
+                                last_clang_stderr = clang_proc2.stderr or ""
+                                last_clang_rc = int(clang_proc2.returncode)
+                                if clang_proc2.returncode == 0:
+                                    cleaned = patched
+                                    try:
+                                        try:
+                                            final_obj_path.unlink()
+                                        except FileNotFoundError:
+                                            pass
+                                        validate_obj.replace(final_obj_path)
+                                    except OSError:
+                                        shutil.copy2(
+                                            validate_obj, final_obj_path)
+                                    break
+
+                    if args.attempt_sleep > 0:
+                        time.sleep(args.attempt_sleep)
 
                     # `emit-llvm-file` has historically produced malformed output for
                     # some large modules. If validation fails and we used
@@ -858,10 +1237,18 @@ def main(argv: list[str]) -> int:
                         rel = source_path.relative_to(REPO_ROOT)
                     except ValueError:
                         rel = source_path
+                    extra = ""
+                    if last_clang_rc is not None and last_clang_stderr.strip():
+                        extra = (
+                            "\n[selfhost] last clang error (rc="
+                            + str(last_clang_rc)
+                            + "):\n"
+                            + last_clang_stderr
+                        )
                     raise SystemExit(
                         "selfhost: seed compiler failed compiling module "
                         f"{idx + 1}/{len(sources)} {rel} (rc={last_rc})\n" +
-                        last_stderr
+                        last_stderr + extra
                     )
 
                 final_ll = raw_dir / f"{module_name}.ll"
@@ -1013,8 +1400,51 @@ def main(argv: list[str]) -> int:
                     "selfhost: missing runtime prelude module; expected to compile runtime/prelude.sfn"
                 )
 
-        # Compile/link directly from the raw IR modules.
+        # Default: compile/link directly from the raw IR modules.
         used_ir_dir = raw_dir
+
+        # In `--skip-clang-validate` mode (used by some release CI workflows),
+        # we don't have a per-module clang parse/validate gate that would
+        # otherwise force retries or catch malformed import mangling early.
+        # Some older seed compilers also rely on `aot-prepare-dir` to make IR
+        # link-safe (import symbol rewrites + declaration injection). If the
+        # seed supports it, run the rewrite step before compiling.
+        if args.skip_clang_validate and _seed_supports_aot_prepare_dir(seed_bin):
+            prepared_dir = stage2_dir / "aot_prepared"
+            prepared_dir.mkdir(parents=True, exist_ok=True)
+            for p in prepared_dir.glob("*.ll"):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+            try:
+                proc = subprocess.run(
+                    [
+                        str(seed_bin),
+                        "aot-prepare-dir",
+                        str(modules_path),
+                        str(raw_dir),
+                        str(prepared_dir),
+                    ],
+                    cwd=str(REPO_ROOT),
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+                _ = proc  # silence linters
+                used_ir_dir = prepared_dir
+            except subprocess.CalledProcessError as exc:
+                stderr_text = (exc.stderr or b"").decode(
+                    "utf-8", errors="replace")
+                # If the seed doesn't actually implement this subcommand, it can
+                # respond with the generic CLI usage. Don't spam CI logs for that.
+                if not stderr_text.startswith("usage: sailfin-stage2 [--emit sailfin|llvm]"):
+                    print(
+                        "[selfhost][warn] aot-prepare-dir failed; continuing with raw IR\n"
+                        + stderr_text,
+                        file=sys.stderr,
+                        flush=True,
+                    )
         _compile_objects_and_link(ll_dir=used_ir_dir)
 
         _print_timing_summary(header="timing summary",
