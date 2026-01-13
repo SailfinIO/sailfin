@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.109 (2026-01-13)
+
+### Bug Fixes
+
+- Decorator semantics
+  ([`4aabf92`](https://github.com/SailfinIO/sailfin/commit/4aabf92d34fcc12b50762bbf304fc6c206b825a2))
+
+
 ## v0.1.1-alpha.108 (2026-01-13)
 
 ### Bug Fixes
