@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.113 (2026-01-13)
+
+### Bug Fixes
+
+- Opaque struct flakiness
+  ([`110a944`](https://github.com/SailfinIO/sailfin/commit/110a9440d114eb2945ae25f874797e93458cab95))
+
+
 ## v0.1.1-alpha.112 (2026-01-13)
 
 ### Bug Fixes
