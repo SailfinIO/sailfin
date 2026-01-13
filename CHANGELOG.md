@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.105 (2026-01-13)
+
+### Bug Fixes
+
+- Clang validation in selfhost
+  ([`8f7b7f8`](https://github.com/SailfinIO/sailfin/commit/8f7b7f85def7946bda465082ac4a058e610b70bf))
+
+
 ## v0.1.1-alpha.104 (2026-01-13)
 
 ### Bug Fixes
