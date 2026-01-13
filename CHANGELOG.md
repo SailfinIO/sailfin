@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.104 (2026-01-13)
+
+### Bug Fixes
+
+- Array push declare
+  ([`53c2c2c`](https://github.com/SailfinIO/sailfin/commit/53c2c2caae34f9437db3dd989c6a06fef4f52cf1))
+
+
 ## v0.1.1-alpha.103 (2026-01-12)
 
 ### Bug Fixes
