@@ -17,6 +17,7 @@ This does NOT import stage1-generated Python compiler artifacts and does NOT run
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import os
 import pathlib
@@ -595,6 +596,15 @@ def main(argv: list[str]) -> int:
         help="Max attempts per module when seed output is malformed (default: 5)",
     )
     parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help=(
+            "Number of modules to build in parallel (seed emit + clang compile). "
+            "Default: 1 (sequential, most reliable)."
+        ),
+    )
+    parser.add_argument(
         "--attempt-sleep",
         type=float,
         default=0.0,
@@ -849,8 +859,14 @@ def main(argv: list[str]) -> int:
             clang_validate_timeout = float(args.clang_validate_timeout)
 
         try:
-            for idx, source_path in enumerate(sources):
-                _check_budget()
+            def _compile_one_module(
+                idx: int,
+                source_path: pathlib.Path,
+            ) -> tuple[str, dict[str, int], dict[str, float | int]]:
+                """Compile one module to final .ll + .o.
+
+                Returns (module_name, timing_phases, stats).
+                """
                 module_name = _module_name_from_source_path(source_path)
                 final_obj_path = obj_dir / f"{module_name}.o"
                 final_obj_path.parent.mkdir(parents=True, exist_ok=True)
@@ -858,6 +874,18 @@ def main(argv: list[str]) -> int:
                     final_obj_path.unlink()
                 except FileNotFoundError:
                     pass
+
+                local_timing: dict[str, int] = {}
+                stats: dict[str, float | int] = {
+                    "seed_emit_s": 0.0,
+                    "clang_validate_s": 0.0,
+                    "seed_attempts_total": 0,
+                    "seed_timeouts": 0,
+                    "seed_failures": 0,
+                    "clang_validations": 0,
+                    "clang_validation_failures": 0,
+                    "modules_retried": 0,
+                }
                 max_attempts = max(1, int(args.max_attempts))
                 cleaned = ""
                 last_stderr = ""
@@ -865,23 +893,50 @@ def main(argv: list[str]) -> int:
                 last_clang_stderr = ""
                 last_clang_rc: int | None = None
                 used_attempts = 0
+                use_emit_llvm_file_local = bool(use_emit_llvm_file)
+
+                def _cap_timeout(base: float | None) -> float | None:
+                    if args.max_total_seconds <= 0:
+                        return base
+                    remaining = _remaining_budget_seconds(
+                        total_start=t_total_start,
+                        max_total_seconds=float(args.max_total_seconds),
+                    )
+                    if remaining is None:
+                        return base
+                    if base is None:
+                        return remaining
+                    return min(base, remaining)
+
                 for attempt in range(1, max_attempts + 1):
                     used_attempts = attempt
-                    seed_attempts_total += 1
+                    stats["seed_attempts_total"] = int(
+                        stats["seed_attempts_total"]) + 1
+
+                    _check_budget()
+
+                    seed_env_local = seed_env.copy()
+                    attempt_tmp = raw_dir / "tmp" / \
+                        module_name / f"attempt{attempt}"
+                    attempt_tmp.mkdir(parents=True, exist_ok=True)
+                    # Some stage2 seeds appear to use fixed temp file names.
+                    # When running modules in parallel, isolate TMPDIR to avoid
+                    # cross-process temp collisions that can corrupt LLVM output.
+                    seed_env_local["TMPDIR"] = str(attempt_tmp)
+                    seed_env_local["TMP"] = str(attempt_tmp)
+                    seed_env_local["TEMP"] = str(attempt_tmp)
 
                     attempt_seed_timeout = seed_timeout
                     if seed_timeout is not None:
-                        # Some modules can legitimately take much longer than the
-                        # default per-module timeout (especially on macOS or when
-                        # the seed is instrumented). Retrying with the same timeout
-                        # just wastes wall time, so back off per attempt.
                         cap = max(seed_timeout, 1200.0)
                         attempt_seed_timeout = min(
                             seed_timeout * (2 ** (attempt - 1)), cap)
+
                     print(
                         f"[selfhost] ({pass_name}) module {idx + 1}/{len(sources)} {module_name} attempt {attempt}/{max_attempts}",
                         flush=True,
                     )
+
                     attempt_path = raw_dir / \
                         f"{module_name}.attempt{attempt}.ll"
                     cleaned_attempt_path = raw_dir / \
@@ -891,7 +946,6 @@ def main(argv: list[str]) -> int:
 
                     for p in (attempt_path, cleaned_attempt_path, clang_stderr_path):
                         p.parent.mkdir(parents=True, exist_ok=True)
-
                     for stale in (attempt_path, cleaned_attempt_path, clang_stderr_path):
                         try:
                             stale.unlink()
@@ -901,9 +955,10 @@ def main(argv: list[str]) -> int:
                     last_clang_stderr = ""
                     last_clang_rc = None
 
-                    if use_emit_llvm_file:
+                    # --- Seed emit ---
+                    t0 = time.perf_counter()
+                    if use_emit_llvm_file_local:
                         try:
-                            t0 = time.perf_counter()
                             cmd = [str(seed_bin), "emit-llvm-file"]
                             if args.timing:
                                 cmd.append("--timing")
@@ -914,28 +969,21 @@ def main(argv: list[str]) -> int:
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE,
                                 close_fds=False,
-                                env=seed_env,
-                                timeout=attempt_seed_timeout,
+                                env=seed_env_local,
+                                timeout=_cap_timeout(attempt_seed_timeout),
                             )
-                            if args.timing:
-                                stderr_text = proc.stderr.decode(
-                                    "utf-8", errors="replace")
-                                for _mod, phase, ms in _extract_timing_lines(stderr_text):
-                                    timing_by_module.setdefault(
-                                        module_name, {})[phase] = ms
-                            seed_emit_s += time.perf_counter() - t0
                         except subprocess.TimeoutExpired as exc:
                             last_rc = 124
-                            seed_timeouts += 1
                             last_stderr = (exc.stderr or b"").decode(
                                 "utf-8", errors="replace")
+                            stats["seed_timeouts"] = int(
+                                stats["seed_timeouts"]) + 1
                             if args.attempt_sleep > 0:
                                 time.sleep(args.attempt_sleep)
                             continue
                     else:
                         with attempt_path.open("wb") as out:
                             try:
-                                t0 = time.perf_counter()
                                 cmd = [str(seed_bin), "emit"]
                                 if args.timing:
                                     cmd.append("--timing")
@@ -946,90 +994,72 @@ def main(argv: list[str]) -> int:
                                     stdout=out,
                                     stderr=subprocess.PIPE,
                                     close_fds=False,
-                                    env=seed_env,
-                                    timeout=attempt_seed_timeout,
+                                    env=seed_env_local,
+                                    timeout=_cap_timeout(attempt_seed_timeout),
                                 )
-                                if args.timing:
-                                    stderr_text = proc.stderr.decode(
-                                        "utf-8", errors="replace")
-                                    for _mod, phase, ms in _extract_timing_lines(stderr_text):
-                                        timing_by_module.setdefault(
-                                            module_name, {})[phase] = ms
-                                seed_emit_s += time.perf_counter() - t0
                             except subprocess.TimeoutExpired as exc:
                                 last_rc = 124
-                                seed_timeouts += 1
                                 last_stderr = (exc.stderr or b"").decode(
                                     "utf-8", errors="replace")
+                                stats["seed_timeouts"] = int(
+                                    stats["seed_timeouts"]) + 1
                                 if args.attempt_sleep > 0:
                                     time.sleep(args.attempt_sleep)
                                 continue
 
+                    emit_elapsed = time.perf_counter() - t0
+                    stats["seed_emit_s"] = float(
+                        stats["seed_emit_s"]) + float(emit_elapsed)
+
                     last_rc = proc.returncode
                     last_stderr = proc.stderr.decode("utf-8", errors="replace")
-                    if proc.returncode != 0:
-                        seed_failures += 1
+                    if last_rc != 0:
+                        stats["seed_failures"] = int(
+                            stats["seed_failures"]) + 1
                         if args.attempt_sleep > 0:
                             time.sleep(args.attempt_sleep)
                         continue
 
+                    if args.timing:
+                        for _mod, phase, ms in _extract_timing_lines(last_stderr):
+                            local_timing[phase] = ms
+
                     raw = attempt_path.read_text(
                         encoding="utf-8", errors="replace")
-                    candidate = raw if use_emit_llvm_file else _strip_stage2_log_prefixes(
+                    candidate = raw if use_emit_llvm_file_local else _strip_stage2_log_prefixes(
                         raw)
                     candidate = _trim_to_llvm_module_start(candidate)
 
-                    if use_emit_llvm_file and "@listpush" in candidate:
+                    # Fallback away from emit-llvm-file if it produced known-bad output.
+                    if use_emit_llvm_file_local and "@listpush" in candidate:
                         with attempt_path.open("wb") as out:
-                            try:
-                                t0 = time.perf_counter()
-                                cmd = [str(seed_bin), "emit"]
-                                if args.timing:
-                                    cmd.append("--timing")
-                                cmd.extend(["llvm", str(source_path)])
-                                proc = subprocess.run(
-                                    cmd,
-                                    cwd=str(REPO_ROOT),
-                                    stdout=out,
-                                    stderr=subprocess.PIPE,
-                                    close_fds=False,
-                                    env=seed_env,
-                                    timeout=attempt_seed_timeout,
-                                )
-                                if args.timing:
-                                    stderr_text = proc.stderr.decode(
-                                        "utf-8", errors="replace")
-                                    for _mod, phase, ms in _extract_timing_lines(stderr_text):
-                                        timing_by_module.setdefault(
-                                            module_name, {})[phase] = ms
-                                seed_emit_s += time.perf_counter() - t0
-                            except subprocess.TimeoutExpired as exc:
-                                last_rc = 124
-                                seed_timeouts += 1
-                                last_stderr = (exc.stderr or b"").decode(
-                                    "utf-8", errors="replace")
-                                if args.attempt_sleep > 0:
-                                    time.sleep(args.attempt_sleep)
-                                continue
-
+                            cmd = [str(seed_bin), "emit"]
+                            if args.timing:
+                                cmd.append("--timing")
+                            cmd.extend(["llvm", str(source_path)])
+                            proc = subprocess.run(
+                                cmd,
+                                cwd=str(REPO_ROOT),
+                                stdout=out,
+                                stderr=subprocess.PIPE,
+                                close_fds=False,
+                                env=seed_env_local,
+                                timeout=_cap_timeout(attempt_seed_timeout),
+                            )
                         last_rc = proc.returncode
                         last_stderr = proc.stderr.decode(
                             "utf-8", errors="replace")
-                        if proc.returncode != 0:
-                            seed_failures += 1
+                        if last_rc != 0:
                             if args.attempt_sleep > 0:
                                 time.sleep(args.attempt_sleep)
                             continue
-
                         raw = attempt_path.read_text(
                             encoding="utf-8", errors="replace")
                         candidate = _strip_stage2_log_prefixes(raw)
                         candidate = _trim_to_llvm_module_start(candidate)
+                        use_emit_llvm_file_local = False
 
                     if not _looks_like_llvm_module(candidate):
-                        # Common CI failure mode: seed exits 0 but emits log lines
-                        # before the LLVM module header. Retrying won't help unless
-                        # output is genuinely flaky, but we keep retries for now.
                         try:
                             size = attempt_path.stat().st_size
                         except OSError:
@@ -1049,17 +1079,13 @@ def main(argv: list[str]) -> int:
                         candidate, encoding="utf-8")
                     validate_obj = raw_dir / \
                         f"{module_name}.attempt{attempt}.o"
-                    validate_obj.parent.mkdir(parents=True, exist_ok=True)
                     try:
                         validate_obj.unlink()
                     except FileNotFoundError:
                         pass
 
-                    # Even when `--skip-clang-validate` is requested (release CI
-                    # mode), we still need to compile/parse the module with clang
-                    # here so we can retry flaky/invalid seed output.
-                    clang_validations += 1
-                    t0 = time.perf_counter()
+                    # --- Clang compile gate (always) ---
+                    t1 = time.perf_counter()
                     clang_proc = subprocess.run(
                         [clang, *clang_flags, "-fPIC", "-c",
                             str(cleaned_attempt_path), "-o", str(validate_obj)],
@@ -1067,18 +1093,21 @@ def main(argv: list[str]) -> int:
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.PIPE,
                         text=True,
-                        timeout=clang_validate_timeout,
+                        timeout=_cap_timeout(clang_validate_timeout),
                     )
-                    clang_validate_s += time.perf_counter() - t0
+                    clang_elapsed = time.perf_counter() - t1
                     clang_stderr_path.write_text(
                         clang_proc.stderr or "", encoding="utf-8")
                     last_clang_stderr = clang_proc.stderr or ""
                     last_clang_rc = int(clang_proc.returncode)
 
+                    stats["clang_validate_s"] = float(
+                        stats["clang_validate_s"]) + float(clang_elapsed)
+                    stats["clang_validations"] = int(
+                        stats["clang_validations"]) + 1
+
                     if clang_proc.returncode == 0:
                         cleaned = candidate
-
-                        # Reuse the compiled object for the final link step.
                         try:
                             try:
                                 final_obj_path.unlink()
@@ -1089,14 +1118,10 @@ def main(argv: list[str]) -> int:
                             shutil.copy2(validate_obj, final_obj_path)
                         break
 
-                    clang_validation_failures += 1
+                    stats["clang_validation_failures"] = int(
+                        stats["clang_validation_failures"]) + 1
 
-                    # If the seed omitted a declaration for an already-mangled
-                    # cross-module function, clang reports "use of undefined value".
-                    # Retrying the seed may not help if the omission is deterministic,
-                    # so inject a single `declare` inferred from the call site and
-                    # retry compilation once.
-                    m = _UNDEFINED_VALUE_RE.search(clang_proc.stderr or "")
+                    m = _UNDEFINED_VALUE_RE.search(last_clang_stderr)
                     if m:
                         missing = m.group("name")
                         if "__" in missing:
@@ -1110,20 +1135,14 @@ def main(argv: list[str]) -> int:
                                 except FileNotFoundError:
                                     pass
                                 clang_proc2 = subprocess.run(
-                                    [
-                                        clang,
-                                        *clang_flags,
-                                        "-fPIC",
-                                        "-c",
-                                        str(cleaned_attempt_path),
-                                        "-o",
-                                        str(validate_obj),
-                                    ],
+                                    [clang, *clang_flags, "-fPIC", "-c",
+                                        str(cleaned_attempt_path), "-o", str(validate_obj)],
                                     cwd=str(REPO_ROOT),
                                     stdout=subprocess.DEVNULL,
                                     stderr=subprocess.PIPE,
                                     text=True,
-                                    timeout=clang_validate_timeout,
+                                    timeout=_cap_timeout(
+                                        clang_validate_timeout),
                                 )
                                 last_clang_stderr = clang_proc2.stderr or ""
                                 last_clang_rc = int(clang_proc2.returncode)
@@ -1140,97 +1159,15 @@ def main(argv: list[str]) -> int:
                                             validate_obj, final_obj_path)
                                     break
 
-                    if args.attempt_sleep > 0:
-                        time.sleep(args.attempt_sleep)
-
-                    # `emit-llvm-file` has historically produced malformed output for
-                    # some large modules. If validation fails and we used
-                    # `emit-llvm-file`, retry once in this attempt using the streaming
-                    # `emit llvm` path.
-                    if use_emit_llvm_file:
-                        with attempt_path.open("wb") as out:
-                            try:
-                                t0 = time.perf_counter()
-                                proc = subprocess.run(
-                                    ([str(seed_bin), "emit", "--timing", "llvm", str(source_path)]
-                                     if args.timing else [str(seed_bin), "emit", "llvm", str(source_path)]),
-                                    cwd=str(REPO_ROOT),
-                                    stdout=out,
-                                    stderr=subprocess.PIPE,
-                                    close_fds=False,
-                                    env=seed_env,
-                                    timeout=attempt_seed_timeout,
-                                )
-                                if args.timing:
-                                    stderr_text = proc.stderr.decode(
-                                        "utf-8", errors="replace")
-                                    for _mod, phase, ms in _extract_timing_lines(stderr_text):
-                                        timing_by_module.setdefault(
-                                            module_name, {})[phase] = ms
-                                seed_emit_s += time.perf_counter() - t0
-                            except subprocess.TimeoutExpired as exc:
-                                last_rc = 124
-                                seed_timeouts += 1
-                                last_stderr = (exc.stderr or b"").decode(
-                                    "utf-8", errors="replace")
-                                continue
-
-                        last_rc = proc.returncode
-                        last_stderr = proc.stderr.decode(
-                            "utf-8", errors="replace")
-                        if proc.returncode != 0:
-                            seed_failures += 1
-                            continue
-
-                        raw = attempt_path.read_text(
-                            encoding="utf-8", errors="replace")
-                        candidate = _strip_stage2_log_prefixes(raw)
-                        candidate = _trim_to_llvm_module_start(candidate)
-                        if _looks_like_llvm_module(candidate):
-                            cleaned_attempt_path.write_text(
-                                candidate, encoding="utf-8")
-
-                            clang_validations += 1
-                            t0 = time.perf_counter()
-                            clang_proc = subprocess.run(
-                                [
-                                    clang,
-                                    *clang_flags,
-                                    "-fPIC",
-                                    "-c",
-                                    str(cleaned_attempt_path),
-                                    "-o",
-                                    str(validate_obj),
-                                ],
-                                cwd=str(REPO_ROOT),
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                timeout=clang_validate_timeout,
-                            )
-                            clang_validate_s += time.perf_counter() - t0
-                            clang_stderr_path.write_text(
-                                clang_proc.stderr or "", encoding="utf-8")
-
-                            if clang_proc.returncode == 0:
-                                cleaned = candidate
-
-                                # Reuse the validated object for the final link step.
-                                try:
-                                    try:
-                                        final_obj_path.unlink()
-                                    except FileNotFoundError:
-                                        pass
-                                    validate_obj.replace(final_obj_path)
-                                except OSError:
-                                    shutil.copy2(validate_obj, final_obj_path)
-                                break
+                    if use_emit_llvm_file_local:
+                        # Force retry with streaming emit in the next attempt.
+                        use_emit_llvm_file_local = False
 
                     if args.attempt_sleep > 0:
                         time.sleep(args.attempt_sleep)
 
                 if used_attempts > 1:
-                    modules_retried += 1
+                    stats["modules_retried"] = 1
 
                 if not cleaned:
                     try:
@@ -1254,7 +1191,76 @@ def main(argv: list[str]) -> int:
                 final_ll = raw_dir / f"{module_name}.ll"
                 final_ll.parent.mkdir(parents=True, exist_ok=True)
                 final_ll.write_text(cleaned, encoding="utf-8")
-                module_names.append(module_name)
+                return module_name, local_timing, stats
+
+            jobs = max(1, int(args.jobs))
+            if jobs == 1:
+                for idx, source_path in enumerate(sources):
+                    _check_budget()
+                    name, local_timing, module_stats = _compile_one_module(
+                        idx, source_path)
+                    seed_emit_s += float(module_stats["seed_emit_s"])
+                    clang_validate_s += float(module_stats["clang_validate_s"])
+                    seed_attempts_total += int(
+                        module_stats["seed_attempts_total"])
+                    seed_timeouts += int(module_stats["seed_timeouts"])
+                    seed_failures += int(module_stats["seed_failures"])
+                    clang_validations += int(module_stats["clang_validations"])
+                    clang_validation_failures += int(
+                        module_stats["clang_validation_failures"])
+                    modules_retried += int(module_stats["modules_retried"])
+                    if args.timing and local_timing:
+                        timing_by_module[name] = local_timing
+                    module_names.append(name)
+            else:
+                print(
+                    f"[selfhost] ({pass_name}) building modules with jobs={jobs}", flush=True)
+                futures: dict[
+                    concurrent.futures.Future[
+                        tuple[str, dict[str, int], dict[str, float | int]]
+                    ],
+                    int,
+                ] = {}
+                with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+                    for idx, source_path in enumerate(sources):
+                        _check_budget()
+                        futures[executor.submit(
+                            _compile_one_module, idx, source_path)] = idx
+
+                    results_by_index: dict[
+                        int, tuple[str, dict[str, int], dict[str, float | int]]
+                    ] = {}
+                    first_error: BaseException | None = None
+                    for fut in concurrent.futures.as_completed(futures):
+                        idx = futures[fut]
+                        try:
+                            results_by_index[idx] = fut.result()
+                        except BaseException as exc:
+                            first_error = exc
+                            for other in futures:
+                                other.cancel()
+                            break
+
+                    if first_error is not None:
+                        raise first_error
+
+                    for idx in range(len(sources)):
+                        name, local_timing, module_stats = results_by_index[idx]
+                        seed_emit_s += float(module_stats["seed_emit_s"])
+                        clang_validate_s += float(
+                            module_stats["clang_validate_s"])
+                        seed_attempts_total += int(
+                            module_stats["seed_attempts_total"])
+                        seed_timeouts += int(module_stats["seed_timeouts"])
+                        seed_failures += int(module_stats["seed_failures"])
+                        clang_validations += int(
+                            module_stats["clang_validations"])
+                        clang_validation_failures += int(
+                            module_stats["clang_validation_failures"])
+                        modules_retried += int(module_stats["modules_retried"])
+                        if args.timing and local_timing:
+                            timing_by_module[name] = local_timing
+                        module_names.append(name)
 
         except SystemExit as exc:
             # If we're exiting due to a wall-time budget, print partial timing so

@@ -104,6 +104,7 @@ jobs:
             --seed "${{ steps.seed.outputs.seed_path }}" \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
+            --jobs 2 \
             --max-attempts 10 \
             --max-total-seconds 3600
 

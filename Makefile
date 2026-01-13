@@ -10,6 +10,10 @@ CLANG ?= clang
 # Override in CI as needed (e.g. NATIVE_JOBS=2 for smaller runners).
 NATIVE_JOBS ?= $(shell (sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) | head -n 1)
 
+# Parallelism for the selfhost orchestrator's per-module seed emit + clang compile.
+# Keep conservative by default: this can increase peak memory.
+SELFHOST_JOBS ?= 1
+
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 STAGE2_NATIVE_LIBS ?=
@@ -130,14 +134,19 @@ compile:
 # - Use `make selfhost-native-stage2-asan` for the slower-but-more-diagnostic ASAN seed.
 # - Always runs the orchestrator script via the Conda env Python.
 # - Pass extra flags via SELFHOST_ARGS (e.g. SELFHOST_ARGS="--seed-timeout 300").
-selfhost-native-stage2: compile
+# - Parallelize module building via SELFHOST_JOBS (e.g. SELFHOST_JOBS=2).
+selfhost-native-stage2:
 	@seed=$${SEED_STAGE2:-build/native/sailfin-stage2}; \
 	if [ ! -x "$$seed" ]; then \
 		echo "[selfhost-native-stage2] missing seed compiler: $$seed"; \
-		echo "[selfhost-native-stage2] (hint) build one with: make compile"; \
+		echo "[selfhost-native-stage2] building seed with: make compile"; \
+		$(MAKE) compile; \
+	fi; \
+	if [ ! -x "$$seed" ]; then \
+		echo "[selfhost-native-stage2] missing seed compiler after compile: $$seed"; \
 		exit 1; \
 	fi; \
-	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
+	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
 	@echo "[selfhost-native-stage2] built build/native/sailfin-stage2-selfhost"
 
 selfhost-native-stage2-asan: native-stage2-asan
@@ -147,7 +156,7 @@ selfhost-native-stage2-asan: native-stage2-asan
 		echo "[selfhost-native-stage2-asan] (hint) build one with: make native-stage2-asan"; \
 		exit 1; \
 	fi; \
-	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
+	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
 	@echo "[selfhost-native-stage2-asan] built build/native/sailfin-stage2-selfhost"
 
 

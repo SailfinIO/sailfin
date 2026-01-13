@@ -150,6 +150,7 @@ jobs:
             --seed "$SEED_STAGE2" \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2 \
+            --jobs 2 \
             --max-attempts 10 \
             --skip-clang-validate \
             --max-total-seconds 1800
@@ -162,6 +163,7 @@ jobs:
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2 \
             --out build/native/sailfin-stage2-selfhost1 \
+            --jobs 2 \
             --max-attempts 5 \
             --seed-timeout 120 \
             --max-total-seconds 1200 \
@@ -169,6 +171,7 @@ jobs:
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2-selfhost1 \
             --out build/native/sailfin-stage2-selfhost2 \
+            --jobs 2 \
             --max-attempts 3 \
             --skip-clang-validate
           cmp -s build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2
