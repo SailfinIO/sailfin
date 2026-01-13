@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.114 (2026-01-13)
+
+### Bug Fixes
+
+- **bootstrap**: Stabilize stage1 effect checker
+  ([`10f1da2`](https://github.com/SailfinIO/sailfin/commit/10f1da2debc5b9ffd9468f3fa45c7eb1ab0ecdb3))
+
+- **compiler**: Avoid Token in effect checker
+  ([`efc4f24`](https://github.com/SailfinIO/sailfin/commit/efc4f24c1fe9f22438b459de0754157ad822c6c3))
+
+
 ## v0.1.1-alpha.113 (2026-01-13)
 
 ### Bug Fixes
