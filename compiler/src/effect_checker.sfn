@@ -16,11 +16,10 @@ import {
     Statement,
     decorator_names,
 } from "./ast";
-import { Token } from "./token";
+import { substring } from "./string_utils";
 
 struct EffectRequirement {
     effect -> string;
-    origin -> Token?;
     description -> string;
 }
 
@@ -166,7 +165,7 @@ fn required_effects(body -> Block) -> EffectRequirement[] {
 }
 
 fn collect_effects_from_block(block -> Block) -> EffectRequirement[] {
-    let mut required = collect_effects_from_tokens(block.tokens);
+    let mut required = collect_effects_from_text(block.text);
     let mut index -> number = 0;
     loop {
         if index >= block.statements.length {
@@ -199,7 +198,6 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
             required,
             EffectRequirement {
                 effect: "model",
-                origin: statement.keyword_token,
                 description: "prompt \"" + statement.channel + "\"",
             }
         );
@@ -295,7 +293,7 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
         return required;
     }
     if statement.variant == "Unknown" {
-        return collect_effects_from_tokens(statement.tokens);
+        return collect_effects_from_text(statement.text);
     }
     return [];
 }
@@ -395,183 +393,89 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
     }
     return [];
 }
-fn collect_effects_from_tokens(tokens -> Token[]) -> EffectRequirement[] {
+
+fn collect_effects_from_text(text -> string) -> EffectRequirement[] {
     let mut required -> EffectRequirement[] = [];
-    required = append_prompt_effect(required, tokens);
-    required = append_identifier_dot_effect(required, tokens, "fs", "io", "filesystem helper usage");
-    required = append_identifier_dot_effect(required, tokens, "print", "io", "print helper usage");
-    required = append_identifier_dot_effect(required, tokens, "console", "io", "console helper usage");
-    required = append_identifier_dot_effect(required, tokens, "http", "net", "http helper usage");
-    required = append_identifier_dot_effect(required, tokens, "websocket", "net", "websocket helper usage");
-    required = append_identifier_call_effect(required, tokens, "spawn", "io", "spawn call");
-    required = append_identifier_call_effect(required, tokens, "serve", "net", "serve call");
-    required = append_identifier_call_effect(required, tokens, "sleep", "clock", "sleep call");
+
+    // Keep this conservative: false positives are worse than missing a hint.
+    // This checker exists to produce friendly diagnostics, not enforce soundness.
+    if contains(text, "prompt") {
+        required = append_requirement(
+            required,
+            EffectRequirement { effect: "model", description: "prompt usage" }
+        );
+    }
+    if contains(text, "fs.") {
+        required = append_requirement(
+            required,
+            EffectRequirement { effect: "io", description: "filesystem helper usage" }
+        );
+    }
+    if contains(text, "print(") || contains(text, "print.") {
+        required = append_requirement(
+            required,
+            EffectRequirement { effect: "io", description: "print helper usage" }
+        );
+    }
+    if contains(text, "console.") {
+        required = append_requirement(
+            required,
+            EffectRequirement { effect: "io", description: "console helper usage" }
+        );
+    }
+    if contains(text, "http.") {
+        required = append_requirement(
+            required,
+            EffectRequirement { effect: "net", description: "http helper usage" }
+        );
+    }
+    if contains(text, "websocket.") {
+        required = append_requirement(
+            required,
+            EffectRequirement { effect: "net", description: "websocket helper usage" }
+        );
+    }
+    if contains(text, "spawn(") {
+        required = append_requirement(
+            required,
+            EffectRequirement { effect: "io", description: "spawn call" }
+        );
+    }
+    if contains(text, "serve(") {
+        required = append_requirement(
+            required,
+            EffectRequirement { effect: "net", description: "serve call" }
+        );
+    }
+    if contains(text, "sleep(") {
+        required = append_requirement(
+            required,
+            EffectRequirement { effect: "clock", description: "sleep call" }
+        );
+    }
+
     return required;
 }
 
-fn token_text(token -> Token) -> string {
-    return token.lexeme;
-}
-
-fn append_prompt_effect(requirements -> EffectRequirement[], tokens -> Token[]) -> EffectRequirement[] {
-    let mut result = requirements;
+fn contains(text -> string, needle -> string) -> boolean {
+    if needle.length == 0 {
+        return false;
+    }
     let mut index -> number = 0;
+    let limit = text.length - needle.length;
+    if limit < 0 {
+        return false;
+    }
     loop {
-        if index >= tokens.length {
+        if index > limit {
             break;
         }
-        let token = tokens[index];
-        if is_identifier_token(token, "prompt") {
-            let channel_index = next_non_trivia(tokens, index + 1);
-            let mut description -> string = "prompt block";
-            if channel_index != -1 {
-                let channel_token = tokens[channel_index];
-                if channel_token.kind.variant == "Identifier" || channel_token.kind.variant == "StringLiteral" {
-                    description = "prompt " + token_text(channel_token);
-                    let brace_index = next_non_trivia(tokens, channel_index + 1);
-                    if brace_index != -1 && is_symbol_token(tokens[brace_index], "{") {
-                        result = append_requirement(
-                            result,
-                            EffectRequirement {
-                                effect: "model",
-                                origin: token,
-                                description: description,
-                            }
-                        );
-                        index += 1;
-                        continue;
-                    }
-                }
-            }
-            result = append_requirement(
-                result,
-                EffectRequirement {
-                    effect: "model",
-                    origin: token,
-                    description: description,
-                }
-            );
+        if substring(text, index, index + needle.length) == needle {
+            return true;
         }
         index += 1;
     }
-    return result;
-}
-
-fn append_identifier_dot_effect(
-    requirements -> EffectRequirement[],
-    tokens -> Token[],
-    identifier -> string,
-    effect -> string,
-    description -> string
-) -> EffectRequirement[] {
-    let matches = find_identifier_followed_by_symbol(tokens, identifier, ".");
-    let mut result = requirements;
-    let mut index -> number = 0;
-    loop {
-        if index >= matches.length {
-            break;
-        }
-        result = append_requirement(
-            result,
-            EffectRequirement {
-                effect: effect,
-                origin: matches[index],
-                description: description,
-            }
-        );
-        index += 1;
-    }
-    return result;
-}
-
-fn append_identifier_call_effect(
-    requirements -> EffectRequirement[],
-    tokens -> Token[],
-    identifier -> string,
-    effect -> string,
-    description -> string
-) -> EffectRequirement[] {
-    let matches = find_identifier_call(tokens, identifier);
-    let mut result = requirements;
-    let mut index -> number = 0;
-    loop {
-        if index >= matches.length {
-            break;
-        }
-        result = append_requirement(
-            result,
-            EffectRequirement {
-                effect: effect,
-                origin: matches[index],
-                description: description,
-            }
-        );
-        index += 1;
-    }
-    return result;
-}
-
-fn find_identifier_followed_by_symbol(tokens -> Token[], name -> string, symbol -> string) -> Token[] {
-    let mut matches -> Token[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= tokens.length {
-            break;
-        }
-        if is_identifier_token(tokens[index], name) {
-            let next_index = next_non_trivia(tokens, index + 1);
-            if next_index != -1 && is_symbol_token(tokens[next_index], symbol) {
-                matches = matches.concat([tokens[index]]);
-            }
-        }
-        index += 1;
-    }
-    return matches;
-}
-
-fn find_identifier_call(tokens -> Token[], name -> string) -> Token[] {
-    let mut matches -> Token[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= tokens.length {
-            break;
-        }
-        if is_identifier_token(tokens[index], name) {
-            let paren = next_non_trivia(tokens, index + 1);
-            if paren != -1 && is_symbol_token(tokens[paren], "(") {
-                matches = matches.concat([tokens[index]]);
-            }
-        }
-        index += 1;
-    }
-    return matches;
-}
-
-fn next_non_trivia(tokens -> Token[], start -> number) -> number {
-    let mut index = start;
-    loop {
-        if index >= tokens.length {
-            break;
-        }
-        let token = tokens[index];
-        if !is_trivia_token(token) {
-            return index;
-        }
-        index += 1;
-    }
-    return -1;
-}
-
-fn is_trivia_token(token -> Token) -> boolean {
-    return token.kind.variant == "Whitespace" || token.kind.variant == "Comment";
-}
-
-fn is_identifier_token(token -> Token, expected -> string) -> boolean {
-    return token.lexeme == expected;
-}
-
-fn is_symbol_token(token -> Token, expected -> string) -> boolean {
-    return token.lexeme == expected;
+    return false;
 }
 
 fn append_violations(violations -> EffectViolation[], new_violations -> EffectViolation[]) -> EffectViolation[] {
