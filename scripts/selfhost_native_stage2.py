@@ -31,6 +31,68 @@ import re
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+_IMPORT_FROM_RE = re.compile(r"\bfrom\s+\"(?P<path>[^\"]+)\"")
+_IMPORT_BARE_RE = re.compile(
+    r"^\s*import\s+\"(?P<path>[^\"]+)\"\s*;", re.MULTILINE)
+
+
+def _resolve_sailfin_module_path(*, source_path: pathlib.Path, module_ref: str) -> pathlib.Path | None:
+    """Resolve a Sailfin `import ... from "..."` module reference to a .sfn file.
+
+    Only handles local relative imports (./, ../). External imports (e.g.
+    "sailfin/runtime") return None.
+    """
+
+    ref = module_ref.strip()
+    if not ref:
+        return None
+    if not (ref.startswith("./") or ref.startswith("../")):
+        return None
+
+    base = source_path.parent
+    raw = (base / ref)
+
+    candidates: list[pathlib.Path] = []
+    if raw.suffix:
+        candidates.append(raw)
+    else:
+        candidates.append(raw.with_suffix(".sfn"))
+        candidates.append(raw / "mod.sfn")
+
+    for cand in candidates:
+        try:
+            resolved = cand.resolve()
+        except OSError:
+            continue
+        if resolved.exists():
+            return resolved
+    return None
+
+
+def _sailfin_local_dependencies(source_path: pathlib.Path, sources_set: set[pathlib.Path]) -> set[pathlib.Path]:
+    """Return local dependency paths (absolute/resolved) that exist in sources_set."""
+
+    try:
+        text = source_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set()
+
+    deps: set[pathlib.Path] = set()
+    for m in _IMPORT_FROM_RE.finditer(text):
+        dep = _resolve_sailfin_module_path(
+            source_path=source_path, module_ref=m.group("path"))
+        if dep is not None and dep in sources_set:
+            deps.add(dep)
+
+    for m in _IMPORT_BARE_RE.finditer(text):
+        dep = _resolve_sailfin_module_path(
+            source_path=source_path, module_ref=m.group("path"))
+        if dep is not None and dep in sources_set:
+            deps.add(dep)
+
+    return deps
+
+
 def _deterministic_link_flags() -> list[str]:
     if sys.platform == "darwin":
         return ["-Wl,-no_uuid"]
@@ -965,6 +1027,9 @@ def main(argv: list[str]) -> int:
                             cmd.extend([str(source_path), str(attempt_path)])
                             proc = subprocess.run(
                                 cmd,
+                                # Keep CWD at repo root so seeds that resolve module roots
+                                # or cache/import metadata relative to the working directory
+                                # can materialize concrete struct layouts.
                                 cwd=str(REPO_ROOT),
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE,
@@ -1074,6 +1139,12 @@ def main(argv: list[str]) -> int:
                         if args.attempt_sleep > 0:
                             time.sleep(args.attempt_sleep)
                         continue
+
+                    # Some release seeds emit call sites without corresponding
+                    # declarations. Inject any missing `declare` lines before
+                    # running the clang compile gate to keep selfhost robust.
+                    candidate, _ = _inject_missing_function_declarations(
+                        candidate)
 
                     cleaned_attempt_path.write_text(
                         candidate, encoding="utf-8")
@@ -1215,52 +1286,138 @@ def main(argv: list[str]) -> int:
             else:
                 print(
                     f"[selfhost] ({pass_name}) building modules with jobs={jobs}", flush=True)
-                futures: dict[
+                # NOTE: Some stage2 release seeds appear to rely on prior
+                # compilation of imported modules to materialize concrete struct
+                # layouts in LLVM output (otherwise emitting `type opaque` for
+                # imported structs, which clang rejects once accessed).
+                #
+                # When running in parallel, compile in dependency order so
+                # modules that define AST/token structs (and similar) complete
+                # before dependents.
+                resolved_sources = [p.resolve() for p in sources]
+                sources_set = set(resolved_sources)
+                deps_by_source: dict[pathlib.Path, set[pathlib.Path]] = {}
+                for p in resolved_sources:
+                    deps_by_source[p] = _sailfin_local_dependencies(
+                        p, sources_set)
+
+                dependents: dict[pathlib.Path, set[pathlib.Path]] = {}
+                indegree: dict[pathlib.Path, int] = {}
+                for p in resolved_sources:
+                    indegree[p] = 0
+                    dependents[p] = set()
+                for p, deps in deps_by_source.items():
+                    indegree[p] = len(deps)
+                    for dep in deps:
+                        dependents[dep].add(p)
+
+                # Map resolved path -> original (idx, path) for stable progress output.
+                index_by_source: dict[pathlib.Path, int] = {
+                    resolved_sources[i]: i for i in range(len(resolved_sources))
+                }
+
+                ready: list[pathlib.Path] = [
+                    p for p in resolved_sources if indegree[p] == 0]
+                # Prefer deterministic ordering for readiness waves.
+                ready.sort(key=lambda p: str(p))
+
+                results_by_index: dict[
+                    int, tuple[str, dict[str, int], dict[str, float | int]]
+                ] = {}
+                in_flight: dict[
                     concurrent.futures.Future[
                         tuple[str, dict[str, int], dict[str, float | int]]
                     ],
-                    int,
+                    pathlib.Path,
                 ] = {}
-                with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
-                    for idx, source_path in enumerate(sources):
-                        _check_budget()
-                        futures[executor.submit(
-                            _compile_one_module, idx, source_path)] = idx
 
-                    results_by_index: dict[
-                        int, tuple[str, dict[str, int], dict[str, float | int]]
-                    ] = {}
-                    first_error: BaseException | None = None
-                    for fut in concurrent.futures.as_completed(futures):
-                        idx = futures[fut]
-                        try:
-                            results_by_index[idx] = fut.result()
-                        except BaseException as exc:
-                            first_error = exc
-                            for other in futures:
-                                other.cancel()
+                completed: set[pathlib.Path] = set()
+                first_error: BaseException | None = None
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+                    while (ready or in_flight) and first_error is None:
+                        _check_budget()
+
+                        while ready and len(in_flight) < jobs:
+                            source_resolved = ready.pop(0)
+                            original_idx = index_by_source[source_resolved]
+                            # Use the resolved path for consistent dependency accounting.
+                            fut = executor.submit(
+                                _compile_one_module, original_idx, source_resolved
+                            )
+                            in_flight[fut] = source_resolved
+
+                        if not in_flight:
                             break
+
+                        done, _pending = concurrent.futures.wait(
+                            in_flight,
+                            return_when=concurrent.futures.FIRST_COMPLETED,
+                        )
+                        for fut in done:
+                            source_resolved = in_flight.pop(fut)
+                            original_idx = index_by_source[source_resolved]
+                            try:
+                                results_by_index[original_idx] = fut.result()
+                            except BaseException as exc:
+                                first_error = exc
+                                for other in in_flight:
+                                    other.cancel()
+                                break
+
+                            completed.add(source_resolved)
+                            for child in dependents.get(source_resolved, set()):
+                                if child in completed:
+                                    continue
+                                indegree[child] = max(0, indegree[child] - 1)
+                                if indegree[child] == 0:
+                                    ready.append(child)
+                            ready.sort(key=lambda p: str(p))
 
                     if first_error is not None:
                         raise first_error
 
-                    for idx in range(len(sources)):
-                        name, local_timing, module_stats = results_by_index[idx]
-                        seed_emit_s += float(module_stats["seed_emit_s"])
-                        clang_validate_s += float(
-                            module_stats["clang_validate_s"])
-                        seed_attempts_total += int(
-                            module_stats["seed_attempts_total"])
-                        seed_timeouts += int(module_stats["seed_timeouts"])
-                        seed_failures += int(module_stats["seed_failures"])
-                        clang_validations += int(
-                            module_stats["clang_validations"])
-                        clang_validation_failures += int(
-                            module_stats["clang_validation_failures"])
-                        modules_retried += int(module_stats["modules_retried"])
-                        if args.timing and local_timing:
-                            timing_by_module[name] = local_timing
-                        module_names.append(name)
+                # If we couldn't topologically schedule everything (cycles or
+                # unresolved imports), fall back to compiling remaining modules
+                # in their original order.
+                if len(results_by_index) != len(sources):
+                    remaining: list[pathlib.Path] = []
+                    for p in resolved_sources:
+                        if index_by_source[p] not in results_by_index:
+                            remaining.append(p)
+                    if remaining:
+                        print(
+                            f"[selfhost][warn] ({pass_name}) dependency scheduler left {len(remaining)} module(s); compiling remaining in original order",
+                            flush=True,
+                        )
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+                            extra_futures: dict[concurrent.futures.Future[tuple[str,
+                                                                                dict[str, int], dict[str, float | int]]], int] = {}
+                            for p in remaining:
+                                idx = index_by_source[p]
+                                extra_futures[executor.submit(
+                                    _compile_one_module, idx, p)] = idx
+                            for fut in concurrent.futures.as_completed(extra_futures):
+                                idx = extra_futures[fut]
+                                results_by_index[idx] = fut.result()
+
+                for idx in range(len(sources)):
+                    name, local_timing, module_stats = results_by_index[idx]
+                    seed_emit_s += float(module_stats["seed_emit_s"])
+                    clang_validate_s += float(
+                        module_stats["clang_validate_s"])
+                    seed_attempts_total += int(
+                        module_stats["seed_attempts_total"])
+                    seed_timeouts += int(module_stats["seed_timeouts"])
+                    seed_failures += int(module_stats["seed_failures"])
+                    clang_validations += int(module_stats["clang_validations"])
+                    clang_validation_failures += int(
+                        module_stats["clang_validation_failures"]
+                    )
+                    modules_retried += int(module_stats["modules_retried"])
+                    if args.timing and local_timing:
+                        timing_by_module[name] = local_timing
+                    module_names.append(name)
 
         except SystemExit as exc:
             # If we're exiting due to a wall-time budget, print partial timing so
