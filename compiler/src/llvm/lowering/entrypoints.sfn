@@ -1154,6 +1154,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse 
     if !string_array_contains(runtime_helpers, "array_push_slot") {
         runtime_helpers = append_string(runtime_helpers, "array_push_slot");
     }
+    // `lower_array_push_in_place` uses `@sailfin_runtime_append_string` for `i8*` arrays.
+    // This helper target must be present so we emit the corresponding declaration.
+    if !string_array_contains(runtime_helpers, "append_string") {
+        runtime_helpers = append_string(runtime_helpers, "append_string");
+    }
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
     runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at");

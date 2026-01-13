@@ -739,6 +739,8 @@ def lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manif
         runtime_helpers = append_string(runtime_helpers, "copy_bytes")
     if not string_array_contains(runtime_helpers, "array_push_slot"):
         runtime_helpers = append_string(runtime_helpers, "array_push_slot")
+    if not string_array_contains(runtime_helpers, "append_string"):
+        runtime_helpers = append_string(runtime_helpers, "append_string")
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field")
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat")
     runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at")

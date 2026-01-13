@@ -135,6 +135,12 @@ def lower_array_push_in_place(array, value, element_type, lines, temp_index):
     if len(element_type) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: push requires a concrete element type")
         return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=None, diagnostics=diagnostics, string_constants=[])
+    if element_type == "i8*":
+        pushed = format_temp_name(current_temp)
+        current_temp += 1
+        current_lines = append_string(current_lines, "  " + pushed + " = call " + array.llvm_type + " @sailfin_runtime_append_string(" + array.llvm_type + " " + array.value + ", i8* " + value.value + ")")
+        result_operand = LLVMOperand(llvm_type=array.llvm_type, value=pushed)
+        return ExpressionResult(lines=current_lines, temp_index=current_temp, operand=result_operand, diagnostics=diagnostics, string_constants=[])
     array_struct_type = array_struct_type_for_element(element_type)
     if len(array_struct_type) == 0:
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported push element type `" + element_type + "`")

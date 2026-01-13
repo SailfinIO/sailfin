@@ -151,6 +151,20 @@ fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
     }
 
+    // IMPORTANT: `i8*` arrays are the runtime's "string array" ABI and are
+    // backed by `SailfinPtrArray` helpers that carry a hidden capacity header.
+    // Do not route these through the generic `array_push_slot` path, which uses
+    // a different header layout and can break subsequent `append_string` calls.
+    if element_type == "i8*" {
+        let pushed = format_temp_name(current_temp);
+        current_temp += 1;
+        // NOTE: Do not embed `{ ... }` literally in Sailfin strings; braces are
+        // treated as interpolation markers. Use `array.llvm_type` instead.
+        current_lines = append_string(current_lines, "  " + pushed + " = call " + array.llvm_type + " @sailfin_runtime_append_string(" + array.llvm_type + " " + array.value + ", i8* " + value.value + ")");
+        let result_operand = LLVMOperand { llvm_type: array.llvm_type, value: pushed };
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
+    }
+
     let array_struct_type = array_struct_type_for_element(element_type);
     if array_struct_type.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: unsupported push element type `" + element_type + "`");
