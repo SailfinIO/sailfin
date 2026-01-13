@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.111 (2026-01-13)
+
+### Bug Fixes
+
+- Decorator indexing
+  ([`107c7b9`](https://github.com/SailfinIO/sailfin/commit/107c7b96e4d908d0e33aa510adf69ccceb20afca))
+
+
 ## v0.1.1-alpha.110 (2026-01-13)
 
 ### Bug Fixes
