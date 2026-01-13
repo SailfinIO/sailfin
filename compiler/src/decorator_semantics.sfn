@@ -68,10 +68,9 @@ fn evaluate_decorators(decorators -> Decorator[]) -> DecoratorInfo[] {
         if index >= decorators.length {
             break;
         }
-        let decorator = decorators[index];
-        let argument_infos = evaluate_arguments(decorator.arguments);
+        let argument_infos = evaluate_arguments(decorators[index].arguments);
         results = append_decorator_info(results, DecoratorInfo {
-            name: decorator.name,
+            name: decorators[index].name,
             arguments: argument_infos,
         });
         index += 1;
@@ -86,10 +85,9 @@ fn evaluate_arguments(arguments -> DecoratorArgument[]) -> DecoratorArgumentInfo
         if index >= arguments.length {
             break;
         }
-        let argument = arguments[index];
-        let value = evaluate_expression(argument.expression);
+        let value = evaluate_expression(arguments[index].expression);
         infos = append_argument_info(infos, DecoratorArgumentInfo {
-            name: argument.name,
+            name: arguments[index].name,
             value: value,
         });
         index += 1;
