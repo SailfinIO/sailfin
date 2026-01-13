@@ -165,7 +165,7 @@ fn required_effects(body -> Block) -> EffectRequirement[] {
 }
 
 fn collect_effects_from_block(block -> Block) -> EffectRequirement[] {
-    let mut required = collect_effects_from_text(block.text);
+    let mut required -> EffectRequirement[] = [];
     let mut index -> number = 0;
     loop {
         if index >= block.statements.length {
@@ -318,6 +318,25 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
     }
     if expression.variant == "Call" {
         let mut required = collect_effects_from_expression(expression.callee);
+
+        // Capture runtime helpers that imply effects.
+        if expression.callee.variant == "Identifier" {
+            let name = expression.callee.name;
+            if name == "spawn" {
+                required = append_requirement(required, EffectRequirement { effect: "io", description: "spawn call" });
+            }
+            if name == "sleep" {
+                required = append_requirement(required, EffectRequirement { effect: "clock", description: "sleep call" });
+            }
+            if name == "serve" {
+                required = append_requirement(required, EffectRequirement { effect: "net", description: "serve call" });
+            }
+        }
+        if expression.callee.variant == "Member" {
+            // Member access effect is handled below, but calls are a strong signal.
+            required = merge_requirements(required, collect_effects_from_expression(expression.callee));
+        }
+
         let mut argument_index -> number = 0;
         loop {
             if argument_index >= expression.arguments.length {
@@ -329,7 +348,20 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
         return required;
     }
     if expression.variant == "Member" {
-        return collect_effects_from_expression(expression.object);
+        let mut required = collect_effects_from_expression(expression.object);
+        if expression.object.variant == "Identifier" {
+            let root = expression.object.name;
+            if root == "fs" {
+                required = append_requirement(required, EffectRequirement { effect: "io", description: "filesystem helper usage" });
+            }
+            if root == "print" || root == "console" {
+                required = append_requirement(required, EffectRequirement { effect: "io", description: "print/console helper usage" });
+            }
+            if root == "http" || root == "websocket" {
+                required = append_requirement(required, EffectRequirement { effect: "net", description: "network helper usage" });
+            }
+        }
+        return required;
     }
     if expression.variant == "Unary" {
         return collect_effects_from_expression(expression.operand);
@@ -389,7 +421,7 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
         return required;
     }
     if expression.variant == "Raw" {
-        return [];
+        return collect_effects_from_text(expression.text);
     }
     return [];
 }
@@ -399,55 +431,49 @@ fn collect_effects_from_text(text -> string) -> EffectRequirement[] {
 
     // Keep this conservative: false positives are worse than missing a hint.
     // This checker exists to produce friendly diagnostics, not enforce soundness.
-    if contains(text, "prompt") {
-        required = append_requirement(
-            required,
-            EffectRequirement { effect: "model", description: "prompt usage" }
-        );
-    }
-    if contains(text, "fs.") {
+    if contains_code(text, "fs.") {
         required = append_requirement(
             required,
             EffectRequirement { effect: "io", description: "filesystem helper usage" }
         );
     }
-    if contains(text, "print(") || contains(text, "print.") {
+    if contains_code(text, "print(") || contains_code(text, "print.") {
         required = append_requirement(
             required,
             EffectRequirement { effect: "io", description: "print helper usage" }
         );
     }
-    if contains(text, "console.") {
+    if contains_code(text, "console.") {
         required = append_requirement(
             required,
             EffectRequirement { effect: "io", description: "console helper usage" }
         );
     }
-    if contains(text, "http.") {
+    if contains_code(text, "http.") {
         required = append_requirement(
             required,
             EffectRequirement { effect: "net", description: "http helper usage" }
         );
     }
-    if contains(text, "websocket.") {
+    if contains_code(text, "websocket.") {
         required = append_requirement(
             required,
             EffectRequirement { effect: "net", description: "websocket helper usage" }
         );
     }
-    if contains(text, "spawn(") {
+    if contains_code(text, "spawn(") {
         required = append_requirement(
             required,
             EffectRequirement { effect: "io", description: "spawn call" }
         );
     }
-    if contains(text, "serve(") {
+    if contains_code(text, "serve(") {
         required = append_requirement(
             required,
             EffectRequirement { effect: "net", description: "serve call" }
         );
     }
-    if contains(text, "sleep(") {
+    if contains_code(text, "sleep(") {
         required = append_requirement(
             required,
             EffectRequirement { effect: "clock", description: "sleep call" }
@@ -457,24 +483,92 @@ fn collect_effects_from_text(text -> string) -> EffectRequirement[] {
     return required;
 }
 
-fn contains(text -> string, needle -> string) -> boolean {
+fn contains_code(text -> string, needle -> string) -> boolean {
     if needle.length == 0 {
+        return true;
+    }
+    if text.length < needle.length {
         return false;
     }
+
     let mut index -> number = 0;
-    let limit = text.length - needle.length;
-    if limit < 0 {
-        return false;
-    }
+    let mut in_line_comment -> boolean = false;
+    let mut in_block_comment -> boolean = false;
+    let mut in_string_quote -> string = "";
+    let mut escaped -> boolean = false;
+
     loop {
-        if index > limit {
+        if index >= text.length {
             break;
         }
-        if substring(text, index, index + needle.length) == needle {
+
+        let ch = substring(text, index, index + 1);
+        let mut two -> string = "";
+        if index + 1 < text.length {
+            two = substring(text, index, index + 2);
+        }
+
+        if in_string_quote.length > 0 {
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            if ch == in_string_quote {
+                in_string_quote = "";
+                index += 1;
+                continue;
+            }
+            index += 1;
+            continue;
+        }
+
+        if in_line_comment {
+            if ch == "\n" {
+                in_line_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        if in_block_comment {
+            if two == "*/" {
+                in_block_comment = false;
+                index += 2;
+                continue;
+            }
+            index += 1;
+            continue;
+        }
+
+        if two == "//" {
+            in_line_comment = true;
+            index += 2;
+            continue;
+        }
+        if two == "/*" {
+            in_block_comment = true;
+            index += 2;
+            continue;
+        }
+        if ch == "\"" || ch == "'" {
+            in_string_quote = ch;
+            escaped = false;
+            index += 1;
+            continue;
+        }
+
+        if index + needle.length <= text.length && substring(text, index, index + needle.length) == needle {
             return true;
         }
         index += 1;
     }
+
     return false;
 }
 

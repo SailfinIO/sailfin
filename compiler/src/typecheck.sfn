@@ -730,10 +730,9 @@ fn select_requirement_for_effect(requirements -> EffectRequirement[], effect -> 
 }
 
 fn requirement_primary_token(requirement -> EffectRequirement?) -> Token? {
-    if requirement == null {
-        return null;
-    }
-    return requirement.origin;
+    // Stage2's effect checker is intentionally token-free for seed compatibility.
+    // When no origin token is available, fall back to spanless diagnostics.
+    return null;
 }
 
 fn format_effect_message(routine_name -> string, effect -> string, requirement -> EffectRequirement?) -> string {

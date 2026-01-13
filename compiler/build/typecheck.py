@@ -505,9 +505,7 @@ def select_requirement_for_effect(requirements, effect):
     return None
 
 def requirement_primary_token(requirement):
-    if requirement == None:
-        return None
-    return requirement.origin
+    return None
 
 def format_effect_message(routine_name, effect, requirement):
     message = routine_name + " is missing effect '" + effect + "'"
