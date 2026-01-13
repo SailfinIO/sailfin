@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.108 (2026-01-13)
+
+### Bug Fixes
+
+- Trigger version bumpt to test self host release
+  ([`f2836ab`](https://github.com/SailfinIO/sailfin/commit/f2836ab4a30fac8841c690b0e27e699a8cabdb23))
+
+
 ## v0.1.1-alpha.107 (2026-01-13)
 
 ### Bug Fixes
