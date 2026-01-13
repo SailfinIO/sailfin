@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.107 (2026-01-13)
+
+### Bug Fixes
+
+- Job parallelzation
+  ([`f8cbd10`](https://github.com/SailfinIO/sailfin/commit/f8cbd10229a0a3aa8ace89d20dc0099e4853bbec))
+
+
 ## v0.1.1-alpha.106 (2026-01-13)
 
 ### Bug Fixes
