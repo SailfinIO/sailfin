@@ -889,6 +889,24 @@ def _module_name_from_source_path(source_path: pathlib.Path) -> str:
     except ValueError:
         pass
 
+    # Support generated compatibility sources that live outside REPO_ROOT but
+    # still use a compiler/src-like path layout so module naming stays stable.
+    normalized = str(source_path).replace("\\", "/")
+    marker = "/compiler/src/"
+    idx = normalized.find(marker)
+    if idx != -1:
+        tail = normalized[idx + len(marker):]
+        if tail.endswith(".sfn"):
+            tail = tail[:-4]
+        return tail.replace("/", "__")
+    marker = "/runtime/"
+    idx = normalized.find(marker)
+    if idx != -1:
+        tail = normalized[idx + len(marker):]
+        if tail.endswith(".sfn"):
+            tail = tail[:-4]
+        return "runtime__" + tail.replace("/", "__")
+
     return source_path.stem
 
 
@@ -1486,78 +1504,38 @@ def main(argv: list[str]) -> int:
             clang_validate_timeout = float(args.clang_validate_timeout)
 
         # Compatibility: older seeds may not resolve directory imports ("./parser")
-        # to "./parser/mod". Generate shim sources so both slugs exist.
-        #
-        # We place these under seed_cwd/compat_src/compiler/src/... so the seed's
-        # module_name_from_path logic can still infer stable module names.
-        compat_root = seed_cwd / "compat_src" / "compiler" / "src"
-        compat_root.mkdir(parents=True, exist_ok=True)
+        # to "./parser/mod". Previously we generated shim modules like
+        # compat_src/compiler/src/parser.sfn, but some older seeds crash while
+        # compiling those shims. Instead, build a full compatibility copy of
+        # compiler sources that rewrites directory imports to explicit /mod.
+        compat_compiler_src = seed_cwd / "compat_src" / "compiler" / "src"
+        if compat_compiler_src.exists():
+            shutil.rmtree(compat_compiler_src)
+        compat_compiler_src.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(REPO_ROOT / "compiler" / "src", compat_compiler_src)
 
-        # Symlink top-level compiler/src/*.sfn into compat tree so shim imports
-        # like "./lexer" resolve without rewriting everything.
-        repo_compiler_src = REPO_ROOT / "compiler" / "src"
-        for p in repo_compiler_src.iterdir():
-            if p.is_dir():
-                continue
-            if p.suffix != ".sfn":
-                continue
-            target = compat_root / p.name
-            if target.exists() or target.is_symlink():
-                continue
+        # Rewrite the handful of known directory imports used by stage2.
+        # Keep this surgical to avoid churn and to preserve determinism.
+        rewrites = {
+            'from "./parser";': 'from "./parser/mod";',
+            'from "./llvm/expression_lowering_stage2";': 'from "./llvm/expression_lowering_stage2/mod";',
+        }
+        for p in compat_compiler_src.rglob("*.sfn"):
             try:
-                os.symlink(p, target)
-            except OSError:
-                # Best effort: symlinks may be disallowed in some environments.
-                shutil.copy2(p, target)
+                text = p.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            new_text = text
+            for old, new in rewrites.items():
+                new_text = new_text.replace(old, new)
+            if new_text != text:
+                p.write_text(new_text, encoding="utf-8")
 
-        # parser/ can be a directory symlink (we don't need to write into it).
-        parser_dir = compat_root / "parser"
-        if not parser_dir.exists() and not parser_dir.is_symlink():
-            try:
-                os.symlink(repo_compiler_src / "parser", parser_dir)
-            except OSError:
-                shutil.copytree(repo_compiler_src / "parser", parser_dir)
-
-        # llvm/ must be a real directory so we can drop llvm.sfn and
-        # llvm/expression_lowering_stage2.sfn shims into it.
-        llvm_dir = compat_root / "llvm"
-        if not llvm_dir.exists():
-            llvm_dir.mkdir(parents=True, exist_ok=True)
-        repo_llvm_dir = repo_compiler_src / "llvm"
-        for p in repo_llvm_dir.rglob("*"):
-            rel = p.relative_to(repo_llvm_dir)
-            dest = llvm_dir / rel
-            if dest.exists() or dest.is_symlink():
-                continue
-            if p.is_dir():
-                dest.mkdir(parents=True, exist_ok=True)
-                continue
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                os.symlink(p, dest)
-            except OSError:
-                shutil.copy2(p, dest)
-
-        shim_sources: list[pathlib.Path] = []
-        for mod_path, shim_rel in (
-            (repo_compiler_src / "parser" / "mod.sfn", pathlib.Path("parser.sfn")),
-            (repo_compiler_src / "llvm" / "mod.sfn", pathlib.Path("llvm.sfn")),
-            (
-                repo_compiler_src
-                / "llvm"
-                / "expression_lowering_stage2"
-                / "mod.sfn",
-                pathlib.Path("llvm") / "expression_lowering_stage2.sfn",
-            ),
-        ):
-            if not mod_path.exists():
-                continue
-            shim_path = compat_root / shim_rel
-            _generate_mod_shim(mod_path=mod_path, shim_path=shim_path)
-            shim_sources.append(shim_path)
-
-        if shim_sources:
-            sources = sources + shim_sources
+        # Compile using the compat tree for compiler sources but keep runtime
+        # sources from the repo.
+        sources = sorted(compat_compiler_src.rglob("*.sfn")) + sorted(
+            (REPO_ROOT / "runtime").rglob("*.sfn")
+        )
 
         # Populate an isolated import-context cache for the seed compiler.
         # Without build/stage2/<slug>.sfn-asm files, stage2 lowering falls back
