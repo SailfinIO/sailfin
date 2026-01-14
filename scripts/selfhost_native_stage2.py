@@ -997,192 +997,113 @@ def _prepare_seed_import_context(
     env: dict[str, str],
     timeout: float | None,
 ) -> None:
-    """Populate seed_cwd/build/stage2 with import-context artifacts.
+    """Populate seed_cwd/build/stage2 with .sfn-asm + .layout-manifest artifacts.
 
     Stage2's LLVM lowering reads imported module context from
     build/stage2/<slug>.sfn-asm and build/stage2/<slug>.layout-manifest.
 
-    Important: the `emit llvm`/`emit-llvm-file` commands do not generate these
-    cache artifacts, and writing stub manifests is actively harmful: it causes
-    the lowerer to accept empty layout info, which in turn can degrade imported
-    structs into `i8*` and produce wrong/mismatched cross-module call
-    signatures.
+    In clean CI environments, relying on `sfn build` to "warm" this cache is
+    brittle because the build can fail before emitting any cache artifacts
+    (missing runtime symbols, invalid LLVM, etc). Instead, we generate the
+    artifacts directly:
 
-    Instead, we "warm" the stage2 cache by running `sfn build` under the
-    isolated seed_cwd. Even when the final link fails (common on macOS when
-    runtime bits are missing), the compiler usually still emits the needed
-    build/stage2 artifacts for all compiled modules.
+    - Run `sfn emit native <path>` to produce `<slug>.sfn-asm`.
+    - Derive `<slug>.layout-manifest` by extracting `.layout ...` lines from the
+      emitted native text.
     """
 
     stage2_cache = seed_cwd / "build" / "stage2"
     stage2_cache.mkdir(parents=True, exist_ok=True)
+    tmp_root = stage2_cache / ".tmp"
+    tmp_root.mkdir(parents=True, exist_ok=True)
 
-    expected: list[tuple[pathlib.Path, pathlib.Path]] = []
-    for p in sources:
+    def _write_layout_manifest_from_native_text(*, native_text: str, out_path: pathlib.Path) -> None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        header = "; Sailfin Layout Manifest\n.manifest version=1\n\n"
+        out_lines: list[str] = [header.rstrip("\n")]
+        for line in native_text.splitlines():
+            stripped = line.lstrip(" \t")
+            if stripped.startswith(".layout "):
+                out_lines.append(stripped)
+        out_path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+
+    def _emit_one(p: pathlib.Path) -> None:
         slug = _slug_from_source_path(p)
-        expected.append(
-            (stage2_cache / f"{slug}.sfn-asm",
-             stage2_cache / f"{slug}.layout-manifest")
-        )
+        asm_path = stage2_cache / f"{slug}.sfn-asm"
+        manifest_path = stage2_cache / f"{slug}.layout-manifest"
 
-    def _all_present_and_fresh() -> bool:
-        # Best-effort: if some mtimes fail, treat as stale.
-        for src, (asm_path, manifest_path) in zip(sources, expected, strict=False):
-            try:
-                src_mtime = src.stat().st_mtime
-                if not asm_path.exists() or not manifest_path.exists():
-                    return False
-                # Reject stub/empty manifests. Older staging logic used a
-                # header-only placeholder; that causes the lowerer to treat
-                # imported struct layouts as unknown and can corrupt ABI.
-                try:
-                    if manifest_path.stat().st_size < 80:
-                        return False
-                    with manifest_path.open("r", encoding="utf-8", errors="replace") as f:
-                        head = f.read(512)
-                    if ".layout" not in head:
-                        return False
-                except OSError:
-                    return False
-                if asm_path.stat().st_mtime < src_mtime:
-                    return False
-                if manifest_path.stat().st_mtime < src_mtime:
-                    return False
-            except OSError:
-                return False
-        return True
+        # Best-effort caching.
+        try:
+            src_mtime = p.stat().st_mtime
+            if asm_path.exists() and manifest_path.exists():
+                if asm_path.stat().st_mtime >= src_mtime and manifest_path.stat().st_mtime >= src_mtime:
+                    return
+        except OSError:
+            pass
 
-    # Fast path: cache already staged in this seed_cwd.
-    if expected and _all_present_and_fresh():
-        return
+        seed_env_local = env.copy()
+        tmp_dir = tmp_root / slug.replace("/", "__")
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        seed_env_local["TMPDIR"] = str(tmp_dir)
+        seed_env_local["TMP"] = str(tmp_dir)
+        seed_env_local["TEMP"] = str(tmp_dir)
 
-    def _run_build(seed: pathlib.Path, entrypoint: pathlib.Path) -> None:
-        build_out_dir = seed_cwd / "build" / "selfhost_import_context"
-        build_out_dir.mkdir(parents=True, exist_ok=True)
-        out_bin = build_out_dir / "warm-cache-bin"
-        proc = subprocess.run(
-            [str(seed), "build", "-o", str(out_bin), str(entrypoint)],
-            cwd=str(seed_cwd),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-            timeout=timeout,
-        )
-        if proc.returncode != 0:
-            stderr_text = proc.stderr.decode("utf-8", errors="replace")
-            lines = stderr_text.splitlines()
-            if len(lines) > 60:
-                stderr_text = "\n".join(
-                    lines[:60]) + "\n... (stderr truncated)"
+        def _emit_with(seed: pathlib.Path) -> None:
+            _seed_emit_native_text(
+                seed_bin=seed,
+                source_path=p,
+                out_path=asm_path,
+                cwd=seed_cwd,
+                env=seed_env_local,
+                timeout=timeout,
+            )
+            native_text = asm_path.read_text(
+                encoding="utf-8", errors="replace")
+            _write_layout_manifest_from_native_text(
+                native_text=native_text,
+                out_path=manifest_path,
+            )
+
+        try:
+            _emit_with(seed_bin)
+        except SystemExit as exc:
+            if fallback_seed_bin is None or fallback_seed_bin == seed_bin:
+                raise
             print(
-                f"[selfhost][warn] warm-cache build failed (seed={seed}, entrypoint={entrypoint}, rc={proc.returncode})\n{stderr_text}",
+                f"[selfhost][warn] seed emit native failed for {p}; retrying staging with fallback seed {fallback_seed_bin}\n{exc}",
                 file=sys.stderr,
                 flush=True,
             )
+            _emit_with(fallback_seed_bin)
 
-    def _choose_entrypoints() -> list[pathlib.Path]:
-        # Prefer compat sources if present (they match the module naming scheme
-        # used by later selfhost compilation).
-        name_to_paths: dict[str, list[pathlib.Path]] = {}
-        for p in sources:
-            name_to_paths.setdefault(p.name, []).append(p)
-        candidates: list[pathlib.Path] = []
-        for name in ("cli_main.sfn", "main.sfn"):
-            for p in name_to_paths.get(name, []):
-                # Heuristic: prioritize compat_src path first.
-                if "compat_src" in p.as_posix():
-                    candidates.insert(len(candidates), p)
-                else:
-                    candidates.append(p)
-        # De-dupe while preserving order.
-        seen: set[pathlib.Path] = set()
-        out: list[pathlib.Path] = []
-        for p in candidates:
-            if p in seen:
-                continue
-            seen.add(p)
-            out.append(p)
-        return out
-
-    entrypoints = _choose_entrypoints()
-    if not entrypoints:
-        # Fallback: pick the first source; better than doing nothing.
-        entrypoints = [sources[0]] if sources else []
-
-    # Attempt warm builds (try seed_bin, then fallback_seed_bin) until the
-    # cache looks complete.
-    for entrypoint in entrypoints[:2]:
-        if not entrypoint.exists():
-            continue
-        _run_build(seed_bin, entrypoint)
-        if _all_present_and_fresh():
-            return
-
-    if fallback_seed_bin is not None and fallback_seed_bin != seed_bin:
-        for entrypoint in entrypoints[:2]:
-            if not entrypoint.exists():
-                continue
-            _run_build(fallback_seed_bin, entrypoint)
-            if _all_present_and_fresh():
-                return
-
-    # Backfill shim slugs from their corresponding /mod artifacts.
-    #
-    # The compat sources create sibling shims like `parser.sfn` for
-    # `parser/mod.sfn`. A warm-cache build typically emits artifacts only for
-    # the real module file, but older seeds may import the shim slug.
-    shim_slug_to_mod_slug = {
-        "parser": "parser/mod",
-        "llvm": "llvm/mod",
-        "llvm/expression_lowering_stage2": "llvm/expression_lowering_stage2/mod",
-    }
-
-    def _slug_from_cache_path(p: pathlib.Path) -> str:
-        rel = p.relative_to(stage2_cache).as_posix()
-        if rel.endswith(".sfn-asm"):
-            return rel[: -len(".sfn-asm")]
-        if rel.endswith(".layout-manifest"):
-            return rel[: -len(".layout-manifest")]
-        return rel
-
-    for asm_path, manifest_path in expected:
-        if asm_path.exists() and manifest_path.exists():
-            continue
-        slug = _slug_from_cache_path(asm_path)
-        mod_slug = shim_slug_to_mod_slug.get(slug)
-        if mod_slug is None:
-            continue
-        mod_asm = stage2_cache / f"{mod_slug}.sfn-asm"
-        mod_manifest = stage2_cache / f"{mod_slug}.layout-manifest"
-        try:
-            if not asm_path.exists() and mod_asm.exists():
-                asm_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(mod_asm, asm_path)
-            if not manifest_path.exists() and mod_manifest.exists():
-                manifest_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(mod_manifest, manifest_path)
-        except OSError:
-            # Best-effort; missing shims will be reported below.
-            pass
-
-    if _all_present_and_fresh():
+    if jobs <= 1:
+        for idx, p in enumerate(sources):
+            if idx % 10 == 0 or idx + 1 == len(sources):
+                print(
+                    f"[selfhost] staging {idx + 1}/{len(sources)} import artifact(s)...",
+                    flush=True,
+                )
+            _emit_one(p)
         return
 
-    missing = [
-        (asm_path, manifest_path)
-        for (asm_path, manifest_path) in expected
-        if not asm_path.exists() or not manifest_path.exists()
-    ]
-    if missing:
-        sample = missing[:10]
-        formatted = "\n".join(
-            f"- {a.relative_to(seed_cwd)} / {m.relative_to(seed_cwd)}" for a, m in sample)
-        raise SystemExit(
-            "selfhost: failed to stage import-context artifacts under seed_cwd.\n"
-            "Tried warm-cache `sfn build`, but some expected build/stage2 artifacts are missing.\n"
-            f"Missing (sample {len(sample)}/{len(missing)}):\n{formatted}\n"
-            "Hint: ensure the seed supports `sfn build` and can compile the stage2 entrypoint sufficiently to populate build/stage2."
-        )
+    completed = 0
+    completed_lock = threading.Lock()
+
+    def _emit_one_with_progress(p: pathlib.Path) -> None:
+        nonlocal completed
+        _emit_one(p)
+        with completed_lock:
+            completed += 1
+            if completed % 10 == 0 or completed == len(sources):
+                print(
+                    f"[selfhost] staged {completed}/{len(sources)} import artifact(s)...",
+                    flush=True,
+                )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = [pool.submit(_emit_one_with_progress, p) for p in sources]
+        for fut in concurrent.futures.as_completed(futures):
+            fut.result()
 
 
 def main(argv: list[str]) -> int:
@@ -1700,6 +1621,16 @@ def main(argv: list[str]) -> int:
                     )
                     if remaining is None:
                         return base
+                    # Avoid passing extremely small timeouts to subprocesses.
+                    # When the wall-time budget is nearly exhausted, a
+                    # sub-second timeout tends to produce confusing
+                    # `subprocess.TimeoutExpired` errors; fail fast instead.
+                    if remaining < 1.0:
+                        elapsed = float(args.max_total_seconds) - remaining
+                        raise SystemExit(
+                            f"selfhost: exceeded max wall time ({elapsed:.2f}s > {args.max_total_seconds:.2f}s)\n"
+                            f"(remaining budget {remaining:.2f}s is too small to run the next step)"
+                        )
                     if base is None:
                         return remaining
                     return min(base, remaining)
