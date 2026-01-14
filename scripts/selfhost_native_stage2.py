@@ -38,7 +38,7 @@ _IMPORT_BARE_RE = re.compile(
 
 
 _LLVM_NAMED_TYPE_DEF_RE = re.compile(
-    r"^(?P<name>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*type\s+(?P<body>.+)$",
+    r"^\s*(?P<name>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*type\s+(?P<body>.+)$",
     re.MULTILINE,
 )
 
@@ -78,17 +78,24 @@ def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple
     name_ref_re = re.compile(r"%[A-Za-z_.$][A-Za-z0-9_.$]*")
 
     lines_in = llvm_ir.splitlines()
-    defined: set[str] = set()
+
+    # Track which named types are already concretely defined in this module.
+    # NOTE: Opaque definitions are *not* considered "defined" for our purposes
+    # because we want to replace them when a concrete definition is known.
+    concrete_defined: set[str] = set()
     for line in lines_in:
         m = type_decl_re.match(line)
-        if m:
-            defined.add(m.group("name"))
+        if not m:
+            continue
+        if m.group("body").strip() == "opaque":
+            continue
+        concrete_defined.add(m.group("name"))
 
     # Names we inserted (so we don't re-insert or loop forever).
     emitted: set[str] = set()
 
     def _emit_with_deps(name: str) -> list[str]:
-        if name in emitted or name in defined:
+        if name in emitted or name in concrete_defined:
             return []
         definition = known_defs.get(name)
         if definition is None:
@@ -99,10 +106,10 @@ def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple
         for ref in name_ref_re.findall(body):
             if ref == name:
                 continue
-            if ref in known_defs and ref not in defined and ref not in emitted:
+            if ref in known_defs and ref not in concrete_defined and ref not in emitted:
                 deps.extend(_emit_with_deps(ref))
         emitted.add(name)
-        defined.add(name)
+        concrete_defined.add(name)
         deps.append(definition)
         return deps
 
@@ -119,8 +126,10 @@ def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple
                 if injected:
                     for inj in injected:
                         patched_lines.append(prefix + inj)
-                    changed += 1
-                    continue
+                # Whether we injected a definition here or the module already
+                # had a concrete definition elsewhere, drop the opaque line.
+                changed += 1
+                continue
         patched_lines.append(line)
 
     return "\n".join(patched_lines) + "\n", changed
@@ -902,6 +911,25 @@ def main(argv: list[str]) -> int:
         raise SystemExit(f"missing seed compiler: {seed}")
     if not os.access(seed, os.X_OK):
         raise SystemExit(f"seed compiler is not executable: {seed}")
+
+    def _seed_version(seed_bin: pathlib.Path) -> str:
+        for cmd in ([str(seed_bin), "version"], [str(seed_bin), "--version"]):
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=str(REPO_ROOT),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=10,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            out = proc.stdout.decode("utf-8", errors="replace").strip()
+            if proc.returncode == 0 and out:
+                return out.splitlines()[0]
+        return "(unknown version)"
+
+    print(f"[selfhost] seed: {seed} ({_seed_version(seed)})", flush=True)
 
     def _hash_file(path: pathlib.Path) -> str:
         h = hashlib.sha256()
