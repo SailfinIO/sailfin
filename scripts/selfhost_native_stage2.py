@@ -138,6 +138,109 @@ def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple
     return "\n".join(patched_lines) + "\n", changed
 
 
+def _normalize_concrete_named_type_defs(
+    llvm_ir: str, canonical_defs: dict[str, str]
+) -> tuple[str, int]:
+    """Normalize concrete named type definitions to a canonical map.
+
+    LLVM will silently rename identified structs when linking modules that
+    define the same named type with different bodies. That can produce
+    cross-module ABI mismatches and runtime crashes.
+
+    This helper rewrites *concrete* definitions (non-opaque) to match the
+    canonical definition, while leaving `type opaque` lines intact so
+    `_patch_opaque_named_types` can handle dependency insertion.
+    """
+
+    if not canonical_defs:
+        return llvm_ir, 0
+
+    type_decl_re = re.compile(
+        r"^(?P<prefix>\s*)(?P<name>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*type\s+(?P<body>.+?)\s*$"
+    )
+    lines_in = llvm_ir.splitlines()
+    changed = 0
+    out_lines: list[str] = []
+    for line in lines_in:
+        m = type_decl_re.match(line)
+        if not m:
+            out_lines.append(line)
+            continue
+        name = m.group("name")
+        body = m.group("body").strip()
+        if body == "opaque":
+            out_lines.append(line)
+            continue
+        canonical = canonical_defs.get(name)
+        if canonical is None:
+            out_lines.append(line)
+            continue
+        expected = canonical
+        # Compare on normalized whitespace to avoid churn.
+        current_norm = " ".join(f"{name} = type {body}".split())
+        expected_norm = " ".join(expected.split())
+        if current_norm != expected_norm:
+            out_lines.append(m.group("prefix") + expected)
+            changed += 1
+        else:
+            out_lines.append(line)
+
+    new_text = "\n".join(out_lines)
+    if llvm_ir.endswith("\n"):
+        new_text += "\n"
+    return new_text, changed
+
+
+def _build_canonical_named_type_defs(ll_texts: list[str]) -> tuple[dict[str, str], list[str]]:
+    """Compute canonical named type definitions from a set of LLVM modules.
+
+    If multiple concrete bodies exist for the same type name, chooses the most
+    common concrete body and records a warning.
+    """
+
+    # name -> normalized body -> (original_def_line, count)
+    counts: dict[str, dict[str, tuple[str, int]]] = {}
+
+    for text in ll_texts:
+        for m in _LLVM_NAMED_TYPE_DEF_RE.finditer(text):
+            name = m.group("name")
+            body = m.group("body").strip()
+            if body == "opaque":
+                continue
+            definition = f"{name} = type {body}"
+            normalized = " ".join(definition.split())
+            if name not in counts:
+                counts[name] = {}
+            prev = counts[name].get(normalized)
+            if prev is None:
+                counts[name][normalized] = (definition, 1)
+            else:
+                counts[name][normalized] = (prev[0], prev[1] + 1)
+
+    warnings: list[str] = []
+    canonical: dict[str, str] = {}
+    for name, variants in counts.items():
+        if not variants:
+            continue
+        ranked = sorted(variants.values(), key=lambda t: t[1], reverse=True)
+        chosen_def, chosen_count = ranked[0]
+        if len(variants) == 1:
+            # Safe: there is exactly one concrete body across modules.
+            canonical[name] = chosen_def
+            continue
+
+        # Unsafe to pick a single body: rewriting can break IR that was emitted
+        # assuming a different definition (e.g., insertvalue/extractvalue field
+        # types no longer line up). We'll warn and leave these to LLVM's type
+        # renaming/linking semantics.
+        total = sum(v[1] for v in variants.values())
+        warnings.append(
+            f"named type {name} has {len(variants)} concrete definitions; "
+            f"not normalizing (most common count={chosen_count}/{total})"
+        )
+    return canonical, warnings
+
+
 _LLVM_NAMED_TYPE_REF_RE = re.compile(r"%[A-Z][A-Za-z0-9_.$]*")
 
 
@@ -392,8 +495,7 @@ def _split_top_level_commas(text: str) -> list[str]:
             parts.append(text[start:i].strip())
             start = i + 1
     tail = text[start:].strip()
-    if tail:
-        parts.append(tail)
+    parts.append(tail)
     return parts
 
 
@@ -582,7 +684,12 @@ def _inject_missing_function_declarations(llvm_text: str) -> tuple[str, int]:
     return new_text, len(decl_lines)
 
 
-_UNDEFINED_VALUE_RE = re.compile(r"use of undefined value '@(?P<name>[^']+)'")
+# Clang diagnostic formats vary slightly across versions and truncation.
+# Accept both:
+#   use of undefined value '@foo'
+#   use of undefined value '@foo
+# (i.e. optional trailing quote)
+_UNDEFINED_VALUE_RE = re.compile(r"use of undefined value '@(?P<name>[^']+)'?")
 
 
 def _inject_declare_for_symbol(llvm_text: str, symbol: str) -> tuple[str, bool]:
@@ -883,100 +990,199 @@ def _seed_emit_native_text(
 def _prepare_seed_import_context(
     *,
     seed_bin: pathlib.Path,
+    fallback_seed_bin: pathlib.Path | None,
     sources: list[pathlib.Path],
     seed_cwd: pathlib.Path,
     jobs: int,
     env: dict[str, str],
     timeout: float | None,
 ) -> None:
-    """Populate seed_cwd/build/stage2 with .sfn-asm files for all modules.
+    """Populate seed_cwd/build/stage2 with import-context artifacts.
 
     Stage2's LLVM lowering reads imported module context from
-    build/stage2/<slug>.sfn-asm (and optionally .layout-manifest). The
-    `emit llvm`/`emit-llvm-file` commands do not write these artifacts.
+    build/stage2/<slug>.sfn-asm and build/stage2/<slug>.layout-manifest.
 
-    Selfhost runs the seed in an isolated cwd and pre-populates native-text
-    artifacts so imports resolve deterministically (no opaque/i8* fallback).
+    Important: the `emit llvm`/`emit-llvm-file` commands do not generate these
+    cache artifacts, and writing stub manifests is actively harmful: it causes
+    the lowerer to accept empty layout info, which in turn can degrade imported
+    structs into `i8*` and produce wrong/mismatched cross-module call
+    signatures.
+
+    Instead, we "warm" the stage2 cache by running `sfn build` under the
+    isolated seed_cwd. Even when the final link fails (common on macOS when
+    runtime bits are missing), the compiler usually still emits the needed
+    build/stage2 artifacts for all compiled modules.
     """
 
     stage2_cache = seed_cwd / "build" / "stage2"
     stage2_cache.mkdir(parents=True, exist_ok=True)
-    tmp_root = stage2_cache / ".tmp"
-    tmp_root.mkdir(parents=True, exist_ok=True)
 
-    # Minimal manifest content: enough for parse_layout_manifest() and for
-    # fs.exists() checks used during import slug resolution.
-    manifest_stub = "; Sailfin Layout Manifest\n.manifest version=1\n"
-
-    # Emit native text for all modules up-front so LLVM emission can resolve
-    # imported module context regardless of module compilation order.
-    def _emit_one(p: pathlib.Path) -> None:
+    expected: list[tuple[pathlib.Path, pathlib.Path]] = []
+    for p in sources:
         slug = _slug_from_source_path(p)
-        out_path = stage2_cache / f"{slug}.sfn-asm"
-        manifest_path = stage2_cache / f"{slug}.layout-manifest"
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Fast path: reuse existing artifacts if they're newer than the source.
-        try:
-            src_mtime = p.stat().st_mtime
-            out_mtime = out_path.stat().st_mtime if out_path.exists() else -1.0
-            man_mtime = manifest_path.stat().st_mtime if manifest_path.exists() else -1.0
-            if out_mtime >= src_mtime and man_mtime >= src_mtime:
-                return
-        except OSError:
-            # Best-effort caching only.
-            pass
-
-        # Always ensure the manifest exists: stage2 import resolution uses
-        # existence checks on the manifest/asm paths.
-        manifest_path.write_text(manifest_stub, encoding="utf-8")
-
-        # Some stage2 seeds appear to use fixed temp file names. When staging in
-        # parallel, isolate TMPDIR to avoid cross-process collisions.
-        seed_env_local = env.copy()
-        tmp_dir = tmp_root / slug.replace("/", "__")
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        seed_env_local["TMPDIR"] = str(tmp_dir)
-        seed_env_local["TMP"] = str(tmp_dir)
-        seed_env_local["TEMP"] = str(tmp_dir)
-
-        _seed_emit_native_text(
-            seed_bin=seed_bin,
-            source_path=p,
-            out_path=out_path,
-            cwd=seed_cwd,
-            env=seed_env_local,
-            timeout=timeout,
+        expected.append(
+            (stage2_cache / f"{slug}.sfn-asm",
+             stage2_cache / f"{slug}.layout-manifest")
         )
 
-    if jobs <= 1:
-        for idx, p in enumerate(sources):
-            if idx % 10 == 0 or idx + 1 == len(sources):
-                print(
-                    f"[selfhost] staging {idx + 1}/{len(sources)} import artifact(s)...",
-                    flush=True,
-                )
-            _emit_one(p)
+    def _all_present_and_fresh() -> bool:
+        # Best-effort: if some mtimes fail, treat as stale.
+        for src, (asm_path, manifest_path) in zip(sources, expected, strict=False):
+            try:
+                src_mtime = src.stat().st_mtime
+                if not asm_path.exists() or not manifest_path.exists():
+                    return False
+                # Reject stub/empty manifests. Older staging logic used a
+                # header-only placeholder; that causes the lowerer to treat
+                # imported struct layouts as unknown and can corrupt ABI.
+                try:
+                    if manifest_path.stat().st_size < 80:
+                        return False
+                    with manifest_path.open("r", encoding="utf-8", errors="replace") as f:
+                        head = f.read(512)
+                    if ".layout" not in head:
+                        return False
+                except OSError:
+                    return False
+                if asm_path.stat().st_mtime < src_mtime:
+                    return False
+                if manifest_path.stat().st_mtime < src_mtime:
+                    return False
+            except OSError:
+                return False
+        return True
+
+    # Fast path: cache already staged in this seed_cwd.
+    if expected and _all_present_and_fresh():
         return
 
-    completed = 0
-    completed_lock = threading.Lock()
+    def _run_build(seed: pathlib.Path, entrypoint: pathlib.Path) -> None:
+        build_out_dir = seed_cwd / "build" / "selfhost_import_context"
+        build_out_dir.mkdir(parents=True, exist_ok=True)
+        out_bin = build_out_dir / "warm-cache-bin"
+        proc = subprocess.run(
+            [str(seed), "build", "-o", str(out_bin), str(entrypoint)],
+            cwd=str(seed_cwd),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            timeout=timeout,
+        )
+        if proc.returncode != 0:
+            stderr_text = proc.stderr.decode("utf-8", errors="replace")
+            lines = stderr_text.splitlines()
+            if len(lines) > 60:
+                stderr_text = "\n".join(
+                    lines[:60]) + "\n... (stderr truncated)"
+            print(
+                f"[selfhost][warn] warm-cache build failed (seed={seed}, entrypoint={entrypoint}, rc={proc.returncode})\n{stderr_text}",
+                file=sys.stderr,
+                flush=True,
+            )
 
-    def _emit_one_with_progress(p: pathlib.Path) -> None:
-        nonlocal completed
-        _emit_one(p)
-        with completed_lock:
-            completed += 1
-            if completed % 10 == 0 or completed == len(sources):
-                print(
-                    f"[selfhost] staged {completed}/{len(sources)} import artifact(s)...",
-                    flush=True,
-                )
+    def _choose_entrypoints() -> list[pathlib.Path]:
+        # Prefer compat sources if present (they match the module naming scheme
+        # used by later selfhost compilation).
+        name_to_paths: dict[str, list[pathlib.Path]] = {}
+        for p in sources:
+            name_to_paths.setdefault(p.name, []).append(p)
+        candidates: list[pathlib.Path] = []
+        for name in ("cli_main.sfn", "main.sfn"):
+            for p in name_to_paths.get(name, []):
+                # Heuristic: prioritize compat_src path first.
+                if "compat_src" in p.as_posix():
+                    candidates.insert(len(candidates), p)
+                else:
+                    candidates.append(p)
+        # De-dupe while preserving order.
+        seen: set[pathlib.Path] = set()
+        out: list[pathlib.Path] = []
+        for p in candidates:
+            if p in seen:
+                continue
+            seen.add(p)
+            out.append(p)
+        return out
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures = [pool.submit(_emit_one_with_progress, p) for p in sources]
-        for fut in concurrent.futures.as_completed(futures):
-            fut.result()
+    entrypoints = _choose_entrypoints()
+    if not entrypoints:
+        # Fallback: pick the first source; better than doing nothing.
+        entrypoints = [sources[0]] if sources else []
+
+    # Attempt warm builds (try seed_bin, then fallback_seed_bin) until the
+    # cache looks complete.
+    for entrypoint in entrypoints[:2]:
+        if not entrypoint.exists():
+            continue
+        _run_build(seed_bin, entrypoint)
+        if _all_present_and_fresh():
+            return
+
+    if fallback_seed_bin is not None and fallback_seed_bin != seed_bin:
+        for entrypoint in entrypoints[:2]:
+            if not entrypoint.exists():
+                continue
+            _run_build(fallback_seed_bin, entrypoint)
+            if _all_present_and_fresh():
+                return
+
+    # Backfill shim slugs from their corresponding /mod artifacts.
+    #
+    # The compat sources create sibling shims like `parser.sfn` for
+    # `parser/mod.sfn`. A warm-cache build typically emits artifacts only for
+    # the real module file, but older seeds may import the shim slug.
+    shim_slug_to_mod_slug = {
+        "parser": "parser/mod",
+        "llvm": "llvm/mod",
+        "llvm/expression_lowering_stage2": "llvm/expression_lowering_stage2/mod",
+    }
+
+    def _slug_from_cache_path(p: pathlib.Path) -> str:
+        rel = p.relative_to(stage2_cache).as_posix()
+        if rel.endswith(".sfn-asm"):
+            return rel[: -len(".sfn-asm")]
+        if rel.endswith(".layout-manifest"):
+            return rel[: -len(".layout-manifest")]
+        return rel
+
+    for asm_path, manifest_path in expected:
+        if asm_path.exists() and manifest_path.exists():
+            continue
+        slug = _slug_from_cache_path(asm_path)
+        mod_slug = shim_slug_to_mod_slug.get(slug)
+        if mod_slug is None:
+            continue
+        mod_asm = stage2_cache / f"{mod_slug}.sfn-asm"
+        mod_manifest = stage2_cache / f"{mod_slug}.layout-manifest"
+        try:
+            if not asm_path.exists() and mod_asm.exists():
+                asm_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(mod_asm, asm_path)
+            if not manifest_path.exists() and mod_manifest.exists():
+                manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(mod_manifest, manifest_path)
+        except OSError:
+            # Best-effort; missing shims will be reported below.
+            pass
+
+    if _all_present_and_fresh():
+        return
+
+    missing = [
+        (asm_path, manifest_path)
+        for (asm_path, manifest_path) in expected
+        if not asm_path.exists() or not manifest_path.exists()
+    ]
+    if missing:
+        sample = missing[:10]
+        formatted = "\n".join(
+            f"- {a.relative_to(seed_cwd)} / {m.relative_to(seed_cwd)}" for a, m in sample)
+        raise SystemExit(
+            "selfhost: failed to stage import-context artifacts under seed_cwd.\n"
+            "Tried warm-cache `sfn build`, but some expected build/stage2 artifacts are missing.\n"
+            f"Missing (sample {len(sample)}/{len(missing)}):\n{formatted}\n"
+            "Hint: ensure the seed supports `sfn build` and can compile the stage2 entrypoint sufficiently to populate build/stage2."
+        )
 
 
 def main(argv: list[str]) -> int:
@@ -1006,6 +1212,15 @@ def main(argv: list[str]) -> int:
         type=pathlib.Path,
         default=REPO_ROOT / "build/native/sailfin-stage2",
         help="Path to the seed native sailfin-stage2 binary",
+    )
+    parser.add_argument(
+        "--import-context-seed",
+        type=pathlib.Path,
+        default=None,
+        help=(
+            "Optional path to a stage2 binary used only to stage import-context artifacts "
+            "(emit native -> build/stage2/*.sfn-asm). Useful when the main seed crashes on 'emit native'."
+        ),
     )
     parser.add_argument(
         "--max-attempts",
@@ -1130,6 +1345,20 @@ def main(argv: list[str]) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    # Resolve the seed path once up front so subprocesses can run it even when
+    # we change cwd (e.g. into an isolated seed working directory).
+    try:
+        args.seed = args.seed.resolve()
+    except OSError:
+        # Best effort; a later check will fail with a clear message.
+        pass
+
+    if args.import_context_seed is not None:
+        try:
+            args.import_context_seed = args.import_context_seed.resolve()
+        except OSError:
+            pass
 
     if args.use_emit_llvm_file and args.no_use_emit_llvm_file:
         raise SystemExit(
@@ -1317,6 +1546,17 @@ def main(argv: list[str]) -> int:
         seed_env = os.environ.copy()
         seed_env["SAILFIN_DISABLE_STRING_FREE"] = "1"
 
+        fallback_import_seed: pathlib.Path | None = None
+        if args.import_context_seed is not None:
+            fallback_import_seed = args.import_context_seed
+        else:
+            # Convenience fallback for local debugging: allow a stage1-built
+            # debug compiler to stage import-context artifacts when the release
+            # seed crashes on `emit native`.
+            candidate = REPO_ROOT / "build/native/sailfin-stage2-debug"
+            if candidate.exists() and os.access(candidate, os.X_OK):
+                fallback_import_seed = candidate
+
         seed_timeout = None
         if args.seed_timeout and args.seed_timeout > 0:
             seed_timeout = float(args.seed_timeout)
@@ -1406,6 +1646,7 @@ def main(argv: list[str]) -> int:
             f"[selfhost] ({pass_name}) staging import artifacts...", flush=True)
         _prepare_seed_import_context(
             seed_bin=seed_bin,
+            fallback_seed_bin=fallback_import_seed if fallback_import_seed != seed_bin else None,
             sources=sources,
             seed_cwd=seed_cwd,
             jobs=max(1, int(args.jobs)),
@@ -1633,12 +1874,6 @@ def main(argv: list[str]) -> int:
                             time.sleep(args.attempt_sleep)
                         continue
 
-                    # Some release seeds emit call sites without corresponding
-                    # declarations. Inject any missing `declare` lines before
-                    # running the clang compile gate to keep selfhost robust.
-                    candidate, _ = _inject_missing_function_declarations(
-                        candidate)
-
                     # Learn concrete named type definitions from this module.
                     discovered = _collect_concrete_named_type_defs(candidate)
                     if discovered:
@@ -1692,56 +1927,60 @@ def main(argv: list[str]) -> int:
 
                     if clang_proc.returncode == 0:
                         cleaned = candidate
-                        try:
-                            try:
-                                final_obj_path.unlink()
-                            except FileNotFoundError:
-                                pass
-                            validate_obj.replace(final_obj_path)
-                        except OSError:
-                            shutil.copy2(validate_obj, final_obj_path)
+                        # Do not reuse this object for the final build. We will
+                        # run a global named-type normalization pass after all
+                        # modules are emitted, then compile objects from the
+                        # normalized IR.
                         break
 
                     stats["clang_validation_failures"] = int(
                         stats["clang_validation_failures"]) + 1
 
-                    m = _UNDEFINED_VALUE_RE.search(last_clang_stderr)
-                    if m:
-                        missing = m.group("name")
-                        if "__" in missing:
-                            patched, did_patch = _inject_declare_for_symbol(
-                                candidate, missing)
-                            if did_patch:
-                                cleaned_attempt_path.write_text(
-                                    patched, encoding="utf-8")
-                                try:
-                                    validate_obj.unlink()
-                                except FileNotFoundError:
-                                    pass
-                                clang_proc2 = subprocess.run(
-                                    [clang, *clang_flags, "-fPIC", "-c",
-                                        str(cleaned_attempt_path), "-o", str(validate_obj)],
-                                    cwd=str(REPO_ROOT),
-                                    stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.PIPE,
-                                    text=True,
-                                    timeout=_cap_timeout(
-                                        clang_validate_timeout),
-                                )
-                                last_clang_stderr = clang_proc2.stderr or ""
-                                last_clang_rc = int(clang_proc2.returncode)
-                                if clang_proc2.returncode == 0:
-                                    cleaned = patched
-                                    try:
-                                        try:
-                                            final_obj_path.unlink()
-                                        except FileNotFoundError:
-                                            pass
-                                        validate_obj.replace(final_obj_path)
-                                    except OSError:
-                                        shutil.copy2(
-                                            validate_obj, final_obj_path)
-                                    break
+                    # Some seeds omit `declare` lines for imported functions.
+                    # Iteratively patch missing declarations inferred from call
+                    # sites until clang accepts the module (or we stop making
+                    # progress).
+                    patched_candidate = candidate
+                    for _ in range(64):
+                        m = _UNDEFINED_VALUE_RE.search(last_clang_stderr)
+                        if not m:
+                            break
+                        missing = m.group("name").strip()
+                        if not missing or missing.startswith("llvm."):
+                            break
+
+                        patched_candidate2, did_patch = _inject_declare_for_symbol(
+                            patched_candidate, missing
+                        )
+                        if not did_patch:
+                            break
+                        patched_candidate = patched_candidate2
+                        cleaned_attempt_path.write_text(
+                            patched_candidate, encoding="utf-8")
+                        try:
+                            validate_obj.unlink()
+                        except FileNotFoundError:
+                            pass
+                        clang_proc2 = subprocess.run(
+                            [clang, *clang_flags, "-fPIC", "-c",
+                                str(cleaned_attempt_path), "-o", str(validate_obj)],
+                            cwd=str(REPO_ROOT),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=_cap_timeout(clang_validate_timeout),
+                        )
+                        last_clang_stderr = clang_proc2.stderr or ""
+                        last_clang_rc = int(clang_proc2.returncode)
+                        # Persist the latest stderr so failures are debuggable.
+                        clang_stderr_path.write_text(
+                            last_clang_stderr, encoding="utf-8")
+                        if clang_proc2.returncode == 0:
+                            cleaned = patched_candidate
+                            break
+
+                    if cleaned:
+                        break
 
                     if use_emit_llvm_file_local:
                         # Force retry with streaming emit in the next attempt.
@@ -1942,6 +2181,41 @@ def main(argv: list[str]) -> int:
 
         _check_budget()
 
+        # Global named-type normalization pass.
+        #
+        # Per-module compilation learns concrete named type definitions
+        # incrementally. Modules emitted early can retain `type opaque` lines,
+        # which LLVM will resolve by renaming types during linking. That can
+        # cause cross-module ABI mismatches and runtime crashes.
+        print(
+            f"[selfhost] ({pass_name}) normalizing named LLVM types...", flush=True)
+        ll_texts: list[str] = []
+        ll_paths: list[pathlib.Path] = []
+        for name in module_names:
+            p = raw_dir / f"{name}.ll"
+            ll_paths.append(p)
+            ll_texts.append(p.read_text(encoding="utf-8", errors="replace"))
+
+        canonical_defs, canonical_warnings = _build_canonical_named_type_defs(
+            ll_texts)
+        if canonical_warnings:
+            # Keep this as info/warn output rather than failing: this is often
+            # recoverable (e.g. concrete vs opaque across modules).
+            for w in canonical_warnings:
+                print(f"[selfhost][warn] ({pass_name}) {w}", flush=True)
+
+        # Rewrite each module to:
+        # - declare any missing referenced named types as opaque
+        # - replace opaque defs with canonical concrete defs (including deps)
+        for idx, p in enumerate(ll_paths):
+            _check_budget()
+            text = ll_texts[idx]
+            text, _ = _inject_missing_named_type_stubs(text)
+            text, _ = _patch_opaque_named_types(text, canonical_defs)
+            # Patching can also introduce new references via inserted bodies.
+            text, _ = _inject_missing_named_type_stubs(text)
+            p.write_text(text, encoding="utf-8")
+
         modules_path = raw_dir / "modules.txt"
         modules_path.write_text(
             "\n".join(module_names) + "\n", encoding="utf-8")
@@ -1999,18 +2273,20 @@ def main(argv: list[str]) -> int:
                 ll_path = ll_dir / f"{name}.ll"
                 out_o = obj_dir / f"{name}.o"
                 out_o.parent.mkdir(parents=True, exist_ok=True)
-                if not out_o.exists():
-                    t0 = time.perf_counter()
-                    _run(
-                        [clang, *clang_flags, "-fPIC", "-c",
-                            str(ll_path), "-o", str(out_o)],
-                        cwd=REPO_ROOT,
-                        timeout=_remaining_budget_seconds(
-                            total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
-                        if args.max_total_seconds > 0
-                        else None,
-                    )
-                    clang_compile_s += time.perf_counter() - t0
+                # Always compile from the (possibly normalized) final IR.
+                if out_o.exists():
+                    out_o.unlink()
+                t0 = time.perf_counter()
+                _run(
+                    [clang, *clang_flags, "-fPIC", "-c",
+                        str(ll_path), "-o", str(out_o)],
+                    cwd=REPO_ROOT,
+                    timeout=_remaining_budget_seconds(
+                        total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                    if args.max_total_seconds > 0
+                    else None,
+                )
+                clang_compile_s += time.perf_counter() - t0
                 aot_objects.append(out_o)
 
                 # Also emit the runtime prelude object in the canonical runtime
