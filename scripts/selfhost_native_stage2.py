@@ -32,6 +32,9 @@ import threading
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+DEFAULT_MAX_TOTAL_SECONDS = 1800.0 if sys.platform == "darwin" else 1200.0
+
+
 _IMPORT_FROM_RE = re.compile(r"\bfrom\s+\"(?P<path>[^\"]+)\"")
 _IMPORT_BARE_RE = re.compile(
     r"^\s*import\s+\"(?P<path>[^\"]+)\"\s*;", re.MULTILINE)
@@ -133,6 +136,63 @@ def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple
         patched_lines.append(line)
 
     return "\n".join(patched_lines) + "\n", changed
+
+
+_LLVM_NAMED_TYPE_REF_RE = re.compile(r"%[A-Z][A-Za-z0-9_.$]*")
+
+
+def _inject_missing_named_type_stubs(llvm_ir: str) -> tuple[str, int]:
+    """Ensure every referenced named type is declared in the module.
+
+    Some release seeds have been observed to reference imported struct types
+    (e.g. `%ElseBranch`) without emitting either a concrete definition or a
+    `type opaque` placeholder.
+
+    Clang rejects such IR with: "use of undefined type named 'ElseBranch'".
+    We fix this by inserting `%Name = type opaque` stubs for any referenced
+    CamelCase `%Name` that lacks a `= type ...` declaration line.
+
+    The caller should run `_patch_opaque_named_types` afterwards so any stubs
+    can be replaced with concrete definitions when known.
+    """
+
+    lines = llvm_ir.splitlines()
+    type_decl_re = re.compile(
+        r"^\s*(?P<name>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*type\s+(?P<body>.+)\s*$"
+    )
+
+    declared: set[str] = set()
+    for line in lines:
+        m = type_decl_re.match(line)
+        if m:
+            declared.add(m.group("name"))
+
+    referenced = set(_LLVM_NAMED_TYPE_REF_RE.findall(llvm_ir))
+    missing = sorted(name for name in referenced if name not in declared)
+    if not missing:
+        return llvm_ir, 0
+
+    # Insert stubs before the first non-type top-level entity.
+    insert_at = None
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("source_filename") or s.startswith(";"):
+            continue
+        if s.startswith("%"):
+            continue
+        insert_at = i
+        break
+    if insert_at is None:
+        insert_at = len(lines)
+
+    stub_lines = [f"{name} = type opaque" for name in missing]
+    new_lines = lines[:insert_at] + stub_lines + [""] + lines[insert_at:]
+    new_text = "\n".join(new_lines)
+    if llvm_ir.endswith("\n"):
+        new_text += "\n"
+    return new_text, len(stub_lines)
 
 
 def _resolve_sailfin_module_path(*, source_path: pathlib.Path, module_ref: str) -> pathlib.Path | None:
@@ -725,6 +785,200 @@ def _module_name_from_source_path(source_path: pathlib.Path) -> str:
     return source_path.stem
 
 
+def _slug_from_source_path(source_path: pathlib.Path) -> str:
+    """Return the build/stage2 slug used by stage2 import resolution.
+
+    This matches the logic in compiler/src/llvm/imports.sfn, which expects
+    imported-module artifacts under build/stage2/<slug>.*.
+    """
+
+    compiler_src = REPO_ROOT / "compiler" / "src"
+    runtime_src = REPO_ROOT / "runtime"
+
+    try:
+        relative = source_path.relative_to(compiler_src)
+        return str(relative.with_suffix("")).replace("\\", "/")
+    except ValueError:
+        pass
+
+    try:
+        relative = source_path.relative_to(runtime_src)
+        return "runtime/" + str(relative.with_suffix("")).replace("\\", "/")
+    except ValueError:
+        pass
+
+    # Support generated shim sources that live outside REPO_ROOT but still use
+    # a compiler/src-like path layout so module_name_from_path/import slugs stay
+    # stable.
+    normalized = str(source_path).replace("\\", "/")
+    marker = "/compiler/src/"
+    idx = normalized.find(marker)
+    if idx != -1:
+        tail = normalized[idx + len(marker):]
+        if tail.endswith(".sfn"):
+            tail = tail[:-4]
+        return tail
+    marker = "/runtime/"
+    idx = normalized.find(marker)
+    if idx != -1:
+        tail = normalized[idx + len(marker):]
+        if tail.endswith(".sfn"):
+            tail = tail[:-4]
+        return "runtime/" + tail
+
+    return source_path.stem
+
+
+def _generate_mod_shim(*, mod_path: pathlib.Path, shim_path: pathlib.Path) -> None:
+    """Create a compatibility shim for a directory entrypoint module.
+
+    Older seeds may treat directory imports as module slugs without the implicit
+    `/mod` resolution. We generate a sibling `<dir>.sfn` that mirrors the
+    directory's `mod.sfn`, adjusting relative import paths accordingly.
+    """
+
+    text = mod_path.read_text(encoding="utf-8")
+    dir_segment = mod_path.parent.name
+
+    # Move from <dir>/mod.sfn -> <dir>.sfn (one directory up):
+    # - "./foo" becomes "./<dir>/foo"
+    # - "../bar" becomes "./bar"
+    text = text.replace('from "./', f'from "./{dir_segment}/')
+    text = text.replace("from \"../", "from \"./")
+
+    shim_path.parent.mkdir(parents=True, exist_ok=True)
+    shim_path.write_text(text, encoding="utf-8")
+
+
+def _seed_emit_native_text(
+    *,
+    seed_bin: pathlib.Path,
+    source_path: pathlib.Path,
+    out_path: pathlib.Path,
+    cwd: pathlib.Path,
+    env: dict[str, str],
+    timeout: float | None,
+) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [str(seed_bin), "emit", "native", str(source_path)],
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        timeout=timeout,
+    )
+    if proc.returncode != 0:
+        stderr_text = proc.stderr.decode("utf-8", errors="replace")
+        raise SystemExit(
+            f"selfhost: seed emit native failed for {source_path} (rc={proc.returncode})\n{stderr_text}"
+        )
+    raw = proc.stdout.decode("utf-8", errors="replace")
+    # Some seeds prefix stdout with log labels; strip those so the native-text
+    # parser can consume the artifact.
+    cleaned = _strip_stage2_log_prefixes(raw)
+    out_path.write_text(cleaned, encoding="utf-8")
+
+
+def _prepare_seed_import_context(
+    *,
+    seed_bin: pathlib.Path,
+    sources: list[pathlib.Path],
+    seed_cwd: pathlib.Path,
+    jobs: int,
+    env: dict[str, str],
+    timeout: float | None,
+) -> None:
+    """Populate seed_cwd/build/stage2 with .sfn-asm files for all modules.
+
+    Stage2's LLVM lowering reads imported module context from
+    build/stage2/<slug>.sfn-asm (and optionally .layout-manifest). The
+    `emit llvm`/`emit-llvm-file` commands do not write these artifacts.
+
+    Selfhost runs the seed in an isolated cwd and pre-populates native-text
+    artifacts so imports resolve deterministically (no opaque/i8* fallback).
+    """
+
+    stage2_cache = seed_cwd / "build" / "stage2"
+    stage2_cache.mkdir(parents=True, exist_ok=True)
+    tmp_root = stage2_cache / ".tmp"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+
+    # Minimal manifest content: enough for parse_layout_manifest() and for
+    # fs.exists() checks used during import slug resolution.
+    manifest_stub = "; Sailfin Layout Manifest\n.manifest version=1\n"
+
+    # Emit native text for all modules up-front so LLVM emission can resolve
+    # imported module context regardless of module compilation order.
+    def _emit_one(p: pathlib.Path) -> None:
+        slug = _slug_from_source_path(p)
+        out_path = stage2_cache / f"{slug}.sfn-asm"
+        manifest_path = stage2_cache / f"{slug}.layout-manifest"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Fast path: reuse existing artifacts if they're newer than the source.
+        try:
+            src_mtime = p.stat().st_mtime
+            out_mtime = out_path.stat().st_mtime if out_path.exists() else -1.0
+            man_mtime = manifest_path.stat().st_mtime if manifest_path.exists() else -1.0
+            if out_mtime >= src_mtime and man_mtime >= src_mtime:
+                return
+        except OSError:
+            # Best-effort caching only.
+            pass
+
+        # Always ensure the manifest exists: stage2 import resolution uses
+        # existence checks on the manifest/asm paths.
+        manifest_path.write_text(manifest_stub, encoding="utf-8")
+
+        # Some stage2 seeds appear to use fixed temp file names. When staging in
+        # parallel, isolate TMPDIR to avoid cross-process collisions.
+        seed_env_local = env.copy()
+        tmp_dir = tmp_root / slug.replace("/", "__")
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        seed_env_local["TMPDIR"] = str(tmp_dir)
+        seed_env_local["TMP"] = str(tmp_dir)
+        seed_env_local["TEMP"] = str(tmp_dir)
+
+        _seed_emit_native_text(
+            seed_bin=seed_bin,
+            source_path=p,
+            out_path=out_path,
+            cwd=seed_cwd,
+            env=seed_env_local,
+            timeout=timeout,
+        )
+
+    if jobs <= 1:
+        for idx, p in enumerate(sources):
+            if idx % 10 == 0 or idx + 1 == len(sources):
+                print(
+                    f"[selfhost] staging {idx + 1}/{len(sources)} import artifact(s)...",
+                    flush=True,
+                )
+            _emit_one(p)
+        return
+
+    completed = 0
+    completed_lock = threading.Lock()
+
+    def _emit_one_with_progress(p: pathlib.Path) -> None:
+        nonlocal completed
+        _emit_one(p)
+        with completed_lock:
+            completed += 1
+            if completed % 10 == 0 or completed == len(sources):
+                print(
+                    f"[selfhost] staged {completed}/{len(sources)} import artifact(s)...",
+                    flush=True,
+                )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = [pool.submit(_emit_one_with_progress, p) for p in sources]
+        for fut in concurrent.futures.as_completed(futures):
+            fut.result()
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -735,8 +989,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--max-total-seconds",
         type=float,
-        default=600.0,
-        help="Fail if the rebuild exceeds this wall time (default: 600)",
+        default=DEFAULT_MAX_TOTAL_SECONDS,
+        help=(
+            "Fail if the rebuild exceeds this wall time "
+            f"(default: {int(DEFAULT_MAX_TOTAL_SECONDS)})"
+        ),
     )
     parser.add_argument(
         "--work-dir",
@@ -795,8 +1052,17 @@ def main(argv: list[str]) -> int:
         "--use-emit-llvm-file",
         action="store_true",
         help=(
-            "Use the seed compiler's 'emit-llvm-file' command when available. "
-            "Disabled by default because some seeds can silently truncate output."
+            "Force using the seed compiler's 'emit-llvm-file' command (when available). "
+            "This mode generally produces link-safe IR."
+        ),
+    )
+
+    parser.add_argument(
+        "--no-use-emit-llvm-file",
+        action="store_true",
+        help=(
+            "Do not use 'emit-llvm-file' even if the seed supports it. "
+            "Use this only when debugging seeds that truncate output."
         ),
     )
 
@@ -865,6 +1131,10 @@ def main(argv: list[str]) -> int:
 
     args = parser.parse_args(argv)
 
+    if args.use_emit_llvm_file and args.no_use_emit_llvm_file:
+        raise SystemExit(
+            "selfhost: cannot pass both --use-emit-llvm-file and --no-use-emit-llvm-file")
+
     # Production defaults: validate LLVM output, keep retries bounded.
     if args.force_clang_validate:
         args.skip_clang_validate = False
@@ -881,7 +1151,8 @@ def main(argv: list[str]) -> int:
         elapsed = time.perf_counter() - t_total_start
         if elapsed > float(args.max_total_seconds):
             raise SystemExit(
-                f"selfhost: exceeded max wall time ({elapsed:.2f}s > {args.max_total_seconds:.2f}s)"
+                f"selfhost: exceeded max wall time ({elapsed:.2f}s > {args.max_total_seconds:.2f}s)\n"
+                "hint: increase --max-total-seconds (or reduce --jobs / seed-timeout if you suspect a hang)"
             )
 
     # Prefer a reliable seed when available.
@@ -930,6 +1201,14 @@ def main(argv: list[str]) -> int:
         return "(unknown version)"
 
     print(f"[selfhost] seed: {seed} ({_seed_version(seed)})", flush=True)
+
+    seed_supports_emit_llvm_file = _seed_supports_emit_llvm_file(seed)
+    # Default behaviour: prefer emit-llvm-file when the seed supports it.
+    # Rationale: many seeds' streaming `emit llvm` output is not link-safe
+    # (missing import symbol rewrite), especially on macOS.
+    prefer_emit_llvm_file = seed_supports_emit_llvm_file and not args.no_use_emit_llvm_file
+    if args.use_emit_llvm_file:
+        prefer_emit_llvm_file = seed_supports_emit_llvm_file
 
     def _hash_file(path: pathlib.Path) -> str:
         h = hashlib.sha256()
@@ -1012,13 +1291,15 @@ def main(argv: list[str]) -> int:
                         flush=True,
                     )
 
-        work_dir = args.work_dir
+        work_dir = args.work_dir.resolve()
         stage2_dir = work_dir / pass_name
         raw_dir = stage2_dir / "raw"
         obj_dir = stage2_dir / "obj"
+        seed_cwd = stage2_dir / "seed_cwd"
 
         raw_dir.mkdir(parents=True, exist_ok=True)
         obj_dir.mkdir(parents=True, exist_ok=True)
+        (seed_cwd / "build" / "stage2").mkdir(parents=True, exist_ok=True)
 
         for p in obj_dir.rglob("*.o"):
             p.unlink()
@@ -1032,8 +1313,7 @@ def main(argv: list[str]) -> int:
         known_named_type_defs: dict[str, str] = {}
         known_named_type_defs_lock = threading.Lock()
 
-        use_emit_llvm_file = args.use_emit_llvm_file and _seed_supports_emit_llvm_file(
-            seed_bin)
+        use_emit_llvm_file = prefer_emit_llvm_file and seed_supports_emit_llvm_file
         seed_env = os.environ.copy()
         seed_env["SAILFIN_DISABLE_STRING_FREE"] = "1"
 
@@ -1043,6 +1323,95 @@ def main(argv: list[str]) -> int:
         clang_validate_timeout = None
         if args.clang_validate_timeout and args.clang_validate_timeout > 0:
             clang_validate_timeout = float(args.clang_validate_timeout)
+
+        # Compatibility: older seeds may not resolve directory imports ("./parser")
+        # to "./parser/mod". Generate shim sources so both slugs exist.
+        #
+        # We place these under seed_cwd/compat_src/compiler/src/... so the seed's
+        # module_name_from_path logic can still infer stable module names.
+        compat_root = seed_cwd / "compat_src" / "compiler" / "src"
+        compat_root.mkdir(parents=True, exist_ok=True)
+
+        # Symlink top-level compiler/src/*.sfn into compat tree so shim imports
+        # like "./lexer" resolve without rewriting everything.
+        repo_compiler_src = REPO_ROOT / "compiler" / "src"
+        for p in repo_compiler_src.iterdir():
+            if p.is_dir():
+                continue
+            if p.suffix != ".sfn":
+                continue
+            target = compat_root / p.name
+            if target.exists() or target.is_symlink():
+                continue
+            try:
+                os.symlink(p, target)
+            except OSError:
+                # Best effort: symlinks may be disallowed in some environments.
+                shutil.copy2(p, target)
+
+        # parser/ can be a directory symlink (we don't need to write into it).
+        parser_dir = compat_root / "parser"
+        if not parser_dir.exists() and not parser_dir.is_symlink():
+            try:
+                os.symlink(repo_compiler_src / "parser", parser_dir)
+            except OSError:
+                shutil.copytree(repo_compiler_src / "parser", parser_dir)
+
+        # llvm/ must be a real directory so we can drop llvm.sfn and
+        # llvm/expression_lowering_stage2.sfn shims into it.
+        llvm_dir = compat_root / "llvm"
+        if not llvm_dir.exists():
+            llvm_dir.mkdir(parents=True, exist_ok=True)
+        repo_llvm_dir = repo_compiler_src / "llvm"
+        for p in repo_llvm_dir.rglob("*"):
+            rel = p.relative_to(repo_llvm_dir)
+            dest = llvm_dir / rel
+            if dest.exists() or dest.is_symlink():
+                continue
+            if p.is_dir():
+                dest.mkdir(parents=True, exist_ok=True)
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.symlink(p, dest)
+            except OSError:
+                shutil.copy2(p, dest)
+
+        shim_sources: list[pathlib.Path] = []
+        for mod_path, shim_rel in (
+            (repo_compiler_src / "parser" / "mod.sfn", pathlib.Path("parser.sfn")),
+            (repo_compiler_src / "llvm" / "mod.sfn", pathlib.Path("llvm.sfn")),
+            (
+                repo_compiler_src
+                / "llvm"
+                / "expression_lowering_stage2"
+                / "mod.sfn",
+                pathlib.Path("llvm") / "expression_lowering_stage2.sfn",
+            ),
+        ):
+            if not mod_path.exists():
+                continue
+            shim_path = compat_root / shim_rel
+            _generate_mod_shim(mod_path=mod_path, shim_path=shim_path)
+            shim_sources.append(shim_path)
+
+        if shim_sources:
+            sources = sources + shim_sources
+
+        # Populate an isolated import-context cache for the seed compiler.
+        # Without build/stage2/<slug>.sfn-asm files, stage2 lowering falls back
+        # to opaque/i8* imported types and can drop cross-module definitions,
+        # leading to link failures.
+        print(
+            f"[selfhost] ({pass_name}) staging import artifacts...", flush=True)
+        _prepare_seed_import_context(
+            seed_bin=seed_bin,
+            sources=sources,
+            seed_cwd=seed_cwd,
+            jobs=max(1, int(args.jobs)),
+            env=seed_env,
+            timeout=seed_timeout,
+        )
 
         try:
             def _compile_one_module(
@@ -1151,10 +1520,10 @@ def main(argv: list[str]) -> int:
                             cmd.extend([str(source_path), str(attempt_path)])
                             proc = subprocess.run(
                                 cmd,
-                                # Keep CWD at repo root so seeds that resolve module roots
-                                # or cache/import metadata relative to the working directory
-                                # can materialize concrete struct layouts.
-                                cwd=str(REPO_ROOT),
+                                # Run in an isolated cwd populated with build/stage2
+                                # native-text artifacts so imported module context is
+                                # always available during lowering.
+                                cwd=str(seed_cwd),
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE,
                                 close_fds=False,
@@ -1179,7 +1548,7 @@ def main(argv: list[str]) -> int:
                                 cmd.extend(["llvm", str(source_path)])
                                 proc = subprocess.run(
                                     cmd,
-                                    cwd=str(REPO_ROOT),
+                                    cwd=str(seed_cwd),
                                     stdout=out,
                                     stderr=subprocess.PIPE,
                                     close_fds=False,
@@ -1228,7 +1597,7 @@ def main(argv: list[str]) -> int:
                             cmd.extend(["llvm", str(source_path)])
                             proc = subprocess.run(
                                 cmd,
-                                cwd=str(REPO_ROOT),
+                                cwd=str(seed_cwd),
                                 stdout=out,
                                 stderr=subprocess.PIPE,
                                 close_fds=False,
@@ -1277,6 +1646,12 @@ def main(argv: list[str]) -> int:
                             for name, definition in discovered.items():
                                 known_named_type_defs.setdefault(
                                     name, definition)
+
+                    # Some seeds reference named types without declaring them.
+                    # Insert `type opaque` stubs so clang can parse the module,
+                    # then immediately replace any stubs with concrete
+                    # definitions we learned from earlier modules.
+                    candidate, _ = _inject_missing_named_type_stubs(candidate)
 
                     # Patch `type opaque` declarations when we know a concrete definition.
                     with known_named_type_defs_lock:
