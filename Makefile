@@ -32,7 +32,7 @@ NATIVE_LINK_EXTRA ?=
 
 .PHONY: help install test test-unit test-integration test-e2e compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
 
-.PHONY: selfhost-native-stage2 selfhost-native-stage2-asan
+.PHONY: selfhost-native-stage2 selfhost-native-stage2-asan selfhost-smoke-native-stage2
 
 # Rebuild a fresh native stage2 using an existing *native* stage2 seed compiler.
 # This is the self-hosting check CI ultimately needs (no stage1, no bootstrap).
@@ -146,8 +146,36 @@ selfhost-native-stage2:
 		echo "[selfhost-native-stage2] missing seed compiler after compile: $$seed"; \
 		exit 1; \
 	fi; \
-	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
+	echo "[selfhost-native-stage2] running selfhost script..."; \
+	$(CONDA) run -n $(CONDA_ENV) python -u scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
 	@echo "[selfhost-native-stage2] built build/native/sailfin-stage2-selfhost"
+
+# Smoke: selfhost Stage2 and run hello-world + emit-llvm-file.
+# Usage:
+#   make selfhost-smoke-native-stage2
+#   make selfhost-smoke-native-stage2 SEED_STAGE2=path/to/sailfin-stage2
+#   make selfhost-smoke-native-stage2 SELFHOST_SMOKE_ARGS="--keep-work-dir"
+SELFHOST_SMOKE_OUT ?= build/native/sailfin-stage2-selfhost
+SELFHOST_SMOKE_ARGS ?=
+selfhost-smoke-native-stage2:
+	@seed=$${SEED_STAGE2:-build/native/sailfin-stage2}; \
+	if [ ! -x "$$seed" ]; then \
+		echo "[selfhost-smoke-native-stage2] missing seed compiler: $$seed"; \
+		echo "[selfhost-smoke-native-stage2] building seed with: make compile"; \
+		$(MAKE) compile; \
+	fi; \
+	if [ ! -x "$$seed" ]; then \
+		echo "[selfhost-smoke-native-stage2] missing seed compiler after compile: $$seed"; \
+		exit 1; \
+	fi; \
+	echo "[selfhost-smoke-native-stage2] running smoke harness..."; \
+	$(CONDA) run -n $(CONDA_ENV) python -u scripts/selfhost_smoke_native_stage2.py \
+		--seed "$$seed" \
+		--out $(SELFHOST_SMOKE_OUT) \
+		--jobs $(SELFHOST_JOBS) \
+		--import-context-jobs 1 \
+		$(SELFHOST_SMOKE_ARGS)
+	@echo "[selfhost-smoke-native-stage2] OK"
 
 selfhost-native-stage2-asan: native-stage2-asan
 	@seed=$${SEED_STAGE2:-build/native/sailfin-stage2-asan}; \
@@ -156,7 +184,8 @@ selfhost-native-stage2-asan: native-stage2-asan
 		echo "[selfhost-native-stage2-asan] (hint) build one with: make native-stage2-asan"; \
 		exit 1; \
 	fi; \
-	$(CONDA) run -n $(CONDA_ENV) python scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
+	echo "[selfhost-native-stage2-asan] running selfhost script (ASAN output)..."; \
+	$(CONDA) run -n $(CONDA_ENV) python -u scripts/selfhost_native_stage2.py --asan --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
 	@echo "[selfhost-native-stage2-asan] built build/native/sailfin-stage2-selfhost"
 
 

@@ -73,7 +73,7 @@ class LLVMCompilationResult:
     def __repr__(self):
         return runtime.struct_repr('LLVMCompilationResult', [runtime.struct_field('llvm', self.llvm), runtime.struct_field('native_module', self.native_module)])
 
-class LoweredLLVMResult:
+class LoweredLLVMResultAny:
     def __init__(self, ir, diagnostics, trait_metadata, function_effects, lifetime_regions, capability_manifest, string_constants):
         self.ir = ir
         self.diagnostics = diagnostics
@@ -84,7 +84,7 @@ class LoweredLLVMResult:
         self.string_constants = string_constants
 
     def __repr__(self):
-        return runtime.struct_repr('LoweredLLVMResult', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest), runtime.struct_field('string_constants', self.string_constants)])
+        return runtime.struct_repr('LoweredLLVMResultAny', [runtime.struct_field('ir', self.ir), runtime.struct_field('diagnostics', self.diagnostics), runtime.struct_field('trait_metadata', self.trait_metadata), runtime.struct_field('function_effects', self.function_effects), runtime.struct_field('lifetime_regions', self.lifetime_regions), runtime.struct_field('capability_manifest', self.capability_manifest), runtime.struct_field('string_constants', self.string_constants)])
 
 def _ms_since(start_ms):
     end_ms = monotonic_millis()
@@ -210,7 +210,7 @@ def compile_to_native_llvm(source):
                 break
             print.warn("[native-llvm] " + combined[index])
             index += 1
-    return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+    return LoweredLLVMResultAny(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
 
 def compile_to_native_llvm_with_module(source, module_name):
     # effects: io
@@ -219,7 +219,7 @@ def compile_to_native_llvm_with_module(source, module_name):
     if len(analysis_result.diagnostics) > 0:
         report_typecheck_errors(analysis_result.diagnostics, source)
         messages = format_typecheck_diagnostics(analysis_result.diagnostics, source)
-        return LoweredLLVMResult(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None)
+        return LoweredLLVMResultAny(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None)
     native_result = emit_native_with_module_name(program, module_name)
     lowered = lower_to_llvm(native_result.module)
     combined = []
@@ -232,7 +232,7 @@ def compile_to_native_llvm_with_module(source, module_name):
                 break
             print.warn("[native-llvm] " + combined[index])
             index += 1
-    return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+    return LoweredLLVMResultAny(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
 
 def compile_to_llvm(source):
     # effects: io
@@ -369,7 +369,7 @@ def compile_to_native_llvm_full(source):
                 break
             print.warn("[native-llvm] " + combined[index])
             index += 1
-    return LLVMCompilationResult(llvm=LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants), native_module=native_result.module)
+    return LLVMCompilationResult(llvm=LoweredLLVMResultAny(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants), native_module=native_result.module)
 
 def compile_to_native_llvm_full_with_module(source, module_name):
     # effects: io
@@ -378,7 +378,7 @@ def compile_to_native_llvm_full_with_module(source, module_name):
     if len(analysis_result.diagnostics) > 0:
         report_typecheck_errors(analysis_result.diagnostics, source)
         messages = format_typecheck_diagnostics(analysis_result.diagnostics, source)
-        return LLVMCompilationResult(llvm=LoweredLLVMResult(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None), native_module=None)
+        return LLVMCompilationResult(llvm=LoweredLLVMResultAny(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None), native_module=None)
     native_result = emit_native_with_module_name(program, module_name)
     lowered = lower_to_llvm(native_result.module)
     combined = []
@@ -391,7 +391,7 @@ def compile_to_native_llvm_full_with_module(source, module_name):
                 break
             print.warn("[native-llvm] " + combined[index])
             index += 1
-    return LLVMCompilationResult(llvm=LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants), native_module=native_result.module)
+    return LLVMCompilationResult(llvm=LoweredLLVMResultAny(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants), native_module=native_result.module)
 
 def compile_to_native_llvm_with_context(source, manifest_contents, native_artifacts):
     # effects: io
@@ -419,7 +419,7 @@ def compile_to_native_llvm_with_context(source, manifest_contents, native_artifa
                 break
             print.warn("[native-llvm] " + combined[index])
             index += 1
-    return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+    return LoweredLLVMResultAny(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
 
 def compile_to_native_llvm_with_context_with_module(source, module_name, manifest_contents, native_artifacts):
     # effects: io
@@ -428,7 +428,7 @@ def compile_to_native_llvm_with_context_with_module(source, module_name, manifes
     if len(analysis_result.diagnostics) > 0:
         report_typecheck_errors(analysis_result.diagnostics, source)
         messages = format_typecheck_diagnostics(analysis_result.diagnostics, source)
-        return LoweredLLVMResult(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None)
+        return LoweredLLVMResultAny(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None)
     native_result = emit_native_with_module_name(program, module_name)
     manifests = []
     manifest_index = 0
@@ -453,7 +453,7 @@ def compile_to_native_llvm_with_context_with_module(source, module_name, manifes
                 break
             print.warn("[native-llvm] " + combined[index])
             index += 1
-    return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+    return LoweredLLVMResultAny(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
 
 def compile_to_native_llvm_with_context_with_module_and_entry_points(source, module_name, manifest_contents, native_artifacts, entry_points):
     # effects: io
@@ -462,7 +462,7 @@ def compile_to_native_llvm_with_context_with_module_and_entry_points(source, mod
     if len(analysis_result.diagnostics) > 0:
         report_typecheck_errors(analysis_result.diagnostics, source)
         messages = format_typecheck_diagnostics(analysis_result.diagnostics, source)
-        return LoweredLLVMResult(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None)
+        return LoweredLLVMResultAny(ir="", diagnostics=messages, trait_metadata=None, function_effects=None, lifetime_regions=None, capability_manifest=None, string_constants=None)
     native_result = emit_native_with_module_name(program, module_name)
     overridden_module = NativeModule(module_name=native_result.module.module_name, artifacts=native_result.module.artifacts, entry_points=entry_points, symbol_count=native_result.module.symbol_count)
     manifests = []
@@ -488,7 +488,7 @@ def compile_to_native_llvm_with_context_with_module_and_entry_points(source, mod
                 break
             print.warn("[native-llvm] " + combined[index])
             index += 1
-    return LoweredLLVMResult(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
+    return LoweredLLVMResultAny(ir=lowered.ir, diagnostics=combined, trait_metadata=lowered.trait_metadata, function_effects=lowered.function_effects, lifetime_regions=lowered.lifetime_regions, capability_manifest=lowered.capability_manifest, string_constants=lowered.string_constants)
 
 def compile_to_native_llvm_with_manifests(source, manifest_contents):
     # effects: io

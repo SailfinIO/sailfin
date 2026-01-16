@@ -27,6 +27,7 @@ import sys
 import time
 import re
 import threading
+import shlex
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -38,6 +39,16 @@ DEFAULT_MAX_TOTAL_SECONDS = 1800.0 if sys.platform == "darwin" else 1200.0
 _IMPORT_FROM_RE = re.compile(r"\bfrom\s+\"(?P<path>[^\"]+)\"")
 _IMPORT_BARE_RE = re.compile(
     r"^\s*import\s+\"(?P<path>[^\"]+)\"\s*;", re.MULTILINE)
+
+_IMPORT_SYMBOLS_RE = re.compile(
+    r"import\s*\{(?P<names>[^}]+)\}\s*from\s+\"(?P<path>[^\"]+)\"\s*;",
+    re.MULTILINE,
+)
+
+_TOPLEVEL_FN_RE = re.compile(
+    r"^\s*(?:pub\s+)?fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(",
+    re.MULTILINE,
+)
 
 
 _LLVM_NAMED_TYPE_DEF_RE = re.compile(
@@ -138,6 +149,282 @@ def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple
     return "\n".join(patched_lines) + "\n", changed
 
 
+_BITCAST_FROM_BYTES_TO_PTR_RE = re.compile(
+    r"^\s*(?P<dst>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*bitcast\s+"
+    r"(?:(?:i8\*)|(?:\[[0-9]+\s+x\s+i8\]\*))\s+"
+    r"(?P<src>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s+to\s+.+\*$"
+)
+
+_LOAD_WITH_PTR_RE = re.compile(
+    r"^(?P<head>\s*(?:%[A-Za-z_.$][A-Za-z0-9_.$]*\s*=\s*)?load\s+.+?,\s+.+?\*\s+)"
+    r"(?P<ptr>%[A-Za-z_.$][A-Za-z0-9_.$]*)"
+    r"(?P<tail>.*)$"
+)
+
+_STORE_WITH_PTR_RE = re.compile(
+    r"^(?P<head>\s*store\s+.+?,\s+.+?\*\s+)"
+    r"(?P<ptr>%[A-Za-z_.$][A-Za-z0-9_.$]*)"
+    r"(?P<tail>.*)$"
+)
+
+_GEP_PTR_BASE_RE = re.compile(
+    r"^\s*(?P<dst>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*getelementptr\b.*?,\s+"
+    r"(?:(?:ptr)|(?:.+?\*))\s+(?P<base>%[A-Za-z_.$][A-Za-z0-9_.$]*).*$"
+)
+
+_BITCAST_PTR_BASE_RE = re.compile(
+    r"^\s*(?P<dst>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*bitcast\s+.+?\s+"
+    r"(?P<base>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s+to\s+.+$"
+)
+
+
+def _mark_unaligned_enum_payload_accesses(llvm_ir: str) -> tuple[str, int]:
+    """Add `align 1` to loads/stores through enum-payload byte casts.
+
+    Stage2 encodes enums as `{ tag, [payload_size x i8] }` and then accesses
+    variant payload fields by bitcasting the payload byte pointer to a typed
+    pointer. For enums with a 32-bit tag on 64-bit targets, payload starts at
+    offset 4, so pointer-sized fields are commonly misaligned.
+
+    A typed `load/store` without an explicit `align` carries an implied
+    alignment. If the pointer is actually misaligned, that is undefined
+    behavior and can miscompile (arm64 is particularly sensitive).
+
+    We conservatively mark such accesses as `align 1` when the pointer operand
+    originates from a `bitcast i8*` / `bitcast [.. x i8]*` into a typed pointer.
+    """
+
+    lines = llvm_ir.splitlines()
+    changed = 0
+    out: list[str] = []
+
+    in_function = False
+    maybe_unaligned: set[str] = set()
+
+    for ln in lines:
+        # Reset per-function state at function boundaries.
+        if ln.lstrip().startswith("define "):
+            in_function = True
+            maybe_unaligned = set()
+            out.append(ln)
+            continue
+
+        if in_function:
+            m = _BITCAST_FROM_BYTES_TO_PTR_RE.match(ln)
+            if m:
+                maybe_unaligned.add(m.group("dst"))
+
+            # Propagate unaligned-ness through derived pointers so we catch
+            # loads/stores that use GEPs/bitcasts of the original payload cast.
+            m_gep = _GEP_PTR_BASE_RE.match(ln)
+            if m_gep and m_gep.group("base") in maybe_unaligned:
+                maybe_unaligned.add(m_gep.group("dst"))
+            else:
+                m_bc = _BITCAST_PTR_BASE_RE.match(ln)
+                if m_bc and m_bc.group("base") in maybe_unaligned:
+                    maybe_unaligned.add(m_bc.group("dst"))
+
+            # Patch loads/stores using those potentially unaligned pointers.
+            if maybe_unaligned and "align" not in ln:
+                m_load = _LOAD_WITH_PTR_RE.match(ln)
+                if m_load and m_load.group("ptr") in maybe_unaligned:
+                    tail = m_load.group("tail")
+                    insert_at = tail.find(", !")
+                    if insert_at != -1:
+                        tail = ", align 1" + tail[insert_at:]
+                    else:
+                        tail = ", align 1" + tail
+                    out.append(m_load.group("head") +
+                               m_load.group("ptr") + tail)
+                    changed += 1
+                    if ln.strip() == "}":
+                        in_function = False
+                    continue
+
+                # `store <val>, <ptr>` has two SSA values; we want the pointer operand.
+                if ln.lstrip().startswith("store "):
+                    ssa_names = re.findall(r"%[A-Za-z_.$][A-Za-z0-9_.$]*", ln)
+                    if ssa_names:
+                        ptr_name = ssa_names[-1]
+                        if ptr_name in maybe_unaligned:
+                            meta_at = ln.find(", !")
+                            if meta_at != -1:
+                                ln2 = ln[:meta_at] + ", align 1" + ln[meta_at:]
+                            else:
+                                ln2 = ln + ", align 1"
+                            out.append(ln2)
+                            changed += 1
+                            if ln.strip() == "}":
+                                in_function = False
+                            continue
+
+            out.append(ln)
+            if ln.strip() == "}":
+                in_function = False
+            continue
+
+        out.append(ln)
+
+    return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _inject_debug_enum_payload_probes(llvm_ir: str, module_name: str) -> tuple[str, int]:
+    """Inject best-effort debug probes to dump enum payload bits.
+
+    This is for macOS/arm64 selfhost debugging where the selfhosted compiler
+    crashes in `format_expression__emit_native` while reading the Call
+    arguments pointer from the enum payload.
+
+    Enabled only when `SAILFIN_SELFHOST_DEBUG_ENUM_PAYLOAD=1` is set.
+    """
+
+    if os.environ.get("SAILFIN_SELFHOST_DEBUG_ENUM_PAYLOAD") not in ("1", "true", "TRUE", "yes", "YES"):
+        return llvm_ir, 0
+
+    if module_name not in ("emit_native", "parser__expressions"):
+        return llvm_ir, 0
+
+    lines = llvm_ir.splitlines()
+    changed = 0
+
+    # Ensure declarations exist before any `define`.
+    has_u64 = any(
+        "declare void @sailfin_runtime_debug_dump_u64" in ln for ln in lines)
+    has_ptr = any(
+        "declare void @sailfin_runtime_debug_dump_ptr" in ln for ln in lines)
+    if not (has_u64 and has_ptr):
+        insert_at = next((i for i, ln in enumerate(
+            lines) if ln.startswith("define ")), len(lines))
+        decls: list[str] = []
+        if not has_u64:
+            decls.append("declare void @sailfin_runtime_debug_dump_u64(i64)")
+        if not has_ptr:
+            decls.append("declare void @sailfin_runtime_debug_dump_ptr(i8*)")
+        if decls:
+            lines[insert_at:insert_at] = decls + [""]
+            changed += len(decls)
+
+    out: list[str] = []
+
+    if module_name == "emit_native":
+        in_target_fn = False
+        probe_idx = 0
+        last_payload_i8: str | None = None
+        last_payload8_i8: str | None = None
+        last_tag_i32: str | None = None
+        for ln in lines:
+            if ln.startswith("define ") and "@format_expression__emit_native" in ln:
+                in_target_fn = True
+                out.append(ln)
+                continue
+            if in_target_fn and ln.strip() == "}":
+                in_target_fn = False
+                out.append(ln)
+                continue
+
+            if in_target_fn and re.match(r"^\s*[A-Za-z0-9_.]+:\s*(;.*)?$", ln):
+                # Reset per-basic-block so we don't accidentally reuse values from a
+                # non-dominating predecessor block.
+                last_payload_i8 = None
+                last_payload8_i8 = None
+                last_tag_i32 = None
+
+            # In Call-case blocks we have the pattern:
+            #   %t661 = bitcast [40 x i8]* %t660 to i8*
+            #   %t662 = getelementptr inbounds i8, i8* %t661, i64 8
+            #   %t663 = bitcast i8* %t662 to { %Expression*, i64 }**
+            #   %t664 = load { %Expression*, i64 }*, { %Expression*, i64 }** %t663, align 1
+            # We probe the raw u64 words at payload+0 and payload+8 and the decoded ptr.
+
+            if in_target_fn:
+                m_tag = re.match(
+                    r"^\s*(%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*extractvalue\s+%Expression\s+%expression,\s*0\s*$",
+                    ln,
+                )
+                if m_tag:
+                    last_tag_i32 = m_tag.group(1)
+
+                m_payload = re.match(
+                    r"^\s*(%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*bitcast\s+\[40 x i8\]\*\s+%[A-Za-z_.$][A-Za-z0-9_.$]*\s+to\s+i8\*\s*$",
+                    ln,
+                )
+                if m_payload:
+                    last_payload_i8 = m_payload.group(1)
+                m_payload8 = re.match(
+                    r"^\s*(%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*getelementptr\s+inbounds\s+i8,\s+i8\*\s+(%[A-Za-z_.$][A-Za-z0-9_.$]*),\s+i64\s+8\s*$",
+                    ln,
+                )
+                if m_payload8 and last_payload_i8 and m_payload8.group(2) == last_payload_i8:
+                    last_payload8_i8 = m_payload8.group(1)
+
+            if in_target_fn and "= load { %Expression*, i64 }*, { %Expression*, i64 }**" in ln and ", align 1" in ln:
+                m = re.match(
+                    r"^(\s*)(%[A-Za-z_.$][A-Za-z0-9_.$]*)\s*=\s*load\s+\{\s*%Expression\*,\s*i64\s*\}\*,\s+\{\s*%Expression\*,\s*i64\s*\}\*\*\s+(%[A-Za-z_.$][A-Za-z0-9_.$]*),\s*align\s+1\s*$",
+                    ln,
+                )
+                if m:
+                    indent = m.group(1)
+                    loaded_ptr = m.group(2)
+                    out.append(ln)
+                    payload_i8 = last_payload_i8
+                    payload8_i8 = last_payload8_i8
+                    tag_i32 = last_tag_i32
+                    if tag_i32 and payload_i8 and payload8_i8:
+                        out.append(
+                            f"{indent}%dbg_tag_i64.{probe_idx} = zext i32 {tag_i32} to i64")
+                        out.append(
+                            f"{indent}call void @sailfin_runtime_debug_dump_u64(i64 %dbg_tag_i64.{probe_idx})")
+                        out.append(
+                            f"{indent}%dbg_payload0_ptr.{probe_idx} = bitcast i8* {payload_i8} to i64*")
+                        out.append(
+                            f"{indent}%dbg_payload0.{probe_idx} = load i64, i64* %dbg_payload0_ptr.{probe_idx}, align 1")
+                        out.append(
+                            f"{indent}call void @sailfin_runtime_debug_dump_u64(i64 %dbg_payload0.{probe_idx})")
+                        out.append(
+                            f"{indent}%dbg_payload8_ptr.{probe_idx} = bitcast i8* {payload8_i8} to i64*")
+                        out.append(
+                            f"{indent}%dbg_payload8.{probe_idx} = load i64, i64* %dbg_payload8_ptr.{probe_idx}, align 1")
+                        out.append(
+                            f"{indent}call void @sailfin_runtime_debug_dump_u64(i64 %dbg_payload8.{probe_idx})")
+                        out.append(
+                            f"{indent}%dbg_ptr.{probe_idx} = bitcast {{ %Expression*, i64 }}* {loaded_ptr} to i8*")
+                        out.append(
+                            f"{indent}call void @sailfin_runtime_debug_dump_ptr(i8* %dbg_ptr.{probe_idx})")
+                        changed += 9
+                        probe_idx += 1
+                    continue
+
+            out.append(ln)
+
+        return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+    # parser__expressions: probe the value being stored into Expression.Call payload+8
+    # `store { %Expression*, i64 }* %t153, { %Expression*, i64 }** %t157, align 1`
+    store_idx = 0
+    for ln in lines:
+        out.append(ln)
+        if "store { %Expression*, i64 }*" in ln and "**" in ln and ", align 1" in ln:
+            m = re.match(
+                r"^(\s*)store\s+\{\s*%Expression\*,\s*i64\s*\}\*\s+(%[A-Za-z_.$][A-Za-z0-9_.$]*),\s+\{\s*%Expression\*,\s*i64\s*\}\*\*\s+(%[A-Za-z_.$][A-Za-z0-9_.$]*),\s*align\s+1\s*$",
+                ln,
+            )
+            if m:
+                indent = m.group(1)
+                val_ptr = m.group(2)
+                out.append(
+                    f"{indent}%dbg_args_ptr_i8.{store_idx} = bitcast {{ %Expression*, i64 }}* {val_ptr} to i8*")
+                out.append(
+                    f"{indent}call void @sailfin_runtime_debug_dump_ptr(i8* %dbg_args_ptr_i8.{store_idx})")
+                out.append(
+                    f"{indent}%dbg_args_ptr_i64.{store_idx} = ptrtoint {{ %Expression*, i64 }}* {val_ptr} to i64")
+                out.append(
+                    f"{indent}call void @sailfin_runtime_debug_dump_u64(i64 %dbg_args_ptr_i64.{store_idx})")
+                changed += 4
+                store_idx += 1
+
+    return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
 def _normalize_concrete_named_type_defs(
     llvm_ir: str, canonical_defs: dict[str, str]
 ) -> tuple[str, int]:
@@ -194,8 +481,8 @@ def _normalize_concrete_named_type_defs(
 def _build_canonical_named_type_defs(ll_texts: list[str]) -> tuple[dict[str, str], list[str]]:
     """Compute canonical named type definitions from a set of LLVM modules.
 
-    If multiple concrete bodies exist for the same type name, chooses the most
-    common concrete body and records a warning.
+    If multiple concrete bodies exist for the same type name, records a warning
+    and does not choose a canonical definition.
     """
 
     # name -> normalized body -> (original_def_line, count)
@@ -229,10 +516,6 @@ def _build_canonical_named_type_defs(ll_texts: list[str]) -> tuple[dict[str, str
             canonical[name] = chosen_def
             continue
 
-        # Unsafe to pick a single body: rewriting can break IR that was emitted
-        # assuming a different definition (e.g., insertvalue/extractvalue field
-        # types no longer line up). We'll warn and leave these to LLVM's type
-        # renaming/linking semantics.
         total = sum(v[1] for v in variants.values())
         warnings.append(
             f"named type {name} has {len(variants)} concrete definitions; "
@@ -353,6 +636,52 @@ def _sailfin_local_dependencies(source_path: pathlib.Path, sources_set: set[path
             deps.add(dep)
 
     return deps
+
+
+def _sailfin_local_imported_symbols(
+    source_path: pathlib.Path, sources_set: set[pathlib.Path]
+) -> list[tuple[pathlib.Path, set[str]]]:
+    """Return [(dep_path, {symbol,...})] for `import { ... } from "...";` forms.
+
+    Only includes local relative imports that resolve into sources_set.
+    """
+
+    try:
+        text = source_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+
+    out: list[tuple[pathlib.Path, set[str]]] = []
+    for m in _IMPORT_SYMBOLS_RE.finditer(text):
+        dep = _resolve_sailfin_module_path(
+            source_path=source_path, module_ref=m.group("path")
+        )
+        if dep is None or dep not in sources_set:
+            continue
+        names_raw = m.group("names")
+        names: set[str] = set()
+        for part in names_raw.split(","):
+            token = part.strip()
+            if not token:
+                continue
+            # Handle `foo as bar`-style aliases by keeping the original name.
+            token = token.split(" as ", 1)[0].strip()
+            # Drop any trailing comments or punctuation.
+            token = token.split("//", 1)[0].strip()
+            token = token.strip()
+            if token:
+                names.add(token)
+        if names:
+            out.append((dep, names))
+    return out
+
+
+def _toplevel_fn_names(source_path: pathlib.Path) -> set[str]:
+    try:
+        text = source_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set()
+    return set(m.group("name") for m in _TOPLEVEL_FN_RE.finditer(text))
 
 
 def _deterministic_link_flags() -> list[str]:
@@ -1162,6 +1491,16 @@ def main(argv: list[str]) -> int:
         ),
     )
     parser.add_argument(
+        "--import-context-jobs",
+        type=int,
+        default=1,
+        help=(
+            "Parallelism for import-context staging (emit native -> build/stage2/*.sfn-asm). "
+            "Default: 1. IMPORTANT: older seeds are not safe to run concurrently in the same cwd, "
+            "and parallel staging can trigger crashes or corrupt artifacts."
+        ),
+    )
+    parser.add_argument(
         "--max-attempts",
         type=int,
         default=5,
@@ -1283,6 +1622,16 @@ def main(argv: list[str]) -> int:
         help="Disable deterministic link flags (default: deterministic)",
     )
 
+    parser.add_argument(
+        "--asan",
+        action="store_true",
+        default=False,
+        help=(
+            "Build the output compiler with AddressSanitizer instrumentation "
+            "(adds -fsanitize=address, -g, -fno-omit-frame-pointer). Useful for debugging runtime corruption."
+        ),
+    )
+
     args = parser.parse_args(argv)
 
     # Resolve the seed path once up front so subprocesses can run it even when
@@ -1342,9 +1691,20 @@ def main(argv: list[str]) -> int:
         args.clang_validate_timeout = 30.0
 
     clang = args.clang
-    clang_flags: list[str] = [args.opt]
+    clang_flags: list[str] = shlex.split(args.opt)
     if args.wno_override_module:
         clang_flags.append("-Wno-override-module")
+
+    if args.asan:
+        # Prefer diagnostic builds when chasing selfhost corruption.
+        clang_flags.extend(
+            [
+                "-g",
+                "-fno-omit-frame-pointer",
+                "-fno-delete-null-pointer-checks",
+                "-fsanitize=address",
+            ]
+        )
 
     if not seed.exists():
         raise SystemExit(f"missing seed compiler: {seed}")
@@ -1537,6 +1897,26 @@ def main(argv: list[str]) -> int:
             (REPO_ROOT / "runtime").rglob("*.sfn")
         )
 
+        sources_set = set(p.resolve() for p in sources)
+        source_by_module: dict[str, pathlib.Path] = {
+            _module_name_from_source_path(p): p for p in sources
+        }
+
+        # Infer which *function* symbols each module must export based on the
+        # rest of the stage2 sources importing them.
+        fn_names_by_module: dict[str, set[str]] = {
+            mod: _toplevel_fn_names(path) for mod, path in source_by_module.items()
+        }
+        required_export_fns: dict[str, set[str]] = {}
+        for src in sources:
+            for dep_path, imported_names in _sailfin_local_imported_symbols(src, sources_set):
+                dep_mod = _module_name_from_source_path(dep_path)
+                dep_fns = fn_names_by_module.get(dep_mod, set())
+                needed = {name for name in imported_names if name in dep_fns}
+                if needed:
+                    required_export_fns.setdefault(
+                        dep_mod, set()).update(needed)
+
         # Populate an isolated import-context cache for the seed compiler.
         # Without build/stage2/<slug>.sfn-asm files, stage2 lowering falls back
         # to opaque/i8* imported types and can drop cross-module definitions,
@@ -1548,7 +1928,7 @@ def main(argv: list[str]) -> int:
             fallback_seed_bin=fallback_import_seed if fallback_import_seed != seed_bin else None,
             sources=sources,
             seed_cwd=seed_cwd,
-            jobs=max(1, int(args.jobs)),
+            jobs=max(1, int(args.import_context_jobs)),
             env=seed_env,
             timeout=seed_timeout,
         )
@@ -1624,6 +2004,37 @@ def main(argv: list[str]) -> int:
                     attempt_tmp = raw_dir / "tmp" / \
                         module_name / f"attempt{attempt}"
                     attempt_tmp.mkdir(parents=True, exist_ok=True)
+
+                    # IMPORTANT: Many stage2 seeds write intermediate artifacts
+                    # under the current working directory (e.g. build/sailfin/*)
+                    # using fixed file names. When running in parallel, sharing
+                    # a single cwd can corrupt or truncate emitted LLVM.
+                    #
+                    # To make parallel builds reliable, run each seed emit in a
+                    # per-attempt isolated cwd that still has access to the
+                    # shared build/stage2 import-context cache.
+                    seed_emit_cwd = attempt_tmp / "seed_cwd"
+                    (seed_emit_cwd / "build").mkdir(parents=True, exist_ok=True)
+                    shared_stage2_cache = seed_cwd / "build" / "stage2"
+                    local_stage2_cache = seed_emit_cwd / "build" / "stage2"
+                    if not local_stage2_cache.exists():
+                        # Copy rather than symlink: stage2 seeds may update
+                        # build artifacts during emit, and sharing build/stage2
+                        # across concurrent seed processes can produce
+                        # inconsistent IR and runtime ABI mismatches.
+                        shutil.copytree(shared_stage2_cache,
+                                        local_stage2_cache)
+
+                    # IMPORTANT: Some seeds will opportunistically load
+                    # build/stage2/<module>.sfn-asm when it exists, even when
+                    # compiling that same module from source. This can cause
+                    # the seed to treat local functions as imported externs,
+                    # producing LLVM with missing definitions (link-time
+                    # undefined symbols).
+                    cached_self_artifact = local_stage2_cache / \
+                        f"{module_name}.sfn-asm"
+                    if cached_self_artifact.exists():
+                        cached_self_artifact.unlink()
                     # Some stage2 seeds appear to use fixed temp file names.
                     # When running modules in parallel, isolate TMPDIR to avoid
                     # cross-process temp collisions that can corrupt LLVM output.
@@ -1673,7 +2084,7 @@ def main(argv: list[str]) -> int:
                                 # Run in an isolated cwd populated with build/stage2
                                 # native-text artifacts so imported module context is
                                 # always available during lowering.
-                                cwd=str(seed_cwd),
+                                cwd=str(seed_emit_cwd),
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE,
                                 close_fds=False,
@@ -1698,7 +2109,7 @@ def main(argv: list[str]) -> int:
                                 cmd.extend(["llvm", str(source_path)])
                                 proc = subprocess.run(
                                     cmd,
-                                    cwd=str(seed_cwd),
+                                    cwd=str(seed_emit_cwd),
                                     stdout=out,
                                     stderr=subprocess.PIPE,
                                     close_fds=False,
@@ -1747,7 +2158,7 @@ def main(argv: list[str]) -> int:
                             cmd.extend(["llvm", str(source_path)])
                             proc = subprocess.run(
                                 cmd,
-                                cwd=str(seed_cwd),
+                                cwd=str(seed_emit_cwd),
                                 stdout=out,
                                 stderr=subprocess.PIPE,
                                 close_fds=False,
@@ -1802,6 +2213,57 @@ def main(argv: list[str]) -> int:
                         candidate, _ = _patch_opaque_named_types(
                             candidate, known_named_type_defs
                         )
+
+                    # Arm64 is sensitive to misaligned accesses: our enum payloads are
+                    # byte arrays after a 32-bit tag, so typed loads/stores through
+                    # payload bitcasts can be misaligned and are UB without `align`.
+                    candidate, _ = _mark_unaligned_enum_payload_accesses(
+                        candidate)
+
+                    # Optional debugging: inject probes to dump enum payload raw bits
+                    # and decoded pointers around Expression.Call.
+                    candidate, _ = _inject_debug_enum_payload_probes(
+                        candidate, module_name)
+
+                    # --- Export-definition gate (catches truncated-but-parseable LLVM) ---
+                    required = required_export_fns.get(module_name, set())
+                    if required:
+                        missing_defs: list[str] = []
+                        for fn_name in sorted(required):
+                            # The stage2 seed currently emits a mix of symbol mangling styles:
+                            # - many exports are `@name__module`
+                            # - some entrypoints are emitted as plain `@name` (not suffixed)
+                            # Treat either as satisfying the export requirement.
+                            sym_module = f"@{fn_name}__{module_name}"
+                            sym_plain = f"@{fn_name}"
+                            has_module = re.search(
+                                rf"^define\b.*{re.escape(sym_module)}\b",
+                                candidate,
+                                re.MULTILINE,
+                            )
+                            has_plain = re.search(
+                                rf"^define\b.*{re.escape(sym_plain)}\b",
+                                candidate,
+                                re.MULTILINE,
+                            )
+                            if not (has_module or has_plain):
+                                missing_defs.append(sym_module)
+                        if missing_defs:
+                            try:
+                                size = attempt_path.stat().st_size
+                            except OSError:
+                                size = -1
+                            preview = "\n".join(candidate.splitlines()[:40])
+                            print(
+                                f"[selfhost][warn] seed output for {module_name} is missing {len(missing_defs)} required definition(s) (bytes={size})\n"
+                                f"[selfhost][warn] missing: {', '.join(missing_defs[:8])}{' ...' if len(missing_defs) > 8 else ''}\n"
+                                f"[selfhost][warn] first lines:\n{preview}\n",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                            if args.attempt_sleep > 0:
+                                time.sleep(args.attempt_sleep)
+                            continue
 
                     cleaned_attempt_path.write_text(
                         candidate, encoding="utf-8")
@@ -1926,114 +2388,94 @@ def main(argv: list[str]) -> int:
                 return module_name, local_timing, stats
 
             jobs = max(1, int(args.jobs))
-            if jobs == 1:
-                for idx, source_path in enumerate(sources):
+            print(
+                f"[selfhost] ({pass_name}) building modules with jobs={jobs}", flush=True)
+            # NOTE: Some stage2 release seeds appear to rely on prior
+            # compilation of imported modules to materialize concrete struct
+            # layouts in LLVM output (otherwise emitting `type opaque` for
+            # imported structs, which clang rejects once accessed).
+            #
+            # Compile in dependency order even with jobs=1, so modules that
+            # define shared structs (AST/token/native IR) complete before
+            # dependents.
+            resolved_sources = [p.resolve() for p in sources]
+            sources_set = set(resolved_sources)
+            deps_by_source: dict[pathlib.Path, set[pathlib.Path]] = {}
+            for p in resolved_sources:
+                deps_by_source[p] = _sailfin_local_dependencies(p, sources_set)
+
+            dependents: dict[pathlib.Path, set[pathlib.Path]] = {}
+            indegree: dict[pathlib.Path, int] = {}
+            for p in resolved_sources:
+                indegree[p] = 0
+                dependents[p] = set()
+            for p, deps in deps_by_source.items():
+                indegree[p] = len(deps)
+                for dep in deps:
+                    dependents[dep].add(p)
+
+            # Map resolved path -> original (idx, path) for stable progress output.
+            index_by_source: dict[pathlib.Path, int] = {
+                resolved_sources[i]: i for i in range(len(resolved_sources))
+            }
+
+            ready: list[pathlib.Path] = [
+                p for p in resolved_sources if indegree[p] == 0]
+            # Prefer deterministic ordering for readiness waves.
+            ready.sort(key=lambda p: str(p))
+
+            results_by_index: dict[
+                int, tuple[str, dict[str, int], dict[str, float | int]]
+            ] = {}
+            in_flight: dict[
+                concurrent.futures.Future[
+                    tuple[str, dict[str, int], dict[str, float | int]]
+                ],
+                pathlib.Path,
+            ] = {}
+
+            completed: set[pathlib.Path] = set()
+            first_error: BaseException | None = None
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+                while (ready or in_flight) and first_error is None:
                     _check_budget()
-                    name, local_timing, module_stats = _compile_one_module(
-                        idx, source_path)
-                    seed_emit_s += float(module_stats["seed_emit_s"])
-                    clang_validate_s += float(module_stats["clang_validate_s"])
-                    seed_attempts_total += int(
-                        module_stats["seed_attempts_total"])
-                    seed_timeouts += int(module_stats["seed_timeouts"])
-                    seed_failures += int(module_stats["seed_failures"])
-                    clang_validations += int(module_stats["clang_validations"])
-                    clang_validation_failures += int(
-                        module_stats["clang_validation_failures"])
-                    modules_retried += int(module_stats["modules_retried"])
-                    if args.timing and local_timing:
-                        timing_by_module[name] = local_timing
-                    module_names.append(name)
-            else:
-                print(
-                    f"[selfhost] ({pass_name}) building modules with jobs={jobs}", flush=True)
-                # NOTE: Some stage2 release seeds appear to rely on prior
-                # compilation of imported modules to materialize concrete struct
-                # layouts in LLVM output (otherwise emitting `type opaque` for
-                # imported structs, which clang rejects once accessed).
-                #
-                # When running in parallel, compile in dependency order so
-                # modules that define AST/token structs (and similar) complete
-                # before dependents.
-                resolved_sources = [p.resolve() for p in sources]
-                sources_set = set(resolved_sources)
-                deps_by_source: dict[pathlib.Path, set[pathlib.Path]] = {}
-                for p in resolved_sources:
-                    deps_by_source[p] = _sailfin_local_dependencies(
-                        p, sources_set)
 
-                dependents: dict[pathlib.Path, set[pathlib.Path]] = {}
-                indegree: dict[pathlib.Path, int] = {}
-                for p in resolved_sources:
-                    indegree[p] = 0
-                    dependents[p] = set()
-                for p, deps in deps_by_source.items():
-                    indegree[p] = len(deps)
-                    for dep in deps:
-                        dependents[dep].add(p)
+                    while ready and len(in_flight) < jobs:
+                        source_resolved = ready.pop(0)
+                        original_idx = index_by_source[source_resolved]
+                        # Use the resolved path for consistent dependency accounting.
+                        fut = executor.submit(
+                            _compile_one_module, original_idx, source_resolved
+                        )
+                        in_flight[fut] = source_resolved
 
-                # Map resolved path -> original (idx, path) for stable progress output.
-                index_by_source: dict[pathlib.Path, int] = {
-                    resolved_sources[i]: i for i in range(len(resolved_sources))
-                }
+                    if not in_flight:
+                        break
 
-                ready: list[pathlib.Path] = [
-                    p for p in resolved_sources if indegree[p] == 0]
-                # Prefer deterministic ordering for readiness waves.
-                ready.sort(key=lambda p: str(p))
-
-                results_by_index: dict[
-                    int, tuple[str, dict[str, int], dict[str, float | int]]
-                ] = {}
-                in_flight: dict[
-                    concurrent.futures.Future[
-                        tuple[str, dict[str, int], dict[str, float | int]]
-                    ],
-                    pathlib.Path,
-                ] = {}
-
-                completed: set[pathlib.Path] = set()
-                first_error: BaseException | None = None
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
-                    while (ready or in_flight) and first_error is None:
-                        _check_budget()
-
-                        while ready and len(in_flight) < jobs:
-                            source_resolved = ready.pop(0)
-                            original_idx = index_by_source[source_resolved]
-                            # Use the resolved path for consistent dependency accounting.
-                            fut = executor.submit(
-                                _compile_one_module, original_idx, source_resolved
-                            )
-                            in_flight[fut] = source_resolved
-
-                        if not in_flight:
+                    done, _pending = concurrent.futures.wait(
+                        in_flight,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+                    for fut in done:
+                        source_resolved = in_flight.pop(fut)
+                        original_idx = index_by_source[source_resolved]
+                        try:
+                            results_by_index[original_idx] = fut.result()
+                        except BaseException as exc:
+                            first_error = exc
+                            for other in in_flight:
+                                other.cancel()
                             break
 
-                        done, _pending = concurrent.futures.wait(
-                            in_flight,
-                            return_when=concurrent.futures.FIRST_COMPLETED,
-                        )
-                        for fut in done:
-                            source_resolved = in_flight.pop(fut)
-                            original_idx = index_by_source[source_resolved]
-                            try:
-                                results_by_index[original_idx] = fut.result()
-                            except BaseException as exc:
-                                first_error = exc
-                                for other in in_flight:
-                                    other.cancel()
-                                break
-
-                            completed.add(source_resolved)
-                            for child in dependents.get(source_resolved, set()):
-                                if child in completed:
-                                    continue
-                                indegree[child] = max(0, indegree[child] - 1)
-                                if indegree[child] == 0:
-                                    ready.append(child)
-                            ready.sort(key=lambda p: str(p))
+                        completed.add(source_resolved)
+                        for child in dependents.get(source_resolved, set()):
+                            if child in completed:
+                                continue
+                            indegree[child] = max(0, indegree[child] - 1)
+                            if indegree[child] == 0:
+                                ready.append(child)
+                        ready.sort(key=lambda p: str(p))
 
                     if first_error is not None:
                         raise first_error
@@ -2121,7 +2563,7 @@ def main(argv: list[str]) -> int:
             text = ll_texts[idx]
             text, _ = _inject_missing_named_type_stubs(text)
             text, _ = _patch_opaque_named_types(text, canonical_defs)
-            # Patching can also introduce new references via inserted bodies.
+            # Patching can introduce new references via inserted bodies.
             text, _ = _inject_missing_named_type_stubs(text)
             p.write_text(text, encoding="utf-8")
 
@@ -2177,52 +2619,74 @@ def main(argv: list[str]) -> int:
             )
             clang_compile_s += time.perf_counter() - t0
 
-            for name in module_names:
-                _check_budget()
-                ll_path = ll_dir / f"{name}.ll"
-                out_o = obj_dir / f"{name}.o"
-                out_o.parent.mkdir(parents=True, exist_ok=True)
-                # Always compile from the (possibly normalized) final IR.
-                if out_o.exists():
-                    out_o.unlink()
-                t0 = time.perf_counter()
-                _run(
-                    [clang, *clang_flags, "-fPIC", "-c",
-                        str(ll_path), "-o", str(out_o)],
-                    cwd=REPO_ROOT,
-                    timeout=_remaining_budget_seconds(
-                        total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
-                    if args.max_total_seconds > 0
-                    else None,
+            # --- IR link step (prevents cross-object ABI/layout mismatches) ---
+            llvm_link = shutil.which(os.environ.get("LLVM_LINK", "llvm-link"))
+            if not llvm_link:
+                raise SystemExit(
+                    "selfhost: missing llvm-link (set LLVM_LINK or install LLVM; e.g. brew install llvm)"
                 )
-                clang_compile_s += time.perf_counter() - t0
-                aot_objects.append(out_o)
 
-                # Also emit the runtime prelude object in the canonical runtime
-                # bundle location expected by the Stage2 CLI packaging.
-                if name == "runtime__prelude":
-                    canonical = obj_dir / "runtime" / "prelude.o"
-                    canonical.parent.mkdir(parents=True, exist_ok=True)
-                    if canonical.exists():
-                        canonical.unlink()
-                    if out_o.exists():
-                        try:
-                            os.link(out_o, canonical)
-                        except OSError:
-                            shutil.copy2(out_o, canonical)
-                    else:
-                        t0 = time.perf_counter()
-                        _run(
-                            [clang, *clang_flags, "-fPIC", "-c",
-                                str(ll_path), "-o", str(canonical)],
-                            cwd=REPO_ROOT,
-                            timeout=_remaining_budget_seconds(
-                                total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
-                            if args.max_total_seconds > 0
-                            else None,
-                        )
-                        clang_compile_s += time.perf_counter() - t0
-                    prelude_obj = canonical
+            # Keep runtime prelude as a separate object in the canonical runtime
+            # bundle location expected by the Stage2 CLI packaging.
+            prelude_name = "runtime__prelude"
+            ll_paths_for_link: list[pathlib.Path] = []
+            for name in module_names:
+                if name == prelude_name:
+                    continue
+                ll_paths_for_link.append(ll_dir / f"{name}.ll")
+
+            linked_bc = obj_dir / "stage2.linked.bc"
+            if linked_bc.exists():
+                linked_bc.unlink()
+            t0 = time.perf_counter()
+            _run(
+                [llvm_link, "-o", str(linked_bc), *[str(p)
+                                                    for p in ll_paths_for_link]],
+                cwd=REPO_ROOT,
+                timeout=_remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                if args.max_total_seconds > 0
+                else None,
+            )
+            # llvm-link time is generally small compared to clang, but keep it in compile bucket.
+            clang_compile_s += time.perf_counter() - t0
+
+            stage2_o = obj_dir / "stage2.linked.o"
+            if stage2_o.exists():
+                stage2_o.unlink()
+            t0 = time.perf_counter()
+            _run(
+                [clang, *clang_flags, "-fPIC", "-c",
+                    str(linked_bc), "-o", str(stage2_o)],
+                cwd=REPO_ROOT,
+                timeout=_remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                if args.max_total_seconds > 0
+                else None,
+            )
+            clang_compile_s += time.perf_counter() - t0
+            aot_objects.append(stage2_o)
+
+            # Build runtime prelude object separately (for packaging and for any
+            # runtime-link expectations).
+            prelude_ll = ll_dir / f"{prelude_name}.ll"
+            canonical = obj_dir / "runtime" / "prelude.o"
+            canonical.parent.mkdir(parents=True, exist_ok=True)
+            if canonical.exists():
+                canonical.unlink()
+            t0 = time.perf_counter()
+            _run(
+                [clang, *clang_flags, "-fPIC", "-c",
+                    str(prelude_ll), "-o", str(canonical)],
+                cwd=REPO_ROOT,
+                timeout=_remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                if args.max_total_seconds > 0
+                else None,
+            )
+            clang_compile_s += time.perf_counter() - t0
+            prelude_obj = canonical
+            aot_objects.append(canonical)
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if out_path.exists():

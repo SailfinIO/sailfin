@@ -168,9 +168,18 @@ jobs:
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2 \
             --jobs 2 \
+            --import-context-jobs 1 \
             --max-attempts ${{ matrix.max_attempts }} \
             --skip-clang-validate \
             --max-total-seconds 1800
+
+      - name: Report selfhosted compiler metadata
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          ls -lh build/native/sailfin-stage2
+          (file build/native/sailfin-stage2 || true)
+          build/native/sailfin-stage2 version || build/native/sailfin-stage2 --version || true
 
       - name: Self-host fixed-point rebuild (linux-x86_64)
         if: matrix.package_label == 'linux-x86_64'
@@ -181,6 +190,7 @@ jobs:
             --seed build/native/sailfin-stage2 \
             --out build/native/sailfin-stage2-selfhost1 \
             --jobs 2 \
+            --import-context-jobs 1 \
             --max-attempts 5 \
             --seed-timeout 120 \
             --max-total-seconds 1200 \
@@ -189,8 +199,13 @@ jobs:
             --seed build/native/sailfin-stage2-selfhost1 \
             --out build/native/sailfin-stage2-selfhost2 \
             --jobs 2 \
+            --import-context-jobs 1 \
             --max-attempts 3 \
             --skip-clang-validate
+          ls -lh build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2
+          (file build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 || true)
+          build/native/sailfin-stage2-selfhost1 version || true
+          build/native/sailfin-stage2-selfhost2 version || true
           cmp -s build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2
 
       - name: Run Sailfin-native tests (selfhosted compiler)

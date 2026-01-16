@@ -1254,6 +1254,22 @@ static SAILFIN_NOINLINE bool _asan_poisoned(const void *addr)
     {
         return false;
     }
+
+    // Some invalid/mis-tagged values can look like pointers (notably IEEE-754
+    // doubles such as 3.0 => 0x4008...) and crash inside ASAN's shadow mapping
+    // logic. Treat these as poisoned without calling into ASAN.
+    {
+        uintptr_t raw = (uintptr_t)addr;
+        if (raw < 4096u)
+        {
+            return true;
+        }
+        uintptr_t high = raw >> 48;
+        if (high != 0u && high != 0xffffu)
+        {
+            return true;
+        }
+    }
     return __asan_address_is_poisoned((const volatile void *)addr) != 0;
 }
 #else
@@ -1345,6 +1361,65 @@ void sailfin_runtime_string_drop(char *text)
 void sailfin_runtime_print_info(char *msg) { _print_line(stdout, "[info] ", msg); }
 void sailfin_runtime_print_warn(char *msg) { _print_line(stderr, "[warn] ", msg); }
 void sailfin_runtime_print_error(char *msg) { _print_line(stderr, "[error] ", msg); }
+
+// -----------------------------------------------------------------------------
+// Debug helpers (best-effort; used by selfhost crash instrumentation)
+// -----------------------------------------------------------------------------
+
+static int _sailfin_debug_dump_budget = -1;
+
+static bool _sailfin_debug_dump_allowed(void)
+{
+    if (_sailfin_debug_dump_budget < 0)
+    {
+        const char *env = getenv("SAILFIN_DEBUG_DUMP_BUDGET");
+        if (!env || env[0] == '\0')
+        {
+            _sailfin_debug_dump_budget = 32;
+        }
+        else
+        {
+            long v = strtol(env, NULL, 10);
+            if (v < 0)
+            {
+                v = 0;
+            }
+            if (v > 1000000)
+            {
+                v = 1000000;
+            }
+            _sailfin_debug_dump_budget = (int)v;
+        }
+    }
+
+    if (_sailfin_debug_dump_budget <= 0)
+    {
+        return false;
+    }
+
+    _sailfin_debug_dump_budget -= 1;
+    return true;
+}
+
+void sailfin_runtime_debug_dump_u64(uint64_t value)
+{
+    if (!_sailfin_debug_dump_allowed())
+    {
+        return;
+    }
+    fprintf(stderr, "[debug] u64=0x%016llx (%llu)\n", (unsigned long long)value, (unsigned long long)value);
+    fflush(stderr);
+}
+
+void sailfin_runtime_debug_dump_ptr(void *ptr)
+{
+    if (!_sailfin_debug_dump_allowed())
+    {
+        return;
+    }
+    fprintf(stderr, "[debug] ptr=%p\n", ptr);
+    fflush(stderr);
+}
 
 void sailfin_runtime_sleep(double seconds)
 {
@@ -1850,6 +1925,51 @@ char *sailfin_runtime_string_concat(char *a, char *b)
             alen,
             blen);
         fflush(stderr);
+
+        if (!b_truncated)
+        {
+            unsigned char preview_buf[9] = {0};
+            size_t preview_len = blen;
+            if (preview_len > 8)
+            {
+                preview_len = 8;
+            }
+
+            if (b_immediate)
+            {
+                memcpy(preview_buf, b_buf, preview_len);
+            }
+            else
+            {
+                memcpy(preview_buf, (const unsigned char *)b, preview_len);
+            }
+
+            if (blen == 1 && preview_buf[0] >= 32 && preview_buf[0] < 127)
+            {
+                fprintf(stderr, "[stage2-native] string_concat: rhs preview '%c' (0x%02x)\n", (char)preview_buf[0], (unsigned)preview_buf[0]);
+            }
+            else
+            {
+                fprintf(stderr, "[stage2-native] string_concat: rhs preview bytes");
+                for (size_t i = 0; i < preview_len; i++)
+                {
+                    fprintf(stderr, " %02x", (unsigned)preview_buf[i]);
+                }
+                fprintf(stderr, "\n");
+            }
+            fflush(stderr);
+        }
+
+        _maybe_print_string_backtrace(
+            "string_concat unterminated",
+            a,
+            a_immediate,
+            a_poisoned,
+            a_truncated,
+            b,
+            b_immediate,
+            b_poisoned,
+            b_truncated);
     }
 
     // Allocate a padding region beyond the primary terminator.
@@ -4541,4 +4661,81 @@ void sailfin_runtime_raise_value_error(void *message)
 {
     _print_line(stderr, "[value_error] ", (const char *)message);
     abort();
+}
+
+// Debug helper: validate an "identifier name" pointer and dump context if suspicious.
+// Called with the Expression* that should contain the identifier.
+void sailfin_runtime_debug_validate_identifier(void *expr_ptr, void *name_ptr)
+{
+    static int check_enabled = -1;
+    if (check_enabled < 0)
+    {
+        check_enabled = _env_enabled("SAILFIN_DEBUG_IDENTIFIER_VALIDATION") ? 1 : 0;
+    }
+    if (!check_enabled)
+    {
+        return;
+    }
+
+    const char *name = (const char *)name_ptr;
+    if (!name)
+    {
+        fprintf(stderr, "[debug] validate_identifier: name=NULL expr=%p\n", expr_ptr);
+        return;
+    }
+
+    // Check if this looks like a double bit pattern (especially 3.0 = 0x4008000000000000).
+    uintptr_t val = (uintptr_t)name;
+    if (val == 0x4008000000000000ULL)
+    {
+        fprintf(
+            stderr,
+            "[debug] validate_identifier: SUSPICIOUS name=%p (double 3.0 bit pattern!) expr=%p\n",
+            name_ptr,
+            expr_ptr);
+        fflush(stderr);
+
+        // Dump the Expression struct (tag + payload bytes).
+        if (expr_ptr)
+        {
+            fprintf(stderr, "[debug] Expression hexdump (first 64 bytes at %p):\n", expr_ptr);
+            const unsigned char *bytes = (const unsigned char *)expr_ptr;
+            for (int i = 0; i < 64 && i < 64; i += 16)
+            {
+                fprintf(stderr, "  %04x: ", i);
+                for (int j = 0; j < 16 && (i + j) < 64; j++)
+                {
+                    fprintf(stderr, "%02x ", bytes[i + j]);
+                }
+                fprintf(stderr, "\n");
+            }
+            fflush(stderr);
+
+            // Interpret as { i32 tag, [4 x i8] pad, [40 x i8] payload }.
+            const uint32_t *tag_ptr = (const uint32_t *)expr_ptr;
+            fprintf(stderr, "[debug]   tag = %u (0x%x)\n", *tag_ptr, *tag_ptr);
+            const unsigned char *payload_start = bytes + 8; // after tag+pad
+            fprintf(stderr, "[debug]   payload[0..8] as ptr: %p\n", *(void **)payload_start);
+            const double *payload_as_double = (const double *)payload_start;
+            fprintf(stderr, "[debug]   payload[0..8] as double: %g\n", *payload_as_double);
+            fflush(stderr);
+        }
+
+#if defined(__APPLE__)
+        // Print backtrace.
+        void *callstack[128];
+        int frames = backtrace(callstack, 128);
+        char **strs = backtrace_symbols(callstack, frames);
+        if (strs)
+        {
+            fprintf(stderr, "[debug] backtrace:\n");
+            for (int i = 0; i < frames; i++)
+            {
+                fprintf(stderr, "%s\n", strs[i]);
+            }
+            free(strs);
+        }
+        fflush(stderr);
+#endif
+    }
 }

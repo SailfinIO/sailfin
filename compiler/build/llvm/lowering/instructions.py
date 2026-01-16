@@ -1621,23 +1621,26 @@ context
                 field_binding = lowered_condition.field_bindings[binding_idx]
                 payload_ptr_temp = format_temp_name(current_temp)
                 current_temp += 1
-                current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 1")
+                payload_field_index = 1
+                if enum_info_val.max_payload_size > 0  and  enum_info_val.align > enum_info_val.tag_size:
+                    payload_field_index = 2
+                current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 " + number_to_string(payload_field_index))
                 byte_ptr_temp = format_temp_name(current_temp)
                 current_temp += 1
-                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(enum_info_val.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*")
+                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr")
                 field_offset_in_payload = field_binding.field_offset - variant_info_val.offset
                 field_ptr_temp = byte_ptr_temp
                 if field_offset_in_payload > 0:
                     offset_ptr_temp = format_temp_name(current_temp)
                     current_temp += 1
-                    current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
+                    current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
                     field_ptr_temp = offset_ptr_temp
                 typed_ptr_temp = format_temp_name(current_temp)
                 current_temp += 1
-                current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + field_binding.field_type + "*")
+                current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr")
                 value_temp = format_temp_name(current_temp)
                 current_temp += 1
-                current_lines = append_string(current_lines, "  " + value_temp + " = load " + field_binding.field_type + ", " + field_binding.field_type + "* " + typed_ptr_temp)
+                current_lines = append_string(current_lines, "  " + value_temp + " = load " + field_binding.field_type + ", ptr " + typed_ptr_temp)
                 local_alloca_temp = format_temp_name(current_temp)
                 current_temp += 1
                 current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + field_binding.field_type)

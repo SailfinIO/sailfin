@@ -320,7 +320,7 @@ fn lower_logical_not_with_operand(operand -> LLVMOperand, temp_index -> number, 
     let mut current_diagnostics = diagnostics.concat(coerced.diagnostics);
     let mut current_lines = coerced.lines;
     let mut current_temp = coerced.temp_index;
-    if coerced.operand != null {
+        if coerced.operand != null {
         let bool_operand = coerced.operand;
         let result_temp = format_temp_name(current_temp);
         current_lines = append_string(current_lines, "  " + result_temp + " = xor i1 " + bool_operand.value + ", 1");
@@ -2500,18 +2500,22 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         let field_info = selected_fields[match_index];
 
         let payload_ptr_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + enum_pointer_value + ", i32 0, i32 1");
+        let mut payload_field_index -> number = 1;
+        if enum_info.max_payload_size > 0 && enum_info.align > enum_info.tag_size {
+            payload_field_index = 2;
+        }
+        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + enum_pointer_value + ", i32 0, i32 " + number_to_string(payload_field_index));
         current_temp += 1;
 
         let byte_ptr_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(enum_info.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*");
+        current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
         current_temp += 1;
 
         let field_offset_in_payload = field_info.offset - variant_info.offset;
         let mut field_ptr_temp -> string = byte_ptr_temp;
         if field_offset_in_payload > 0 {
             let offset_ptr_temp = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
             current_temp += 1;
             field_ptr_temp = offset_ptr_temp;
         }
@@ -2534,19 +2538,19 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
             storage_type = mapped;
         }
         let typed_ptr_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + storage_type + "*");
+        current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
         current_temp += 1;
 
         let mut value_temp -> string = typed_ptr_temp;
         if pointer_coercion {
             if ends_with_pointer_suffix(storage_type) {
                 value_temp = format_temp_name(current_temp);
-                current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", " + storage_type + "* " + typed_ptr_temp);
+                current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp);
                 current_temp += 1;
             }
         } else {
             value_temp = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", " + storage_type + "* " + typed_ptr_temp);
+            current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp);
             current_temp += 1;
         }
 
@@ -2966,7 +2970,9 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
         // IMPORTANT: `i8*` is a string pointer in our runtime ABI (null-terminated).
         // Boxing an `i8` into an `i8*` via `malloc(1)` produces a non-terminated string
         // and crashes native execution when `string_length` calls `strlen`.
-        if ends_with_pointer_suffix(element_type) && !ends_with_pointer_suffix(operand.llvm_type) && !is_string_pointer_type(element_type) {
+        let trimmed_operand_type = trim_text(operand.llvm_type);
+        let operand_is_aggregate = starts_with(trimmed_operand_type, "%") || starts_with(trimmed_operand_type, "{");
+        if ends_with_pointer_suffix(element_type) && !ends_with_pointer_suffix(operand.llvm_type) && operand_is_aggregate {
             let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
             diagnostics = extend_string_array(diagnostics, boxed.diagnostics);
             current_lines = boxed.lines;
@@ -3306,7 +3312,9 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                     // IMPORTANT: `i8*` is a string pointer in our runtime ABI (null-terminated).
                     // Boxing an `i8` into an `i8*` via `malloc(1)` produces a non-terminated string
                     // and crashes native execution when `string_length` calls `strlen`.
-                    if ends_with_pointer_suffix(expected.llvm_type) && !ends_with_pointer_suffix(field_operand.llvm_type) && !is_string_pointer_type(expected.llvm_type) {
+                    let trimmed_field_type = trim_text(field_operand.llvm_type);
+                    let field_is_aggregate = starts_with(trimmed_field_type, "%") || starts_with(trimmed_field_type, "{");
+                    if ends_with_pointer_suffix(expected.llvm_type) && !ends_with_pointer_suffix(field_operand.llvm_type) && field_is_aggregate {
                         let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
                         diagnostics = diagnostics.concat(boxed.diagnostics);
                         current_lines = boxed.lines;
@@ -3320,15 +3328,19 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                     current_lines = coerced.lines;
                     current_temp = coerced.temp_index;
                     if coerced.operand != null && alloca_ptr != null {
-                        // Get pointer to the payload byte array (field 1)
+                        // Get pointer to the payload byte array (field 1 or 2 when padded)
                         let payload_ptr_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 1");
+                        let mut payload_field_index -> number = 1;
+                        if enum_info.max_payload_size > 0 && enum_info.align > enum_info.tag_size {
+                            payload_field_index = 2;
+                        }
+                        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 " + number_to_string(payload_field_index));
 
-                        // Cast payload byte array pointer to i8*
+                        // Treat payload as a raw byte pointer (opaque pointers)
                         let byte_array_ptr_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(enum_info.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*");
+                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
 
                         // Use field offset from variant layout metadata, relative to the variant start
                         // Since the payload byte array starts at variant_info.offset, subtract that to get payload-relative offset
@@ -3338,17 +3350,17 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                         if field_offset_in_payload > 0 {
                             let offset_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
                             field_byte_ptr_temp = offset_ptr_temp;
                         }
 
-                        // Cast byte pointer to field type pointer
+                        // Cast byte pointer to a typed pointer (opaque pointers)
                         let field_ptr_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines = append_string(current_lines, "  " + field_ptr_temp + " = bitcast i8* " + field_byte_ptr_temp + " to " + expected.llvm_type + "*");
+                        current_lines = append_string(current_lines, "  " + field_ptr_temp + " = bitcast ptr " + field_byte_ptr_temp + " to ptr");
 
                         // Store the field value
-                        current_lines = append_string(current_lines, "  store " + expected.llvm_type + " " + coerced.operand.value + ", " + expected.llvm_type + "* " + field_ptr_temp);
+                        current_lines = append_string(current_lines, "  store " + expected.llvm_type + " " + coerced.operand.value + ", ptr " + field_ptr_temp);
                     }
                 }
                 if !string_array_contains(used_names, expected.name) {

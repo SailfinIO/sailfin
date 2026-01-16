@@ -290,10 +290,44 @@ def render_enum_type_definitions(context):
             if variant.size > max_payload_size:
                 max_payload_size = variant.size
             variant_idx += 1
+        pad_repr = ""
         payload_repr = ""
         if max_payload_size > 0:
-            payload_repr = ", [" + number_to_string(max_payload_size) + " x i8]"
-        body = "{ " + llvm_tag_type + payload_repr + " }"
+            enum_align = enum_info.align
+            if enum_align <= 0:
+                enum_align = 1
+            payload_offset = enum_info.tag_size
+            if enum_align > 1:
+                remainder = payload_offset % enum_align
+                if remainder != 0:
+                    payload_offset += (enum_align - remainder)
+            pad_size = payload_offset - enum_info.tag_size
+            if pad_size > 0:
+                pad_repr = ", [" + number_to_string(pad_size) + " x i8]"
+            elem_type = "i8"
+            elem_size = 1
+            if enum_align >= 16:
+                elem_type = "i128"
+                elem_size = 16
+            else:
+                if enum_align >= 8:
+                    elem_type = "i64"
+                    elem_size = 8
+                else:
+                    if enum_align >= 4:
+                        elem_type = "i32"
+                        elem_size = 4
+                    else:
+                        if enum_align >= 2:
+                            elem_type = "i16"
+                            elem_size = 2
+            payload_storage_size = max_payload_size
+            remainder = payload_storage_size % elem_size
+            if remainder != 0:
+                payload_storage_size += (elem_size - remainder)
+            elem_count = payload_storage_size / elem_size
+            payload_repr = ", [" + number_to_string(elem_count) + " x " + elem_type + "]"
+        body = "{ " + llvm_tag_type + pad_repr + payload_repr + " }"
         lines = append_string(lines, enum_info.llvm_name + " = type " + body)
         index += 1
     return lines
