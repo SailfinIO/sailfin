@@ -2651,12 +2651,16 @@ fn lower_match_instruction(
                 // 1. Get pointer to payload byte array (field 1 of enum)
                 let payload_ptr_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 1");
+                let mut payload_field_index -> number = 1;
+                if enum_info_val.max_payload_size > 0 && enum_info_val.align > enum_info_val.tag_size {
+                    payload_field_index = 2;
+                }
+                current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 " + number_to_string(payload_field_index));
 
-                // 2. Cast to i8*
+                // 2. Treat payload as a raw byte pointer (opaque pointers)
                 let byte_ptr_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(enum_info_val.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*");
+                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
 
                 // 3. Offset to field position
                 // Field offset is relative to the enum start, but payload starts at variant offset
@@ -2666,19 +2670,19 @@ fn lower_match_instruction(
                 if field_offset_in_payload > 0 {
                     let offset_ptr_temp = format_temp_name(current_temp);
                     current_temp += 1;
-                    current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+                    current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
                     field_ptr_temp = offset_ptr_temp;
                 }
 
-                // 4. Cast to field type pointer
+                // 4. Cast to field type pointer (opaque pointers)
                 let typed_ptr_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + field_binding.field_type + "*");
+                current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
 
                 // 5. Load the field value
                 let value_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + value_temp + " = load " + field_binding.field_type + ", " + field_binding.field_type + "* " + typed_ptr_temp);
+                current_lines = append_string(current_lines, "  " + value_temp + " = load " + field_binding.field_type + ", ptr " + typed_ptr_temp);
 
                 // 6. Allocate a local for this binding
                 let local_alloca_temp = format_temp_name(current_temp);

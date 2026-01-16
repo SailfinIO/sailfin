@@ -28,7 +28,7 @@ import {
     ElseBranch,
     SourceSpan,
 } from "./ast";
-import { substring } from "./string_utils";
+import { substring, char_code } from "./string_utils";
 
 struct NativeArtifact {
     name -> string;
@@ -494,28 +494,27 @@ fn emit_tool(state -> NativeState, statement -> Statement) -> NativeState {
 }
 
 fn emit_test(state -> NativeState, statement -> Statement) -> NativeState {
-    let mut current = emit_decorators(state, statement.decorators);
-    let mut header -> string = ".test " + quote_string(statement.name);
-    if statement.effects.length > 0 {
-        header = header + " ![" + join_with_separator(statement.effects, ", ") + "]";
-    }
-    current = state_emit_line(current, header);
-    current = emit_signature_metadata(
-        current,
+    // NOTE: We intentionally lower `test "..." {}` to a normal function named
+    // `test:<sanitized>` (instead of emitting a `.test` directive).
+    //
+    // Reason: some selfhosted stage2 builds have historically misparsed `.test`
+    // directives in the native IR parser, causing tests to be dropped before
+    // LLVM lowering and resulting in missing `main` at link time.
+    let test_symbol = test_function_symbol(statement.name);
+    return emit_function(
+        state,
         FunctionSignature {
-            name: statement.name,
+            name: test_symbol,
             is_async: false,
             parameters: [],
             return_type: null,
             effects: statement.effects,
             type_parameters: [],
-            name_span: null,
-        }
+            name_span: statement.name_span,
+        },
+        statement.body,
+        statement.decorators
     );
-    current = state_push_indent(current);
-    current = emit_block(current, statement.body);
-    current = state_pop_indent(current);
-    return state_emit_line(current, ".endtest");
 }
 
 fn emit_model(state -> NativeState, statement -> Statement) -> NativeState {
@@ -1246,6 +1245,16 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
     if contains_string(visiting, trimmed) {
         return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
     }
+
+    // Prefer canonical layouts for well-known compiler/runtime types.
+    // This avoids layout drift when recursive inference hits cycles or
+    // incomplete definitions and would otherwise fall back to pointer-sized
+    // placeholders for by-value fields.
+    let canonical = lookup_canonical_type_layout(trimmed);
+    if canonical != null {
+        return TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics };
+    }
+
     let struct_definition = find_layout_struct_definition(context, trimmed);
     if struct_definition != null {
         let nested_visiting = append_string(visiting, trimmed);
@@ -1259,10 +1268,6 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
         let aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting);
         diagnostics = diagnostics.concat(aggregate.diagnostics);
         return TypeLayoutInfo { size: aggregate.size, align: aggregate.align, diagnostics: diagnostics };
-    }
-    let canonical = lookup_canonical_type_layout(trimmed);
-    if canonical != null {
-        return TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics };
     }
     diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout");
     return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
@@ -1348,32 +1353,34 @@ fn find_layout_enum_definition(context -> LayoutContext, name -> string) -> Layo
 fn canonical_type_layouts() -> CanonicalTypeLayout[] {
     let mut layouts -> CanonicalTypeLayout[] = [];
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Token", size: 40, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TokenKind", size: 16, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TokenKind", size: 4, align: 4 });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Program", size: 8, align: 8 });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeAnnotation", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeParameter", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Block", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "SourceSpan", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Expression", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Parameter", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "WithClause", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ObjectField", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ElseBranch", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ForClause", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MatchCase", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelProperty", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FieldDeclaration", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MethodDeclaration", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariant", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FunctionSignature", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "PipelineDeclaration", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ToolDeclaration", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TestDeclaration", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelDeclaration", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Decorator", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "DecoratorArgument", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeParameter", size: 24, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Block", size: 24, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "SourceSpan", size: 32, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Expression", size: 48, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Parameter", size: 40, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "WithClause", size: 48, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ObjectField", size: 56, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ElseBranch", size: 16, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ForClause", size: 104, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MatchCase", size: 80, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelProperty", size: 64, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FieldDeclaration", size: 32, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MethodDeclaration", size: 88, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariant", size: 24, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FunctionSignature", size: 56, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "PipelineDeclaration", size: 88, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ToolDeclaration", size: 88, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TestDeclaration", size: 48, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelDeclaration", size: 40, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Decorator", size: 16, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "DecoratorArgument", size: 56, align: 8 });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "NamedSpecifier", size: 8, align: 8 });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Statement", size: 8, align: 8 });
+    // NOTE: `Statement` is an enum; its size is driven by the largest payload variant.
+    // Keep this in sync with the stage2 LLVM ABI and `ast.layout-manifest`.
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Statement", size: 144, align: 8 });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumField", size: 8, align: 8 });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariantDefinition", size: 8, align: 8 });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumType", size: 8, align: 8 });
@@ -1483,7 +1490,8 @@ fn number_to_string(value -> number) -> string {
 
 fn format_expression(expression -> Expression) -> string {
     if expression.variant == "Identifier" {
-        return expression.name;
+        let name = expression.name;
+        return name;
     }
     if expression.variant == "NumberLiteral" {
         return expression.value;
@@ -1743,11 +1751,71 @@ fn collect_entry_points(program -> Program) -> string[] {
             entries = append_unique(entries, statement.signature.name);
         }
         if statement.variant == "TestDeclaration" {
-            entries = append_unique(entries, "test:" + statement.name);
+            entries = append_unique(entries, test_function_symbol(statement.name));
         }
         index += 1;
     }
     return entries;
+}
+
+fn is_test_symbol_char(ch -> string) -> boolean {
+    if ch.length == 0 {
+        return false;
+    }
+    if ch == "_" {
+        return true;
+    }
+    let code = char_code(ch);
+    let lower_a = char_code("a");
+    let lower_z = char_code("z");
+    if code >= lower_a && code <= lower_z {
+        return true;
+    }
+    let upper_a = char_code("A");
+    let upper_z = char_code("Z");
+    if code >= upper_a && code <= upper_z {
+        return true;
+    }
+    let zero = char_code("0");
+    let nine = char_code("9");
+    if code >= zero && code <= nine {
+        return true;
+    }
+    return false;
+}
+
+fn sanitize_test_name_for_symbol(name -> string) -> string {
+    if name.length == 0 {
+        return "unnamed";
+    }
+    let mut out -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if is_test_symbol_char(ch) {
+            out = out + ch;
+        }
+        index += 1;
+    }
+    if out.length == 0 {
+        return "unnamed";
+    }
+    // Ensure the name is not purely numeric / doesn't start with a digit.
+    let first = out[0];
+    let code = char_code(first);
+    if code >= char_code("0") && code <= char_code("9") {
+        return "_" + out;
+    }
+    return out;
+}
+
+fn test_function_symbol(test_name -> string) -> string {
+    // Keep the `test:` prefix stable so LLVM lowering can synthesize a harness
+    // by scanning `NativeFunction.name`.
+    return "test:" + sanitize_test_name_for_symbol(test_name);
 }
 
 fn count_exported_symbols(program -> Program) -> number {

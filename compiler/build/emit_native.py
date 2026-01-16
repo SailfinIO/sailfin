@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.ast import Block, Decorator, EnumVariant, Expression, FieldDeclaration, ForClause, FunctionSignature, MatchCase, MethodDeclaration, ModelProperty, Parameter, Program, Statement, ImportSpecifier, ExportSpecifier, TypeAnnotation, TypeParameter, WithClause, ElseBranch, SourceSpan
-from compiler.build.string_utils import substring
+from compiler.build.string_utils import substring, char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -429,19 +429,8 @@ def emit_tool(state, statement):
     return state_emit_line(current, ".endtool")
 
 def emit_test(state, statement):
-    current = emit_decorators(state, statement.decorators)
-    header = ".test " + quote_string(statement.name)
-    if len(statement.effects) > 0:
-        header = header + " ![" + join_with_separator(statement.effects, ", ") + "]"
-    current = state_emit_line(current, header)
-    current = emit_signature_metadata(
-current,
-FunctionSignature(name=statement.name, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[], name_span=None)
-)
-    current = state_push_indent(current)
-    current = emit_block(current, statement.body)
-    current = state_pop_indent(current)
-    return state_emit_line(current, ".endtest")
+    test_symbol = test_function_symbol(statement.name)
+    return emit_function(state, FunctionSignature(name=test_symbol, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[], name_span=statement.name_span), statement.body, statement.decorators)
 
 def emit_model(state, statement):
     current = emit_decorators(state, statement.decorators)
@@ -1000,6 +989,9 @@ def analyze_type_layout(context, visiting, type_annotation, container_kind, cont
         return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
     if contains_string(visiting, trimmed):
         return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
+    canonical = lookup_canonical_type_layout(trimmed)
+    if canonical != None:
+        return TypeLayoutInfo(size=canonical.size, align=canonical.align, diagnostics=diagnostics)
     struct_definition = find_layout_struct_definition(context, trimmed)
     if struct_definition != None:
         nested_visiting = append_string(visiting, trimmed)
@@ -1012,9 +1004,6 @@ def analyze_type_layout(context, visiting, type_annotation, container_kind, cont
         aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting)
         diagnostics = (diagnostics) + (aggregate.diagnostics)
         return TypeLayoutInfo(size=aggregate.size, align=aggregate.align, diagnostics=diagnostics)
-    canonical = lookup_canonical_type_layout(trimmed)
-    if canonical != None:
-        return TypeLayoutInfo(size=canonical.size, align=canonical.align, diagnostics=diagnostics)
     diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout")
     return TypeLayoutInfo(size=8, align=8, diagnostics=diagnostics)
 
@@ -1079,32 +1068,32 @@ def find_layout_enum_definition(context, name):
 def canonical_type_layouts():
     layouts = []
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Token", size=40, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TokenKind", size=16, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TokenKind", size=4, align=4))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Program", size=8, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TypeAnnotation", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TypeParameter", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Block", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="SourceSpan", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Expression", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Parameter", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="WithClause", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ObjectField", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ElseBranch", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ForClause", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="MatchCase", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ModelProperty", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="FieldDeclaration", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="MethodDeclaration", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumVariant", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="FunctionSignature", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="PipelineDeclaration", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ToolDeclaration", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TestDeclaration", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ModelDeclaration", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Decorator", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="DecoratorArgument", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TypeParameter", size=24, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Block", size=24, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="SourceSpan", size=32, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Expression", size=48, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Parameter", size=40, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="WithClause", size=48, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ObjectField", size=56, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ElseBranch", size=16, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ForClause", size=104, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="MatchCase", size=80, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ModelProperty", size=64, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="FieldDeclaration", size=32, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="MethodDeclaration", size=88, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumVariant", size=24, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="FunctionSignature", size=56, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="PipelineDeclaration", size=88, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ToolDeclaration", size=88, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="TestDeclaration", size=48, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="ModelDeclaration", size=40, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Decorator", size=16, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="DecoratorArgument", size=56, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="NamedSpecifier", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Statement", size=8, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Statement", size=144, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumField", size=8, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumVariantDefinition", size=8, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumType", size=8, align=8))
@@ -1187,7 +1176,8 @@ def number_to_string(value):
 
 def format_expression(expression):
     if expression.variant == "Identifier":
-        return expression.name
+        name = expression.name
+        return name
     if expression.variant == "NumberLiteral":
         return expression.value
     if expression.variant == "BooleanLiteral":
@@ -1370,9 +1360,52 @@ def collect_entry_points(program):
         if statement.variant == "FunctionDeclaration":
             entries = append_unique(entries, statement.signature.name)
         if statement.variant == "TestDeclaration":
-            entries = append_unique(entries, "test:" + statement.name)
+            entries = append_unique(entries, test_function_symbol(statement.name))
         index += 1
     return entries
+
+def is_test_symbol_char(ch):
+    if len(ch) == 0:
+        return False
+    if ch == "_":
+        return True
+    code = char_code(ch)
+    lower_a = char_code("a")
+    lower_z = char_code("z")
+    if code >= lower_a  and  code <= lower_z:
+        return True
+    upper_a = char_code("A")
+    upper_z = char_code("Z")
+    if code >= upper_a  and  code <= upper_z:
+        return True
+    zero = char_code("0")
+    nine = char_code("9")
+    if code >= zero  and  code <= nine:
+        return True
+    return False
+
+def sanitize_test_name_for_symbol(name):
+    if len(name) == 0:
+        return "unnamed"
+    out = ""
+    index = 0
+    while True:
+        if index >= len(name):
+            break
+        ch = name[index]
+        if is_test_symbol_char(ch):
+            out = out + ch
+        index += 1
+    if len(out) == 0:
+        return "unnamed"
+    first = out[0]
+    code = char_code(first)
+    if code >= char_code("0")  and  code <= char_code("9"):
+        return "_" + out
+    return out
+
+def test_function_symbol(test_name):
+    return "test:" + sanitize_test_name_for_symbol(test_name)
 
 def count_exported_symbols(program):
     count = 0

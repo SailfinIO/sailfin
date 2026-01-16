@@ -125,6 +125,15 @@ jobs:
           echo "$OUT"
           echo "$OUT" | grep -F "sfn ${VERSION}" >/dev/null
 
+      - name: Run Sailfin-native tests (release binary)
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          CONDA=$(which conda)
+          STAGE2_BIN="build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }}"
+          "$STAGE2_BIN" --version
+          CONDA="$CONDA" make test STAGE2_BIN="$STAGE2_BIN"
+
       - name: Package release asset
         shell: bash -l {0}
         run: |

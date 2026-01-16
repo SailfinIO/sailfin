@@ -1528,16 +1528,19 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
         variant_info = selected_variants[match_index]
         field_info = selected_fields[match_index]
         payload_ptr_temp = format_temp_name(current_temp)
-        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + enum_pointer_value + ", i32 0, i32 1")
+        payload_field_index = 1
+        if enum_info.max_payload_size > 0  and  enum_info.align > enum_info.tag_size:
+            payload_field_index = 2
+        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + enum_pointer_value + ", i32 0, i32 " + number_to_string(payload_field_index))
         current_temp += 1
         byte_ptr_temp = format_temp_name(current_temp)
-        current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast [" + number_to_string(enum_info.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*")
+        current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr")
         current_temp += 1
         field_offset_in_payload = field_info.offset - variant_info.offset
         field_ptr_temp = byte_ptr_temp
         if field_offset_in_payload > 0:
             offset_ptr_temp = format_temp_name(current_temp)
-            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
+            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
             current_temp += 1
             field_ptr_temp = offset_ptr_temp
         storage_type = field_info.llvm_type
@@ -1553,17 +1556,17 @@ def lower_enum_member_access(parse, enum_info, base_operand, pointer_available, 
                     mapped = stripped
             storage_type = mapped
         typed_ptr_temp = format_temp_name(current_temp)
-        current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + field_ptr_temp + " to " + storage_type + "*")
+        current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr")
         current_temp += 1
         value_temp = typed_ptr_temp
         if pointer_coercion:
             if ends_with_pointer_suffix(storage_type):
                 value_temp = format_temp_name(current_temp)
-                current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", " + storage_type + "* " + typed_ptr_temp)
+                current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp)
                 current_temp += 1
         else:
             value_temp = format_temp_name(current_temp)
-            current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", " + storage_type + "* " + typed_ptr_temp)
+            current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp)
             current_temp += 1
         compare_temp = format_temp_name(current_temp)
         current_lines = append_string(current_lines, "  " + compare_temp + " = icmp eq " + tag_operand.llvm_type + " " + tag_operand.value + ", " + number_to_string(variant_info.tag))
@@ -1863,7 +1866,9 @@ def lower_array_literal(text, bindings, locals, temp_index, lines, functions, co
             break
         operand = operands[index]
         prepared_operand = operand
-        if ends_with_pointer_suffix(element_type)  and  not ends_with_pointer_suffix(operand.llvm_type)  and  not is_string_pointer_type(element_type):
+        trimmed_operand_type = trim_text(operand.llvm_type)
+        operand_is_aggregate = starts_with(trimmed_operand_type, "%")  or  starts_with(trimmed_operand_type, "{")
+        if ends_with_pointer_suffix(element_type)  and  not ends_with_pointer_suffix(operand.llvm_type)  and  operand_is_aggregate:
             boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context)
             diagnostics = extend_string_array(diagnostics, boxed.diagnostics)
             current_lines = boxed.lines
@@ -2109,7 +2114,9 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
                 current_temp = lowered.temp_index
                 if lowered.operand != None:
                     field_operand = lowered.operand
-                    if ends_with_pointer_suffix(expected.llvm_type)  and  not ends_with_pointer_suffix(field_operand.llvm_type)  and  not is_string_pointer_type(expected.llvm_type):
+                    trimmed_field_type = trim_text(field_operand.llvm_type)
+                    field_is_aggregate = starts_with(trimmed_field_type, "%")  or  starts_with(trimmed_field_type, "{")
+                    if ends_with_pointer_suffix(expected.llvm_type)  and  not ends_with_pointer_suffix(field_operand.llvm_type)  and  field_is_aggregate:
                         boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context)
                         diagnostics = (diagnostics) + (boxed.diagnostics)
                         current_lines = boxed.lines
@@ -2123,22 +2130,25 @@ def lower_enum_literal(parse, bindings, locals, temp_index, lines, functions, co
                     if coerced.operand != None  and  alloca_ptr != None:
                         payload_ptr_temp = format_temp_name(current_temp)
                         current_temp += 1
-                        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 1")
+                        payload_field_index = 1
+                        if enum_info.max_payload_size > 0  and  enum_info.align > enum_info.tag_size:
+                            payload_field_index = 2
+                        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 " + number_to_string(payload_field_index))
                         byte_array_ptr_temp = format_temp_name(current_temp)
                         current_temp += 1
-                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast [" + number_to_string(enum_info.max_payload_size) + " x i8]* " + payload_ptr_temp + " to i8*")
+                        current_lines = append_string(current_lines, "  " + byte_array_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr")
                         field_absolute_offset = variant_info.fields[field_index].offset
                         field_offset_in_payload = field_absolute_offset - variant_info.offset
                         field_byte_ptr_temp = byte_array_ptr_temp
                         if field_offset_in_payload > 0:
                             offset_ptr_temp = format_temp_name(current_temp)
                             current_temp += 1
-                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, i8* " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
+                            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload))
                             field_byte_ptr_temp = offset_ptr_temp
                         field_ptr_temp = format_temp_name(current_temp)
                         current_temp += 1
-                        current_lines = append_string(current_lines, "  " + field_ptr_temp + " = bitcast i8* " + field_byte_ptr_temp + " to " + expected.llvm_type + "*")
-                        current_lines = append_string(current_lines, "  store " + expected.llvm_type + " " + coerced.operand.value + ", " + expected.llvm_type + "* " + field_ptr_temp)
+                        current_lines = append_string(current_lines, "  " + field_ptr_temp + " = bitcast ptr " + field_byte_ptr_temp + " to ptr")
+                        current_lines = append_string(current_lines, "  store " + expected.llvm_type + " " + coerced.operand.value + ", ptr " + field_ptr_temp)
                 if not string_array_contains(used_names, expected.name):
                     used_names = append_string(used_names, expected.name)
             else:

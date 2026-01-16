@@ -409,14 +409,64 @@ fn render_enum_type_definitions(context -> TypeContext) -> string[] {
             variant_idx += 1;
         }
 
-        // Enum layout: { tag, [payload_bytes x payload_size] }
-        // We represent payload as a byte array for the largest variant
+        // Enum layout:
+        // - Tag lives in the first field.
+        // - Payload is stored in a field whose *LLVM alignment* matches the enum's
+        //   ABI alignment. This is critical: if the payload field is `[N x i8]`, the
+        //   whole enum becomes only 4-byte aligned (due to the `i32` tag), which then
+        //   breaks the inferred offsets for structs that contain this enum.
+        // - If the enum's ABI alignment is larger than the tag, insert explicit
+        //   padding bytes so payload begins at an aligned offset.
+        //   This must match `.layout variant offset=...` produced by layout inference.
+        let mut pad_repr -> string = "";
         let mut payload_repr -> string = "";
         if max_payload_size > 0 {
-            payload_repr = ", [" + number_to_string(max_payload_size) + " x i8]";
+            let mut enum_align = enum_info.align;
+            if enum_align <= 0 {
+                enum_align = 1;
+            }
+
+            // Payload offset = align_to(tag_size, enum_align)
+            let mut payload_offset = enum_info.tag_size;
+            if enum_align > 1 {
+                let remainder = payload_offset % enum_align;
+                if remainder != 0 {
+                    payload_offset += (enum_align - remainder);
+                }
+            }
+            let pad_size = payload_offset - enum_info.tag_size;
+            if pad_size > 0 {
+                pad_repr = ", [" + number_to_string(pad_size) + " x i8]";
+            }
+
+            // Store payload in an aligned element array so the enum type itself has
+            // `enum_align` alignment.
+            let mut elem_type -> string = "i8";
+            let mut elem_size -> number = 1;
+            if enum_align >= 16 {
+                elem_type = "i128";
+                elem_size = 16;
+            } else if enum_align >= 8 {
+                elem_type = "i64";
+                elem_size = 8;
+            } else if enum_align >= 4 {
+                elem_type = "i32";
+                elem_size = 4;
+            } else if enum_align >= 2 {
+                elem_type = "i16";
+                elem_size = 2;
+            }
+
+            let mut payload_storage_size = max_payload_size;
+            let remainder = payload_storage_size % elem_size;
+            if remainder != 0 {
+                payload_storage_size += (elem_size - remainder);
+            }
+            let elem_count = payload_storage_size / elem_size;
+            payload_repr = ", [" + number_to_string(elem_count) + " x " + elem_type + "]";
         }
 
-        let body = "{ " + llvm_tag_type + payload_repr + " }";
+        let body = "{ " + llvm_tag_type + pad_repr + payload_repr + " }";
         lines = append_string(lines, enum_info.llvm_name + " = type " + body);
         index += 1;
     }
