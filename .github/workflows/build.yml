@@ -55,12 +55,13 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang jq
+          sudo apt-get install -y clang llvm jq
 
-      - name: Install jq (macOS)
+      - name: Install jq + LLVM tools (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          brew install jq
+          brew install jq llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
       - name: Build native Stage2 compiler
         shell: bash -l {0}
@@ -127,13 +128,14 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang jq
+          sudo apt-get install -y clang llvm jq
 
-      - name: Install jq (macOS)
+      - name: Install jq + LLVM tools (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          brew install jq
+          brew install jq llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
       - name: Install latest released Stage2 seed (via install.sh)
         shell: bash -l {0}

@@ -2720,10 +2720,38 @@ def main(argv: list[str]) -> int:
             clang_compile_s += time.perf_counter() - t0
 
             # --- IR link step (prevents cross-object ABI/layout mismatches) ---
-            llvm_link = shutil.which(os.environ.get("LLVM_LINK", "llvm-link"))
+            llvm_link: str | None = None
+            llvm_link_env = os.environ.get("LLVM_LINK")
+            if llvm_link_env:
+                llvm_link = shutil.which(llvm_link_env) or llvm_link_env
+
+            if not llvm_link:
+                candidates: list[str] = ["llvm-link"]
+                # Linux distros often ship only version-suffixed binaries.
+                candidates.extend([f"llvm-link-{v}" for v in range(30, 8, -1)])
+                for candidate in candidates:
+                    llvm_link = shutil.which(candidate)
+                    if llvm_link:
+                        break
+
+            if not llvm_link and sys.platform == "darwin":
+                # Homebrew installs LLVM but does not put it on PATH by default in CI.
+                try:
+                    brew_prefix = subprocess.check_output(
+                        ["brew", "--prefix", "llvm"],
+                        cwd=str(REPO_ROOT),
+                        text=True,
+                    ).strip()
+                    brew_llvm_link = pathlib.Path(
+                        brew_prefix) / "bin" / "llvm-link"
+                    if brew_llvm_link.exists():
+                        llvm_link = str(brew_llvm_link)
+                except Exception:
+                    pass
+
             if not llvm_link:
                 raise SystemExit(
-                    "selfhost: missing llvm-link (set LLVM_LINK or install LLVM; e.g. brew install llvm)"
+                    "selfhost: missing llvm-link (set LLVM_LINK or install LLVM tools; e.g. brew install llvm)"
                 )
 
             # Keep runtime prelude as a separate object in the canonical runtime
