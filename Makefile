@@ -30,6 +30,10 @@ NATIVE_OBJ_DIR ?= build/native/obj
 NATIVE_OUT ?= build/native/sailfin-stage2
 NATIVE_LINK_EXTRA ?=
 
+# Which compiler binary to use for running Sailfin-native tests.
+# Default: the seed native stage2 built by `make compile`.
+STAGE2_BIN ?= build/native/sailfin-stage2
+
 .PHONY: help install test test-unit test-integration test-e2e compile clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
 
 .PHONY: selfhost-native-stage2 selfhost-native-stage2-asan selfhost-smoke-native-stage2
@@ -70,8 +74,8 @@ install:
 test: test-unit test-integration test-e2e
 
 test-unit:
-	@if [ ! -x build/native/sailfin-stage2 ]; then \
-		echo "[test-unit] missing build/native/sailfin-stage2; running make compile"; \
+	@if [ ! -x $(STAGE2_BIN) ]; then \
+		echo "[test-unit] missing $(STAGE2_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
 	@set -e; \
@@ -81,12 +85,12 @@ test-unit:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		build/native/sailfin-stage2 test "$$f"; \
+		$(STAGE2_BIN) test "$$f"; \
 	done
 
 test-integration:
-	@if [ ! -x build/native/sailfin-stage2 ]; then \
-		echo "[test-integration] missing build/native/sailfin-stage2; running make compile"; \
+	@if [ ! -x $(STAGE2_BIN) ]; then \
+		echo "[test-integration] missing $(STAGE2_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
 	@set -e; \
@@ -96,12 +100,12 @@ test-integration:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		build/native/sailfin-stage2 test "$$f"; \
+		$(STAGE2_BIN) test "$$f"; \
 	done
 
 test-e2e:
-	@if [ ! -x build/native/sailfin-stage2 ]; then \
-		echo "[test-e2e] missing build/native/sailfin-stage2; running make compile"; \
+	@if [ ! -x $(STAGE2_BIN) ]; then \
+		echo "[test-e2e] missing $(STAGE2_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
 	@set -e; \
@@ -111,8 +115,18 @@ test-e2e:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		build/native/sailfin-stage2 test "$$f"; \
+		$(STAGE2_BIN) test "$$f"; \
 	done
+
+# Run the full Sailfin-native test suite using the *self-hosted* compiler.
+# This ensures tests cover the same binary we intend to ship for 1.0.
+.PHONY: test-selfhost
+test-selfhost:
+	@if [ ! -x build/native/sailfin-stage2-selfhost ]; then \
+		echo "[test-selfhost] missing build/native/sailfin-stage2-selfhost; building it (can take several minutes)"; \
+		$(MAKE) selfhost-native-stage2; \
+	fi
+	@$(MAKE) test STAGE2_BIN=build/native/sailfin-stage2-selfhost
 
 clean:
 	rm -rf dist

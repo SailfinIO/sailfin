@@ -1364,6 +1364,28 @@ def _prepare_seed_import_context(
     tmp_root = stage2_cache / ".tmp"
     tmp_root.mkdir(parents=True, exist_ok=True)
 
+    def _write_seed_stamp() -> None:
+        stamp_path = stage2_cache / ".seed_stamp"
+        try:
+            seed_stat = seed_bin.stat()
+        except OSError:
+            seed_stat = None
+        try:
+            fallback_stat = fallback_seed_bin.stat() if fallback_seed_bin is not None else None
+        except OSError:
+            fallback_stat = None
+
+        lines: list[str] = [
+            "seed_import_context_stamp_v1",
+            f"seed_bin={seed_bin}",
+            f"seed_mtime={seed_stat.st_mtime if seed_stat is not None else 'unknown'}",
+            f"seed_size={seed_stat.st_size if seed_stat is not None else 'unknown'}",
+            f"fallback_seed_bin={fallback_seed_bin if fallback_seed_bin is not None else ''}",
+            f"fallback_seed_mtime={fallback_stat.st_mtime if fallback_stat is not None else ''}",
+            f"fallback_seed_size={fallback_stat.st_size if fallback_stat is not None else ''}",
+        ]
+        stamp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
     def _write_layout_manifest_from_native_text(*, native_text: str, out_path: pathlib.Path) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         header = "; Sailfin Layout Manifest\n.manifest version=1\n\n"
@@ -1382,8 +1404,12 @@ def _prepare_seed_import_context(
         # Best-effort caching.
         try:
             src_mtime = p.stat().st_mtime
+            seed_mtime = seed_bin.stat().st_mtime
+            fallback_seed_mtime = fallback_seed_bin.stat(
+            ).st_mtime if fallback_seed_bin is not None else 0.0
+            stamp_mtime = max(src_mtime, seed_mtime, fallback_seed_mtime)
             if asm_path.exists() and manifest_path.exists():
-                if asm_path.stat().st_mtime >= src_mtime and manifest_path.stat().st_mtime >= src_mtime:
+                if asm_path.stat().st_mtime >= stamp_mtime and manifest_path.stat().st_mtime >= stamp_mtime:
                     return
         except OSError:
             pass
@@ -1422,6 +1448,9 @@ def _prepare_seed_import_context(
                 flush=True,
             )
             _emit_with(fallback_seed_bin)
+
+    # Stamp the cache so per-module isolated cwds can detect when they need a refresh.
+    _write_seed_stamp()
 
     if jobs <= 1:
         for idx, p in enumerate(sources):
@@ -2017,11 +2046,28 @@ def main(argv: list[str]) -> int:
                     (seed_emit_cwd / "build").mkdir(parents=True, exist_ok=True)
                     shared_stage2_cache = seed_cwd / "build" / "stage2"
                     local_stage2_cache = seed_emit_cwd / "build" / "stage2"
-                    if not local_stage2_cache.exists():
+
+                    def _needs_stage2_cache_refresh() -> bool:
+                        shared_stamp = shared_stage2_cache / ".seed_stamp"
+                        local_stamp = local_stage2_cache / ".seed_stamp"
+                        try:
+                            if not local_stage2_cache.exists():
+                                return True
+                            if not shared_stamp.exists() or not local_stamp.exists():
+                                return True
+                            return shared_stamp.read_text(encoding="utf-8", errors="replace") != local_stamp.read_text(
+                                encoding="utf-8", errors="replace"
+                            )
+                        except OSError:
+                            return True
+
+                    if _needs_stage2_cache_refresh():
                         # Copy rather than symlink: stage2 seeds may update
                         # build artifacts during emit, and sharing build/stage2
                         # across concurrent seed processes can produce
                         # inconsistent IR and runtime ABI mismatches.
+                        if local_stage2_cache.exists():
+                            shutil.rmtree(local_stage2_cache)
                         shutil.copytree(shared_stage2_cache,
                                         local_stage2_cache)
 
@@ -2035,6 +2081,10 @@ def main(argv: list[str]) -> int:
                         f"{module_name}.sfn-asm"
                     if cached_self_artifact.exists():
                         cached_self_artifact.unlink()
+                    cached_self_manifest = local_stage2_cache / \
+                        f"{module_name}.layout-manifest"
+                    if cached_self_manifest.exists():
+                        cached_self_manifest.unlink()
                     # Some stage2 seeds appear to use fixed temp file names.
                     # When running modules in parallel, isolate TMPDIR to avoid
                     # cross-process temp collisions that can corrupt LLVM output.

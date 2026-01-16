@@ -2,7 +2,7 @@ import asyncio
 from runtime import runtime_support as runtime
 
 from compiler.build.ast import Block, Decorator, EnumVariant, Expression, FieldDeclaration, ForClause, FunctionSignature, MatchCase, MethodDeclaration, ModelProperty, Parameter, Program, Statement, ImportSpecifier, ExportSpecifier, TypeAnnotation, TypeParameter, WithClause, ElseBranch, SourceSpan
-from compiler.build.string_utils import substring
+from compiler.build.string_utils import substring, char_code
 
 print = runtime.console
 sleep = runtime.sleep
@@ -429,19 +429,8 @@ def emit_tool(state, statement):
     return state_emit_line(current, ".endtool")
 
 def emit_test(state, statement):
-    current = emit_decorators(state, statement.decorators)
-    header = ".test " + quote_string(statement.name)
-    if len(statement.effects) > 0:
-        header = header + " ![" + join_with_separator(statement.effects, ", ") + "]"
-    current = state_emit_line(current, header)
-    current = emit_signature_metadata(
-current,
-FunctionSignature(name=statement.name, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[], name_span=None)
-)
-    current = state_push_indent(current)
-    current = emit_block(current, statement.body)
-    current = state_pop_indent(current)
-    return state_emit_line(current, ".endtest")
+    test_symbol = test_function_symbol(statement.name)
+    return emit_function(state, FunctionSignature(name=test_symbol, is_async=False, parameters=[], return_type=None, effects=statement.effects, type_parameters=[], name_span=statement.name_span), statement.body, statement.decorators)
 
 def emit_model(state, statement):
     current = emit_decorators(state, statement.decorators)
@@ -1104,7 +1093,7 @@ def canonical_type_layouts():
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Decorator", size=16, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="DecoratorArgument", size=56, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="NamedSpecifier", size=8, align=8))
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Statement", size=112, align=8))
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="Statement", size=144, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumField", size=8, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumVariantDefinition", size=8, align=8))
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout(name="EnumType", size=8, align=8))
@@ -1371,9 +1360,52 @@ def collect_entry_points(program):
         if statement.variant == "FunctionDeclaration":
             entries = append_unique(entries, statement.signature.name)
         if statement.variant == "TestDeclaration":
-            entries = append_unique(entries, "test:" + statement.name)
+            entries = append_unique(entries, test_function_symbol(statement.name))
         index += 1
     return entries
+
+def is_test_symbol_char(ch):
+    if len(ch) == 0:
+        return False
+    if ch == "_":
+        return True
+    code = char_code(ch)
+    lower_a = char_code("a")
+    lower_z = char_code("z")
+    if code >= lower_a  and  code <= lower_z:
+        return True
+    upper_a = char_code("A")
+    upper_z = char_code("Z")
+    if code >= upper_a  and  code <= upper_z:
+        return True
+    zero = char_code("0")
+    nine = char_code("9")
+    if code >= zero  and  code <= nine:
+        return True
+    return False
+
+def sanitize_test_name_for_symbol(name):
+    if len(name) == 0:
+        return "unnamed"
+    out = ""
+    index = 0
+    while True:
+        if index >= len(name):
+            break
+        ch = name[index]
+        if is_test_symbol_char(ch):
+            out = out + ch
+        index += 1
+    if len(out) == 0:
+        return "unnamed"
+    first = out[0]
+    code = char_code(first)
+    if code >= char_code("0")  and  code <= char_code("9"):
+        return "_" + out
+    return out
+
+def test_function_symbol(test_name):
+    return "test:" + sanitize_test_name_for_symbol(test_name)
 
 def count_exported_symbols(program):
     count = 0
