@@ -252,6 +252,38 @@ jobs:
           mkdir -p build/sailfin
           touch build/sailfin/.trace_test_runner
 
+      - name: Preflight single unit test (macOS)
+        if: runner.os == 'macOS'
+        id: mac_test_preflight
+        continue-on-error: true
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          build/native/sailfin-stage2 test compiler/tests/unit/cli_version_test.sfn
+
+      - name: ASAN repro on preflight failure (macOS)
+        if: runner.os == 'macOS' && steps.mac_test_preflight.outcome != 'success'
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          echo "[ci][warn] preflight unit test crashed; rebuilding stage2 with ASAN for a better stack trace"
+          conda run -n sailfin python scripts/selfhost_native_stage2.py \
+            --asan \
+            --seed build/native/sailfin-stage2 \
+            --no-prefer-asan-seed \
+            --out build/native/sailfin-stage2-asan \
+            --jobs 1 \
+            --import-context-jobs 1 \
+            --max-attempts 3 \
+            --seed-timeout 300 \
+            --max-total-seconds 1800
+          mkdir -p build/native/obj/runtime
+          if [ -f build/selfhost/stage2/obj/runtime/prelude.o ]; then
+            cp -f build/selfhost/stage2/obj/runtime/prelude.o build/native/obj/runtime/prelude.o
+          fi
+          export ASAN_OPTIONS="abort_on_error=1:detect_leaks=0"
+          build/native/sailfin-stage2-asan test compiler/tests/unit/cli_version_test.sfn
+
       - name: Self-host fixed-point rebuild (linux-x86_64)
         if: matrix.package_label == 'linux-x86_64'
         shell: bash -l {0}
@@ -260,7 +292,7 @@ jobs:
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2 \
             --out build/native/sailfin-stage2-selfhost1 \
-            --jobs 2 \
+            --jobs 1 \
             --import-context-jobs 1 \
             --max-attempts 5 \
             --seed-timeout 120 \
@@ -268,7 +300,7 @@ jobs:
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2-selfhost1 \
             --out build/native/sailfin-stage2-selfhost2 \
-            --jobs 2 \
+            --jobs 1 \
             --import-context-jobs 1 \
             --max-attempts 3
           ls -lh build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2
