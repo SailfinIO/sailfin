@@ -2359,6 +2359,12 @@ def main(argv: list[str]) -> int:
                     # --- Clang compile gate (always) ---
                     t1 = time.perf_counter()
 
+                    # IMPORTANT: `clang_flags` is defined in the outer `main()` scope.
+                    # Keep per-module mutable flags in a local variable so retries
+                    # (e.g. adding opaque-pointer mode) don't create Python's
+                    # "assigned before reference" scoping errors.
+                    clang_flags_local = list(clang_flags)
+
                     def _run_clang_compile(flags: list[str]) -> subprocess.CompletedProcess[str]:
                         return subprocess.run(
                             [clang, *flags, "-fPIC", "-c",
@@ -2370,15 +2376,15 @@ def main(argv: list[str]) -> int:
                             timeout=_cap_timeout(clang_validate_timeout),
                         )
 
-                    clang_proc = _run_clang_compile(clang_flags)
+                    clang_proc = _run_clang_compile(clang_flags_local)
                     if clang_proc.returncode != 0:
                         maybe_flags, did_patch = _maybe_add_opaque_pointers_flag(
-                            clang_flags=clang_flags,
+                            clang_flags=clang_flags_local,
                             clang_stderr=clang_proc.stderr or "",
                         )
                         if did_patch:
-                            clang_flags = maybe_flags
-                            clang_proc = _run_clang_compile(clang_flags)
+                            clang_flags_local = maybe_flags
+                            clang_proc = _run_clang_compile(clang_flags_local)
                     clang_elapsed = time.perf_counter() - t1
                     clang_stderr_path.write_text(
                         clang_proc.stderr or "", encoding="utf-8")
