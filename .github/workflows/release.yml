@@ -18,6 +18,8 @@ jobs:
   build-native:
     name: Build native (${{ matrix.package_label }})
     runs-on: ${{ matrix.os }}
+    env:
+      FORCE_STAGE1_SEED: "0"
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +59,17 @@ jobs:
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Decide seed strategy
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.rel.outputs.version }}"
+          if [[ "$VERSION" == *alpha* ]]; then
+            echo "FORCE_STAGE1_SEED=1" >> "$GITHUB_ENV"
+          else
+            echo "FORCE_STAGE1_SEED=0" >> "$GITHUB_ENV"
+          fi
 
       - name: Set up Miniconda
         uses: conda-incubator/setup-miniconda@v3
@@ -106,6 +119,7 @@ jobs:
 
       - name: Try self-host rebuild Stage2 from released seed
         id: selfhost_seed_try
+        if: env.FORCE_STAGE1_SEED != '1'
         continue-on-error: true
         shell: bash -l {0}
         run: |
@@ -120,11 +134,11 @@ jobs:
             --max-total-seconds 3600
 
       - name: Stage1/bootstrap fallback seed (alpha escape hatch)
-        if: steps.selfhost_seed_try.outcome != 'success'
+        if: env.FORCE_STAGE1_SEED == '1' || steps.selfhost_seed_try.outcome != 'success'
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          echo "[release][warn] previous released seed could not selfhost this tag; falling back to stage1 bootstrap to mint a temporary seed"
+          echo "[release][warn] using stage1 bootstrap to mint a temporary seed"
           if [ "${RUNNER_OS}" = "Linux" ]; then
             export CLANG_LL_FLAGS="-mllvm -opaque-pointers"
           fi
@@ -133,7 +147,7 @@ jobs:
           mv build/native/sailfin-stage2 build/native/sailfin-stage2-stage1-seed
 
       - name: Self-host rebuild Stage2 from fallback seed
-        if: steps.selfhost_seed_try.outcome != 'success'
+        if: env.FORCE_STAGE1_SEED == '1' || steps.selfhost_seed_try.outcome != 'success'
         shell: bash -l {0}
         run: |
           set -euo pipefail
