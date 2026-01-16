@@ -9,7 +9,7 @@ CLANG ?= clang
 # Extra flags used when compiling LLVM IR (.ll) with clang.
 # Some distros ship clang builds that default to typed pointers, but stage2 emits
 # opaque-pointer IR using the `ptr` keyword. In that case, pass:
-#   CLANG_LL_FLAGS=-Xclang -opaque-pointers
+#   CLANG_LL_FLAGS=-mllvm -opaque-pointers
 CLANG_LL_FLAGS ?=
 
 # Parallelism for compiling many Stage2 AOT LLVM modules.

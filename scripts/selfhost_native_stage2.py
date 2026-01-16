@@ -178,7 +178,7 @@ def _maybe_add_opaque_pointers_flag(
         if flag == "-Xclang" and idx + 1 < len(clang_flags) and clang_flags[idx + 1] == "-opaque-pointers":
             return clang_flags, False
 
-    return [*clang_flags, "-Xclang", "-opaque-pointers"], True
+    return [*clang_flags, "-mllvm", "-opaque-pointers"], True
 
 
 _BITCAST_FROM_BYTES_TO_PTR_RE = re.compile(

@@ -109,16 +109,11 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          OPT="-O2"
-          if [ "${RUNNER_OS}" = "Linux" ]; then
-            OPT="-O2 -Xclang -opaque-pointers"
-          fi
           rm -f build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }}
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed "${{ steps.seed.outputs.seed_path }}" \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
-            --opt "$OPT" \
             --jobs 2 \
             --max-attempts 10 \
             --max-total-seconds 3600
@@ -130,7 +125,7 @@ jobs:
           set -euo pipefail
           echo "[release][warn] previous released seed could not selfhost this tag; falling back to stage1 bootstrap to mint a temporary seed"
           if [ "${RUNNER_OS}" = "Linux" ]; then
-            export CLANG_LL_FLAGS="-Xclang -opaque-pointers"
+            export CLANG_LL_FLAGS="-mllvm -opaque-pointers"
           fi
           CONDA=$(which conda) make compile
           rm -f build/native/sailfin-stage2-stage1-seed
@@ -141,16 +136,11 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          OPT="-O2"
-          if [ "${RUNNER_OS}" = "Linux" ]; then
-            OPT="-O2 -Xclang -opaque-pointers"
-          fi
           rm -f build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }}
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2-stage1-seed \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
-            --opt "$OPT" \
             --jobs 2 \
             --max-attempts 10 \
             --max-total-seconds 3600
