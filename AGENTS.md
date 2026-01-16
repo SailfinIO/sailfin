@@ -2,7 +2,6 @@
 
 ## Project Structure & Module Organization
 
-- `Legacy/stage0/` archives the historical Python bootstrap compiler.
 - `compiler/src/` carries the Sailfin-native front end; stage2 has been the primary compiler for many iterations, with stage1/bootstrapping kept for now but slated for removal at 1.0.
 - `docs/` now has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), roadmap (`docs/roadmap.md`), bootstrap spec (`docs/spec.md`), grammar, and keyword references. Update the status doc first whenever behaviour changes, then adjust the spec/roadmap accordingly.
 - `docs/proposals/` holds future-facing designs (e.g., package management); leave implementation notes there until the status page marks them shipped.

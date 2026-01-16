@@ -61,8 +61,7 @@ pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
 
 Sailfin is under active design and bootstrapping. The native stage2 compiler is
 the primary toolchain today; the Stage1 bootstrap compiler remains in the build
-pipeline for now, while the Python bootstrap lives under `Legacy/stage0` for
-archaeology and regression hunting. The runtime currently ships as C and is
+pipeline for now. The runtime currently ships as C and is
 planned to move into Sailfin for the 1.0 release.
 
 - `docs/status.md` — source of truth for what the bootstrap compiler enforces
@@ -99,8 +98,7 @@ Notes:
 Sailfin targets a capsule-based architecture with fleets coordinating compiler,
 runtime, and tooling capsules. The current repository hosts the stage2 native
 compiler (`build/native`) and the stage1 bootstrap pipeline (`compiler/src` +
-`compiler/build`) alongside the Sailfin runtime (`runtime/`). The historical
-Python bootstrap is archived in `Legacy/stage0`. Future capsule manifests and
+`compiler/build`) alongside the Sailfin runtime (`runtime/`). Future capsule manifests and
 fleet layout are tracked in `docs/roadmap.md`.
 
 ## Roadmap Highlights
