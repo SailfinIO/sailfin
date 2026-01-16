@@ -175,7 +175,6 @@ jobs:
             --jobs 2 \
             --import-context-jobs 1 \
             --max-attempts ${{ matrix.max_attempts }} \
-            --skip-clang-validate \
             --max-total-seconds 1800
 
       - name: Stage1/bootstrap fallback seed (alpha only)
@@ -209,7 +208,6 @@ jobs:
             --jobs 2 \
             --import-context-jobs 1 \
             --max-attempts ${{ matrix.max_attempts }} \
-            --skip-clang-validate \
             --max-total-seconds 1800
 
       - name: Fail if no build path succeeded
@@ -266,15 +264,13 @@ jobs:
             --import-context-jobs 1 \
             --max-attempts 5 \
             --seed-timeout 120 \
-            --max-total-seconds 1200 \
-            --skip-clang-validate
+            --max-total-seconds 1200
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2-selfhost1 \
             --out build/native/sailfin-stage2-selfhost2 \
             --jobs 2 \
             --import-context-jobs 1 \
-            --max-attempts 3 \
-            --skip-clang-validate
+            --max-attempts 3
           ls -lh build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2
           (file build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 || true)
           build/native/sailfin-stage2-selfhost1 version || true
