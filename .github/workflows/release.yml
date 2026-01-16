@@ -103,13 +103,37 @@ jobs:
           ls -lh "${{ steps.seed.outputs.seed_path }}"
           "${{ steps.seed.outputs.seed_path }}" version
 
-      - name: Self-host rebuild Stage2 from released seed
-        id: selfhost_seed
+      - name: Try self-host rebuild Stage2 from released seed
+        id: selfhost_seed_try
+        continue-on-error: true
         shell: bash -l {0}
         run: |
           set -euo pipefail
+          rm -f build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }}
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed "${{ steps.seed.outputs.seed_path }}" \
+            --no-prefer-asan-seed \
+            --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
+            --jobs 2 \
+            --max-attempts 10 \
+            --max-total-seconds 3600
+
+      - name: Stage1/bootstrap fallback seed (alpha escape hatch)
+        if: steps.selfhost_seed_try.outcome != 'success'
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          echo "[release][warn] previous released seed could not selfhost this tag; falling back to stage1 bootstrap to mint a temporary seed"
+          CONDA=$(which conda) make compile
+
+      - name: Self-host rebuild Stage2 from fallback seed
+        if: steps.selfhost_seed_try.outcome != 'success'
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          rm -f build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }}
+          conda run -n sailfin python scripts/selfhost_native_stage2.py \
+            --seed build/native/sailfin-stage2 \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
             --jobs 2 \

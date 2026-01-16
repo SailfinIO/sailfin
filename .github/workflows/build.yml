@@ -159,10 +159,13 @@ jobs:
           ls -lh "$SEED_STAGE2"
           "$SEED_STAGE2" version
 
-      - name: Self-host rebuild Stage2 from released seed
+      - name: Try self-host rebuild Stage2 from released seed
+        id: selfhost_seed_try
+        continue-on-error: true
         shell: bash -l {0}
         run: |
           set -euo pipefail
+          rm -f build/native/sailfin-stage2
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed "$SEED_STAGE2" \
             --no-prefer-asan-seed \
@@ -172,6 +175,44 @@ jobs:
             --max-attempts ${{ matrix.max_attempts }} \
             --skip-clang-validate \
             --max-total-seconds 1800
+
+      - name: Stage1/bootstrap fallback seed (alpha only)
+        if: >-
+          steps.selfhost_seed_try.outcome != 'success' &&
+          (github.ref == 'refs/heads/alpha' || github.base_ref == 'alpha')
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          echo "[ci][warn] released seed could not selfhost current sources; falling back to stage1 bootstrap to mint a temporary seed (alpha escape hatch)"
+          CONDA=$(which conda) make compile
+
+      - name: Self-host rebuild Stage2 from fallback seed (alpha only)
+        if: >-
+          steps.selfhost_seed_try.outcome != 'success' &&
+          (github.ref == 'refs/heads/alpha' || github.base_ref == 'alpha')
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          rm -f build/native/sailfin-stage2
+          conda run -n sailfin python scripts/selfhost_native_stage2.py \
+            --seed build/native/sailfin-stage2 \
+            --no-prefer-asan-seed \
+            --out build/native/sailfin-stage2 \
+            --jobs 2 \
+            --import-context-jobs 1 \
+            --max-attempts ${{ matrix.max_attempts }} \
+            --skip-clang-validate \
+            --max-total-seconds 1800
+
+      - name: Fail if no build path succeeded
+        if: >-
+          steps.selfhost_seed_try.outcome != 'success' &&
+          !(github.ref == 'refs/heads/alpha' || github.base_ref == 'alpha')
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          echo "released seed failed to selfhost, and stage1 fallback is disabled on this branch" >&2
+          exit 1
 
       - name: Report selfhosted compiler metadata
         shell: bash -l {0}
