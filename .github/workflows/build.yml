@@ -165,11 +165,16 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
+          OPT="-O2"
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            OPT="-O2 -Xclang -opaque-pointers"
+          fi
           rm -f build/native/sailfin-stage2
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed "$SEED_STAGE2" \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2 \
+            --opt "$OPT" \
             --jobs 2 \
             --import-context-jobs 1 \
             --max-attempts ${{ matrix.max_attempts }} \
@@ -184,7 +189,13 @@ jobs:
         run: |
           set -euo pipefail
           echo "[ci][warn] released seed could not selfhost current sources; falling back to stage1 bootstrap to mint a temporary seed (alpha escape hatch)"
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            export CLANG_LL_FLAGS="-Xclang -opaque-pointers"
+          fi
           CONDA=$(which conda) make compile
+          # Preserve the stage1-built binary as a seed input for the selfhost step.
+          rm -f build/native/sailfin-stage2-stage1-seed
+          mv build/native/sailfin-stage2 build/native/sailfin-stage2-stage1-seed
 
       - name: Self-host rebuild Stage2 from fallback seed (alpha only)
         if: >-
@@ -193,11 +204,16 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
+          OPT="-O2"
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            OPT="-O2 -Xclang -opaque-pointers"
+          fi
           rm -f build/native/sailfin-stage2
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --seed build/native/sailfin-stage2 \
+            --seed build/native/sailfin-stage2-stage1-seed \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2 \
+            --opt "$OPT" \
             --jobs 2 \
             --import-context-jobs 1 \
             --max-attempts ${{ matrix.max_attempts }} \
@@ -227,9 +243,11 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
+          OPT="-O2 -Xclang -opaque-pointers"
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2 \
             --out build/native/sailfin-stage2-selfhost1 \
+            --opt "$OPT" \
             --jobs 2 \
             --import-context-jobs 1 \
             --max-attempts 5 \
@@ -239,6 +257,7 @@ jobs:
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2-selfhost1 \
             --out build/native/sailfin-stage2-selfhost2 \
+            --opt "$OPT" \
             --jobs 2 \
             --import-context-jobs 1 \
             --max-attempts 3 \

@@ -57,6 +57,12 @@ _LLVM_NAMED_TYPE_DEF_RE = re.compile(
 )
 
 
+_OPAQUE_PTR_CLANG_ERR_RE = re.compile(
+    r"ptr type is only supported in -opaque-pointers mode",
+    re.IGNORECASE,
+)
+
+
 def _collect_concrete_named_type_defs(llvm_ir: str) -> dict[str, str]:
     """Return concrete named type definitions found in the LLVM module.
 
@@ -147,6 +153,32 @@ def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple
         patched_lines.append(line)
 
     return "\n".join(patched_lines) + "\n", changed
+
+
+def _maybe_add_opaque_pointers_flag(
+    *,
+    clang_flags: list[str],
+    clang_stderr: str,
+) -> tuple[list[str], bool]:
+    """Return updated clang flags if stderr indicates opaque pointers are required."""
+
+    if not clang_stderr:
+        return clang_flags, False
+
+    # If clang doesn't understand the `ptr` keyword in LLVM IR, it will emit a
+    # diagnostic like:
+    #   "ptr type is only supported in -opaque-pointers mode"
+    if _OPAQUE_PTR_CLANG_ERR_RE.search(clang_stderr) is None:
+        return clang_flags, False
+
+    # Avoid duplicating the flag.
+    for idx, flag in enumerate(clang_flags):
+        if flag == "-opaque-pointers":
+            return clang_flags, False
+        if flag == "-Xclang" and idx + 1 < len(clang_flags) and clang_flags[idx + 1] == "-opaque-pointers":
+            return clang_flags, False
+
+    return [*clang_flags, "-Xclang", "-opaque-pointers"], True
 
 
 _BITCAST_FROM_BYTES_TO_PTR_RE = re.compile(
@@ -2326,15 +2358,27 @@ def main(argv: list[str]) -> int:
 
                     # --- Clang compile gate (always) ---
                     t1 = time.perf_counter()
-                    clang_proc = subprocess.run(
-                        [clang, *clang_flags, "-fPIC", "-c",
-                            str(cleaned_attempt_path), "-o", str(validate_obj)],
-                        cwd=str(REPO_ROOT),
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        timeout=_cap_timeout(clang_validate_timeout),
-                    )
+
+                    def _run_clang_compile(flags: list[str]) -> subprocess.CompletedProcess[str]:
+                        return subprocess.run(
+                            [clang, *flags, "-fPIC", "-c",
+                                str(cleaned_attempt_path), "-o", str(validate_obj)],
+                            cwd=str(REPO_ROOT),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=_cap_timeout(clang_validate_timeout),
+                        )
+
+                    clang_proc = _run_clang_compile(clang_flags)
+                    if clang_proc.returncode != 0:
+                        maybe_flags, did_patch = _maybe_add_opaque_pointers_flag(
+                            clang_flags=clang_flags,
+                            clang_stderr=clang_proc.stderr or "",
+                        )
+                        if did_patch:
+                            clang_flags = maybe_flags
+                            clang_proc = _run_clang_compile(clang_flags)
                     clang_elapsed = time.perf_counter() - t1
                     clang_stderr_path.write_text(
                         clang_proc.stderr or "", encoding="utf-8")
