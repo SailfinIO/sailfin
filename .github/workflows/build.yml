@@ -266,20 +266,13 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          echo "[ci][warn] preflight unit test crashed; rebuilding stage2 with ASAN for a better stack trace"
-          conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --asan \
-            --seed build/native/sailfin-stage2 \
-            --no-prefer-asan-seed \
-            --out build/native/sailfin-stage2-asan \
-            --jobs 1 \
-            --import-context-jobs 1 \
-            --max-attempts 3 \
-            --seed-timeout 300 \
-            --max-total-seconds 1800
+          echo "[ci][warn] preflight unit test crashed; building a Stage1-based ASAN compiler to get a stack trace"
+          CONDA=$(which conda) make native-stage2-asan
+          # Ensure the runtime prelude object exists where the test runner expects it.
+          # (native-stage2-asan builds build/native/asan-obj, including runtime/prelude.o under build/native/asan-obj/runtime/prelude.o)
           mkdir -p build/native/obj/runtime
-          if [ -f build/selfhost/stage2/obj/runtime/prelude.o ]; then
-            cp -f build/selfhost/stage2/obj/runtime/prelude.o build/native/obj/runtime/prelude.o
+          if [ -f build/native/asan-obj/runtime/prelude.o ]; then
+            cp -f build/native/asan-obj/runtime/prelude.o build/native/obj/runtime/prelude.o
           fi
           export ASAN_OPTIONS="abort_on_error=1:detect_leaks=0"
           build/native/sailfin-stage2-asan test compiler/tests/unit/cli_version_test.sfn
@@ -307,7 +300,13 @@ jobs:
           (file build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 || true)
           build/native/sailfin-stage2-selfhost1 version || true
           build/native/sailfin-stage2-selfhost2 version || true
-          cmp -s build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2
+          echo "[ci] fixed-point sha256:" 
+          (sha256sum build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 2>/dev/null || shasum -a 256 build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2)
+          if ! cmp -s build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2; then
+            echo "[ci][error] fixed-point rebuild mismatch (binaries differ)" >&2
+            (cmp -l build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 | head -n 20 || true)
+            exit 1
+          fi
 
       - name: Run Sailfin-native tests (selfhosted compiler)
         shell: bash -l {0}
