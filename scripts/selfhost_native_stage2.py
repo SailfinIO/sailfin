@@ -1396,8 +1396,7 @@ def _prepare_seed_import_context(
     tmp_root = stage2_cache / ".tmp"
     tmp_root.mkdir(parents=True, exist_ok=True)
 
-    def _write_seed_stamp() -> None:
-        stamp_path = stage2_cache / ".seed_stamp"
+    def _seed_stamp_text() -> str:
         try:
             seed_stat = seed_bin.stat()
         except OSError:
@@ -1416,7 +1415,41 @@ def _prepare_seed_import_context(
             f"fallback_seed_mtime={fallback_stat.st_mtime if fallback_stat is not None else ''}",
             f"fallback_seed_size={fallback_stat.st_size if fallback_stat is not None else ''}",
         ]
-        stamp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        return "\n".join(lines) + "\n"
+
+    def _ensure_stage2_cache_matches_seed() -> None:
+        """Ensure build/stage2 cache does not mix artifacts across seeds.
+
+        Mixing import-context artifacts produced by a different seed can cause
+        the current seed to crash while running `emit native`, especially when
+        the cache is reused across multiple selfhost passes in the same work dir.
+        """
+
+        stamp_path = stage2_cache / ".seed_stamp"
+        expected = _seed_stamp_text()
+        try:
+            current = stamp_path.read_text(
+                encoding="utf-8", errors="replace") if stamp_path.exists() else ""
+        except OSError:
+            current = ""
+
+        if current != expected:
+            for child in stage2_cache.iterdir():
+                if child.name == ".tmp":
+                    continue
+                try:
+                    if child.is_dir():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+                except OSError:
+                    pass
+
+        try:
+            stamp_path.write_text(expected, encoding="utf-8")
+        except OSError:
+            pass
 
     def _write_layout_manifest_from_native_text(*, native_text: str, out_path: pathlib.Path) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1481,8 +1514,8 @@ def _prepare_seed_import_context(
             )
             _emit_with(fallback_seed_bin)
 
-    # Stamp the cache so per-module isolated cwds can detect when they need a refresh.
-    _write_seed_stamp()
+    # Ensure we don't reuse stale artifacts across different seeds.
+    _ensure_stage2_cache_matches_seed()
 
     if jobs <= 1:
         for idx, p in enumerate(sources):
