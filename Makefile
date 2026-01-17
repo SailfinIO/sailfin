@@ -256,7 +256,7 @@ _build-native-stage2:
 	      if [ $$rc -ne 0 ]; then \
 	        echo "[_build-native-stage2][error] module $$m failed (rc=$$rc)" >&2; \
 	        exit $$rc; \
-	      fi'
+	      fi'; \
 	fi
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -o $(NATIVE_OUT) \
 		$(NATIVE_OBJ_DIR)/sailfin_runtime.o \
