@@ -18,8 +18,6 @@ jobs:
   build-native:
     name: Build native (${{ matrix.package_label }})
     runs-on: ${{ matrix.os }}
-    env:
-      FORCE_STAGE1_SEED: "0"
     strategy:
       fail-fast: false
       matrix:
@@ -59,17 +57,6 @@ jobs:
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Decide seed strategy
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.rel.outputs.version }}"
-          if [[ "$VERSION" == *alpha* ]]; then
-            echo "FORCE_STAGE1_SEED=1" >> "$GITHUB_ENV"
-          else
-            echo "FORCE_STAGE1_SEED=0" >> "$GITHUB_ENV"
-          fi
 
       - name: Set up Miniconda
         uses: conda-incubator/setup-miniconda@v3
@@ -147,39 +134,12 @@ jobs:
 
       - name: Try self-host rebuild Stage2 from released seed
         id: selfhost_seed_try
-        if: env.FORCE_STAGE1_SEED != '1'
-        continue-on-error: true
         shell: bash -l {0}
         run: |
           set -euo pipefail
           rm -f build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }}
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed "${{ steps.seed.outputs.seed_path }}" \
-            --no-prefer-asan-seed \
-            --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
-            --clang "${CLANG:-clang}" \
-            --jobs 2 \
-            --max-attempts 10 \
-            --max-total-seconds 3600
-
-      - name: Stage1/bootstrap fallback seed (alpha escape hatch)
-        if: env.FORCE_STAGE1_SEED == '1' || steps.selfhost_seed_try.outcome != 'success'
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          echo "[release][warn] using stage1 bootstrap to mint a temporary seed"
-          CONDA=$(which conda) make compile NATIVE_JOBS=1 NATIVE_OPT=-O1 NATIVE_LL_TIMEOUT_SECONDS=2400 CLANG="${CLANG:-clang}" CLANG_LL_FLAGS="${CLANG_LL_FLAGS:-}"
-          rm -f build/native/sailfin-stage2-stage1-seed
-          mv build/native/sailfin-stage2 build/native/sailfin-stage2-stage1-seed
-
-      - name: Self-host rebuild Stage2 from fallback seed
-        if: env.FORCE_STAGE1_SEED == '1' || steps.selfhost_seed_try.outcome != 'success'
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          rm -f build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }}
-          conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --seed build/native/sailfin-stage2-stage1-seed \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
             --clang "${CLANG:-clang}" \

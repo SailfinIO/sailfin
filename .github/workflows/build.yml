@@ -9,111 +9,13 @@ on:
       - alpha
   pull_request:
   workflow_dispatch:
-    inputs:
-      run_stage1_bootstrap:
-        description: "Also run Stage1/bootstrap pipeline (legacy safety net). Default: false"
-        required: false
-        type: boolean
-        default: false
+    inputs: {}
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  stage2:
-    name: Stage2 (${{ matrix.package_label }})
-    # Legacy safety net: this job runs the Stage1->Stage2 bootstrap pipeline.
-    # The project goal is full self-hosting, so keep this opt-in only.
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.run_stage1_bootstrap == 'true'
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            package_label: macos-arm64
-          - os: ubuntu-24.04
-            package_label: linux-x86_64
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Miniconda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          activate-environment: sailfin
-          environment-file: environment.yml
-          auto-update-conda: false
-          use-mamba: true
-
-      - name: Install clang (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 jq
-          echo "CLANG=clang-18" >> "$GITHUB_ENV"
-          echo "LLVM_LINK=llvm-link-18" >> "$GITHUB_ENV"
-
-      - name: Preflight llvm-link opaque pointers (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          llvm_link="${LLVM_LINK:-llvm-link}"
-          echo "[ci] $($llvm_link --version | head -n 1)"
-          printf '%s\n' 'define ptr @id(ptr %p) { ret ptr %p }' > /tmp/sailfin-opaque.ll
-          if "$llvm_link" /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
-            echo "LLVM_LINK_FLAGS=" >> "$GITHUB_ENV"
-          else
-            if grep -qi "ptr type is only supported in -opaque-pointers mode" /tmp/sailfin-opaque.err; then
-              if "$llvm_link" -opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
-                echo "LLVM_LINK_FLAGS=-opaque-pointers" >> "$GITHUB_ENV"
-              else
-                echo "[ci][error] llvm-link requires opaque pointers but -opaque-pointers failed" >&2
-                cat /tmp/sailfin-opaque.err >&2 || true
-                exit 1
-              fi
-            else
-              echo "[ci][error] llvm-link failed on ptr IR" >&2
-              cat /tmp/sailfin-opaque.err >&2 || true
-              exit 1
-            fi
-          fi
-
-      - name: Install jq + LLVM tools (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install jq llvm
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
-
-      - name: Build native Stage2 compiler
-        shell: bash -l {0}
-        run: |
-          CONDA=$(which conda) make compile
-
-      - name: Run Sailfin-native tests
-        shell: bash -l {0}
-        run: |
-          CONDA=$(which conda) make test
-
-      - name: Package Stage2 artifacts
-        run: conda run -n sailfin python tools/package_stage2.py --skip-build --target ${{ matrix.package_label }} --out dist
-
-      - name: Upload Stage2 artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: stage2-stage1-${{ matrix.package_label }}
-          path: |
-            dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz
-            dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz.sha256
-            dist/sailfin-stage2-${{ matrix.package_label }}-*.manifest.json
-          if-no-files-found: error
-
   selfhost-from-release-seed:
     name: Selfhost From Release Seed (${{ matrix.package_label }})
     if: >-
@@ -125,11 +27,6 @@ jobs:
       )
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
-    env:
-      # The released seed can successfully selfhost current sources on alpha
-      # while still producing an unstable compiler (segfaults in tests / emit-native).
-      # Until a clean seed is published, force the stage1-bootstrap seed path on alpha.
-      FORCE_STAGE1_SEED: ${{ (github.ref == 'refs/heads/alpha' || github.base_ref == 'alpha') && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
@@ -206,8 +103,9 @@ jobs:
           # Optional: set repo variables to pin or exclude a seed during incidents.
           # - SELFHOST_SEED_VERSION: e.g. 0.1.1-alpha.114 (or 'latest')
           # - SELFHOST_SEED_EXCLUDE_TAG: e.g. v0.1.1-alpha.999
-          VERSION: ${{ vars.SELFHOST_SEED_VERSION || 'latest' }}
-          EXCLUDE_TAG: ${{ vars.SELFHOST_SEED_EXCLUDE_TAG || '' }}
+          # Pinned while we remove stage1/bootstrap and harden selfhost-only CI.
+          VERSION: 0.1.1-alpha.115
+          EXCLUDE_TAG: ""
           GLOBAL_BIN_DIR: ${{ github.workspace }}/build/seed/bin
           INSTALL_BASE: ${{ github.workspace }}/build/seed/versions
         run: |
@@ -224,8 +122,6 @@ jobs:
 
       - name: Try self-host rebuild Stage2 from released seed
         id: selfhost_seed_try
-        if: env.FORCE_STAGE1_SEED != '1'
-        continue-on-error: true
         shell: bash -l {0}
         run: |
           set -euo pipefail
@@ -239,55 +135,6 @@ jobs:
             --import-context-jobs 1 \
             --max-attempts ${{ matrix.max_attempts }} \
             --max-total-seconds 1800
-
-      - name: Stage1/bootstrap fallback seed (alpha only)
-        if: >-
-          (env.FORCE_STAGE1_SEED == '1') ||
-          (
-            steps.selfhost_seed_try.outcome != 'success' &&
-            (github.ref == 'refs/heads/alpha' || github.base_ref == 'alpha')
-          )
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          echo "[ci][warn] using stage1 bootstrap to mint a temporary seed (alpha escape hatch)"
-          # Keep parallelism conservative on CI runners. This is a *temporary* seed,
-          # so prefer faster compilation over peak optimization.
-          CONDA=$(which conda) make compile NATIVE_JOBS=1 NATIVE_OPT=-O1 NATIVE_LL_TIMEOUT_SECONDS=2400 CLANG="${CLANG:-clang}" CLANG_LL_FLAGS="${CLANG_LL_FLAGS:-}"
-          # Preserve the stage1-built binary as a seed input for the selfhost step.
-          rm -f build/native/sailfin-stage2-stage1-seed
-          mv build/native/sailfin-stage2 build/native/sailfin-stage2-stage1-seed
-
-      - name: Self-host rebuild Stage2 from fallback seed (alpha only)
-        if: >-
-          (env.FORCE_STAGE1_SEED == '1') ||
-          (
-            steps.selfhost_seed_try.outcome != 'success' &&
-            (github.ref == 'refs/heads/alpha' || github.base_ref == 'alpha')
-          )
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          rm -f build/native/sailfin-stage2
-          conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --seed build/native/sailfin-stage2-stage1-seed \
-            --no-prefer-asan-seed \
-            --out build/native/sailfin-stage2 \
-            --clang "${CLANG:-clang}" \
-            --jobs 2 \
-            --import-context-jobs 1 \
-            --max-attempts ${{ matrix.max_attempts }} \
-            --max-total-seconds 1800
-
-      - name: Fail if no build path succeeded
-        if: >-
-          steps.selfhost_seed_try.outcome != 'success' &&
-          !(github.ref == 'refs/heads/alpha' || github.base_ref == 'alpha')
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          echo "released seed failed to selfhost, and stage1 fallback is disabled on this branch" >&2
-          exit 1
 
       - name: Report selfhosted compiler metadata
         shell: bash -l {0}
@@ -330,36 +177,8 @@ jobs:
           set -euo pipefail
           build/native/sailfin-stage2 test compiler/tests/unit/cli_version_test.sfn
 
-      - name: ASAN repro on preflight failure (macOS)
-        if: runner.os == 'macOS' && steps.mac_test_preflight.outcome != 'success'
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          echo "[ci][warn] preflight unit test crashed; building a Stage1-based ASAN compiler to get a stack trace"
-          CONDA=$(which conda) make native-stage2-asan
-          # Ensure the runtime prelude object exists where the test runner expects it.
-          # (native-stage2-asan builds build/native/asan-obj, including runtime/prelude.o under build/native/asan-obj/runtime/prelude.o)
-          mkdir -p build/native/obj/runtime
-          if [ -f build/native/asan-obj/runtime/prelude.o ]; then
-            cp -f build/native/asan-obj/runtime/prelude.o build/native/obj/runtime/prelude.o
-          fi
-          # The test runner links with clang; when using an ASAN-instrumented compiler/runtime,
-          # the final test executable must link the ASAN runtime as well.
-          # Provide a PATH-preferred clang wrapper that forces -fsanitize=address.
-          mkdir -p build/clang-asan-wrapper
-          printf '%s\n' \
-            '#!/usr/bin/env bash' \
-            'set -euo pipefail' \
-            'REAL_CLANG="'"'"'$(xcrun --find clang)'"'"'"' \
-            'exec "$REAL_CLANG" -fsanitize=address "$@"' \
-            > build/clang-asan-wrapper/clang
-          chmod +x build/clang-asan-wrapper/clang
-          export PATH="$PWD/build/clang-asan-wrapper:$PATH"
-          export ASAN_OPTIONS="abort_on_error=1:detect_leaks=0"
-          build/native/sailfin-stage2-asan test compiler/tests/unit/cli_version_test.sfn
-
-      - name: Self-host fixed-point rebuild (linux-x86_64)
-        if: matrix.package_label == 'linux-x86_64'
+      - name: Self-host fixed-point rebuild (linux-x86_64, macos-arm64)
+        if: matrix.package_label == 'linux-x86_64' || matrix.package_label == 'macos-arm64'
         shell: bash -l {0}
         run: |
           set -euo pipefail
@@ -385,10 +204,18 @@ jobs:
           build/native/sailfin-stage2-selfhost2 version || true
           echo "[ci] fixed-point sha256:" 
           (sha256sum build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 2>/dev/null || shasum -a 256 build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2)
-          if ! cmp -s build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2; then
-            echo "[ci][error] fixed-point rebuild mismatch (binaries differ)" >&2
-            (cmp -l build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 | head -n 20 || true)
-            exit 1
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            if ! cmp -s build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2; then
+              echo "[ci][error] fixed-point rebuild mismatch (binaries differ)" >&2
+              (cmp -l build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 | head -n 20 || true)
+              exit 1
+            fi
+          else
+            # macOS binaries (Mach-O) embed a per-link UUID (LC_UUID), so byte-for-byte
+            # equality is not a stable determinism signal. Instead, assert the second
+            # selfhosted compiler can run a minimal unit test.
+            (dwarfdump --uuid build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 || true)
+            build/native/sailfin-stage2-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
 
       - name: Run Sailfin-native tests (selfhosted compiler)
