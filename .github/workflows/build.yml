@@ -144,6 +144,21 @@ jobs:
           (file build/native/sailfin-stage2 || true)
           build/native/sailfin-stage2 version || build/native/sailfin-stage2 --version || true
 
+      - name: Expose build/stage2 import context for tests
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          SRC="build/selfhost/stage2/seed_cwd/build/stage2"
+          if [ ! -d "$SRC" ]; then
+            echo "missing $SRC (selfhost did not stage import artifacts?)" >&2
+            find build/selfhost -maxdepth 5 -type d -name stage2 -print || true
+            exit 1
+          fi
+          rm -rf build/stage2
+          mkdir -p build/stage2
+          cp -a "$SRC/." build/stage2/
+          ls -1 build/stage2 | head -n 20
+
       - name: Expose runtime prelude object for tests
         shell: bash -l {0}
         run: |

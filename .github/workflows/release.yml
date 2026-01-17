@@ -156,6 +156,21 @@ jobs:
           echo "$OUT"
           echo "$OUT" | grep -F "sfn ${VERSION}" >/dev/null
 
+      - name: Expose build/stage2 import context for tests
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          SRC="build/selfhost/stage2/seed_cwd/build/stage2"
+          if [ ! -d "$SRC" ]; then
+            echo "missing $SRC (selfhost did not stage import artifacts?)" >&2
+            find build/selfhost -maxdepth 5 -type d -name stage2 -print || true
+            exit 1
+          fi
+          rm -rf build/stage2
+          mkdir -p build/stage2
+          cp -a "$SRC/." build/stage2/
+          ls -1 build/stage2 | head -n 20
+
       - name: Run Sailfin-native tests (release binary)
         shell: bash -l {0}
         run: |

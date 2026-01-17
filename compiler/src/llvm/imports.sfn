@@ -51,8 +51,8 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         }
         seen = append_string(seen, slug);
 
-        let manifest_path = layout_manifest_path_for_slug(slug);
-        let native_text_path = native_text_path_for_slug(slug);
+        let manifest_path = _resolve_layout_manifest_path_for_slug(slug);
+        let native_text_path = _resolve_native_text_path_for_slug(slug);
 
         let mut manifest_structs -> NativeStruct[] = [];
         let mut manifest_enums -> NativeEnum[] = [];
@@ -233,6 +233,38 @@ fn layout_manifest_path_for_slug(slug -> string) -> string {
 
 fn native_text_path_for_slug(slug -> string) -> string {
     return "build/stage2/" + slug + ".sfn-asm";
+}
+
+fn _selfhost_layout_manifest_path_for_slug(slug -> string) -> string {
+    return "build/selfhost/stage2/seed_cwd/build/stage2/" + slug + ".layout-manifest";
+}
+
+fn _selfhost_native_text_path_for_slug(slug -> string) -> string {
+    return "build/selfhost/stage2/seed_cwd/build/stage2/" + slug + ".sfn-asm";
+}
+
+fn _resolve_layout_manifest_path_for_slug(slug -> string) -> string ![io] {
+    let primary = layout_manifest_path_for_slug(slug);
+    if fs.exists(primary) {
+        return primary;
+    }
+    let fallback = _selfhost_layout_manifest_path_for_slug(slug);
+    if fs.exists(fallback) {
+        return fallback;
+    }
+    return primary;
+}
+
+fn _resolve_native_text_path_for_slug(slug -> string) -> string ![io] {
+    let primary = native_text_path_for_slug(slug);
+    if fs.exists(primary) {
+        return primary;
+    }
+    let fallback = _selfhost_native_text_path_for_slug(slug);
+    if fs.exists(fallback) {
+        return fallback;
+    }
+    return primary;
 }
 
 fn normalize_import_module_path(value -> string) -> string {
