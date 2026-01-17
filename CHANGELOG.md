@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.116 (2026-01-17)
+
+### Bug Fixes
+
+- Selfhost-only CI using seed 0.1.1-alpha.115
+  ([`9ab40e9`](https://github.com/SailfinIO/sailfin/commit/9ab40e9c049ccab4682e2f1703c78a2893548252))
+
+- Testing in self hosting
+  ([`4159a6d`](https://github.com/SailfinIO/sailfin/commit/4159a6ddcef8cc595c48ad8948a17fa71c4c74a1))
+
+
 ## v0.1.1-alpha.115 (2026-01-17)
 
 ### Bug Fixes
