@@ -1,6 +1,114 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.115 (2026-01-17)
+
+### Bug Fixes
+
+- Add test for self-host
+  ([`5d6100f`](https://github.com/SailfinIO/sailfin/commit/5d6100fad0f55cb01e44db9e1e02cba1bf967e8a))
+
+- Add timeouts + progress for native build
+  ([`370fa66`](https://github.com/SailfinIO/sailfin/commit/370fa66881fcfae204c2603b473207a1a4d04958))
+
+- Avoid opaque-pointers flag for runtime IR
+  ([`1dc75c6`](https://github.com/SailfinIO/sailfin/commit/1dc75c6439d72808fdb22cdb5dd4fd137d8ed9a8))
+
+- Ci self hosting
+  ([`b5862c8`](https://github.com/SailfinIO/sailfin/commit/b5862c8ac1af21ea744a41a2392c6048657378bc))
+
+- Compatibility strategy
+  ([`a810156`](https://github.com/SailfinIO/sailfin/commit/a810156349030bbf1cf4428f488ecff59dd6ef2f))
+
+- Eliminate stale import context artifacts
+  ([`9a950f9`](https://github.com/SailfinIO/sailfin/commit/9a950f93733a630f97430ed19eed030d0241802b))
+
+- Import context staging
+  ([`6b5b007`](https://github.com/SailfinIO/sailfin/commit/6b5b0075a0c07619f91b5d37b9707205dc9262b8))
+
+- Import reliability
+  ([`6628928`](https://github.com/SailfinIO/sailfin/commit/66289289b6bbf41f2898c6bc08d432b394713a95))
+
+- Llvm-link opaque pointers retry
+  ([`ef9dbd8`](https://github.com/SailfinIO/sailfin/commit/ef9dbd83129b5528c75beefcbbf1a3b7b2cba885))
+
+- Pass opaque-pointers flag on linux
+  ([`a6e955a`](https://github.com/SailfinIO/sailfin/commit/a6e955ab927abeb91815450bd18d0db07f89c79c))
+
+- Repair Makefile shell continuation
+  ([`3b03cd1`](https://github.com/SailfinIO/sailfin/commit/3b03cd157681ee509b2e004dc24a188575f3b10a))
+
+- Seed
+  ([`07ab814`](https://github.com/SailfinIO/sailfin/commit/07ab814dcbd5977b6a9147eea457c3cc91309799))
+
+- Speed up linux stage1 seed build
+  ([`720575e`](https://github.com/SailfinIO/sailfin/commit/720575e64806afa66ab635f0af61e083bc1fdb1e))
+
+- Stage2 native determinism
+  ([`e340d9c`](https://github.com/SailfinIO/sailfin/commit/e340d9ceba741bbc5a506d7957e14377764466c3))
+
+- Surface failing LLVM module in native build
+  ([`f419121`](https://github.com/SailfinIO/sailfin/commit/f419121b81bc8568fd672e89bd4834259e49f0fe))
+
+- Use clang-15 on ubuntu
+  ([`fb0dbe1`](https://github.com/SailfinIO/sailfin/commit/fb0dbe1fba66aab963c88887fa298ccb84acf1b4))
+
+- Wall time
+  ([`23ba3c4`](https://github.com/SailfinIO/sailfin/commit/23ba3c434b07bc871bcf26d949fbe32170c57150))
+
+- **ci**: Add macOS ASAN repro + stabilize linux fixed-point
+  ([`55edbd5`](https://github.com/SailfinIO/sailfin/commit/55edbd5bc5694abd68596d5bf0ba90352ab604ee))
+
+- **ci**: Avoid aot-prepare-dir in selfhost
+  ([`0047480`](https://github.com/SailfinIO/sailfin/commit/0047480a1446cb0dd29a7f37920d88210aa34e31))
+
+- **ci**: Correct opaque-pointers + opt passing
+  ([`95a06ed`](https://github.com/SailfinIO/sailfin/commit/95a06ed7029343735575880f74d3db44eef0e397))
+
+- **ci**: Ensure llvm-link available for selfhost
+  ([`9b3f3dd`](https://github.com/SailfinIO/sailfin/commit/9b3f3ddbf375cca05fcbde297719db19c1617881))
+
+- **ci**: Make alpha bootstrap escape hatch work
+  ([`ade004d`](https://github.com/SailfinIO/sailfin/commit/ade004df208578c11f089ba29e72d9d7fcc2be93))
+
+- **ci**: Stage1 fallback until seed 115
+  ([`b11a786`](https://github.com/SailfinIO/sailfin/commit/b11a786a813ae2eba4f056f65e12615b147eeabf))
+
+- **selfhost**: Avoid clang_flags scoping crash
+  ([`d05c86e`](https://github.com/SailfinIO/sailfin/commit/d05c86ec22c504196416d95aaa1775168167d742))
+
+- **selfhost**: Clear import-context cache on seed change
+  ([`8b9586a`](https://github.com/SailfinIO/sailfin/commit/8b9586a7f8d6e62d745909a022610f11039cea87))
+
+- **selfhost**: Prelude missing in ci
+  ([`76ea861`](https://github.com/SailfinIO/sailfin/commit/76ea8616dcad0f9f775a4147082ba9da7c5ed24b))
+
+### Continuous Integration
+
+- Drop -opaque-pointers clang flag on llvm18
+  ([`7fbb4e5`](https://github.com/SailfinIO/sailfin/commit/7fbb4e5cebef39241bd511016c62ddd64500ed25))
+
+- Fix llvm-link preflight for llvm18
+  ([`707cc2c`](https://github.com/SailfinIO/sailfin/commit/707cc2c2e215e30e306618f3f220d49d9bd5d754))
+
+- Force stage1 seed on alpha
+  ([`62b7880`](https://github.com/SailfinIO/sailfin/commit/62b788041b9248b197058c59cf31469dc3a0f127))
+
+- Harden selfhost-from-release-seed
+  ([`8a5a834`](https://github.com/SailfinIO/sailfin/commit/8a5a8341c555c9c407385ca8250f1e2c72fbdb81))
+
+- Improve ASAN diagnostics + fixed-point reporting
+  ([`6c41a57`](https://github.com/SailfinIO/sailfin/commit/6c41a57c363f28bb12e95507e97460918abadf36))
+
+- Ubuntu-24.04 llvm18 preflight + force clang
+  ([`df55f3f`](https://github.com/SailfinIO/sailfin/commit/df55f3f9c50f47e8efeb012311f690b2baf84a9f))
+
+### Documentation
+
+- Aot doc removal
+  ([`a34e630`](https://github.com/SailfinIO/sailfin/commit/a34e630048ce62ae9e06b3a8ab00ae432fcfa4a1))
+
+
 ## v0.1.1-alpha.114 (2026-01-13)
 
 ### Bug Fixes
