@@ -77,11 +77,11 @@ def _maybe_add_opaque_pointers_flag_llvm_link(
         return llvm_link_flags, False
 
     # llvm-link uses its own option parsing (not clang -mllvm).
-    # Prefer the long form; fall back to the short form if needed.
-    if "--opaque-pointers" in llvm_link_flags or "-opaque-pointers" in llvm_link_flags:
+    # The diagnostic explicitly names "-opaque-pointers mode", so prefer that.
+    if "-opaque-pointers" in llvm_link_flags or "--opaque-pointers" in llvm_link_flags:
         return llvm_link_flags, False
 
-    return [*llvm_link_flags, "--opaque-pointers"], True
+    return [*llvm_link_flags, "-opaque-pointers"], True
 
 
 def _collect_concrete_named_type_defs(llvm_ir: str) -> dict[str, str]:
@@ -2850,7 +2850,8 @@ def main(argv: list[str]) -> int:
             t0 = time.perf_counter()
             llvm_link_timeout = (
                 _remaining_budget_seconds(
-                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds)
+                    total_start=t_total_start, max_total_seconds=float(
+                        args.max_total_seconds)
                 )
                 if args.max_total_seconds > 0
                 else None
@@ -2859,10 +2860,12 @@ def main(argv: list[str]) -> int:
             llvm_link_inputs = [str(p) for p in ll_paths_for_link]
 
             # llvm-link (like clang) may require opaque-pointers mode to parse `ptr`.
-            # Retry with `--opaque-pointers` when it emits that diagnostic.
+            # Retry with the opaque-pointers flag when it emits that diagnostic.
             attempted_fallback = False
+            attempted_alt_spelling = False
             while True:
-                cmd = [llvm_link, *llvm_link_flags, "-o", str(linked_bc), *llvm_link_inputs]
+                cmd = [llvm_link, *llvm_link_flags, "-o",
+                       str(linked_bc), *llvm_link_inputs]
                 rc, stderr = _run_capture_stderr(
                     cmd,
                     cwd=REPO_ROOT,
@@ -2885,15 +2888,24 @@ def main(argv: list[str]) -> int:
                         attempted_fallback = True
                         continue
 
-                # If `--opaque-pointers` isn't recognized by this llvm-link build,
-                # try the short flag form once.
-                if "--opaque-pointers" in llvm_link_flags and (
-                    "unknown" in stderr.lower() and "opaque" in stderr.lower()
+                # If the ptr/opaque-pointers diagnostic persists even after adding
+                # one spelling, try the alternate spelling once.
+                if (
+                    not attempted_alt_spelling
+                    and _OPAQUE_PTR_CLANG_ERR_RE.search(stderr or "") is not None
                 ):
-                    llvm_link_flags = [f for f in llvm_link_flags if f != "--opaque-pointers"]
-                    llvm_link_flags.append("-opaque-pointers")
-                    attempted_fallback = True
-                    continue
+                    if "-opaque-pointers" in llvm_link_flags and "--opaque-pointers" not in llvm_link_flags:
+                        llvm_link_flags = [
+                            f for f in llvm_link_flags if f != "-opaque-pointers"]
+                        llvm_link_flags.append("--opaque-pointers")
+                        attempted_alt_spelling = True
+                        continue
+                    if "--opaque-pointers" in llvm_link_flags and "-opaque-pointers" not in llvm_link_flags:
+                        llvm_link_flags = [
+                            f for f in llvm_link_flags if f != "--opaque-pointers"]
+                        llvm_link_flags.append("-opaque-pointers")
+                        attempted_alt_spelling = True
+                        continue
 
                 raise subprocess.CalledProcessError(rc, cmd)
             # llvm-link time is generally small compared to clang, but keep it in compile bucket.

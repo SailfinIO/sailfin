@@ -36,7 +36,7 @@ jobs:
         include:
           - os: macos-latest
             package_label: macos-arm64
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             package_label: linux-x86_64
 
     steps:
@@ -52,12 +52,30 @@ jobs:
           use-mamba: true
 
       - name: Install clang (Linux)
-        if: matrix.os == 'ubuntu-22.04'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-15 llvm-15 jq
-          echo "CLANG=clang-15" >> "$GITHUB_ENV"
-          echo "LLVM_LINK=llvm-link-15" >> "$GITHUB_ENV"
+          sudo apt-get install -y clang-18 llvm-18 jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+          echo "LLVM_LINK=llvm-link-18" >> "$GITHUB_ENV"
+
+      - name: Preflight llvm-link opaque pointers (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          llvm_link="${LLVM_LINK:-llvm-link}"
+          echo "[ci] $($llvm_link --version | head -n 1)"
+          printf '%s\n' 'define ptr @id(ptr %p) { ret ptr %p }' > /tmp/sailfin-opaque.ll
+          if "$llvm_link" -opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
+            echo "LLVM_LINK_FLAGS=-opaque-pointers" >> "$GITHUB_ENV"
+          elif "$llvm_link" --opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
+            echo "LLVM_LINK_FLAGS=--opaque-pointers" >> "$GITHUB_ENV"
+          else
+            echo "[ci][error] llvm-link cannot parse ptr IR in opaque-pointers mode" >&2
+            cat /tmp/sailfin-opaque.err >&2 || true
+            exit 1
+          fi
 
       - name: Install jq + LLVM tools (macOS)
         if: matrix.os == 'macos-latest'
@@ -113,7 +131,7 @@ jobs:
             asset_os: macos
             asset_arch: arm64
             max_attempts: 15
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             package_label: linux-x86_64
             asset_os: linux
             asset_arch: x86_64
@@ -132,12 +150,30 @@ jobs:
           use-mamba: true
 
       - name: Install clang (Linux)
-        if: matrix.os == 'ubuntu-22.04'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-15 llvm-15 jq
-          echo "CLANG=clang-15" >> "$GITHUB_ENV"
-          echo "LLVM_LINK=llvm-link-15" >> "$GITHUB_ENV"
+          sudo apt-get install -y clang-18 llvm-18 jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+          echo "LLVM_LINK=llvm-link-18" >> "$GITHUB_ENV"
+
+      - name: Preflight llvm-link opaque pointers (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          llvm_link="${LLVM_LINK:-llvm-link}"
+          echo "[ci] $($llvm_link --version | head -n 1)"
+          printf '%s\n' 'define ptr @id(ptr %p) { ret ptr %p }' > /tmp/sailfin-opaque.ll
+          if "$llvm_link" -opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
+            echo "LLVM_LINK_FLAGS=-opaque-pointers" >> "$GITHUB_ENV"
+          elif "$llvm_link" --opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
+            echo "LLVM_LINK_FLAGS=--opaque-pointers" >> "$GITHUB_ENV"
+          else
+            echo "[ci][error] llvm-link cannot parse ptr IR in opaque-pointers mode" >&2
+            cat /tmp/sailfin-opaque.err >&2 || true
+            exit 1
+          fi
 
       - name: Install jq + LLVM tools (macOS)
         if: runner.os == 'macOS'
@@ -182,6 +218,7 @@ jobs:
             --seed "$SEED_STAGE2" \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2 \
+            --clang "${CLANG:-clang}" \
             --jobs 2 \
             --import-context-jobs 1 \
             --max-attempts ${{ matrix.max_attempts }} \
@@ -316,6 +353,7 @@ jobs:
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2 \
             --out build/native/sailfin-stage2-selfhost1 \
+            --clang "${CLANG:-clang}" \
             --jobs 1 \
             --import-context-jobs 1 \
             --max-attempts 5 \
@@ -324,6 +362,7 @@ jobs:
           conda run -n sailfin python scripts/selfhost_native_stage2.py \
             --seed build/native/sailfin-stage2-selfhost1 \
             --out build/native/sailfin-stage2-selfhost2 \
+            --clang "${CLANG:-clang}" \
             --jobs 1 \
             --import-context-jobs 1 \
             --max-attempts 3
