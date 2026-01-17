@@ -97,14 +97,22 @@ jobs:
           llvm_link="${LLVM_LINK:-llvm-link}"
           echo "[release] $($llvm_link --version | head -n 1)"
           printf '%s\n' 'define ptr @id(ptr %p) { ret ptr %p }' > /tmp/sailfin-opaque.ll
-          if "$llvm_link" -opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
-            echo "LLVM_LINK_FLAGS=-opaque-pointers" >> "$GITHUB_ENV"
-          elif "$llvm_link" --opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
-            echo "LLVM_LINK_FLAGS=--opaque-pointers" >> "$GITHUB_ENV"
+          if "$llvm_link" /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
+            echo "LLVM_LINK_FLAGS=" >> "$GITHUB_ENV"
           else
-            echo "[release][error] llvm-link cannot parse ptr IR in opaque-pointers mode" >&2
-            cat /tmp/sailfin-opaque.err >&2 || true
-            exit 1
+            if grep -qi "ptr type is only supported in -opaque-pointers mode" /tmp/sailfin-opaque.err; then
+              if "$llvm_link" -opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
+                echo "LLVM_LINK_FLAGS=-opaque-pointers" >> "$GITHUB_ENV"
+              else
+                echo "[release][error] llvm-link requires opaque pointers but -opaque-pointers failed" >&2
+                cat /tmp/sailfin-opaque.err >&2 || true
+                exit 1
+              fi
+            else
+              echo "[release][error] llvm-link failed on ptr IR" >&2
+              cat /tmp/sailfin-opaque.err >&2 || true
+              exit 1
+            fi
           fi
 
       - name: Install jq + LLVM tools (macOS)
