@@ -63,6 +63,27 @@ _OPAQUE_PTR_CLANG_ERR_RE = re.compile(
 )
 
 
+def _maybe_add_opaque_pointers_flag_llvm_link(
+    *,
+    llvm_link_flags: list[str],
+    llvm_link_stderr: str,
+) -> tuple[list[str], bool]:
+    """Return updated llvm-link flags if stderr indicates opaque pointers are required."""
+
+    if not llvm_link_stderr:
+        return llvm_link_flags, False
+
+    if _OPAQUE_PTR_CLANG_ERR_RE.search(llvm_link_stderr) is None:
+        return llvm_link_flags, False
+
+    # llvm-link uses its own option parsing (not clang -mllvm).
+    # Prefer the long form; fall back to the short form if needed.
+    if "--opaque-pointers" in llvm_link_flags or "-opaque-pointers" in llvm_link_flags:
+        return llvm_link_flags, False
+
+    return [*llvm_link_flags, "--opaque-pointers"], True
+
+
 def _collect_concrete_named_type_defs(llvm_ir: str) -> dict[str, str]:
     """Return concrete named type definitions found in the LLVM module.
 
@@ -746,6 +767,22 @@ def _run(
     with stdout_path.open("wb") as f:
         subprocess.run(cmd, cwd=str(cwd), check=True,
                        stdout=f, timeout=timeout)
+
+
+def _run_capture_stderr(
+    cmd: list[str],
+    *,
+    cwd: pathlib.Path,
+    timeout: float | None = None,
+) -> tuple[int, str]:
+    proc = subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+    return proc.returncode, proc.stderr.decode("utf-8", errors="replace")
 
 
 def _remaining_budget_seconds(*, total_start: float, max_total_seconds: float) -> float | None:
@@ -2787,6 +2824,17 @@ def main(argv: list[str]) -> int:
                     "selfhost: missing llvm-link (set LLVM_LINK or install LLVM tools; e.g. brew install llvm)"
                 )
 
+            llvm_link_flags: list[str] = []
+            llvm_link_flags_env = os.environ.get("LLVM_LINK_FLAGS")
+            if llvm_link_flags_env:
+                try:
+                    llvm_link_flags.extend(shlex.split(llvm_link_flags_env))
+                except ValueError:
+                    # If the env var is malformed, fail loudly with a helpful message.
+                    raise SystemExit(
+                        f"selfhost: invalid LLVM_LINK_FLAGS={llvm_link_flags_env!r} (expected shell-style quoting)"
+                    )
+
             # Keep runtime prelude as a separate object in the canonical runtime
             # bundle location expected by the Stage2 CLI packaging.
             prelude_name = "runtime__prelude"
@@ -2800,15 +2848,54 @@ def main(argv: list[str]) -> int:
             if linked_bc.exists():
                 linked_bc.unlink()
             t0 = time.perf_counter()
-            _run(
-                [llvm_link, "-o", str(linked_bc), *[str(p)
-                                                    for p in ll_paths_for_link]],
-                cwd=REPO_ROOT,
-                timeout=_remaining_budget_seconds(
-                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+            llvm_link_timeout = (
+                _remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds)
+                )
                 if args.max_total_seconds > 0
-                else None,
+                else None
             )
+
+            llvm_link_inputs = [str(p) for p in ll_paths_for_link]
+
+            # llvm-link (like clang) may require opaque-pointers mode to parse `ptr`.
+            # Retry with `--opaque-pointers` when it emits that diagnostic.
+            attempted_fallback = False
+            while True:
+                cmd = [llvm_link, *llvm_link_flags, "-o", str(linked_bc), *llvm_link_inputs]
+                rc, stderr = _run_capture_stderr(
+                    cmd,
+                    cwd=REPO_ROOT,
+                    timeout=llvm_link_timeout,
+                )
+                if rc == 0:
+                    break
+
+                # Print stderr so CI has the real reason.
+                if stderr:
+                    sys.stderr.write(stderr)
+
+                if not attempted_fallback:
+                    new_flags, changed = _maybe_add_opaque_pointers_flag_llvm_link(
+                        llvm_link_flags=llvm_link_flags,
+                        llvm_link_stderr=stderr,
+                    )
+                    if changed:
+                        llvm_link_flags = new_flags
+                        attempted_fallback = True
+                        continue
+
+                # If `--opaque-pointers` isn't recognized by this llvm-link build,
+                # try the short flag form once.
+                if "--opaque-pointers" in llvm_link_flags and (
+                    "unknown" in stderr.lower() and "opaque" in stderr.lower()
+                ):
+                    llvm_link_flags = [f for f in llvm_link_flags if f != "--opaque-pointers"]
+                    llvm_link_flags.append("-opaque-pointers")
+                    attempted_fallback = True
+                    continue
+
+                raise subprocess.CalledProcessError(rc, cmd)
             # llvm-link time is generally small compared to clang, but keep it in compile bucket.
             clang_compile_s += time.perf_counter() - t0
 
