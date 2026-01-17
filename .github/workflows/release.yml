@@ -85,7 +85,9 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang llvm jq
+          sudo apt-get install -y clang-15 llvm-15 jq
+          echo "CLANG=clang-15" >> "$GITHUB_ENV"
+          echo "LLVM_LINK=llvm-link-15" >> "$GITHUB_ENV"
 
       - name: Install jq + LLVM tools (macOS)
         if: runner.os == 'macOS'
@@ -139,10 +141,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "[release][warn] using stage1 bootstrap to mint a temporary seed"
-          if [ "${RUNNER_OS}" = "Linux" ]; then
-            export CLANG_LL_FLAGS="-mllvm -opaque-pointers"
-          fi
-          CONDA=$(which conda) make compile NATIVE_JOBS=1 NATIVE_OPT=-O1 NATIVE_LL_TIMEOUT_SECONDS=2400
+          CONDA=$(which conda) make compile NATIVE_JOBS=1 NATIVE_OPT=-O1 NATIVE_LL_TIMEOUT_SECONDS=2400 CLANG="${CLANG:-clang}"
           rm -f build/native/sailfin-stage2-stage1-seed
           mv build/native/sailfin-stage2 build/native/sailfin-stage2-stage1-seed
 
@@ -156,6 +155,7 @@ jobs:
             --seed build/native/sailfin-stage2-stage1-seed \
             --no-prefer-asan-seed \
             --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
+            --clang "${CLANG:-clang}" \
             --jobs 2 \
             --max-attempts 10 \
             --max-total-seconds 3600
