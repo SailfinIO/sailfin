@@ -168,9 +168,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "[release][warn] using stage1 bootstrap to mint a temporary seed"
-          if [ "${RUNNER_OS}" = "Linux" ]; then
-            export CLANG_LL_FLAGS="-mllvm -opaque-pointers"
-          fi
           CONDA=$(which conda) make compile NATIVE_JOBS=1 NATIVE_OPT=-O1 NATIVE_LL_TIMEOUT_SECONDS=2400 CLANG="${CLANG:-clang}" CLANG_LL_FLAGS="${CLANG_LL_FLAGS:-}"
           rm -f build/native/sailfin-stage2-stage1-seed
           mv build/native/sailfin-stage2 build/native/sailfin-stage2-stage1-seed
