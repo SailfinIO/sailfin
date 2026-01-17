@@ -6,6 +6,10 @@ CLANG_WARN_SUPPRESS ?= -Wno-override-module
 
 CLANG ?= clang
 
+# Optimization level for building the native stage2 binary.
+# CI may override to speed up the stage1-bootstrap fallback seed.
+NATIVE_OPT ?= -O2
+
 # Extra flags used when compiling LLVM IR (.ll) with clang.
 # Some distros ship clang builds that default to typed pointers, but stage2 emits
 # opaque-pointer IR using the `ptr` keyword. In that case, pass:
@@ -38,7 +42,7 @@ NATIVE_LL_TIMEOUT_SECONDS ?= 600
 
 CLANG_LL_COMPILE := $(CLANG)
 ifneq ($(strip $(TIMEOUT_CMD)),)
-CLANG_LL_COMPILE := $(TIMEOUT_CMD) --preserve-status --kill-after=10 $(NATIVE_LL_TIMEOUT_SECONDS) $(CLANG)
+CLANG_LL_COMPILE := $(TIMEOUT_CMD) --kill-after=10 $(NATIVE_LL_TIMEOUT_SECONDS) $(CLANG)
 endif
 
 STAGE2_AOT_DIR ?= build/stage2/aot
@@ -228,10 +232,10 @@ _build-native-stage2:
 	fi
 	@mkdir -p $(NATIVE_OBJ_DIR)
 	@rm -rf $(NATIVE_OBJ_DIR)/*
-	$(CLANG) -O2 -fno-delete-null-pointer-checks $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o $(NATIVE_OBJ_DIR)/sailfin_runtime.o
-	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o $(NATIVE_OBJ_DIR)/stage2_driver.o
+	$(CLANG) $(NATIVE_OPT) -fno-delete-null-pointer-checks $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o $(NATIVE_OBJ_DIR)/sailfin_runtime.o
+	$(CLANG) $(NATIVE_OPT) $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o $(NATIVE_OBJ_DIR)/stage2_driver.o
 	@echo "[_build-native-stage2] compile runtime IR: runtime_globals.ll"
-	$(CLANG_LL_COMPILE) -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o $(NATIVE_OBJ_DIR)/runtime_globals.o
+	$(CLANG_LL_COMPILE) $(NATIVE_OPT) $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o $(NATIVE_OBJ_DIR)/runtime_globals.o
 	@echo "[_build-native-stage2] compile AOT LLVM modules (jobs=$(NATIVE_JOBS))"
 	@if [ "$(NATIVE_JOBS)" = "1" ]; then \
 	  set -e; \
@@ -239,7 +243,7 @@ _build-native-stage2:
 	    [ -z "$$m" ] && continue; \
 	    echo "[_build-native-stage2][aot] $$m"; \
 	    mkdir -p "$$(dirname "$(NATIVE_OBJ_DIR)/$$m.o")"; \
-	    $(CLANG_LL_COMPILE) -O2 $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"; \
+	    $(CLANG_LL_COMPILE) $(NATIVE_OPT) $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"; \
 	    rc=$$?; \
 	    if [ $$rc -ne 0 ]; then \
 	      echo "[_build-native-stage2][error] module $$m failed (rc=$$rc)" >&2; \
@@ -251,14 +255,14 @@ _build-native-stage2:
 	    xargs -I {} -P $(NATIVE_JOBS) sh -c 'm="{}"; \
 	      echo "[_build-native-stage2][aot] $$m"; \
 	      mkdir -p "$$(dirname "$(NATIVE_OBJ_DIR)/$$m.o")"; \
-	      $(CLANG_LL_COMPILE) -O2 $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"; \
+	      $(CLANG_LL_COMPILE) $(NATIVE_OPT) $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"; \
 	      rc=$$?; \
 	      if [ $$rc -ne 0 ]; then \
 	        echo "[_build-native-stage2][error] module $$m failed (rc=$$rc)" >&2; \
 	        exit $$rc; \
 	      fi'; \
 	fi
-	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -o $(NATIVE_OUT) \
+	$(CLANG) $(NATIVE_OPT) $(CLANG_WARN_SUPPRESS) -o $(NATIVE_OUT) \
 		$(NATIVE_OBJ_DIR)/sailfin_runtime.o \
 		$(NATIVE_OBJ_DIR)/stage2_driver.o \
 		$(NATIVE_OBJ_DIR)/runtime_globals.o \
