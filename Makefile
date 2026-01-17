@@ -24,9 +24,21 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 STAGE2_NATIVE_LIBS ?=
 NATIVE_LINK_DETERMINISTIC_FLAGS ?= -Wl,-no_uuid
+TIMEOUT_CMD ?=
 else
 STAGE2_NATIVE_LIBS ?= -lm -pthread
 NATIVE_LINK_DETERMINISTIC_FLAGS ?= -Wl,--build-id=none
+TIMEOUT_CMD ?= timeout
+endif
+
+# Bound clang when compiling LLVM IR modules in CI.
+# GitHub Actions can cancel jobs that emit no output for long stretches;
+# a single stuck clang process can otherwise stall the whole build.
+NATIVE_LL_TIMEOUT_SECONDS ?= 600
+
+CLANG_LL_COMPILE := $(CLANG)
+ifneq ($(strip $(TIMEOUT_CMD)),)
+CLANG_LL_COMPILE := $(TIMEOUT_CMD) $(NATIVE_LL_TIMEOUT_SECONDS) $(CLANG)
 endif
 
 STAGE2_AOT_DIR ?= build/stage2/aot
@@ -218,11 +230,14 @@ _build-native-stage2:
 	@rm -rf $(NATIVE_OBJ_DIR)/*
 	$(CLANG) -O2 -fno-delete-null-pointer-checks $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o $(NATIVE_OBJ_DIR)/sailfin_runtime.o
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o $(NATIVE_OBJ_DIR)/stage2_driver.o
-	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o $(NATIVE_OBJ_DIR)/runtime_globals.o
+	@echo "[_build-native-stage2] compile runtime IR: runtime_globals.ll"
+	$(CLANG_LL_COMPILE) -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o $(NATIVE_OBJ_DIR)/runtime_globals.o
+	@echo "[_build-native-stage2] compile AOT LLVM modules (jobs=$(NATIVE_JOBS))"
 	@awk 'NF' $(STAGE2_AOT_MODULES_FILE) | \
 	  xargs -I {} -P $(NATIVE_JOBS) sh -c 'm="{}"; \
+	    echo "[_build-native-stage2][aot] $$m"; \
 	    mkdir -p "$$(dirname "$(NATIVE_OBJ_DIR)/$$m.o")"; \
-	    $(CLANG) -O2 $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"'
+	    $(CLANG_LL_COMPILE) -O2 $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"'
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -o $(NATIVE_OUT) \
 		$(NATIVE_OBJ_DIR)/sailfin_runtime.o \
 		$(NATIVE_OBJ_DIR)/stage2_driver.o \

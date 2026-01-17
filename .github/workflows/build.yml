@@ -197,7 +197,8 @@ jobs:
           if [ "${RUNNER_OS}" = "Linux" ]; then
             export CLANG_LL_FLAGS="-mllvm -opaque-pointers"
           fi
-          CONDA=$(which conda) make compile
+          # Keep parallelism conservative on CI runners.
+          CONDA=$(which conda) make compile NATIVE_JOBS=1
           # Preserve the stage1-built binary as a seed input for the selfhost step.
           rm -f build/native/sailfin-stage2-stage1-seed
           mv build/native/sailfin-stage2 build/native/sailfin-stage2-stage1-seed

@@ -142,7 +142,7 @@ jobs:
           if [ "${RUNNER_OS}" = "Linux" ]; then
             export CLANG_LL_FLAGS="-mllvm -opaque-pointers"
           fi
-          CONDA=$(which conda) make compile
+          CONDA=$(which conda) make compile NATIVE_JOBS=1
           rm -f build/native/sailfin-stage2-stage1-seed
           mv build/native/sailfin-stage2 build/native/sailfin-stage2-stage1-seed
 
