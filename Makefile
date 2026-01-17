@@ -38,7 +38,7 @@ NATIVE_LL_TIMEOUT_SECONDS ?= 600
 
 CLANG_LL_COMPILE := $(CLANG)
 ifneq ($(strip $(TIMEOUT_CMD)),)
-CLANG_LL_COMPILE := $(TIMEOUT_CMD) $(NATIVE_LL_TIMEOUT_SECONDS) $(CLANG)
+CLANG_LL_COMPILE := $(TIMEOUT_CMD) --preserve-status --kill-after=10 $(NATIVE_LL_TIMEOUT_SECONDS) $(CLANG)
 endif
 
 STAGE2_AOT_DIR ?= build/stage2/aot
@@ -233,11 +233,31 @@ _build-native-stage2:
 	@echo "[_build-native-stage2] compile runtime IR: runtime_globals.ll"
 	$(CLANG_LL_COMPILE) -O2 $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o $(NATIVE_OBJ_DIR)/runtime_globals.o
 	@echo "[_build-native-stage2] compile AOT LLVM modules (jobs=$(NATIVE_JOBS))"
-	@awk 'NF' $(STAGE2_AOT_MODULES_FILE) | \
-	  xargs -I {} -P $(NATIVE_JOBS) sh -c 'm="{}"; \
+	@if [ "$(NATIVE_JOBS)" = "1" ]; then \
+	  set -e; \
+	  while IFS= read -r m; do \
+	    [ -z "$$m" ] && continue; \
 	    echo "[_build-native-stage2][aot] $$m"; \
 	    mkdir -p "$$(dirname "$(NATIVE_OBJ_DIR)/$$m.o")"; \
-	    $(CLANG_LL_COMPILE) -O2 $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"'
+	    $(CLANG_LL_COMPILE) -O2 $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"; \
+	    rc=$$?; \
+	    if [ $$rc -ne 0 ]; then \
+	      echo "[_build-native-stage2][error] module $$m failed (rc=$$rc)" >&2; \
+	      exit $$rc; \
+	    fi; \
+	  done < $(STAGE2_AOT_MODULES_FILE); \
+	else \
+	  awk 'NF' $(STAGE2_AOT_MODULES_FILE) | \
+	    xargs -I {} -P $(NATIVE_JOBS) sh -c 'm="{}"; \
+	      echo "[_build-native-stage2][aot] $$m"; \
+	      mkdir -p "$$(dirname "$(NATIVE_OBJ_DIR)/$$m.o")"; \
+	      $(CLANG_LL_COMPILE) -O2 $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c "$(STAGE2_AOT_DIR)/$$m.ll" -o "$(NATIVE_OBJ_DIR)/$$m.o"; \
+	      rc=$$?; \
+	      if [ $$rc -ne 0 ]; then \
+	        echo "[_build-native-stage2][error] module $$m failed (rc=$$rc)" >&2; \
+	        exit $$rc; \
+	      fi'
+	fi
 	$(CLANG) -O2 $(CLANG_WARN_SUPPRESS) -o $(NATIVE_OUT) \
 		$(NATIVE_OBJ_DIR)/sailfin_runtime.o \
 		$(NATIVE_OBJ_DIR)/stage2_driver.o \
