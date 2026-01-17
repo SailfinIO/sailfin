@@ -200,7 +200,10 @@ jobs:
           echo "[ci][warn] using stage1 bootstrap to mint a temporary seed (alpha escape hatch)"
           # Keep parallelism conservative on CI runners. This is a *temporary* seed,
           # so prefer faster compilation over peak optimization.
-          CONDA=$(which conda) make compile NATIVE_JOBS=1 NATIVE_OPT=-O1 NATIVE_LL_TIMEOUT_SECONDS=2400 CLANG="${CLANG:-clang}"
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            export CLANG_LL_FLAGS="-mllvm -opaque-pointers"
+          fi
+          CONDA=$(which conda) make compile NATIVE_JOBS=1 NATIVE_OPT=-O1 NATIVE_LL_TIMEOUT_SECONDS=2400 CLANG="${CLANG:-clang}" CLANG_LL_FLAGS="${CLANG_LL_FLAGS:-}"
           # Preserve the stage1-built binary as a seed input for the selfhost step.
           rm -f build/native/sailfin-stage2-stage1-seed
           mv build/native/sailfin-stage2 build/native/sailfin-stage2-stage1-seed
