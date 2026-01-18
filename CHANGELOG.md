@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.117 (2026-01-18)
+
+### Bug Fixes
+
+- Expose prelude.o
+  ([`fb417e3`](https://github.com/SailfinIO/sailfin/commit/fb417e3c7499b442314b3612cc211a2237b29ae3))
+
+
 ## v0.1.1-alpha.116 (2026-01-17)
 
 ### Bug Fixes
