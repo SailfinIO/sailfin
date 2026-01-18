@@ -171,6 +171,22 @@ jobs:
           cp -a "$SRC/." build/stage2/
           ls -1 build/stage2 | head -n 20
 
+      - name: Expose runtime prelude object for tests
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          # The Stage2 CLI test runner requires a runtime bundle prelude object.
+          # In a fresh checkout, the selfhost build produces it under build/selfhost/...
+          # but the CLI searches build/native/obj/runtime/prelude.o as a fallback.
+          if [ ! -f build/selfhost/stage2/obj/runtime/prelude.o ]; then
+            echo "missing build/selfhost/stage2/obj/runtime/prelude.o (selfhost did not build runtime__prelude?)" >&2
+            find build/selfhost -maxdepth 4 -type f -name 'prelude.o' -print || true
+            exit 1
+          fi
+          mkdir -p build/native/obj/runtime
+          cp -f build/selfhost/stage2/obj/runtime/prelude.o build/native/obj/runtime/prelude.o
+          ls -lh build/selfhost/stage2/obj/runtime/prelude.o build/native/obj/runtime/prelude.o
+
       - name: Run Sailfin-native tests (release binary)
         shell: bash -l {0}
         run: |
