@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.120 (2026-01-19)
+
+### Bug Fixes
+
+- Clean build and stage2 renaming
+  ([`aae34f5`](https://github.com/SailfinIO/sailfin/commit/aae34f5abdaa0992300b2d66a36d44276b967124))
+
+- Repo local wrapper
+  ([`30e686d`](https://github.com/SailfinIO/sailfin/commit/30e686dc74c2a14abcd120820def06610be0602c))
+
+- Stage2 removal
+  ([`2a452d3`](https://github.com/SailfinIO/sailfin/commit/2a452d385be32539c711b73d882e4eb414832ddf))
+
+- Stage2 removal
+  ([`a97963a`](https://github.com/SailfinIO/sailfin/commit/a97963a78e441da4449b1e7f1f749b77ac26eb62))
+
+
 ## v0.1.1-alpha.119 (2026-01-19)
 
 ### Bug Fixes
