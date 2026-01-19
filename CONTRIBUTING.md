@@ -8,14 +8,15 @@ repository.
 
 - See `README.md` for a project overview and `docs/README.md` for the doc
   navigation map.
-- Review `docs/status.md` to understand which features ship in the stage1
-  toolchain versus forward-looking designs.
+- Review `docs/status.md` to understand which features ship today vs what is
+  planned.
+- Check `docs/roadmap.md` for current tasks and sequencing.
 - Familiarise yourself with `docs/style-guide.md` for Sailfin module layout,
   file naming, and doc/test mirroring conventions.
 - Ensure you have the `sailfin` Conda environment:
 
   ```bash
-  make install
+  make env
   ```
 
 ## 2. Coding Workflow
@@ -24,9 +25,10 @@ repository.
    items when possible.
 2. **Development commands**
    - Run tests: `make test`
-   - Compile Sailfin sources: `make compile` (stage1 pipeline).
+   - Compile Sailfin sources: `make compile` (self-hosted native compiler).
+   - Install the built compiler: `make install` (defaults to `/usr/local/bin`).
 3. **Testing expectations**
-   - Add or update unit tests under `compiler/tests/` for stage1 changes.
+   - Add or update unit tests under `compiler/tests/` for compiler changes.
    - Reflect behaviour updates in `docs/status.md` and the relevant module docs.
    - Run `make test` before submitting.
 
@@ -61,7 +63,7 @@ Please reference the updated documents in your pull request description.
 Each PR should include:
 
 - Summary of the change and impacted areas.
-- Verification commands (`make test`, targeted pytest runs, etc.).
+- Verification commands (`make test`, targeted runs, etc.).
 - Notes on documentation updates (status/spec/roadmap).
 
 Reviewers will check for:

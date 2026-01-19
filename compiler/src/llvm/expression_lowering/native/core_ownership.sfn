@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/core_ownership_stage2.sfn
+// compiler/src/llvm/expression_lowering/native/core_ownership.sfn
 //
 // Ownership/borrow analysis helpers extracted from core.sfn.
 

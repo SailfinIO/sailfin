@@ -1,6 +1,6 @@
-// compiler/src/llvm/expression_lowering_stage2/core_type_mapping_stage2.sfn
+// compiler/src/llvm/expression_lowering/native/core_type_mapping.sfn
 //
-// Stage2 expression lowering type-mapping helpers extracted from core.sfn.
+// Expression lowering type-mapping helpers extracted from core.sfn.
 
 import { substring } from "../../../string_utils";
 

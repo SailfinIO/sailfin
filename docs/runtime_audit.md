@@ -1,9 +1,22 @@
 # Runtime Audit: Sailfin-Native Runtime Plan
 
 This audit documents the remaining runtime work required to remove the C
-dependency and ship a fully Sailfin-native compiler/runtime before 1.0. It is
-scoped to the native compiler toolchain and the runtime surface declared in
+dependency and ship a fully Sailfin-native compiler/runtime before 1.0. It
+reflects the current self-hosted native compiler, with legacy Python compiler
+artifacts kept only for emergency recovery. The audit is scoped to the native
+compiler toolchain and the runtime surface declared in
 `runtime/native/include/sailfin_runtime.h`.
+
+## Toolchain Snapshot (Current)
+
+- The self-hosted native compiler is the primary toolchain (`make compile`
+  produces `build/native/sailfin`).
+- The runtime is still implemented in C under `runtime/native/` and linked
+  into the native compiler binary.
+- Legacy Python compiler artifacts live under `compiler/build/` and are kept
+  for emergency recovery only; they will be removed before 1.0.
+- Python runtime shims remain only to support the legacy artifacts and should
+  be deleted once `compiler/build/` is removed.
 
 ## Current Surface Area
 
@@ -30,6 +43,81 @@ Primary sources:
 - `runtime/native/src/sailfin_runtime.c`
 - `runtime/prelude.sfn`
 - `runtime/native_runner.py` (temporary; slated for removal pre-1.0)
+- `docs/runtime_abi.md` (target Sailfin-native ABI spec)
+
+## C Runtime Architecture (Current)
+
+This section reflects how the C runtime behaves today and how the self-hosted
+compiler relies on it.
+
+### ABI and value representation
+
+- **Strings**: `char*` NUL-terminated C strings. The runtime also accepts
+  "immediate-codepoint" pseudo-strings encoded in pointer bits to avoid
+  allocations for single-byte graphemes.
+- **Arrays**: `{ i8**, i64 }` for pointer arrays. The runtime stores capacity
+  and canaries in a hidden header *before* `data` for arrays it allocates.
+- **Numbers**: `double` at the ABI (including for chars/bytes in some helpers).
+- **Booleans**: `bool` (i1 in LLVM IR).
+- **Exceptions**: thread-local exception message string + setjmp/longjmp stack
+  used by `sailfin_runtime_try_enter/throw`, while the compiler lowering uses
+  `set_exception/has_exception/take_exception` today.
+
+### Memory/ownership model (bootstrap-era)
+
+- Strings are a mix of static literals, immediate-codepoint pseudo-strings,
+  runtime-owned malloc strings, and foreign pointers. The runtime tracks owned
+  and persistent pointers in hash sets to avoid freeing invalid memory.
+- `sailfin_runtime_string_drop` is effectively disabled by default because the
+  compiler does not yet emit safe ownership/RC signals; large strings are
+  forcibly marked persistent to avoid reuse-related corruption.
+- Array growth for pointer arrays uses a custom header and canaries to detect
+  memory stomps caused by ABI mismatches or mis-lowered code.
+
+### Functional areas (current behavior)
+
+- **Logging + timing**: implemented (`print_*`, `sleep`, `monotonic_millis`).
+- **Strings**: length, concat, substring, grapheme helpers implemented with
+  defensive guards against invalid pointers and non-canonical addresses.
+- **Arrays**: concat/append/push for pointer arrays; generic `array_push_slot`
+  for non-pointer element arrays using a separate header format.
+- **Process**: `process.run` implemented via `posix_spawnp`.
+- **Filesystem**: `read_file`, `write_file`, `write_lines`, `list_directory`,
+  `delete_file`, `create_directory`, `exists` implemented.
+- **Exceptions**: `set_exception/has_exception/take_exception` implemented;
+  `try_enter/throw` uses `setjmp/longjmp` but is not wired into current
+  lowering.
+- **Concurrency**: `spawn/parallel/channel/serve` are stubs; futures use
+  per-task pthreads for `spawn_*` and `await_*`.
+- **Reflection/type checks**: `is_*`, `resolve_type`, `instance_of`,
+  `get_field` are stubs or return defaults.
+- **Adapters**: HTTP/model adapters are stubs; capability bridge creators are
+  stubs.
+
+### Notable debug/diagnostic hooks
+
+- Extensive runtime guards for pointer plausibility, string length scanning,
+  array canary checks, and optional tracing via `SAILFIN_TRACE_*` env vars.
+- These exist to survive bootstrap-era ABI mismatches and should be retired or
+  reduced once a native ABI and ownership model are stable.
+
+## Compiler <-> Runtime Integration (Current)
+
+- The native compiler lowers runtime calls using
+  `compiler/src/llvm/runtime_helpers.sfn`, which maps Sailfin-level intrinsics
+  to external C symbols (e.g., `string.concat` -> `sailfin_runtime_string_concat`).
+- Array lowering has two distinct paths:
+  - `i8*` arrays use `sailfin_runtime_append_string` and `sailfin_runtime_concat`
+    to preserve the runtime's pointer-array header conventions.
+  - Non-pointer arrays use `sailfin_runtime_array_push_slot` to grow buffers
+    with a separate header layout.
+- Exception lowering in `compiler/src/llvm/lowering/instructions.sfn` relies on
+  `set_exception/has_exception/take_exception` rather than `try_enter/throw`.
+- The C `native_driver` embeds the Sailfin-native CLI, resolves a runtime root
+  via `SAILFIN_RUNTIME_ROOT` or a bundled `runtime/` directory, and calls into
+  `native_cli_main__cli_main`.
+- The Sailfin `runtime/prelude.sfn` exposes `runtime.*` helpers that are wired
+  to these runtime symbols; this is the primary interface for compiled code.
 
 ## Removal Inventory (Pre-1.0)
 
@@ -42,8 +130,8 @@ replaced before 1.0 ships:
   `runtime/native/include/sailfin_runtime.h`.
 - Native C driver: `runtime/native/src/native_driver.c`.
 - Python-generated compiler artifacts that import `runtime_support`
-  (e.g., `compiler/build/**`). These should disappear once the toolchain no
-  longer emits or executes Python code.
+  (e.g., `compiler/build/**`). These are legacy recovery-only artifacts and
+  should be removed from the 1.0 toolchain and release artifacts.
 
 ## Python Removal Map (Pre-1.0)
 
@@ -60,8 +148,8 @@ runtime/toolchain.
 
 ### Compiler artifacts → native pipeline
 
-- `compiler/build/**` (Python-generated compiler artifacts) → remove from 1.0
-  toolchain once the native compiler and CLI cover compile/run/test flows.
+- `compiler/build/**` (Python-generated compiler artifacts) → remove from the
+  1.0 toolchain once the native compiler and CLI cover compile/run/test flows.
 - Any generated Python entrypoints (e.g., `compiler/build/cli_main.py`) →
   Sailfin-native CLI modules.
 
@@ -94,6 +182,48 @@ runtime/toolchain.
    `to_debug_string`, and `log_execution` are minimal. These must be fully
    implemented with correct semantics and tests.
 
+## Production-Ready Runtime Work Ahead
+
+This is the concrete work needed to move from the current C runtime to a
+production-grade Sailfin-native runtime and toolchain.
+
+### Architecture alignment
+
+- Define and lock a Sailfin-native ABI (string/array layouts, tagged values,
+  ownership rules) and update compiler lowering to emit it directly.
+- Replace pointer-tagging hacks (immediate codepoints, C string heuristics)
+  with explicit value representations in the native ABI.
+- Specify a real memory model (RC/arena/GC) and reflect it in codegen, runtime
+  helpers, and drop semantics.
+
+### Core runtime subsystems
+
+- Implement native equivalents for string/array operations with correct UTF-8
+  grapheme semantics and predictable allocation behavior.
+- Implement type metadata emission, descriptors, and runtime queries
+  (`is_*`, `resolve_type`, `instance_of`, `get_field`).
+- Replace the current exception model with a compiler/runtime design that
+  supports structured unwind and preserves diagnostics.
+
+### Concurrency and effects
+
+- Replace stubbed `spawn/channel/parallel/serve` with a scheduler, channel
+  implementation, and server dispatch.
+- Provide native adapters for filesystem, HTTP, and model effects that match
+  the prelude contracts and capability enforcement.
+
+### Tooling and integration
+
+- Replace `native_driver.c` with a Sailfin-native CLI binary.
+- Remove runtime shims and Python legacy artifacts once the native runtime and
+  CLI cover all compile/run/test workflows.
+
+### Performance and diagnostics
+
+- Remove bootstrap-era defensive padding and pointer-safety heuristics once the
+  ABI is stabilized.
+- Add profiling hooks and structured logging for runtime services.
+
 ## ABI Recommendation
 
 Adopt a **Sailfin-native ABI** (versioned) and retire the C ABI entirely before
@@ -102,6 +232,8 @@ room for future runtime features (type metadata, exception frames, concurrency,
 and safer FFI).
 
 ### Proposed Native ABI Primitives (Initial Sketch)
+
+See `docs/runtime_abi.md` for the draft v0 ABI contract and migration plan.
 
 - **String**: `{ i8* data, i64 len }` with UTF-8 bytes; no implicit NUL.
 - **Array/Slice**: `{ T* data, i64 len, i64 cap }` for owned arrays and

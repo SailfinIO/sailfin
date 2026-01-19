@@ -1,9 +1,6 @@
 // compiler/src/llvm/lowering/module_globals.sfn
 //
 // Module-global lowering: turns `let` bindings into LLVM globals plus optional init function.
-//
-// Mechanical extraction from compiler/src/native_llvm_lowering.sfn.
-// Logic should remain identical.
 
 import { NativeBinding, NativeFunction } from "../../native_ir";
 

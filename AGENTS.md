@@ -9,9 +9,10 @@
 
 ## Build, Test, and Development Commands
 
-- `make install` provisions or updates the `sailfin` Conda env defined in `environment.yml`.
+- `make env` provisions or updates the `sailfin` Conda env defined in `environment.yml`.
 - `make test` runs all test cases.
 - `make compile` builds the compiler by self-hosting from the latest released seed (no stage1/bootstrap).
+- `make install` installs the built compiler binary into `PREFIX/bin` (default: `/usr/local/bin`).
 - `make bootstrap-legacy` runs the legacy stage1 → stage2 bootstrap pipeline (deprecated; for emergency recovery only).
 - `make clean` removes packaged artifacts (`dist/`); use `make clean-stage1` if you intentionally want to delete `compiler/build/` (requires an installed stage1 to rebuild).
 - if you need to do some debugging, use the /scratch directory and run/place scripts there. This is a conda environment so you may have to account for your path to the compiler when running scripts.
@@ -23,7 +24,7 @@
 - Sailfin files spell effects explicitly (`fn foo() -> Bar ![io, model]`), keep lists ordered by impact, and use `CamelCase` for models or capsules while locals remain `snake_case`.
 - Align terminology with `docs/spec.md` (capsule, fleet, provenance card) and note currency or latency literals as comments until syntax support arrives.
 
-- Tag pytest cases with `unit`, `integration`, or `e2e`; stage tests beside the code in `compiler/tests/` and mirror intent in `docs/status.md` when available.
+- Stage tests beside the code in `compiler/tests/` and mirror intent in `docs/status.md` when available.
 - Prefer slim golden inputs in `examples/` plus targeted fixtures; avoid recording generated output.
 - Run `make test` before submitting and capture reproduction steps for regressions.
 - When adding language surface or runtime behaviour, extend coverage in the Sailfin-native tests and reflect the change in `docs/status.md`.

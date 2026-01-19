@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/core_helpers.sfn
+// compiler/src/llvm/expression_lowering/native/core_helpers.sfn
 //
 // Small helper utilities extracted from core.sfn to reduce file size.
 

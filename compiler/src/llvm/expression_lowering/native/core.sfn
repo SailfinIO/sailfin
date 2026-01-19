@@ -1,6 +1,6 @@
-// compiler/src/llvm/expression_lowering_stage2/core.sfn
+// compiler/src/llvm/expression_lowering/native/core.sfn
 //
-// Core expression lowering for Stage2 LLVM backend.
+// Core expression lowering for LLVM backend.
 //
 // This module implements the primary `lower_expression` entry point that
 // transforms Sailfin expressions into LLVM IR. It handles ownership/borrow

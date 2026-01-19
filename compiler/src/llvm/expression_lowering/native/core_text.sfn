@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/core_text.sfn
+// compiler/src/llvm/expression_lowering/native/core_text.sfn
 //
 // Text and string utilities for expression lowering.
 //

@@ -1,9 +1,6 @@
 // compiler/src/llvm/lowering/emission.sfn
 //
 // Function emission (wrapping, async spawning, and body lowering orchestration).
-//
-// Mechanical extraction from compiler/src/native_llvm_lowering.sfn.
-// Logic should remain identical.
 
 import { NativeFunction } from "../../native_ir";
 

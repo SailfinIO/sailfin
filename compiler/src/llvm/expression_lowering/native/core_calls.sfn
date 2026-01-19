@@ -1,6 +1,6 @@
-// compiler/src/llvm/expression_lowering_stage2/core_calls_stage2.sfn
+// compiler/src/llvm/expression_lowering/native/core_calls.sfn
 //
-// Call parsing helpers for Stage2 expression lowering.
+// Call parsing helpers for expression lowering.
 
 import { char_at } from "../../../string_utils";
 

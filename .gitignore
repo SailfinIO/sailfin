@@ -65,27 +65,10 @@ logs/
 *.orig
 *.rej
 
-# Node / VS Code extension
-node_modules/
-*.vsix
-# Extension build artifacts (kept even if extension/.gitignore exists)
-extension/out/
-extension/dist/
-extension/node_modules/
-
 # Optional platform specific
 $RECYCLE.BIN/
 
-# Project-specific
-# Do not ignore Poetry lock at repo root by default. The bootstrap folder controls its own lock-file behavior.
-# Generated CLI binaries
-bootstrap/dist/
-bootstrap/output.py
-bootstrap/parser.out
-bootstrap/parsetab.py
-
 scratch/
-runtime/build/
 
 # Build outputs (Stage2 bootstrap/native artifacts). These are generated and
 # should never be committed; use dist/ for release packaging instead.
@@ -98,6 +81,3 @@ runtime/build/
 !compiler/build/llvm/**/*.py
 compiler/build/llvm/**/__pycache__/
 compiler/build/llvm/**/*.pyc
-
-# Generated native example binaries (produced by stage2-native-run-examples)
-build/native/examples/

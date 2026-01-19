@@ -1,9 +1,6 @@
 // compiler/src/llvm/lowering/instructions.sfn
 //
 // Instruction lowering (control flow + let/match/try/loop helpers).
-//
-// Mechanical extraction from compiler/src/native_llvm_lowering.sfn.
-// Logic should remain identical.
 
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { substring } from "../../string_utils";

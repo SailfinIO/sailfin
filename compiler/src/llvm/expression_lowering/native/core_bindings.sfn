@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/core_bindings_stage2.sfn
+// compiler/src/llvm/expression_lowering/native/core_bindings.sfn
 //
 // Small Stage2-specific binding helpers extracted from core.sfn.
 

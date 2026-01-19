@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/core_operators_stage2.sfn
+// compiler/src/llvm/expression_lowering/native/core_operators.sfn
 //
 // Operator and expression-shape helpers extracted from core.sfn.
 

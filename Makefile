@@ -62,7 +62,7 @@ NATIVE_BIN ?= build/native/sailfin
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help install fetch-seed test test-unit test-integration test-e2e compile bootstrap-legacy clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
+.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile bootstrap-legacy clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
 
 .PHONY: selfhost-native selfhost-smoke-native check-native-determinism native-debug native-asan native-ubsan
 
@@ -71,16 +71,16 @@ ifeq ($(origin CONDA_EXE), undefined)
 # executable path for Makefile recipes.
 CONDA_EXE := $(shell { type -P conda 2>/dev/null || /usr/bin/which conda 2>/dev/null; } | head -n 1)
 endif
-ifeq ($(strip $(CONDA_EXE)),)
-$(error "conda" executable not found. Export CONDA_EXE or install Conda.)
-endif
+ifneq ($(strip $(CONDA_EXE)),)
 CONDA ?= $(CONDA_EXE)
+endif
 CONDA_ENV ?= sailfin
 CONDA_ENV_FILE ?= environment.yml
 
 help:
 	@echo "Common Sailfin tasks"
-	@echo "  make install      # Create or update the Conda env used for the compiler"
+	@echo "  make env          # Create or update the Conda env used for the compiler"
+	@echo "  make install      # Install the built compiler binary into PREFIX/bin"
 	@echo "  make fetch-seed   # Download the latest released seed into build/seed/ (requires GITHUB_TOKEN)"
 	@echo "  make test         # Run Sailfin-native unit + integration tests"
 	@echo "  make test-unit    # Run Sailfin-native unit tests (self-hosted compiler)"
@@ -100,8 +100,28 @@ help:
 	@echo "  make native-stage2-asan # Build native compiler (legacy: stage2) with AddressSanitizer (bootstrap-built)"
 	@echo "  make native-asan   # Alias for native-stage2-asan"
 
-install:
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+INSTALL_NAME ?= sailfin
+
+.PHONY: check-conda env install
+check-conda:
+	@if [ -z "$(CONDA)" ]; then \
+		echo "[conda] conda executable not found. Export CONDA_EXE or install Conda."; \
+		exit 1; \
+	fi
+
+env: check-conda
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
+
+install:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[install] missing $(NATIVE_BIN); run 'make compile' first"; \
+		exit 1; \
+	fi
+	@mkdir -p "$(DESTDIR)$(BINDIR)"
+	@install -m 755 "$(NATIVE_BIN)" "$(DESTDIR)$(BINDIR)/$(INSTALL_NAME)"
+	@echo "[install] installed $(DESTDIR)$(BINDIR)/$(INSTALL_NAME)"
 
 test: test-unit test-integration test-e2e
 
@@ -218,7 +238,7 @@ legacy-bootstrap: bootstrap-legacy
 
 # Deprecated: legacy stage1/bootstrap pipeline.
 # Kept for debugging and emergency recovery only.
-bootstrap-legacy:
+bootstrap-legacy: check-conda
 	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
 	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python scripts/bootstrap_native.py --no-validate
 	$(MAKE) _build-native-stage2
@@ -247,7 +267,7 @@ bootstrap-legacy:
 # - Always runs the orchestrator script via the Conda env Python.
 # - Pass extra flags via SELFHOST_ARGS (e.g. SELFHOST_ARGS="--seed-timeout 300").
 # - Parallelize module building via SELFHOST_JOBS (e.g. SELFHOST_JOBS=2).
-selfhost-native:
+selfhost-native: check-conda
 	@seed="$${SEED_NATIVE:-$${SEED_STAGE2:-$(SEED_STAGE2)}}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -297,7 +317,7 @@ selfhost-native:
 #   make selfhost-smoke-native SELFHOST_SMOKE_ARGS="--keep-work-dir"
 SELFHOST_SMOKE_OUT ?= $(NATIVE_OUT)
 SELFHOST_SMOKE_ARGS ?=
-selfhost-smoke-native:
+selfhost-smoke-native: check-conda
 	@seed="$${SEED_NATIVE:-$${SEED_STAGE2:-$(SEED_STAGE2)}}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -328,7 +348,7 @@ selfhost-smoke-native:
 		$(SELFHOST_SMOKE_ARGS)
 	@echo "[selfhost-smoke-native] OK"
 
-selfhost-native-asan: native-stage2-asan
+selfhost-native-asan: native-stage2-asan check-conda
 	@seed=$${SEED_STAGE2:-build/native/sailfin-asan}; \
 	if [ ! -x "$$seed" ]; then \
 		echo "[selfhost-native-asan] missing seed compiler: $$seed"; \
@@ -384,7 +404,7 @@ _build-native-stage2:
 		$$(sed 's|^|$(NATIVE_OBJ_DIR)/|; s|$$|.o|' $(STAGE2_AOT_MODULES_FILE) | tr '\n' ' ') \
 		$(NATIVE_LINK_EXTRA) $(STAGE2_NATIVE_LIBS)
 
-check-stage2-determinism:
+check-stage2-determinism: check-conda
 	@echo "[check-stage2-determinism] bootstrapping twice and diffing outputs"
 	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
 	@rm -rf build/stage2-diff-a build/stage2-diff-b build/stage2-diff.patch

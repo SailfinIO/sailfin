@@ -17,7 +17,7 @@ To get started with the Sailfin project, please refer to the [README.md](README.
 Before you begin, ensure you have the `sailfin` Conda environment set up:
 
 ```bash
-make install
+make env
 ```
 
 ## Development Workflow
@@ -38,7 +38,8 @@ The primary workflow for development is as follows:
 
 The following commands are available for development:
 
-- `make install`: Create or update the Conda environment used for the compiler.
+ - `make env`: Create or update the Conda environment used for the compiler.
+ - `make install`: Install the built compiler into `PREFIX/bin` (default: `/usr/local/bin`).
 - `make test`: Run the full suite.
 - `make compile`: Build the native compiler by self-hosting from a released seed (preferred).
 - `make clean`: Remove packaged artifacts (`dist/`).
@@ -79,7 +80,7 @@ Before submitting any changes, please ensure that all tests pass.
 We welcome contributions to the Sailfin project. Please follow these guidelines when contributing:
 
 - **Branch & scope**: Keep work focused; reference open issues or roadmap items when possible.
-- **Testing**: Add or update unit tests under `compiler/tests/` for stage1 changes.
+- **Testing**: Add or update unit tests under `compiler/tests/` for compiler changes.
 - **Documentation**: Reflect behavior updates in `docs/status.md` and the relevant module docs.
 - **Commits**: Use clear, atomic commits. Conventional prefixes (`feat(compiler):`, `fix(bootstrap):`) are encouraged but not mandatory.
 - **Pull Requests**: Each PR should include a summary of the change, verification commands, and notes on documentation updates.

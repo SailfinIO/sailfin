@@ -23,13 +23,14 @@ The language features effect types (`![io, net, model, gpu, rand, clock]`), owne
 ### Environment Setup
 
 ```bash
-make install          # Create/update the 'sailfin' Conda environment
+make env              # Create/update the 'sailfin' Conda environment
 ```
 
 ### Development Workflow
 
 ```bash
 make compile          # Build the compiler by self-hosting from a released seed (preferred)
+make install          # Install the built compiler into PREFIX/bin (default: /usr/local/bin)
 make bootstrap-legacy # Legacy stage1/bootstrap pipeline (deprecated)
 make test             # Run full suite
 make test-unit        # Run Sailfin-native unit tests
@@ -211,29 +212,23 @@ All development goes through the bootstrap compiler (legacy name: stage1) and th
 
 ### Writing Regression Tests
 
-```python
-# compiler/tests/test_my_feature.py
-import pytest
+```sfn
+// compiler/tests/unit/my_feature_test.sfn
+import { parse_program } from "../../src/parser/mod";
 
-@pytest.mark.unit
-def test_my_feature_parses():
-    source = 'fn foo() ![io] { print.info("hello"); }'
-    # Test parsing/lowering/emission
-    ...
-
-@pytest.mark.stage2
-def test_my_feature_executes():
-    # Test LLVM execution
-    ...
+test "parser: parses effectful fn" {
+    let source = "fn foo() ![io] { print.info(\"hello\"); }";
+    let program = parse_program(source);
+    assert program.statements.length == 1;
+}
 ```
 
 ### Debugging Compilation Failures
 
 1. Isolate the failing `.sfn` source
 2. Run `make compile` to see bootstrap compiler errors
-3. Check `compiler/build/*.py` for emitted Python
-4. Use `PYTEST_STAGE1_DEBUG=1 make test` to see cache behavior
-5. Review diagnostics for source spans and fix-it hints
+3. Run `./sfn test path/to/test_file.sfn` for focused output
+4. Review diagnostics for source spans and fix-it hints
 
 ### Self-Hosting Invariants
 

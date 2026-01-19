@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/mod.sfn
+// compiler/src/llvm/expression_lowering/native/mod.sfn
 //
 // Compatibility facade.
 //
@@ -6,7 +6,7 @@
 // recompile. The implementation is split into submodules in this directory.
 //
 // This module re-exports the stable surface area used by the rest of the
-// compiler and by stage1/bootstrap shims.
+// compiler.
 
 export {
     // Statement + entrypoint helpers

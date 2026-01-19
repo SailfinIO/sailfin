@@ -23,13 +23,18 @@ work after launch. Legacy compiler stages are no longer tracked in this plan.
 
 3. **Sailfin-native runtime for 1.0**
    - [ ] Execute the Sailfin runtime migration plan in `docs/runtime_audit.md`.
+   - [ ] Finalize the Sailfin-native ABI spec in `docs/runtime_abi.md`.
    - [ ] Implement the Sailfin-native ABI and versioned layouts.
+   - [ ] Define the runtime ownership/memory model and update lowering to match.
    - [ ] Port core runtime helpers (strings, arrays, exceptions, type metadata).
+   - [ ] Replace the current exception plumbing with a structured model supported by the native runtime.
    - [ ] Remove the C runtime once parity and performance gates are satisfied.
+   - [ ] Ship Sailfin-native filesystem, HTTP, and model adapters.
    - [ ] Document capability adapter behavior and platform requirements in `docs/runtime_audit.md`.
 
 4. **Tooling and developer workflow**
    - [ ] Replace the current `sfn` shell wrapper with a Sailfin-native CLI binary.
+   - [ ] Replace the C `native_driver` with a Sailfin-native CLI entrypoint.
    - [ ] Remove Python tooling/scripts from the release pipeline and developer entrypoints.
    - [ ] Replace Python runtime shims (`runtime/runtime_support.py`, `runtime/native_runner*.py`) with native runtime modules.
    - [ ] Remove Python-generated compiler artifacts (`compiler/build/**`) from the 1.0 toolchain.
@@ -43,8 +48,8 @@ work after launch. Legacy compiler stages are no longer tracked in this plan.
 
 ## Post-1.0 (Immediate Follow-On)
 
-- [ ] **Native capability adapters** — Replace Python adapters with Sailfin-native modules for filesystem, HTTP, and model invocation.
 - [ ] **Async runtime** — Ship a Sailfin-native event loop, task scheduler, and channel primitives once coroutine lowering is stable.
+- [ ] **Runtime diagnostics** — Add structured tracing, allocation telemetry, and performance profiling hooks.
 - [ ] **Package registry workflow** — Finalize manifests, implement `sfn init/add/publish`, and stand up registry auth/signing.
 - [ ] **Native test framework** — Replace pytest suites with Sailfin-native tests and CI reporting.
 

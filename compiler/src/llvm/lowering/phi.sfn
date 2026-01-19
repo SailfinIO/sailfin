@@ -1,9 +1,6 @@
 // compiler/src/llvm/lowering/phi.sfn
 //
 // Phi-node and mutation materialization helpers.
-//
-// Mechanical extraction from compiler/src/native_llvm_lowering.sfn.
-// Logic should remain identical.
 
 import { substring } from "../../string_utils";
 

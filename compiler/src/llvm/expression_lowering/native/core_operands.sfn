@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/core_operands.sfn
+// compiler/src/llvm/expression_lowering/native/core_operands.sfn
 //
 // LLVM operand coercion and comparison emission.
 //

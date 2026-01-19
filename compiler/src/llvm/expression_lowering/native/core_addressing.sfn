@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/core_addressing_stage2.sfn
+// compiler/src/llvm/expression_lowering/native/core_addressing.sfn
 //
 // Addressing helpers for Stage2 expression lowering.
 

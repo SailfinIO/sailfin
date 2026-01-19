@@ -1650,8 +1650,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--max-attempts",
         type=int,
-        default=5,
-        help="Max attempts per module when seed output is malformed (default: 5)",
+        default=8,
+        help="Max attempts per module when seed output is malformed (default: 8)",
     )
     parser.add_argument(
         "--jobs",
@@ -1712,6 +1712,15 @@ def main(argv: list[str]) -> int:
         help=(
             "Ask the seed compiler to emit per-phase timing to stderr (requires a seed that supports it). "
             "The selfhost script will summarize the slowest modules."
+        ),
+    )
+
+    parser.add_argument(
+        "--debug-missing-defs",
+        action="store_true",
+        help=(
+            "Print detailed diagnostics when the seed emits LLVM missing required function definitions. "
+            "This can happen transiently when older seeds truncate output."
         ),
     )
     parser.add_argument(
@@ -2351,6 +2360,26 @@ def main(argv: list[str]) -> int:
                         raw)
                     candidate = _trim_to_llvm_module_start(candidate)
 
+                    # Some flaky seeds intermittently corrupt individual LLVM
+                    # instruction lines (e.g. emitting "= call ..." without a
+                    # destination register). Treat this as malformed output and
+                    # retry before spending time in clang.
+                    corrupted = False
+                    for ln in candidate.splitlines():
+                        if ln.lstrip().startswith("="):
+                            corrupted = True
+                            break
+                    if corrupted:
+                        if args.debug_missing_defs:
+                            print(
+                                f"[selfhost][debug] seed output for {module_name} appears corrupted (found line starting with '='); retrying",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                        if args.attempt_sleep > 0:
+                            time.sleep(args.attempt_sleep)
+                        continue
+
                     # Fallback away from emit-llvm-file if it produced known-bad output.
                     if use_emit_llvm_file_local and "@listpush" in candidate:
                         with attempt_path.open("wb") as out:
@@ -2463,18 +2492,24 @@ def main(argv: list[str]) -> int:
                             if not (has_module or has_plain):
                                 missing_defs.append(sym_module)
                         if missing_defs:
-                            try:
-                                size = attempt_path.stat().st_size
-                            except OSError:
-                                size = -1
-                            preview = "\n".join(candidate.splitlines()[:40])
-                            print(
-                                f"[selfhost][warn] seed output for {module_name} is missing {len(missing_defs)} required definition(s) (bytes={size})\n"
-                                f"[selfhost][warn] missing: {', '.join(missing_defs[:8])}{' ...' if len(missing_defs) > 8 else ''}\n"
-                                f"[selfhost][warn] first lines:\n{preview}\n",
-                                file=sys.stderr,
-                                flush=True,
-                            )
+                            # Treat this as a malformed emit and retry. Some seeds
+                            # intermittently truncate output; retrying is usually
+                            # sufficient. Keep logs clean by default, but allow
+                            # opt-in diagnostics.
+                            if args.debug_missing_defs:
+                                try:
+                                    size = attempt_path.stat().st_size
+                                except OSError:
+                                    size = -1
+                                preview = "\n".join(
+                                    candidate.splitlines()[:40])
+                                print(
+                                    f"[selfhost][debug] seed output for {module_name} is missing {len(missing_defs)} required definition(s) (bytes={size})\n"
+                                    f"[selfhost][debug] missing: {', '.join(missing_defs[:8])}{' ...' if len(missing_defs) > 8 else ''}\n"
+                                    f"[selfhost][debug] first lines:\n{preview}\n",
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
                             if args.attempt_sleep > 0:
                                 time.sleep(args.attempt_sleep)
                             continue

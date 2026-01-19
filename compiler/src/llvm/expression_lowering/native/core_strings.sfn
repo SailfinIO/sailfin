@@ -1,6 +1,6 @@
-// compiler/src/llvm/expression_lowering_stage2/core_strings_stage2.sfn
+// compiler/src/llvm/expression_lowering/native/core_strings.sfn
 //
-// String lowering helpers for Stage2 expression lowering extracted from core.sfn.
+// String lowering helpers for expression lowering extracted from core.sfn.
 
 import {
     LLVMOperand,

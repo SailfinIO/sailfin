@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/core_scopes.sfn
+// compiler/src/llvm/expression_lowering/native/core_scopes.sfn
 //
 // Scope, local bindings, and lifetime tracking for expression lowering.
 //

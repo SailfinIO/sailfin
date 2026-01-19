@@ -1,4 +1,4 @@
-// compiler/src/llvm/expression_lowering_stage2/statement.sfn
+// compiler/src/llvm/expression_lowering/native/statement.sfn
 //
 // Statement lowering and type mapping for LLVM backend.
 //

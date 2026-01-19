@@ -9,7 +9,10 @@
 // Entry point exported by the native compiler IR.
 extern char *compile_to_sailfin(char *source);
 extern char *compile_to_llvm(char *source);
-extern double native_cli_main__cli_main(SailfinPtrArray *argv);
+// NOTE: `native_cli_main` has historically varied in symbol spelling across
+// compiler versions (plain vs module-suffixed). Call the stable mangled symbol
+// for the underlying CLI implementation instead.
+extern double sailfin_cli_main__cli_main(SailfinPtrArray *argv);
 
 static void _print_usage(FILE *stream)
 {
@@ -226,7 +229,8 @@ int main(int argc, char **argv)
 
             args.data = argv_copy;
             args.len = out_index;
-            double rc = native_cli_main__cli_main(&args);
+
+            double rc = sailfin_cli_main__cli_main(&args);
             free(argv_copy);
             free(runtime_root);
             return (int)rc;
