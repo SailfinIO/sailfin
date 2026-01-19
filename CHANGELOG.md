@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.121 (2026-01-19)
+
+### Bug Fixes
+
+- Clean build and doc planning
+  ([`15cebf7`](https://github.com/SailfinIO/sailfin/commit/15cebf7c3adf9f24b3a8cdfdfdf39a7b7e615fdf))
+
+- Clean build and stage2 renaming
+  ([`60560e8`](https://github.com/SailfinIO/sailfin/commit/60560e82aacf3b89aead0875c11554ffef0bde23))
+
+- Clean build and stage2 renaming
+  ([`f5a498c`](https://github.com/SailfinIO/sailfin/commit/f5a498c46cabeb66b68696fd8dc2363c1d7f2517))
+
+- Clean build and stage2 renaming
+  ([`0a1320b`](https://github.com/SailfinIO/sailfin/commit/0a1320be3d4186e57fac2e4bed031eb7029a4428))
+
+
 ## v0.1.1-alpha.120 (2026-01-19)
 
 ### Bug Fixes

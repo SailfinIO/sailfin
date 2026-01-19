@@ -1,6 +1,6 @@
 """Runtime helpers used by the Sailfin native compiler."""
 
-__version__ = "0.1.1-alpha.120"
+__version__ = "0.1.1-alpha.121"
 
 from .runtime_support import *  # noqa: F401,F403
 from . import runtime_support as _runtime_support
