@@ -50,15 +50,13 @@ replaced before 1.0 ships:
 The following replacements must land before Python can be removed from the
 runtime/toolchain.
 
-### Runtime shims → Sailfin-native replacements
+### Runtime shims → removal conditions
 
-- `runtime/runtime_support.py` → `runtime/prelude.sfn` + native runtime modules
-  implementing console, filesystem, HTTP, model, spawn, channel, serve, sleep,
-  and type checks.
-- `runtime/native_runner.py` + `runtime/native_runner_impl.py` → Sailfin-native
-  runner/launcher integrated into the `sfn` CLI, using the native runtime and
-  capability enforcement.
-- `runtime/__init__.py` → remove entirely once Python shims are gone.
+- `runtime/runtime_support.py`, `runtime/native_runner.py`,
+  `runtime/native_runner_impl.py`, and `runtime/__init__.py` are only required
+  by the emergency fallback Python compiler artifacts under `compiler/build/**`.
+  They can be deleted once that fallback is removed; no separate native
+  replacements are required purely to retire these shims.
 
 ### Compiler artifacts → native pipeline
 
