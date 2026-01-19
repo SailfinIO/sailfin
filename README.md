@@ -59,10 +59,11 @@ pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
 
 ## Current Status
 
-Sailfin is under active design and bootstrapping. The native stage2 compiler is
-the primary toolchain today; the Stage1 bootstrap compiler remains in the build
-pipeline for now. The runtime currently ships as C and is
-planned to move into Sailfin for the 1.0 release.
+Sailfin is under active design and self-hosting. The self-hosted native compiler
+(legacy name: stage2) is the primary toolchain today; the legacy Stage1
+bootstrap pipeline remains only as an emergency fallback while marching toward
+1.0. The runtime currently ships as C and is planned to move into Sailfin for
+the 1.0 release.
 
 - `docs/status.md` — source of truth for what the bootstrap compiler enforces
   versus what exists only in prototypes.
@@ -91,14 +92,14 @@ VERSION=0.1.1-alpha.66 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sa
 Notes:
 
 - Windows is supported for the published sailfin binary. Run the installer from WSL or Git Bash (MSYS2/Cygwin environments are detected as `windows`).
-- Release assets are expected to be named `sailfin-stage2_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin-stage2` (or `bin/sailfin-stage2.exe` on Windows).
+- Naming note: release assets are currently named `sailfin-stage2_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin-stage2` (or `bin/sailfin-stage2.exe` on Windows). This is legacy naming; docs prefer “native compiler” terminology.
 
 ## Architecture Overview
 
 Sailfin targets a capsule-based architecture with fleets coordinating compiler,
-runtime, and tooling capsules. The current repository hosts the stage2 native
-compiler (`build/native`) and the stage1 bootstrap pipeline (`compiler/src` +
-`compiler/build`) alongside the Sailfin runtime (`runtime/`). Future capsule manifests and
+runtime, and tooling capsules. The current repository hosts the native compiler
+(legacy name: stage2) under `build/native` and a legacy Stage1 bootstrap pipeline
+alongside the Sailfin runtime (`runtime/`). Future capsule manifests and
 fleet layout are tracked in `docs/roadmap.md`.
 
 ## Roadmap Highlights
@@ -115,9 +116,9 @@ For now, experiment, record findings, and propose ideas through pull requests.
 ### Local Development
 
 - `make install` — create or update the `sailfin` Conda environment defined in `environment.yml`.
-- `make test` — run the suite.
-- `make package` — build the stage1 release artifact (`dist/sailfin-stage1-<version>.zip`).
-- `sailfin-stage1 <paths> --out <dir>` — compile Sailfin sources using the installed stage1 bundle.
+- `make compile` — build the native compiler by self-hosting from a released seed.
+- `make test` — run the suite using the self-hosted native compiler.
+- `make bootstrap-legacy` — legacy Stage1 bootstrap pipeline (deprecated; emergency recovery only).
 
 The Sailfin registry at `registry.sailfin.dev` is live for experiments; the
 bootstrap toolchain has not yet integrated manifest workflows, so treat registry

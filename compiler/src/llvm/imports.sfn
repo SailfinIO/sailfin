@@ -94,7 +94,7 @@ fn resolve_import_artifact_slug(slug -> string) -> string ![io] {
     }
 
     // Prefer the direct slug if it exists.
-    if fs.exists(layout_manifest_path_for_slug(slug)) {
+    if fs.exists(_resolve_layout_manifest_path_for_slug(slug)) {
         return slug;
     }
 
@@ -102,7 +102,7 @@ fn resolve_import_artifact_slug(slug -> string) -> string ![io] {
     // module is typically `parser/mod`. Fall back to that layout.
     if !ends_with(slug, "/mod") {
         let mod_slug = slug + "/mod";
-        if fs.exists(layout_manifest_path_for_slug(mod_slug)) {
+        if fs.exists(_resolve_layout_manifest_path_for_slug(mod_slug)) {
             return mod_slug;
         }
     }

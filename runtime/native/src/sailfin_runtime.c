@@ -4423,6 +4423,24 @@ void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
     {
         n = 0;
     }
+
+    // Safety guard: if the array ABI is corrupted (e.g. wrong pointer passed),
+    // `len` can become a huge positive value and we will effectively hang
+    // writing for a very long time.
+    if (n > (int64_t)10000000)
+    {
+        fprintf(stderr, "[stage2-native] fs.writeLines refusing to write absurd line count=%lld (possible ABI corruption)\n", (long long)n);
+        fclose(f);
+        return;
+    }
+
+    if (!lines->data && n > 0)
+    {
+        fprintf(stderr, "[stage2-native] fs.writeLines missing data pointer (len=%lld)\n", (long long)n);
+        fclose(f);
+        return;
+    }
+
     for (int64_t i = 0; i < n; i++)
     {
         const char *line = NULL;

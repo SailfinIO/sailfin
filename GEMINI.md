@@ -8,7 +8,7 @@ Sailfin is an AI-native, systems-friendly programming language designed for prec
 
 For a comprehensive overview of the project, please refer to the [README.md](README.md).
 
-The primary compiler is the native stage2 toolchain; stage1 and bootstrap steps still exist for now but are slated for removal by the 1.0 release. The runtime currently ships in C and is planned to move into Sailfin for 1.0.
+The primary compiler is the self-hosted native compiler (legacy name: stage2); stage1 and bootstrap steps still exist for now but are slated for removal by the 1.0 release. The runtime currently ships in C and is planned to move into Sailfin for 1.0.
 
 ## Getting Started
 
@@ -40,7 +40,7 @@ The following commands are available for development:
 
 - `make install`: Create or update the Conda environment used for the compiler.
 - `make test`: Run the full suite.
-- `make compile`: Build the native sailfin-stage2 compiler via the current stage1 → stage2 bootstrap pipeline.
+- `make compile`: Build the native compiler by self-hosting from a released seed (preferred).
 - `make clean`: Remove packaged artifacts (`dist/`).
 - `make native-stage2-debug`: Build native stage2 with debug symbols for lldb.
 - `make native-stage2-asan`: Build native stage2 with AddressSanitizer.
@@ -55,7 +55,7 @@ The `docs` folder is a critical part of the Sailfin project. It contains the pro
 Key documents include:
 
 - [docs/roadmap.md](docs/roadmap.md): The project's roadmap, which tracks tasks and future development.
-- [docs/status.md](docs/status.md): The source of truth for what ships today (stage2 primary) versus what is still in progress.
+- [docs/status.md](docs/status.md): The source of truth for what ships today (native compiler primary; legacy name stage2) versus what is still in progress.
 - [docs/spec.md](docs/spec.md): The bootstrap language reference with design-preview callouts.
 
 ## Testing
@@ -70,7 +70,8 @@ You can also run specific test suites:
 
 - `make test-unit`: Run fast Sailfin-focused unit coverage.
 - `make test-integration`: Run Sailfin-native integration tests.
-- `make test-stage2`: Run LLVM/native backend coverage.
+
+Note: the repo still contains historical `stage2` naming in targets and artifact paths; docs prefer “native compiler” terminology going forward.
 
 Before submitting any changes, please ensure that all tests pass.
 

@@ -14,7 +14,6 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
 - [ ] Self-hosted release pipeline
-
   - [x] Promote the Stage2 bootstrap job to the primary release workflow so every merge runs the Stage2->Stage2 rebuild and archives the native artifacts.
   - [x] Add a `build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the Stage2 smoke suite, and uploads artifacts for downstream jobs.
     - [x] Initial workflow scaffolds Stage2 bootstrap/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged LLVM artifacts via `tools/package_stage2.py`.
@@ -22,13 +21,11 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [x] Wire the workflow into `semantic-release` so version bumps publish Stage2 binaries and changelog entries in one pass.
 
 - [ ] Installer and distribution hardening
-
   - [x] Add a curl-able `install.sh` (repo root) that detects OS/arch, downloads the matching Stage2 binary, validates the archive, and installs to `/usr/local/bin` (with override support).
   - [ ] Publish signed checksums alongside release artifacts and add a CI job that runs the installer against staging builds.
   - [x] Update `README.md` and `docs/status.md` with the new install flow and installer defaults.
 
 - [ ] Distribution packaging
-
   - [x] Introduce `tools/package_stage2.py` to package Stage2 LLVM artifacts with per-target metadata (tarballs for macOS arm64/x86_64 and Linux x86_64).
   - [x] Emit checksum and manifest sidecars (SHA256 + JSON) for Stage2 tarballs so release automation can verify downloads.
   - [x] Extend packaging tooling to emit Stage2-native release bundles per platform (macOS arm64/x86_64, Linux x86_64) with runtime adapters and prelude modules.
@@ -37,7 +34,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [ ] Document artifact structure, supported platforms, and upgrade expectations in `docs/README.md` and `docs/status.md`.
 
 - [ ] **Extend suspension-conflict tracking to coroutines** — Once `async fn` and generator support lands, extend borrow lifetime checks to reject mutable borrows held across `yield`/resume boundaries in coroutine frames.
-
   - [ ] Add coroutine/generator lowering infrastructure (tracked separately in "Async & Concurrency Substrate" roadmap item; this subtask assumes that work is complete).
   - [ ] Extend `compiler/src/native_llvm_lowering.sfn` suspension tracking to recognize `yield` instructions and treat them like `await` for borrow conflict analysis.
   - [ ] Implement resumable frame lifetime analysis that tracks which locals survive across suspension points and rejects mutable borrows that would be live at `yield` sites.
@@ -50,7 +46,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 2. **Runtime & FFI Foundations**
 
 - [ ] **Native runtime self-hosting plan** — Execute the C removal plan in `docs/runtime_audit.md`.
-
   - [ ] Adopt the Sailfin-native ABI (versioned) and document layouts + migration steps in `docs/runtime_audit.md`.
   - [ ] Implement a legacy ABI shim (C-string compatibility) to bridge existing Stage2 intrinsics during migration.
   - [ ] Implement a Sailfin-native core runtime module covering:
@@ -64,7 +59,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [ ] Remove C runtime dependencies from the Stage2 build once parity is confirmed.
 
 - [ ] **Native capability adapter implementation** — Replace `runtime_support.py` Python implementations with native Sailfin modules for filesystem, HTTP, and model adapters.
-
   - [ ] Create `runtime/adapters/fs.sfn` implementing filesystem operations (`read_file`, `write_file`, `list_directory`, `delete_file`, `create_directory`) using platform-specific system calls via `unsafe extern` declarations.
   - [ ] Create `runtime/adapters/http.sfn` implementing HTTP client (`get`, `post`, `put`, `delete`) using native networking primitives or FFI bindings to libcurl/platform APIs.
   - [ ] Create `runtime/adapters/model.sfn` implementing model invocation adapter that routes to registered engine implementations (OpenAI API, local inference, etc.).
@@ -74,7 +68,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [ ] Document native adapter FFI contracts and platform-specific requirements in `docs/runtime_audit.md`.
 
 - [ ] **Port async runtime glue to Sailfin** — Reimplement `asyncio`-based helpers (`spawn`, `channel`, `serve`) as native Sailfin modules with capability enforcement.
-
   - [ ] Create `runtime/async_runtime.sfn` implementing:
     - [ ] Event loop abstraction compatible with native coroutine lowering.
     - [ ] Task scheduler for `spawn` with named task tracking.
@@ -89,7 +82,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 5. **Toolchain De-Pythonisation**
 
 - [ ] **Native emission milestone** — Switch default compilation target from Python codegen to Stage2 LLVM executable backend.
-
   - [ ] Update `compiler/src/main.sfn` to default `--backend` flag to `native` instead of `python`, with explicit `--backend=python` option for fallback.
   - [ ] Ensure all compiler modules compile cleanly with Stage2 backend and pass existing test suite.
   - [ ] Update Makefile targets:
@@ -100,7 +92,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [ ] Document backend selection, fallback strategy, and known Stage2 limitations in `docs/README.md`.
 
 - [ ] **Sailfin-native CLI (`sfn`)** — Reimplement compiler launcher, project commands, and package management in Sailfin without Python entrypoints.
-
   - [ ] Create `cli/main.sfn` implementing:
     - [ ] Command-line argument parsing (using native string utilities).
     - [ ] Subcommand dispatch for `sfn compile`, `sfn run`, `sfn test`, `sfn add`, `sfn publish`.
@@ -120,7 +111,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [ ] Update README.md with `sfn` CLI usage examples replacing Python `sailfin-stage1` references.
 
 - [ ] **Release pipeline guardrails** — Enforce that CI builds use only Sailfin artifacts, failing if Python runtime shims are invoked.
-
   - [ ] Add CI job `.github/workflows/python-free-build.yml` that:
     - [ ] Compiles compiler using Stage2 backend without `runtime_support.py` in path.
     - [ ] Compiles all examples using self-hosted compiler.
@@ -154,7 +144,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 3. **Diagnostics Parity**
 
 - [ ] **Expand typecheck coverage** — Complete type inference for generics, interface conformance, and port remaining stage0 diagnostics.
-
   - [x] Locked regression coverage for duplicate symbol diagnostics across structs, enums, interfaces, models, and type parameters via `compiler/tests/test_stage1_typecheck_duplicates.py`.
   - [x] Implements clauses now enforce interface type argument counts, rejecting missing or extra generics with coverage in `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_missing_type_arguments_for_generic_interface_reports_diagnostic` and `compiler/tests/test_stage1_typecheck_interfaces.py::test_struct_mismatched_type_argument_count_reports_diagnostic`.
   - [ ] Generic function type inference — Infer type parameters from call-site arguments when not explicitly provided.
@@ -178,7 +167,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [ ] Document generic type inference rules, variance, and interface conformance checking in `docs/spec.md`.
 
 - [ ] **Enhanced diagnostic rendering** — Improve CLI/artifact diagnostic output with multi-line snippets, caret highlights, and suggested fixes.
-
   - [ ] Extend diagnostic types in `compiler/src/typecheck.sfn` and `compiler/src/effect_checker.sfn` to carry:
     - [ ] Primary span (error location) and secondary spans (related locations like definition sites).
     - [ ] Suggested fixes as text edits (e.g., add `![io]` to signature).
@@ -215,7 +203,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 4. **Registry & Capsule Workflow**
 
 - [ ] **Finalize manifest schemas** — Define and validate capsule (`sail.toml`) and fleet (`fleet.toml`) formats per package management proposal.
-
   - [ ] Review and refine manifest format in `docs/proposals/package-management.md`:
     - [ ] Capsule manifest (`sail.toml`) — package name, version, authors, license, dependencies, effect declarations, entry points.
     - [ ] Fleet manifest (`fleet.toml`) — workspace root, member capsules, shared dependencies, dev/build dependencies.
@@ -235,7 +222,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [ ] Document manifest schemas with field descriptions and examples in `docs/proposals/package-management.md`.
 
 - [ ] **Registry CLI commands** — Implement capsule management commands against `registry.sailfin.dev`.
-
   - [ ] Implement `sfn init` in `cli/init.sfn`:
     - [ ] Create project directory structure.
     - [ ] Generate default `sail.toml` with template values.
@@ -301,7 +287,6 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 Move checked tasks here with links to PRs / status updates for traceability.
 
 - [x] **Bootstrap Stage2 self-hosting** — Compile the Sailfin compiler with Stage2 native backend and execute the resulting binary end-to-end; CI gating is tracked under "CI gating and signals".
-
   - [x] Create self-hosting compilation script in `scripts/bootstrap_stage2.py` that compiles all `compiler/src/*.sfn` modules using Stage2 LLVM backend with full capability grants.
   - [x] Add Makefile targets for Stage2 native validation (`stage2-native-sanity`, `stage2-native-roundtrip`, `stage2-native-fixed-point`).
   - [x] Add smoke tests in `compiler/tests/test_stage2_bootstrap.py` that validate the self-hosted compiler modules are generated correctly with valid LLVM IR.
@@ -383,7 +368,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
   - [x] Full `if`/`else` merges: re-use the helper to union mutations from both arms, skip terminated branches, and emit two-input phis. Add coverage for a function where both arms mutate a shared local (and another unique local) before reconverging, confirming the right value is observed after the merge. Validated by `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_if_else` which exercises both shared mutations (where both branches modify the same local) and partial mutations (where each branch modifies unique locals), ensuring phi nodes correctly merge values from both branches.
   - [x] Loop header phis: restructured `lower_loop_instruction` to create explicit preheader, header, body, latch, and exit labels. For each local mutated in the body and live on exit, emit header phis fed by the preheader definition and the latch definition while ensuring `continue` jumps target the latch. The `lower_for_instruction` already had the proper structure (header, body, increment/latch, exit) and `continue` targeting. Regression coverage: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program` includes both `loop_and_match` (which mutates `total` and `current` accumulator locals) and `sum_for` (which mutates `total` accumulator local in a for loop with `continue`/`break`).
   - [x] Match merges: in `lower_match_instruction`, accumulate mutations per arm (including guards) with their terminating label, then emit a multi-input phi for each live-out local at the shared merge label. Terminated arms are ignored. Covered by `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_emits_phi_for_match` with match expressions where different arms assign distinct values before falling through (both shared mutations across all arms and partial mutations unique to specific arms).
-  - [x] Consolidation and docs: factored shared phi assembly helpers (`find_preloaded_value`, `collect_mutation_names`, `find_mutation_for_name`, `join_strings`, `build_phi_and_store`) into `compiler/src/native_llvm_lowering.sfn` and refactored all three phi emission functions (`emit_phi_merges_for_straight_if`, `emit_phi_merges_for_if_else`, `emit_phi_merges_for_match`) to use the common helpers while ensuring LLVM's requirement that phi nodes are grouped at the top of basic blocks. Stage2 suite (`make test-stage2`) confirms all 40 tests pass. Behaviour documented in `docs/status.md` with references to execution fixtures `test_native_llvm_execution_emits_phi_for_straight_line_if`, `test_native_llvm_execution_emits_phi_for_if_else`, and `test_native_llvm_execution_emits_phi_for_match`.
+  - [x] Consolidation and docs: factored shared phi assembly helpers (`find_preloaded_value`, `collect_mutation_names`, `find_mutation_for_name`, `join_strings`, `build_phi_and_store`) into `compiler/src/native_llvm_lowering.sfn` and refactored all three phi emission functions (`emit_phi_merges_for_straight_if`, `emit_phi_merges_for_if_else`, `emit_phi_merges_for_match`) to use the common helpers while ensuring LLVM's requirement that phi nodes are grouped at the top of basic blocks. Native compiler suite (`make test`) confirms coverage. Behaviour documented in `docs/status.md` with references to execution fixtures `test_native_llvm_execution_emits_phi_for_straight_line_if`, `test_native_llvm_execution_emits_phi_for_if_else`, and `test_native_llvm_execution_emits_phi_for_match`.
 - [x] Lower enum aggregates (including payload storage) into LLVM so runtime helpers can consume native values without Python bridges.
   - [x] Define the tagged-union LLVM layout (tag + payload pointer/inline storage) and thread it through the type context.
   - [x] Emit enum constructors that populate the tag field; unit variants (no payload) fully work, payload variants insert tags but full field storage needs bitcast/store operations (deferred to follow-on work).
@@ -414,13 +399,11 @@ Move checked tasks here with links to PRs / status updates for traceability.
   - [x] Teach the native emitter to consume the canonical descriptors before defaulting to pointer layouts.
   - [x] Update diagnostics/tests to assert the absence of pointer-layout fallbacks for the covered types.
 - [x] Add cross-module layout regression coverage (stage1 pipeline + stage2 LLVM execution) to lock the merged-manifest behaviour and guard against future pointer fallback regressions.
-
   - [x] Build a minimal multi-module fixture that exercises shared structs/enums through both pipelines.
   - [x] Wire the fixture into `make test` (stage1) and the native LLVM execution suite.
   - [x] Document the coverage expectations in `docs/status.md` once the suite lands.
 
 - [x] **Capability-aware intrinsics for native backend** — Introduce intrinsic declarations that preserve effect annotations through LLVM codegen so Stage2 binaries enforce capability requirements at the IR level.
-
   - [x] Define intrinsic signatures for core capability operations (`io_print`, `io_read`, `model_invoke`, `net_request`) in `compiler/src/native_ir.sfn` with effect metadata that survives lowering.
   - [x] Extend `compiler/src/native_llvm_lowering.sfn` to emit LLVM function declarations for intrinsics, annotating them with capability metadata in IR comments.
   - [x] Wire intrinsic calls through `lower_call_expression` so Stage2 routes `console.info`, `fs.*`, `http.*`, `prompt` to the declared intrinsics instead of Python fallbacks.
@@ -428,7 +411,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
   - [x] Document intrinsic ABI and capability metadata format in `docs/spec.md` and update `docs/status.md` with coverage references.
 
 - [x] **Bridge capability adapters into Stage2 lowering** — Expose `fs`, `http`, `serve`, `spawn`, and channel primitives as callable symbols in Stage2 LLVM modules so runtime helpers can be invoked from native code.
-
   - [x] Declare adapter function signatures in `compiler/src/native_llvm_lowering.sfn` for filesystem operations (`fs_read_file`, `fs_write_file`, `fs_list_directory`), HTTP (`http_get`, `http_post`), model (`model_invoke_with_prompt`), serving (`serve_start`, `serve_handler_dispatch`), concurrency (`spawn_task`, `channel_create`, `channel_send`, `channel_receive`). Adapter signatures added to `runtime_helper_descriptors()` function with appropriate effect annotations and LLVM symbol names.
   - [x] Implement adapter lowering in `compiler/src/native_llvm_lowering.sfn` that emits external function declarations and routes Sailfin runtime helper calls to the corresponding adapter symbols. Adapter calls route through existing `find_runtime_helper` infrastructure, ensuring proper symbol resolution via the `symbol` field and automatic capability metadata propagation.
   - [x] Add smoke tests in `compiler/tests/test_native_llvm_execution.py` for each adapter category:
@@ -440,7 +422,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
   - [x] Ensure adapter calls propagate capability requirements into the module's capability manifest. Validated by existing manifest tests plus new adapter-specific coverage showing effects (`io`, `net`, `model`, `spawn`, `channel`) flow through declaration comments.
 
 - [x] **Register capability adapters in Stage2 runner** — Extend `runtime/stage2_runner.py` to bind adapter implementations to LLVM symbols and enforce capability grants before native code executes.
-
   - [x] Implement adapter registration in `Stage2Runner.__init__` that maps adapter symbol names to Python callback implementations (reusing existing `runtime_support.py` helpers for `fs`, `http`, `model`, `serve`, `spawn`, `channel`).
   - [x] Extend `Stage2Runner.execute_entry_point` to check the capability manifest before execution and raise `PermissionError` if native code attempts IO/model/net operations without grants (leveraging existing manifest enforcement from completed work).
   - [x] Add bridge implementations for each adapter that translate LLVM ABI calls to Python runtime helpers:
@@ -459,7 +440,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
   - [x] Document adapter ABI, registration flow, and capability enforcement in `docs/runtime_audit.md` and update `docs/status.md` with coverage.
 
 - [x] **Complete string literal lowering in LLVM backend** — Emit global string constants so method returns and expressions can use string literals without Python fallbacks.
-
   - [x] Implement `lower_string_literal` in `compiler/src/native_llvm_lowering.sfn` to create LLVM global constants for string literals:
     - [x] Parse string literal content and unescape sequences (`\n`, `\t`, `\"`, etc.).
     - [x] Generate deterministic global constant names (`@.str.len{length}.h{hash}`) and track them in lowering context.
@@ -474,7 +454,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
   - [x] Document string literal lowering strategy and global constant layout in `docs/status.md`.
 
 - [x] **Fix self parameter type resolution in interface methods** — Ensure interface method bodies can access struct fields via `self` without "missing type annotation" diagnostics.
-
   - [x] Extend interface method lowering in `compiler/src/native_llvm_lowering.sfn` to inject implicit `self` type annotation:
     - [x] When lowering struct method implementing interface, resolve struct type from function qualified name (e.g., `Person::format` → `Person`).
     - [x] Create parameter binding for `self` with resolved struct type and appropriate LLVM pointer type (`%StructName*`).
@@ -490,7 +469,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
   - [x] Document self parameter resolution and member access lowering for interface methods in `docs/status.md`.
 
 - [x] **Add regression coverage for method return expressions** — Validate that interface methods can return all expression types to prevent regressions before self-hosting.
-
   - [x] Create comprehensive method return test suite in `compiler/tests/test_native_llvm_execution.py`:
     - [x] `test_native_llvm_execution_method_returns_string_literal` — validates `return "text"` works end-to-end.
     - [x] `test_native_llvm_execution_method_returns_field_access` — validates `return self.field` works.
@@ -499,9 +477,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
   - [x] Document expression coverage expectations in `docs/status.md`.
 
 - [x] **Complete Stage2 LLVM lowering for warning-free self-compilation** — Implement missing language features in LLVM backend so the compiler can compile itself without diagnostic warnings, achieving full Stage2 feature parity.
-
   - [x] **Fix complex type lowering fallbacks** — Address cases where complex types (arrays, enums, structs) are incorrectly lowered as `double` due to missing type resolution.
-
     - [x] Investigate type resolution failures in `lower_expression` that cause `{ %DecoratorInfo*, i64 }*` and similar complex types to fallback to `double` primitive.
     - [x] Ensure `resolve_struct_info_for_literal`, `resolve_enum_info_for_literal`, and array type resolution correctly propagate through all expression contexts.
     - [x] Fix parameter type resolution in decorator evaluation functions (`evaluate_decorators`, `evaluate_arguments`, `evaluate_expression`) where `Decorator[]`, `DecoratorArgument[]`, and `Expression` parameters lose type metadata.
@@ -513,14 +489,12 @@ Move checked tasks here with links to PRs / status updates for traceability.
     - [x] Target diagnostics: eliminated "unsupported parameter type" warnings and "double lacks struct metadata" warnings from bootstrap output. Remaining "i8* lacks struct metadata" and "{ i8\*\*, i64 }* lacks struct metadata" warnings are expected for operations on opaque pointer types (require cross-module type resolution, roadmap work).
 
   - [x] **Implement array indexing in LLVM lowering** — Support `array[index]` expressions so compiler internals can access AST node fields, token arrays, and decorator lists.
-
     - [x] Add `lower_index_expression` function in `compiler/src/native_llvm_lowering.sfn` that:
       - [x] Recognizes `base[index]` syntax and splits into base expression and index expression.
       - [x] Lowers base expression to get array operand with `{ element_type*, i64 }` or `[N x element_type]` LLVM type.
       - [x] Lowers index expression to get `i64` index value.
 
   - [x] Emits bounds check (compare index against array length) and routes failures through the `sailfin_runtime_bounds_check` helper to raise `IndexError` on out-of-bounds access.
-
     - [x] Generates `getelementptr` to compute element address.
     - [x] Loads element value and returns operand with correct element type.
     - [x] Integrate index expression recognition into `lower_expression` after member access but before fallback.
@@ -532,7 +506,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
     - [x] Target diagnostics: eliminate "unsupported expression `array[index]`", "unsupported expression `decorators[index]`", "unsupported expression `text[0]`" warnings.
 
   - [x] **Fix string indexing and character operations** — Support `string[index]` access and character comparison so lexer/parser string utilities work natively.
-
     - [x] Extend `lower_index_expression` to recognize string base types (`i8*` LLVM representation).
     - [x] Generate `getelementptr` for character access returning `i8` value.
     - [x] Implement `is_whitespace_char`, `is_digit_char`, `is_alpha_char` as native helpers or inline comparisons.
@@ -543,7 +516,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
     - [x] Target diagnostics: eliminate "member access base `i8*` lacks struct metadata", "unsupported expression `value[start]`", "unsupported expression `text[0]`" warnings.
 
   - [x] **Implement compound assignment operators** — Support `+=`, `-=`, `*=`, `/=` operators so mutation-heavy compiler code (loop counters, accumulators) lowers without fallbacks.
-
     - [x] Recognize compound assignment syntax in `lower_expression_statement`.
     - [x] Desugar `variable += expression` into `variable = variable + expression` during lowering.
     - [x] Ensure desugared form uses existing local binding infrastructure and mutation tracking.
@@ -554,7 +526,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
     - [x] Target diagnostics: eliminate "assignment to unknown local `index +`", "unsupported expression `= 1`" warnings.
 
   - [x] **Fix logical operator lowering** — Support `&&`, `||` operators with short-circuit evaluation so conditional expressions in compiler logic compile correctly.
-
     - [x] Implement `lower_logical_and` and `lower_logical_or` in `compiler/src/native_llvm_lowering.sfn`:
       - [x] For `a && b`: evaluate `a`, branch to short-circuit exit if false, otherwise evaluate `b`.
       - [x] For `a || b`: evaluate `a`, branch to short-circuit exit if true, otherwise evaluate `b`.
@@ -568,7 +539,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
     - [x] Target diagnostics: eliminate "call to unknown function `requires_io && !contains_effect`" warnings.
 
   - [x] **Support conditional expression ternary operator** — Implement `condition ? true_value : false_value` so inline conditionals in compiler code compile without fallback.
-
     - [x] Recognize ternary syntax in `lower_expression`.
     - [x] Lower condition expression, branch to `then`/`else` labels, evaluate corresponding expression, emit phi merge.
     - [x] Add tests:
@@ -577,7 +547,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
     - [x] Target diagnostics: eliminate conditional expression fallback warnings (if any).
 
   - [x] **Fix if-statement condition lowering failures** — Address cases where if/match conditions produce no value due to type coercion issues.
-
     - [x] Audit `lower_condition_to_i1` in `compiler/src/native_llvm_lowering.sfn` to ensure all boolean-producing expressions return operands.
     - [x] Handle cases where complex expressions (member access, calls) need type coercion to `i1` for branch conditions.
     - [x] Extend `comparison_predicate_for_symbol` to support `i8` (character) comparisons with full ordering (`==`, `!=`, `<`, `<=`, `>`, `>=`) and `i8*` (string pointer) equality comparisons (`==`, `!=`).
@@ -589,7 +558,6 @@ Move checked tasks here with links to PRs / status updates for traceability.
     - [x] Target diagnostics: eliminate "unsupported comparison operator `==` for type `i8`", "unsupported comparison operator `!=` for type `i8`", and "unsupported comparison operator `==` for type `i8*`" warnings. All "unsupported comparison operator" warnings eliminated from bootstrap output.
 
   - [x] **Implement unsupported expression fallback handlers** — Add lowering support for remaining expression types used in compiler source.
-
     - [x] **Unary negation operator** — Implement `!` operator lowering using `xor i1 <value>, 1` instruction. Eliminates all "call to unknown function `!...`" warnings (e.g., `!contains_effect`, `!starts_with`). Tests: `compiler/tests/test_negation_operator.py`.
     - [x] **Null literal support** — Implement `null` keyword lowering as `i8* null` pointer. Enables struct fields with optional types (e.g., `primary: null` in Diagnostic structs) to compile without "unsupported expression `null`" warnings. Eliminates ~50+ bootstrap warnings. Tests: `compiler/tests/test_null_literal.py`.
     - [x] **Character literal support** — Single-character string literals (e.g., `"a"`, `"t"`, `"\n"`) now lower to `i8` type instead of `i8*`, enabling direct character comparisons without type coercion errors. Implemented `is_character_literal` and `get_character_literal_value` helpers that detect single-char strings and escape sequences, returning ASCII values for LLVM lowering. Eliminates "unable to convert right operand from `i8*` to `i8`" warnings in character comparison contexts. Tests: `compiler/tests/test_string_lowering_improvements.py::test_character_literal_lowering`, `test_character_comparison`, `test_escape_sequence_character_literals`.

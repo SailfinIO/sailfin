@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Sailfin is an AI-native, systems-friendly programming language designed for precision, safety, and introspection. The repository hosts the **native Stage2 compiler** (primary toolchain today), the Stage1 bootstrap compiler, and a legacy Python bootstrap (Stage0, now archived).
+Sailfin is an AI-native, systems-friendly programming language designed for precision, safety, and introspection. The repository hosts the **self-hosted native compiler** (primary toolchain), plus legacy bootstrap code kept for emergency recovery while marching toward 1.0.
 
 **Current architecture:**
 
-- **Stage1 (bootstrap)**: Sailfin-written compiler used to bootstrap Stage2. Located in `compiler/src/*.sfn`, emits Python code targeting `runtime/runtime_support.py`.
-- **Stage0 (legacy)**: Python bootstrap compiler.
-- **Stage2 (primary)**: Native backend targeting LLVM with `.sfn-asm` intermediate representation, producing the `sailfin-stage2` binary.
+- **Native compiler (primary; legacy name: Stage2)**: Native backend targeting LLVM with `.sfn-asm` intermediate representation; the release artifact is still named `sailfin-stage2` today.
+- **Stage1 (legacy bootstrap)**: Deprecated bootstrap pipeline kept for emergency recovery while marching toward 1.0.
+- **Stage0 (legacy)**: Historical Python bootstrap compiler.
+
+Note: the codebase still contains many historical `stage2` names in targets and artifact paths; docs prefer “native compiler” terminology going forward.
 
 The runtime currently ships as C under `runtime/native/` and is planned to move into Sailfin for the 1.0 release.
 
@@ -27,11 +29,11 @@ make install          # Create/update the 'sailfin' Conda environment
 ### Development Workflow
 
 ```bash
-make compile          # Build the native sailfin-stage2 compiler (bootstraps through Stage1)
+make compile          # Build the compiler by self-hosting from a released seed (preferred)
+make bootstrap-legacy # Legacy stage1/bootstrap pipeline (deprecated)
 make test             # Run full suite
-make test-unit        # Run fast unit tests (exclude Stage2)
+make test-unit        # Run Sailfin-native unit tests
 make test-integration # Run Sailfin-native integration tests
-make test-stage2      # Run LLVM/native backend tests
 ```
 
 ### Build Artifacts
@@ -39,8 +41,8 @@ make test-stage2      # Run LLVM/native backend tests
 ```bash
 make clean            # Remove dist/ artifacts
 make clean-stage1     # Remove compiler/build/ (requires stage1 to rebuild)
-make native-stage2-debug # Build native stage2 with -O0/-g for lldb
-make native-stage2-asan  # Build native stage2 with AddressSanitizer
+make native-stage2-debug # Build native compiler (legacy: stage2) with -O0/-g for lldb (bootstrap-built)
+make native-stage2-asan  # Build native compiler (legacy: stage2) with AddressSanitizer (bootstrap-built)
 make stage2-native-sanity # Build + compile hello-world as smoke test
 make stage2-native-roundtrip # Build + run on compiler/src/main.sfn
 make stage2-native-fixed-point # Ensure Stage3→Stage4 is a stable fixed-point
@@ -87,7 +89,7 @@ fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 
 Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effects emit diagnostics with source spans and fix-it hints.
 
-### Ownership & Borrowing (Stage2)
+### Ownership & Borrowing (Native Compiler)
 
 Sailfin uses move-by-default semantics with explicit borrows:
 
@@ -96,7 +98,7 @@ Sailfin uses move-by-default semantics with explicit borrows:
 - `&T`: shared (read-only) borrow
 - `&mut T`: exclusive mutable borrow
 
-**Bootstrap status:** Parsed but not enforced. Stage2 LLVM backend tracks ownership metadata, rejects conflicting borrows, and flags use-after-move.
+**Bootstrap status:** Parsed but not enforced. The native LLVM backend tracks ownership metadata, rejects conflicting borrows, and flags use-after-move.
 
 ### Capability Bridges (Hybrid Stage)
 
@@ -123,7 +125,7 @@ See `docs/runtime_audit.md` for the full migration plan.
 2. Add AST node(s) to `compiler/src/ast.sfn`
 3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
 4. Modify `compiler/src/native_lowering.sfn` to generate Python
-5. (Stage2) Extend `compiler/src/native_llvm_lowering.sfn` for LLVM
+5. (Native compiler) Extend `compiler/src/native_llvm_lowering.sfn` for LLVM
 6. Add regression tests to `compiler/tests/`
 7. Update `docs/spec.md` (Part A if shipped, Part B if planned)
 8. Update `docs/status.md` with implementation status
@@ -136,27 +138,30 @@ Effect diagnostics include source spans and suggested fixes. If a function calls
 2. Add the required effect to the function signature: `fn foo() ![io] { ... }`
 3. Ensure parent callers also declare transitive effects
 
-### Working with Stage2 (LLVM Backend)
+### Working with the Native Compiler (LLVM Backend)
 
-Stage2 tests execute real LLVM IR via `llvmlite`:
+Native compiler coverage lives in Sailfin-native tests under `compiler/tests/`:
 
 ```bash
-make test-stage2  # Run LLVM execution suite
+make test         # Run unit + integration + e2e suites
+make test-unit
+make test-integration
+make test-e2e
 ```
 
 **Key files:**
 
 - `compiler/src/native_llvm_lowering.sfn` — LLVM IR generation
-- `compiler/tests/test_native_llvm_execution.py` — Execution smoke tests
-- `runtime/stage2_runner.py` — Capability manifest enforcement for native code
+- `compiler/tests/` — Sailfin-native unit/integration/e2e suites
+- `runtime/native/` — C runtime linked into the native compiler
 
 ### Running Examples
 
 Examples in `examples/` demonstrate language features:
 
 ```bash
-conda run -n sailfin python tools/compile_with_stage1.py examples/basics/hello-world.sfn --out /tmp
-python /tmp/hello-world.py
+make compile
+build/native/sailfin-stage2 run examples/basics/hello-world.sfn
 ```
 
 Check `examples/README.md` for capability requirements (`![io]`, `![model]`, etc.).

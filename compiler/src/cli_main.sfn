@@ -709,6 +709,13 @@ fn _write_lines(path -> string, lines -> string[]) ![io] {
     fs.writeLines(path, lines);
 }
 
+fn _write_llvm_text(path -> string, llvm -> string) ![io] {
+    // Avoid passing potentially large/fragile `string[]` buffers across the
+    // native runtime boundary via fs.writeLines, which can hang if array ABI
+    // metadata is corrupted.
+    fs.writeFile(path, llvm);
+}
+
 fn _ensure_dir(path -> string) ![io] {
     // best-effort; ignore false.
     fs.createDirectory(path, true);
@@ -1077,13 +1084,13 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
-        let mut lines -> string[] = [];
+        let llvm -> string = "";
         if timing {
-            lines = compile_to_llvm_lines_with_module_timed(source, module_name);
+            llvm = compile_to_llvm_with_module_timed(source, module_name);
         } else {
-            lines = compile_to_llvm_lines_with_module(source, module_name);
+            llvm = compile_to_llvm_with_module(source, module_name);
         }
-        _write_lines(out_path, lines);
+        _write_llvm_text(out_path, llvm);
         return 0;
     }
 
@@ -1110,13 +1117,13 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
         let source = fs.readFile(input_path);
         let module_name = module_name_from_path(input_path);
-        let lines = compile_to_llvm_lines_with_module(source, module_name);
+        let llvm = compile_to_llvm_with_module(source, module_name);
 
         _ensure_dir("build");
         _ensure_dir("build/sailfin");
 
         let ll_path = "build/sailfin/program.ll";
-        _write_lines(ll_path, lines);
+        _write_llvm_text(ll_path, llvm);
 
         let exe_path = out_path;
         let rc = _clang_link(ll_path, exe_path, runtime_root);

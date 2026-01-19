@@ -895,7 +895,7 @@ Test runners support:
 - **Replay** – use generation cards to re-run model calls exactly as captured
   during production incidents.
 
-Current (self-hosted) CLI note: the Stage2 CLI now exposes `sailfin test [path]`.
+Current (self-hosted) CLI note: the native CLI (legacy binary name: `sailfin-stage2`) exposes `sailfin test [path]`.
 Today it discovers Sailfin test files by filename convention (`*_test.sfn`) under
 `path` (recursively), compiles each file with a synthesized test harness `main`,
 and executes it. This is an initial bridge while the native test runner grows;

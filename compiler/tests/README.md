@@ -1,6 +1,7 @@
 # Sailfin-native tests
 
-This folder contains Sailfin-native tests that are executed by the Stage2 CLI:
+This folder contains Sailfin-native tests that are executed by the native compiler CLI
+(legacy binary name: `sailfin-stage2`):
 
 - `build/native/sailfin-stage2 test <path>`
 
