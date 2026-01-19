@@ -144,7 +144,7 @@ jobs:
           (file build/native/sailfin || true)
           build/native/sailfin version || build/native/sailfin --version || true
 
-      - name: Expose build/stage2 import context for tests
+      - name: Expose build/native import context for tests
         shell: bash -l {0}
         run: |
           set -euo pipefail
@@ -157,10 +157,17 @@ jobs:
             find build/selfhost -maxdepth 5 -type d -name import-context -o -name stage2 -print || true
             exit 1
           fi
-          rm -rf build/stage2
-          mkdir -p build/stage2
-          cp -a "$SRC/." build/stage2/
-          ls -1 build/stage2 | head -n 20
+          rm -rf build/native/import-context
+          mkdir -p build/native/import-context
+          cp -a "$SRC/." build/native/import-context/
+          if [ -e build/stage2 ]; then
+            rm -rf build/stage2
+          fi
+          ln -s build/native/import-context build/stage2 2>/dev/null || {
+            mkdir -p build/stage2
+            cp -a build/native/import-context/. build/stage2/
+          }
+          ls -1 build/native/import-context | head -n 20
 
       - name: Expose runtime prelude object for tests
         shell: bash -l {0}
@@ -243,7 +250,7 @@ jobs:
           CONDA=$(which conda) make test
 
       - name: Package native artifacts (selfhosted)
-        run: conda run -n sailfin python tools/package_native.py --skip-build --target ${{ matrix.package_label }} --out dist --native-out build/stage2
+        run: conda run -n sailfin python tools/package_native.py --skip-build --target ${{ matrix.package_label }} --out dist --native-out build/native/import-context
 
       - name: Upload native artifacts (selfhosted)
         uses: actions/upload-artifact@v4
