@@ -235,7 +235,7 @@ def stage1_cache_stats() -> Dict[str, int]:
     return dict(_STAGE1_CACHE_STATS)
 
 
-def link_stage2_binary(
+def link_native_binary(
     modules: Iterable[pathlib.Path],
     output_path: pathlib.Path,
     *,
@@ -244,12 +244,12 @@ def link_stage2_binary(
 ) -> None:
     module_paths = [pathlib.Path(module) for module in modules]
     if not module_paths:
-        raise Stage1CompileError("no Stage2 modules available to link")
+        raise Stage1CompileError("no native LLVM modules available to link")
 
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    temp_dir = pathlib.Path(tempfile.mkdtemp(prefix="stage2-link-"))
+    temp_dir = pathlib.Path(tempfile.mkdtemp(prefix="native-link-"))
     objects: List[pathlib.Path] = []
     try:
         for module_path in module_paths:
@@ -281,9 +281,9 @@ def link_stage2_binary(
             stderr = exc.stderr.decode(
                 "utf-8", errors="ignore") if exc.stderr else ""
             raise Stage1CompileError(
-                f"failed to link Stage2 binary: {stderr}") from exc
+                f"failed to link native compiler binary: {stderr}") from exc
 
-        print(f"[stage2] linked compiler binary to {output_path}")
+        print(f"[native] linked compiler binary to {output_path}")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -351,11 +351,11 @@ def main(argv: list[str] | None = None) -> int:
 
     stage2_requested = args.stage2 or args.stage2_binary is not None
     if stage2_requested:
-        from scripts import bootstrap_stage2
+        from scripts import bootstrap_native
 
         stage2_output = args.stage2_output.resolve()
         capture_results = True  # always capture for potential linking/tests
-        compilation_result = bootstrap_stage2.compile_compiler_to_stage2(
+        compilation_result = bootstrap_native.compile_compiler_to_native(
             stage2_output,
             debug=not args.stage2_quiet,
             quiet=args.stage2_quiet,
@@ -370,15 +370,15 @@ def main(argv: list[str] | None = None) -> int:
         fatal_count = getattr(aggregator, "fatal_count", 0)
         if fatal_count:
             raise Stage1CompileError(
-                f"stage2 bootstrap produced {fatal_count} fatal diagnostic(s)")
+                f"native bootstrap produced {fatal_count} fatal diagnostic(s)")
 
         module_count = len(compiled_modules)
         print(
-            f"[stage2] generated {module_count} LLVM module(s) in {stage2_output}")
+            f"[native] generated {module_count} LLVM module(s) in {stage2_output}")
 
         if args.stage2_binary:
             ldflags = args.stage2_ldflags or []
-            link_stage2_binary(compiled_modules, args.stage2_binary,
+            link_native_binary(compiled_modules, args.stage2_binary,
                                clang=args.stage2_clang, extra_flags=ldflags)
 
     return 0

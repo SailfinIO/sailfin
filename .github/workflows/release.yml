@@ -123,7 +123,7 @@ jobs:
         run: |
           set -euo pipefail
           ./install.sh
-          echo "seed_path=${GLOBAL_BIN_DIR}/sailfin-stage2" >> "$GITHUB_OUTPUT"
+          echo "seed_path=${GLOBAL_BIN_DIR}/sailfin" >> "$GITHUB_OUTPUT"
 
       - name: Report installed seed version
         shell: bash -l {0}
@@ -137,11 +137,11 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          rm -f build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }}
-          conda run -n sailfin python scripts/selfhost_native_stage2.py \
+          rm -f build/native/sailfin-selfhost${{ matrix.exe_ext }}
+          conda run -n sailfin python scripts/selfhost_native.py \
             --seed "${{ steps.seed.outputs.seed_path }}" \
             --no-prefer-asan-seed \
-            --out build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} \
+            --out build/native/sailfin-selfhost${{ matrix.exe_ext }} \
             --clang "${CLANG:-clang}" \
             --jobs 2 \
             --max-attempts 10 \
@@ -152,7 +152,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.rel.outputs.version }}"
-          OUT="$(build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }} --version | tr -d '\r' | head -n 1)"
+          OUT="$(build/native/sailfin-selfhost${{ matrix.exe_ext }} --version | tr -d '\r' | head -n 1)"
           echo "$OUT"
           echo "$OUT" | grep -F "sfn ${VERSION}" >/dev/null
 
@@ -192,9 +192,9 @@ jobs:
         run: |
           set -euo pipefail
           CONDA=$(which conda)
-          STAGE2_BIN="build/native/sailfin-stage2-selfhost${{ matrix.exe_ext }}"
-          "$STAGE2_BIN" --version
-          CONDA="$CONDA" make test STAGE2_BIN="$STAGE2_BIN"
+          NATIVE_BIN="build/native/sailfin-selfhost${{ matrix.exe_ext }}"
+          "$NATIVE_BIN" --version
+          CONDA="$CONDA" make test NATIVE_BIN="$NATIVE_BIN"
 
       - name: Package release asset
         shell: bash -l {0}
@@ -204,20 +204,20 @@ jobs:
           OS="${{ matrix.asset_os }}"
           ARCH="${{ matrix.asset_arch }}"
           EXE_EXT="${{ matrix.exe_ext }}"
-          BIN_SRC="build/native/sailfin-stage2-selfhost${EXE_EXT}"
+          BIN_SRC="build/native/sailfin-selfhost${EXE_EXT}"
           PRELUDE_OBJ="build/selfhost/stage2/obj/runtime/prelude.o"
 
           mkdir -p dist
           STAGE_DIR="$(mktemp -d)"
           mkdir -p "${STAGE_DIR}/bin"
-          cp "$BIN_SRC" "${STAGE_DIR}/bin/sailfin-stage2${EXE_EXT}"
+          cp "$BIN_SRC" "${STAGE_DIR}/bin/sailfin${EXE_EXT}"
           cp "$BIN_SRC" "${STAGE_DIR}/bin/sfn${EXE_EXT}"
           mkdir -p "${STAGE_DIR}/runtime"
           cp -R runtime/native "${STAGE_DIR}/runtime/native"
           mkdir -p "${STAGE_DIR}/runtime/native/obj"
           cp "$PRELUDE_OBJ" "${STAGE_DIR}/runtime/native/obj/prelude.o"
 
-          ASSET="sailfin-stage2_${VERSION}_${OS}_${ARCH}.tar.gz"
+          ASSET="sailfin_${VERSION}_${OS}_${ARCH}.tar.gz"
           tar -czf "dist/${ASSET}" -C "${STAGE_DIR}" .
           echo "asset=${ASSET}" >> "$GITHUB_OUTPUT"
 
@@ -226,6 +226,6 @@ jobs:
         with:
           tag_name: ${{ steps.rel.outputs.tag }}
           files: |
-            dist/sailfin-stage2_${{ steps.rel.outputs.version }}_${{ matrix.asset_os }}_${{ matrix.asset_arch }}.tar.gz
+            dist/sailfin_${{ steps.rel.outputs.version }}_${{ matrix.asset_os }}_${{ matrix.asset_arch }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}

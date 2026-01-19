@@ -30,7 +30,7 @@ def run_one(stage2: pathlib.Path, path: pathlib.Path, timeout_s: float, emit: st
     start = time.monotonic()
     try:
         proc = subprocess.run(
-            # Match the CLI shape used by scripts/selfhost_native_stage2.py.
+            # Match the CLI shape used by scripts/selfhost_native.py.
             # (Older invocations used a --emit flag; the subcommand is the
             # stable interface and tends to give clearer failures.)
             [str(stage2), "emit", emit, str(path)],

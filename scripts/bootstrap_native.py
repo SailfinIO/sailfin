@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Bootstrap Stage2 self-hosted compiler by compiling all compiler sources to LLVM.
+"""Build the native self-hosted compiler by compiling all compiler sources to LLVM.
 
-This script compiles the Sailfin compiler itself using the Stage2 LLVM backend,
+This script compiles the Sailfin compiler itself using the native LLVM backend,
 producing native executable artifacts that can run independently of the Python runtime.
 """
 
@@ -29,7 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 _STAGE1_LOWERING = None
 
 
-_STAGE2_BOOTSTRAP_CACHE_VERSION = "stage2-bootstrap-cache-v1"
+_NATIVE_BOOTSTRAP_CACHE_VERSION = "native-bootstrap-cache-v1"
 
 
 def _sha256_text(text: str) -> str:
@@ -99,12 +99,12 @@ def _module_name_from_path(module_path: pathlib.Path, output_dir: pathlib.Path) 
 def _stage1_fingerprint() -> str:
     """Fingerprint the stage1-generated Python compiler modules.
 
-    `bootstrap_stage2.py` imports `compiler.build.main` + lowering helpers.
-    If those change, we must rebuild stage2 artifacts.
+    This script imports `compiler.build.main` + lowering helpers.
+    If those change, we must rebuild native artifacts.
     """
 
     digest = hashlib.sha256()
-    digest.update(_STAGE2_BOOTSTRAP_CACHE_VERSION.encode("utf-8"))
+    digest.update(_NATIVE_BOOTSTRAP_CACHE_VERSION.encode("utf-8"))
     digest.update(b"\0")
     digest.update(
         f"python-{sys.version_info.major}.{sys.version_info.minor}".encode("utf-8"))
@@ -134,7 +134,7 @@ def _stage1_fingerprint() -> str:
 
 
 def _bootstrap_manifest_path(output_dir: pathlib.Path) -> pathlib.Path:
-    return output_dir / ".stage2-bootstrap-manifest.json"
+    return output_dir / ".native-bootstrap-manifest.json"
 
 
 def _load_bootstrap_manifest(output_dir: pathlib.Path) -> Dict[str, Any] | None:
@@ -839,7 +839,7 @@ def load_native_text_for_import(import_path: str, output_dir: pathlib.Path, *, c
     return ""
 
 
-def compile_compiler_to_stage2(
+def compile_compiler_to_native(
     output_dir: pathlib.Path,
     *,
     debug: bool = False,
@@ -849,7 +849,7 @@ def compile_compiler_to_stage2(
     incremental: bool = True,
     force: bool = False,
 ) -> Tuple[List[pathlib.Path], DiagnosticAggregator] | Tuple[List[pathlib.Path], DiagnosticAggregator, Dict[pathlib.Path, Any]]:
-    """Compile all compiler sources to Stage2 LLVM artifacts.
+    """Compile all compiler sources to native LLVM artifacts.
 
     Args:
         output_dir: Directory to write compiled LLVM modules
@@ -1394,7 +1394,7 @@ def compile_compiler_to_stage2(
     return compiled_modules, aggregator
 
 
-def validate_stage2_artifacts(llvm_modules: List[pathlib.Path], *, debug: bool = False) -> None:
+def validate_native_artifacts(llvm_modules: List[pathlib.Path], *, debug: bool = False) -> None:
     """Validate that compiled LLVM modules are well-formed.
 
     Args:
@@ -1413,11 +1413,11 @@ def validate_stage2_artifacts(llvm_modules: List[pathlib.Path], *, debug: bool =
 
     if debug:
         print(
-            f"[stage2-bootstrap] validating {len(llvm_modules)} LLVM module(s)...")
+            f"[native-bootstrap] validating {len(llvm_modules)} LLVM module(s)...")
 
     for module_path in llvm_modules:
         if debug:
-            print(f"[stage2-bootstrap]   validating {module_path.name}...")
+            print(f"[native-bootstrap]   validating {module_path.name}...")
 
         try:
             ir_text = module_path.read_text(encoding="utf-8")
@@ -1736,7 +1736,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Main entry point for Stage2 bootstrap script."""
+    """Main entry point for native bootstrap script."""
     args = _parse_args(argv)
 
     # The Sailfin compiler reads stage2 artifacts via relative paths like
@@ -1745,13 +1745,13 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(REPO_ROOT)
 
     try:
-        print("[stage2-bootstrap] starting Stage2 self-hosting compilation...")
+        print("[native-bootstrap] starting native self-hosting compilation...")
 
         if args.clean and args.output.exists():
             shutil.rmtree(args.output)
 
         # Compile compiler sources to LLVM
-        compilation_result = compile_compiler_to_stage2(
+        compilation_result = compile_compiler_to_native(
             args.output,
             debug=args.debug,
             quiet=args.quiet,
@@ -1762,7 +1762,7 @@ def main(argv: list[str] | None = None) -> int:
         llvm_modules, aggregator = compilation_result[:2]
 
         print(
-            f"[stage2-bootstrap] compiled {len(llvm_modules)} module(s) to {args.output}")
+            f"[native-bootstrap] compiled {len(llvm_modules)} module(s) to {args.output}")
 
         # Show diagnostic summary if requested
         if args.summary and aggregator.total_count > 0:
@@ -1777,13 +1777,13 @@ def main(argv: list[str] | None = None) -> int:
 
         # Validate LLVM modules if requested
         if args.validate:
-            validate_stage2_artifacts(llvm_modules, debug=args.debug)
+            validate_native_artifacts(llvm_modules, debug=args.debug)
 
-        print("[stage2-bootstrap] ✓ Stage2 bootstrap completed successfully")
+        print("[native-bootstrap] ✓ bootstrap completed successfully")
         return 0
 
     except Stage2BootstrapError as exc:
-        print(f"[stage2-bootstrap][error] {exc}", file=sys.stderr)
+        print(f"[native-bootstrap][error] {exc}", file=sys.stderr)
         if args.debug and exc.__cause__:
             import traceback
             print("\nCaused by:", file=sys.stderr)
@@ -1791,7 +1791,7 @@ def main(argv: list[str] | None = None) -> int:
                 type(exc.__cause__), exc.__cause__, exc.__cause__.__traceback__)
         return 1
     except KeyboardInterrupt:
-        print("\n[stage2-bootstrap] interrupted", file=sys.stderr)
+        print("\n[native-bootstrap] interrupted", file=sys.stderr)
         return 130
 
 

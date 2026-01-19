@@ -111,25 +111,25 @@ jobs:
         run: |
           set -euo pipefail
           ./install.sh
-          echo "SEED_STAGE2=${GLOBAL_BIN_DIR}/sailfin-stage2" >> "$GITHUB_ENV"
+          echo "SEED_NATIVE=${GLOBAL_BIN_DIR}/sailfin" >> "$GITHUB_ENV"
 
       - name: Report installed seed version
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          ls -lh "$SEED_STAGE2"
-          "$SEED_STAGE2" version
+          ls -lh "$SEED_NATIVE"
+          "$SEED_NATIVE" version
 
       - name: Try self-host rebuild Stage2 from released seed
         id: selfhost_seed_try
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          rm -f build/native/sailfin-stage2
-          conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --seed "$SEED_STAGE2" \
+          rm -f build/native/sailfin
+          conda run -n sailfin python scripts/selfhost_native.py \
+            --seed "$SEED_NATIVE" \
             --no-prefer-asan-seed \
-            --out build/native/sailfin-stage2 \
+            --out build/native/sailfin \
             --clang "${CLANG:-clang}" \
             --jobs 2 \
             --import-context-jobs 1 \
@@ -140,9 +140,9 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          ls -lh build/native/sailfin-stage2
-          (file build/native/sailfin-stage2 || true)
-          build/native/sailfin-stage2 version || build/native/sailfin-stage2 --version || true
+          ls -lh build/native/sailfin
+          (file build/native/sailfin || true)
+          build/native/sailfin version || build/native/sailfin --version || true
 
       - name: Expose build/stage2 import context for tests
         shell: bash -l {0}
@@ -190,47 +190,47 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          build/native/sailfin-stage2 test compiler/tests/unit/cli_version_test.sfn
+          build/native/sailfin test compiler/tests/unit/cli_version_test.sfn
 
       - name: Self-host fixed-point rebuild (linux-x86_64, macos-arm64)
         if: matrix.package_label == 'linux-x86_64' || matrix.package_label == 'macos-arm64'
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --seed build/native/sailfin-stage2 \
-            --out build/native/sailfin-stage2-selfhost1 \
+          conda run -n sailfin python scripts/selfhost_native.py \
+            --seed build/native/sailfin \
+            --out build/native/sailfin-selfhost1 \
             --clang "${CLANG:-clang}" \
             --jobs 1 \
             --import-context-jobs 1 \
             --max-attempts 5 \
             --seed-timeout 120 \
             --max-total-seconds 1200
-          conda run -n sailfin python scripts/selfhost_native_stage2.py \
-            --seed build/native/sailfin-stage2-selfhost1 \
-            --out build/native/sailfin-stage2-selfhost2 \
+          conda run -n sailfin python scripts/selfhost_native.py \
+            --seed build/native/sailfin-selfhost1 \
+            --out build/native/sailfin-selfhost2 \
             --clang "${CLANG:-clang}" \
             --jobs 1 \
             --import-context-jobs 1 \
             --max-attempts 3
-          ls -lh build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2
-          (file build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 || true)
-          build/native/sailfin-stage2-selfhost1 version || true
-          build/native/sailfin-stage2-selfhost2 version || true
+          ls -lh build/native/sailfin-selfhost1 build/native/sailfin-selfhost2
+          (file build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
+          build/native/sailfin-selfhost1 version || true
+          build/native/sailfin-selfhost2 version || true
           echo "[ci] fixed-point sha256:" 
-          (sha256sum build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 2>/dev/null || shasum -a 256 build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2)
+          (sha256sum build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 2>/dev/null || shasum -a 256 build/native/sailfin-selfhost1 build/native/sailfin-selfhost2)
           if [ "${RUNNER_OS}" = "Linux" ]; then
-            if ! cmp -s build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2; then
+            if ! cmp -s build/native/sailfin-selfhost1 build/native/sailfin-selfhost2; then
               echo "[ci][error] fixed-point rebuild mismatch (binaries differ)" >&2
-              (cmp -l build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 | head -n 20 || true)
+              (cmp -l build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 | head -n 20 || true)
               exit 1
             fi
           else
             # macOS binaries (Mach-O) embed a per-link UUID (LC_UUID), so byte-for-byte
             # equality is not a stable determinism signal. Instead, assert the second
             # selfhosted compiler can run a minimal unit test.
-            (dwarfdump --uuid build/native/sailfin-stage2-selfhost1 build/native/sailfin-stage2-selfhost2 || true)
-            build/native/sailfin-stage2-selfhost2 test compiler/tests/unit/cli_version_test.sfn
+            (dwarfdump --uuid build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
+            build/native/sailfin-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
 
       - name: Run Sailfin-native tests (selfhosted compiler)
@@ -239,17 +239,17 @@ jobs:
           set -euo pipefail
           CONDA=$(which conda) make test
 
-      - name: Package Stage2 artifacts (selfhosted)
-        run: conda run -n sailfin python tools/package_stage2.py --skip-build --target ${{ matrix.package_label }} --out dist
+      - name: Package native artifacts (selfhosted)
+        run: conda run -n sailfin python tools/package_native.py --skip-build --target ${{ matrix.package_label }} --out dist --native-out build/stage2
 
-      - name: Upload Stage2 artifacts (selfhosted)
+      - name: Upload native artifacts (selfhosted)
         uses: actions/upload-artifact@v4
         with:
-          name: stage2-${{ matrix.package_label }}
+          name: native-${{ matrix.package_label }}
           path: |
-            dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz
-            dist/sailfin-stage2-${{ matrix.package_label }}-*.tar.gz.sha256
-            dist/sailfin-stage2-${{ matrix.package_label }}-*.manifest.json
+            dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz
+            dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz.sha256
+            dist/sailfin-native-${{ matrix.package_label }}-*.manifest.json
           if-no-files-found: error
 
   semantic-release:

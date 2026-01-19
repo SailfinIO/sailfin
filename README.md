@@ -92,13 +92,13 @@ VERSION=0.1.1-alpha.66 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sa
 Notes:
 
 - Windows is supported for the published sailfin binary. Run the installer from WSL or Git Bash (MSYS2/Cygwin environments are detected as `windows`).
-- Naming note: release assets are currently named `sailfin-stage2_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin-stage2` (or `bin/sailfin-stage2.exe` on Windows). This is legacy naming; docs prefer “native compiler” terminology.
+- Release assets are named `sailfin_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin` (or `bin/sailfin.exe` on Windows).
 
 ## Architecture Overview
 
 Sailfin targets a capsule-based architecture with fleets coordinating compiler,
 runtime, and tooling capsules. The current repository hosts the native compiler
-(legacy name: stage2) under `build/native` and a legacy Stage1 bootstrap pipeline
+(under `build/native`) and a legacy Stage1 bootstrap pipeline
 alongside the Sailfin runtime (`runtime/`). Future capsule manifests and
 fleet layout are tracked in `docs/roadmap.md`.
 

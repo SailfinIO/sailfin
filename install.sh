@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# curlable installer for the Sailfin native compiler binary (legacy name: stage2).
+# curlable installer for the Sailfin compiler binary.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
@@ -9,19 +9,24 @@ set -euo pipefail
 # Env overrides:
 #   REPO=owner/repo          (default: SailfinIO/sailfin)
 #   VERSION=latest|<ver>     (default: latest; accepts optional leading v)
-#   BINARY=sailfin-stage2    (default: sailfin-stage2)
-#   INSTALL_BASE=...         (default: ~/.local/share/sailfin-stage2/versions)
+#   BINARY=sailfin           (default: sailfin)
+#   INSTALL_BASE=...         (default: ~/.local/share/sailfin/versions)
 #   GLOBAL_BIN_DIR=...       (default: ~/.local/bin)
 #   GITHUB_TOKEN=...         (required for private repos)
 #
 # Assets are expected to be named:
-#   sailfin-stage2_<version>_<os>_<arch>.tar.gz
+#   sailfin_<version>_<os>_<arch>.tar.gz
 # where <os> is linux|macos and <arch> is x86_64|arm64.
 
+# Legacy fallback (pre-1.0) asset naming:
+#   sailfin-stage2_<version>_<os>_<arch>.tar.gz
+
 REPO="${REPO:-SailfinIO/sailfin}"
-BINARY="${BINARY:-sailfin-stage2}"
+BINARY="${BINARY:-sailfin}"
 VERSION="${VERSION:-latest}"
 EXCLUDE_TAG="${EXCLUDE_TAG:-}"
+
+LEGACY_BINARY="sailfin-stage2"
 
 log() {
   printf '[%s] %s\n' "$(date +'%Y-%m-%dT%H:%M:%S%z')" "$*"
@@ -83,27 +88,44 @@ api() {
 
 TAG=""
 ASSET=""
+ASSET_BINARY=""
 
 if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
   log "VERSION is 'latest'; resolving most recent release with matching asset (including prereleases)…"
   releases_json="$(api "https://api.github.com/repos/${REPO}/releases?per_page=50")"
 
-  selected="$(
-    printf '%s' "$releases_json" | jq -c --arg binary "$BINARY" --arg os "$OS" --arg arch "$ARCH" --arg exclude "$EXCLUDE_TAG" '
-      [ .[]
-        | select(($exclude == "") or (.tag_name != $exclude))
-        | . as $rel
-        | ($rel.tag_name | sub("^v"; "")) as $ver
-        | ($binary + "_" + $ver + "_" + $os + "_" + $arch + ".tar.gz") as $asset
-        | select(any((($rel.assets // [])[]); .name == $asset))
-        | {tag: $rel.tag_name, version: $ver, asset: $asset}
-      ][0]
-    '
-  )"
+  select_release() {
+    local binary_name="$1"
+    printf '%s' "$releases_json" | jq -c --arg binary "$binary_name" --arg os "$OS" --arg arch "$ARCH" --arg exclude "$EXCLUDE_TAG" '
+        [ .[]
+          | select(($exclude == "") or (.tag_name != $exclude))
+          | . as $rel
+          | ($rel.tag_name | sub("^v"; "")) as $ver
+          | ($binary + "_" + $ver + "_" + $os + "_" + $arch + ".tar.gz") as $asset
+          | select(any((($rel.assets // [])[]); .name == $asset))
+          | {tag: $rel.tag_name, version: $ver, asset: $asset}
+        ][0]
+      '
+  }
 
+  selected="$(select_release "$BINARY")"
   TAG="$(printf '%s' "$selected" | jq -r '.tag // empty')"
   VERSION="$(printf '%s' "$selected" | jq -r '.version // empty')"
   ASSET="$(printf '%s' "$selected" | jq -r '.asset // empty')"
+  ASSET_BINARY="$BINARY"
+
+  if [ -z "$TAG" ] || [ -z "$VERSION" ] || [ -z "$ASSET" ]; then
+    if [ "$BINARY" != "$LEGACY_BINARY" ]; then
+      selected="$(select_release "$LEGACY_BINARY")"
+      TAG="$(printf '%s' "$selected" | jq -r '.tag // empty')"
+      VERSION="$(printf '%s' "$selected" | jq -r '.version // empty')"
+      ASSET="$(printf '%s' "$selected" | jq -r '.asset // empty')"
+      ASSET_BINARY="$LEGACY_BINARY"
+      if [ -n "$TAG" ] && [ -n "$VERSION" ] && [ -n "$ASSET" ]; then
+        log "Falling back to legacy release asset naming (${LEGACY_BINARY}_...)."
+      fi
+    fi
+  fi
 
   if [ -z "$TAG" ] || [ -z "$VERSION" ] || [ -z "$ASSET" ]; then
     if [ -n "$EXCLUDE_TAG" ]; then
@@ -116,6 +138,7 @@ else
   VERSION="${VERSION#V}"
   TAG="v${VERSION}"
   ASSET="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
+  ASSET_BINARY="$BINARY"
 fi
 
 log "Using release tag: ${TAG}"
@@ -124,6 +147,19 @@ log "Expected asset: ${ASSET}"
 
 release_json="$(api "https://api.github.com/repos/${REPO}/releases/tags/${TAG}")"
 asset_id="$(printf '%s' "$release_json" | jq -r '.assets[]? | select(.name=="'"$ASSET"'") | .id' | head -n 1)"
+
+if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
+  if [ "$ASSET_BINARY" != "$LEGACY_BINARY" ]; then
+    fallback_asset="${LEGACY_BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
+    fallback_id="$(printf '%s' "$release_json" | jq -r '.assets[]? | select(.name=="'"$fallback_asset"'") | .id' | head -n 1)"
+    if [ -n "$fallback_id" ] && [ "$fallback_id" != "null" ]; then
+      log "Falling back to legacy asset: ${fallback_asset}"
+      ASSET="$fallback_asset"
+      ASSET_BINARY="$LEGACY_BINARY"
+      asset_id="$fallback_id"
+    fi
+  fi
+fi
 
 if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
   die "Could not find asset '${ASSET}' in release '${TAG}'."
@@ -165,6 +201,10 @@ if [ ! -d "${EXTRACT_DIR}/bin" ] && [ ! -f "${EXTRACT_DIR}/${BINARY}" ] && [ ! -
 fi
 
 SRC_BINARY=""
+ALT_BINARY="$LEGACY_BINARY"
+if [ "$BINARY" = "$LEGACY_BINARY" ]; then
+  ALT_BINARY="sailfin"
+fi
 if [ "$OS" = "windows" ]; then
   if [ -f "${ROOT_DIR}/${BINARY}.exe" ]; then
     SRC_BINARY="${ROOT_DIR}/${BINARY}.exe"
@@ -174,6 +214,18 @@ if [ "$OS" = "windows" ]; then
     SRC_BINARY="${ROOT_DIR}/${BINARY}"
   elif [ -f "${ROOT_DIR}/bin/${BINARY}" ]; then
     SRC_BINARY="${ROOT_DIR}/bin/${BINARY}"
+  elif [ -f "${ROOT_DIR}/${ALT_BINARY}.exe" ]; then
+    log "Archive contains '${ALT_BINARY}.exe'; installing as '${BINARY}.exe'."
+    SRC_BINARY="${ROOT_DIR}/${ALT_BINARY}.exe"
+  elif [ -f "${ROOT_DIR}/bin/${ALT_BINARY}.exe" ]; then
+    log "Archive contains 'bin/${ALT_BINARY}.exe'; installing as '${BINARY}.exe'."
+    SRC_BINARY="${ROOT_DIR}/bin/${ALT_BINARY}.exe"
+  elif [ -f "${ROOT_DIR}/${ALT_BINARY}" ]; then
+    log "Archive contains '${ALT_BINARY}'; installing as '${BINARY}'."
+    SRC_BINARY="${ROOT_DIR}/${ALT_BINARY}"
+  elif [ -f "${ROOT_DIR}/bin/${ALT_BINARY}" ]; then
+    log "Archive contains 'bin/${ALT_BINARY}'; installing as '${BINARY}'."
+    SRC_BINARY="${ROOT_DIR}/bin/${ALT_BINARY}"
   else
     die "Binary '${BINARY}.exe' not found in archive."
   fi
@@ -182,12 +234,18 @@ else
     SRC_BINARY="${ROOT_DIR}/${BINARY}"
   elif [ -f "${ROOT_DIR}/bin/${BINARY}" ]; then
     SRC_BINARY="${ROOT_DIR}/bin/${BINARY}"
+  elif [ -f "${ROOT_DIR}/${ALT_BINARY}" ]; then
+    log "Archive contains '${ALT_BINARY}'; installing as '${BINARY}'."
+    SRC_BINARY="${ROOT_DIR}/${ALT_BINARY}"
+  elif [ -f "${ROOT_DIR}/bin/${ALT_BINARY}" ]; then
+    log "Archive contains 'bin/${ALT_BINARY}'; installing as '${BINARY}'."
+    SRC_BINARY="${ROOT_DIR}/bin/${ALT_BINARY}"
   else
     die "Binary '${BINARY}' not found in archive."
   fi
 fi
 
-INSTALL_BASE="${INSTALL_BASE:-$HOME/.local/share/${BINARY}/versions}"
+INSTALL_BASE="${INSTALL_BASE:-$HOME/.local/share/sailfin/versions}"
 if [ -z "${GLOBAL_BIN_DIR:-}" ]; then
   if [ "$OS" = "macos" ]; then
     GLOBAL_BIN_DIR="/usr/local/bin"
@@ -237,45 +295,42 @@ if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$LINK_PATH" 2>/dev/null
   $MAYBE_SUDO chmod 0755 "$LINK_PATH" || true
 fi
 
-# Also install stable `sfn`/`sailfin` entrypoints when installing `sailfin-stage2`.
-if [ "$BINARY" = "sailfin-stage2" ]; then
-  ALIAS_BASENAME="sfn"
-  if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
-    ALIAS_BASENAME="sfn.exe"
-  fi
+ALIAS_BASENAME="sfn"
+if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
+  ALIAS_BASENAME="sfn.exe"
+fi
 
-  ALIAS_PATH="${GLOBAL_BIN_DIR}/${ALIAS_BASENAME}"
-  if [ -L "$ALIAS_PATH" ] || [ -f "$ALIAS_PATH" ]; then
-    $MAYBE_SUDO rm -f "$ALIAS_PATH"
-  fi
-  if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$ALIAS_PATH" 2>/dev/null; then
-    log "Symlink failed for ${ALIAS_BASENAME}; copying binary instead."
-    $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$ALIAS_PATH"
-    $MAYBE_SUDO chmod 0755 "$ALIAS_PATH" || true
-  fi
-  log "Linked: ${ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
+ALIAS_PATH="${GLOBAL_BIN_DIR}/${ALIAS_BASENAME}"
+if [ -L "$ALIAS_PATH" ] || [ -f "$ALIAS_PATH" ]; then
+  $MAYBE_SUDO rm -f "$ALIAS_PATH"
+fi
+if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$ALIAS_PATH" 2>/dev/null; then
+  log "Symlink failed for ${ALIAS_BASENAME}; copying binary instead."
+  $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$ALIAS_PATH"
+  $MAYBE_SUDO chmod 0755 "$ALIAS_PATH" || true
+fi
+log "Linked: ${ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
 
-  SAILFIN_ALIAS_BASENAME="sailfin"
-  if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
-    SAILFIN_ALIAS_BASENAME="sailfin.exe"
-  fi
+SAILFIN_ALIAS_BASENAME="sailfin"
+if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
+  SAILFIN_ALIAS_BASENAME="sailfin.exe"
+fi
 
-  SAILFIN_ALIAS_PATH="${GLOBAL_BIN_DIR}/${SAILFIN_ALIAS_BASENAME}"
-  if [ -L "$SAILFIN_ALIAS_PATH" ] || [ -f "$SAILFIN_ALIAS_PATH" ]; then
-    $MAYBE_SUDO rm -f "$SAILFIN_ALIAS_PATH"
-  fi
-  if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$SAILFIN_ALIAS_PATH" 2>/dev/null; then
-    log "Symlink failed for ${SAILFIN_ALIAS_BASENAME}; copying binary instead."
-    $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$SAILFIN_ALIAS_PATH"
-    $MAYBE_SUDO chmod 0755 "$SAILFIN_ALIAS_PATH" || true
-  fi
-  log "Linked: ${SAILFIN_ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
+SAILFIN_ALIAS_PATH="${GLOBAL_BIN_DIR}/${SAILFIN_ALIAS_BASENAME}"
+if [ -L "$SAILFIN_ALIAS_PATH" ] || [ -f "$SAILFIN_ALIAS_PATH" ]; then
+  $MAYBE_SUDO rm -f "$SAILFIN_ALIAS_PATH"
+fi
+if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$SAILFIN_ALIAS_PATH" 2>/dev/null; then
+  log "Symlink failed for ${SAILFIN_ALIAS_BASENAME}; copying binary instead."
+  $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$SAILFIN_ALIAS_PATH"
+  $MAYBE_SUDO chmod 0755 "$SAILFIN_ALIAS_PATH" || true
+fi
+log "Linked: ${SAILFIN_ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
 
-  RESOLVED_SFN="$(command -v sfn 2>/dev/null || true)"
-  if [ -n "$RESOLVED_SFN" ] && [ "$RESOLVED_SFN" != "$ALIAS_PATH" ]; then
-    log "Warning: 'sfn' resolves to ${RESOLVED_SFN} (not ${ALIAS_PATH})."
-    log "If you previously installed Stage0, remove that binary or ensure ${GLOBAL_BIN_DIR} comes first in PATH."
-  fi
+RESOLVED_SFN="$(command -v sfn 2>/dev/null || true)"
+if [ -n "$RESOLVED_SFN" ] && [ "$RESOLVED_SFN" != "$ALIAS_PATH" ]; then
+  log "Warning: 'sfn' resolves to ${RESOLVED_SFN} (not ${ALIAS_PATH})."
+  log "If you previously installed Stage0, remove that binary or ensure ${GLOBAL_BIN_DIR} comes first in PATH."
 fi
 
 log "Installed: ${TARGET_DIR}/${DEST_BASENAME}"

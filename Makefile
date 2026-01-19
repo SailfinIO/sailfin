@@ -51,7 +51,7 @@ STAGE2_AOT_DIR ?= build/stage2/aot
 STAGE2_AOT_MODULES_FILE ?= $(STAGE2_AOT_DIR)/modules.txt
 
 NATIVE_OBJ_DIR ?= build/native/obj
-NATIVE_OUT ?= build/native/sailfin-stage2
+NATIVE_OUT ?= build/native/sailfin
 NATIVE_LINK_EXTRA ?=
 
 # Preferred local path for the native compiler binary.
@@ -61,17 +61,10 @@ NATIVE_BIN ?= build/native/sailfin
 
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
-STAGE2_BIN ?= $(NATIVE_BIN)
 
 .PHONY: help install fetch-seed test test-unit test-integration test-e2e compile bootstrap-legacy clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
 
 .PHONY: selfhost-native selfhost-smoke-native check-native-determinism native-debug native-asan native-ubsan
-
-.PHONY: selfhost-native-stage2 selfhost-native-stage2-asan selfhost-smoke-native-stage2
-
-# Rebuild a fresh native stage2 using an existing *native* stage2 seed compiler.
-# This is the self-hosting check CI ultimately needs (no stage1, no bootstrap).
-.PHONY: selfhost-native-stage2
 
 ifeq ($(origin CONDA_EXE), undefined)
 # `conda` is often a shell function (e.g. in zsh/bash init). We need the actual
@@ -94,8 +87,8 @@ help:
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make test-e2e     # Run Sailfin-native end-to-end tests"
 	@echo "  make compile      # Build the compiler by self-hosting from a released seed"
-	@echo "  make selfhost-native # Alias for selfhost-native-stage2 (preferred wording)"
-	@echo "  make selfhost-smoke-native # Alias for selfhost-smoke-native-stage2 (preferred wording)"
+	@echo "  make selfhost-native # Rebuild the compiler from a seed"
+	@echo "  make selfhost-smoke-native # Selfhost + run smoke tests"
 	@echo "  make bootstrap-legacy # Legacy stage1/bootstrap pipeline (deprecated; emergency recovery only)"
 	@echo "  make legacy-bootstrap # Alias for bootstrap-legacy"
 	@echo "  make check-stage2-determinism # Bootstrap stage2 twice and diff outputs"
@@ -128,14 +121,14 @@ SEED_GLOBAL_BIN_DIR ?= build/seed/bin
 # Override with a full path if needed, e.g. SEED_STAGE2=build/seed/bin/sailfin-stage2.
 SEED_STAGE2 ?= sfn
 
-FETCHED_SEED_STAGE2 ?= $(SEED_GLOBAL_BIN_DIR)/sailfin-stage2
+FETCHED_SEED_STAGE2 ?= $(SEED_GLOBAL_BIN_DIR)/sailfin
 
 fetch-seed:
 	@echo "[fetch-seed] installing seed into $(SEED_INSTALL_BASE)"
 	@mkdir -p build/seed
 	@REPO="$(SEED_REPO)" VERSION="$(SEED_VERSION)" EXCLUDE_TAG="$(SEED_EXCLUDE_TAG)" \
 		GLOBAL_BIN_DIR="$(SEED_GLOBAL_BIN_DIR)" INSTALL_BASE="$(SEED_INSTALL_BASE)" \
-		BINARY="sailfin-stage2" ./install.sh
+		BINARY="sailfin" ./install.sh
 	@if [ ! -x "$(FETCHED_SEED_STAGE2)" ]; then \
 		echo "[fetch-seed][error] missing fetched seed compiler: $(FETCHED_SEED_STAGE2)" >&2; \
 		exit 1; \
@@ -144,8 +137,8 @@ fetch-seed:
 	@echo "[fetch-seed] hint: make compile SEED_STAGE2=$(FETCHED_SEED_STAGE2)"
 
 test-unit:
-	@if [ ! -x $(STAGE2_BIN) ]; then \
-		echo "[test-unit] missing $(STAGE2_BIN); running make compile"; \
+	@if [ ! -x $(NATIVE_BIN) ]; then \
+		echo "[test-unit] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
 	@set -e; \
@@ -155,12 +148,12 @@ test-unit:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		$(STAGE2_BIN) test "$$f"; \
+		$(NATIVE_BIN) test "$$f"; \
 	done
 
 test-integration:
-	@if [ ! -x $(STAGE2_BIN) ]; then \
-		echo "[test-integration] missing $(STAGE2_BIN); running make compile"; \
+	@if [ ! -x $(NATIVE_BIN) ]; then \
+		echo "[test-integration] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
 	@set -e; \
@@ -170,12 +163,12 @@ test-integration:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		$(STAGE2_BIN) test "$$f"; \
+		$(NATIVE_BIN) test "$$f"; \
 	done
 
 test-e2e:
-	@if [ ! -x $(STAGE2_BIN) ]; then \
-		echo "[test-e2e] missing $(STAGE2_BIN); running make compile"; \
+	@if [ ! -x $(NATIVE_BIN) ]; then \
+		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
 	@set -e; \
@@ -185,7 +178,7 @@ test-e2e:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		$(STAGE2_BIN) test "$$f"; \
+		$(NATIVE_BIN) test "$$f"; \
 	done
 
 # Run the full Sailfin-native test suite using the *self-hosted* compiler.
@@ -197,17 +190,27 @@ test-selfhost:
 clean:
 	rm -rf dist
 
+# Remove local build artifacts (keeps downloaded seed by default).
+# Use KEEP_SEED=0 to also delete build/seed.
+.PHONY: clean-build clean-all
+clean-build:
+	@mkdir -p build
+	@for d in build/*; do \
+		base="$$(basename "$$d")"; \
+		if [ "$$base" = "seed" ] && [ "${KEEP_SEED:-1}" != "0" ]; then \
+			continue; \
+		fi; \
+		rm -rf "$$d"; \
+	done
+
+# Full cleanup for a CI-like fresh start.
+clean-all: clean clean-build
+
 compile:
-	@$(MAKE) selfhost-native-stage2
+	@$(MAKE) selfhost-native
 	@echo "[compile] built $(NATIVE_OUT)"
 
-# Naming aliases: prefer "native compiler" terminology while keeping legacy
-# stage2 target names and artifact paths stable.
-selfhost-native: selfhost-native-stage2
-selfhost-smoke-native: selfhost-smoke-native-stage2
-check-native-determinism: check-native-stage2-determinism
-native-debug: native-stage2-debug
-native-asan: native-stage2-asan
+# Naming aliases: prefer "native compiler" terminology.
 native-ubsan: native-stage2-ubsan
 
 # Explicit legacy alias to make the fallback nature obvious.
@@ -217,10 +220,9 @@ legacy-bootstrap: bootstrap-legacy
 # Kept for debugging and emergency recovery only.
 bootstrap-legacy:
 	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
-	$(CONDA) run -n $(CONDA_ENV) python scripts/bootstrap_stage2.py --no-validate
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python scripts/bootstrap_native.py --no-validate
 	$(MAKE) _build-native-stage2
 	@mkdir -p build/native
-	@ln -sf sailfin-stage2 $(NATIVE_BIN)
 	@rm -rf build/native/import-context
 	@if [ -d build/stage2 ]; then \
 		mkdir -p build/native/import-context; \
@@ -229,18 +231,18 @@ bootstrap-legacy:
 	@echo "[bootstrap-legacy] built $(NATIVE_OUT)"
 
 # Usage:
-#   make selfhost-native-stage2
-#   make selfhost-native-stage2 SEED_STAGE2=path/to/sailfin-stage2
+#   make selfhost-native
+#   make selfhost-native SEED_STAGE2=path/to/sailfin
 # Output:
-#   build/native/sailfin-stage2
+#   build/native/sailfin
 #
 # Notes:
 # - Defaults to a non-ASAN seed for speed.
-# - Use `make selfhost-native-stage2-asan` for the slower-but-more-diagnostic ASAN seed.
+# - Use `make selfhost-native-asan` for the slower-but-more-diagnostic ASAN seed.
 # - Always runs the orchestrator script via the Conda env Python.
 # - Pass extra flags via SELFHOST_ARGS (e.g. SELFHOST_ARGS="--seed-timeout 300").
 # - Parallelize module building via SELFHOST_JOBS (e.g. SELFHOST_JOBS=2).
-selfhost-native-stage2:
+selfhost-native:
 	@seed="$${SEED_STAGE2:-$(SEED_STAGE2)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -248,25 +250,25 @@ selfhost-native-stage2:
 	fi; \
 	seed="$$resolved_seed"; \
 	if [ ! -x "$$seed" ]; then \
-		echo "[selfhost-native-stage2] missing seed compiler: $$seed"; \
-		echo "[selfhost-native-stage2] fetching seed with: make fetch-seed"; \
+		echo "[selfhost-native] missing seed compiler: $$seed"; \
+		echo "[selfhost-native] fetching seed with: make fetch-seed"; \
 		$(MAKE) fetch-seed; \
 		seed="$(FETCHED_SEED_STAGE2)"; \
 	fi; \
 	if [ ! -x "$$seed" ]; then \
-		echo "[selfhost-native-stage2] missing seed compiler: $$seed"; \
+		echo "[selfhost-native] missing seed compiler: $$seed"; \
 		exit 1; \
 	fi; \
 	if ! "$$seed" emit native compiler/src/version.sfn >/dev/null 2>&1; then \
-		echo "[selfhost-native-stage2][error] seed compiler does not support 'emit native'" >&2; \
-		echo "[selfhost-native-stage2][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
+		echo "[selfhost-native][error] seed compiler does not support 'emit native'" >&2; \
+		echo "[selfhost-native][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
 		exit 1; \
 	fi; \
 	if [ -d build/stage2 ]; then \
 		find build/stage2 -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi; \
-	echo "[selfhost-native-stage2] running selfhost script (seed=$$seed)..."; \
-	$(CONDA) run -n $(CONDA_ENV) python -u scripts/selfhost_native_stage2.py --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out $(NATIVE_OUT)
+	echo "[selfhost-native] running selfhost script (seed=$$seed)..."; \
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out $(NATIVE_OUT)
 	@SRC="build/selfhost/stage2/seed_cwd/build/stage2"; \
 	if [ -d "$$SRC" ]; then \
 		rm -rf build/stage2; \
@@ -283,17 +285,16 @@ selfhost-native-stage2:
 		cp -f build/selfhost/stage2/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
 	fi
 	@mkdir -p build/native
-	@ln -sf sailfin-stage2 $(NATIVE_BIN)
-	@echo "[selfhost-native-stage2] built $(NATIVE_OUT)"
+	@echo "[selfhost-native] built $(NATIVE_OUT)"
 
-# Smoke: selfhost Stage2 and run hello-world + emit-llvm-file.
+# Smoke: selfhost native and run hello-world + emit-llvm-file.
 # Usage:
-#   make selfhost-smoke-native-stage2
-#   make selfhost-smoke-native-stage2 SEED_STAGE2=path/to/sailfin-stage2
-#   make selfhost-smoke-native-stage2 SELFHOST_SMOKE_ARGS="--keep-work-dir"
+#   make selfhost-smoke-native
+#   make selfhost-smoke-native SEED_STAGE2=path/to/sailfin
+#   make selfhost-smoke-native SELFHOST_SMOKE_ARGS="--keep-work-dir"
 SELFHOST_SMOKE_OUT ?= $(NATIVE_OUT)
 SELFHOST_SMOKE_ARGS ?=
-selfhost-smoke-native-stage2:
+selfhost-smoke-native:
 	@seed="$${SEED_STAGE2:-$(SEED_STAGE2)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -301,39 +302,39 @@ selfhost-smoke-native-stage2:
 	fi; \
 	seed="$$resolved_seed"; \
 	if [ ! -x "$$seed" ]; then \
-		echo "[selfhost-smoke-native-stage2] missing seed compiler: $$seed"; \
-		echo "[selfhost-smoke-native-stage2] fetching seed with: make fetch-seed"; \
+		echo "[selfhost-smoke-native] missing seed compiler: $$seed"; \
+		echo "[selfhost-smoke-native] fetching seed with: make fetch-seed"; \
 		$(MAKE) fetch-seed; \
 		seed="$(FETCHED_SEED_STAGE2)"; \
 	fi; \
 	if [ ! -x "$$seed" ]; then \
-		echo "[selfhost-smoke-native-stage2] missing seed compiler: $$seed"; \
+		echo "[selfhost-smoke-native] missing seed compiler: $$seed"; \
 		exit 1; \
 	fi; \
 	if ! "$$seed" emit native compiler/src/version.sfn >/dev/null 2>&1; then \
-		echo "[selfhost-smoke-native-stage2][error] seed compiler does not support 'emit native'" >&2; \
-		echo "[selfhost-smoke-native-stage2][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
+		echo "[selfhost-smoke-native][error] seed compiler does not support 'emit native'" >&2; \
+		echo "[selfhost-smoke-native][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
 		exit 1; \
 	fi; \
-	echo "[selfhost-smoke-native-stage2] running smoke harness..."; \
-	$(CONDA) run -n $(CONDA_ENV) python -u scripts/selfhost_smoke_native_stage2.py \
+	echo "[selfhost-smoke-native] running smoke harness..."; \
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_smoke_native.py \
 		--seed "$$seed" \
 		--out $(SELFHOST_SMOKE_OUT) \
 		--jobs $(SELFHOST_JOBS) \
 		--import-context-jobs 1 \
 		$(SELFHOST_SMOKE_ARGS)
-	@echo "[selfhost-smoke-native-stage2] OK"
+	@echo "[selfhost-smoke-native] OK"
 
-selfhost-native-stage2-asan: native-stage2-asan
-	@seed=$${SEED_STAGE2:-build/native/sailfin-stage2-asan}; \
+selfhost-native-asan: native-stage2-asan
+	@seed=$${SEED_STAGE2:-build/native/sailfin-asan}; \
 	if [ ! -x "$$seed" ]; then \
-		echo "[selfhost-native-stage2-asan] missing seed compiler: $$seed"; \
-		echo "[selfhost-native-stage2-asan] (hint) build one with: make native-stage2-asan"; \
+		echo "[selfhost-native-asan] missing seed compiler: $$seed"; \
+		echo "[selfhost-native-asan] (hint) build one with: make native-stage2-asan"; \
 		exit 1; \
 	fi; \
-	echo "[selfhost-native-stage2-asan] running selfhost script (ASAN output)..."; \
-	$(CONDA) run -n $(CONDA_ENV) python -u scripts/selfhost_native_stage2.py --asan --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out build/native/sailfin-stage2-selfhost
-	@echo "[selfhost-native-stage2-asan] built build/native/sailfin-stage2-selfhost"
+	echo "[selfhost-native-asan] running selfhost script (ASAN output)..."; \
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --asan --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out build/native/sailfin-selfhost
+	@echo "[selfhost-native-asan] built build/native/sailfin-selfhost"
 
 
 _build-native-stage2:
@@ -415,15 +416,6 @@ check-native-stage2-determinism:
 		shasum -a 256 build/native-diff-a/sailfin-stage2 build/native-diff-b/sailfin-stage2; \
 		exit 1)
 	@echo "[check-native-stage2-determinism] OK (byte-identical)"
-
-# Canary check for the current self-host blocker: flaky/malformed LLVM emission.
-# Validates LLVM by compiling it with clang.
-check-seed-llvm-emission:
-	@if [ ! -x build/native/sailfin-stage2 ]; then \
-		echo "[check-seed-llvm-emission] missing build/native/sailfin-stage2; running make compile"; \
-		$(MAKE) compile; \
-	fi
-	@python tools/check_seed_llvm_emission.py --seed build/native/sailfin-stage2 --input compiler/src/effect_checker.sfn --attempts 10 --timeout 5 --no-clang --disable-string-free
 
 native-stage2-o1: bootstrap-legacy
 	@mkdir -p build/native/o1-obj

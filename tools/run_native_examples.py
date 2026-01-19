@@ -1,10 +1,10 @@
-"""Run Sailfin Stage2 native compiler against examples.
+"""Run the Sailfin native compiler against examples.
 
-This script is intended to help uncover Stage2 gaps by compiling + running
+This script is intended to help uncover native backend gaps by compiling + running
 `examples/**/*.sfn` with the self-hosted native CLI.
 
 Pipeline per file:
-  1) stage2: `--emit llvm <example.sfn>`
+    1) compile: `--emit llvm <example.sfn>`
   2) clang: link runtime + emitted `.ll` into a native binary
   3) execute the binary
 
@@ -29,7 +29,7 @@ from pathlib import Path
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_COMPILER = _REPO_ROOT / "build" / "native" / "sailfin-stage2"
+_DEFAULT_COMPILER = _REPO_ROOT / "build" / "native" / "sailfin"
 
 
 @dataclass(frozen=True)

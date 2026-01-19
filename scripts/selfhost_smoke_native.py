@@ -13,8 +13,8 @@ import textwrap
 from typing import TextIO
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-DEFAULT_SEED = REPO_ROOT / "build/native/sailfin-stage2"
-DEFAULT_OUT = REPO_ROOT / "build/native/sailfin-stage2-selfhost"
+DEFAULT_SEED = REPO_ROOT / "build/native/sailfin"
+DEFAULT_OUT = REPO_ROOT / "build/native/sailfin-selfhost"
 
 
 def _utc_timestamp() -> str:
@@ -154,7 +154,7 @@ def main(argv: list[str]) -> int:
         _run_checked(
             [
                 sys.executable,
-                str(REPO_ROOT / "scripts/selfhost_native_stage2.py"),
+                str(REPO_ROOT / "scripts/selfhost_native.py"),
                 "--seed",
                 str(seed),
                 "--no-prefer-asan-seed",

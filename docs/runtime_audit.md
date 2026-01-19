@@ -2,7 +2,7 @@
 
 This audit documents the remaining runtime work required to remove the C
 dependency and ship a fully Sailfin-native compiler/runtime. It is scoped to
-the self-hosted native compiler toolchain (legacy name: stage2) and the runtime surface declared in
+the self-hosted native compiler toolchain and the runtime surface declared in
 `runtime/native/include/sailfin_runtime.h`.
 
 ## Current Surface Area
@@ -28,7 +28,6 @@ Primary sources:
 
 - `runtime/native/include/sailfin_runtime.h`
 - `runtime/native/src/sailfin_runtime.c`
-- `runtime/stage2_runtime_stub.c`
 - `runtime/prelude.sfn`
 - `runtime/native_runner.py`
 
@@ -50,9 +49,9 @@ Primary sources:
 5. **Capability adapters**: Filesystem is implemented in C, HTTP/model are
    stubs, and Python shims remain in `runtime/runtime_support.py` and
    `runtime/native_runner.py`. Native adapters must replace these.
-6. **Driver/CLI**: `runtime/native/src/stage2_driver.c` and Python runners are
-   still part of the toolchain. A Sailfin-native CLI should replace them for
-   the full self-hosted workflow.
+6. **Driver/CLI**: the C driver and Python runners are still part of the
+   toolchain. A Sailfin-native CLI should replace them for the full self-hosted
+   workflow.
 7. **Incomplete helpers**: `get_field`, `array_map/filter/reduce`,
    `to_debug_string`, and `log_execution` are minimal. These must be fully
    implemented with correct semantics and tests.
@@ -101,5 +100,5 @@ exception frames, concurrency, and safer FFI).
   Python shims from native execution.
 - **M3: Async Runtime**: Spawn, channel, serve; integrate with coroutine
   lowering and add native execution tests.
-- **M4: Native CLI + Driver**: Replace `stage2_driver.c` and Python runner
+- **M4: Native CLI + Driver**: Replace the C driver and Python runner
   with Sailfin-native CLI, update packaging/tooling.

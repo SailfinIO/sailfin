@@ -924,8 +924,8 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
     }
 
     // Selfhost-only builds may not populate build/native/obj or modules.txt.
-    // In that case, fall back to the linked stage2 object produced by
-    // scripts/selfhost_native_stage2.py.
+    // In that case, fall back to the linked object produced by
+    // scripts/selfhost_native.py.
     let selfhost_linked = "build/selfhost/stage2/obj/stage2.linked.o";
 
     let mut args -> string[] = [

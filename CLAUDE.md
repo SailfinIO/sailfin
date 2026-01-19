@@ -8,11 +8,11 @@ Sailfin is an AI-native, systems-friendly programming language designed for prec
 
 **Current architecture:**
 
-- **Native compiler (primary; legacy name: stage2)**: Native backend targeting LLVM with `.sfn-asm` intermediate representation; the release artifact is still named `sailfin-stage2` today.
+- **Native compiler (primary)**: Native backend targeting LLVM with `.sfn-asm` intermediate representation; release artifacts install as `sailfin`/`sfn`.
 - **Stage1 (legacy bootstrap)**: Deprecated bootstrap pipeline kept for emergency recovery while marching toward 1.0.
 - **Stage0 (legacy)**: Historical Python bootstrap compiler.
 
-Note: the codebase still contains many historical `stage2` names in targets and artifact paths; docs prefer “native compiler” terminology going forward.
+Note: the codebase may still contain historical `stage2` names in internal paths; prefer “native compiler” terminology going forward.
 
 The runtime currently ships as C under `runtime/native/` and is planned to move into Sailfin for the 1.0 release.
 

@@ -1,4 +1,8 @@
-"""Stage2 execution helpers that enforce capability manifests at runtime."""
+"""Native execution helpers that enforce capability manifests at runtime.
+
+Legacy note: this module path is kept for compatibility. New code should import
+`runtime.native_runner.NativeRunner`.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +23,7 @@ import llvmlite.binding as llvm
 
 from runtime import runtime_support as runtime
 
-__all__ = ["Stage2Runner", "current_capability_grant"]
+__all__ = ["NativeRunner", "Stage2Runner", "current_capability_grant"]
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -4278,3 +4282,7 @@ class Stage2Runner:
 
         self._validate_structure_result(entry_point, result)
         return result
+
+
+# Preferred name for 1.0+.
+NativeRunner = Stage2Runner

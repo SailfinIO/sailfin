@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Rebuild the native stage2 compiler using an existing native stage2 binary.
+"""Rebuild the native compiler using an existing native compiler binary.
 
 This is the self-host check CI ultimately needs:
 
-- Start from a *seed* native `sailfin-stage2` binary.
-- Compile the full stage2 module set (compiler + runtime Sailfin sources) to
+- Start from a *seed* native compiler binary.
+- Compile the full compiler+runtime module set to
     separate LLVM modules.
 - The selfhost pipeline is expected to produce link-safe IR without text rewriting
     (no `aot-prepare-dir`).
-- Compile/link a fresh native `sailfin-stage2`.
+- Compile/link a fresh native compiler binary.
 
 This does NOT import stage1-generated Python compiler artifacts and does NOT run
-`scripts/bootstrap_stage2.py`.
+`scripts/bootstrap_native.py`.
 """
 
 from __future__ import annotations
@@ -825,7 +825,9 @@ def _seed_supports_aot_prepare_dir(seed: pathlib.Path) -> bool:
     # Some seeds respond to unknown subcommands with the generic CLI usage.
     # That output can occasionally include the subcommand text, so explicitly
     # treat the base usage as "not supported".
-    if stderr.startswith("usage: sailfin-stage2 [--emit sailfin|llvm]"):
+    if stderr.startswith("usage: sailfin [--emit sailfin|llvm]") or stderr.startswith(
+        "usage: sailfin-stage2 [--emit sailfin|llvm]"
+    ):
         return False
     # Only treat as supported if the command name appears in output.
     # Some seeds print a generic usage string even for unknown subcommands.
@@ -837,11 +839,11 @@ def _seed_supports_aot_prepare_dir(seed: pathlib.Path) -> bool:
     return False
 
 
-def _strip_stage2_log_prefixes(text: str) -> str:
-    """Remove leading stage2 log prefixes like '[info] ' from LLVM text.
+def _strip_cli_log_prefixes(text: str) -> str:
+    """Remove leading log prefixes like '[info] ' from LLVM text.
 
-    Some stage2 builds annotate LLVM output lines with a log-level prefix. This
-    helper strips that prefix so clang can parse the IR.
+    Some compiler builds annotate LLVM output lines with a log-level prefix.
+    This helper strips that prefix so clang can parse the IR.
     """
 
     out_lines: list[str] = []
@@ -1260,7 +1262,7 @@ def _collect_stage2_sources(repo_root: pathlib.Path) -> list[pathlib.Path]:
     if not runtime_src.exists():
         raise SystemExit(f"missing runtime sources: {runtime_src}")
 
-    # Match `scripts/bootstrap_stage2.py`: include all compiler sources.
+    # Match `scripts/bootstrap_native.py`: include all compiler sources.
     sources = [p for p in sorted(compiler_src.rglob("*.sfn"))]
     runtime_sources = sorted(runtime_src.rglob("*.sfn"))
     all_sources = sources + runtime_sources
@@ -1399,7 +1401,7 @@ def _seed_emit_native_text(
     raw = proc.stdout.decode("utf-8", errors="replace")
     # Some seeds prefix stdout with log labels; strip those so the native-text
     # parser can consume the artifact.
-    cleaned = _strip_stage2_log_prefixes(raw)
+    cleaned = _strip_cli_log_prefixes(raw)
     out_path.write_text(cleaned, encoding="utf-8")
 
 
@@ -1609,15 +1611,18 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--seed",
         type=pathlib.Path,
-        default=REPO_ROOT / "build/native/sailfin-stage2",
-        help="Path to the seed native sailfin-stage2 binary",
+        default=None,
+        help=(
+            "Path to the seed compiler binary (default: build/native/sailfin if present, "
+            "else build/native/sailfin-stage2)"
+        ),
     )
     parser.add_argument(
         "--import-context-seed",
         type=pathlib.Path,
         default=None,
         help=(
-            "Optional path to a stage2 binary used only to stage import-context artifacts "
+            "Optional path to a seed binary used only to stage import-context artifacts "
             "(emit native -> build/stage2/*.sfn-asm). Useful when the main seed crashes on 'emit native'."
         ),
     )
@@ -1726,7 +1731,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--out",
         type=pathlib.Path,
-        default=REPO_ROOT / "build/native/sailfin-stage2-selfhost",
+        default=REPO_ROOT / "build/native/sailfin-selfhost",
         help="Output path for the rebuilt native compiler binary",
     )
     parser.add_argument(
@@ -1764,6 +1769,11 @@ def main(argv: list[str]) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    if args.seed is None:
+        preferred_seed = REPO_ROOT / "build/native/sailfin"
+        legacy_seed = REPO_ROOT / "build/native/sailfin-stage2"
+        args.seed = preferred_seed if preferred_seed.exists() else legacy_seed
 
     # Resolve the seed path once up front so subprocesses can run it even when
     # we change cwd (e.g. into an isolated seed working directory).
@@ -1804,15 +1814,26 @@ def main(argv: list[str]) -> int:
             )
 
     # Prefer a reliable seed when available.
-    default_seed = REPO_ROOT / "build/native/sailfin-stage2"
-    asan_seed = REPO_ROOT / "build/native/sailfin-stage2-asan"
+    default_seed = REPO_ROOT / "build/native/sailfin"
+    legacy_default_seed = REPO_ROOT / "build/native/sailfin-stage2"
+    asan_seed = REPO_ROOT / "build/native/sailfin-asan"
+    legacy_asan_seed = REPO_ROOT / "build/native/sailfin-stage2-asan"
     prefer_asan_seed = (
         args.prefer_asan_seed and not args.no_prefer_asan_seed and not args.fixed_point
     )
     seed = args.seed
-    if prefer_asan_seed and seed.resolve() == default_seed.resolve() and asan_seed.exists():
-        print(f"[selfhost] using ASAN seed: {asan_seed}")
-        seed = asan_seed
+    if prefer_asan_seed:
+        try:
+            resolved = seed.resolve()
+        except OSError:
+            resolved = seed
+
+        if resolved == default_seed.resolve() and asan_seed.exists():
+            print(f"[selfhost] using ASAN seed: {asan_seed}")
+            seed = asan_seed
+        elif resolved == legacy_default_seed.resolve() and legacy_asan_seed.exists():
+            print(f"[selfhost] using ASAN seed: {legacy_asan_seed}")
+            seed = legacy_asan_seed
 
     # Default timeouts: ASAN seeds can be much slower and may spuriously hit the
     # standard per-module timeout, leading to repeated retries.
@@ -2297,7 +2318,7 @@ def main(argv: list[str]) -> int:
 
                     raw = attempt_path.read_text(
                         encoding="utf-8", errors="replace")
-                    candidate = raw if use_emit_llvm_file_local else _strip_stage2_log_prefixes(
+                    candidate = raw if use_emit_llvm_file_local else _strip_cli_log_prefixes(
                         raw)
                     candidate = _trim_to_llvm_module_start(candidate)
 
@@ -2326,7 +2347,7 @@ def main(argv: list[str]) -> int:
                             continue
                         raw = attempt_path.read_text(
                             encoding="utf-8", errors="replace")
-                        candidate = _strip_stage2_log_prefixes(raw)
+                        candidate = _strip_cli_log_prefixes(raw)
                         candidate = _trim_to_llvm_module_start(candidate)
                         use_emit_llvm_file_local = False
 
@@ -2767,6 +2788,24 @@ def main(argv: list[str]) -> int:
             aot_objects: list[pathlib.Path] = []
             prelude_obj: pathlib.Path | None = None
 
+            def _prelude_ll_has_defs(p: pathlib.Path) -> bool:
+                try:
+                    text = p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    return False
+                # A real prelude should define at least a few known helpers.
+                # Some truncated/stub preludes only declare runtime intrinsics.
+                return (
+                    "define" in text
+                    and (
+                        "define double @clamp" in text
+                        or "define i8* @substring" in text
+                        or "define double @char_code" in text
+                        or "define double @grapheme_count" in text
+                        or "define i1 @strings_equal" in text
+                    )
+                )
+
             t0 = time.perf_counter()
             _run(
                 [clang, *clang_flags, "-I",
@@ -2942,6 +2981,35 @@ def main(argv: list[str]) -> int:
             # Build runtime prelude object separately (for packaging and for any
             # runtime-link expectations).
             prelude_ll = ll_dir / f"{prelude_name}.ll"
+
+            # Some seed compilers occasionally emit a truncated-but-parseable
+            # runtime__prelude module. When that happens, linking the compiler
+            # will fail with missing symbols (e.g. clamp/substring).
+            #
+            # Fall back to emitting LLVM directly from runtime/prelude.sfn.
+            if not _prelude_ll_has_defs(prelude_ll):
+                regenerated = obj_dir / "runtime" / "prelude.regenerated.ll"
+                try:
+                    regenerated.parent.mkdir(parents=True, exist_ok=True)
+                    if regenerated.exists():
+                        regenerated.unlink()
+                    subprocess.run(
+                        [
+                            str(seed_bin),
+                            "emit-llvm-file",
+                            str(REPO_ROOT / "runtime" / "prelude.sfn"),
+                            str(regenerated),
+                        ],
+                        cwd=str(REPO_ROOT),
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=None,
+                    )
+                    if _prelude_ll_has_defs(regenerated):
+                        prelude_ll = regenerated
+                except Exception:
+                    # Best-effort fallback: keep using the module-emitted IR.
+                    pass
             canonical = obj_dir / "runtime" / "prelude.o"
             canonical.parent.mkdir(parents=True, exist_ok=True)
             if canonical.exists():
@@ -3035,7 +3103,11 @@ def main(argv: list[str]) -> int:
                     "utf-8", errors="replace")
                 # If the seed doesn't actually implement this subcommand, it can
                 # respond with the generic CLI usage. Don't spam CI logs for that.
-                if not stderr_text.startswith("usage: sailfin-stage2 [--emit sailfin|llvm]"):
+                if not (
+                    stderr_text.startswith(
+                        "usage: sailfin [--emit sailfin|llvm]")
+                    or stderr_text.startswith("usage: sailfin-stage2 [--emit sailfin|llvm]")
+                ):
                     print(
                         "[selfhost][warn] aot-prepare-dir failed; continuing with raw IR\n"
                         + stderr_text,

@@ -1,9 +1,10 @@
-"""Bootstrap shim for stage1-generated Python modules.
+"""Bootstrap shim for legacy Python-generated modules.
 
-The stage1 compiler emits Python under `compiler/build/` and some submodules use
-relative imports that resolve to `compiler.string_utils`.
+The legacy Python bootstrap compiler emits modules under `compiler/build/` and
+some of those modules use relative imports that resolve to `compiler.string_utils`.
 
-This file re-exports the generated implementation from `compiler.build.string_utils`.
+This file intentionally re-exports the generated implementation from
+`compiler.build.string_utils`.
 """
 
 from compiler.build.string_utils import *  # noqa: F401,F403

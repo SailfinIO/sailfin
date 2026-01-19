@@ -7,8 +7,6 @@ Preferred invocations:
 - `./sfn test <path>` (repo-local wrapper; picks the best available compiler)
 - `build/native/sailfin test <path>` (stable local alias produced by `make compile`)
 
-Legacy note: releases and some build artifacts still use the historical binary name `sailfin-stage2`.
-
 The test runner discovers files named `*_test.sfn` under `<path>` (recursively), compiles each file with a synthesized harness, and executes it.
 
 ## Suites

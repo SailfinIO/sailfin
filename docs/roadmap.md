@@ -16,7 +16,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 - [ ] Self-hosted release pipeline
   - [x] Promote the native compiler self-host job to the primary release workflow so every merge runs the native→native rebuild and archives artifacts.
   - [x] Add a `build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the native smoke suite, and uploads artifacts for downstream jobs.
-    - [x] Initial workflow scaffolds self-hosted builds/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged artifacts via `tools/package_stage2.py` (legacy tooling name).
+    - [x] Initial workflow scaffolds self-hosted builds/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged artifacts via `tools/package_native.py`.
   - [x] Add a `release.yml` workflow that builds native compiler binaries on release publish (macOS arm64/x86_64, Linux x86_64) and uploads release assets.
   - [x] Wire the workflow into `semantic-release` so version bumps publish native compiler binaries and changelog entries in one pass.
 
@@ -26,7 +26,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
   - [x] Update `README.md` and `docs/status.md` with the new install flow and installer defaults.
 
 - [ ] Distribution packaging
-  - [x] Introduce `tools/package_stage2.py` to package native compiler LLVM artifacts (legacy tooling name: stage2) with per-target metadata (tarballs for macOS arm64/x86_64 and Linux x86_64).
+  - [x] Introduce `tools/package_native.py` to package native compiler LLVM artifacts with per-target metadata (tarballs for macOS arm64/x86_64 and Linux x86_64).
   - [x] Emit checksum and manifest sidecars (SHA256 + JSON) for legacy stage2 tarballs so release automation can verify downloads.
   - [x] Extend packaging tooling to emit native compiler release bundles per platform (legacy name: stage2) (macOS arm64/x86_64, Linux x86_64) with runtime adapters and prelude modules.
   - [ ] Update the release workflow to build native compiler artifacts (legacy: stage2), run full regression suites, generate signed SHA256 checksums, and attach provenance metadata.
@@ -287,7 +287,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 Move checked tasks here with links to PRs / status updates for traceability.
 
 - [x] **Bootstrap Stage2 self-hosting** — Compile the Sailfin compiler with Stage2 native backend and execute the resulting binary end-to-end; CI gating is tracked under "CI gating and signals".
-  - [x] Create self-hosting compilation script in `scripts/bootstrap_stage2.py` that compiles all `compiler/src/*.sfn` modules using Stage2 LLVM backend with full capability grants.
+  - [x] Create self-hosting compilation script in `scripts/bootstrap_native.py` that compiles all `compiler/src/*.sfn` modules using the native LLVM backend with full capability grants.
   - [x] Add Makefile targets for Stage2 native validation (`stage2-native-sanity`, `stage2-native-roundtrip`, `stage2-native-fixed-point`).
   - [x] Add smoke tests in `compiler/tests/test_stage2_bootstrap.py` that validate the self-hosted compiler modules are generated correctly with valid LLVM IR.
   - [x] Document self-hosting status and validation findings in `docs/investigations/stage2-self-hosting-status.md`.

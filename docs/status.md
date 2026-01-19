@@ -4,7 +4,7 @@ This document tracks what works today and what is in progress.
 
 ## Compiler Pipeline (Current)
 
-- The self-hosted native compiler (legacy name: stage2) is the primary toolchain; `make compile` produces `build/native/sailfin` (a stable local alias) and the legacy-named `build/native/sailfin-stage2`.
+- The self-hosted native compiler is the primary toolchain; `make compile` produces `build/native/sailfin`.
 - The legacy Stage1 (Python) bootstrap pipeline is kept for emergency recovery, but it is no longer the primary developer path.
 - Experimental LLVM JIT execution remains available for targeted backend coverage.
 - Stage1 Python lowering no longer blocks compilation on heuristic fallback checks; diagnostics still surface.

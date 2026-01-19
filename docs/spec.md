@@ -479,7 +479,7 @@ Reference types &T and &mut T are accepted syntactically (see below) but are tre
 
 The expression forms &x and borrow(x) are accepted. They construct a reference value but carry no static guarantees in bootstrap builds.
 
-Warning (bootstrap): Ownership wrappers and borrows are diagnostics-only. The bootstrap backend will not prevent aliasing, duplication, use-after-move, or early drops of Affine<T>/Linear<T>/&mut T values. The native LLVM lowering (legacy name: stage2) now threads ownership metadata through `.sfn-asm`, rejects conflicting borrows (multiple `&mut` aliases or mixing `&mut` with shared borrows), and flags use-after-move when a consumed local or parameter is reused after control-flow merges. Lifetime analysis and borrow-region inference remain future work.
+Warning (bootstrap): Ownership wrappers and borrows are diagnostics-only. The bootstrap backend will not prevent aliasing, duplication, use-after-move, or early drops of Affine<T>/Linear<T>/&mut T values. The native LLVM lowering now threads ownership metadata through `.sfn-asm`, rejects conflicting borrows (multiple `&mut` aliases or mixing `&mut` with shared borrows), and flags use-after-move when a consumed local or parameter is reused after control-flow merges. Lifetime analysis and borrow-region inference remain future work.
 
 #### 6.1.2 Planned (self-hosted) semantics
 
@@ -505,7 +505,7 @@ Unsafe/raw memory: Raw pointers and pointer arithmetic are not part of the safe 
 
 #### 6.1.3 Examples
 
-See `examples/basics/borrowing.sfn` for a runnable native-compiler design sample (legacy name: stage2) that illustrates the ownership rules described above. The sample shows how
+See `examples/basics/borrowing.sfn` for a runnable native-compiler design sample that illustrates the ownership rules described above. The sample shows how
 
 - bindings move by default (`let mut counter = Counter { ... };`),
 - shared borrows are constructed with `&counter` and `borrow(counter)`,
@@ -810,7 +810,7 @@ fn summarize(user: PII<Text>) -> Summary ![model] {
 
 ### 7.2 Runtime Intrinsics and Native Capability ABI
 
-The native LLVM backend (legacy name: stage2) exposes capability-gated operations as **runtime intrinsics**—
+The native LLVM backend exposes capability-gated operations as **runtime intrinsics**—
 declared external functions that preserve their effect requirements through the native
 compilation pipeline.
 
@@ -896,7 +896,7 @@ Test runners support:
   during production incidents.
 
 Current (self-hosted) CLI note: the native compiler CLI exposes `sfn test [path]`.
-The installer currently ships a legacy-named binary (`sailfin-stage2`) but also provides a stable `sfn` entrypoint.
+The installer ships stable entrypoints (`sfn`, `sailfin`).
 Today it discovers Sailfin test files by filename convention (`*_test.sfn`) under
 `path` (recursively), compiles each file with a synthesized test harness `main`,
 and executes it. This is an initial bridge while the native test runner grows;
