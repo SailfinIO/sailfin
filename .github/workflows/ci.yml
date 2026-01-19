@@ -95,16 +95,16 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-      - name: Install latest released Stage2 seed (via install.sh)
+      - name: Install latest released seed (via install.sh)
         shell: bash -l {0}
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           # Optional: set repo variables to pin or exclude a seed during incidents.
-          # - SELFHOST_SEED_VERSION: e.g. 0.1.1-alpha.114 (or 'latest')
+          # - SELFHOST_SEED_VERSION: e.g. 0.1.1-alpha.121 (or 'latest')
           # - SELFHOST_SEED_EXCLUDE_TAG: e.g. v0.1.1-alpha.999
           # Pinned while we remove stage1/bootstrap and harden selfhost-only CI.
-          VERSION: 0.1.1-alpha.115
+          VERSION: 0.1.1-alpha.121
           EXCLUDE_TAG: ""
           GLOBAL_BIN_DIR: ${{ github.workspace }}/build/seed/bin
           INSTALL_BASE: ${{ github.workspace }}/build/seed/versions
@@ -120,7 +120,7 @@ jobs:
           ls -lh "$SEED_NATIVE"
           "$SEED_NATIVE" version
 
-      - name: Try self-host rebuild Stage2 from released seed
+      - name: Try self-host rebuild from released seed
         id: selfhost_seed_try
         shell: bash -l {0}
         run: |
