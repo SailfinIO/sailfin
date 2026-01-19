@@ -30,7 +30,7 @@ Primary sources:
 - `runtime/native/src/sailfin_runtime.c`
 - `runtime/stage2_runtime_stub.c`
 - `runtime/prelude.sfn`
-- `runtime/stage2_runner.py`
+- `runtime/native_runner.py`
 
 ## Gaps Blocking C Removal
 
@@ -49,7 +49,7 @@ Primary sources:
    for examples and capability enforcement.
 5. **Capability adapters**: Filesystem is implemented in C, HTTP/model are
    stubs, and Python shims remain in `runtime/runtime_support.py` and
-   `runtime/stage2_runner.py`. Native adapters must replace these.
+   `runtime/native_runner.py`. Native adapters must replace these.
 6. **Driver/CLI**: `runtime/native/src/stage2_driver.c` and Python runners are
    still part of the toolchain. A Sailfin-native CLI should replace them for
    the full self-hosted workflow.

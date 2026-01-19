@@ -56,14 +56,14 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
     - [ ] Logging + bounds checks + process execution.
   - [ ] Wire native lowering (legacy name: stage2) to the native runtime symbols and add regression coverage for each intrinsic.
   - [ ] Add native tests that validate runtime helper parity with the current C runtime (string/array/exception/type helpers).
-  - [ ] Remove C runtime dependencies from the legacy stage2 build once parity is confirmed.
+  - [ ] Remove C runtime dependencies from the legacy build once parity is confirmed.
 
 - [ ] **Native capability adapter implementation** — Replace `runtime_support.py` Python implementations with native Sailfin modules for filesystem, HTTP, and model adapters.
   - [ ] Create `runtime/adapters/fs.sfn` implementing filesystem operations (`read_file`, `write_file`, `list_directory`, `delete_file`, `create_directory`) using platform-specific system calls via `unsafe extern` declarations.
   - [ ] Create `runtime/adapters/http.sfn` implementing HTTP client (`get`, `post`, `put`, `delete`) using native networking primitives or FFI bindings to libcurl/platform APIs.
   - [ ] Create `runtime/adapters/model.sfn` implementing model invocation adapter that routes to registered engine implementations (OpenAI API, local inference, etc.).
-  - [ ] Compile adapter modules to LLVM and link them into Stage2 runtime library.
-  - [ ] Update Stage2Runner to load native adapter implementations instead of `runtime_support.py` shims.
+  - [ ] Compile adapter modules to LLVM and link them into the native runtime library.
+  - [ ] Update NativeRunner to load native adapter implementations instead of `runtime_support.py` shims.
   - [ ] Add regression tests validating native adapters match Python adapter behavior for all existing examples in `examples/io/` and `examples/ai/`.
   - [ ] Document native adapter FFI contracts and platform-specific requirements in `docs/runtime_audit.md`.
 
@@ -73,7 +73,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
     - [ ] Task scheduler for `spawn` with named task tracking.
     - [ ] Channel implementation (bounded/unbounded queues) for inter-task communication.
   - [ ] Create `runtime/server.sfn` implementing HTTP/WebSocket server handler dispatch for `serve`.
-  - [ ] Integrate async runtime with Stage2 coroutine lowering once generator/async support lands (depends on mid-term suspension work).
+  - [ ] Integrate async runtime with native coroutine lowering once generator/async support lands (depends on mid-term suspension work).
   - [ ] Add smoke tests in `compiler/tests/test_native_llvm_execution.py` exercising:
     - [ ] Native spawn with channel communication (validate task executes and channel send/receive works).
     - [ ] Native serve with mock request handling (validate handler registration and dispatch).
@@ -112,12 +112,12 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
 - [ ] **Release pipeline guardrails** — Enforce that CI builds use only Sailfin artifacts, failing if Python runtime shims are invoked.
   - [ ] Add CI job `.github/workflows/python-free-build.yml` that:
-    - [ ] Compiles compiler using Stage2 backend without `runtime_support.py` in path.
+    - [ ] Compiles compiler using the native backend without `runtime_support.py` in path.
     - [ ] Compiles all examples using self-hosted compiler.
     - [ ] Executes examples and validates output matches baseline.
     - [ ] Fails if `import runtime_support` or bootstrap script imports are detected in execution traces.
   - [ ] Add runtime instrumentation to detect Python shim usage:
-    - [ ] Wrap Stage2Runner to log any fallback calls to Python helpers.
+    - [ ] Wrap NativeRunner to log any fallback calls to Python helpers.
     - [ ] Emit warnings during compilation if Python codegen is invoked.
   - [ ] Update release workflow to require `python-free-build` job passing before artifact publication.
   - [ ] Document Python-free validation strategy and known exceptions (developer tooling, test harness) in `docs/README.md`.
@@ -310,7 +310,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
 - [x] Stage2 suspension-conflict spans — LLVM lowering threads borrow initializer spans and suspension instruction spans into mutable-borrow suspension diagnostics so both sites show up in error messages. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_rejects_mutable_borrow_across_await`; behaviour documented in `docs/status.md`.
 - [x] Stage2 suspension conflict diagnostics — LLVM lowering now enforces the `!mut ⊄ !async` lattice rule by rejecting `await`/`yield` sites that keep mutable borrows or parameters alive. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_rejects_mutable_borrow_across_await` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_allows_await_without_mutable_borrow`; behaviour documented in `docs/status.md` and `docs/spec.md`.
 - [x] Stage2 capability manifest aggregation — Stage2 lowering now merges borrow effects with declared capabilities and publishes the combined requirements via `LoweredLLVMResult.capability_manifest`. Validation: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_capability_manifest_propagates_composite_effects`; behaviour documented in `docs/status.md`.
-- [x] Stage2 capability manifest enforcement — `runtime.stage2_runner.Stage2Runner` now consumes the manifest before executing entry points, issuing capability grants and raising `PermissionError` when native helpers exercise effects not present in the grant. Validation: `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_applies_capability_manifest` and `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_denies_missing_capabilities`; behaviour documented in `docs/status.md`.
+- [x] Native capability manifest enforcement — `runtime.native_runner.NativeRunner` consumes the manifest before executing entry points, issuing capability grants and raising `PermissionError` when native helpers exercise effects not present in the grant. Validation: `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_applies_capability_manifest` and `compiler/tests/test_native_llvm_execution.py::test_stage2_runner_denies_missing_capabilities`; behaviour documented in `docs/status.md`.
 - [x] Stage2 move-out diagnostics — Ownership metadata now ships use-after-move errors for locals and parameters, including non-copy aggregates; regression coverage lives in `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move` and `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_reports_use_after_move_for_affine_array`, with behaviour documented in `docs/status.md`.
 - [x] Extend `.sfn-asm` lowering to emit runnable LLVM IR modules and execute smoke binaries via CI. (Coverage: `compiler/tests/test_native_llvm_execution.py` runs the emitted IR through `llvmlite`.)
 - [x] Lower loops and `match` dispatch into LLVM branch/merge blocks so structured control flow executes under the stage2 backend. (Regression: `compiler/tests/test_native_llvm_execution.py::test_native_llvm_execution_runs_program` now covers loop + match execution.)
@@ -410,7 +410,7 @@ Move checked tasks here with links to PRs / status updates for traceability.
   - [x] Add unit tests in `compiler/tests/test_native_llvm_execution.py` that validate intrinsic declarations emit, capability metadata propagates, and simple IO/model/net calls compile without diagnostics.
   - [x] Document intrinsic ABI and capability metadata format in `docs/spec.md` and update `docs/status.md` with coverage references.
 
-- [x] **Bridge capability adapters into Stage2 lowering** — Expose `fs`, `http`, `serve`, `spawn`, and channel primitives as callable symbols in Stage2 LLVM modules so runtime helpers can be invoked from native code.
+- [x] **Bridge capability adapters into native lowering** — Expose `fs`, `http`, `serve`, `spawn`, and channel primitives as callable symbols in native LLVM modules so runtime helpers can be invoked from native code.
   - [x] Declare adapter function signatures in `compiler/src/native_llvm_lowering.sfn` for filesystem operations (`fs_read_file`, `fs_write_file`, `fs_list_directory`), HTTP (`http_get`, `http_post`), model (`model_invoke_with_prompt`), serving (`serve_start`, `serve_handler_dispatch`), concurrency (`spawn_task`, `channel_create`, `channel_send`, `channel_receive`). Adapter signatures added to `runtime_helper_descriptors()` function with appropriate effect annotations and LLVM symbol names.
   - [x] Implement adapter lowering in `compiler/src/native_llvm_lowering.sfn` that emits external function declarations and routes Sailfin runtime helper calls to the corresponding adapter symbols. Adapter calls route through existing `find_runtime_helper` infrastructure, ensuring proper symbol resolution via the `symbol` field and automatic capability metadata propagation.
   - [x] Add smoke tests in `compiler/tests/test_native_llvm_execution.py` for each adapter category:
@@ -421,16 +421,16 @@ Move checked tasks here with links to PRs / status updates for traceability.
     - [x] `test_native_llvm_execution_calls_spawn_adapter` — validates spawn/channel declarations emit with capability metadata.
   - [x] Ensure adapter calls propagate capability requirements into the module's capability manifest. Validated by existing manifest tests plus new adapter-specific coverage showing effects (`io`, `net`, `model`, `spawn`, `channel`) flow through declaration comments.
 
-- [x] **Register capability adapters in Stage2 runner** — Extend `runtime/stage2_runner.py` to bind adapter implementations to LLVM symbols and enforce capability grants before native code executes.
-  - [x] Implement adapter registration in `Stage2Runner.__init__` that maps adapter symbol names to Python callback implementations (reusing existing `runtime_support.py` helpers for `fs`, `http`, `model`, `serve`, `spawn`, `channel`).
-  - [x] Extend `Stage2Runner.execute_entry_point` to check the capability manifest before execution and raise `PermissionError` if native code attempts IO/model/net operations without grants (leveraging existing manifest enforcement from completed work).
+- [x] **Register capability adapters in native runner** — Extend `runtime/native_runner.py` to bind adapter implementations to LLVM symbols and enforce capability grants before native code executes.
+  - [x] Implement adapter registration in `NativeRunner.__init__` that maps adapter symbol names to Python callback implementations (reusing existing `runtime_support.py` helpers for `fs`, `http`, `model`, `serve`, `spawn`, `channel`).
+  - [x] Extend `NativeRunner.execute_entry_point` to check the capability manifest before execution and raise `PermissionError` if native code attempts IO/model/net operations without grants (leveraging existing manifest enforcement from completed work).
   - [x] Add bridge implementations for each adapter that translate LLVM ABI calls to Python runtime helpers:
     - [x] Filesystem adapters — `fs_read_file`, `fs_write_file`, `fs_list_directory` bridging to `runtime_support.fs.*` with path validation and error handling.
     - [x] HTTP adapters — `http_get`, `http_post` bridging to `runtime_support.http.*` with request/response marshalling.
     - [x] Model adapters — `model_invoke_with_prompt` bridging to `runtime_support.prompt` with capability check and result marshalling.
     - [x] Serve adapters — `serve_start`, `serve_handler_dispatch` bridging to `runtime_support.serve` with handler registration and request routing.
     - [x] Concurrency adapters — `spawn_task` bridging to `runtime_support.spawn`, channel creation/send/receive bridging to `runtime_support.channel` with asyncio integration.
-  - [x] Add end-to-end runtime smoke tests in `compiler/tests/test_native_llvm_execution.py` that compile Sailfin programs calling adapters, execute them via Stage2Runner, and validate behavior:
+  - [x] Add end-to-end runtime smoke tests in `compiler/tests/test_native_llvm_execution.py` that compile Sailfin programs calling adapters, execute them via NativeRunner, and validate behavior:
     - [x] `test_stage2_runner_executes_fs_operations` — write/read file round-trip.
     - [x] `test_stage2_runner_executes_http_request` — mock HTTP get with stub adapter.
     - [x] `test_stage2_runner_executes_model_prompt` — mock prompt invocation with stub adapter.
