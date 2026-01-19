@@ -926,7 +926,7 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
     // Selfhost-only builds may not populate build/native/obj or modules.txt.
     // In that case, fall back to the linked object produced by
     // scripts/selfhost_native.py.
-    let selfhost_linked = "build/selfhost/stage2/obj/stage2.linked.o";
+    let selfhost_linked = "build/selfhost/native/obj/native.linked.o";
 
     let mut args -> string[] = [
         "clang",
@@ -1287,8 +1287,8 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     return 2;
 }
 
-// Exported entrypoint for the native stage2 argv shim.
-fn stage2_cli_main(argv -> string[]) -> number ![io] {
+// Exported entrypoint for the native argv shim.
+fn native_cli_main(argv -> string[]) -> number ![io] {
     return sailfin_cli_main(argv);
 }
 

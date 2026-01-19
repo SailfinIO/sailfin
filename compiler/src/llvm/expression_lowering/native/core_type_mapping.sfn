@@ -2,11 +2,11 @@
 //
 // Stage2 expression lowering type-mapping helpers extracted from core.sfn.
 
-import { substring } from "../../string_utils";
+import { substring } from "../../../string_utils";
 
 import {
     TypeContext,
-} from "../types";
+} from "../../types";
 
 import {
     trim_text,
@@ -14,7 +14,7 @@ import {
     index_of,
     append_string,
     join_with_separator,
-} from "../utils";
+} from "../../utils";
 
 import {
     map_type_annotation,
@@ -23,12 +23,12 @@ import {
     annotation_is_array,
     layout_annotation_represents_user_value,
     array_struct_type_for_element,
-} from "../type_mapping";
+} from "../../type_mapping";
 
 import {
     find_struct_info_by_name,
     find_interface_info_by_name,
-} from "../type_context";
+} from "../../type_context";
 
 fn map_struct_type_annotation_ctx(context -> TypeContext, annotation -> string) -> string {
     let info = find_struct_info_by_name(context, annotation);

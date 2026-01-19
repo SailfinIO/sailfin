@@ -198,8 +198,8 @@ fn sanitize_module_suffix(module_name -> string) -> string {
 }
 
 fn should_keep_unmangled_abi_symbol(symbol -> string) -> boolean {
-    // These are consumed directly by the native C stage2 driver.
-    if symbol == "stage2_cli_main" {
+    // These are consumed directly by the native C driver.
+    if symbol == "native_cli_main" {
         return true;
     }
     if symbol == "compile_to_sailfin" {

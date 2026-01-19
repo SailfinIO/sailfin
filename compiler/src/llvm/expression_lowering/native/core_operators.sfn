@@ -2,17 +2,17 @@
 //
 // Operator and expression-shape helpers extracted from core.sfn.
 
-import { substring, char_at, char_code } from "../../string_utils";
+import { substring, char_at, char_code } from "../../../string_utils";
 
 import {
     OperatorMatch,
-} from "../types";
+} from "../../types";
 
 import {
     trim_text,
     starts_with,
     contains_text,
-} from "../utils";
+} from "../../utils";
 
 import {
     char_code_at_text,

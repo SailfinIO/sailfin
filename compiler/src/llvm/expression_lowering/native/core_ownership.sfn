@@ -2,7 +2,7 @@
 //
 // Ownership/borrow analysis helpers extracted from core.sfn.
 
-import { NativeSourceSpan } from "../../native_ir";
+import { NativeSourceSpan } from "../../../native_ir";
 
 import {
     LocalBinding,
@@ -10,21 +10,21 @@ import {
     OwnershipAnalysis,
     OwnershipInfo,
     OwnershipConsumption,
-} from "../types";
+} from "../../types";
 
 import {
     trim_text,
     append_string,
     number_to_string,
-} from "../utils";
+} from "../../utils";
 
 import {
     is_copy_type,
-} from "../type_mapping";
+} from "../../type_mapping";
 
 import {
     is_simple_identifier,
-} from "../expressions";
+} from "../../expressions";
 
 import {
     find_local_binding,
@@ -32,11 +32,11 @@ import {
 
 import {
     find_parameter_binding,
-} from "./core_bindings_stage2";
+} from "./core_bindings";
 
 import {
     parse_borrow_expression,
-} from "./core_parsing_stage2";
+} from "./core_parsing";
 
 fn analyze_value_ownership_impl(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
     if initializer == null {

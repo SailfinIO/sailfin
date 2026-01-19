@@ -7,7 +7,7 @@
 // relational operators (`emit_comparison_instruction`, `emit_boolean_and`),
 // and provides local variable loading (`load_local_operand`).
 
-import { char_code } from "../../string_utils";
+import { char_code } from "../../../string_utils";
 
 import {
     number_to_string,
@@ -18,19 +18,19 @@ import {
     parse_union_payload_types,
 } from "./core_text";
 
-import { starts_with } from "../utils";
+import { starts_with } from "../../utils";
 
 import {
     ends_with_pointer_suffix,
     strip_pointer_suffix,
-} from "../type_mapping";
+} from "../../type_mapping";
 
 import {
     format_temp_name,
     default_return_literal,
-} from "../expressions";
+} from "../../expressions";
 
-import { array_pointer_element_type } from "../expression_lowering/arrays";
+import { array_pointer_element_type } from "../arrays";
 
 import {
     LocalBinding,
@@ -39,7 +39,7 @@ import {
     LoadLocalResult,
     CoercionResult,
     BinaryAlignmentResult,
-} from "../types";
+} from "../../types";
 
 fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission {
     let mut diagnostics -> string[] = [];

@@ -6,14 +6,14 @@
 
 #include "sailfin_runtime.h"
 
-// Entry point exported by the stage2 compiler IR.
+// Entry point exported by the native compiler IR.
 extern char *compile_to_sailfin(char *source);
 extern char *compile_to_llvm(char *source);
-extern double stage2_cli_main(SailfinPtrArray *argv);
+extern double native_cli_main__cli_main(SailfinPtrArray *argv);
 
 static void _print_usage(FILE *stream)
 {
-    fprintf(stream, "usage: sailfin-stage2 [--emit sailfin|llvm] <file.sfn>\n");
+    fprintf(stream, "usage: sailfin [--emit sailfin|llvm] <file.sfn>\n");
 }
 
 static char *_read_file(const char *path)
@@ -226,7 +226,7 @@ int main(int argc, char **argv)
 
             args.data = argv_copy;
             args.len = out_index;
-            double rc = stage2_cli_main(&args);
+            double rc = native_cli_main__cli_main(&args);
             free(argv_copy);
             free(runtime_root);
             return (int)rc;

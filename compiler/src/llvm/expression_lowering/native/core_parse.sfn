@@ -7,7 +7,7 @@
 // index expressions (`parse_index_expression`), range iterables, and
 // brace/bracket/paren balancing utilities.
 
-import { substring, char_code, char_at } from "../../string_utils";
+import { substring, char_code, char_at } from "../../../string_utils";
 
 import {
     trim_text,
@@ -18,11 +18,11 @@ import {
     is_digit_char,
 } from "./core_text";
 
-import { ends_with, is_identifier_start_char } from "../utils";
+import { ends_with, is_identifier_start_char } from "../../utils";
 
-import { is_simple_identifier } from "../expressions";
+import { is_simple_identifier } from "../../expressions";
 
-import { split_array_elements } from "../expression_lowering/splitting";
+import { split_array_elements } from "../splitting";
 
 import {
     StructLiteralParse,
@@ -31,7 +31,9 @@ import {
     MemberAccessParse,
     IndexExpressionParse,
     RangeIterableParse,
-} from "../types";
+} from "../../types";
+
+
 
 fn find_matching_closing_brace(text -> string, open_index -> number) -> number {
     let mut depth -> number = 0;

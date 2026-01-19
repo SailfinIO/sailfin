@@ -2,7 +2,7 @@
 //
 // Parsing helpers for Stage2 expression lowering extracted from core.sfn.
 
-import { substring, char_at } from "../../string_utils";
+import { substring, char_at } from "../../../string_utils";
 
 import {
     TypeContext,
@@ -12,7 +12,7 @@ import {
     RawAddressParseResult,
     CastParseResult,
     ArrayLiteralMetadata,
-} from "../types";
+} from "../../types";
 
 import {
     trim_text,
@@ -21,17 +21,17 @@ import {
     is_effect_delimiter,
     is_identifier_start_char,
     is_identifier_part_char,
-} from "../utils";
+} from "../../utils";
 
-import { array_struct_type_for_element } from "../type_mapping";
+import { array_struct_type_for_element } from "../../type_mapping";
 
 import {
     map_type_annotation,
-} from "../type_mapping";
+} from "../../type_mapping";
 
 import {
     map_primitive_type,
-} from "./core_type_mapping_stage2";
+} from "./core_type_mapping";
 
 fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
     let trimmed = trim_text(expression);

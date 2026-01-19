@@ -2,12 +2,12 @@
 //
 // Call parsing helpers for Stage2 expression lowering.
 
-import { char_at } from "../../string_utils";
+import { char_at } from "../../../string_utils";
 
 import {
     trim_text,
     append_string,
-} from "../utils";
+} from "../../utils";
 
 fn find_call_site(expression -> string) -> number {
     let mut depth -> number = 0;

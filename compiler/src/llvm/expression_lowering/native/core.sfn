@@ -7,8 +7,8 @@
 // analysis (`analyze_value_ownership`, `detect_borrow_conflicts`) and
 // orchestrates calls to helper modules for operands, scopes, parsing, and text.
 
-import { NativeFunction, NativeSourceSpan, NativeStruct, NativeEnum } from "../../native_ir";
-import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "../../string_utils";
+import { NativeFunction, NativeSourceSpan, NativeStruct, NativeEnum } from "../../../native_ir";
+import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
 
 import {
     TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
@@ -30,7 +30,7 @@ import {
     ConditionConversion, ComparisonEmission, BinaryAlignmentResult,
     ThrowLoweringResult, PhiMergeResult, PhiInputEntry, MutationMaterializationResult,
     PhiStoreEntry, MatchArmMutations, LoadLocalResult
-} from "../types";
+} from "../../types";
 
 import {
     starts_with, ends_with, char_at as utils_char_at,
@@ -40,7 +40,7 @@ import {
     find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings,
     is_effect_delimiter,
     extend_string_array,
-} from "../utils";
+} from "../../utils";
 
 import {
     number_to_string,
@@ -162,7 +162,7 @@ export {
 import {
     empty_string_constant_set, append_string_constant, merge_string_constants,
     find_string_constant, find_string_constant_by_name, render_string_constants, escape_string_for_llvm
-} from "../strings";
+} from "../../strings";
 
 import {
     map_type_annotation,
@@ -174,7 +174,7 @@ import {
     layout_annotation_represents_user_value,
     is_copy_type,
     array_struct_type_for_element,
-} from "../type_mapping";
+} from "../../type_mapping";
 
 import {
     fixup_enum_layouts,
@@ -193,15 +193,15 @@ import {
     resolve_enum_info_for_literal,
     resolve_enum_variant_info,
     find_variant_field_info
-} from "../type_context";
+} from "../../type_context";
 
 import {
     find_function_by_name,
-} from "../rendering";
+} from "../../rendering";
 
 import {
     find_runtime_helper,
-} from "../runtime_helpers";
+} from "../../runtime_helpers";
 
 import {
     format_temp_name,
@@ -210,7 +210,7 @@ import {
     default_return_literal,
     strip_mut_prefix,
     is_simple_identifier,
-} from "../expressions";
+} from "../../expressions";
 
 import {
     find_parameter_binding,
@@ -218,7 +218,7 @@ import {
     mark_local_consumed,
     reset_local_consumption,
     update_local_ownership,
-} from "./core_bindings_stage2";
+} from "./core_bindings";
 
 import {
     map_struct_type_annotation_ctx,
@@ -238,7 +238,7 @@ import {
     future_pointer_type_for_return_type,
     await_symbol_for_future_pointer_type,
     map_parameter_type,
-} from "./core_type_mapping_stage2";
+} from "./core_type_mapping";
 
 import {
     parse_borrow_expression,
@@ -250,7 +250,7 @@ import {
     parse_cast_expression,
     parse_array_literal_metadata,
     map_metadata_annotation,
-} from "./core_parsing_stage2";
+} from "./core_parsing";
 
 import {
     strip_enclosing_parentheses,
@@ -258,33 +258,33 @@ import {
     find_comparison_operator,
     find_logical_operator,
     lines_end_with_terminator,
-} from "./core_operators_stage2";
+} from "./core_operators";
 
 import {
     lower_string_literal,
     emit_string_concat,
     coerce_operand_to_string,
-} from "./core_strings_stage2";
+} from "./core_strings";
 
 import {
     find_call_site,
     split_call_arguments,
-} from "./core_calls_stage2";
+} from "./core_calls";
 
 import {
     lower_raw_address_expression,
-} from "./core_addressing_stage2";
+} from "./core_addressing";
 
 import {
     analyze_value_ownership_impl,
     detect_borrow_conflicts_impl,
     format_suspension_location_impl,
     resolve_borrow_base_impl,
-} from "./core_ownership_stage2";
+} from "./core_ownership";
 
 import {
     split_array_elements,
-} from "../expression_lowering/splitting";
+} from "../splitting";
 
 import {
     collect_parameter_types,
@@ -296,7 +296,7 @@ import {
     lower_array_push_in_place,
     find_top_level_comma_in_llvm_type,
     array_pointer_element_type,
-} from "../expression_lowering/arrays";
+} from "../arrays";
 
 fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
     return analyze_value_ownership_impl(initializer, span, locals, bindings);

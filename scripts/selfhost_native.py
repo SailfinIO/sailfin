@@ -1972,10 +1972,10 @@ def main(argv: list[str]) -> int:
                     )
 
         work_dir = args.work_dir.resolve()
-        stage2_dir = work_dir / pass_name
-        raw_dir = stage2_dir / "raw"
-        obj_dir = stage2_dir / "obj"
-        seed_cwd = stage2_dir / "seed_cwd"
+        pass_dir = work_dir / pass_name
+        raw_dir = pass_dir / "raw"
+        obj_dir = pass_dir / "obj"
+        seed_cwd = pass_dir / "seed_cwd"
 
         raw_dir.mkdir(parents=True, exist_ok=True)
         obj_dir.mkdir(parents=True, exist_ok=True)
@@ -2775,12 +2775,12 @@ def main(argv: list[str]) -> int:
             "\n".join(module_names) + "\n", encoding="utf-8")
 
         runtime_c = REPO_ROOT / "runtime/native/src/sailfin_runtime.c"
-        driver_c = REPO_ROOT / "runtime/native/src/stage2_driver.c"
+        driver_c = REPO_ROOT / "runtime/native/src/native_driver.c"
         globals_ll = REPO_ROOT / "runtime/native/ir/runtime_globals.ll"
         include_dir = REPO_ROOT / "runtime/native/include"
 
         runtime_o = obj_dir / "sailfin_runtime.o"
-        driver_o = obj_dir / "stage2_driver.o"
+        driver_o = obj_dir / "native_driver.o"
         globals_o = obj_dir / "runtime_globals.o"
 
         def _compile_objects_and_link(*, ll_dir: pathlib.Path) -> None:
@@ -2962,13 +2962,13 @@ def main(argv: list[str]) -> int:
             # llvm-link time is generally small compared to clang, but keep it in compile bucket.
             clang_compile_s += time.perf_counter() - t0
 
-            stage2_o = obj_dir / "stage2.linked.o"
-            if stage2_o.exists():
-                stage2_o.unlink()
+            linked_o = obj_dir / "native.linked.o"
+            if linked_o.exists():
+                linked_o.unlink()
             t0 = time.perf_counter()
             _run(
                 [clang, *clang_flags, "-fPIC", "-c",
-                    str(linked_bc), "-o", str(stage2_o)],
+                    str(linked_bc), "-o", str(linked_o)],
                 cwd=REPO_ROOT,
                 timeout=_remaining_budget_seconds(
                     total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
@@ -2976,7 +2976,7 @@ def main(argv: list[str]) -> int:
                 else None,
             )
             clang_compile_s += time.perf_counter() - t0
-            aot_objects.append(stage2_o)
+            aot_objects.append(linked_o)
 
             # Build runtime prelude object separately (for packaging and for any
             # runtime-link expectations).
@@ -3075,7 +3075,7 @@ def main(argv: list[str]) -> int:
         # link-safe (import symbol rewrites + declaration injection). If the
         # seed supports it, run the rewrite step before compiling.
         if args.skip_clang_validate and _seed_supports_aot_prepare_dir(seed_bin):
-            prepared_dir = stage2_dir / "aot_prepared"
+            prepared_dir = pass_dir / "aot_prepared"
             prepared_dir.mkdir(parents=True, exist_ok=True)
             for p in prepared_dir.glob("*.ll"):
                 try:
@@ -3122,7 +3122,7 @@ def main(argv: list[str]) -> int:
 
     out_path1 = args.out
     aot_dir1, module_names1 = _build_once(
-        seed_bin=seed, out_path=out_path1, pass_name="stage2")
+        seed_bin=seed, out_path=out_path1, pass_name="native")
     subprocess.run(
         [str(out_path1), "--version"],
         cwd=str(REPO_ROOT),
@@ -3134,7 +3134,7 @@ def main(argv: list[str]) -> int:
         _check_budget()
         out_path2 = args.out.with_name(args.out.name + "-fp2")
         aot_dir2, module_names2 = _build_once(
-            seed_bin=out_path1, out_path=out_path2, pass_name="stage2_fp2")
+            seed_bin=out_path1, out_path=out_path2, pass_name="native_fp2")
         subprocess.run(
             [str(out_path2), "--version"],
             cwd=str(REPO_ROOT),

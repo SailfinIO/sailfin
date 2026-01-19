@@ -8,20 +8,20 @@ import {
     RawAddressParseResult,
     LLVMOperand,
     ExpressionResult,
-} from "../types";
+} from "../../types";
 
 import {
     trim_text,
     append_string,
-} from "../utils";
+} from "../../utils";
 
 import {
     empty_string_constant_set,
-} from "../strings";
+} from "../../strings";
 
 import {
     is_simple_identifier,
-} from "../expressions";
+} from "../../expressions";
 
 import {
     find_local_binding,
@@ -29,7 +29,7 @@ import {
 
 import {
     find_parameter_binding,
-} from "./core_bindings_stage2";
+} from "./core_bindings";
 
 fn lower_raw_address_expression(parse -> RawAddressParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[]) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;

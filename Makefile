@@ -269,7 +269,7 @@ selfhost-native:
 	fi; \
 	echo "[selfhost-native] running selfhost script (seed=$$seed)..."; \
 	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out $(NATIVE_OUT)
-	@SRC="build/selfhost/stage2/seed_cwd/build/stage2"; \
+	@SRC="build/selfhost/native/seed_cwd/build/stage2"; \
 	if [ -d "$$SRC" ]; then \
 		rm -rf build/stage2; \
 		mkdir -p build/stage2; \
@@ -280,9 +280,9 @@ selfhost-native:
 		mkdir -p build/native/import-context; \
 		cp -a build/stage2/. build/native/import-context/; \
 	fi
-	@if [ -f build/selfhost/stage2/obj/runtime/prelude.o ]; then \
+	@if [ -f build/selfhost/native/obj/runtime/prelude.o ]; then \
 		mkdir -p build/native/obj/runtime; \
-		cp -f build/selfhost/stage2/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
+		cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
 	fi
 	@mkdir -p build/native
 	@echo "[selfhost-native] built $(NATIVE_OUT)"
@@ -345,7 +345,7 @@ _build-native-stage2:
 	@mkdir -p $(NATIVE_OBJ_DIR)
 	@rm -rf $(NATIVE_OBJ_DIR)/*
 	$(CLANG) $(NATIVE_OPT) -fno-delete-null-pointer-checks $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o $(NATIVE_OBJ_DIR)/sailfin_runtime.o
-	$(CLANG) $(NATIVE_OPT) $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o $(NATIVE_OBJ_DIR)/stage2_driver.o
+	$(CLANG) $(NATIVE_OPT) $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/native_driver.c -o $(NATIVE_OBJ_DIR)/native_driver.o
 	@echo "[_build-native-stage2] compile runtime IR: runtime_globals.ll"
 	$(CLANG_LL_COMPILE) $(NATIVE_OPT) $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o $(NATIVE_OBJ_DIR)/runtime_globals.o
 	@echo "[_build-native-stage2] compile AOT LLVM modules (jobs=$(NATIVE_JOBS))"
@@ -376,7 +376,7 @@ _build-native-stage2:
 	fi
 	$(CLANG) $(NATIVE_OPT) $(CLANG_WARN_SUPPRESS) -o $(NATIVE_OUT) \
 		$(NATIVE_OBJ_DIR)/sailfin_runtime.o \
-		$(NATIVE_OBJ_DIR)/stage2_driver.o \
+		$(NATIVE_OBJ_DIR)/native_driver.o \
 		$(NATIVE_OBJ_DIR)/runtime_globals.o \
 		$$(sed 's|^|$(NATIVE_OBJ_DIR)/|; s|$$|.o|' $(STAGE2_AOT_MODULES_FILE) | tr '\n' ' ') \
 		$(NATIVE_LINK_EXTRA) $(STAGE2_NATIVE_LIBS)
@@ -421,50 +421,50 @@ native-stage2-o1: bootstrap-legacy
 	@mkdir -p build/native/o1-obj
 	@rm -rf build/native/o1-obj/*
 	$(CLANG) -O1 -g -fno-omit-frame-pointer -fno-delete-null-pointer-checks $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/o1-obj/sailfin_runtime.o
-	$(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/o1-obj/stage2_driver.o
+	$(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/native_driver.c -o build/native/o1-obj/native_driver.o
 	$(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/o1-obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
 	  mkdir -p "$$(dirname build/native/o1-obj/$$m.o)"; \
 	  $(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/o1-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	$(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-o1 build/native/o1-obj/sailfin_runtime.o build/native/o1-obj/stage2_driver.o build/native/o1-obj/runtime_globals.o $$(sed 's|^|build/native/o1-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
+	$(CLANG) -O1 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-o1 build/native/o1-obj/sailfin_runtime.o build/native/o1-obj/native_driver.o build/native/o1-obj/runtime_globals.o $$(sed 's|^|build/native/o1-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
 
 native-stage2-debug: bootstrap-legacy
 	@mkdir -p build/native/debug-obj
 	@rm -rf build/native/debug-obj/*
 	$(CLANG) -O0 -g -fno-omit-frame-pointer -fno-delete-null-pointer-checks $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/debug-obj/sailfin_runtime.o
-	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/debug-obj/stage2_driver.o
+	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/native_driver.c -o build/native/debug-obj/native_driver.o
 	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/debug-obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
 	  mkdir -p "$$(dirname build/native/debug-obj/$$m.o)"; \
 	  $(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/debug-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/stage2_driver.o build/native/debug-obj/runtime_globals.o $$(sed 's|^|build/native/debug-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
+	$(CLANG) -O0 -g -fno-omit-frame-pointer $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-debug build/native/debug-obj/sailfin_runtime.o build/native/debug-obj/native_driver.o build/native/debug-obj/runtime_globals.o $$(sed 's|^|build/native/debug-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
 
 native-stage2-asan: bootstrap-legacy
 	@mkdir -p build/native/asan-obj
 	@rm -rf build/native/asan-obj/*
 	$(CLANG) -O1 -g -fno-omit-frame-pointer -fno-delete-null-pointer-checks -fsanitize=address $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/asan-obj/sailfin_runtime.o
-	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/asan-obj/stage2_driver.o
+	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/native_driver.c -o build/native/asan-obj/native_driver.o
 	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/asan-obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
 	  mkdir -p "$$(dirname build/native/asan-obj/$$m.o)"; \
 	  $(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/asan-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/stage2_driver.o build/native/asan-obj/runtime_globals.o $$(sed 's|^|build/native/asan-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
+	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=address $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-asan build/native/asan-obj/sailfin_runtime.o build/native/asan-obj/native_driver.o build/native/asan-obj/runtime_globals.o $$(sed 's|^|build/native/asan-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
 
 native-stage2-ubsan: bootstrap-legacy
 	@mkdir -p build/native/ubsan-obj
 	@rm -rf build/native/ubsan-obj/*
 	$(CLANG) -O1 -g -fno-omit-frame-pointer -fno-delete-null-pointer-checks -fsanitize=undefined -fno-sanitize-recover=undefined $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/sailfin_runtime.c -o build/native/ubsan-obj/sailfin_runtime.o
-	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/stage2_driver.c -o build/native/ubsan-obj/stage2_driver.o
+	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined $(CLANG_WARN_SUPPRESS) -I runtime/native/include -c runtime/native/src/native_driver.c -o build/native/ubsan-obj/native_driver.o
 	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined $(CLANG_WARN_SUPPRESS) -c runtime/native/ir/runtime_globals.ll -o build/native/ubsan-obj/runtime_globals.o
 	@while IFS= read -r m ; do \
 	  [ -z "$$m" ] && continue; \
 	  mkdir -p "$$(dirname build/native/ubsan-obj/$$m.o)"; \
 	  $(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined $(CLANG_WARN_SUPPRESS) $(CLANG_LL_FLAGS) -fPIC -c build/stage2/aot/$$m.ll -o build/native/ubsan-obj/$$m.o; \
 	done < build/stage2/aot/modules.txt
-	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-ubsan build/native/ubsan-obj/sailfin_runtime.o build/native/ubsan-obj/stage2_driver.o build/native/ubsan-obj/runtime_globals.o $$(sed 's|^|build/native/ubsan-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)
+	$(CLANG) -O1 -g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined $(CLANG_WARN_SUPPRESS) -o build/native/sailfin-stage2-ubsan build/native/ubsan-obj/sailfin_runtime.o build/native/ubsan-obj/native_driver.o build/native/ubsan-obj/runtime_globals.o $$(sed 's|^|build/native/ubsan-obj/|; s|$$|.o|' build/stage2/aot/modules.txt | tr '\n' ' ') $(STAGE2_NATIVE_LIBS)

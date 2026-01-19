@@ -244,11 +244,11 @@ fn _legacy_native_text_path_for_slug(slug -> string) -> string {
 }
 
 fn _selfhost_layout_manifest_path_for_slug(slug -> string) -> string {
-    return "build/selfhost/stage2/seed_cwd/build/stage2/" + slug + ".layout-manifest";
+    return "build/selfhost/native/seed_cwd/build/stage2/" + slug + ".layout-manifest";
 }
 
 fn _selfhost_native_text_path_for_slug(slug -> string) -> string {
-    return "build/selfhost/stage2/seed_cwd/build/stage2/" + slug + ".sfn-asm";
+    return "build/selfhost/native/seed_cwd/build/stage2/" + slug + ".sfn-asm";
 }
 
 fn _resolve_layout_manifest_path_for_slug(slug -> string) -> string ![io] {

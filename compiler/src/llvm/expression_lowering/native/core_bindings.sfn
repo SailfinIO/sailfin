@@ -2,7 +2,7 @@
 //
 // Small Stage2-specific binding helpers extracted from core.sfn.
 
-import { LocalBinding, ParameterBinding, OwnershipInfo } from "../types";
+import { LocalBinding, ParameterBinding, OwnershipInfo } from "../../types";
 
 import {
     bindings_find_parameter_binding,
@@ -10,7 +10,7 @@ import {
     bindings_mark_local_consumed,
     bindings_reset_local_consumption,
     bindings_update_local_ownership,
-} from "../expression_lowering/bindings";
+} from "../bindings";
 
 fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
     return bindings_find_parameter_binding(bindings, name);

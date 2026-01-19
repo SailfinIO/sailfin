@@ -6,21 +6,21 @@ import {
     LLVMOperand,
     ExpressionResult,
     StringConstant,
-} from "../types";
+} from "../../types";
 
 import {
     append_string,
     number_to_string,
-} from "../utils";
+} from "../../utils";
 
 import {
     empty_string_constant_set,
     escape_string_for_llvm,
-} from "../strings";
+} from "../../strings";
 
 import {
     format_temp_name,
-} from "../expressions";
+} from "../../expressions";
 
 import {
     unescape_string_literal,

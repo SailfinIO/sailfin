@@ -1,4 +1,4 @@
-"""Runtime helpers exposed for the Sailfin stage1 compiler."""
+"""Runtime helpers used by the Sailfin native compiler."""
 
 __version__ = "0.1.1-alpha.120"
 

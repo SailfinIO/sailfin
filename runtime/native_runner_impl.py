@@ -1,7 +1,6 @@
-"""Native execution helpers that enforce capability manifests at runtime.
+"""Implementation of the native execution runner.
 
-Legacy note: this module path is kept for compatibility. New code should import
-`runtime.native_runner.NativeRunner`.
+Prefer importing `NativeRunner` from `runtime.native_runner`.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ import llvmlite.binding as llvm
 
 from runtime import runtime_support as runtime
 
-__all__ = ["NativeRunner", "Stage2Runner", "current_capability_grant"]
+__all__ = ["NativeRunner", "NativeRuntimeHooks", "current_capability_grant"]
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -33,7 +32,7 @@ SleepDelegate = Callable[[float], None]
 
 
 @dataclass
-class Stage2RuntimeHooks:
+class NativeRuntimeHooks:
     """Optional handlers invoked by the native runtime helpers."""
 
     print_info: CapabilityDelegate | None = None
@@ -63,6 +62,10 @@ _DEFAULT_ALLOC_GUARD_BYTES = 32
 _DEFAULT_GUARD_SCAN_INTERVAL = 128
 _FRONT_GUARD_VALUE = 0xAB
 _BACK_GUARD_VALUE = 0xEF
+
+
+# Compatibility alias; remove once external callers have migrated.
+Stage2RuntimeHooks = NativeRuntimeHooks
 
 
 _HELPER_ALIASES: Mapping[str, str] = {
@@ -153,13 +156,13 @@ _ADAPTER_SIGNATURES: Mapping[str, tuple[str | Sequence[str] | None, Sequence[typ
 }
 
 _ACTIVE_GRANT: contextvars.ContextVar[runtime.CapabilityGrant | None] = contextvars.ContextVar(
-    "stage2_active_capability_grant", default=None
+    "native_active_capability_grant", default=None
 )
 _LAST_RUNTIME_ERROR: contextvars.ContextVar[Exception | None] = contextvars.ContextVar(
-    "stage2_last_runtime_error", default=None
+    "native_last_runtime_error", default=None
 )
-_ACTIVE_RUNNER: contextvars.ContextVar["Stage2Runner" | None] = contextvars.ContextVar(
-    "stage2_active_runner_instance", default=None
+_ACTIVE_RUNNER: contextvars.ContextVar["NativeRunner" | None] = contextvars.ContextVar(
+    "native_active_runner_instance", default=None
 )
 
 _LLVM_INITIALISED = False
@@ -170,7 +173,7 @@ _LIBC_ALLOCATIONS: dict[int, AllocationRecord] = {}
 
 
 def current_capability_grant() -> runtime.CapabilityGrant | None:
-    """Return the capability grant active for the current Stage2 invocation."""
+    """Return the capability grant active for the current invocation."""
 
     return _ACTIVE_GRANT.get()
 
@@ -434,10 +437,10 @@ def _ensure_libc_symbols(debug_log: Callable[[str], None] | None) -> dict[str, c
     return _LIBC_FUNCTIONS
 
 
-def _normalise_hooks(hooks: Stage2RuntimeHooks | Mapping[str, Callable[..., None]] | None) -> Dict[str, Callable[..., None] | None]:
+def _normalise_hooks(hooks: NativeRuntimeHooks | Mapping[str, Callable[..., None]] | None) -> Dict[str, Callable[..., None] | None]:
     if hooks is None:
         return {}
-    if isinstance(hooks, Stage2RuntimeHooks):
+    if isinstance(hooks, NativeRuntimeHooks):
         return {
             "sailfin_runtime_print_info": hooks.print_info,
             "sailfin_runtime_print_warn": hooks.print_warn,
@@ -448,7 +451,7 @@ def _normalise_hooks(hooks: Stage2RuntimeHooks | Mapping[str, Callable[..., None
     for key, value in hooks.items():
         canonical = _HELPER_ALIASES.get(key, key)
         if canonical not in _HELPER_SIGNATURES:
-            raise ValueError(f"unknown Stage2 runtime helper '{key}'")
+            raise ValueError(f"unknown runtime helper '{key}'")
         result[canonical] = value
     return result
 
@@ -461,14 +464,14 @@ def _create_execution_engine() -> llvm.ExecutionEngine:
     return llvm.create_mcjit_compiler(backing_module, target_machine)
 
 
-class Stage2Runner:
-    """Execute Stage2 LLVM outputs while enforcing capability manifests."""
+class NativeRunner:
+    """Execute native LLVM outputs while enforcing capability manifests."""
 
     def __init__(
         self,
         lowered,
         *,
-        runtime_hooks: Stage2RuntimeHooks | Mapping[str,
+        runtime_hooks: NativeRuntimeHooks | Mapping[str,
                                                     Callable[..., None]] | None = None,
         initialise_runtime: bool = True,
         compile_ir: bool = True,
@@ -4284,5 +4287,5 @@ class Stage2Runner:
         return result
 
 
-# Preferred name for 1.0+.
-NativeRunner = Stage2Runner
+# Compatibility alias; remove once external callers have migrated.
+Stage2Runner = NativeRunner

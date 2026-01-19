@@ -7,7 +7,7 @@
 // `infer_borrow_base_scope`, lifetime region creation/release, and scope ID
 // construction (`format_root_scope_id`, `make_child_scope_id`).
 
-import { NativeStruct, NativeEnum } from "../../native_ir";
+import { NativeStruct, NativeEnum } from "../../../native_ir";
 
 import {
     OwnershipInfo,
@@ -18,13 +18,13 @@ import {
     ParameterBinding,
     LLVMOperand,
     StructLiteralField,
-} from "../types";
+} from "../../types";
 
-import { starts_with } from "../utils";
+import { starts_with } from "../../utils";
 
 import { sanitize_symbol } from "./core_text";
 
-import { bindings_find_parameter_binding } from "../expression_lowering/bindings";
+import { bindings_find_parameter_binding } from "../bindings";
 
 fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
     return bindings_find_parameter_binding(bindings, name);

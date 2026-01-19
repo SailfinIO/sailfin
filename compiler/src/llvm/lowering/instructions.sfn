@@ -97,7 +97,7 @@ import {
     analyze_value_ownership,
     detect_borrow_conflicts,
     append_match_arm_mutations,
-} from "../expression_lowering_stage2/core";
+} from "../expression_lowering/native/core";
 
 import {
     coerce_operand_to_type,
@@ -105,23 +105,23 @@ import {
     emit_comparison_instruction,
     harmonise_operands,
     load_local_operand,
-} from "../expression_lowering_stage2/core_operands";
+} from "../expression_lowering/native/core_operands";
 
 import {
     append_local_binding,
-} from "../expression_lowering_stage2/core_scopes";
+} from "../expression_lowering/native/core_scopes";
 
 import {
     parse_enum_literal,
     parse_range_iterable,
     parse_struct_pattern,
-} from "../expression_lowering_stage2/core_parse";
+} from "../expression_lowering/native/core_parse";
 
 import {
     extract_simple_identifier,
     is_union_llvm_type,
     parse_union_payload_types,
-} from "../expression_lowering_stage2/core_text";
+} from "../expression_lowering/native/core_text";
 
 import {
     detect_suspension_conflicts,
@@ -129,7 +129,7 @@ import {
     lower_return_instruction,
     map_local_type,
     parse_inline_let_expression,
-} from "../expression_lowering_stage2/statement";
+} from "../expression_lowering/native/statement";
 
 import {
     array_pointer_element_type,

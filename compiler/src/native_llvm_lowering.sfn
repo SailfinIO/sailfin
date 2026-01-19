@@ -12,8 +12,8 @@ export {
     lower_to_llvm_with_context,
 } from "./llvm/lowering/entrypoints";
 
-// Stage1/Stage2 bootstrap scripts still import these symbols from the
-// historical `native_llvm_lowering` module name.
+// Older bootstrap tooling still imports these symbols from the historical
+// `native_llvm_lowering` module name.
 export {
     runtime_helper_descriptors,
     find_runtime_helper,
@@ -24,7 +24,7 @@ export {
     coerce_operand_to_type,
     detect_suspension_conflicts,
     analyze_value_ownership,
-} from "./llvm/expression_lowering_stage2";
+} from "./llvm/expression_lowering/native";
 
 export {
     mark_local_consumed,
@@ -40,7 +40,7 @@ export {
 export {
     unescape_string_literal,
     make_string_constant_name,
-} from "./llvm/expression_lowering_stage2";
+} from "./llvm/expression_lowering/native";
 
 export {
     escape_string_for_llvm,

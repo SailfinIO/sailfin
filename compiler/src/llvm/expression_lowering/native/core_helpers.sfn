@@ -2,11 +2,11 @@
 //
 // Small helper utilities extracted from core.sfn to reduce file size.
 
-import { NativeParameter } from "../../native_ir";
-import { TypeContext } from "../types";
-import { substring, find_last_index_of_char } from "../../string_utils";
-import { append_string } from "../utils";
-import { map_parameter_type, map_struct_type_annotation_ctx } from "./core_type_mapping_stage2";
+import { NativeParameter } from "../../../native_ir";
+import { TypeContext } from "../../types";
+import { substring, find_last_index_of_char } from "../../../string_utils";
+import { append_string } from "../../utils";
+import { map_parameter_type, map_struct_type_annotation_ctx } from "./core_type_mapping";
 
 fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[], function_name -> string) -> string[] {
     let mut types -> string[] = [];
