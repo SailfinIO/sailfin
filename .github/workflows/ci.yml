@@ -1,4 +1,4 @@
-name: Build
+name: CI
 
 on:
   push:
@@ -259,6 +259,9 @@ jobs:
     needs: selfhost-from-release-seed
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release_tag.outputs.released }}
+      tag: ${{ steps.release_tag.outputs.tag }}
 
     steps:
       - name: Checkout repository
@@ -300,3 +303,42 @@ jobs:
         shell: bash -l {0}
         run: |
           CONDA=$(which conda) semantic-release publish
+
+      - name: Detect release tag
+        id: release_tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$(git tag --points-at HEAD | sort -V | tail -n 1 || true)"
+          if [ -z "$TAG" ]; then
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  attach-release-assets:
+    needs:
+      - selfhost-from-release-seed
+      - semantic-release
+    if: needs.semantic-release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: .
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.semantic-release.outputs.tag }}
+          files: |
+            dist/sailfin-native-*.tar.gz
+            dist/sailfin-native-*.tar.gz.sha256
+            dist/sailfin-native-*.manifest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
