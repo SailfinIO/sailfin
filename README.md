@@ -120,6 +120,13 @@ For now, experiment, record findings, and propose ideas through pull requests.
 - `make test` — run the suite using the self-hosted native compiler.
 - `make bootstrap-legacy` — legacy Stage1 bootstrap pipeline (deprecated; emergency recovery only).
 
+Tip: use the repo-local wrapper `./sfn` to run the freshly built compiler without relying on PATH:
+
+```sh
+./sfn --version
+./sfn test .
+```
+
 The Sailfin registry at `registry.sailfin.dev` is live for experiments; the
 bootstrap toolchain has not yet integrated manifest workflows, so treat registry
 examples in the docs as design previews.

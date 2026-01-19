@@ -5,6 +5,10 @@ This folder contains Sailfin-native tests that are executed by the native compil
 
 - `build/native/sailfin-stage2 test <path>`
 
+Or via the repo wrapper:
+
+- `./sfn test <path>`
+
 The test runner discovers files named `*_test.sfn` under `<path>` (recursively), compiles each file with a synthesized harness, and executes it.
 
 ## Suites

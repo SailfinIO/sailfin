@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Prefer the repo-built native compiler.
+if [[ -x "$ROOT_DIR/build/native/sailfin" ]]; then
+  exec "$ROOT_DIR/build/native/sailfin" "$@"
+fi
+if [[ -x "$ROOT_DIR/build/native/sailfin-stage2" ]]; then
+  exec "$ROOT_DIR/build/native/sailfin-stage2" "$@"
+fi
+
+# Fall back to an installed compiler on PATH.
+if command -v sfn >/dev/null 2>&1; then
+  exec "$(command -v sfn)" "$@"
+fi
+if command -v sailfin-stage2 >/dev/null 2>&1; then
+  exec "$(command -v sailfin-stage2)" "$@"
+fi
+
+cat >&2 <<'EOF'
+[sfn][error] No compiler found.
+
+Build the self-hosted native compiler:
+  make compile
+
+Or install a released seed compiler and ensure it's on PATH.
+EOF
+exit 1

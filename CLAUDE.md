@@ -161,7 +161,7 @@ Examples in `examples/` demonstrate language features:
 
 ```bash
 make compile
-build/native/sailfin-stage2 run examples/basics/hello-world.sfn
+./sfn run examples/basics/hello-world.sfn
 ```
 
 Check `examples/README.md` for capability requirements (`![io]`, `![model]`, etc.).
