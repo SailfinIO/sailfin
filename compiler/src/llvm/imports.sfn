@@ -228,10 +228,18 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
 }
 
 fn layout_manifest_path_for_slug(slug -> string) -> string {
-    return "build/stage2/" + slug + ".layout-manifest";
+    return "build/native/import-context/" + slug + ".layout-manifest";
 }
 
 fn native_text_path_for_slug(slug -> string) -> string {
+    return "build/native/import-context/" + slug + ".sfn-asm";
+}
+
+fn _legacy_layout_manifest_path_for_slug(slug -> string) -> string {
+    return "build/stage2/" + slug + ".layout-manifest";
+}
+
+fn _legacy_native_text_path_for_slug(slug -> string) -> string {
     return "build/stage2/" + slug + ".sfn-asm";
 }
 
@@ -248,11 +256,15 @@ fn _resolve_layout_manifest_path_for_slug(slug -> string) -> string ![io] {
     if fs.exists(primary) {
         return primary;
     }
+    let legacy = _legacy_layout_manifest_path_for_slug(slug);
+    if fs.exists(legacy) {
+        return legacy;
+    }
     let fallback = _selfhost_layout_manifest_path_for_slug(slug);
     if fs.exists(fallback) {
         return fallback;
     }
-    return primary;
+    return legacy;
 }
 
 fn _resolve_native_text_path_for_slug(slug -> string) -> string ![io] {
@@ -260,11 +272,15 @@ fn _resolve_native_text_path_for_slug(slug -> string) -> string ![io] {
     if fs.exists(primary) {
         return primary;
     }
+    let legacy = _legacy_native_text_path_for_slug(slug);
+    if fs.exists(legacy) {
+        return legacy;
+    }
     let fallback = _selfhost_native_text_path_for_slug(slug);
     if fs.exists(fallback) {
         return fallback;
     }
-    return primary;
+    return legacy;
 }
 
 fn normalize_import_module_path(value -> string) -> string {

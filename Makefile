@@ -54,9 +54,14 @@ NATIVE_OBJ_DIR ?= build/native/obj
 NATIVE_OUT ?= build/native/sailfin-stage2
 NATIVE_LINK_EXTRA ?=
 
+# Preferred local path for the native compiler binary.
+# We keep the legacy artifact name (sailfin-stage2) for now, but expose a stable
+# alias path so we can transition away from "stage2" naming without breaking CI.
+NATIVE_BIN ?= build/native/sailfin
+
 # Which compiler binary to use for running Sailfin-native tests.
-# Default: the self-hosted compiler built by `make compile`.
-STAGE2_BIN ?= build/native/sailfin-stage2
+# Default: the native compiler alias produced by `make compile`.
+STAGE2_BIN ?= $(NATIVE_BIN)
 
 .PHONY: help install fetch-seed test test-unit test-integration test-e2e compile bootstrap-legacy clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
 
@@ -91,7 +96,8 @@ help:
 	@echo "  make compile      # Build the compiler by self-hosting from a released seed"
 	@echo "  make selfhost-native # Alias for selfhost-native-stage2 (preferred wording)"
 	@echo "  make selfhost-smoke-native # Alias for selfhost-smoke-native-stage2 (preferred wording)"
-	@echo "  make bootstrap-legacy # Legacy stage1/bootstrap pipeline (deprecated)"
+	@echo "  make bootstrap-legacy # Legacy stage1/bootstrap pipeline (deprecated; emergency recovery only)"
+	@echo "  make legacy-bootstrap # Alias for bootstrap-legacy"
 	@echo "  make check-stage2-determinism # Bootstrap stage2 twice and diff outputs"
 	@echo "  make check-native-stage2-determinism # Rebuild native compiler twice and diff the binaries (legacy name: stage2)"
 	@echo "  make check-native-determinism # Alias for check-native-stage2-determinism"
@@ -204,12 +210,22 @@ native-debug: native-stage2-debug
 native-asan: native-stage2-asan
 native-ubsan: native-stage2-ubsan
 
+# Explicit legacy alias to make the fallback nature obvious.
+legacy-bootstrap: bootstrap-legacy
+
 # Deprecated: legacy stage1/bootstrap pipeline.
 # Kept for debugging and emergency recovery only.
 bootstrap-legacy:
 	$(CONDA) run -n $(CONDA_ENV) python tools/compile_with_stage1.py
 	$(CONDA) run -n $(CONDA_ENV) python scripts/bootstrap_stage2.py --no-validate
 	$(MAKE) _build-native-stage2
+	@mkdir -p build/native
+	@ln -sf sailfin-stage2 $(NATIVE_BIN)
+	@rm -rf build/native/import-context
+	@if [ -d build/stage2 ]; then \
+		mkdir -p build/native/import-context; \
+		cp -a build/stage2/. build/native/import-context/; \
+	fi
 	@echo "[bootstrap-legacy] built $(NATIVE_OUT)"
 
 # Usage:
@@ -257,10 +273,17 @@ selfhost-native-stage2:
 		mkdir -p build/stage2; \
 		cp -a "$$SRC/." build/stage2/; \
 	fi
+	@rm -rf build/native/import-context
+	@if [ -d build/stage2 ]; then \
+		mkdir -p build/native/import-context; \
+		cp -a build/stage2/. build/native/import-context/; \
+	fi
 	@if [ -f build/selfhost/stage2/obj/runtime/prelude.o ]; then \
 		mkdir -p build/native/obj/runtime; \
 		cp -f build/selfhost/stage2/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
 	fi
+	@mkdir -p build/native
+	@ln -sf sailfin-stage2 $(NATIVE_BIN)
 	@echo "[selfhost-native-stage2] built $(NATIVE_OUT)"
 
 # Smoke: selfhost Stage2 and run hello-world + emit-llvm-file.

@@ -2388,13 +2388,25 @@ def main(argv: list[str]) -> int:
                             # Treat either as satisfying the export requirement.
                             sym_module = f"@{fn_name}__{module_name}"
                             sym_plain = f"@{fn_name}"
+                            # Some seeds suffix function symbols with extra
+                            # `__...` segments (e.g. to avoid collisions across
+                            # nested compilation units). Treat prefixed symbols
+                            # as satisfying the export requirement.
                             has_module = re.search(
-                                rf"^define\b.*{re.escape(sym_module)}\b",
+                                rf"^define\b.*{re.escape(sym_module)}(?:\b|\W|$)",
+                                candidate,
+                                re.MULTILINE,
+                            ) or re.search(
+                                rf"^define\b.*{re.escape(sym_module)}__",
                                 candidate,
                                 re.MULTILINE,
                             )
                             has_plain = re.search(
-                                rf"^define\b.*{re.escape(sym_plain)}\b",
+                                rf"^define\b.*{re.escape(sym_plain)}(?:\b|\W|$)",
+                                candidate,
+                                re.MULTILINE,
+                            ) or re.search(
+                                rf"^define\b.*{re.escape(sym_plain)}__",
                                 candidate,
                                 re.MULTILINE,
                             )
