@@ -9,8 +9,8 @@ capsules, model artefacts, capability manifests, and reproducible build
 metadata. The interface mirrors modern dependency managers but is designed for
 deterministic, AI-native projects.
 
-> Implementation note: The Python bootstrap toolchain does not yet ship an `sfn`
-> CLI. Registry workflows live in this proposal until the integration work in
+> Implementation note: The `sfn` CLI is in active development. Registry
+> workflows live in this proposal until the integration work in
 > `docs/roadmap.md` lands.
 
 ## Getting Started
@@ -216,7 +216,7 @@ hashes, generation cards, capability manifests, and evaluator baselines.
 Consumers can replay model calls using the bundled cards for deterministic
 evaluation.
 
-The registry is live today, but the bootstrap toolchain lacks native commands
+The registry is live today, but the current toolchain lacks native commands
 for interacting with it; the flows above remain design targets until the CLI
 arrives.
 

@@ -175,7 +175,7 @@ static char *_resolve_runtime_root(const char *argv0)
 int main(int argc, char **argv)
 {
     // If invoked with an explicit subcommand/flag, delegate to the Sailfin-native CLI.
-    // Otherwise, preserve the legacy interface: `sailfin-stage2 [--emit MODE] file.sfn`.
+    // Otherwise, preserve the legacy interface: `sailfin [--emit MODE] file.sfn`.
     if (argc >= 2)
     {
         const char *first = argv[1];
@@ -195,7 +195,7 @@ int main(int argc, char **argv)
         }
         else if (strcmp(first, "--emit") == 0)
         {
-            // Support `sailfin-stage2 --emit llvm file.sfn` through the Sailfin CLI layer as well.
+            // Support `sailfin --emit llvm file.sfn` through the Sailfin CLI layer as well.
             is_cli = true;
         }
 
@@ -208,7 +208,7 @@ int main(int argc, char **argv)
                 sizeof(char *) * (size_t)(argc - 1 + extra));
             if (!argv_copy)
             {
-                fprintf(stderr, "out of memory building stage2 argv\n");
+                fprintf(stderr, "out of memory building native argv\n");
                 free(runtime_root);
                 return 1;
             }

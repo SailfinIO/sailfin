@@ -88,10 +88,10 @@ def main(argv: list[str]) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent(
             """\
-            Self-host Stage2 and run a minimal smoke test.
+            Self-host the native compiler and run a minimal smoke test.
 
             This is intended to be a fast, high-signal check that:
-              1) we can rebuild the native stage2 compiler from a seed, and
+              1) we can rebuild the native compiler from a seed, and
               2) the resulting compiler can compile + run hello-world.
 
             It writes logs and intermediates under --work-dir.
@@ -103,7 +103,7 @@ def main(argv: list[str]) -> int:
         "--seed",
         type=pathlib.Path,
         default=DEFAULT_SEED,
-        help=f"Path to seed stage2 compiler (default: {DEFAULT_SEED})",
+        help=f"Path to seed compiler (default: {DEFAULT_SEED})",
     )
     parser.add_argument(
         "--out",

@@ -21,14 +21,19 @@ work after launch. Legacy compiler stages are no longer tracked in this plan.
    - [ ] Implement richer diagnostics (multi-span snippets, severity, suggested fixes).
    - [ ] Add `--fix` workflow for missing effect annotations with safe rewrite guards.
 
-3. **Runtime stability for 1.0**
-   - [ ] Define and document the C runtime surface that will be treated as stable for 1.0.
-   - [ ] Audit intrinsic coverage and ensure parity tests exist for strings, arrays, and exceptions.
+3. **Sailfin-native runtime for 1.0**
+   - [ ] Execute the Sailfin runtime migration plan in `docs/runtime_audit.md`.
+   - [ ] Implement the Sailfin-native ABI and versioned layouts.
+   - [ ] Port core runtime helpers (strings, arrays, exceptions, type metadata).
+   - [ ] Remove the C runtime once parity and performance gates are satisfied.
    - [ ] Document capability adapter behavior and platform requirements in `docs/runtime_audit.md`.
 
 4. **Tooling and developer workflow**
    - [ ] Replace the current `sfn` shell wrapper with a Sailfin-native CLI binary.
-   - [ ] Add Python-free CI guardrails that fail when runtime shims are invoked.
+   - [ ] Remove Python tooling/scripts from the release pipeline and developer entrypoints.
+   - [ ] Replace Python runtime shims (`runtime/runtime_support.py`, `runtime/native_runner*.py`) with native runtime modules.
+   - [ ] Remove Python-generated compiler artifacts (`compiler/build/**`) from the 1.0 toolchain.
+   - [ ] Add CI guardrails that fail when Python tooling is invoked.
    - [ ] Provide a dedicated `make test-native` target and keep `make test` stable for release.
 
 5. **Documentation for public release**
@@ -38,10 +43,6 @@ work after launch. Legacy compiler stages are no longer tracked in this plan.
 
 ## Post-1.0 (Immediate Follow-On)
 
-- [ ] **Native runtime implementation** — Execute the Sailfin runtime migration plan in `docs/runtime_audit.md`.
-  - [ ] Implement the Sailfin-native ABI and versioned layouts.
-  - [ ] Port core runtime helpers (strings, arrays, exceptions, type metadata).
-  - [ ] Remove the C runtime once parity and performance gates are satisfied.
 - [ ] **Native capability adapters** — Replace Python adapters with Sailfin-native modules for filesystem, HTTP, and model invocation.
 - [ ] **Async runtime** — Ship a Sailfin-native event loop, task scheduler, and channel primitives once coroutine lowering is stable.
 - [ ] **Package registry workflow** — Finalize manifests, implement `sfn init/add/publish`, and stand up registry auth/signing.

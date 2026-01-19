@@ -228,11 +228,16 @@ bootstrap-legacy:
 		mkdir -p build/native/import-context; \
 		cp -a build/stage2/. build/native/import-context/; \
 	fi
+	@rm -rf build/native/aot
+	@if [ -f build/stage2/aot/modules.txt ]; then \
+		mkdir -p build/native/aot; \
+		cp -f build/stage2/aot/modules.txt build/native/aot/modules.txt; \
+	fi
 	@echo "[bootstrap-legacy] built $(NATIVE_OUT)"
 
 # Usage:
 #   make selfhost-native
-#   make selfhost-native SEED_STAGE2=path/to/sailfin
+#   make selfhost-native SEED_NATIVE=path/to/sailfin
 # Output:
 #   build/native/sailfin
 #
@@ -243,7 +248,7 @@ bootstrap-legacy:
 # - Pass extra flags via SELFHOST_ARGS (e.g. SELFHOST_ARGS="--seed-timeout 300").
 # - Parallelize module building via SELFHOST_JOBS (e.g. SELFHOST_JOBS=2).
 selfhost-native:
-	@seed="$${SEED_STAGE2:-$(SEED_STAGE2)}"; \
+	@seed="$${SEED_NATIVE:-$${SEED_STAGE2:-$(SEED_STAGE2)}}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
 		resolved_seed="$$(command -v "$$seed")"; \
@@ -264,21 +269,19 @@ selfhost-native:
 		echo "[selfhost-native][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
 		exit 1; \
 	fi; \
-	if [ -d build/stage2 ]; then \
-		find build/stage2 -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
+	if [ -d build/native/import-context ]; then \
+		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi; \
 	echo "[selfhost-native] running selfhost script (seed=$$seed)..."; \
 	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --jobs $(SELFHOST_JOBS) $(SELFHOST_ARGS) --out $(NATIVE_OUT)
-	@SRC="build/selfhost/native/seed_cwd/build/stage2"; \
+	@SRC="build/selfhost/native/seed_cwd/build/import-context"; \
+	if [ ! -d "$$SRC" ]; then \
+		SRC="build/selfhost/native/seed_cwd/build/stage2"; \
+	fi; \
 	if [ -d "$$SRC" ]; then \
-		rm -rf build/stage2; \
-		mkdir -p build/stage2; \
-		cp -a "$$SRC/." build/stage2/; \
-	fi
-	@rm -rf build/native/import-context
-	@if [ -d build/stage2 ]; then \
+		rm -rf build/native/import-context; \
 		mkdir -p build/native/import-context; \
-		cp -a build/stage2/. build/native/import-context/; \
+		cp -a "$$SRC/." build/native/import-context/; \
 	fi
 	@if [ -f build/selfhost/native/obj/runtime/prelude.o ]; then \
 		mkdir -p build/native/obj/runtime; \
@@ -290,12 +293,12 @@ selfhost-native:
 # Smoke: selfhost native and run hello-world + emit-llvm-file.
 # Usage:
 #   make selfhost-smoke-native
-#   make selfhost-smoke-native SEED_STAGE2=path/to/sailfin
+#   make selfhost-smoke-native SEED_NATIVE=path/to/sailfin
 #   make selfhost-smoke-native SELFHOST_SMOKE_ARGS="--keep-work-dir"
 SELFHOST_SMOKE_OUT ?= $(NATIVE_OUT)
 SELFHOST_SMOKE_ARGS ?=
 selfhost-smoke-native:
-	@seed="$${SEED_STAGE2:-$(SEED_STAGE2)}"; \
+	@seed="$${SEED_NATIVE:-$${SEED_STAGE2:-$(SEED_STAGE2)}}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
 		resolved_seed="$$(command -v "$$seed")"; \

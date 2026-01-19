@@ -804,10 +804,10 @@ def _seed_supports_emit_llvm_file(seed: pathlib.Path) -> bool:
         timeout=10,
     )
     stderr = proc.stderr.decode("utf-8", errors="replace")
-    # When the command exists, stage2 prints usage for missing args.
+    # When the command exists, the compiler prints usage for missing args.
     if "emit-llvm-file" in stderr or "usage" in stderr:
         return True
-    # If the command does not exist, stage2 reports an unknown command.
+    # If the command does not exist, the compiler reports an unknown command.
     if "unknown" in stderr and "emit-llvm-file" in stderr:
         return False
     return proc.returncode != 0
@@ -833,7 +833,7 @@ def _seed_supports_aot_prepare_dir(seed: pathlib.Path) -> bool:
     # Some seeds print a generic usage string even for unknown subcommands.
     if "aot-prepare-dir" in stderr:
         return True
-    # If the command does not exist, stage2 reports an unknown command.
+    # If the command does not exist, the compiler reports an unknown command.
     if "unknown" in stderr and "aot-prepare-dir" in stderr:
         return False
     return False
@@ -1311,10 +1311,11 @@ def _module_name_from_source_path(source_path: pathlib.Path) -> str:
 
 
 def _slug_from_source_path(source_path: pathlib.Path) -> str:
-    """Return the build/stage2 slug used by stage2 import resolution.
+    """Return the import-context slug used by native import resolution.
 
     This matches the logic in compiler/src/llvm/imports.sfn, which expects
-    imported-module artifacts under build/stage2/<slug>.*.
+    imported-module artifacts under build/native/import-context/<slug>.*.
+    (Seeds may still look under build/stage2; we provide a legacy alias.)
     """
 
     compiler_src = REPO_ROOT / "compiler" / "src"
@@ -1415,10 +1416,11 @@ def _prepare_seed_import_context(
     env: dict[str, str],
     timeout: float | None,
 ) -> None:
-    """Populate seed_cwd/build/stage2 with .sfn-asm + .layout-manifest artifacts.
+    """Populate seed_cwd/build/import-context with .sfn-asm + .layout-manifest artifacts.
 
-    Stage2's LLVM lowering reads imported module context from
-    build/stage2/<slug>.sfn-asm and build/stage2/<slug>.layout-manifest.
+    Native LLVM lowering reads imported module context from
+    build/import-context/<slug>.sfn-asm and build/import-context/<slug>.layout-manifest.
+    (Some older seeds read from build/stage2; we provide a compatibility alias.)
 
     In clean CI environments, relying on `sfn build` to "warm" this cache is
     brittle because the build can fail before emitting any cache artifacts
@@ -1430,9 +1432,19 @@ def _prepare_seed_import_context(
       emitted native text.
     """
 
-    stage2_cache = seed_cwd / "build" / "stage2"
-    stage2_cache.mkdir(parents=True, exist_ok=True)
-    tmp_root = stage2_cache / ".tmp"
+    import_cache = seed_cwd / "build" / "import-context"
+    import_cache.mkdir(parents=True, exist_ok=True)
+
+    legacy_cache = seed_cwd / "build" / "stage2"
+    if not legacy_cache.exists():
+        try:
+            legacy_cache.symlink_to(import_cache, target_is_directory=True)
+        except OSError:
+            # If symlinks aren't available, fall back to keeping a real
+            # directory at the legacy location.
+            legacy_cache.mkdir(parents=True, exist_ok=True)
+
+    tmp_root = import_cache / ".tmp"
     tmp_root.mkdir(parents=True, exist_ok=True)
 
     def _seed_stamp_text() -> str:
@@ -1457,15 +1469,15 @@ def _prepare_seed_import_context(
 
         return "\n".join(lines) + "\n"
 
-    def _ensure_stage2_cache_matches_seed() -> None:
-        """Ensure build/stage2 cache does not mix artifacts across seeds.
+    def _ensure_import_context_cache_matches_seed() -> None:
+        """Ensure build/import-context cache does not mix artifacts across seeds.
 
         Mixing import-context artifacts produced by a different seed can cause
         the current seed to crash while running `emit native`, especially when
         the cache is reused across multiple selfhost passes in the same work dir.
         """
 
-        stamp_path = stage2_cache / ".seed_stamp"
+        stamp_path = import_cache / ".seed_stamp"
         expected = _seed_stamp_text()
         try:
             current = stamp_path.read_text(
@@ -1474,7 +1486,7 @@ def _prepare_seed_import_context(
             current = ""
 
         if current != expected:
-            for child in stage2_cache.iterdir():
+            for child in import_cache.iterdir():
                 if child.name == ".tmp":
                     continue
                 try:
@@ -1502,8 +1514,8 @@ def _prepare_seed_import_context(
 
     def _emit_one(p: pathlib.Path) -> None:
         slug = _slug_from_source_path(p)
-        asm_path = stage2_cache / f"{slug}.sfn-asm"
-        manifest_path = stage2_cache / f"{slug}.layout-manifest"
+        asm_path = import_cache / f"{slug}.sfn-asm"
+        manifest_path = import_cache / f"{slug}.layout-manifest"
 
         # Best-effort caching.
         try:
@@ -1554,7 +1566,7 @@ def _prepare_seed_import_context(
             _emit_with(fallback_seed_bin)
 
     # Ensure we don't reuse stale artifacts across different seeds.
-    _ensure_stage2_cache_matches_seed()
+    _ensure_import_context_cache_matches_seed()
 
     if jobs <= 1:
         for idx, p in enumerate(sources):
@@ -1613,8 +1625,7 @@ def main(argv: list[str]) -> int:
         type=pathlib.Path,
         default=None,
         help=(
-            "Path to the seed compiler binary (default: build/native/sailfin if present, "
-            "else build/native/sailfin-stage2)"
+            "Path to the seed compiler binary (default: build/native/sailfin if present)"
         ),
     )
     parser.add_argument(
@@ -1623,7 +1634,7 @@ def main(argv: list[str]) -> int:
         default=None,
         help=(
             "Optional path to a seed binary used only to stage import-context artifacts "
-            "(emit native -> build/stage2/*.sfn-asm). Useful when the main seed crashes on 'emit native'."
+            "(emit native -> build/import-context/*.sfn-asm). Useful when the main seed crashes on 'emit native'."
         ),
     )
     parser.add_argument(
@@ -1631,7 +1642,7 @@ def main(argv: list[str]) -> int:
         type=int,
         default=1,
         help=(
-            "Parallelism for import-context staging (emit native -> build/stage2/*.sfn-asm). "
+            "Parallelism for import-context staging (emit native -> build/import-context/*.sfn-asm). "
             "Default: 1. IMPORTANT: older seeds are not safe to run concurrently in the same cwd, "
             "and parallel staging can trigger crashes or corrupt artifacts."
         ),
@@ -1772,8 +1783,8 @@ def main(argv: list[str]) -> int:
 
     if args.seed is None:
         preferred_seed = REPO_ROOT / "build/native/sailfin"
-        legacy_seed = REPO_ROOT / "build/native/sailfin-stage2"
-        args.seed = preferred_seed if preferred_seed.exists() else legacy_seed
+        compat_seed = REPO_ROOT / "build/native/sailfin-stage2"
+        args.seed = preferred_seed if preferred_seed.exists() else compat_seed
 
     # Resolve the seed path once up front so subprocesses can run it even when
     # we change cwd (e.g. into an isolated seed working directory).
@@ -1815,9 +1826,9 @@ def main(argv: list[str]) -> int:
 
     # Prefer a reliable seed when available.
     default_seed = REPO_ROOT / "build/native/sailfin"
-    legacy_default_seed = REPO_ROOT / "build/native/sailfin-stage2"
+    compat_default_seed = REPO_ROOT / "build/native/sailfin-stage2"
     asan_seed = REPO_ROOT / "build/native/sailfin-asan"
-    legacy_asan_seed = REPO_ROOT / "build/native/sailfin-stage2-asan"
+    compat_asan_seed = REPO_ROOT / "build/native/sailfin-stage2-asan"
     prefer_asan_seed = (
         args.prefer_asan_seed and not args.no_prefer_asan_seed and not args.fixed_point
     )
@@ -1831,9 +1842,9 @@ def main(argv: list[str]) -> int:
         if resolved == default_seed.resolve() and asan_seed.exists():
             print(f"[selfhost] using ASAN seed: {asan_seed}")
             seed = asan_seed
-        elif resolved == legacy_default_seed.resolve() and legacy_asan_seed.exists():
-            print(f"[selfhost] using ASAN seed: {legacy_asan_seed}")
-            seed = legacy_asan_seed
+        elif resolved == compat_default_seed.resolve() and compat_asan_seed.exists():
+            print(f"[selfhost] using ASAN seed: {compat_asan_seed}")
+            seed = compat_asan_seed
 
     # Default timeouts: ASAN seeds can be much slower and may spuriously hit the
     # standard per-module timeout, leading to repeated retries.
@@ -1979,7 +1990,14 @@ def main(argv: list[str]) -> int:
 
         raw_dir.mkdir(parents=True, exist_ok=True)
         obj_dir.mkdir(parents=True, exist_ok=True)
-        (seed_cwd / "build" / "stage2").mkdir(parents=True, exist_ok=True)
+        import_cache = seed_cwd / "build" / "import-context"
+        import_cache.mkdir(parents=True, exist_ok=True)
+        legacy_cache = seed_cwd / "build" / "stage2"
+        if not legacy_cache.exists():
+            try:
+                legacy_cache.symlink_to(import_cache, target_is_directory=True)
+            except OSError:
+                legacy_cache.mkdir(parents=True, exist_ok=True)
 
         for p in obj_dir.rglob("*.o"):
             p.unlink()
@@ -2004,9 +2022,12 @@ def main(argv: list[str]) -> int:
             # Convenience fallback for local debugging: allow a stage1-built
             # debug compiler to stage import-context artifacts when the release
             # seed crashes on `emit native`.
-            candidate = REPO_ROOT / "build/native/sailfin-stage2-debug"
-            if candidate.exists() and os.access(candidate, os.X_OK):
-                fallback_import_seed = candidate
+            preferred_candidate = REPO_ROOT / "build/native/sailfin-debug"
+            compat_candidate = REPO_ROOT / "build/native/sailfin-stage2-debug"
+            for candidate in (preferred_candidate, compat_candidate):
+                if candidate.exists() and os.access(candidate, os.X_OK):
+                    fallback_import_seed = candidate
+                    break
 
         seed_timeout = None
         if args.seed_timeout and args.seed_timeout > 0:
@@ -2157,24 +2178,32 @@ def main(argv: list[str]) -> int:
                         module_name / f"attempt{attempt}"
                     attempt_tmp.mkdir(parents=True, exist_ok=True)
 
-                    # IMPORTANT: Many stage2 seeds write intermediate artifacts
+                    # IMPORTANT: Many seeds write intermediate artifacts
                     # under the current working directory (e.g. build/sailfin/*)
                     # using fixed file names. When running in parallel, sharing
                     # a single cwd can corrupt or truncate emitted LLVM.
                     #
                     # To make parallel builds reliable, run each seed emit in a
                     # per-attempt isolated cwd that still has access to the
-                    # shared build/stage2 import-context cache.
+                    # shared build/import-context cache.
                     seed_emit_cwd = attempt_tmp / "seed_cwd"
                     (seed_emit_cwd / "build").mkdir(parents=True, exist_ok=True)
-                    shared_stage2_cache = seed_cwd / "build" / "stage2"
-                    local_stage2_cache = seed_emit_cwd / "build" / "stage2"
-
-                    def _needs_stage2_cache_refresh() -> bool:
-                        shared_stamp = shared_stage2_cache / ".seed_stamp"
-                        local_stamp = local_stage2_cache / ".seed_stamp"
+                    shared_import_cache = seed_cwd / "build" / "import-context"
+                    local_import_cache = seed_emit_cwd / "build" / "import-context"
+                    legacy_import_cache = seed_emit_cwd / "build" / "stage2"
+                    if not legacy_import_cache.exists():
                         try:
-                            if not local_stage2_cache.exists():
+                            legacy_import_cache.symlink_to(
+                                local_import_cache, target_is_directory=True
+                            )
+                        except OSError:
+                            pass
+
+                    def _needs_import_cache_refresh() -> bool:
+                        shared_stamp = shared_import_cache / ".seed_stamp"
+                        local_stamp = local_import_cache / ".seed_stamp"
+                        try:
+                            if not local_import_cache.exists():
                                 return True
                             if not shared_stamp.exists() or not local_stamp.exists():
                                 return True
@@ -2184,31 +2213,31 @@ def main(argv: list[str]) -> int:
                         except OSError:
                             return True
 
-                    if _needs_stage2_cache_refresh():
-                        # Copy rather than symlink: stage2 seeds may update
-                        # build artifacts during emit, and sharing build/stage2
+                    if _needs_import_cache_refresh():
+                        # Copy rather than symlink: some seeds may update
+                        # build artifacts during emit, and sharing build/import-context
                         # across concurrent seed processes can produce
                         # inconsistent IR and runtime ABI mismatches.
-                        if local_stage2_cache.exists():
-                            shutil.rmtree(local_stage2_cache)
-                        shutil.copytree(shared_stage2_cache,
-                                        local_stage2_cache)
+                        if local_import_cache.exists():
+                            shutil.rmtree(local_import_cache)
+                        shutil.copytree(shared_import_cache,
+                                        local_import_cache)
 
                     # IMPORTANT: Some seeds will opportunistically load
-                    # build/stage2/<module>.sfn-asm when it exists, even when
+                    # build/import-context/<module>.sfn-asm when it exists, even when
                     # compiling that same module from source. This can cause
                     # the seed to treat local functions as imported externs,
                     # producing LLVM with missing definitions (link-time
                     # undefined symbols).
-                    cached_self_artifact = local_stage2_cache / \
+                    cached_self_artifact = local_import_cache / \
                         f"{module_name}.sfn-asm"
                     if cached_self_artifact.exists():
                         cached_self_artifact.unlink()
-                    cached_self_manifest = local_stage2_cache / \
+                    cached_self_manifest = local_import_cache / \
                         f"{module_name}.layout-manifest"
                     if cached_self_manifest.exists():
                         cached_self_manifest.unlink()
-                    # Some stage2 seeds appear to use fixed temp file names.
+                    # Some seeds appear to use fixed temp file names.
                     # When running modules in parallel, isolate TMPDIR to avoid
                     # cross-process temp collisions that can corrupt LLVM output.
                     seed_env_local["TMPDIR"] = str(attempt_tmp)
@@ -2254,7 +2283,7 @@ def main(argv: list[str]) -> int:
                             cmd.extend([str(source_path), str(attempt_path)])
                             proc = subprocess.run(
                                 cmd,
-                                # Run in an isolated cwd populated with build/stage2
+                                # Run in an isolated cwd populated with build/import-context
                                 # native-text artifacts so imported module context is
                                 # always available during lowering.
                                 cwd=str(seed_emit_cwd),

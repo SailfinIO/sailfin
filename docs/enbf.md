@@ -3,7 +3,7 @@
 (filename: `enbf.md`)
 
 The Sailfin grammar is written using an extended Backus–Naur form that mirrors
-current bootstrap behaviour while signalling upcoming AI-native features.
+current compiler behavior while signalling upcoming AI-native features.
 Non-terminals are written in `PascalCase`, terminals in double quotes.
 Parentheses group expressions, square brackets denote optional elements, and
 braces denote repetition (`{ x }` means zero or more occurrences of `x`).
@@ -114,7 +114,7 @@ Statement          = VariableDeclaration
                    | ExpressionStatement ;
 UnsafeBlock        = "unsafe" Block ;
 
-AssertStatement    = "assert" Expression ";" ;  // Bootstrap: no parentheses required
+AssertStatement    = "assert" Expression ";" ;
 
 VariableDeclaration  = "let" [ "mut" ] Identifier [ TypeSep Type ]
                        [ "=" Expression ] ";" ;
@@ -145,8 +145,8 @@ BreakStatement     = "break" [ ";" ] ;
 ContinueStatement  = "continue" [ ";" ] ;
 
 PromptStatement    = "prompt" PromptChannel Block ;
-// Bootstrap status: channels are parsed as identifiers; canonical channel names are
-// system | user | assistant | tool (not enforced by the bootstrap lexer/parser).
+// Channels are parsed as identifiers; canonical channel names are
+// system | user | assistant | tool (not enforced yet).
 PromptChannel      = Identifier ;
 
 AssignmentStatement = Assignment ";" ;
@@ -158,9 +158,9 @@ Expression         = LambdaExpression | PipelineExpression ;
 
 LambdaExpression   = "fn" "(" [ Parameters ] ")" [ TypeSep Type ] Block ;
 
-// Planned (self-hosted target). The bootstrap parser does not implement the
-// pipeline operator; this rule is included for design reference only. `|>`
-// binds looser than all expression operators and associates left-to-right.
+// Planned. The pipeline operator is not implemented yet; this rule is included
+// for design reference only. `|>` binds looser than all expression operators
+// and associates left-to-right.
 PipelineExpression = LogicalOr { "|>" LogicalOr } ;
 
 LogicalOr          = LogicalAnd { "||" LogicalAnd } ;
@@ -283,9 +283,9 @@ correspond to capabilities granted via manifests (`sail.toml`, aggregated in
 auditable use of I/O (`io`), networking (`net`), randomness (`rand`), model
 invocation (`model`), accelerator usage (`gpu`), and clocks/timers (`clock`).
 
-Bootstrap enforcement note: The stage0 effect checker validates only `model`,
-`io`, and `net`. Other effect identifiers are parsed and recorded on
-declarations but are not enforced in bootstrap.
+Current enforcement note: The compiler validates `model`, `io`, and `net`
+effects today. Other effect identifiers are parsed and recorded on declarations
+but are not enforced yet.
 
 ### Prompt Blocks
 

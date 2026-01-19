@@ -3,14 +3,13 @@
 Choose the path that fits your task:
 
 - **Understand what runs today** → `docs/status.md`
-- **Learn the language** → `docs/spec.md` (bootstrap reference)  
+- **Learn the language** → `docs/spec.md`
   Pair with `docs/enbf.md` for grammar details and `docs/keywords.md` for reserved identifiers.
 - **Plan future work** → `docs/roadmap.md`
 - **Retire AOT prepare** → `docs/aot-prepare-retirement.md`
 - **Track proposals** → `docs/proposals/` (e.g., `package-management.md`, `model-engines-and-training.md`)
 - **Align structure & naming** → `docs/style-guide.md`
 - **See working samples** → `examples/` (category index in `examples/README.md`)
-- **Reference archived stage0 tests** → `docs/archive/bootstrap-tests.md`
 
 When updating docs:
 

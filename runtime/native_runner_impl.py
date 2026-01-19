@@ -478,7 +478,10 @@ class NativeRunner:
         disable_instrumentation: bool | None = None,
     ) -> None:
         raw_log_setting = os.environ.get(
-            "SAILFIN_STAGE2_DEBUG_LOG", "").strip()
+            "SAILFIN_NATIVE_DEBUG_LOG", "").strip()
+        if not raw_log_setting:
+            raw_log_setting = os.environ.get(
+                "SAILFIN_STAGE2_DEBUG_LOG", "").strip()
         requested_paths: list[pathlib.Path] = []
         if raw_log_setting:
             for candidate in raw_log_setting.split(os.pathsep):
@@ -488,10 +491,13 @@ class NativeRunner:
                 requested_paths.append(
                     pathlib.Path(candidate_path).expanduser())
         fallback_pref = os.environ.get(
-            "SAILFIN_STAGE2_DEBUG_FALLBACK", "1").strip().lower()
+            "SAILFIN_NATIVE_DEBUG_FALLBACK", "").strip().lower()
+        if not fallback_pref:
+            fallback_pref = os.environ.get(
+                "SAILFIN_STAGE2_DEBUG_FALLBACK", "1").strip().lower()
         if fallback_pref not in {"0", "false", "off", "no"}:
             requested_paths.append(
-                _REPO_ROOT / "build" / "stage2" / "stage2_debug.log")
+                _REPO_ROOT / "build" / "native" / "native_debug.log")
         unique_paths: list[pathlib.Path] = []
         for path in requested_paths:
             if path not in unique_paths:
@@ -508,8 +514,13 @@ class NativeRunner:
         self._primary_debug_log_path = (
             str(self._debug_log_sinks[0].path) if self._debug_log_sinks else None
         )
-        dump_dir_override = os.environ.get("SAILFIN_STAGE2_INSTRUMENT_DIR")
-        dump_setting = os.environ.get("SAILFIN_STAGE2_DUMP_INSTRUMENTED_IR")
+        dump_dir_override = os.environ.get("SAILFIN_NATIVE_INSTRUMENT_DIR")
+        if not dump_dir_override:
+            dump_dir_override = os.environ.get("SAILFIN_STAGE2_INSTRUMENT_DIR")
+        dump_setting = os.environ.get("SAILFIN_NATIVE_DUMP_INSTRUMENTED_IR")
+        if dump_setting is None:
+            dump_setting = os.environ.get(
+                "SAILFIN_STAGE2_DUMP_INSTRUMENTED_IR")
         self._instrument_dump_dir: pathlib.Path | None = None
         selected_dump_dir: pathlib.Path | None = None
         if disable_instrumentation is None:
@@ -539,11 +550,13 @@ class NativeRunner:
             normalized = dump_setting.strip().lower()
             if normalized in {"1", "true", "yes", "on"}:
                 selected_dump_dir = pathlib.Path(
-                    "build") / "stage2" / "instrumented"
+                    "build") / "native" / "instrumented"
             elif normalized not in {"0", "false", "no", "off"}:
                 selected_dump_dir = pathlib.Path(dump_setting)
         default_log_limit = 25 * 1024 * 1024  # 25 MB cap to avoid runaway logs
-        log_limit_env = os.environ.get("SAILFIN_STAGE2_DEBUG_MAX_BYTES")
+        log_limit_env = os.environ.get("SAILFIN_NATIVE_DEBUG_MAX_BYTES")
+        if log_limit_env is None:
+            log_limit_env = os.environ.get("SAILFIN_STAGE2_DEBUG_MAX_BYTES")
         self._debug_log_limit = default_log_limit
         if log_limit_env is not None:
             try:

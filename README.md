@@ -18,7 +18,7 @@ model Summarizer : Model<Text, Summary> {
   engine     = "gpt-neo@3.1"
   schema     = Summary
   max_tok    = 2000
-  cost_cap   = 0.05  // USD (currency literal — future; use plain number in bootstrap)
+  cost_cap   = 0.05  // USD (currency literal — planned)
   evaluators = [ Faithfulness, LatencyBudget(150ms) ]
 }
 
@@ -37,19 +37,18 @@ fn summarize_doc(doc: Text) -> Summary ![io, model] {
   }
 
   let generation = Summarizer.call()
-  print.info(generation.card)      // provenance metadata (bootstrap: `print` bound to runtime.console)
+  print.info(generation.card)      // provenance metadata
   generation.output                // typed `Summary`
 }
 Prompt evaluation order: prompts execute in source order; the common sequence is
 system → user → assistant → tool.
 
 Typed prompts (planned): `prompt user<SummaryRequest> { ... }` is design-stage
-syntax for shape-checked prompts and is not accepted by the bootstrap parser.
+syntax for shape-checked prompts and is not yet accepted by the compiler.
 
 pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
-  // Future syntax note: the `|>` operator is part of the self-hosted design
-  // and not supported by the bootstrap parser. Use ordinary function calls in
-  // stage0 or treat this as illustrative pseudocode.
+  // Future syntax note: the `|>` operator is planned and not yet accepted by
+  // the compiler. Use ordinary function calls until the operator lands.
   docs
     |> chunk(by: "semantic", target_tokens: 512)
     |> embed(with: "e5-large")
@@ -60,15 +59,13 @@ pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
 ## Current Status
 
 Sailfin is under active design and self-hosting. The self-hosted native compiler
-(legacy name: stage2) is the primary toolchain today; the legacy Stage1
-bootstrap pipeline remains only as an emergency fallback while marching toward
-1.0. The runtime currently ships as C and is planned to move into Sailfin for
-the 1.0 release.
+is the primary toolchain today. The runtime currently ships as C and will move
+to a Sailfin-native runtime before the 1.0 release, alongside removing any
+Python tooling from the production pipeline.
 
-- `docs/status.md` — source of truth for what the bootstrap compiler enforces
-  versus what exists only in prototypes.
-- `docs/spec.md` — bootstrap language reference with design-preview callouts.
-- `docs/enbf.md` — grammar sketch aligned to the stage1 parser (with notes on legacy stage0 behaviour where it still matters).
+- `docs/status.md` — source of truth for what the compiler enforces versus what is still planned.
+- `docs/spec.md` — language reference with design-preview callouts.
+- `docs/enbf.md` — grammar sketch aligned to the current parser.
 - `docs/keywords.md` — reserved words and runtime notes.
 
 ## Installing the compiler
@@ -98,9 +95,8 @@ Notes:
 
 Sailfin targets a capsule-based architecture with fleets coordinating compiler,
 runtime, and tooling capsules. The current repository hosts the native compiler
-(under `build/native`) and a legacy Stage1 bootstrap pipeline
-alongside the Sailfin runtime (`runtime/`). Future capsule manifests and
-fleet layout are tracked in `docs/roadmap.md`.
+(under `build/native`) alongside the Sailfin runtime (`runtime/`). Future capsule
+manifests and fleet layout are tracked in `docs/roadmap.md`.
 
 ## Roadmap Highlights
 
@@ -118,7 +114,6 @@ For now, experiment, record findings, and propose ideas through pull requests.
 - `make install` — create or update the `sailfin` Conda environment defined in `environment.yml`.
 - `make compile` — build the native compiler by self-hosting from a released seed.
 - `make test` — run the suite using the self-hosted native compiler.
-- `make bootstrap-legacy` — legacy Stage1 bootstrap pipeline (deprecated; emergency recovery only).
 
 Tip: use the repo-local wrapper `./sfn` to run the freshly built compiler without relying on PATH:
 
@@ -127,6 +122,6 @@ Tip: use the repo-local wrapper `./sfn` to run the freshly built compiler withou
 ./sfn test .
 ```
 
-The Sailfin registry at `registry.sailfin.dev` is live for experiments; the
-bootstrap toolchain has not yet integrated manifest workflows, so treat registry
-examples in the docs as design previews.
+The Sailfin registry at `registry.sailfin.dev` is live for experiments; manifest
+workflows are still in progress, so treat registry examples in the docs as design
+previews.

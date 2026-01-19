@@ -1,8 +1,8 @@
-# Runtime Audit: Native Self-Hosting Gap Analysis
+# Runtime Audit: Sailfin-Native Runtime Plan
 
 This audit documents the remaining runtime work required to remove the C
-dependency and ship a fully Sailfin-native compiler/runtime. It is scoped to
-the self-hosted native compiler toolchain and the runtime surface declared in
+dependency and ship a fully Sailfin-native compiler/runtime before 1.0. It is
+scoped to the native compiler toolchain and the runtime surface declared in
 `runtime/native/include/sailfin_runtime.h`.
 
 ## Current Surface Area
@@ -29,14 +29,55 @@ Primary sources:
 - `runtime/native/include/sailfin_runtime.h`
 - `runtime/native/src/sailfin_runtime.c`
 - `runtime/prelude.sfn`
-- `runtime/native_runner.py`
+- `runtime/native_runner.py` (temporary; slated for removal pre-1.0)
+
+## Removal Inventory (Pre-1.0)
+
+The following entrypoints are still Python/C-based and must be removed or
+replaced before 1.0 ships:
+
+- Python runtime shims: `runtime/runtime_support.py`,
+  `runtime/native_runner.py`, `runtime/native_runner_impl.py`, `runtime/__init__.py`.
+- Native C runtime: `runtime/native/src/sailfin_runtime.c`,
+  `runtime/native/include/sailfin_runtime.h`.
+- Native C driver: `runtime/native/src/native_driver.c`.
+- Python-generated compiler artifacts that import `runtime_support`
+  (e.g., `compiler/build/**`). These should disappear once the toolchain no
+  longer emits or executes Python code.
+
+## Python Removal Map (Pre-1.0)
+
+The following replacements must land before Python can be removed from the
+runtime/toolchain.
+
+### Runtime shims → Sailfin-native replacements
+
+- `runtime/runtime_support.py` → `runtime/prelude.sfn` + native runtime modules
+  implementing console, filesystem, HTTP, model, spawn, channel, serve, sleep,
+  and type checks.
+- `runtime/native_runner.py` + `runtime/native_runner_impl.py` → Sailfin-native
+  runner/launcher integrated into the `sfn` CLI, using the native runtime and
+  capability enforcement.
+- `runtime/__init__.py` → remove entirely once Python shims are gone.
+
+### Compiler artifacts → native pipeline
+
+- `compiler/build/**` (Python-generated compiler artifacts) → remove from 1.0
+  toolchain once the native compiler and CLI cover compile/run/test flows.
+- Any generated Python entrypoints (e.g., `compiler/build/cli_main.py`) →
+  Sailfin-native CLI modules.
+
+### Guardrails
+
+- CI should fail if any Python runtime shim is imported or executed.
+- Packaging should exclude Python runtime files from 1.0 artifacts.
 
 ## Gaps Blocking C Removal
 
-1. **ABI ownership**: The native compiler toolchain still targets a legacy C-string ABI and pointer
-   arrays. A Sailfin-native runtime must either preserve this ABI or the
-   compiler lowering must move to a native ABI (string/array layouts, tagged
-   values, ownership rules).
+1. **ABI ownership**: The native compiler toolchain still targets a C ABI
+   (NUL-terminated strings, pointer arrays). A Sailfin-native runtime must move
+   the compiler lowering to a native ABI (string/array layouts, tagged values,
+   ownership rules).
 2. **Exception model**: The current runtime uses `setjmp/longjmp` and TLS
    state in C. A Sailfin-native runtime needs an equivalent mechanism or a
    compiler-driven EH strategy with compatible entrypoints.
@@ -48,20 +89,19 @@ Primary sources:
    for examples and capability enforcement.
 5. **Capability adapters**: Filesystem is implemented in C, HTTP/model are
    stubs, and Python shims remain in `runtime/runtime_support.py` and
-   `runtime/native_runner.py`. Native adapters must replace these.
+   `runtime/native_runner.py`. Native adapters must replace these before 1.0.
 6. **Driver/CLI**: the C driver and Python runners are still part of the
-   toolchain. A Sailfin-native CLI should replace them for the full self-hosted
-   workflow.
+   toolchain. A Sailfin-native CLI must replace them before 1.0.
 7. **Incomplete helpers**: `get_field`, `array_map/filter/reduce`,
    `to_debug_string`, and `log_execution` are minimal. These must be fully
    implemented with correct semantics and tests.
 
-## ABI Recommendation (Long-Term Stable Direction)
+## ABI Recommendation
 
-Adopt a **Sailfin-native ABI** (versioned) and treat the legacy C-string ABI as
-a temporary compatibility layer. This provides predictable memory layouts,
-explicit ownership rules, and room for future runtime features (type metadata,
-exception frames, concurrency, and safer FFI).
+Adopt a **Sailfin-native ABI** (versioned) and retire the C ABI entirely before
+1.0. This provides predictable memory layouts, explicit ownership rules, and
+room for future runtime features (type metadata, exception frames, concurrency,
+and safer FFI).
 
 ### Proposed Native ABI Primitives (Initial Sketch)
 
@@ -75,11 +115,9 @@ exception frames, concurrency, and safer FFI).
 
 ### Compatibility Strategy
 
-- Keep a **legacy ABI shim** that maps existing C-string calls to the native
-  ABI. The shim should be implemented in Sailfin where possible and only use
-  minimal platform FFI.
-- Migrate the compiler lowering to emit native ABI calls, then retire the shim
-  once all intrinsics and tests are updated.
+- Migrate the compiler lowering to emit native ABI calls directly.
+- Avoid shipping a compatibility shim in 1.0; use targeted migration helpers
+  during development only.
 
 ## Recommendations
 
@@ -90,6 +128,17 @@ exception frames, concurrency, and safer FFI).
   C.
 - **Parallelize adapters and async runtime**: These are high-surface features
   but can be developed in parallel once the ABI and core helpers are stable.
+
+## Pre-1.0 Acceptance Checklist
+
+- [ ] Compiler lowering emits the Sailfin-native ABI (no C ABI or C strings).
+- [ ] C runtime removed from build artifacts and packaging.
+- [ ] Python runtime shims removed from the runtime package and toolchain.
+- [ ] Native runtime implements required helpers (strings, arrays, exceptions,
+      type metadata, process execution, logging).
+- [ ] Native capability adapters ship for filesystem, HTTP, and model calls.
+- [ ] Native async runtime implements spawn/channel/serve with tests.
+- [ ] Sailfin-native CLI replaces Python/C drivers for `sfn` workflows.
 
 ## Suggested Milestones
 

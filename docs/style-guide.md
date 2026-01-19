@@ -2,10 +2,9 @@
 Updated: October 2025
 
 This guide codifies the Sailfin project layout conventions referenced in
-`CONTRIBUTING.md` and mirrors the expectations the bootstrap (stage0) and
-Sailfin-native (stage1) compilers follow. Use it when creating new capsules,
-reorganising modules, or documenting runtime surfaces so that contributors
-and agents see a stable, predictable structure.
+`CONTRIBUTING.md`. Use it when creating new capsules, reorganising modules, or
+documenting runtime surfaces so that contributors and agents see a stable,
+predictable structure.
 
 ## Goals
 
@@ -35,7 +34,7 @@ sailfin/
 │  │  ├─ effects.rules.sfn      # effect model & validation rules
 │  │  ├─ decorators.semantics.sfn # decorator interpretation
 │  │  ├─ emit.sailfin.sfn       # Sailfin→Sailfin emitter
-│  │  ├─ emit.python.sfn        # Sailfin→Python emitter (optional backend)
+│  │  ├─ emit.llvm.sfn          # Sailfin→LLVM emitter (native backend)
 │  │  └─ codegen.core.sfn       # shared codegen utilities
 │  └─ runtime/                  # runtime shims or std capsules (optional)
 │     ├─ mod.sfn
@@ -70,7 +69,7 @@ own `mod.sfn`.
 | `*.errors.sfn`  | Error types & formatting             | `parser.errors.sfn`        |
 | `*.semantics.sfn` | Semantic extraction from syntax    | `decorators.semantics.sfn` |
 | `*.rules.sfn`   | Validation and effect rules          | `effects.rules.sfn`        |
-| `emit.*.sfn`    | Emitters per backend                 | `emit.python.sfn`          |
+| `emit.*.sfn`    | Emitters per backend                 | `emit.llvm.sfn`            |
 | `*.core.sfn`    | Cross-cutting utilities for a domain | `codegen.core.sfn`         |
 | `mod.sfn`       | Folder public surface (re-exports)   | `compiler/mod.sfn`         |
 | `*.spec.sfn`    | Tests mirroring source filenames     | `parser.parse.spec.sfn`    |
@@ -101,7 +100,7 @@ export { lex } from "./lexer.scan";
 export { parse_program } from "./parser.parse";
 export { analyze_effects } from "./effects.rules";
 export { emit_program as emit_sailfin } from "./emit.sailfin";
-export { emit_program as emit_python } from "./emit.python";
+export { emit_program as emit_llvm } from "./emit.llvm";
 // endregion
 ```
 
@@ -155,8 +154,7 @@ export { substring as stringSlice } from "./runtime/prelude";
 ## Documentation Alignment
 
 - Update `docs/status.md` first whenever behaviour changes.
-- Keep this guide in sync with active repos (bootstrap vs. self-hosted) and
-  note stage-specific differences inline when needed.
+- Keep this guide in sync with the active compiler and runtime.
 - Host subsystem explainers (e.g. compiler architecture) in dedicated docs
   under `docs/` and cross-link them from `README.md` entries.
 - Avoid duplicating manifest or capability guidance; defer to `docs/spec.md`
@@ -179,22 +177,4 @@ export { substring as stringSlice } from "./runtime/prelude";
   them directly into tests or documentation.
 - Inline comments should clarify intent or future syntax gaps—avoid restating
   obvious operations.
-
-## Migration Notes for the Current Compiler
-
-The existing stage0 files map cleanly onto this layout:
-
-- `ast.sfn` → `src/compiler/ast.types.sfn`
-- `token.sfn` → `src/compiler/token.types.sfn`
-- `lexer.sfn` → `src/compiler/lexer.scan.sfn`
-- `parser.sfn` → `src/compiler/parser.parse.sfn`
-- `effect_checker.sfn` → `src/compiler/effects.rules.sfn`
-- `decorator_semantics.sfn` → `src/compiler/decorators.semantics.sfn`
-- `emitter_sailfin.sfn` → `src/compiler/emit.sailfin.sfn`
-- `native_lowering.sfn` (with `emit_native.sfn`) → `src/compiler/emit.python.sfn`
-  or `src/compiler/codegen.core.sfn` depending on the contents
-- Add `src/compiler/mod.sfn` to re-export the public surface
-
-Follow the same mapping for the Sailfin-native compiler sources under
-`compiler/src/` once bootstrap and self-hosted parity lands.
 

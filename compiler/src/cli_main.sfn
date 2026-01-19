@@ -1,6 +1,6 @@
 // compiler/src/cli_main.sfn
 //
-// Sailfin-native CLI entrypoint invoked by the stage2 C shim.
+// Sailfin-native CLI entrypoint invoked by the native C shim.
 
 import {
     compile_to_llvm,
@@ -876,7 +876,8 @@ fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) ->
 fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
     // Tests prioritize compile/link latency over runtime performance.
     // Unit tests often import compiler modules (compiler/src/...), which are already
-    // compiled as part of stage2. Link against those objects to satisfy symbols.
+    // compiled as part of the native compiler build. Link against those objects
+    // to satisfy symbols.
 
     if runtime_root.length == 0 {
         print.error("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary");
@@ -900,16 +901,16 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
         return 1;
     }
 
-    // Best-effort: include stage2 module objects if present.
+    // Best-effort: include native module objects if present.
     let mut module_objs -> string[] = [];
-    let modules = _read_non_empty_lines("build/stage2/aot/modules.txt");
+    let modules = _read_non_empty_lines("build/native/aot/modules.txt");
     if modules.length > 0 {
         let mut index -> number = 0;
         loop {
             if index >= modules.length {
                 break;
             }
-            // Do not link the stage2 runtime modules here; the test link already
+            // Do not link runtime modules here; the test link already
             // includes the runtime bundle objects (including prelude.o).
             if _has_prefix(modules[index], "runtime/") {
                 index += 1;
@@ -987,7 +988,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         return 0;
     }
 
-    // Back-compat with existing stage2 driver UX: --emit MODE file
+    // Back-compat with older driver UX: --emit MODE file
     if args.length == 3 && _is_flag(args[0], "--emit") {
         let mode = args[1];
         let path = args[2];
@@ -1246,7 +1247,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
                 fs.deleteFile(test_runner_active_path);
                 return 1;
             }
-            let cleaned = _strip_stage2_log_prefixes(llvm);
+            let cleaned = _strip_native_log_prefixes(llvm);
             _write_text(ll_path, cleaned);
 
             if trace_runner {
@@ -1324,8 +1325,8 @@ fn _join_with_separator_cli(values -> string[], separator -> string) -> string {
     return parts[0];
 }
 
-fn _strip_stage2_log_prefixes(text -> string) -> string {
-    // Some stage2 builds annotate LLVM output lines with a log-level prefix.
+fn _strip_native_log_prefixes(text -> string) -> string {
+    // Some native builds annotate LLVM output lines with a log-level prefix.
     // Strip those prefixes so clang can parse the IR.
     // Fast path: avoid touching large IR blobs unless we see a prefix.
     if text.length >= 6 {
