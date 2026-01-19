@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.118 (2026-01-19)
+
+### Bug Fixes
+
+- Stage2 naming
+  ([`c895520`](https://github.com/SailfinIO/sailfin/commit/c8955202f80941c7cbcc92fdbbfad23562fa6fbc))
+
+
 ## v0.1.1-alpha.117 (2026-01-18)
 
 ### Bug Fixes
