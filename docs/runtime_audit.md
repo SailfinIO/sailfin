@@ -2,7 +2,7 @@
 
 This audit documents the remaining runtime work required to remove the C
 dependency and ship a fully Sailfin-native compiler/runtime. It is scoped to
-the Stage2 native toolchain and the runtime surface declared in
+the self-hosted native compiler toolchain (legacy name: stage2) and the runtime surface declared in
 `runtime/native/include/sailfin_runtime.h`.
 
 ## Current Surface Area
@@ -25,6 +25,7 @@ The C runtime provides (or stubs) the following categories of helpers:
   `sailfin_runtime_set_exception/clear_exception/has_exception`
 
 Primary sources:
+
 - `runtime/native/include/sailfin_runtime.h`
 - `runtime/native/src/sailfin_runtime.c`
 - `runtime/stage2_runtime_stub.c`
@@ -33,7 +34,7 @@ Primary sources:
 
 ## Gaps Blocking C Removal
 
-1. **ABI ownership**: Stage2 still targets a legacy C-string ABI and pointer
+1. **ABI ownership**: The native compiler toolchain still targets a legacy C-string ABI and pointer
    arrays. A Sailfin-native runtime must either preserve this ABI or the
    compiler lowering must move to a native ABI (string/array layouts, tagged
    values, ownership rules).

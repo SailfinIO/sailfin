@@ -1,4 +1,4 @@
-test "smoke: stage2 runner executes" {
+test "smoke: native runner executes" {
     assert 1 + 1 == 2;
     assert "hi" + "" == "hi";
 }

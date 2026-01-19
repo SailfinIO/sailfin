@@ -42,11 +42,10 @@ The following commands are available for development:
 - `make test`: Run the full suite.
 - `make compile`: Build the native compiler by self-hosting from a released seed (preferred).
 - `make clean`: Remove packaged artifacts (`dist/`).
-- `make native-stage2-debug`: Build native stage2 with debug symbols for lldb.
-- `make native-stage2-asan`: Build native stage2 with AddressSanitizer.
-- `make stage2-native-sanity`: Build + compile hello-world as a smoke test.
-- `make stage2-native-roundtrip`: Build + run on `compiler/src/main.sfn`.
-- `make stage2-native-fixed-point`: Ensure Stage3→Stage4 is a stable fixed-point.
+- `make native-debug`: Build the native compiler with debug symbols for lldb (bootstrap-built).
+- `make native-asan`: Build the native compiler with AddressSanitizer (bootstrap-built).
+- `make selfhost-smoke-native`: Run a fast smoke rebuild of the native compiler from a released seed.
+- `make check-native-determinism`: Rebuild native compiler twice and diff outputs.
 
 ## Documentation
 

@@ -9,27 +9,27 @@ actionable item, mark it complete, and move to the following bucket; creating ne
 
 ## Active Workstreams (Do Now)
 
-1. **Stage2 Production Launch**
+1. **Native Compiler Production Launch (legacy name: stage2)**
 
 _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
 - [ ] Self-hosted release pipeline
-  - [x] Promote the Stage2 bootstrap job to the primary release workflow so every merge runs the Stage2->Stage2 rebuild and archives the native artifacts.
-  - [x] Add a `build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the Stage2 smoke suite, and uploads artifacts for downstream jobs.
-    - [x] Initial workflow scaffolds Stage2 bootstrap/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged LLVM artifacts via `tools/package_stage2.py`.
-  - [x] Add a `release.yml` workflow that builds native Stage2 binaries on release publish (macOS arm64/x86_64, Linux x86_64) and uploads release assets.
-  - [x] Wire the workflow into `semantic-release` so version bumps publish Stage2 binaries and changelog entries in one pass.
+  - [x] Promote the native compiler self-host job to the primary release workflow so every merge runs the native→native rebuild and archives artifacts.
+  - [x] Add a `build.yml` GitHub workflow that builds universal macOS (arm64 + x86_64) and Linux binaries, runs the native smoke suite, and uploads artifacts for downstream jobs.
+    - [x] Initial workflow scaffolds self-hosted builds/tests on macOS arm64, macOS x86_64, and Linux x86_64 runners and publishes packaged artifacts via `tools/package_stage2.py` (legacy tooling name).
+  - [x] Add a `release.yml` workflow that builds native compiler binaries on release publish (macOS arm64/x86_64, Linux x86_64) and uploads release assets.
+  - [x] Wire the workflow into `semantic-release` so version bumps publish native compiler binaries and changelog entries in one pass.
 
 - [ ] Installer and distribution hardening
-  - [x] Add a curl-able `install.sh` (repo root) that detects OS/arch, downloads the matching Stage2 binary, validates the archive, and installs to `/usr/local/bin` (with override support).
+  - [x] Add a curl-able `install.sh` (repo root) that detects OS/arch, downloads the matching native compiler binary, validates the archive, and installs to `/usr/local/bin` (with override support).
   - [ ] Publish signed checksums alongside release artifacts and add a CI job that runs the installer against staging builds.
   - [x] Update `README.md` and `docs/status.md` with the new install flow and installer defaults.
 
 - [ ] Distribution packaging
-  - [x] Introduce `tools/package_stage2.py` to package Stage2 LLVM artifacts with per-target metadata (tarballs for macOS arm64/x86_64 and Linux x86_64).
-  - [x] Emit checksum and manifest sidecars (SHA256 + JSON) for Stage2 tarballs so release automation can verify downloads.
-  - [x] Extend packaging tooling to emit Stage2-native release bundles per platform (macOS arm64/x86_64, Linux x86_64) with runtime adapters and prelude modules.
-  - [ ] Update the release workflow to build Stage2 artifacts, run full regression suites, generate signed SHA256 checksums, and attach provenance metadata.
+  - [x] Introduce `tools/package_stage2.py` to package native compiler LLVM artifacts (legacy tooling name: stage2) with per-target metadata (tarballs for macOS arm64/x86_64 and Linux x86_64).
+  - [x] Emit checksum and manifest sidecars (SHA256 + JSON) for legacy stage2 tarballs so release automation can verify downloads.
+  - [x] Extend packaging tooling to emit native compiler release bundles per platform (legacy name: stage2) (macOS arm64/x86_64, Linux x86_64) with runtime adapters and prelude modules.
+  - [ ] Update the release workflow to build native compiler artifacts (legacy: stage2), run full regression suites, generate signed SHA256 checksums, and attach provenance metadata.
   - [x] Ensure the curl-able installer consumes the new artifact layout and fails fast when unsupported platforms request binaries.
   - [ ] Document artifact structure, supported platforms, and upgrade expectations in `docs/README.md` and `docs/status.md`.
 
@@ -47,16 +47,16 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
 - [ ] **Native runtime self-hosting plan** — Execute the C removal plan in `docs/runtime_audit.md`.
   - [ ] Adopt the Sailfin-native ABI (versioned) and document layouts + migration steps in `docs/runtime_audit.md`.
-  - [ ] Implement a legacy ABI shim (C-string compatibility) to bridge existing Stage2 intrinsics during migration.
+  - [ ] Implement a legacy ABI shim (C-string compatibility) to bridge existing legacy stage2 intrinsics during migration.
   - [ ] Implement a Sailfin-native core runtime module covering:
     - [ ] String helpers (`string_length`, `substring`, `concat`, `grapheme_*`, `char_code`).
     - [ ] Array helpers (`concat`, `append_string`, `map/filter/reduce`).
     - [ ] Exceptions (`try_enter`, `try_leave`, `throw`, `take_exception`).
     - [ ] Type metadata (`is_*`, `resolve_type`, `instance_of`, `get_field`).
     - [ ] Logging + bounds checks + process execution.
-  - [ ] Wire Stage2 lowering to the native runtime symbols and add regression coverage for each intrinsic.
+  - [ ] Wire native lowering (legacy name: stage2) to the native runtime symbols and add regression coverage for each intrinsic.
   - [ ] Add native tests that validate runtime helper parity with the current C runtime (string/array/exception/type helpers).
-  - [ ] Remove C runtime dependencies from the Stage2 build once parity is confirmed.
+  - [ ] Remove C runtime dependencies from the legacy stage2 build once parity is confirmed.
 
 - [ ] **Native capability adapter implementation** — Replace `runtime_support.py` Python implementations with native Sailfin modules for filesystem, HTTP, and model adapters.
   - [ ] Create `runtime/adapters/fs.sfn` implementing filesystem operations (`read_file`, `write_file`, `list_directory`, `delete_file`, `create_directory`) using platform-specific system calls via `unsafe extern` declarations.
@@ -81,15 +81,15 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
 5. **Toolchain De-Pythonisation**
 
-- [ ] **Native emission milestone** — Switch default compilation target from Python codegen to Stage2 LLVM executable backend.
+- [ ] **Native emission milestone** — Switch default compilation target from Python codegen to the native LLVM executable backend.
   - [ ] Update `compiler/src/main.sfn` to default `--backend` flag to `native` instead of `python`, with explicit `--backend=python` option for fallback.
-  - [ ] Ensure all compiler modules compile cleanly with Stage2 backend and pass existing test suite.
+  - [ ] Ensure all compiler modules compile cleanly with the native backend and pass existing test suite.
   - [ ] Update Makefile targets:
-    - [ ] `make compile` defaults to Stage2 LLVM backend.
+    - [ ] `make compile` defaults to the native LLVM backend.
     - [ ] Add `make compile-python` for explicit Python fallback.
     - [ ] Keep Stage1 Python artifacts available for bisecting regressions.
-  - [ ] Validate that `examples/` suite compiles and executes with Stage2 as default backend (regression coverage via `make test`).
-  - [ ] Document backend selection, fallback strategy, and known Stage2 limitations in `docs/README.md`.
+  - [ ] Validate that `examples/` suite compiles and executes with the native backend as default (regression coverage via `make test`).
+  - [ ] Document backend selection, fallback strategy, and known native-backend limitations in `docs/README.md`.
 
 - [ ] **Sailfin-native CLI (`sfn`)** — Reimplement compiler launcher, project commands, and package management in Sailfin without Python entrypoints.
   - [ ] Create `cli/main.sfn` implementing:
@@ -103,7 +103,7 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
     - [ ] `cli/test.sfn` — discover test functions, execute them, report results (deferred until native test framework lands).
     - [ ] `cli/add.sfn` — fetch capsule from registry, update fleet.toml (deferred until registry work lands).
     - [ ] `cli/publish.sfn` — package capsule, upload to registry with provenance (deferred until registry work lands).
-  - [ ] Compile CLI to native binary via Stage2 LLVM backend and install as `sfn` executable.
+  - [ ] Compile CLI to native binary via the native LLVM backend and install as `sfn` executable.
   - [ ] Add smoke tests in `compiler/tests/test_native_cli.py`:
     - [ ] `test_sfn_compile_hello_world` — compile and validate output artifact.
     - [ ] `test_sfn_run_hello_world` — compile and execute, check stdout.
@@ -270,14 +270,14 @@ _Near-term (flip to a self-hosted release pipeline and prep GA)_
 
 ## Ready Next (Pull When Active Stream Clears)
 
-- [ ] Stage2 general availability launch plan — Finalise GA criteria, support policy, and release communications once the self-hosted pipeline holds green for multiple iterations.
+- [ ] Native compiler general availability launch plan (legacy name: stage2) — Finalise GA criteria, support policy, and release communications once the self-hosted pipeline holds green for multiple iterations.
 - [ ] `sfn` package manager release plan — Define rollout steps once CLI integration lands.
 - [ ] Registry authentication & signing — Add capability manifests and signed provenance to registry flows.
 - [ ] Prototype WebAssembly emission from `.sfn-asm` once the LLVM backend is feature-complete, reusing the existing smoke harness for validation.
 
 ## Exploration Backlog (Research / Design)
 
-- [ ] Introduce an `unsafe` capability in the stage2 runtime, lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
+- [ ] Introduce an `unsafe` capability in the native runtime (legacy name: stage2), lowering `unsafe extern` declarations (e.g., `malloc`) and gating raw pointer dereference to lexical `unsafe {}` blocks.
 - Model engines & training — Continue design in `docs/proposals/model-engines-and-training.md`; merge into Active once registry workflows exist.
 - Tensor and GPU effects — Define `Tensor<T>` primitives and effect propagation for GPU workloads.
 - Notebook & LSP tooling — Prototype interactive editing, effect-aware debugging, provenance overlays.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# curlable installer for Sailfin Stage2 native compiler binary.
+# curlable installer for the Sailfin native compiler binary (legacy name: stage2).
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
@@ -237,7 +237,7 @@ if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$LINK_PATH" 2>/dev/null
   $MAYBE_SUDO chmod 0755 "$LINK_PATH" || true
 fi
 
-# Also install a stable `sfn` entrypoint when installing `sailfin-stage2`.
+# Also install stable `sfn`/`sailfin` entrypoints when installing `sailfin-stage2`.
 if [ "$BINARY" = "sailfin-stage2" ]; then
   ALIAS_BASENAME="sfn"
   if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
@@ -254,6 +254,22 @@ if [ "$BINARY" = "sailfin-stage2" ]; then
     $MAYBE_SUDO chmod 0755 "$ALIAS_PATH" || true
   fi
   log "Linked: ${ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
+
+  SAILFIN_ALIAS_BASENAME="sailfin"
+  if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
+    SAILFIN_ALIAS_BASENAME="sailfin.exe"
+  fi
+
+  SAILFIN_ALIAS_PATH="${GLOBAL_BIN_DIR}/${SAILFIN_ALIAS_BASENAME}"
+  if [ -L "$SAILFIN_ALIAS_PATH" ] || [ -f "$SAILFIN_ALIAS_PATH" ]; then
+    $MAYBE_SUDO rm -f "$SAILFIN_ALIAS_PATH"
+  fi
+  if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$SAILFIN_ALIAS_PATH" 2>/dev/null; then
+    log "Symlink failed for ${SAILFIN_ALIAS_BASENAME}; copying binary instead."
+    $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$SAILFIN_ALIAS_PATH"
+    $MAYBE_SUDO chmod 0755 "$SAILFIN_ALIAS_PATH" || true
+  fi
+  log "Linked: ${SAILFIN_ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
 
   RESOLVED_SFN="$(command -v sfn 2>/dev/null || true)"
   if [ -n "$RESOLVED_SFN" ] && [ "$RESOLVED_SFN" != "$ALIAS_PATH" ]; then

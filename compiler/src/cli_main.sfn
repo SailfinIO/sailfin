@@ -16,7 +16,7 @@ import {
 } from "./main";
 import { compile_to_native_text } from "./main";
 import { split_lines } from "./native_ir";
-import { sailfin_stage2_version } from "./version";
+import { sailfin_version } from "./version";
 
 fn _usage() -> string {
     return "usage:\n" +
@@ -983,7 +983,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     }
 
     if args.length == 1 && (_is_flag(args[0], "--version") || _is_flag(args[0], "-V")) {
-        print.info("sfn " + sailfin_stage2_version());
+        print.info("sfn " + sailfin_version());
         return 0;
     }
 
@@ -1021,7 +1021,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             print.error(_usage());
             return 2;
         }
-        print.info("sfn " + sailfin_stage2_version());
+        print.info("sfn " + sailfin_version());
         return 0;
     }
 

@@ -1,4 +1,4 @@
-import { sailfin_stage2_version } from "../../src/version";
+import { sailfin_version } from "../../src/version";
 
 fn _index_of(haystack -> string, needle -> string) -> number {
     if needle.length == 0 {
@@ -36,8 +36,8 @@ fn _contains(haystack -> string, needle -> string) -> boolean {
     return _index_of(haystack, needle) >= 0;
 }
 
-test "version: stage2 version string looks semver-ish" {
-    let v = sailfin_stage2_version();
+test "version: native version string looks semver-ish" {
+    let v = sailfin_version();
 
     assert v.length > 0;
     assert _contains(v, ".");

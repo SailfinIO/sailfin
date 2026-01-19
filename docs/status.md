@@ -4,13 +4,13 @@ This document tracks what works today and what is in progress.
 
 ## Compiler Pipeline (Current)
 
-- The self-hosted native compiler (legacy name: Stage2) is the primary toolchain; `make compile` produces `build/native/sailfin-stage2`.
+- The self-hosted native compiler (legacy name: stage2) is the primary toolchain; `make compile` produces `build/native/sailfin` (a stable local alias) and the legacy-named `build/native/sailfin-stage2`.
 - The legacy Stage1 (Python) bootstrap pipeline is kept for emergency recovery, but it is no longer the primary developer path.
 - Experimental LLVM JIT execution remains available for targeted backend coverage.
 - Stage1 Python lowering no longer blocks compilation on heuristic fallback checks; diagnostics still surface.
 - CI uses the native build/release workflows (`.github/workflows/build.yml`, `.github/workflows/release.yml`); Stage1 release workflow has been retired.
-- Native compiler self-hosted tests live in `compiler/tests/{unit,integration,e2e}` and run via `sailfin-stage2 test` (`make test-unit`, `make test-integration`, `make test-e2e`).
-- Native AOT builds do not rely on any `aot-prepare` text rewrite step; stage2 emits link-safe LLVM IR directly.
+- Native compiler self-hosted tests live in `compiler/tests/{unit,integration,e2e}` and run via `sfn test` (repo-local: `./sfn test .`; build output: `build/native/sailfin test .`; `make test-unit`, `make test-integration`, `make test-e2e`).
+- Native AOT builds do not rely on any `aot-prepare` text rewrite step; the native compiler emits link-safe LLVM IR directly.
 
 ## Runtime (Current)
 

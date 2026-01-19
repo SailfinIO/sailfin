@@ -1,13 +1,13 @@
 # Sailfin-native tests
 
-This folder contains Sailfin-native tests that are executed by the native compiler CLI
-(legacy binary name: `sailfin-stage2`):
+This folder contains Sailfin-native tests that are executed by the self-hosted native compiler CLI.
 
-- `build/native/sailfin-stage2 test <path>`
+Preferred invocations:
 
-Or via the repo wrapper:
+- `./sfn test <path>` (repo-local wrapper; picks the best available compiler)
+- `build/native/sailfin test <path>` (stable local alias produced by `make compile`)
 
-- `./sfn test <path>`
+Legacy note: releases and some build artifacts still use the historical binary name `sailfin-stage2`.
 
 The test runner discovers files named `*_test.sfn` under `<path>` (recursively), compiles each file with a synthesized harness, and executes it.
 

@@ -27,7 +27,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 | Example                  | Effects       | Notes                                                                                                                                      |
 | ------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `basic-enum.sfn`         | `io`          | Enum pattern matching with console logging.                                                                                                |
-| `borrowing.sfn`          | `mut`, `read` | Native compiler borrowing design sample (legacy name: Stage2); shows moves, shared borrows, and reborrows without runtime enforcement yet. |
+| `borrowing.sfn`          | `mut`, `read` | Native compiler borrowing design sample (legacy name: stage2); shows moves, shared borrows, and reborrows without runtime enforcement yet. |
 | `conditionals.sfn`       | `io`          | Branching over values with `print.info`.                                                                                                   |
 | `error-handling.sfn`     | `io`          | Struct-based error propagation matched with logging.                                                                                       |
 | `functions.sfn`          | `io`          | Function defaults and overloading with console output.                                                                                     |
@@ -119,11 +119,11 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 
 ## Runtime Notes
 
-- **Stage1-friendly**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs covered by the stage1 pipeline.
+- **Bootstrap-friendly (legacy name: stage1)**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs covered by the bootstrap pipeline.
 - **Effect-sensitive**: `advanced`, `concurrency`, `ai`, `io`, and `web` rely on mocked helpers (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`, `model` prompts). Declare the exact effects listed above before running them through the bootstrap compiler.
 - **Design-stage examples**: Some examples demonstrate planned features that parse but aren't fully enforced yet. These are marked with **Design-stage** in the notes column. Examples include:
   - `unsafe-extern-interop.sfn` — FFI interop with raw pointers and `unsafe` blocks. Parser accepts the syntax but unsafe semantics are not yet enforced. See `docs/spec.md` §6.1.5.
-  - `borrowing.sfn` — Ownership and borrowing syntax. Parser accepts but Stage1 does not enforce exclusivity. The native LLVM backend (legacy name: Stage2) enforces borrow conflicts.
+  - `borrowing.sfn` — Ownership and borrowing syntax. Parser accepts but the bootstrap compiler does not enforce exclusivity. The native LLVM backend (legacy name: stage2) enforces borrow conflicts.
 - **Forward-looking commentary**: Any future syntax remains inside comments—runnable code in this directory sticks to the shipped bootstrap grammar. Update the index whenever you add new examples or adjust their effects.
 
 > Tip: Browse examples alongside the grammar (`docs/enbf.md`) and spec (`docs/spec.md`) to see how planned features map onto the implemented subset.

@@ -8,7 +8,7 @@ Sailfin is an AI-native, systems-friendly programming language designed for prec
 
 **Current architecture:**
 
-- **Native compiler (primary; legacy name: Stage2)**: Native backend targeting LLVM with `.sfn-asm` intermediate representation; the release artifact is still named `sailfin-stage2` today.
+- **Native compiler (primary; legacy name: stage2)**: Native backend targeting LLVM with `.sfn-asm` intermediate representation; the release artifact is still named `sailfin-stage2` today.
 - **Stage1 (legacy bootstrap)**: Deprecated bootstrap pipeline kept for emergency recovery while marching toward 1.0.
 - **Stage0 (legacy)**: Historical Python bootstrap compiler.
 
@@ -41,16 +41,15 @@ make test-integration # Run Sailfin-native integration tests
 ```bash
 make clean            # Remove dist/ artifacts
 make clean-stage1     # Remove compiler/build/ (requires stage1 to rebuild)
-make native-stage2-debug # Build native compiler (legacy: stage2) with -O0/-g for lldb (bootstrap-built)
-make native-stage2-asan  # Build native compiler (legacy: stage2) with AddressSanitizer (bootstrap-built)
-make stage2-native-sanity # Build + compile hello-world as smoke test
-make stage2-native-roundtrip # Build + run on compiler/src/main.sfn
-make stage2-native-fixed-point # Ensure Stage3→Stage4 is a stable fixed-point
+make native-debug     # Build native compiler with -O0/-g for lldb (bootstrap-built)
+make native-asan      # Build native compiler with AddressSanitizer (bootstrap-built)
+make selfhost-smoke-native # Smoke selfhost from a released seed
+make check-native-determinism # Rebuild twice and diff outputs
 ```
 
 ## Architecture & Key Concepts
 
-### Stage1 Bootstrap Compiler Pipeline
+### Bootstrap Compiler Pipeline (legacy stage1)
 
 The bootstrap compiler (`compiler/src/`) follows this flow:
 
@@ -60,7 +59,7 @@ The bootstrap compiler (`compiler/src/`) follows this flow:
 4. **Effect Checker** (`effect_checker.sfn`) → validates `![effect, ...]` annotations
 5. **Native Emitter** (`emit_native.sfn`) → `.sfn-asm` IR (`native_ir.sfn`)
 6. **Python Lowering** (`native_lowering.sfn`) → executable Python code
-7. **LLVM Lowering** (`native_llvm_lowering.sfn`, Stage2 only) → LLVM IR
+7. **LLVM Lowering** (`native_llvm_lowering.sfn`, native compiler only) → LLVM IR
 
 **Critical files:**
 
@@ -113,7 +112,7 @@ See `docs/runtime_audit.md` for the full migration plan.
 
 - **Unit tests** (`-m unit`): Fast, focused on single passes (lexer, parser, typecheck, effect checker)
 - **Integration tests** (`-m integration`): Artifact packaging, self-hosting, CLI workflows
-- **Stage2 tests** (`-m stage2`): LLVM lowering and execution via `llvmlite`
+- **Native (LLVM) tests** (`-m stage2`): LLVM lowering and execution via `llvmlite`
 
 **Regression strategy:** Lock behavior with snapshot tests (`compiler/tests/test_stage2_golden.py`) and execution fixtures (`compiler/tests/test_native_llvm_execution.py`).
 
@@ -188,7 +187,7 @@ When uncertain about feature status or semantics:
 - `model` blocks emit metadata only (no `.call()` execution)
 - `prompt` blocks are parsed but don't send messages
 
-### Stage1 Readiness Checklist
+### Bootstrap (stage1) Readiness Checklist
 
 Before declaring a feature "shipped in Stage1":
 
@@ -202,10 +201,10 @@ Before declaring a feature "shipped in Stage1":
 
 ### Do Not Use Python Bootstrap (Stage0)
 
-All development goes through the Stage1 bootstrap compiler and Stage2 primary toolchain:
+All development goes through the bootstrap compiler (legacy name: stage1) and the self-hosted native compiler (legacy name: stage2):
 
 - To modify the compiler: edit `compiler/src/*.sfn`
-- To run tests: `make test` (bootstraps Stage2 as needed)
+- To run tests: `make test` (bootstraps the native compiler as needed)
 - To build a native compiler: `make compile`
 
 ## Testing Guidance
@@ -231,7 +230,7 @@ def test_my_feature_executes():
 ### Debugging Compilation Failures
 
 1. Isolate the failing `.sfn` source
-2. Run `make compile` to see Stage1 errors
+2. Run `make compile` to see bootstrap compiler errors
 3. Check `compiler/build/*.py` for emitted Python
 4. Use `PYTEST_STAGE1_DEBUG=1 make test` to see cache behavior
 5. Review diagnostics for source spans and fix-it hints
@@ -242,7 +241,7 @@ The compiler must always compile itself. Breaking changes require:
 
 1. Bootstrap the change in Python (`runtime/runtime_support.py`)
 2. Implement in Sailfin (`compiler/src/*.sfn`)
-3. Ensure Stage1 artifact still self-hosts (`make test-integration`)
+3. Ensure the bootstrap artifact still self-hosts (`make test-integration`)
 4. Remove Python scaffold once stable
 
 ## Versioning & Releases

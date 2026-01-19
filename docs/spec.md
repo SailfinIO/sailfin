@@ -479,7 +479,7 @@ Reference types &T and &mut T are accepted syntactically (see below) but are tre
 
 The expression forms &x and borrow(x) are accepted. They construct a reference value but carry no static guarantees in bootstrap builds.
 
-Warning (bootstrap): Ownership wrappers and borrows are diagnostics-only. The bootstrap backend will not prevent aliasing, duplication, use-after-move, or early drops of Affine<T>/Linear<T>/&mut T values. The Stage2 LLVM lowering now threads ownership metadata through `.sfn-asm`, rejects conflicting borrows (multiple `&mut` aliases or mixing `&mut` with shared borrows), and flags use-after-move when a consumed local or parameter is reused after control-flow merges. Lifetime analysis and borrow-region inference remain future work.
+Warning (bootstrap): Ownership wrappers and borrows are diagnostics-only. The bootstrap backend will not prevent aliasing, duplication, use-after-move, or early drops of Affine<T>/Linear<T>/&mut T values. The native LLVM lowering (legacy name: stage2) now threads ownership metadata through `.sfn-asm`, rejects conflicting borrows (multiple `&mut` aliases or mixing `&mut` with shared borrows), and flags use-after-move when a consumed local or parameter is reused after control-flow merges. Lifetime analysis and borrow-region inference remain future work.
 
 #### 6.1.2 Planned (self-hosted) semantics
 
@@ -505,14 +505,14 @@ Unsafe/raw memory: Raw pointers and pointer arithmetic are not part of the safe 
 
 #### 6.1.3 Examples
 
-See `examples/basics/borrowing.sfn` for a runnable Stage2 design sample that illustrates the ownership rules described above. The sample shows how
+See `examples/basics/borrowing.sfn` for a runnable native-compiler design sample (legacy name: stage2) that illustrates the ownership rules described above. The sample shows how
 
 - bindings move by default (`let mut counter = Counter { ... };`),
 - shared borrows are constructed with `&counter` and `borrow(counter)`,
 - mutable borrows use `&mut counter` and can be reborrowed as shared references inside `snapshot`, and
 - ending the scope of a mutable borrow allows new borrows to be taken later in the program.
 
-The bootstrap pipeline currently accepts these forms without enforcing exclusivity; the example documents the semantics the Stage2 checker will apply.
+The bootstrap pipeline currently accepts these forms without enforcing exclusivity; the example documents the semantics the native compiler will apply.
 
 #### 6.1.4 Borrow-specific effects
 
@@ -548,13 +548,13 @@ fn update_cache!(cache -> &mut Map<string, string>) ![mut, io.fs.read, io.fs.wri
 
 Here the compiler derives the composite effect list `![mut, io.fs.read, io.fs.write]` by combining the borrow requirement with filesystem I/O.
 
-Async safety: borrow effects cannot cross suspension points unless the reference is proven `'static` or cloned into an owned value. Expressed as a lattice rule, `!mut` is not a subset of `!async`. The Stage2 checker rejects `await` and routine yields that would extend a mutable borrow beyond its lifetime, emitting diagnostics that identify the active borrow and the offending suspension site.
+Async safety: borrow effects cannot cross suspension points unless the reference is proven `'static` or cloned into an owned value. Expressed as a lattice rule, `!mut` is not a subset of `!async`. The native compiler rejects `await` and routine yields that would extend a mutable borrow beyond its lifetime, emitting diagnostics that identify the active borrow and the offending suspension site.
 
 #### 6.1.5 Unsafe capability and extern interop
 
 Low-level interop lives behind an explicit `unsafe` capability. Unsafe declarations surface the risk while keeping safe code pointer-free.
 
-**Bootstrap status**: The parser accepts `unsafe`, `extern`, and raw pointer syntax (`*T`, `*mut T`). The bootstrap compiler does not enforce unsafe semantics. Stage2 will enforce all rules described below.
+**Bootstrap status**: The parser accepts `unsafe`, `extern`, and raw pointer syntax (`*T`, `*mut T`). The bootstrap compiler does not enforce unsafe semantics. The native compiler will enforce all rules described below.
 
 ##### 6.1.5.1 Foreign Function Declarations
 
@@ -810,7 +810,7 @@ fn summarize(user: PII<Text>) -> Summary ![model] {
 
 ### 7.2 Runtime Intrinsics and Native Capability ABI
 
-The Stage2 LLVM backend exposes capability-gated operations as **runtime intrinsics**—
+The native LLVM backend (legacy name: stage2) exposes capability-gated operations as **runtime intrinsics**—
 declared external functions that preserve their effect requirements through the native
 compilation pipeline.
 
@@ -895,7 +895,8 @@ Test runners support:
 - **Replay** – use generation cards to re-run model calls exactly as captured
   during production incidents.
 
-Current (self-hosted) CLI note: the native CLI (legacy binary name: `sailfin-stage2`) exposes `sailfin test [path]`.
+Current (self-hosted) CLI note: the native compiler CLI exposes `sfn test [path]`.
+The installer currently ships a legacy-named binary (`sailfin-stage2`) but also provides a stable `sfn` entrypoint.
 Today it discovers Sailfin test files by filename convention (`*_test.sfn`) under
 `path` (recursively), compiles each file with a synthesized test harness `main`,
 and executes it. This is an initial bridge while the native test runner grows;
@@ -1029,7 +1030,7 @@ Note (planned): Engines, adapters, tensors, and training are specified in a draf
 
 ### Native Backend Layout Descriptors
 
-Stage2 emits a textual `.sfn-asm` artefact (`sailfin-native-text`) before LLVM
+The native compiler emits a textual `.sfn-asm` artefact (`sailfin-native-text`) before LLVM
 lowering. Structs and enums now include `.layout` directives that describe the
 calculated byte layout so downstream passes can materialise storage without
 re-computing sizes or alignment.
@@ -1051,7 +1052,7 @@ Struct declarations prepend their `.field` entries with:
 - Optional annotations (`Type?`), nested enums, and recursive aggregates now
   resolve to explicit layouts when their definitions are available in the same
   module, avoiding the historical `defaulting to pointer layout` warnings that
-  Stage2 surfaced for the compiler AST.
+  the native compiler surfaced for the compiler AST.
 
 Enum declarations emit:
 
