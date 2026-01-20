@@ -51,7 +51,7 @@ NATIVE_BIN ?= build/native/sailfin
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check clean
+.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check package clean
 
 .PHONY: rebuild rebuild-asan smoke
 
@@ -79,6 +79,7 @@ help:
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make test-e2e     # Run Sailfin-native end-to-end tests"
 	@echo "  make compile      # Build the compiler by self-hosting from a released seed"
+	@echo "  make package      # Build + package native artifacts into dist/"
 	@echo "  make check        # Compile (if needed) then run the full test suite"
 	@echo "  make rebuild      # Force rebuild the compiler from a released seed"
 	@echo "  make rebuild-asan # Force rebuild with AddressSanitizer (diagnostic)"
@@ -221,6 +222,16 @@ compile:
 	fi
 
 check: compile test
+
+# =============================================================================
+# Packaging (release artifacts)
+# =============================================================================
+
+package: check-conda
+	@echo "[package] building + packaging native artifacts into dist/";
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u tools/package_native.py \
+		--out dist \
+		--compiler-bin "$(NATIVE_BIN)"
 
 # Usage:
 #   make rebuild

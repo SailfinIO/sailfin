@@ -1,6 +1,6 @@
 [tool.semantic_release]
 version_source = "file"
-version_variables = ["runtime/__init__.py:__version__", "compiler/src/version.sfn:__version__"]
+version_variables = ["compiler/src/version.sfn:__version__"]
 upload_to_pypi = false
 build_command = "make package"
 commit_parser = "conventional"
@@ -16,7 +16,7 @@ include_v_prefix = true
 
 [tool.semantic_release.github]
 release_method = "github"
-assets = ["dist/*.zip"]
+assets = ["dist/*.tar.gz", "dist/*.sha256", "dist/*.manifest.json"]
 
 [tool.semantic_release.branches.main]
 match = "main"

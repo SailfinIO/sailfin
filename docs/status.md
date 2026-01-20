@@ -15,6 +15,7 @@ This document tracks what works today and what is in progress.
 
 - The runtime is implemented in C under `runtime/native/` and linked into the native compiler binary.
 - The native CLI locates a bundled runtime next to the executable (override with `SAILFIN_RUNTIME_ROOT`) when building or running programs.
+- Legacy Python runtime shims have been removed; the 1.0 toolchain does not rely on `runtime/*.py` helpers.
 - The runtime will be reimplemented in Sailfin before the 1.0 release.
 
 ## Installer (Current)

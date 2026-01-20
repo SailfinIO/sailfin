@@ -42,7 +42,6 @@ Primary sources:
 - `runtime/native/include/sailfin_runtime.h`
 - `runtime/native/src/sailfin_runtime.c`
 - `runtime/prelude.sfn`
-- `runtime/native_runner.py` (temporary; slated for removal pre-1.0)
 - `docs/runtime_abi.md` (target Sailfin-native ABI spec)
 
 ## C Runtime Architecture (Current)
@@ -56,7 +55,7 @@ compiler relies on it.
   "immediate-codepoint" pseudo-strings encoded in pointer bits to avoid
   allocations for single-byte graphemes.
 - **Arrays**: `{ i8**, i64 }` for pointer arrays. The runtime stores capacity
-  and canaries in a hidden header *before* `data` for arrays it allocates.
+  and canaries in a hidden header _before_ `data` for arrays it allocates.
 - **Numbers**: `double` at the ABI (including for chars/bytes in some helpers).
 - **Booleans**: `bool` (i1 in LLVM IR).
 - **Exceptions**: thread-local exception message string + setjmp/longjmp stack
@@ -121,11 +120,9 @@ compiler relies on it.
 
 ## Removal Inventory (Pre-1.0)
 
-The following entrypoints are still Python/C-based and must be removed or
-replaced before 1.0 ships:
+The following entrypoints are still C-based and must be removed or replaced
+before 1.0 ships:
 
-- Python runtime shims: `runtime/runtime_support.py`,
-  `runtime/native_runner.py`, `runtime/native_runner_impl.py`, `runtime/__init__.py`.
 - Native C runtime: `runtime/native/src/sailfin_runtime.c`,
   `runtime/native/include/sailfin_runtime.h`.
 - Native C driver: `runtime/native/src/native_driver.c`.
@@ -140,11 +137,7 @@ runtime/toolchain.
 
 ### Runtime shims → removal conditions
 
-- `runtime/runtime_support.py`, `runtime/native_runner.py`,
-  `runtime/native_runner_impl.py`, and `runtime/__init__.py` are only required
-  by the emergency fallback Python compiler artifacts under `compiler/build/**`.
-  They can be deleted once that fallback is removed; no separate native
-  replacements are required purely to retire these shims.
+- Status: the Python runtime shims were removed from the repository pre-1.0.
 
 ### Compiler artifacts → native pipeline
 
@@ -174,8 +167,7 @@ runtime/toolchain.
    no-ops in C. A native scheduler, channels, and server dispatch are required
    for examples and capability enforcement.
 5. **Capability adapters**: Filesystem is implemented in C, HTTP/model are
-   stubs, and Python shims remain in `runtime/runtime_support.py` and
-   `runtime/native_runner.py`. Native adapters must replace these before 1.0.
+   stubs. Native adapters must replace these before 1.0.
 6. **Driver/CLI**: the C driver and Python runners are still part of the
    toolchain. A Sailfin-native CLI must replace them before 1.0.
 7. **Incomplete helpers**: `get_field`, `array_map/filter/reduce`,

@@ -39,7 +39,7 @@ sailfin/
 ├─ runtime/
 │  ├─ prelude.sfn                # Sailfin-visible runtime surface
 │  ├─ native/                    # C runtime implementation
-│  └─ native_runner*.py          # runner glue for the native runtime
+│  └─ (no Python shims)          # Python runtime shims removed pre-1.0
 ├─ docs/
 ├─ examples/
 ├─ scripts/
@@ -55,7 +55,7 @@ If a subsystem grows large, give it its own folder under `compiler/src/` with a
 - Prefer name + role suffixes that match existing usage:
   - `*_utils.sfn` for helpers (`string_utils.sfn`, `token_utils.sfn`)
   - `*_checker.sfn` for validators (`effect_checker.sfn`)
-  - `*_lowering.sfn` for lowering passes (`native_lowering.sfn`)
+  - `*_lowering.sfn` for lowering passes (`native_llvm_lowering.sfn`)
   - `*_ir.sfn` for IR definitions (`native_ir.sfn`)
   - `*_semantics.sfn` for semantic interpretation (`decorator_semantics.sfn`)
 - In multi-file domains, use neutral names like `types.sfn`, `utils.sfn`,

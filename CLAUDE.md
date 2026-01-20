@@ -64,7 +64,7 @@ The compiler (`compiler/src/`) follows this flow:
 - `compiler/src/ast.sfn` — Canonical AST node definitions
 - `compiler/src/native_ir.sfn` — `.sfn-asm` intermediate representation
 - `runtime/prelude.sfn` — Sailfin-native runtime (collections, strings, type checks)
-- `runtime/runtime_support.py` — Python bridges (still needed for I/O, concurrency)
+- `runtime/native/` — Current C runtime implementation (planned to move into Sailfin pre-1.0)
 
 ### Effect System
 
@@ -183,7 +183,7 @@ Before declaring a feature "shipped in Stage1":
 1. Parses correctly (`compiler/src/parser.sfn`)
 2. Type-checks or effect-checks (`compiler/src/typecheck.sfn`, `compiler/src/effect_checker.sfn`)
 3. Emits valid `.sfn-asm` (`compiler/src/emit_native.sfn`)
-4. Lowers to runnable Python (`compiler/src/native_lowering.sfn`)
+4. Lowers to LLVM IR (`compiler/src/native_llvm_lowering.sfn`)
 5. Has regression coverage (`compiler/tests/`)
 6. Self-hosts (compiler compiles itself)
 7. Documented in `docs/status.md` and `docs/spec.md` Part A
@@ -222,10 +222,9 @@ test "parser: parses effectful fn" {
 
 The compiler must always compile itself. Breaking changes require:
 
-1. Bootstrap the change in Python (`runtime/runtime_support.py`)
-2. Implement in Sailfin (`compiler/src/*.sfn`)
-3. Ensure the bootstrap artifact still self-hosts (`make test-integration`)
-4. Remove Python scaffold once stable
+1. Implement in Sailfin (`compiler/src/*.sfn`)
+2. Ensure the selfhost build still succeeds (`make compile`)
+3. Ensure integration coverage still passes (`make test-integration`)
 
 ## Versioning & Releases
 

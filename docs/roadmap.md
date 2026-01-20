@@ -36,7 +36,7 @@ work after launch. Legacy compiler stages are no longer tracked in this plan.
    - [ ] Replace the current `sfn` shell wrapper with a Sailfin-native CLI binary.
    - [ ] Replace the C `native_driver` with a Sailfin-native CLI entrypoint.
    - [ ] Remove Python tooling/scripts from the release pipeline and developer entrypoints.
-   - [ ] Replace Python runtime shims (`runtime/runtime_support.py`, `runtime/native_runner*.py`) with native runtime modules.
+   - [x] Remove Python runtime shims (`runtime/runtime_support.py`, `runtime/native_runner*.py`).
    - [ ] Remove Python-generated compiler artifacts (`compiler/build/**`) from the 1.0 toolchain.
    - [ ] Add CI guardrails that fail when Python tooling is invoked.
    - [ ] Provide a dedicated `make test-native` target and keep `make test` stable for release.

@@ -7,7 +7,6 @@ import { parse_program } from "./parser";
 import { Program } from "./ast";
 import { emit_program } from "./emitter_sailfin";
 import { emit_native, emit_native_with_module_name, EmitNativeResult, NativeModule } from "./emit_native";
-import { lower_to_python, LoweredPythonResult } from "./native_lowering";
 import {
     lower_to_llvm,
     lower_to_llvm_for_tests,
@@ -35,27 +34,6 @@ fn _timing_line(module_name -> string, phase -> string, elapsed_ms -> number) ->
     // Format is stable and grep/awk-friendly.
     // Emit to stderr via print.warn.
     return "[timing] module=" + module_name + " phase=" + phase + " ms=" + number_to_string(elapsed_ms);
-}
-
-struct CompiledModule {
-    source_path -> string;
-    python_source -> string;
-}
-
-struct ModuleDiagnostics {
-    source_path -> string;
-    messages -> string[];
-    fatal -> boolean;
-}
-
-struct ModuleCompilationResult {
-    module -> CompiledModule?;
-    diagnostics -> ModuleDiagnostics[];
-}
-
-struct ProjectCompilation {
-    modules -> CompiledModule[];
-    diagnostics -> ModuleDiagnostics[];
 }
 
 fn compile_to_sailfin(source -> string) -> string ![io] {
@@ -179,28 +157,6 @@ fn module_name_from_path(source_path -> string) -> string {
         return "main";
     }
     return base;
-}
-
-fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
-    let native_result = compile_to_native(source);
-    let lowered = lower_to_python(native_result.module, "main");
-    let mut combined -> string[] = [];
-    combined = combined.concat(native_result.diagnostics);
-    combined = combined.concat(lowered.diagnostics);
-    if combined.length > 0 {
-        let mut index -> number = 0;
-        loop {
-            if index >= combined.length {
-                break;
-            }
-            print.warn("[native] " + combined[index]);
-            index += 1;
-        }
-    }
-    return LoweredPythonResult {
-        source: lowered.source,
-        diagnostics: combined,
-    };
 }
 
 struct LLVMCompilationResult {
@@ -721,65 +677,6 @@ fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> 
 
 fn stage2_compiler_main() ![io] {
     print.info("Sailfin compiler");
-}
-
-fn compile_project(sources -> string[]) -> ProjectCompilation ![io] {
-    let mut modules -> CompiledModule[] = [];
-    let mut diagnostics -> ModuleDiagnostics[] = [];
-
-    for source_path in sources {
-        let result = compile_source_at_path(source_path);
-        if result.module != null {
-            modules = modules.concat([result.module]);
-        }
-        if result.diagnostics.length > 0 {
-            diagnostics = diagnostics.concat(result.diagnostics);
-        }
-    }
-
-    return ProjectCompilation {
-        modules: modules,
-        diagnostics: diagnostics,
-    };
-}
-
-fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io] {
-    let source = fs.readFile(source_path);
-    let program = parse_program(source);
-    let analysis = typecheck_program(program);
-    if analysis.diagnostics.length > 0 {
-        return ModuleCompilationResult {
-            module: null,
-            diagnostics: [ModuleDiagnostics {
-                source_path: source_path,
-                messages: format_typecheck_diagnostics(analysis.diagnostics, source),
-                fatal: true,
-            }],
-        };
-    }
-
-    let module_name = module_name_from_path(source_path);
-    let native_result = emit_native_with_module_name(program, module_name);
-    let lowered = lower_to_python(native_result.module, module_name);
-    let mut messages -> string[] = native_result.diagnostics.concat(lowered.diagnostics);
-    let python_source = lowered.source;
-
-    let mut entry_list -> ModuleDiagnostics[] = [];
-    if messages.length > 0 {
-        entry_list = [ModuleDiagnostics {
-            source_path: source_path,
-            messages: messages,
-            fatal: false,
-        }];
-    }
-
-    return ModuleCompilationResult {
-        module: CompiledModule {
-            source_path: source_path,
-            python_source: python_source,
-        },
-        diagnostics: entry_list,
-    };
 }
 
 fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> string[] {
