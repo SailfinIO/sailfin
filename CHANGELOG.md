@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.124 (2026-01-20)
+
+### Bug Fixes
+
+- Remove llvm shim file
+  ([`4ecf0be`](https://github.com/SailfinIO/sailfin/commit/4ecf0bef5f2f18c8d0ecd82c23e3dda89434ed88))
+
+- Remove release assets step
+  ([`6deaa51`](https://github.com/SailfinIO/sailfin/commit/6deaa51d2469ceb240b02d1812384430386d973f))
+
+
 ## v0.1.1-alpha.123 (2026-01-20)
 
 ### Bug Fixes
