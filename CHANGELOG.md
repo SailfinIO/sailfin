@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.129 (2026-01-20)
+
+### Bug Fixes
+
+- Refactor and release tag and branches yml
+  ([`55b8818`](https://github.com/SailfinIO/sailfin/commit/55b88189514d5ebc64a2ae87c5346ae60d6f8002))
+
+- Refactor and release tag and branches yml
+  ([`509cea1`](https://github.com/SailfinIO/sailfin/commit/509cea10b137312de7333df1e44bf59f7950c3ab))
+
+
 ## v0.1.1-alpha.128 (2026-01-20)
 
 ### Bug Fixes
