@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Benchmark Stage2 compilation time for Sailfin source files.
+"""Benchmark native compiler compilation time for Sailfin source files.
 
-Runs the already-built `build/native/sailfin-stage2` binary against a set of
-`.sfn` files and records wall-clock time per file.
+Runs the already-built self-hosted native compiler binary (default:
+`build/native/sailfin`) against a set of `.sfn` files and records wall-clock
+time per file.
 
 This is intended to catch regressions where lexing/parsing becomes O(N^2) and
 large files start hanging.
@@ -26,14 +27,14 @@ class Result:
     timed_out: bool
 
 
-def run_one(stage2: pathlib.Path, path: pathlib.Path, timeout_s: float, emit: str) -> Result:
+def run_one(compiler: pathlib.Path, path: pathlib.Path, timeout_s: float, emit: str) -> Result:
     start = time.monotonic()
     try:
         proc = subprocess.run(
             # Match the CLI shape used by scripts/selfhost_native.py.
             # (Older invocations used a --emit flag; the subcommand is the
             # stable interface and tends to give clearer failures.)
-            [str(stage2), "emit", emit, str(path)],
+            [str(compiler), "emit", emit, str(path)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
@@ -51,9 +52,10 @@ def run_one(stage2: pathlib.Path, path: pathlib.Path, timeout_s: float, emit: st
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--stage2",
-        default="build/native/sailfin-stage2",
-        help="Path to stage2 binary (default: build/native/sailfin-stage2)",
+        "--compiler",
+        dest="compiler",
+        default="build/native/sailfin",
+        help="Path to the native compiler binary (default: build/native/sailfin)",
     )
     parser.add_argument(
         "--emit",
@@ -69,8 +71,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--glob",
-        default="compiler/src/*.sfn",
-        help="Glob of input files (default: compiler/src/*.sfn)",
+        action="append",
+        default=["compiler/src/**/*.sfn"],
+        help="Glob of input files (repeatable, default: compiler/src/**/*.sfn)",
     )
     parser.add_argument(
         "--top",
@@ -95,22 +98,27 @@ def main() -> int:
         args.max_failures = 1
 
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    stage2 = (repo_root / args.stage2).resolve()
-    if not stage2.exists():
-        print(f"missing stage2 binary: {stage2}", file=sys.stderr)
+    compiler = (repo_root / args.compiler).resolve()
+    if not compiler.exists():
+        print(f"missing native compiler binary: {compiler}", file=sys.stderr)
         print("Run `make compile` first.", file=sys.stderr)
         return 2
 
-    files = sorted(repo_root.glob(args.glob))
+    matched: set[pathlib.Path] = set()
+    for pattern in args.glob:
+        matched.update(repo_root.glob(pattern))
+
+    files = sorted(p for p in matched if p.is_file())
     if not files:
-        print(f"no files matched: {args.glob}", file=sys.stderr)
+        patterns = ", ".join(args.glob)
+        print(f"no files matched: {patterns}", file=sys.stderr)
         return 2
 
     results: list[Result] = []
     failures_seen = 0
     total_start = time.monotonic()
     for path in files:
-        res = run_one(stage2, path, timeout_s=args.timeout, emit=args.emit)
+        res = run_one(compiler, path, timeout_s=args.timeout, emit=args.emit)
         results.append(res)
         if res.timed_out:
             print(f"TIMEOUT  {res.seconds:8.3f}s  {path}")
