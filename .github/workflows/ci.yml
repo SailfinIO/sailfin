@@ -121,7 +121,7 @@ jobs:
           "$SEED_NATIVE" version
 
       - name: Build from released seed
-        id: selfhost_seed_try
+        id: build_seed_try
         shell: bash -l {0}
         run: |
           set -euo pipefail
@@ -359,6 +359,8 @@ jobs:
     needs: semantic-release
     if: needs.semantic-release.outputs.released == 'true'
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ needs.semantic-release.outputs.tag }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -380,6 +382,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.semantic-release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify release tag checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          current="$(git describe --tags --exact-match)"
+          if [ "$current" != "$RELEASE_TAG" ]; then
+            echo "[ci][error] expected $RELEASE_TAG, got $current" >&2
+            exit 1
+          fi
 
       - name: Set up Miniconda
         uses: conda-incubator/setup-miniconda@v3
@@ -456,7 +470,7 @@ jobs:
           "$SEED_NATIVE" version
 
       - name: Build from released seed
-        id: selfhost_seed_try
+        id: build_seed_try
         shell: bash -l {0}
         run: |
           set -euo pipefail
@@ -478,6 +492,22 @@ jobs:
           ls -lh build/native/sailfin
           (file build/native/sailfin || true)
           build/native/sailfin version || build/native/sailfin --version || true
+
+      - name: Verify compiler version matches release tag
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          expected="${RELEASE_TAG#v}"
+          file_version="$(python -c "import re, pathlib; text=pathlib.Path('compiler/src/version.sfn').read_text(encoding='utf-8'); m=re.search(r'__version__\\s*=\\s*\"([^\"]+)\"', text); print(m.group(1) if m else '')")"
+          if [ "$file_version" != "$expected" ]; then
+            echo "[ci][error] version.sfn $file_version does not match $expected" >&2
+            exit 1
+          fi
+          actual="$(build/native/sailfin version | sed -n 's/.*sfn //p')"
+          if [ "$actual" != "$expected" ]; then
+            echo "[ci][error] compiler reports $actual, expected $expected" >&2
+            exit 1
+          fi
 
       - name: Expose build/native import context for tests
         shell: bash -l {0}
