@@ -1,6 +1,6 @@
 // examples/io/write-file.sfn
 
-import { fs } from "sail/io";
+import { fs } from "sfn/io";
 
 fn main() ![io] {
     fs.writeFile("output.txt", "Hello, Sail!");

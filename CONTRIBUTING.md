@@ -8,14 +8,15 @@ repository.
 
 - See `README.md` for a project overview and `docs/README.md` for the doc
   navigation map.
-- Review `docs/status.md` to understand which features are implemented in the
-  Python bootstrap compiler (stage0) versus the Sailfin-native prototypes.
+- Review `docs/status.md` to understand which features ship today vs what is
+  planned.
+- Check `docs/roadmap.md` for current tasks and sequencing.
 - Familiarise yourself with `docs/style-guide.md` for Sailfin module layout,
   file naming, and doc/test mirroring conventions.
-- Ensure you have the `sailfin-bootstrap` Conda environment:
+- Ensure you have the `sailfin` Conda environment:
 
   ```bash
-  make bootstrap-install
+  make env
   ```
 
 ## 2. Coding Workflow
@@ -23,14 +24,13 @@ repository.
 1. **Branch & scope** — Keep work focused; reference open issues or roadmap
    items when possible.
 2. **Development commands**
-   - Run tests: `make bootstrap-test` (use `PYTEST_ARGS=-m unit` or
-     `-m integration` to scope).
-   - Compile Sailfin sources: `make bootstrap-compile`.
+   - Run tests: `make test`
+   - Compile Sailfin sources: `make compile` (self-hosted native compiler).
+   - Install the built compiler: `make install` (defaults to `/usr/local/bin`).
 3. **Testing expectations**
-   - Add or update unit tests under `bootstrap/tests/` for stage0 changes.
-   - Mirror semantics in Sailfin-native tests when relevant
-     (`compiler/src/**`, `bootstrap/tests/test_compiler_sources.py`).
-   - Run `make bootstrap-test` before submitting.
+   - Add or update unit tests under `compiler/tests/` for compiler changes.
+   - Reflect behaviour updates in `docs/status.md` and the relevant module docs.
+   - Run `make test` before submitting.
 
 ## 3. Documentation Process
 
@@ -40,8 +40,8 @@ When behaviour, coverage, or roadmap status changes:
 2. Sync `docs/spec.md` (bootstrap reference) and note new design work in the
    Part B preview if needed.
 3. Adjust `docs/roadmap.md` for sequencing changes.
-4. Touch the relevant folder README (e.g., `bootstrap/README.md`,
-   `compiler/README.md`, `examples/README.md`) so local guidance stays accurate.
+4. Touch the relevant folder README (e.g., `compiler/README.md`,
+   `runtime/README.md`, `examples/README.md`) so local guidance stays accurate.
 5. For future-facing designs, add or amend proposals under `docs/proposals/`.
 
 Please reference the updated documents in your pull request description.
@@ -49,7 +49,11 @@ Please reference the updated documents in your pull request description.
 ## 4. Commit & Review Style
 
 - Use clear, atomic commits. Conventional prefixes (`feat(compiler):`, `fix(bootstrap):`)
-  are encouraged but not mandatory.
+  are encouraged.
+- Note: automated GitHub releases are driven by `python-semantic-release`, which relies on
+  Conventional Commit-style prefixes to decide whether to cut a new version. If you expect
+  a new prerelease (e.g., on the `alpha` branch), use a release-worthy prefix like `fix:`
+  or `feat:` in the commit subject.
 - Document how you validated the change (commands, tests, screenshots).
 - When behaviour shifts, include reproduction steps and link to the relevant
   roadmap/status entries.
@@ -59,7 +63,7 @@ Please reference the updated documents in your pull request description.
 Each PR should include:
 
 - Summary of the change and impacted areas.
-- Verification commands (`make bootstrap-test`, targeted pytest runs, etc.).
+- Verification commands (`make test`, targeted runs, etc.).
 - Notes on documentation updates (status/spec/roadmap).
 
 Reviewers will check for:
@@ -85,4 +89,4 @@ For questions about design direction or roadmap priorities, start with
 `docs/status.md` and `docs/roadmap.md`. If additional context is required, open
 an issue referencing the relevant section or proposal.
 
-Welcome aboard, and thanks for advancing Sailfin! ***!
+Welcome aboard, and thanks for advancing Sailfin! \*\*\*!

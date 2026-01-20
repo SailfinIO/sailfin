@@ -18,6 +18,11 @@ Higher-level language features: generics, parametric polymorphism, closures, dec
 - **`unions.sfn`** – Working with union types, intersection via combined interfaces, and structural access.
 - **`web-server-with-concurrency.sfn`** – HTTP handler spawning a routine for background computation while continuing to serve requests.
 - **`unions.sfn`** – (Also covers intersection types and narrowing.)
+- **`type-guards.sfn`** – (Also covers pattern matching.)
+- **`matrix-multiplication.sfn`** – (Also covers higher-order functions.)
+- **`pointer-arithmetic.sfn`** – Low-level memory manipulation with pointers, offsets, and dereferencing.
+- **`raw-pointers.sfn`** – Unsafe operations with raw pointers, including casting and manual memory management.
+- **`unsafe-extern-interop.sfn`** – Calling external C functions with unsafe blocks and pointer handling.
 
 ## Notes
 

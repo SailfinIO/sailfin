@@ -1,0 +1,26 @@
+// examples/advanced/pointer-arithmetic.sfn
+
+unsafe extern fn malloc(size -> usize) -> *u8;
+unsafe extern fn free(ptr -> *u8) -> void;
+
+fn main() ![unsafe, io] {
+    unsafe {
+        // Allocate space for 4 integers (4 bytes each)
+        let arr = malloc(16) as *i32;
+
+        // Write values using pointer arithmetic
+        for i in 0..4 {
+            let element_ptr = arr + i;
+            *element_ptr = i * 10;
+        }
+
+        // Read values back
+        for i in 0..4 {
+            let element_ptr = arr + i;
+            let value = *element_ptr;
+            print.info("arr[{{ i }}] = {{ value }}");
+        }
+
+        free(arr as *u8);
+    }
+}

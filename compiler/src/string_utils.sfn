@@ -1,0 +1,143 @@
+// compiler/src/string_utils.sfn
+//
+// Shared string helpers surfaced via the runtime prelude. The compiler and
+// downstream projects import from here to keep a single implementation.
+
+import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, strings_equal } from "runtime/prelude";
+
+fn char_at(value -> string, index -> number) -> string {
+	let value_len = value.length;
+	if value_len == 0 {
+		return "";
+	}
+	if index < 0 {
+		return "";
+	}
+	if index >= value_len {
+		return "";
+	}
+	// Prefer grapheme_at so ASCII access avoids substring allocations.
+	return grapheme_at(value, index);
+}
+
+fn is_symbol_char(ch -> string) -> boolean {
+	if ch.length == 0 {
+		return false;
+	}
+	if ch == "_" {
+		return true;
+	}
+	let code = char_code(ch);
+	let lower_a = char_code("a");
+	let lower_z = char_code("z");
+	if code >= lower_a && code <= lower_z {
+		return true;
+	}
+	let upper_a = char_code("A");
+	let upper_z = char_code("Z");
+	if code >= upper_a && code <= upper_z {
+		return true;
+	}
+	let zero = char_code("0");
+	let nine = char_code("9");
+	if code >= zero && code <= nine {
+		return true;
+	}
+	return false;
+}
+
+fn sanitize_symbol(name -> string) -> string {
+	let name_len = name.length;
+	if name_len == 0 {
+		return "_";
+	}
+	let mut result -> string = "";
+	let mut index -> number = 0;
+	loop {
+		if index >= name_len {
+			break;
+		}
+		// index is already bounds-checked against name_len.
+		let ch = grapheme_at(name, index);
+		if is_symbol_char(ch) {
+			result = result + ch;
+		}
+		index += 1;
+	}
+	if result.length == 0 {
+		return "_";
+	}
+	let first = char_at(result, 0);
+	let first_code = char_code(first);
+	let zero = char_code("0");
+	let nine = char_code("9");
+	if first_code >= zero && first_code <= nine {
+		result = "_" + result;
+	}
+	return result;
+}
+
+fn char_code_at_text(text -> string, index -> number) -> number {
+	return char_code(char_at(text, index));
+}
+
+fn index_of(value -> string, target -> string) -> number {
+	if target.length == 0 {
+		return 0;
+	}
+	let mut index -> number = 0;
+	loop {
+		if index + target.length > value.length {
+			break;
+		}
+		let mut match_index -> number = 0;
+		let mut matches -> boolean = true;
+		loop {
+			if match_index >= target.length {
+				break;
+			}
+			if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index) {
+				matches = false;
+				break;
+			}
+			match_index += 1;
+		}
+		if matches {
+			return index;
+		}
+		index += 1;
+	}
+	return -1;
+}
+
+fn find_last_index_of_char(value -> string, target -> string) -> number {
+	if target.length != 1 {
+		return -1;
+	}
+	let target_code = char_code_at_text(target, 0);
+	let mut index -> number = value.length;
+	loop {
+		if index <= 0 {
+			break;
+		}
+		index -= 1;
+		if char_code_at_text(value, index) == target_code {
+			return index;
+		}
+	}
+	return -1;
+}
+
+export {
+	clamp,
+	substring,
+	find_char,
+	grapheme_count,
+	grapheme_at,
+	char_code,
+	char_at,
+	sanitize_symbol,
+	strings_equal,
+	index_of,
+	find_last_index_of_char,
+};

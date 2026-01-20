@@ -1,0 +1,20 @@
+test "ops: ge includes equality" {
+    assert 1 >= 1;
+    if 1 >= 2 {
+        runtime_raise_value_error_fn("expected 1 >= 2 to be false");
+    }
+}
+
+test "ops: le includes equality" {
+    assert 1 <= 1;
+    if 2 <= 1 {
+        runtime_raise_value_error_fn("expected 2 <= 1 to be false");
+    }
+}
+
+test "ops: != works" {
+    assert 1 != 2;
+    if 1 != 1 {
+        runtime_raise_value_error_fn("expected 1 != 1 to be false");
+    }
+}

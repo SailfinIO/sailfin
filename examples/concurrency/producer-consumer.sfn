@@ -1,7 +1,7 @@
 // examples/concurrency/producer-consumer.sfn
 
-import { Channel, channel } from "sail/async";
-import { sleep } from "sail/time";
+import { Channel, channel } from "sfn/async";
+import { sleep } from "sfn/time";
 
 fn main() ![clock, io] {
     let buffer -> Channel<number> = channel(10); // bounded buffer

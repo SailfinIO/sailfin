@@ -1,0 +1,453 @@
+// compiler/src/llvm/imports.sfn
+//
+// Import handling and layout manifest management for LLVM lowering.
+// Resolves imported module paths and applies layout metadata.
+
+import { NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest } from "../native_ir";
+import { substring } from "../string_utils";
+import { ImportedModuleContext, LayoutManifestApplication } from "./types";
+import { trim_text, append_string, string_array_contains, number_to_string, starts_with, ends_with, join_with_separator } from "./utils";
+
+// =============================================================================
+// Import Context Collection
+// =============================================================================
+
+fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[] ![io] {
+    let context = collect_imported_module_context(imports);
+    return context.manifests;
+}
+
+fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleContext ![io] {
+    return collect_imported_module_context_for_module(imports, "");
+}
+
+fn collect_imported_module_context_for_module(imports -> NativeImport[], current_module_slug -> string) -> ImportedModuleContext ![io] {
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    if trace {
+        print.info("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
+    }
+    let mut manifests -> LayoutManifest[] = [];
+    let mut native_texts -> string[] = [];
+    let mut diagnostics -> string[] = [];
+    let mut seen -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= imports.length {
+            break;
+        }
+        if trace && index > 0 && index % 50 == 0 {
+            print.info("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")");
+        }
+        let module_path = imports[index].module;
+        let base_slug = resolve_import_module_slug_for_module(module_path, current_module_slug);
+        let slug = resolve_import_artifact_slug(base_slug);
+        if slug.length == 0 {
+            index += 1;
+            continue;
+        }
+        if string_array_contains(seen, slug) {
+            index += 1;
+            continue;
+        }
+        seen = append_string(seen, slug);
+
+        let manifest_path = _resolve_layout_manifest_path_for_slug(slug);
+        let native_text_path = _resolve_native_text_path_for_slug(slug);
+
+        let mut manifest_structs -> NativeStruct[] = [];
+        let mut manifest_enums -> NativeEnum[] = [];
+        if fs.exists(manifest_path) {
+            let manifest_contents = fs.readFile(manifest_path);
+            let parsed_manifest = parse_layout_manifest(manifest_contents);
+            manifest_structs = parsed_manifest.structs;
+            manifest_enums = parsed_manifest.enums;
+        } else {
+            diagnostics = diagnostics.concat(["layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")"]);
+        }
+
+        let mut native_text -> string = "";
+        if fs.exists(native_text_path) {
+            native_text = fs.readFile(native_text_path);
+        } else {
+            diagnostics = diagnostics.concat(["native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")"]);
+        }
+
+        manifests = manifests.concat([LayoutManifest {
+            structs: manifest_structs,
+            enums: manifest_enums,
+            diagnostics: [],
+        }]);
+        native_texts = native_texts.concat([native_text]);
+        index += 1;
+    }
+
+    if trace {
+        print.info("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(seen.length) + ")");
+    }
+
+    return ImportedModuleContext { manifests: manifests, native_texts: native_texts, diagnostics: diagnostics };
+}
+
+fn resolve_import_artifact_slug(slug -> string) -> string ![io] {
+    if slug.length == 0 {
+        return slug;
+    }
+
+    // Prefer the direct slug if it exists.
+    if fs.exists(_resolve_layout_manifest_path_for_slug(slug)) {
+        return slug;
+    }
+
+    // Directory imports (e.g. "./parser") resolve to `parser` but the actual
+    // module is typically `parser/mod`. Fall back to that layout.
+    if !ends_with(slug, "/mod") {
+        let mod_slug = slug + "/mod";
+        if fs.exists(_resolve_layout_manifest_path_for_slug(mod_slug)) {
+            return mod_slug;
+        }
+    }
+
+    return slug;
+}
+
+// =============================================================================
+// Module Path Resolution
+// =============================================================================
+
+fn resolve_import_module_slug(module -> string) -> string {
+    return resolve_import_module_slug_for_module(module, "");
+}
+
+fn dirname_for_module_slug(slug -> string) -> string {
+    let mut last_slash -> number = -1;
+    let mut index -> number = 0;
+    loop {
+        if index >= slug.length {
+            break;
+        }
+        if slug[index] == "/" {
+            last_slash = index;
+        }
+        index += 1;
+    }
+    if last_slash < 0 {
+        return "";
+    }
+    return substring(slug, 0, last_slash);
+}
+
+fn resolve_import_module_slug_for_module(module -> string, current_module_slug -> string) -> string {
+    let trimmed = trim_text(module);
+    if trimmed.length == 0 {
+        return "";
+    }
+
+    let mut normalized = normalize_import_module_path(trimmed);
+
+    // Resolve relative imports against the importing module's directory.
+    // This is required now that we preserve directory structure for modules
+    // (e.g. `parser/mod` importing `./token_utils`).
+    if starts_with(normalized, "./") || starts_with(normalized, "../") {
+        let base_dir = dirname_for_module_slug(current_module_slug);
+        if base_dir.length > 0 {
+            normalized = base_dir + "/" + normalized;
+        }
+    }
+
+    // Normalize relative module specifiers (./foo, ../bar, foo/../baz) into
+    // a stable slug that matches our import-context artifact layout.
+    // (Primary: build/native/import-context; legacy: build/stage2.)
+    // Examples:
+    // - "./llvm/type_context" -> "llvm/type_context"
+    // - "../native_ir" -> "native_ir"
+    let mut parts -> string[] = [];
+    let mut segment -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= normalized.length {
+            break;
+        }
+        let ch = normalized[index];
+        if ch == "/" {
+            if segment.length > 0 {
+                parts = append_string(parts, segment);
+            }
+            segment = "";
+        } else {
+            segment = segment + ch;
+        }
+        index += 1;
+    }
+    if segment.length > 0 {
+        parts = append_string(parts, segment);
+    }
+
+    let mut resolved -> string[] = [];
+    index = 0;
+    loop {
+        if index >= parts.length {
+            break;
+        }
+        let part = parts[index];
+        if part.length == 0 || part == "." {
+            index += 1;
+            continue;
+        }
+        if part == ".." {
+            if resolved.length > 0 {
+                let mut shortened -> string[] = [];
+                let mut drop_index -> number = 0;
+                let limit = resolved.length - 1;
+                loop {
+                    if drop_index >= limit {
+                        break;
+                    }
+                    shortened = append_string(shortened, resolved[drop_index]);
+                    drop_index += 1;
+                }
+                resolved = shortened;
+            }
+            index += 1;
+            continue;
+        }
+        resolved = append_string(resolved, part);
+        index += 1;
+    }
+
+    let mut slug = join_with_separator(resolved, "/");
+
+    // compiler/tests often import compiler sources via "../../src/<name>".
+    // Our import-context artifacts are rooted at build/native/import-context/<name>.*
+    // (no "src/" dir), so strip that prefix to keep imports and artifact layout
+    // consistent.
+    if starts_with(slug, "src/") {
+        slug = substring(slug, 4, slug.length);
+    }
+    if starts_with(slug, "compiler/src/") {
+        slug = substring(slug, 13, slug.length);
+    }
+    return slug;
+}
+
+fn layout_manifest_path_for_slug(slug -> string) -> string {
+    return "build/native/import-context/" + slug + ".layout-manifest";
+}
+
+fn native_text_path_for_slug(slug -> string) -> string {
+    return "build/native/import-context/" + slug + ".sfn-asm";
+}
+
+fn _legacy_layout_manifest_path_for_slug(slug -> string) -> string {
+    return "build/stage2/" + slug + ".layout-manifest";
+}
+
+fn _legacy_native_text_path_for_slug(slug -> string) -> string {
+    return "build/stage2/" + slug + ".sfn-asm";
+}
+
+fn _selfhost_layout_manifest_path_for_slug(slug -> string) -> string {
+    return "build/selfhost/native/seed_cwd/build/import-context/" + slug + ".layout-manifest";
+}
+
+fn _selfhost_native_text_path_for_slug(slug -> string) -> string {
+    return "build/selfhost/native/seed_cwd/build/import-context/" + slug + ".sfn-asm";
+}
+
+fn _selfhost_legacy_layout_manifest_path_for_slug(slug -> string) -> string {
+    return "build/selfhost/native/seed_cwd/build/stage2/" + slug + ".layout-manifest";
+}
+
+fn _selfhost_legacy_native_text_path_for_slug(slug -> string) -> string {
+    return "build/selfhost/native/seed_cwd/build/stage2/" + slug + ".sfn-asm";
+}
+
+fn _resolve_layout_manifest_path_for_slug(slug -> string) -> string ![io] {
+    let primary = layout_manifest_path_for_slug(slug);
+    if fs.exists(primary) {
+        return primary;
+    }
+    let legacy = _legacy_layout_manifest_path_for_slug(slug);
+    if fs.exists(legacy) {
+        return legacy;
+    }
+    let fallback = _selfhost_layout_manifest_path_for_slug(slug);
+    if fs.exists(fallback) {
+        return fallback;
+    }
+    let selfhost_legacy = _selfhost_legacy_layout_manifest_path_for_slug(slug);
+    if fs.exists(selfhost_legacy) {
+        return selfhost_legacy;
+    }
+    return legacy;
+}
+
+fn _resolve_native_text_path_for_slug(slug -> string) -> string ![io] {
+    let primary = native_text_path_for_slug(slug);
+    if fs.exists(primary) {
+        return primary;
+    }
+    let legacy = _legacy_native_text_path_for_slug(slug);
+    if fs.exists(legacy) {
+        return legacy;
+    }
+    let fallback = _selfhost_native_text_path_for_slug(slug);
+    if fs.exists(fallback) {
+        return fallback;
+    }
+    let selfhost_legacy = _selfhost_legacy_native_text_path_for_slug(slug);
+    if fs.exists(selfhost_legacy) {
+        return selfhost_legacy;
+    }
+    return legacy;
+}
+
+fn normalize_import_module_path(value -> string) -> string {
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = value[index];
+        if ch == "\\" {
+            result = result + "/";
+        } else {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    return result;
+}
+
+// =============================================================================
+// Layout Manifest Application
+// =============================================================================
+
+fn apply_layout_manifest_to_module(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest?) -> LayoutManifestApplication {
+    if manifest == null {
+        return LayoutManifestApplication { structs: structs, enums: enums, diagnostics: [] };
+    }
+    return apply_layout_manifest_entries(structs, enums, manifest);
+}
+
+fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest) -> LayoutManifestApplication {
+    let mut diagnostics -> string[] = [];
+
+    let mut updated_structs -> NativeStruct[] = structs;
+    let mut struct_index -> number = 0;
+    loop {
+        if struct_index >= manifest.structs.length {
+            break;
+        }
+        let layout_struct = manifest.structs[struct_index];
+        let target_index = find_struct_index(updated_structs, layout_struct.name);
+        if target_index < 0 {
+            diagnostics = append_string(diagnostics, "layout manifest: struct `" + layout_struct.name + "` missing from native module");
+        } else {
+            let target = updated_structs[target_index];
+            let replaced = NativeStruct {
+                name: target.name,
+                fields: target.fields,
+                methods: target.methods,
+                implements: target.implements,
+                layout: layout_struct.layout,
+            };
+            updated_structs = replace_native_struct(updated_structs, target_index, replaced);
+        }
+        struct_index += 1;
+    }
+
+    let mut updated_enums -> NativeEnum[] = enums;
+    let mut enum_index -> number = 0;
+    loop {
+        if enum_index >= manifest.enums.length {
+            break;
+        }
+        let layout_enum = manifest.enums[enum_index];
+        let target_index = find_enum_index(updated_enums, layout_enum.name);
+        if target_index < 0 {
+            diagnostics = append_string(diagnostics, "layout manifest: enum `" + layout_enum.name + "` missing from native module");
+        } else {
+            let target = updated_enums[target_index];
+            let replaced = NativeEnum {
+                name: target.name,
+                variants: target.variants,
+                layout: layout_enum.layout,
+            };
+            updated_enums = replace_native_enum(updated_enums, target_index, replaced);
+        }
+        enum_index += 1;
+    }
+
+    return LayoutManifestApplication {
+        structs: updated_structs,
+        enums: updated_enums,
+        diagnostics: diagnostics,
+    };
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+fn find_struct_index(structs -> NativeStruct[], name -> string) -> number {
+    let mut index -> number = 0;
+    loop {
+        if index >= structs.length {
+            break;
+        }
+        if structs[index].name == name {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_enum_index(enums -> NativeEnum[], name -> string) -> number {
+    let mut index -> number = 0;
+    loop {
+        if index >= enums.length {
+            break;
+        }
+        if enums[index].name == name {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn replace_native_struct(structs -> NativeStruct[], index -> number, replacement -> NativeStruct) -> NativeStruct[] {
+    let mut result -> NativeStruct[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= structs.length {
+            break;
+        }
+        if i == index {
+            result.push(replacement);
+        } else {
+            result.push(structs[i]);
+        }
+        i += 1;
+    }
+    return result;
+}
+
+fn replace_native_enum(enums -> NativeEnum[], index -> number, replacement -> NativeEnum) -> NativeEnum[] {
+    let mut result -> NativeEnum[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= enums.length {
+            break;
+        }
+        if i == index {
+            result.push(replacement);
+        } else {
+            result.push(enums[i]);
+        }
+        i += 1;
+    }
+    return result;
+}

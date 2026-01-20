@@ -1,4 +1,5 @@
 // compiler/src/emit_native.sfn
+//
 // Prototype native backend that synthesises a textual intermediate format.
 // The current goal is to surface deterministic structure that future LLVM
 // and WASM lowering passes can consume. The artifact mirrors a simplified
@@ -19,11 +20,15 @@ import {
     Parameter,
     Program,
     Statement,
+    ImportSpecifier,
+    ExportSpecifier,
     TypeAnnotation,
     TypeParameter,
     WithClause,
     ElseBranch,
+    SourceSpan,
 } from "./ast";
+import { substring, char_code } from "./string_utils";
 
 struct NativeArtifact {
     name -> string;
@@ -32,6 +37,7 @@ struct NativeArtifact {
 }
 
 struct NativeModule {
+    module_name -> string;
     artifacts -> NativeArtifact[];
     entry_points -> string[];
     symbol_count -> number;
@@ -50,12 +56,131 @@ struct TextBuilder {
 struct NativeState {
     builder -> TextBuilder;
     diagnostics -> string[];
+    layout_context -> LayoutContext;
+}
+
+struct LayoutEmitResult {
+    lines -> string[];
+    diagnostics -> string[];
+}
+
+struct StructFieldLayoutDescriptor {
+    name -> string;
+    type_annotation -> string;
+    offset -> number;
+    size -> number;
+    align -> number;
+}
+
+struct RecordLayoutResult {
+    size -> number;
+    align -> number;
+    fields -> StructFieldLayoutDescriptor[];
+    diagnostics -> string[];
+}
+
+struct EnumVariantLayoutDescriptor {
+    name -> string;
+    tag -> number;
+    offset -> number;
+    size -> number;
+    align -> number;
+    fields -> StructFieldLayoutDescriptor[];
+}
+
+struct EnumAggregateLayout {
+    size -> number;
+    align -> number;
+    tag_size -> number;
+    tag_align -> number;
+    variants -> EnumVariantLayoutDescriptor[];
+    diagnostics -> string[];
+}
+
+struct TypeLayoutInfo {
+    size -> number;
+    align -> number;
+    diagnostics -> string[];
+}
+
+struct LayoutFieldInput {
+    name -> string;
+    type_annotation -> string;
+}
+
+struct LayoutStructDefinition {
+    name -> string;
+    fields -> LayoutFieldInput[];
+}
+
+struct LayoutEnumVariantDefinition {
+    name -> string;
+    fields -> LayoutFieldInput[];
+}
+
+struct LayoutEnumDefinition {
+    name -> string;
+    variants -> LayoutEnumVariantDefinition[];
+}
+
+struct CanonicalTypeLayout {
+    name -> string;
+    size -> number;
+    align -> number;
+}
+
+struct LayoutContext {
+    structs -> LayoutStructDefinition[];
+    enums -> LayoutEnumDefinition[];
+}
+
+fn build_layout_context(program -> Program) -> LayoutContext {
+    let mut structs -> LayoutStructDefinition[] = [];
+    let mut enums -> LayoutEnumDefinition[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= program.statements.length {
+            break;
+        }
+        let statement = program.statements[index];
+        if statement.variant == "StructDeclaration" {
+            let inputs = convert_struct_fields(statement.fields);
+            structs = append_layout_struct_definition(structs, LayoutStructDefinition { name: statement.name, fields: inputs });
+        }
+        if statement.variant == "EnumDeclaration" {
+            let mut variants -> LayoutEnumVariantDefinition[] = [];
+            let mut variant_index -> number = 0;
+            loop {
+                if variant_index >= statement.variants.length {
+                    break;
+                }
+                let variant = statement.variants[variant_index];
+                let inputs = convert_variant_fields(variant);
+                variants = append_layout_enum_variant_definition(variants, LayoutEnumVariantDefinition { name: variant.name, fields: inputs });
+                variant_index += 1;
+            }
+            enums = append_layout_enum_definition(enums, LayoutEnumDefinition { name: statement.name, variants: variants });
+        }
+        index += 1;
+    }
+    return LayoutContext { structs: structs, enums: enums };
 }
 
 fn emit_native(program -> Program) -> EmitNativeResult {
-    let mut state -> NativeState = state_new();
+    return emit_native_with_module_name(program, "main");
+}
+
+fn emit_native_with_module_name(program -> Program, module_name -> string) -> EmitNativeResult {
+    let layout_context = build_layout_context(program);
+    let mut state -> NativeState = state_new(layout_context);
     state = state_emit_line(state, "; Sailfin Native Prototype");
-    state = state_emit_line(state, ".module main");
+    let mut module_line = ".module ";
+    if module_name.length == 0 {
+        module_line = module_line + "main";
+    } else {
+        module_line = module_line + module_name;
+    }
+    state = state_emit_line(state, module_line);
     if program.statements.length > 0 {
         state = state_emit_blank(state);
     }
@@ -78,8 +203,11 @@ fn emit_native(program -> Program) -> EmitNativeResult {
         contents: builder_to_string(state.builder),
     };
 
+    let manifest_artifact = generate_layout_manifest(program, layout_context);
+
     let module = NativeModule {
-        artifacts: [artifact],
+        module_name: module_name,
+        artifacts: [artifact, manifest_artifact],
         entry_points: collect_entry_points(program),
         symbol_count: count_exported_symbols(program),
     };
@@ -93,8 +221,17 @@ fn emit_native(program -> Program) -> EmitNativeResult {
 fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     if statement.variant == "ImportDeclaration" {
         let mut line -> string = ".import \"" + statement.source + "\"";
-        if statement.items.length > 0 {
-            line = line + " { " + join_with_separator(statement.items, ", ") + " }";
+        let rendered = render_native_specifiers(statement.import_specifiers);
+        if rendered.length > 0 {
+            line = line + " { " + rendered + " }";
+        }
+        return state_emit_line(state, line);
+    }
+    if statement.variant == "ExportDeclaration" {
+        let mut line -> string = ".export \"" + statement.source + "\"";
+        let rendered = render_export_specifiers(statement.export_specifiers);
+        if rendered.length > 0 {
+            line = line + " { " + rendered + " }";
         }
         return state_emit_line(state, line);
     }
@@ -103,6 +240,9 @@ fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     }
     if statement.variant == "FunctionDeclaration" {
         return emit_function(state, statement.signature, statement.body, statement.decorators);
+    }
+    if statement.variant == "ExternFunctionDeclaration" {
+        return emit_extern_function(state, statement.signature, statement.unsafe, statement.decorators);
     }
     if statement.variant == "StructDeclaration" {
         return emit_struct(state, statement);
@@ -152,29 +292,167 @@ fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     if statement.variant == "IfStatement" {
         return emit_if(state, statement);
     }
+    if statement.variant == "BlockStatement" {
+        let mut current = state_emit_line(state, ".if 1 > 0");
+        current = state_push_indent(current);
+        current = emit_block(current, statement.body);
+        current = state_pop_indent(current);
+        return state_emit_line(current, ".endif");
+    }
     if statement.variant == "ReturnStatement" {
-        return emit_return(state, statement.expression);
+        return emit_return(state, statement);
+    }
+    if statement.variant == "ThrowStatement" {
+        return emit_throw(state, statement);
+    }
+    if statement.variant == "TryStatement" {
+        return emit_try(state, statement);
     }
     if statement.variant == "ExpressionStatement" {
-        return emit_expression_statement(state, statement.expression);
+        return emit_expression_statement(state, statement);
     }
     let message = "native backend: unsupported statement `" + statement.variant + "`";
     return state_add_diagnostic(state, message);
 }
 
+fn emit_extern_function(
+    state -> NativeState,
+    signature -> FunctionSignature,
+    unsafe_flag -> boolean,
+    decorators -> Decorator[]
+) -> NativeState {
+    let mut current = emit_decorators(state, decorators);
+    current = state_emit_line(current, ".fn " + format_function_signature(signature));
+    if unsafe_flag {
+        current = state_emit_line(current, ".meta unsafe");
+    }
+    current = state_emit_line(current, ".meta extern");
+    current = emit_signature_metadata(current, signature);
+    current = state_push_indent(current);
+    current = emit_parameter_metadata(current, signature.parameters);
+    current = state_pop_indent(current);
+    return state_emit_line(current, ".endfn");
+}
+
+fn emit_throw(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = emit_span_if_present(state, statement.span);
+    return state_emit_line(current, "throw " + format_expression(statement.expression));
+}
+
+fn emit_try(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = state_emit_line(state, ".try");
+    current = state_push_indent(current);
+    current = emit_block(current, statement.try_block);
+    current = state_pop_indent(current);
+
+    if statement.catch_block != null {
+        let mut catch_name -> string = "_";
+        if statement.catch_name != null && statement.catch_name.length > 0 {
+            catch_name = statement.catch_name;
+        }
+        current = state_emit_line(current, ".catch " + catch_name);
+        current = state_push_indent(current);
+        current = emit_block(current, statement.catch_block);
+        current = state_pop_indent(current);
+    }
+
+    if statement.finally_block != null {
+        current = state_emit_line(current, ".finally");
+        current = state_push_indent(current);
+        current = emit_block(current, statement.finally_block);
+        current = state_pop_indent(current);
+    }
+
+    return state_emit_line(current, ".endtry");
+}
+
+fn render_native_specifiers(specifiers -> ImportSpecifier[]) -> string {
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= specifiers.length {
+            break;
+        }
+        parts = append_string(parts, format_native_specifier(specifiers[index].name, specifiers[index].alias));
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
+}
+
+fn render_export_specifiers(specifiers -> ExportSpecifier[]) -> string {
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= specifiers.length {
+            break;
+        }
+        parts = append_string(parts, format_native_specifier(specifiers[index].name, specifiers[index].alias));
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
+}
+
+fn format_native_specifier(name -> string, alias -> string?) -> string {
+    if alias == null || alias.length == 0 {
+        return name;
+    }
+    return name + " as " + alias;
+}
+
+fn emit_span_if_present(state -> NativeState, span -> SourceSpan?) -> NativeState {
+    if span == null {
+        return state;
+    }
+    return state_emit_line(state, ".span " + format_span(span));
+}
+
+fn emit_initializer_span_if_present(state -> NativeState, span -> SourceSpan?) -> NativeState {
+    if span == null {
+        return state;
+    }
+    return state_emit_line(state, ".init-span " + format_span(span));
+}
+
+fn append_optional_type_annotation(line -> string, annotation -> TypeAnnotation?) -> string {
+    if annotation == null {
+        return line;
+    }
+    return line + " : " + annotation.text;
+}
+
+fn append_optional_initializer(line -> string, initializer -> Expression?) -> string {
+    if initializer == null {
+        return line;
+    }
+    let rendered = format_optional_expression(initializer);
+    if rendered.length == 0 {
+        return line;
+    }
+    return line + " = " + rendered;
+}
+
+fn format_span(span -> SourceSpan) -> string {
+    return number_to_string(span.start_line)
+        + " "
+        + number_to_string(span.start_column)
+        + " "
+        + number_to_string(span.end_line)
+        + " "
+        + number_to_string(span.end_column);
+}
+
 fn emit_variable(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = emit_span_if_present(state, statement.span);
+    current = emit_initializer_span_if_present(current, statement.initializer_span);
+
     let mut line -> string = ".let ";
     if statement.mutable {
         line = line + "mut ";
     }
     line = line + statement.name;
-    if statement.type_annotation != null {
-        line = line + " : " + statement.type_annotation.text;
-    }
-    if statement.initializer != null {
-        line = line + " = " + format_expression(statement.initializer);
-    }
-    return state_emit_line(state, line);
+    line = append_optional_type_annotation(line, statement.type_annotation);
+    line = append_optional_initializer(line, statement.initializer);
+    return state_emit_line(current, line);
 }
 
 fn emit_function(
@@ -216,27 +494,27 @@ fn emit_tool(state -> NativeState, statement -> Statement) -> NativeState {
 }
 
 fn emit_test(state -> NativeState, statement -> Statement) -> NativeState {
-    let mut current = emit_decorators(state, statement.decorators);
-    let mut header -> string = ".test " + quote_string(statement.name);
-    if statement.effects.length > 0 {
-        header = header + " ![" + join_with_separator(statement.effects, ", ") + "]";
-    }
-    current = state_emit_line(current, header);
-    current = emit_signature_metadata(
-        current,
+    // NOTE: We intentionally lower `test "..." {}` to a normal function named
+    // `test:<sanitized>` (instead of emitting a `.test` directive).
+    //
+    // Reason: some selfhosted stage2 builds have historically misparsed `.test`
+    // directives in the native IR parser, causing tests to be dropped before
+    // LLVM lowering and resulting in missing `main` at link time.
+    let test_symbol = test_function_symbol(statement.name);
+    return emit_function(
+        state,
         FunctionSignature {
-            name: statement.name,
+            name: test_symbol,
             is_async: false,
             parameters: [],
             return_type: null,
             effects: statement.effects,
             type_parameters: [],
-        }
+            name_span: statement.name_span,
+        },
+        statement.body,
+        statement.decorators
     );
-    current = state_push_indent(current);
-    current = emit_block(current, statement.body);
-    current = state_pop_indent(current);
-    return state_emit_line(current, ".endtest");
 }
 
 fn emit_model(state -> NativeState, statement -> Statement) -> NativeState {
@@ -303,6 +581,9 @@ fn emit_enum(state -> NativeState, statement -> Statement) -> NativeState {
     header = header + format_type_parameters(statement.type_parameters);
     current = state_emit_line(current, header);
     current = state_push_indent(current);
+    let enum_layout = compute_enum_layout_lines(state.layout_context, statement);
+    current = emit_layout_lines(current, enum_layout.lines);
+    current = state_merge_diagnostics(current, enum_layout.diagnostics);
     let mut index -> number = 0;
     loop {
         if index >= statement.variants.length {
@@ -327,6 +608,9 @@ fn emit_struct(state -> NativeState, statement -> Statement) -> NativeState {
     }
     current = state_emit_line(current, header);
     current = state_push_indent(current);
+    let struct_layout = compute_struct_layout_lines(state.layout_context, statement.name, statement.fields);
+    current = emit_layout_lines(current, struct_layout.lines);
+    current = state_merge_diagnostics(current, struct_layout.diagnostics);
 
     let mut index -> number = 0;
     loop {
@@ -435,15 +719,15 @@ fn emit_match(state -> NativeState, statement -> Statement) -> NativeState {
 
 fn emit_match_case(state -> NativeState, case -> MatchCase) -> NativeState {
     let inline_statement = select_inline_match_case_statement(case.body);
-    if inline_statement != null {
-        return emit_inline_match_case(state, case, inline_statement);
+    if inline_statement == null {
+        let mut line -> string = ".case " + format_match_case_head(case);
+        let mut current = state_emit_line(state, line);
+        current = state_push_indent(current);
+        current = emit_block(current, case.body);
+        current = state_pop_indent(current);
+        return current;
     }
-    let mut line -> string = ".case " + format_match_case_head(case);
-    let mut current = state_emit_line(state, line);
-    current = state_push_indent(current);
-    current = emit_block(current, case.body);
-    current = state_pop_indent(current);
-    return current;
+    return emit_inline_match_case(state, case, inline_statement);
 }
 
 fn select_inline_match_case_statement(block -> Block) -> Statement? {
@@ -467,10 +751,11 @@ fn emit_inline_match_case(state -> NativeState, case -> MatchCase, statement -> 
 
 fn format_match_case_head(case -> MatchCase) -> string {
     let mut head -> string = format_expression(case.pattern);
-    if case.guard != null {
-        head = head + " if " + format_expression(case.guard);
+    let guard = case.guard;
+    if guard == null {
+        return head;
     }
-    return head;
+    return head + " if " + format_optional_expression(guard);
 }
 
 fn format_inline_case_body(statement -> Statement) -> string {
@@ -478,10 +763,11 @@ fn format_inline_case_body(statement -> Statement) -> string {
         return format_expression(statement.expression);
     }
     if statement.variant == "ReturnStatement" {
-        if statement.expression == null {
+        let rendered = format_optional_expression(statement.expression);
+        if rendered.length == 0 {
             return "return";
         }
-        return "return " + format_expression(statement.expression);
+        return "return " + rendered;
     }
     return "";
 }
@@ -492,35 +778,52 @@ fn emit_if(state -> NativeState, statement -> Statement) -> NativeState {
     current = state_push_indent(current);
     current = emit_block(current, statement.then_block);
     current = state_pop_indent(current);
-    if statement.else_branch != null {
-        current = emit_else_branch(current, statement.else_branch);
+    let else_branch = statement.else_branch;
+    if else_branch == null {
+        return state_emit_line(current, ".endif");
     }
+    current = emit_else_branch(current, else_branch);
     return state_emit_line(current, ".endif");
 }
 
 fn emit_else_branch(state -> NativeState, branch -> ElseBranch) -> NativeState {
     let mut current = state_emit_line(state, ".else");
     current = state_push_indent(current);
-    if branch.body != null {
-        current = emit_block(current, branch.body);
-    } else if branch.statement != null {
-        current = emit_statement(current, branch.statement);
+    let body = branch.body;
+    if body == null {
+        let nested = branch.statement;
+        if nested == null {
+            current = state_emit_line(current, "noop");
+        } else {
+            current = emit_statement(current, nested);
+        }
     } else {
-        current = state_emit_line(current, "noop");
+        current = emit_block(current, body);
     }
     current = state_pop_indent(current);
     return current;
 }
 
-fn emit_return(state -> NativeState, expression -> Expression?) -> NativeState {
-    if expression == null {
-        return state_emit_line(state, "ret");
+fn emit_return(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = emit_span_if_present(state, statement.span);
+    let rendered = format_optional_expression(statement.expression);
+    if rendered.length == 0 {
+        return state_emit_line(current, "ret");
     }
-    return state_emit_line(state, "ret " + format_expression(expression));
+    return state_emit_line(current, "ret " + rendered);
 }
 
-fn emit_expression_statement(state -> NativeState, expression -> Expression) -> NativeState {
-    return state_emit_line(state, "eval " + format_expression(expression));
+fn format_optional_expression(expression -> Expression?) -> string {
+    if expression == null {
+        return "";
+    }
+    let value -> Expression = expression;
+    return format_expression(value);
+}
+
+fn emit_expression_statement(state -> NativeState, statement -> Statement) -> NativeState {
+    let mut current = emit_span_if_present(state, statement.span);
+    return state_emit_line(current, "eval " + format_expression(statement.expression));
 }
 
 fn emit_block(state -> NativeState, block -> Block) -> NativeState {
@@ -578,6 +881,7 @@ fn emit_parameter_metadata(state -> NativeState, parameters -> Parameter[]) -> N
             break;
         }
         let parameter = parameters[index];
+        current = emit_span_if_present(current, parameter.span);
         let mut line -> string = ".param ";
         if parameter.mutable {
             line = line + "mut ";
@@ -587,7 +891,7 @@ fn emit_parameter_metadata(state -> NativeState, parameters -> Parameter[]) -> N
             line = line + " -> " + parameter.type_annotation.text;
         }
         if parameter.default_value != null {
-            line = line + " = " + format_expression(parameter.default_value);
+            line = line + " = " + format_optional_expression(parameter.default_value);
         }
         current = state_emit_line(current, line);
         index += 1;
@@ -656,7 +960,7 @@ fn format_parameters(parameters -> Parameter[]) -> string {
             entry = entry + " -> " + parameter.type_annotation.text;
         }
         if parameter.default_value != null {
-            entry = entry + " = " + format_expression(parameter.default_value);
+            entry = entry + " = " + format_optional_expression(parameter.default_value);
         }
         parts = append_string(parts, entry);
         index += 1;
@@ -710,18 +1014,490 @@ fn format_enum_variant(variant -> EnumVariant) -> string {
     return variant.name + " { " + join_with_separator(parts, "; ") + " }";
 }
 
+fn compute_struct_layout_lines(context -> LayoutContext, struct_name -> string, fields -> FieldDeclaration[]) -> LayoutEmitResult {
+    let inputs = convert_struct_fields(fields);
+    let layout = calculate_record_layout(context, inputs, "struct", struct_name, append_string([], struct_name));
+    let mut lines -> string[] = [];
+    lines = append_string(lines, ".layout struct name=" + struct_name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align));
+    let mut index -> number = 0;
+    loop {
+        if index >= layout.fields.length {
+            break;
+        }
+        let field = layout.fields[index];
+        let mut line -> string = ".layout field " + field.name;
+        line = line + " type=" + field.type_annotation;
+        line = line + " offset=" + number_to_string(field.offset);
+        line = line + " size=" + number_to_string(field.size);
+        line = line + " align=" + number_to_string(field.align);
+        lines = append_string(lines, line);
+        index += 1;
+    }
+    return LayoutEmitResult { lines: lines, diagnostics: layout.diagnostics };
+}
+
+fn compute_enum_layout_lines(context -> LayoutContext, statement -> Statement) -> LayoutEmitResult {
+    let mut layout_variants -> LayoutEnumVariantDefinition[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= statement.variants.length {
+            break;
+        }
+        let variant = statement.variants[index];
+        let inputs = convert_variant_fields(variant);
+        layout_variants = append_layout_enum_variant_definition(layout_variants, LayoutEnumVariantDefinition { name: variant.name, fields: inputs });
+        index += 1;
+    }
+    let layout = infer_enum_aggregate_layout(context, statement.name, layout_variants, append_string([], statement.name));
+    let mut lines -> string[] = [];
+    let mut header -> string = ".layout enum name=" + statement.name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align);
+    header = header + " tag_type=i32 tag_size=" + number_to_string(layout.tag_size) + " tag_align=" + number_to_string(layout.tag_align);
+    lines = append_string(lines, header);
+    let mut variant_index -> number = 0;
+    loop {
+        if variant_index >= layout.variants.length {
+            break;
+        }
+        let descriptor = layout.variants[variant_index];
+        let mut line -> string = ".layout variant " + descriptor.name;
+        line = line + " tag=" + number_to_string(descriptor.tag);
+        line = line + " offset=" + number_to_string(descriptor.offset);
+        line = line + " size=" + number_to_string(descriptor.size);
+        line = line + " align=" + number_to_string(descriptor.align);
+        lines = append_string(lines, line);
+        let mut payload_index -> number = 0;
+        loop {
+            if payload_index >= descriptor.fields.length {
+                break;
+            }
+            let payload = descriptor.fields[payload_index];
+            let mut payload_line -> string = ".layout payload " + descriptor.name + "." + payload.name;
+            payload_line = payload_line + " type=" + payload.type_annotation;
+            payload_line = payload_line + " offset=" + number_to_string(payload.offset);
+            payload_line = payload_line + " size=" + number_to_string(payload.size);
+            payload_line = payload_line + " align=" + number_to_string(payload.align);
+            lines = append_string(lines, payload_line);
+            payload_index += 1;
+        }
+        variant_index += 1;
+    }
+    return LayoutEmitResult { lines: lines, diagnostics: layout.diagnostics };
+}
+
+fn infer_enum_aggregate_layout(context -> LayoutContext, enum_name -> string, variants -> LayoutEnumVariantDefinition[], visiting -> string[]) -> EnumAggregateLayout {
+    let tag_size -> number = 4;
+    let tag_align -> number = 4;
+    let mut union_align -> number = tag_align;
+    let mut union_size -> number = tag_size;
+    let mut diagnostics -> string[] = [];
+    let mut descriptors -> EnumVariantLayoutDescriptor[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= variants.length {
+            break;
+        }
+        let variant = variants[index];
+        let container_name = enum_name + "." + variant.name;
+        let record = calculate_record_layout(context, variant.fields, "variant", container_name, visiting);
+        diagnostics = diagnostics.concat(record.diagnostics);
+        let mut variant_align -> number = record.align;
+        if variant_align <= 0 {
+            variant_align = 1;
+        }
+        let payload_offset = align_to(tag_size, variant_align);
+        if variant_align > union_align {
+            union_align = variant_align;
+        }
+        let mut absolute_fields -> StructFieldLayoutDescriptor[] = [];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= record.fields.length {
+                break;
+            }
+            let field = record.fields[field_index];
+            let absolute = StructFieldLayoutDescriptor {
+                name: field.name,
+                type_annotation: field.type_annotation,
+                offset: payload_offset + field.offset,
+                size: field.size,
+                align: field.align,
+            };
+            absolute_fields = append_struct_field_layout(absolute_fields, absolute);
+            field_index += 1;
+        }
+        let variant_size = payload_offset + record.size;
+        if variant_size > union_size {
+            union_size = variant_size;
+        }
+        descriptors = append_enum_variant_layout(descriptors, EnumVariantLayoutDescriptor {
+            name: variant.name,
+            tag: index,
+            offset: payload_offset,
+            size: record.size,
+            align: variant_align,
+            fields: absolute_fields,
+        });
+        index += 1;
+    }
+    if variants.length == 0 {
+        union_align = tag_align;
+        union_size = tag_size;
+    }
+    let mut final_align -> number = union_align;
+    if final_align <= 0 {
+        final_align = 1;
+    }
+    let mut aligned_size -> number = union_size;
+    if final_align > 1 {
+        aligned_size = align_to(union_size, final_align);
+    }
+    return EnumAggregateLayout {
+        size: aligned_size,
+        align: final_align,
+        tag_size: tag_size,
+        tag_align: tag_align,
+        variants: descriptors,
+        diagnostics: diagnostics,
+    };
+}
+
+fn calculate_record_layout(context -> LayoutContext, inputs -> LayoutFieldInput[], container_kind -> string, container_name -> string, visiting -> string[]) -> RecordLayoutResult {
+    let mut diagnostics -> string[] = [];
+    let mut fields -> StructFieldLayoutDescriptor[] = [];
+    let mut offset -> number = 0;
+    let mut max_align -> number = 1;
+    let mut index -> number = 0;
+    loop {
+        if index >= inputs.length {
+            break;
+        }
+        let input = inputs[index];
+        let layout = analyze_type_layout(context, visiting, input.type_annotation, container_kind, container_name, input.name);
+        diagnostics = diagnostics.concat(layout.diagnostics);
+        let mut field_align -> number = layout.align;
+        if field_align <= 0 {
+            field_align = 1;
+        }
+        offset = align_to(offset, field_align);
+        let descriptor = StructFieldLayoutDescriptor {
+            name: input.name,
+            type_annotation: trim_text(input.type_annotation),
+            offset: offset,
+            size: layout.size,
+            align: field_align,
+        };
+        fields = append_struct_field_layout(fields, descriptor);
+        offset += layout.size;
+        if field_align > max_align {
+            max_align = field_align;
+        }
+        index += 1;
+    }
+    let mut final_align -> number = max_align;
+    if inputs.length == 0 {
+        final_align = 1;
+    }
+    if final_align <= 0 {
+        final_align = 1;
+    }
+    let mut total_size -> number = offset;
+    if final_align > 1 {
+        total_size = align_to(offset, final_align);
+    }
+    return RecordLayoutResult { size: total_size, align: final_align, fields: fields, diagnostics: diagnostics };
+}
+
+fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_annotation -> string, container_kind -> string, container_name -> string, field_name -> string) -> TypeLayoutInfo {
+    let trimmed = trim_text(type_annotation);
+    let mut diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` missing type annotation; defaulting to pointer layout");
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if trimmed == "number" {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if trimmed == "int" || trimmed == "i64" {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if trimmed == "i32" {
+        return TypeLayoutInfo { size: 4, align: 4, diagnostics: diagnostics };
+    }
+    if trimmed == "boolean" || trimmed == "bool" || trimmed == "i1" {
+        return TypeLayoutInfo { size: 1, align: 1, diagnostics: diagnostics };
+    }
+    if trimmed == "any" {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if is_array_type(trimmed) {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if trimmed == "string" {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if is_optional_annotation(trimmed) {
+        let inner = trim_text(strip_optional_suffix(trimmed));
+        if inner.length == 0 {
+            diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` optional type missing inner annotation; defaulting to pointer layout");
+        }
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+    if contains_string(visiting, trimmed) {
+        return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+    }
+
+    // Prefer canonical layouts for well-known compiler/runtime types.
+    // This avoids layout drift when recursive inference hits cycles or
+    // incomplete definitions and would otherwise fall back to pointer-sized
+    // placeholders for by-value fields.
+    let canonical = lookup_canonical_type_layout(trimmed);
+    if canonical != null {
+        return TypeLayoutInfo { size: canonical.size, align: canonical.align, diagnostics: diagnostics };
+    }
+
+    let struct_definition = find_layout_struct_definition(context, trimmed);
+    if struct_definition != null {
+        let nested_visiting = append_string(visiting, trimmed);
+        let record = calculate_record_layout(context, struct_definition.fields, "struct", trimmed, nested_visiting);
+        diagnostics = diagnostics.concat(record.diagnostics);
+        return TypeLayoutInfo { size: record.size, align: record.align, diagnostics: diagnostics };
+    }
+    let enum_definition = find_layout_enum_definition(context, trimmed);
+    if enum_definition != null {
+        let nested_visiting = append_string(visiting, trimmed);
+        let aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting);
+        diagnostics = diagnostics.concat(aggregate.diagnostics);
+        return TypeLayoutInfo { size: aggregate.size, align: aggregate.align, diagnostics: diagnostics };
+    }
+    diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout");
+    return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
+}
+
+fn convert_struct_fields(fields -> FieldDeclaration[]) -> LayoutFieldInput[] {
+    let mut inputs -> LayoutFieldInput[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        let field = fields[index];
+        let type_text = field.type_annotation.text;
+        inputs = append_layout_field_input(inputs, LayoutFieldInput { name: field.name, type_annotation: type_text });
+        index += 1;
+    }
+    return inputs;
+}
+
+fn convert_variant_fields(variant -> EnumVariant) -> LayoutFieldInput[] {
+    return convert_struct_fields(variant.fields);
+}
+
+fn append_struct_field_layout(values -> StructFieldLayoutDescriptor[], value -> StructFieldLayoutDescriptor) -> StructFieldLayoutDescriptor[] {
+    return values.concat([value]);
+}
+
+fn append_enum_variant_layout(values -> EnumVariantLayoutDescriptor[], value -> EnumVariantLayoutDescriptor) -> EnumVariantLayoutDescriptor[] {
+    return values.concat([value]);
+}
+
+fn append_layout_field_input(values -> LayoutFieldInput[], value -> LayoutFieldInput) -> LayoutFieldInput[] {
+    return values.concat([value]);
+}
+
+fn append_layout_struct_definition(values -> LayoutStructDefinition[], value -> LayoutStructDefinition) -> LayoutStructDefinition[] {
+    return values.concat([value]);
+}
+
+fn append_layout_enum_definition(values -> LayoutEnumDefinition[], value -> LayoutEnumDefinition) -> LayoutEnumDefinition[] {
+    return values.concat([value]);
+}
+
+fn append_layout_enum_variant_definition(values -> LayoutEnumVariantDefinition[], value -> LayoutEnumVariantDefinition) -> LayoutEnumVariantDefinition[] {
+    return values.concat([value]);
+}
+
+fn append_canonical_type_layout(values -> CanonicalTypeLayout[], value -> CanonicalTypeLayout) -> CanonicalTypeLayout[] {
+    return values.concat([value]);
+}
+
+fn find_layout_struct_definition(context -> LayoutContext, name -> string) -> LayoutStructDefinition? {
+    let mut index -> number = 0;
+    loop {
+        if index >= context.structs.length {
+            break;
+        }
+        let definition = context.structs[index];
+        if definition.name == name {
+            return definition;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn find_layout_enum_definition(context -> LayoutContext, name -> string) -> LayoutEnumDefinition? {
+    let mut index -> number = 0;
+    loop {
+        if index >= context.enums.length {
+            break;
+        }
+        let definition = context.enums[index];
+        if definition.name == name {
+            return definition;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn canonical_type_layouts() -> CanonicalTypeLayout[] {
+    let mut layouts -> CanonicalTypeLayout[] = [];
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Token", size: 40, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TokenKind", size: 4, align: 4 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Program", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeAnnotation", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeParameter", size: 24, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Block", size: 24, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "SourceSpan", size: 32, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Expression", size: 48, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Parameter", size: 40, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "WithClause", size: 48, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ObjectField", size: 56, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ElseBranch", size: 16, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ForClause", size: 104, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MatchCase", size: 80, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelProperty", size: 64, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FieldDeclaration", size: 32, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "MethodDeclaration", size: 88, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariant", size: 24, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "FunctionSignature", size: 56, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "PipelineDeclaration", size: 88, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ToolDeclaration", size: 88, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TestDeclaration", size: 48, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "ModelDeclaration", size: 40, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Decorator", size: 16, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "DecoratorArgument", size: 56, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "NamedSpecifier", size: 8, align: 8 });
+    // NOTE: `Statement` is an enum; its size is driven by the largest payload variant.
+    // Keep this in sync with the stage2 LLVM ABI and `ast.layout-manifest`.
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "Statement", size: 144, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumField", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumVariantDefinition", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumType", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "EnumInstance", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "StructField", size: 8, align: 8 });
+    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout { name: "TypeDescriptor", size: 8, align: 8 });
+    return layouts;
+}
+
+fn lookup_canonical_type_layout(name -> string) -> CanonicalTypeLayout? {
+    let layouts = canonical_type_layouts();
+    let mut index -> number = 0;
+    loop {
+        if index >= layouts.length {
+            break;
+        }
+        let layout = layouts[index];
+        if layout.name == name {
+            return layout;
+        }
+        index += 1;
+    }
+    return null;
+}
+
+fn align_to(value -> number, alignment -> number) -> number {
+    if alignment <= 1 {
+        return value;
+    }
+    let mut remainder -> number = value;
+    loop {
+        if remainder < alignment {
+            break;
+        }
+        remainder -= alignment;
+    }
+    if remainder == 0 {
+        return value;
+    }
+    return value + (alignment - remainder);
+}
+
+fn is_array_type(type_annotation -> string) -> boolean {
+    return ends_with(type_annotation, "[]");
+}
+
+fn is_optional_annotation(type_annotation -> string) -> boolean {
+    return ends_with(type_annotation, "?");
+}
+
+fn strip_optional_suffix(type_annotation -> string) -> string {
+    if type_annotation.length == 0 {
+        return type_annotation;
+    }
+    return substring(type_annotation, 0, type_annotation.length - 1);
+}
+
+fn ends_with(value -> string, suffix -> string) -> boolean {
+    if suffix.length == 0 {
+        return true;
+    }
+    if value.length < suffix.length {
+        return false;
+    }
+    let start = value.length - suffix.length;
+    let mut index -> number = 0;
+    loop {
+        if index >= suffix.length {
+            break;
+        }
+        if value[start + index] != suffix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn number_to_string(value -> number) -> string {
+    if value == 0 {
+        return "0";
+    }
+    let mut remaining -> number = value;
+    let mut output -> string = "";
+    let digits = "0123456789";
+    loop {
+        if remaining <= 0 {
+            break;
+        }
+        let mut temp -> number = remaining;
+        let mut quotient -> number = 0;
+        loop {
+            if temp < 10 {
+                break;
+            }
+            temp -= 10;
+            quotient += 1;
+        }
+        let digit = temp;
+        let ch = substring(digits, digit, digit + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    return output;
+}
+
+
 fn format_expression(expression -> Expression) -> string {
     if expression.variant == "Identifier" {
-        return expression.name;
+        let name = expression.name;
+        return name;
     }
     if expression.variant == "NumberLiteral" {
         return expression.value;
     }
     if expression.variant == "BooleanLiteral" {
-        if expression.value {
-            return "true";
-        }
-        return "false";
+        return expression.value;
     }
     if expression.variant == "NullLiteral" {
         return "null";
@@ -757,16 +1533,7 @@ fn format_expression(expression -> Expression) -> string {
         return format_expression(expression.sequence) + "[" + format_expression(expression.index) + "]";
     }
     if expression.variant == "Array" {
-        let mut rendered -> string[] = [];
-        let mut index -> number = 0;
-        loop {
-            if index >= expression.elements.length {
-                break;
-            }
-            rendered = append_string(rendered, format_expression(expression.elements[index]));
-            index += 1;
-        }
-        return "[" + join_with_separator(rendered, ", ") + "]";
+        return format_array_expression(expression.elements);
     }
     if expression.variant == "Object" {
         let mut rendered -> string[] = [];
@@ -805,6 +1572,103 @@ fn format_expression(expression -> Expression) -> string {
         return trim_text(expression.text);
     }
     return "<" + expression.variant + ">";
+}
+
+fn format_array_expression(elements -> Expression[]) -> string {
+    let annotation = infer_array_element_type(elements);
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= elements.length {
+            break;
+        }
+        rendered = append_string(rendered, format_expression(elements[index]));
+        index += 1;
+    }
+    if rendered.length == 0 {
+        if annotation.length == 0 {
+            return "[]";
+        }
+        return "[#element:" + annotation + "]";
+    }
+    let body = join_with_separator(rendered, ", ");
+    if annotation.length == 0 {
+        return "[" + body + "]";
+    }
+    return "[#element:" + annotation + ", " + body + "]";
+}
+
+fn infer_array_element_type(elements -> Expression[]) -> string {
+    if elements.length == 0 {
+        return "";
+    }
+    let mut candidate -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= elements.length {
+            break;
+        }
+        let element_type = infer_expression_type(elements[index]);
+        if element_type.length == 0 {
+            return "";
+        }
+        if candidate.length == 0 {
+            candidate = element_type;
+        } else if candidate != element_type {
+            return "";
+        }
+        index += 1;
+    }
+    return candidate;
+}
+
+fn infer_expression_type(expression -> Expression) -> string {
+    if expression.variant == "NumberLiteral" {
+        return "number";
+    }
+    if expression.variant == "BooleanLiteral" {
+        return "boolean";
+    }
+    if expression.variant == "StringLiteral" {
+        return "string";
+    }
+    if expression.variant == "Struct" {
+        if expression.type_name.length == 0 {
+            return "";
+        }
+        // For enum variants (e.g., Color.Red), type_name is ["Color", "Red"].
+        // For struct literals (e.g., Person { ... }), type_name is ["Person"].
+        // When inferring array element types, we want just the enum name (first component)
+        // so that Color.Red[] becomes [#element:Color, ...], not [#element:Color.Red, ...].
+        if expression.type_name.length == 2 {
+            // Likely an enum variant; return just the enum name.
+            return expression.type_name[0];
+        }
+        return join_with_separator(expression.type_name, ".");
+    }
+    if expression.variant == "Member" {
+        // Member expressions can represent enum variants without fields (e.g., Color.Red).
+        // We need to extract the type name from the member chain.
+        // For Color.Red, this is Member { object: Identifier("Color"), member: "Red" }.
+        // We want to return "Color" as the type.
+        if expression.object.variant == "Identifier" {
+            // Simple case: Color.Red where Color is an identifier
+            return expression.object.name;
+        }
+        if expression.object.variant == "Member" {
+            // Nested case: Namespace.Color.Red - recurse on the object
+            return infer_expression_type(expression.object);
+        }
+        return "";
+    }
+    if expression.variant == "Array" {
+        let nested = infer_array_element_type(expression.elements);
+        if nested.length == 0 {
+            return "";
+        }
+        return nested + "[]";
+    }
+    return "";
 }
 
 fn quote_string(value -> string) -> string {
@@ -865,10 +1729,10 @@ fn trim_text(value -> string) -> string {
         }
         break;
     }
-    if start == 0 && end == value.length {
-        return value;
-    }
-    return runtime.substring(value, start, end);
+        if start == 0 && end == value.length {
+            return value;
+        }
+        return substring(value, start, end);
 }
 
 fn is_trim_char(ch -> string) -> boolean {
@@ -887,11 +1751,71 @@ fn collect_entry_points(program -> Program) -> string[] {
             entries = append_unique(entries, statement.signature.name);
         }
         if statement.variant == "TestDeclaration" {
-            entries = append_unique(entries, "test:" + statement.name);
+            entries = append_unique(entries, test_function_symbol(statement.name));
         }
         index += 1;
     }
     return entries;
+}
+
+fn is_test_symbol_char(ch -> string) -> boolean {
+    if ch.length == 0 {
+        return false;
+    }
+    if ch == "_" {
+        return true;
+    }
+    let code = char_code(ch);
+    let lower_a = char_code("a");
+    let lower_z = char_code("z");
+    if code >= lower_a && code <= lower_z {
+        return true;
+    }
+    let upper_a = char_code("A");
+    let upper_z = char_code("Z");
+    if code >= upper_a && code <= upper_z {
+        return true;
+    }
+    let zero = char_code("0");
+    let nine = char_code("9");
+    if code >= zero && code <= nine {
+        return true;
+    }
+    return false;
+}
+
+fn sanitize_test_name_for_symbol(name -> string) -> string {
+    if name.length == 0 {
+        return "unnamed";
+    }
+    let mut out -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if is_test_symbol_char(ch) {
+            out = out + ch;
+        }
+        index += 1;
+    }
+    if out.length == 0 {
+        return "unnamed";
+    }
+    // Ensure the name is not purely numeric / doesn't start with a digit.
+    let first = out[0];
+    let code = char_code(first);
+    if code >= char_code("0") && code <= char_code("9") {
+        return "_" + out;
+    }
+    return out;
+}
+
+fn test_function_symbol(test_name -> string) -> string {
+    // Keep the `test:` prefix stable so LLVM lowering can synthesize a harness
+    // by scanning `NativeFunction.name`.
+    return "test:" + sanitize_test_name_for_symbol(test_name);
 }
 
 fn count_exported_symbols(program -> Program) -> number {
@@ -939,14 +1863,15 @@ fn contains_string(values -> string[], target -> string) -> boolean {
     return false;
 }
 
-fn state_new() -> NativeState {
-    return NativeState { builder: builder_new(), diagnostics: [] };
+fn state_new(context -> LayoutContext) -> NativeState {
+    return NativeState { builder: builder_new(), diagnostics: [], layout_context: context };
 }
 
 fn state_emit_line(state -> NativeState, line -> string) -> NativeState {
     return NativeState {
         builder: builder_emit_line(state.builder, line),
         diagnostics: state.diagnostics,
+        layout_context: state.layout_context,
     };
 }
 
@@ -954,6 +1879,7 @@ fn state_emit_blank(state -> NativeState) -> NativeState {
     return NativeState {
         builder: builder_emit_blank(state.builder),
         diagnostics: state.diagnostics,
+        layout_context: state.layout_context,
     };
 }
 
@@ -961,6 +1887,7 @@ fn state_push_indent(state -> NativeState) -> NativeState {
     return NativeState {
         builder: builder_push_indent(state.builder),
         diagnostics: state.diagnostics,
+        layout_context: state.layout_context,
     };
 }
 
@@ -968,6 +1895,7 @@ fn state_pop_indent(state -> NativeState) -> NativeState {
     return NativeState {
         builder: builder_pop_indent(state.builder),
         diagnostics: state.diagnostics,
+        layout_context: state.layout_context,
     };
 }
 
@@ -976,7 +1904,97 @@ fn state_add_diagnostic(state -> NativeState, message -> string) -> NativeState 
     return NativeState {
         builder: builder_emit_line(state.builder, "; " + message),
         diagnostics: diagnostics,
+        layout_context: state.layout_context,
     };
+}
+
+fn state_merge_diagnostics(state -> NativeState, entries -> string[]) -> NativeState {
+    if entries.length == 0 {
+        return state;
+    }
+    let mut combined -> string[] = state.diagnostics;
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        combined = append_string(combined, entries[index]);
+        index += 1;
+    }
+    return NativeState { builder: state.builder, diagnostics: combined, layout_context: state.layout_context };
+}
+
+fn generate_layout_manifest(program -> Program, context -> LayoutContext) -> NativeArtifact {
+    let mut builder = builder_new();
+    builder = builder_emit_line(builder, "; Sailfin Layout Manifest");
+    builder = builder_emit_line(builder, ".manifest version=1");
+    builder = builder_emit_blank(builder);
+
+    // Emit struct layouts
+    let mut index -> number = 0;
+    loop {
+        if index >= program.statements.length {
+            break;
+        }
+        let statement = program.statements[index];
+        if statement.variant == "StructDeclaration" {
+            let result = compute_struct_layout_lines(context, statement.name, statement.fields);
+            let mut line_index -> number = 0;
+            loop {
+                if line_index >= result.lines.length {
+                    break;
+                }
+                builder = builder_emit_line(builder, result.lines[line_index]);
+                line_index += 1;
+            }
+            builder = builder_emit_blank(builder);
+        }
+        index += 1;
+    }
+
+    // Emit enum layouts
+    index = 0;
+    loop {
+        if index >= program.statements.length {
+            break;
+        }
+        let statement = program.statements[index];
+        if statement.variant == "EnumDeclaration" {
+            let result = compute_enum_layout_lines(context, statement);
+            let mut line_index -> number = 0;
+            loop {
+                if line_index >= result.lines.length {
+                    break;
+                }
+                builder = builder_emit_line(builder, result.lines[line_index]);
+                line_index += 1;
+            }
+            builder = builder_emit_blank(builder);
+        }
+        index += 1;
+    }
+
+    return NativeArtifact {
+        name: "module.layout-manifest",
+        format: "sailfin-layout-manifest",
+        contents: builder_to_string(builder),
+    };
+}
+
+fn emit_layout_lines(state -> NativeState, lines -> string[]) -> NativeState {
+    if lines.length == 0 {
+        return state;
+    }
+    let mut current = state;
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        current = state_emit_line(current, lines[index]);
+        index += 1;
+    }
+    return current;
 }
 
 fn builder_new() -> TextBuilder {
@@ -1039,7 +2057,7 @@ fn trim_right(value -> string) -> string {
     if end == value.length {
         return value;
     }
-    return runtime.substring(value, 0, end);
+    return substring(value, 0, end);
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {

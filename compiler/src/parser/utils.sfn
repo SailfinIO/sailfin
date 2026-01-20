@@ -1,0 +1,221 @@
+// compiler/src/parser/utils.sfn
+//
+// Parser utility functions for string manipulation, text processing,
+// and general helpers used throughout the parser.
+
+import { substring, char_code, char_at, strings_equal } from "../string_utils";
+
+// ============================================================================
+// String Utilities
+// ============================================================================
+
+fn trim_text(value -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = char_at(value, start);
+        if is_trim_whitespace(ch) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = char_at(value, end - 1);
+        if is_trim_whitespace(ch) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+
+    return substring(value, start, end);
+}
+
+fn is_trim_whitespace(ch -> string) -> boolean {
+    let code = char_code(ch);
+    return code == 32  // space
+        || code == 10  // newline
+        || code == 9   // tab
+        || code == 13; // carriage return
+}
+
+fn strip_surrounding_quotes(text -> string) -> string {
+    if text.length < 2 {
+        return text;
+    }
+    let first = char_code(char_at(text, 0));
+    let last = char_code(char_at(text, text.length - 1));
+    if first == 34 && last == 34 {
+        return substring(text, 1, text.length - 1);
+    }
+    return text;
+}
+
+fn strip_loose_quotes(text -> string) -> string {
+    if text.length == 0 {
+        return text;
+    }
+    let mut start -> number = 0;
+    let mut end -> number = text.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let first = char_code(char_at(text, start));
+        if first == 34 {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let last = char_code(char_at(text, end - 1));
+        if last == 34 {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if start == 0 && end == text.length {
+        return text;
+    }
+    return substring(text, start, end);
+}
+
+fn decode_string_literal_escapes(text -> string) -> string {
+    if text.length == 0 {
+        return "";
+    }
+    let mut decoded -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = char_at(text, index);
+        if ch == "\\" {
+            let next_index = index + 1;
+            if next_index >= text.length {
+                decoded = decoded + ch;
+                index += 1;
+                continue;
+            }
+            let escaped = char_at(text, next_index);
+            if escaped == "n" {
+                decoded = decoded + "\n";
+            } else if escaped == "t" {
+                decoded = decoded + "\t";
+            } else if escaped == "r" {
+                decoded = decoded + "\r";
+            } else if escaped == "\"" {
+                decoded = decoded + "\"";
+            } else if escaped == "\\" {
+                decoded = decoded + "\\";
+            } else {
+                decoded = decoded + escaped;
+            }
+            index += 2;
+            continue;
+        }
+        decoded = decoded + ch;
+        index += 1;
+    }
+    return decoded;
+}
+
+fn normalize_test_name(text -> string) -> string {
+    let trimmed = trim_text(text);
+    if trimmed.length >= 2 {
+        let first = char_code(char_at(trimmed, 0));
+        let last = char_code(char_at(trimmed, trimmed.length - 1));
+        if first == 34 && last == 34 {
+            return strip_surrounding_quotes(trimmed);
+        }
+    }
+    return trimmed;
+}
+
+// ============================================================================
+// Number Detection
+// ============================================================================
+
+fn looks_like_number(text -> string) -> boolean {
+    if text.length == 0 {
+        return false;
+    }
+    let mut has_decimal -> boolean = false;
+    let mut index -> number = 0;
+    if char_at(text, 0) == "-" {
+        if text.length == 1 {
+            return false;
+        }
+        index = 1;
+    }
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = char_at(text, index);
+        if ch == "." {
+            if has_decimal {
+                return false;
+            }
+            has_decimal = true;
+            index += 1;
+            continue;
+        }
+        if !is_decimal_digit(ch) {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn is_decimal_digit(ch -> string) -> boolean {
+    return ch == "0"
+        || ch == "1"
+        || ch == "2"
+        || ch == "3"
+        || ch == "4"
+        || ch == "5"
+        || ch == "6"
+        || ch == "7"
+        || ch == "8"
+        || ch == "9";
+}
+
+// ============================================================================
+// Array Utilities
+// ============================================================================
+
+fn string_array_contains(values -> string[], target -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        if strings_equal(values[index], target) {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn append_string(values -> string[], value -> string) -> string[] {
+    values.push(value);
+    return values;
+}

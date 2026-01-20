@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# A wrapper script to invoke the best available Sailfin native compiler.
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Prefer the repo-built native compiler.
+if [[ -x "$ROOT_DIR/build/native/sailfin" ]]; then
+  exec "$ROOT_DIR/build/native/sailfin" "$@"
+fi
+
+# Fall back to an installed compiler on PATH.
+if command -v sfn >/dev/null 2>&1; then
+  found="$(command -v sfn)"
+  if [[ "$found" != "$0" ]]; then
+    exec "$found" "$@"
+  fi
+fi
+
+cat >&2 <<'EOF'
+[sfn][error] No compiler found.
+
+Build the self-hosted native compiler:
+  make compile
+
+Or install a released seed compiler and ensure it's on PATH.
+EOF
+exit 1

@@ -1,137 +1,32 @@
-# Sailfin Status
+# Status
 
-Updated: October 2025
+This document tracks what works today and what is in progress.
 
-This document is the source of truth for what ships today in the Python
-bootstrap toolchain and what exists only in the Sailfin-native
-experiments. Use it as the checklist before updating specs, examples, or
-roadmaps.
+## Compiler Pipeline (Current)
 
-## Stage Overview
+- The self-hosted native compiler in `compiler/src/` is the primary toolchain; `make compile` produces `build/native/sailfin`.
+- Legacy Python compiler artifacts under `compiler/build/` are kept for emergency recovery only and are slated for removal before 1.0.
+- Experimental LLVM JIT execution remains available for targeted backend coverage.
+- CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test, and attach release assets.
+- Native compiler tests live in `compiler/tests/{unit,integration,e2e}` and run via `sfn test` (repo-local: `./sfn test .`; build output: `build/native/sailfin test .`; `make test-unit`, `make test-integration`, `make test-e2e`).
+- Native AOT builds do not rely on any `aot-prepare` text rewrite step; the native compiler emits link-safe LLVM IR directly.
 
-- **Bootstrap (stage0)** — Python compiler that parses Sailfin source and
-  emits runnable Python. Effect checking is conservative (`model`, `io`,
-  `net`). Runtime helpers for `http`, `websocket`, and `fs` are mocked for
-  fast feedback.
-- **Self-hosted (stage1)** — Sailfin-written lexer, parser, and native
-  lowering pipeline that round-trip common declarations, decorators, and
-  prompts. Lowering targets Python scaffolding via `emit_native` and
-  `native_lowering`, sharing the bootstrap runtime prelude. The stage0
-  fallback has been removed; lowering gaps now surface as fatal diagnostics so
-  we iterate directly on stage1.
-- **Registry** — `registry.sailfin.dev` serves capsule and model metadata.
-  Integration into the bootstrap toolchain is not wired yet; manifests and
-  CLI commands are tracked as roadmap work.
+## Runtime (Current)
 
-## Feature Snapshot
+- The runtime is implemented in C under `runtime/native/` and linked into the native compiler binary.
+- The native CLI locates a bundled runtime next to the executable (override with `SAILFIN_RUNTIME_ROOT`) when building or running programs.
+- Legacy Python runtime shims have been removed; the 1.0 toolchain does not rely on `runtime/*.py` helpers.
+- The runtime will be reimplemented in Sailfin before the 1.0 release.
 
-**Parsing & Declarations**
-- Bootstrap: Stage0 parses `fn`, `struct`, `enum`, `interface`, `model`, `tool`,
-  `pipeline`, `test`, `type`, and `match` declarations.
-- Self-hosted prototype: Mirrors the same surface and now recognises
-  block-level `if`/`else`, `for` loops, and `match` statements with `case`
-  guards captured as expressions plus inline `=>` expression or `return`
-  bodies. Common expressions (member access, function calls, unary `!`/`-`,
-  binary operators through `&&`/`||`, range operators (`start..end`),
-  indexing (`target[index]`), lambda expressions (`fn (...) { ... }`), and
-  literal forms like `[x, y]`, `{ key: value }`, and `Type { field: value }`)
-  now lower into structured nodes instead of `Raw` placeholders.
+## Installer (Current)
 
-**Effect Tracking (`![...]`)**
-- Bootstrap: Enforces `model`, `io`, `net`, and `clock` via
-  `bootstrap/effect_checker.py`, covering prompt blocks, effectful decorators
-  (e.g. `@logExecution`), and runtime helpers such as `fs.*`, `http.*`,
-  `websocket.*`, `serve`, `spawn`, `print.*`, and `sleep` (including their
-  `runtime.*` aliases).
-- Self-hosted prototype: Infers `io` when decorators like `@trace` or
-  `@logExecution` appear and scans blocks for prompts, console helpers
-  (`print.*`, `console.*`, `runtime.console.*`), runtime timers
-  (`sleep`, `runtime.sleep`), and capability helpers such as `fs.*`,
-  `runtime.fs.*`, `http.*`, `runtime.http.*`, `websocket.*`,
-  `runtime.websocket.*`, `serve`, `runtime.serve`, `spawn`, and
-  `runtime.spawn`. Hierarchical effects remain design-stage work.
+- The installer defaults to `/usr/local/bin` on macOS when `GLOBAL_BIN_DIR` is unset and uses `~/.local/bin` on other platforms (override with `GLOBAL_BIN_DIR`).
 
-**Semantic Analysis**
-- Bootstrap: Performs symbol collection and effect validation inside the
-  Python pipeline; deeper type checking remains future work.
-- Self-hosted prototype: `compiler/src/typecheck.sfn` now walks top-level and
-  scoped blocks, builds symbol tables for functions/tests, and reports duplicate
-  declarations (including parameter and local name clashes). The pass also
-  enforces unique struct fields, struct methods, enum variants, interface
-  members, model properties, and type parameters so Sailfin sources surface the
-  same duplicate errors surfaced by the Python implementation. Diagnostics flow
-  through `compiler/src/main.sfn` so the bootstrap pipeline surfaces issues
-  during round-trips.
+## Near-Term Goals
 
-**Prompt Blocks**
-- Bootstrap: Prompts require the `model` effect; interpolation is handled by the
-  runtime helpers.
-- Self-hosted prototype: Prompt statements are preserved in the AST and emitted
-  as comments; deterministic scopes (`with seed(...)`) parse but have stubbed
-  semantics.
-
-**Models, Pipelines, Tools**
-- Bootstrap: Emit data holders and plain Python functions; no special pipeline
-  operator yet.
-- Self-hosted prototype: Uses the same emission strategy while preserving
-  properties and effects. The planned `|>` operator remains illustrative only.
-
-**Ownership & Types**
-- Bootstrap: Parses `Affine<T>` / `Linear<T>` without enforcement.
-- Self-hosted prototype: Carries ownership metadata for future borrow checking.
-
-**Tests**
-- Bootstrap: Lowers tests to Python functions executed in the `__main__`
-  preamble, enforcing required effects.
-- Self-hosted prototype: Generates the same scaffolding.
-
-**Code Generation**
-- Bootstrap: Walks the full AST and emits runnable Python against
-  `runtime_support.py`. Console helpers now cover `print.info`,
-  `print.error`, and `print.warn`, each flagged by the effect checker as
-  `io`.
-- Self-hosted prototype: Lowers Sailfin sources through the native pipeline and
-  prints Python scaffolding via `native_lowering.sfn`, rewiring postfix helpers
-  (`.map`, `.filter`, `.reduce`, `.concat`, `.length`) into runtime shims and
-  `len(...)` calls. Block emission preserves local `let` declarations, loops,
-  `if`/`else if`/`else` chains, and `match` statements so stage1 sources
-  round-trip cleanly. The structured `.sfn-asm` output from `emit_native.sfn`
-  feeds both Python and LLVM lowerings; `native_llvm_lowering.sfn` continues to
-  translate return-only functions into skeletal LLVM IR, providing the first
-  foothold toward real machine-code emission.
-
-**Package Manager (`sfn`)**
-- Bootstrap: Not implemented yet.
-- Self-hosted prototype: Not implemented; behaviour lives in
-  `docs/proposals/package-management.md`.
-
-## Validation Coverage
-
-- `make bootstrap-test` now executes the stage1-focused pytest suite under
-  `compiler/tests/`, including the end-to-end self-host check and native
-  lowering validation.
-- `examples/README.md` enumerates every runnable sample with its declared
-  effects so capability requirements stay in sync with the bootstrap runtime.
-- Stage1 smoke tests ensure Sailfin sources under `compiler/src/` compile
-  through the native pipeline; bootstrap-specific tests have been archived.
-- No automated tests exist yet for registry interactions or CLI workflow
-  beyond the bootstrap scripts.
-
-## Active Workstreams
-
-1. **Self-hosted bootstrap loop** — keep the Sailfin compiler sources compiling
-  themselves without stage0 assistance or fallbacks while new passes land
-  (tracked via `compiler/tests/test_stage1_integration.py`).
-2. **Semantic parity & diagnostics** — land name resolution, type analysis, and
-  richer error reporting in Sailfin (`compiler/src/typecheck.sfn`, expanded
-  `effect_checker.sfn`) so outputs match the Python toolchain.
-3. **Native runtime & FFI** — swap the Python runtime stubs with Sailfin
-  implementations plus minimal capability-aware bridges for filesystem, HTTP,
-  model execution, and concurrency primitives.
-4. **Registry integration** — wire manifest parsing and publish/resolve
-  commands against `registry.sailfin.dev` once the self-hosted compiler stays
-  green.
-
-Track detailed milestones and sequencing in `docs/roadmap.md`. When a
-feature graduates from prototype into stage0, update the table above and
-trim related “planned” callouts from the spec and examples.
+- Keep the native compiler stable as the primary compiler.
+- Deliver the Sailfin-native runtime and remove C runtime dependencies before 1.0.
+- Ship Sailfin-native filesystem, HTTP, and model adapters before 1.0.
+- Finalize the Sailfin-native ABI spec in `docs/runtime_abi.md`.
+- Remove all Python tooling/shims from production pipelines and release artifacts.
+- Remove Python-generated compiler artifacts from the 1.0 toolchain.

@@ -1,0 +1,142 @@
+// compiler/src/llvm/expression_lowering/native/core_strings.sfn
+//
+// String lowering helpers for expression lowering extracted from core.sfn.
+
+import {
+    LLVMOperand,
+    ExpressionResult,
+    StringConstant,
+} from "../../types";
+
+import {
+    append_string,
+    number_to_string,
+} from "../../utils";
+
+import {
+    empty_string_constant_set,
+    escape_string_for_llvm,
+} from "../../strings";
+
+import {
+    format_temp_name,
+} from "../../expressions";
+
+import {
+    unescape_string_literal,
+} from "./core_text";
+
+import {
+    harmonise_operands,
+    coerce_operand_to_type,
+} from "./core_operands";
+
+fn lower_string_literal(literal -> string, temp_index -> number, lines -> string[]) -> ExpressionResult {
+    // Stage2-native note:
+    // The original lowering model used global string constants (@.str.len...).
+    // Stage2's struct-return plumbing can drop the collected constant table,
+    // yielding link-time failures (undefined @.str.*). To keep emitted LLVM
+    // self-contained and clang-linkable, we materialize literals directly
+    // into heap memory via malloc + store of an inline constant array.
+    let content = unescape_string_literal(literal);
+    let escaped = escape_string_for_llvm(content);
+    let array_length = content.length + 1;
+    let array_type = "[" + number_to_string(array_length) + " x i8]";
+
+    let mut current_lines -> string[] = lines;
+    let malloc_temp = format_temp_name(temp_index);
+    current_lines = append_string(current_lines, "  " + malloc_temp + " = call i8* @malloc(i64 " + number_to_string(array_length) + ")");
+    let cast_temp = format_temp_name(temp_index + 1);
+    current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + array_type + "*");
+    current_lines = append_string(current_lines, "  store " + array_type + " c\"" + escaped + "\\00\", " + array_type + "* " + cast_temp);
+
+    let operand = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
+    let empty_constants = empty_string_constant_set();
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: temp_index + 2,
+        operand: operand,
+        diagnostics: [],
+        string_constants: empty_constants
+    };
+}
+
+fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> number, lines -> string[]) -> ExpressionResult {
+    let harmonised = harmonise_operands(left, right, temp_index, lines);
+    if harmonised.left == null || harmonised.right == null {
+        return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: harmonised.diagnostics, string_constants: empty_string_constant_set() };
+    }
+    let left_aligned = coerce_operand_to_type(harmonised.left, "i8*", harmonised.temp_index, harmonised.lines);
+    let mut diagnostics = harmonised.diagnostics.concat(left_aligned.diagnostics);
+    let right_aligned = coerce_operand_to_type(harmonised.right, "i8*", left_aligned.temp_index, left_aligned.lines);
+    diagnostics = diagnostics.concat(right_aligned.diagnostics);
+    if left_aligned.operand == null || right_aligned.operand == null {
+        return ExpressionResult { lines: right_aligned.lines, temp_index: right_aligned.temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_string_constant_set() };
+    }
+    let temp_name = format_temp_name(right_aligned.temp_index);
+    let line = "  " + temp_name + " = call i8* @sailfin_runtime_string_concat(i8* " + left_aligned.operand.value + ", i8* " + right_aligned.operand.value + ")";
+    let mut out_lines = append_string(right_aligned.lines, line);
+    let operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
+    return ExpressionResult { lines: out_lines, temp_index: right_aligned.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: empty_string_constant_set() };
+}
+
+fn coerce_operand_to_string(operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ExpressionResult {
+    let empty_constants = empty_string_constant_set();
+    if operand.llvm_type == "i8*" {
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    if operand.llvm_type == "double" {
+        let temp_name = format_temp_name(temp_index);
+        let mut out_lines = append_string(lines, "  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")");
+        let out_operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
+        return ExpressionResult { lines: out_lines, temp_index: temp_index + 1, operand: out_operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    if operand.llvm_type == "i64" {
+        let cast_temp = format_temp_name(temp_index);
+        let mut out_lines = append_string(lines, "  " + cast_temp + " = sitofp i64 " + operand.value + " to double");
+        let call_temp = format_temp_name(temp_index + 1);
+        out_lines = append_string(out_lines, "  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")");
+        let out_operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
+        return ExpressionResult { lines: out_lines, temp_index: temp_index + 2, operand: out_operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    if operand.llvm_type == "i32" {
+        let cast_temp = format_temp_name(temp_index);
+        let mut out_lines = append_string(lines, "  " + cast_temp + " = sitofp i32 " + operand.value + " to double");
+        let call_temp = format_temp_name(temp_index + 1);
+        out_lines = append_string(out_lines, "  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")");
+        let out_operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
+        return ExpressionResult { lines: out_lines, temp_index: temp_index + 2, operand: out_operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    if operand.llvm_type == "i8" {
+        let as_i64 = format_temp_name(temp_index);
+        let as_double = format_temp_name(temp_index + 1);
+        let as_string = format_temp_name(temp_index + 2);
+        let mut out_lines = append_string(lines, "  " + as_i64 + " = sext i8 " + operand.value + " to i64");
+        out_lines = append_string(out_lines, "  " + as_double + " = sitofp i64 " + as_i64 + " to double");
+        out_lines = append_string(out_lines, "  " + as_string + " = call i8* @sailfin_runtime_number_to_string(double " + as_double + ")");
+        let out_operand = LLVMOperand { llvm_type: "i8*", value: as_string };
+        return ExpressionResult { lines: out_lines, temp_index: temp_index + 3, operand: out_operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    if operand.llvm_type == "i1" {
+        let true_lit = lower_string_literal("\"true\"", temp_index, lines);
+        if true_lit.operand == null {
+            return ExpressionResult { lines: true_lit.lines, temp_index: true_lit.temp_index, operand: null, diagnostics: [], string_constants: empty_constants };
+        }
+        let false_lit = lower_string_literal("\"false\"", true_lit.temp_index, true_lit.lines);
+        if false_lit.operand == null {
+            return ExpressionResult { lines: false_lit.lines, temp_index: false_lit.temp_index, operand: null, diagnostics: [], string_constants: empty_constants };
+        }
+        let select_temp = format_temp_name(false_lit.temp_index);
+        let mut out_lines = append_string(false_lit.lines, "  " + select_temp + " = select i1 " + operand.value + ", i8* " + true_lit.operand.value + ", i8* " + false_lit.operand.value);
+        let out_operand = LLVMOperand { llvm_type: "i8*", value: select_temp };
+        return ExpressionResult { lines: out_lines, temp_index: false_lit.temp_index + 1, operand: out_operand, diagnostics: [], string_constants: empty_constants };
+    }
+
+    let diagnostics = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"]; 
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+}

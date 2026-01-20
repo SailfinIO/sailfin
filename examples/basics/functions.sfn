@@ -4,7 +4,7 @@ fn add(x -> number, y -> number) -> number {
   return x + y;
 }
 
-fn greet(name -> string = "Sail") -> string {
+fn greet(name -> string = "Sailfin") -> string {
   return "Hello, {{name}}!";
 }
 

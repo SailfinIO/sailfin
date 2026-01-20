@@ -1,80 +1,188 @@
 // compiler/src/main.sfn
-// Temporary entry point for the Sailfin compiler (self-hosting prototype).
+//
+// Sailfin compiler main module and compilation entry points. 
+
 
 import { parse_program } from "./parser";
+import { Program } from "./ast";
 import { emit_program } from "./emitter_sailfin";
-import { emit_native, EmitNativeResult, NativeModule } from "./emit_native";
-import { lower_to_python, LoweredPythonResult } from "./native_lowering";
-import { lower_to_llvm, LoweredLLVMResult } from "./native_llvm_lowering";
+import { emit_native, emit_native_with_module_name, EmitNativeResult, NativeModule } from "./emit_native";
+import {
+    lower_to_llvm,
+    lower_to_llvm_for_tests,
+    lower_to_llvm_ir,
+    lower_to_llvm_ir_for_tests,
+    lower_to_llvm_lines_only,
+    lower_to_llvm_with_manifests,
+    lower_to_llvm_with_context,
+} from "./llvm/lowering/entrypoints";
+import { LayoutManifest, parse_layout_manifest } from "./native_ir";
+import { substring } from "./string_utils";
+import { Token } from "./token";
 import { typecheck_program } from "./typecheck";
 
-struct CompiledModule {
-    source_path -> string;
-    python_source -> string;
+fn _ms_since(start_ms -> number) -> number {
+    let end_ms = monotonic_millis();
+    let delta = end_ms - start_ms;
+    if delta < 0 {
+        return 0;
+    }
+    return delta;
 }
 
-struct ModuleDiagnostics {
-    source_path -> string;
-    messages -> string[];
-    fatal -> boolean;
-}
-
-struct ModuleCompilationResult {
-    module -> CompiledModule?;
-    diagnostics -> ModuleDiagnostics[];
-}
-
-struct ProjectCompilation {
-    modules -> CompiledModule[];
-    diagnostics -> ModuleDiagnostics[];
+fn _timing_line(module_name -> string, phase -> string, elapsed_ms -> number) -> string {
+    // Format is stable and grep/awk-friendly.
+    // Emit to stderr via print.warn.
+    return "[timing] module=" + module_name + " phase=" + phase + " ms=" + number_to_string(elapsed_ms);
 }
 
 fn compile_to_sailfin(source -> string) -> string ![io] {
-    let program = parse_program(source);
+    let program -> Program = parse_program(source);
     let analysis_result = typecheck_program(program);
     if analysis_result.diagnostics.length > 0 {
-        report_typecheck_errors(analysis_result.diagnostics);
+        report_typecheck_errors(analysis_result.diagnostics, source);
         return "";
     }
     return emit_program(program);
 }
 
 fn compile_to_native(source -> string) -> EmitNativeResult ![io] {
-    let program = parse_program(source);
+    let program -> Program = parse_program(source);
     let analysis_result = typecheck_program(program);
     if analysis_result.diagnostics.length > 0 {
-        report_typecheck_errors(analysis_result.diagnostics);
+        report_typecheck_errors(analysis_result.diagnostics, source);
         return EmitNativeResult {
             module: empty_native_module(),
-            diagnostics: format_typecheck_diagnostics(analysis_result.diagnostics),
+            diagnostics: format_typecheck_diagnostics(analysis_result.diagnostics, source),
         };
     }
     return emit_native(program);
 }
 
-fn compile_to_native_python(source -> string) -> LoweredPythonResult ![io] {
-    let native_result = compile_to_native(source);
-    let lowered = lower_to_python(native_result.module);
-    let mut combined -> string[] = [];
-    combined = combined.concat(native_result.diagnostics);
-    combined = combined.concat(lowered.diagnostics);
-    if combined.length > 0 {
-        let mut index -> number = 0;
+fn module_name_from_path(source_path -> string) -> string {
+    if source_path.length == 0 {
+        return "main";
+    }
+
+    // Normalize path separators so we can reason about prefixes.
+    let mut normalized -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= source_path.length {
+            break;
+        }
+        let ch = source_path[index];
+        if ch == "\\" {
+            normalized = normalized + "/";
+        } else {
+            normalized = normalized + ch;
+        }
+        index += 1;
+    }
+
+    // Prefer stable module names rooted at compiler/src or runtime.
+    // - .../compiler/src/parser/mod.sfn -> parser/mod
+    // - .../runtime/prelude.sfn         -> runtime/prelude
+    let compiler_prefix = "compiler/src/";
+    let runtime_prefix = "runtime/";
+    let mut start -> number = 0;
+
+    let mut last_compiler -> number = -1;
+    index = 0;
+    loop {
+        if index + compiler_prefix.length > normalized.length {
+            break;
+        }
+        if substring(normalized, index, index + compiler_prefix.length) == compiler_prefix {
+            last_compiler = index;
+        }
+        index += 1;
+    }
+    if last_compiler >= 0 {
+        start = last_compiler + compiler_prefix.length;
+    } else {
+        let mut last_runtime -> number = -1;
+        index = 0;
         loop {
-            if index >= combined.length {
+            if index + runtime_prefix.length > normalized.length {
                 break;
             }
-            print.warn("[native] " + combined[index]);
+            if substring(normalized, index, index + runtime_prefix.length) == runtime_prefix {
+                last_runtime = index;
+            }
             index += 1;
         }
+        if last_runtime >= 0 {
+            // Keep the runtime/ prefix in the module name.
+            start = last_runtime;
+        }
     }
-    return LoweredPythonResult {
-        source: lowered.source,
-        diagnostics: combined,
-    };
+
+    // Find the end of the module name by stripping the extension from the last
+    // path segment.
+    let mut last_slash -> number = -1;
+    index = start;
+    loop {
+        if index >= normalized.length {
+            break;
+        }
+        if normalized[index] == "/" {
+            last_slash = index;
+        }
+        index += 1;
+    }
+    let mut end -> number = normalized.length;
+    let mut dot_index -> number = -1;
+    index = normalized.length;
+    let dot_limit = last_slash + 1;
+    loop {
+        if index <= dot_limit {
+            break;
+        }
+        index -= 1;
+        if normalized[index] == "." {
+            dot_index = index;
+            break;
+        }
+    }
+    if dot_index >= 0 {
+        end = dot_index;
+    }
+
+    if end <= start {
+        return "main";
+    }
+    let base = substring(normalized, start, end);
+    if base.length == 0 {
+        return "main";
+    }
+    return base;
 }
 
-fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
+struct LLVMCompilationResult {
+    // Note: this struct crosses tool boundaries (stage1 Python + stage2 native).
+    // Keep fields `any` so native layout emission doesn't require importing the
+    // full layouts for `LoweredLLVMResultAny` / `NativeModule`.
+    llvm -> any;
+    native_module -> any;
+}
+
+// NOTE: This is intentionally defined in this module (instead of importing the
+// canonical definition from `./llvm/types`) because stage1's LLVM backend
+// currently treats imported structs as opaque when lowering struct literals.
+// Keeping these fields as `any` avoids pulling full type layouts across
+// tool/runtime boundaries (stage1 Python + stage2 native).
+struct LoweredLLVMResultAny {
+    ir -> string;
+    diagnostics -> string[];
+    trait_metadata -> any;
+    function_effects -> any;
+    lifetime_regions -> any;
+    capability_manifest -> any;
+    string_constants -> any;
+}
+
+fn compile_to_native_llvm(source -> string) -> LoweredLLVMResultAny ![io] {
     let native_result = compile_to_native(source);
     let lowered = lower_to_llvm(native_result.module);
     let mut combined -> string[] = [];
@@ -90,108 +198,715 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResult ![io] {
             index += 1;
         }
     }
-    return LoweredLLVMResult {
+    return LoweredLLVMResultAny {
         ir: lowered.ir,
         diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
     };
 }
 
-fn main() ![io] {
-    print.info("Sailfin compiler (stage 0)");
-}
-
-fn compile_project(sources -> string[]) -> ProjectCompilation ![io] {
-    let mut modules -> CompiledModule[] = [];
-    let mut diagnostics -> ModuleDiagnostics[] = [];
-
-    for source_path in sources {
-        let result = compile_source_at_path(source_path);
-        if result.module != null {
-            modules = modules.concat([result.module]);
-        }
-        if result.diagnostics.length > 0 {
-            diagnostics = diagnostics.concat(result.diagnostics);
-        }
+fn compile_to_native_llvm_with_module(source -> string, module_name -> string) -> LoweredLLVMResultAny ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        let messages = format_typecheck_diagnostics(analysis_result.diagnostics, source);
+        return LoweredLLVMResultAny {
+            ir: "",
+            diagnostics: messages,
+            trait_metadata: null,
+            function_effects: null,
+            lifetime_regions: null,
+            capability_manifest: null,
+            string_constants: null,
+        };
     }
 
-    return ProjectCompilation {
-        modules: modules,
-        diagnostics: diagnostics,
+    let native_result = emit_native_with_module_name(program, module_name);
+    let lowered = lower_to_llvm(native_result.module);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LoweredLLVMResultAny {
+        ir: lowered.ir,
+        diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
     };
 }
 
-fn compile_source_at_path(source_path -> string) -> ModuleCompilationResult ![io] {
-    let source = fs.readFile(source_path);
-    let program = parse_program(source);
-    let analysis = typecheck_program(program);
-    if analysis.diagnostics.length > 0 {
-        return ModuleCompilationResult {
-            module: null,
-            diagnostics: [ModuleDiagnostics {
-                source_path: source_path,
-                messages: format_typecheck_diagnostics(analysis.diagnostics),
-                fatal: true,
-            }],
-        };
+// C-friendly entrypoint for the native stage2 driver.
+// Keeps the public ABI as `char* -> char*` while reusing the structured
+// `LoweredLLVMResultAny` internally.
+fn compile_to_llvm(source -> string) -> string ![io] {
+    let native_result = compile_to_native(source);
+    return lower_to_llvm_ir(native_result.module);
+}
+
+fn compile_to_llvm_with_module(source -> string, module_name -> string) -> string ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        return "";
+    }
+    let native_result = emit_native_with_module_name(program, module_name);
+    return lower_to_llvm_ir(native_result.module);
+}
+
+fn compile_to_llvm_with_module_timed(source -> string, module_name -> string) -> string ![io, clock] {
+    let t0 = monotonic_millis();
+    let program -> Program = parse_program(source);
+    let t_parse = _ms_since(t0);
+
+    let t1 = monotonic_millis();
+    let analysis_result = typecheck_program(program);
+    let t_typecheck = _ms_since(t1);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        print.warn(_timing_line(module_name, "parse", t_parse));
+        print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+        return "";
     }
 
-    let native_result = emit_native(program);
-    let lowered = lower_to_python(native_result.module);
-    let mut messages -> string[] = native_result.diagnostics.concat(lowered.diagnostics);
-    let python_source = lowered.source;
-    let fallback_needed = needs_python_fallback(python_source);
-    if fallback_needed {
-    messages = messages.concat(["native backend: lowering produced unsupported python output; stage0 fallback disabled"]);
-        return ModuleCompilationResult {
-            module: null,
-            diagnostics: [ModuleDiagnostics {
-                source_path: source_path,
-                messages: messages,
-                fatal: true,
-            }],
-        };
+    let t2 = monotonic_millis();
+    let native_result = emit_native_with_module_name(program, module_name);
+    let t_emit_native = _ms_since(t2);
+
+    let t3 = monotonic_millis();
+    let ir = lower_to_llvm_ir(native_result.module);
+    let t_lower_llvm = _ms_since(t3);
+
+    print.warn(_timing_line(module_name, "parse", t_parse));
+    print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+    print.warn(_timing_line(module_name, "emit_native", t_emit_native));
+    print.warn(_timing_line(module_name, "lower_llvm", t_lower_llvm));
+    print.warn(_timing_line(module_name, "total", _ms_since(t0)));
+    return ir;
+}
+
+fn compile_to_llvm_lines_with_module(source -> string, module_name -> string) -> string[] ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        return [];
+    }
+    let native_result = emit_native_with_module_name(program, module_name);
+    return lower_to_llvm_lines_only(native_result.module);
+}
+
+fn compile_to_llvm_lines_with_module_timed(source -> string, module_name -> string) -> string[] ![io, clock] {
+    let t0 = monotonic_millis();
+    let program -> Program = parse_program(source);
+    let t_parse = _ms_since(t0);
+
+    let t1 = monotonic_millis();
+    let analysis_result = typecheck_program(program);
+    let t_typecheck = _ms_since(t1);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        print.warn(_timing_line(module_name, "parse", t_parse));
+        print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+        return [];
     }
 
-    let mut entry_list -> ModuleDiagnostics[] = [];
-    if messages.length > 0 {
-        entry_list = [ModuleDiagnostics {
-            source_path: source_path,
-            messages: messages,
-            fatal: false,
-        }];
-    }
+    let t2 = monotonic_millis();
+    let native_result = emit_native_with_module_name(program, module_name);
+    let t_emit_native = _ms_since(t2);
 
-    return ModuleCompilationResult {
-        module: CompiledModule {
-            source_path: source_path,
-            python_source: python_source,
+    let t3 = monotonic_millis();
+    let lines = lower_to_llvm_lines_only(native_result.module);
+    let t_lower_llvm = _ms_since(t3);
+
+    print.warn(_timing_line(module_name, "parse", t_parse));
+    print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+    print.warn(_timing_line(module_name, "emit_native", t_emit_native));
+    print.warn(_timing_line(module_name, "lower_llvm", t_lower_llvm));
+    print.warn(_timing_line(module_name, "total", _ms_since(t0)));
+    return lines;
+}
+
+// Emit LLVM IR that runs all `test ... {}` declarations in the module.
+// Used by the `sailfin test` CLI subcommand.
+fn compile_tests_to_llvm(source -> string) -> string ![io] {
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    if trace {
+        print.info("test compiler: compile_to_native start");
+    }
+    let native_result = compile_to_native(source);
+    if trace {
+        print.info("test compiler: compile_to_native done (diagnostics=" + number_to_string(native_result.diagnostics.length) + ")");
+        print.info("test compiler: lower_to_llvm_for_tests start");
+    }
+    let ir = lower_to_llvm_ir_for_tests(native_result.module);
+    if trace {
+        print.info("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(ir.length) + ")");
+    }
+    return ir;
+}
+
+fn compile_tests_to_llvm_with_module(source -> string, module_name -> string) -> string ![io] {
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    if trace {
+        print.info("test compiler: parse_program start");
+    }
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        return "";
+    }
+    if trace {
+        print.info("test compiler: emit_native_with_module_name start (module=" + module_name + ")");
+    }
+    let native_result = emit_native_with_module_name(program, module_name);
+    if trace {
+        print.info("test compiler: lower_to_llvm_for_tests start");
+    }
+    return lower_to_llvm_ir_for_tests(native_result.module);
+}
+
+fn compile_to_native_text(source -> string) -> string ![io] {
+    let native_result = compile_to_native(source);
+    let mut index -> number = 0;
+    loop {
+        if index >= native_result.module.artifacts.length {
+            break;
+        }
+        let artifact = native_result.module.artifacts[index];
+        if artifact.format == "sailfin-native-text" {
+            return artifact.contents;
+        }
+        index += 1;
+    }
+    return "";
+}
+
+fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] {
+    let native_result = compile_to_native(source);
+    let lowered = lower_to_llvm(native_result.module);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LLVMCompilationResult {
+        llvm: LoweredLLVMResultAny {
+            ir: lowered.ir,
+            diagnostics: combined,
+            trait_metadata: lowered.trait_metadata,
+            function_effects: lowered.function_effects,
+            lifetime_regions: lowered.lifetime_regions,
+            capability_manifest: lowered.capability_manifest,
+            string_constants: lowered.string_constants,
         },
-        diagnostics: entry_list,
+        native_module: native_result.module,
     };
 }
 
-fn format_typecheck_diagnostics(entries -> Diagnostic[]) -> string[] {
-    let mut messages -> string[] = [];
-    for entry in entries {
-    messages = messages.concat([entry.message]);
+fn compile_to_native_llvm_full_with_module(source -> string, module_name -> string) -> LLVMCompilationResult ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        let messages = format_typecheck_diagnostics(analysis_result.diagnostics, source);
+        return LLVMCompilationResult {
+            llvm: LoweredLLVMResultAny {
+                ir: "",
+                diagnostics: messages,
+                trait_metadata: null,
+                function_effects: null,
+                lifetime_regions: null,
+                capability_manifest: null,
+                string_constants: null,
+            },
+            native_module: null,
+        };
     }
-    return messages;
+
+    let native_result = emit_native_with_module_name(program, module_name);
+    let lowered = lower_to_llvm(native_result.module);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LLVMCompilationResult {
+        llvm: LoweredLLVMResultAny {
+            ir: lowered.ir,
+            diagnostics: combined,
+            trait_metadata: lowered.trait_metadata,
+            function_effects: lowered.function_effects,
+            lifetime_regions: lowered.lifetime_regions,
+            capability_manifest: lowered.capability_manifest,
+            string_constants: lowered.string_constants,
+        },
+        native_module: native_result.module,
+    };
 }
 
-fn report_typecheck_errors(entries -> Diagnostic[]) ![io] {
+// Extended lowering entry point that accepts layout manifests and native artifacts for imports
+fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> string[], native_artifacts -> string[]) -> LoweredLLVMResultAny ![io] {
+    let native_result = compile_to_native(source);
+    
+    // Parse the manifest contents into LayoutManifest structs
+    let mut manifests -> LayoutManifest[] = [];
+    let mut manifest_index -> number = 0;
+    loop {
+        if manifest_index >= manifest_contents.length {
+            break;
+        }
+        let manifest_text = manifest_contents[manifest_index];
+        if manifest_text.length == 0 {
+            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+        } else {
+            let parsed = parse_layout_manifest(manifest_text);
+            manifests = manifests.concat([LayoutManifest {
+                structs: parsed.structs,
+                enums: parsed.enums,
+                diagnostics: [],
+            }]);
+        }
+        manifest_index += 1;
+    }
+
+    let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts, []);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LoweredLLVMResultAny {
+        ir: lowered.ir,
+        diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
+    };
+}
+
+fn compile_to_native_llvm_with_context_with_module(source -> string, module_name -> string, manifest_contents -> string[], native_artifacts -> string[]) -> LoweredLLVMResultAny ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        let messages = format_typecheck_diagnostics(analysis_result.diagnostics, source);
+        return LoweredLLVMResultAny {
+            ir: "",
+            diagnostics: messages,
+            trait_metadata: null,
+            function_effects: null,
+            lifetime_regions: null,
+            capability_manifest: null,
+            string_constants: null,
+        };
+    }
+
+    let native_result = emit_native_with_module_name(program, module_name);
+
+    let mut manifests -> LayoutManifest[] = [];
+    let mut manifest_index -> number = 0;
+    loop {
+        if manifest_index >= manifest_contents.length {
+            break;
+        }
+        let manifest_text = manifest_contents[manifest_index];
+        if manifest_text.length == 0 {
+            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+        } else {
+            let parsed = parse_layout_manifest(manifest_text);
+            manifests = manifests.concat([LayoutManifest {
+                structs: parsed.structs,
+                enums: parsed.enums,
+                diagnostics: [],
+            }]);
+        }
+        manifest_index += 1;
+    }
+
+    let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts, []);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+    return LoweredLLVMResultAny {
+        ir: lowered.ir,
+        diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
+    };
+}
+
+fn compile_to_native_llvm_with_context_with_module_and_entry_points(
+    source -> string,
+    module_name -> string,
+    manifest_contents -> string[],
+    native_artifacts -> string[],
+    entry_points -> string[]
+) -> LoweredLLVMResultAny ![io] {
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        let messages = format_typecheck_diagnostics(analysis_result.diagnostics, source);
+        return LoweredLLVMResultAny {
+            ir: "",
+            diagnostics: messages,
+            trait_metadata: null,
+            function_effects: null,
+            lifetime_regions: null,
+            capability_manifest: null,
+            string_constants: null,
+        };
+    }
+
+    let native_result = emit_native_with_module_name(program, module_name);
+    let overridden_module = NativeModule {
+        module_name: native_result.module.module_name,
+        artifacts: native_result.module.artifacts,
+        entry_points: entry_points,
+        symbol_count: native_result.module.symbol_count,
+    };
+
+    let mut manifests -> LayoutManifest[] = [];
+    let mut manifest_index -> number = 0;
+    loop {
+        if manifest_index >= manifest_contents.length {
+            break;
+        }
+        let manifest_text = manifest_contents[manifest_index];
+        if manifest_text.length == 0 {
+            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+        } else {
+            let parsed = parse_layout_manifest(manifest_text);
+            manifests = manifests.concat([LayoutManifest {
+                structs: parsed.structs,
+                enums: parsed.enums,
+                diagnostics: [],
+            }]);
+        }
+        manifest_index += 1;
+    }
+
+    let lowered = lower_to_llvm_with_context(overridden_module, manifests, native_artifacts, []);
+    let mut combined -> string[] = [];
+    combined = combined.concat(native_result.diagnostics);
+    combined = combined.concat(lowered.diagnostics);
+    if combined.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= combined.length {
+                break;
+            }
+            print.warn("[native-llvm] " + combined[index]);
+            index += 1;
+        }
+    }
+
+    return LoweredLLVMResultAny {
+        ir: lowered.ir,
+        diagnostics: combined,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
+    };
+}
+
+// Backwards-compatible shim that only supplies layout manifests
+fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> string[]) -> LoweredLLVMResultAny ![io] {
+    return compile_to_native_llvm_with_context(source, manifest_contents, []);
+}
+
+fn stage2_compiler_main() ![io] {
+    print.info("Sailfin compiler");
+}
+
+fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> string[] {
+    let lines = split_source_lines(source);
+    let mut padding_width -> number = number_to_string(lines.length).length;
+    if padding_width < 1 {
+        padding_width = 1;
+    }
+    let mut messages -> string[] = [];
     let mut index -> number = 0;
     loop {
         if index >= entries.length {
             break;
         }
-        let diagnostic = entries[index];
-        print.error("[typecheck] " + diagnostic.message);
+        let formatted = format_typecheck_diagnostic(entries[index], lines, padding_width);
+        messages = append_string(messages, formatted);
+        index += 1;
+    }
+    return messages;
+}
+
+fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
+    let formatted = format_typecheck_diagnostics(entries, source);
+    let prefix = "[typecheck] ";
+    let padding = repeat_character(" ", prefix.length);
+    let mut index -> number = 0;
+    loop {
+        if index >= formatted.length {
+            break;
+        }
+        let message = formatted[index];
+        let lines = split_source_lines(message);
+        if lines.length == 0 {
+            print.error(prefix);
+            index += 1;
+            continue;
+        }
+        let mut line_index -> number = 0;
+        loop {
+            if line_index >= lines.length {
+                break;
+            }
+            if line_index == 0 {
+                print.error(prefix + lines[line_index]);
+            } else {
+                print.error(padding + lines[line_index]);
+            }
+            line_index += 1;
+        }
         index += 1;
     }
 }
 
+fn format_typecheck_diagnostic(entry -> Diagnostic, source_lines -> string[], line_padding -> number) -> string {
+    if entry.primary == null {
+        return entry.message;
+    }
+    let mut parts -> string[] = [];
+    parts = append_string(parts, entry.message);
+    let token -> Token? = entry.primary;
+    let line_number = token.line;
+    let column_number = token.column;
+    let location = "  --> line " + number_to_string(line_number) + ", column " + number_to_string(column_number);
+    parts = append_string(parts, location);
+    if line_number < 1 || line_number > source_lines.length {
+        return join_lines(parts);
+    }
+    let line_text = source_lines[line_number - 1];
+    let gutter_spaces = repeat_character(" ", line_padding);
+    parts = append_string(parts, " " + gutter_spaces + " |");
+    let line_number_text = number_to_string(line_number);
+    let mut prefix_padding -> string = "";
+    let mut pad_count -> number = line_padding - line_number_text.length;
+    if pad_count < 0 {
+        pad_count = 0;
+    }
+    if pad_count > 0 {
+        prefix_padding = repeat_character(" ", pad_count);
+    }
+    parts = append_string(parts, " " + prefix_padding + line_number_text + " | " + line_text);
+    let pointer = build_pointer_line(column_number, token.lexeme, line_text);
+    parts = append_string(parts, " " + gutter_spaces + " | " + pointer);
+    return join_lines(parts);
+}
+
+fn split_source_lines(source -> string) -> string[] {
+    let mut lines -> string[] = [];
+    let mut current -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= source.length {
+            break;
+        }
+        let ch = substring(source, index, index + 1);
+        if ch == "\r" {
+            lines = append_string(lines, current);
+            current = "";
+            if index + 1 < source.length {
+                let next = substring(source, index + 1, index + 2);
+                if next == "\n" {
+                    index += 2;
+                    continue;
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\n" {
+            lines = append_string(lines, current);
+            current = "";
+            index += 1;
+            continue;
+        }
+        current = current + ch;
+        index += 1;
+    }
+    lines = append_string(lines, current);
+    return lines;
+}
+
+fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -> string {
+    if line_text.length == 0 {
+        return "^";
+    }
+    let mut start_column -> number = column;
+    if start_column < 1 {
+        start_column = 1;
+    }
+    if start_column > line_text.length {
+        start_column = line_text.length;
+    }
+    let mut pointer -> string = "";
+    let mut index -> number = 1;
+    loop {
+        if index >= start_column {
+            break;
+        }
+        if index <= line_text.length {
+            let current = substring(line_text, index - 1, index);
+            if current == "\t" {
+                pointer = pointer + "\t";
+            } else {
+                pointer = pointer + " ";
+            }
+        } else {
+            pointer = pointer + " ";
+        }
+        index += 1;
+    }
+    let mut highlight_length -> number = lexeme.length;
+    if highlight_length <= 0 {
+        highlight_length = 1;
+    }
+    let mut remaining -> number = line_text.length - (start_column - 1);
+    if remaining <= 0 {
+        remaining = 1;
+    }
+    if highlight_length > remaining {
+        highlight_length = remaining;
+    }
+    let mut highlight_index -> number = 0;
+    loop {
+        if highlight_index >= highlight_length {
+            break;
+        }
+        pointer = pointer + "^";
+        highlight_index += 1;
+    }
+    return pointer;
+}
+
+fn join_lines(lines -> string[]) -> string {
+    if lines.length == 0 {
+        return "";
+    }
+    let mut result -> string = lines[0];
+    let mut index -> number = 1;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        result = result + "\n" + lines[index];
+        index += 1;
+    }
+    return result;
+}
+
+fn append_string(values -> string[], value -> string) -> string[] {
+    return values.concat([value]);
+}
+
+fn number_to_string(value -> number) -> string {
+    if value == 0 {
+        return "0";
+    }
+    let mut working -> number = value;
+    let mut negative -> boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let digits = "0123456789";
+    let mut remaining -> number = working;
+    let mut output -> string = "";
+    loop {
+        if remaining <= 0 {
+            break;
+        }
+        let mut temp -> number = remaining;
+        let mut quotient -> number = 0;
+        loop {
+            if temp < 10 {
+                break;
+            }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    if negative {
+        output = "-" + output;
+    }
+    return output;
+}
+
 fn empty_native_module() -> NativeModule {
     return NativeModule {
+        module_name: "main",
         artifacts: [],
         entry_points: [],
         symbol_count: 0,
@@ -213,197 +928,6 @@ fn has_prefix(value -> string, prefix -> string) -> boolean {
         index += 1;
     }
     return true;
-}
-
-fn needs_python_fallback(source -> string) -> boolean {
-    if source.length == 0 {
-        return true;
-    }
-    let sanitized = strip_needs_python_fallback_literals(source);
-    let cleaned = strip_python_string_literals(sanitized);
-    let mut analysis_target -> string = cleaned;
-    if analysis_target.length == 0 {
-        analysis_target = sanitized;
-    }
-    let target = analysis_target;
-    if target.length == 0 {
-        return true;
-    }
-    if string_contains(target, "\nlet ") {
-        return true;
-    }
-    if string_contains(target, " let ") {
-        return true;
-    }
-    if string_contains(target, " mut ") {
-        return true;
-    }
-    if string_contains(target, "TokenKind.variant('Identifier', [])") {
-        return true;
-    }
-    if string_contains(target, "TokenKind.variant('NumberLiteral', [])") {
-        return true;
-    }
-    if string_contains(target, "TokenKind.variant('StringLiteral', [])") {
-        return true;
-    }
-    if string_contains(target, "TokenKind.variant('BooleanLiteral', [])") {
-        return true;
-    }
-    if string_contains(target, "TokenKind.variant('Symbol', [])") {
-        return true;
-    }
-    if string_contains(target, "Expression.Identifier()") {
-        return true;
-    }
-    if string_contains(target, "Expression.Raw()") {
-        return true;
-    }
-    if string_contains(target, "ExpressionIdentifier(") {
-        return true;
-    }
-    if string_contains(target, "ExpressionRaw(") {
-        return true;
-    }
-    return false;
-}
-
-fn string_contains(value -> string, pattern -> string) -> boolean {
-    if pattern.length == 0 {
-        return true;
-    }
-    if value.length < pattern.length {
-        return false;
-    }
-    let mut index -> number = 0;
-    loop {
-        if index + pattern.length > value.length {
-            break;
-        }
-        let mut match_flag -> boolean = true;
-        let mut offset -> number = 0;
-        loop {
-            if offset >= pattern.length {
-                break;
-            }
-            if value[index + offset] != pattern[offset] {
-                match_flag = false;
-                break;
-            }
-            offset += 1;
-        }
-        if match_flag {
-            return true;
-        }
-        index += 1;
-    }
-    return false;
-}
-
-fn strip_needs_python_fallback_literals(source -> string) -> string {
-    let marker = "def needs_python_fallback";
-    let start = find_substring(source, marker);
-    if start < 0 {
-        return source;
-    }
-    let tail_marker = "return False";
-    let tail_index = find_substring_from(source, tail_marker, start);
-    if tail_index < 0 {
-        return source;
-    }
-    let tail_end = tail_index + tail_marker.length;
-    tail_end = advance_to_line_end(source, tail_end);
-    let prefix = slice_string(source, 0, start);
-    let suffix = slice_string(source, tail_end, source.length);
-    return prefix + suffix;
-}
-
-fn strip_python_string_literals(value -> string) -> string {
-    let mut index -> number = 0;
-    let mut result -> string = "";
-    loop {
-        if index >= value.length {
-            break;
-        }
-        let ch = value[index];
-        if ch == "'" {
-            let quote_length = python_quote_length(value, index, "'");
-            let quotes = repeat_character("'", quote_length);
-            result = result + quotes;
-            index = skip_python_string_literal(value, index + quote_length, "'", quote_length);
-            result = result + quotes;
-            continue;
-        }
-        if ch == "\"" {
-            let quote_length = python_quote_length(value, index, "\"");
-            let quotes = repeat_character("\"", quote_length);
-            result = result + quotes;
-            index = skip_python_string_literal(value, index + quote_length, "\"", quote_length);
-            result = result + quotes;
-            continue;
-        }
-        result = result + ch;
-        index += 1;
-    }
-    return result;
-}
-
-fn python_quote_length(value -> string, start -> number, delimiter -> string) -> number {
-    if start + 2 < value.length {
-        if value[start + 1] == delimiter {
-            if value[start + 2] == delimiter {
-                return 3;
-            }
-        }
-    }
-    return 1;
-}
-
-fn skip_python_string_literal(value -> string, position -> number, delimiter -> string, quote_length -> number) -> number {
-    if quote_length == 1 {
-        let mut index -> number = position;
-        let mut escaped -> boolean = false;
-        loop {
-            if index >= value.length {
-                return index;
-            }
-            let current = value[index];
-            index += 1;
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if current == "\\" {
-                escaped = true;
-                continue;
-            }
-            if current == delimiter {
-                return index;
-            }
-        }
-    }
-    let mut search_index -> number = position;
-    loop {
-        if search_index + quote_length > value.length {
-            return value.length;
-        }
-        let mut matches -> boolean = true;
-        let mut offset -> number = 0;
-        loop {
-            if offset >= quote_length {
-                break;
-            }
-            if value[search_index + offset] != delimiter {
-                matches = false;
-                break;
-            }
-            offset += 1;
-        }
-        if matches {
-            return search_index + quote_length;
-        }
-        search_index += 1;
-    }
 }
 
 fn repeat_character(ch -> string, count -> number) -> string {
@@ -484,44 +1008,4 @@ fn find_substring_from(value -> string, pattern -> string, start -> number) -> n
         index += 1;
     }
     return -1;
-}
-
-fn advance_to_line_end(value -> string, position -> number) -> number {
-    let mut index -> number = position;
-    loop {
-        if index >= value.length {
-            break;
-        }
-        let ch = value[index];
-        index += 1;
-        if ch == "\n" {
-            break;
-        }
-    }
-    return index;
-}
-
-fn slice_string(value -> string, start -> number, end -> number) -> string {
-    if start < 0 {
-        start = 0;
-    }
-    if end < start {
-        end = start;
-    }
-    if start >= value.length {
-        return "";
-    }
-    if end > value.length {
-        end = value.length;
-    }
-    let mut index -> number = start;
-    let mut result -> string = "";
-    loop {
-        if index >= end {
-            break;
-        }
-        result = result + value[index];
-        index += 1;
-    }
-    return result;
 }

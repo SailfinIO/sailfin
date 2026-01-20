@@ -1,0 +1,490 @@
+// compiler/src/llvm/expression_lowering/native/core_operators.sfn
+//
+// Operator and expression-shape helpers extracted from core.sfn.
+
+import { substring, char_at, char_code } from "../../../string_utils";
+
+import {
+    OperatorMatch,
+} from "../../types";
+
+import {
+    trim_text,
+    starts_with,
+    contains_text,
+} from "../../utils";
+
+import {
+    char_code_at_text,
+    is_trim_char,
+} from "./core_text";
+
+fn lines_end_with_terminator(lines -> string[]) -> boolean {
+    let mut index -> number = lines.length - 1;
+    loop {
+        if lines.length == 0 {
+            return false;
+        }
+        if index < 0 {
+            break;
+        }
+        let line = trim_text(lines[index]);
+        if line.length == 0 {
+            index -= 1;
+            continue;
+        }
+        if starts_with(line, "ret") {
+            return true;
+        }
+        if starts_with(line, "br ") {
+            return true;
+        }
+        if starts_with(line, "switch ") {
+            return true;
+        }
+        if line == "unreachable" {
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+fn strip_enclosing_parentheses(expression -> string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length < 2 {
+        return trimmed;
+    }
+    if trimmed[0] != "(" || trimmed[trimmed.length - 1] != ")" {
+        return trimmed;
+    }
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = char_at(trimmed, index);
+        if ch == "(" {
+            depth += 1;
+        } else if ch == ")" {
+            depth -= 1;
+            if depth == 0 {
+                if index == trimmed.length - 1 {
+                    let inner = substring(trimmed, 1, trimmed.length - 1);
+                    return strip_enclosing_parentheses(inner);
+                }
+                return trimmed;
+            }
+        }
+        index += 1;
+    }
+    return trimmed;
+}
+
+fn find_top_level_operator(expression -> string, operators -> string) -> OperatorMatch {
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    let mut in_single -> boolean = false;
+    let mut in_double -> boolean = false;
+    let mut escape_next -> boolean = false;
+    let mut candidate_index -> number = -1;
+    let mut candidate_symbol -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let ch = char_at(expression, index);
+        if in_double {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "<" {
+            angle_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 && contains_char(operators, ch) {
+            if ch == "-" {
+                if is_binary_minus(expression, index) {
+                    candidate_index = index;
+                    candidate_symbol = substring(expression, index, index + 1);
+                }
+            } else if ch == "*" {
+                if is_binary_star(expression, index) {
+                    candidate_index = index;
+                    candidate_symbol = substring(expression, index, index + 1);
+                }
+            } else {
+                candidate_index = index;
+                candidate_symbol = substring(expression, index, index + 1);
+            }
+        }
+        index += 1;
+    }
+    if candidate_index >= 0 {
+        return OperatorMatch { index: candidate_index, symbol: candidate_symbol, success: true };
+    }
+    return OperatorMatch { index: -1, symbol: "", success: false };
+}
+
+fn find_comparison_operator(expression -> string) -> OperatorMatch {
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut escape_next -> boolean = false;
+    loop {
+        if index >= expression.length {
+            break;
+        }
+        let code = char_code_at_text(expression, index);
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if code == char_code("\\") {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if code == char_code("\"") {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if code == char_code("\"") {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if code == char_code("(") {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if code == char_code(")") {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth > 0 {
+            index += 1;
+            continue;
+        }
+
+        // Compare operators without substring/string-equality.
+        // This keeps the lowering resilient even if string helpers are broken.
+        if index + 1 < expression.length {
+            let next_code = char_code_at_text(expression, index + 1);
+            if next_code == char_code("=") {
+                if code == char_code("=") {
+                    return OperatorMatch { index: index, symbol: "==", success: true };
+                }
+                if code == char_code("!") {
+                    return OperatorMatch { index: index, symbol: "!=", success: true };
+                }
+                if code == char_code("<") {
+                    return OperatorMatch { index: index, symbol: "<=", success: true };
+                }
+                if code == char_code(">") {
+                    return OperatorMatch { index: index, symbol: ">=", success: true };
+                }
+            }
+        }
+        if code == char_code("<") {
+            return OperatorMatch { index: index, symbol: "<", success: true };
+        }
+        if code == char_code(">") {
+            return OperatorMatch { index: index, symbol: ">", success: true };
+        }
+        index += 1;
+    }
+    return OperatorMatch { index: -1, symbol: "", success: false };
+}
+
+fn find_logical_operator(expression -> string) -> OperatorMatch {
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut escape_next -> boolean = false;
+
+    loop {
+        if index + 1 >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth == 0 {
+            let two = substring(expression, index, index + 2);
+            if two == "||" {
+                return OperatorMatch { index: index, symbol: "||", success: true };
+            }
+        }
+        index += 1;
+    }
+
+    depth = 0;
+    index = 0;
+    in_string = false;
+    escape_next = false;
+    loop {
+        if index + 1 >= expression.length {
+            break;
+        }
+        let ch = expression[index];
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth == 0 {
+            let two = substring(expression, index, index + 2);
+            if two == "&&" {
+                return OperatorMatch { index: index, symbol: "&&", success: true };
+            }
+        }
+        index += 1;
+    }
+    return OperatorMatch { index: -1, symbol: "", success: false };
+}
+
+fn contains_char(set -> string, ch -> string) -> boolean {
+    if ch.length == 0 {
+        return false;
+    }
+    let target = char_code(ch);
+    let mut index -> number = 0;
+    loop {
+        if index >= set.length {
+            break;
+        }
+        if char_code(char_at(set, index)) == target {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn is_binary_minus(expression -> string, index -> number) -> boolean {
+    let previous = find_previous_non_space_char(expression, index);
+    let next = find_next_non_space_char(expression, index);
+    if previous == null {
+        return false;
+    }
+    let prev_char = previous;
+    if prev_char == "+" || prev_char == "-" || prev_char == "*" || prev_char == "/" || prev_char == "(" || prev_char == "," {
+        return false;
+    }
+    if next == null {
+        return false;
+    }
+    let next_char = next;
+    if next_char == "+" || next_char == "-" || next_char == "*" || next_char == "/" || next_char == ")" || next_char == "," {
+        return false;
+    }
+    return true;
+}
+
+fn is_binary_star(expression -> string, index -> number) -> boolean {
+    let previous = find_previous_non_space_char(expression, index);
+    let next = find_next_non_space_char(expression, index);
+    if previous == null {
+        return false;
+    }
+    let prev_char = previous;
+    if prev_char == "+" || prev_char == "-" || prev_char == "*" || prev_char == "/" || prev_char == "(" || prev_char == "," {
+        return false;
+    }
+    if next == null {
+        return false;
+    }
+    let next_char = next;
+    if next_char == "+" || next_char == "-" || next_char == "*" || next_char == "/" || next_char == ")" || next_char == "," {
+        return false;
+    }
+    return true;
+}
+
+fn find_previous_non_space_char(value -> string, index -> number) -> string? {
+    let mut position -> number = index;
+    loop {
+        if position <= 0 {
+            break;
+        }
+        position -= 1;
+        let ch = char_at(value, position);
+        if !is_trim_char(ch) {
+            return ch;
+        }
+    }
+    return null;
+}
+
+fn find_next_non_space_char(value -> string, index -> number) -> string? {
+    let mut position -> number = index + 1;
+    loop {
+        if position >= value.length {
+            break;
+        }
+        let ch = char_at(value, position);
+        if !is_trim_char(ch) {
+            return ch;
+        }
+        position += 1;
+    }
+    return null;
+}

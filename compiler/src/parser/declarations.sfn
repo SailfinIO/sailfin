@@ -1,0 +1,1966 @@
+// compiler/src/parser/declarations.sfn
+//
+// Top-level declaration parsing - functions, structs, enums, interfaces,
+// imports, exports, models, pipelines, tools, tests, and type aliases.
+
+import { Token } from "../token";
+import {
+    Block,
+    Decorator,
+    DecoratorArgument,
+    Expression,
+    FieldDeclaration,
+    FunctionSignature,
+    EnumVariant,
+    MethodDeclaration,
+    ModelProperty,
+    Parameter,
+    Statement,
+    ImportSpecifier,
+    ExportSpecifier,
+    TypeParameter,
+    TypeAnnotation,
+    decorator_names,
+} from "../ast";
+import { infer_effects } from "../decorator_semantics";
+import { substring, char_code, char_at, strings_equal } from "../string_utils";
+import {
+    Parser,
+    StatementParseResult,
+    ParameterParseResult,
+    ParameterListParseResult,
+    StructFieldParseResult,
+    ModelPropertyParseResult,
+    MethodParseResult,
+    InterfaceMemberParseResult,
+    EnumVariantParseResult,
+    TypeParameterParseResult,
+    ImplementsParseResult,
+    DecoratorParseResult,
+    EffectParseResult,
+    TypeSeparatorParseResult,
+    SpecifierListParseResult,
+    NamedSpecifier,
+    BlockParseResult,
+} from "./types";
+import {
+    trim_text,
+    strip_surrounding_quotes,
+    strip_loose_quotes,
+    looks_like_number,
+    normalize_test_name,
+} from "./utils";
+import {
+    parser_peek_raw,
+    parser_advance_raw,
+    skip_trivia,
+    identifier_matches,
+    symbol_matches,
+    identifier_text,
+    string_literal_value,
+    consume_keyword,
+    consume_symbol,
+    advance_to_symbol,
+    collect_until,
+    collect_parenthesized,
+    token_slice,
+    trim_token_edges,
+    filter_trivia,
+    tokens_to_text,
+    source_span_from_tokens,
+    append_token,
+    find_top_level_symbol,
+    find_top_level_colon,
+    split_tokens_by_comma,
+    split_token_slices_by_comma,
+    skip_struct_member,
+    skip_enum_variant_entry,
+    skip_trailing_comma,
+    is_end_of_file,
+} from "./token_utils";
+import { expression_from_tokens, normalize_expression } from "./expressions";
+import { parse_block } from "./statements";
+
+// ============================================================================
+// Type Separator
+// ============================================================================
+
+fn consume_type_separator(parser -> Parser) -> TypeSeparatorParseResult {
+    let token = parser_peek_raw(parser);
+    if symbol_matches(token, ":") || symbol_matches(token, "->") {
+        return TypeSeparatorParseResult { parser: parser_advance_raw(parser), found: true };
+    }
+    // Tolerate a lexer/runtime bug where `->` is split into `-` and `>`.
+    if symbol_matches(token, "-") {
+        let mut current = parser_advance_raw(parser);
+        let maybe_gt = parser_peek_raw(current);
+        if symbol_matches(maybe_gt, ">") {
+            current = parser_advance_raw(current);
+        }
+        return TypeSeparatorParseResult { parser: current, found: true };
+    }
+    return TypeSeparatorParseResult { parser: parser, found: false };
+}
+
+// ============================================================================
+// Decorator Parsing
+// ============================================================================
+
+fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
+    let mut current = parser;
+    let mut decorators -> Decorator[] = [];
+
+    loop {
+        current = skip_trivia(current);
+        let token = parser_peek_raw(current);
+        if !symbol_matches(token, "@") {
+            break;
+        }
+
+        let decorator_start = current;
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+
+        let name_token = parser_peek_raw(current);
+        if name_token.kind.variant != "Identifier" {
+            current = decorator_start;
+            break;
+        }
+
+        let name = identifier_text(name_token);
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+
+        let mut decorator_arguments -> DecoratorArgument[] = [];
+        let after = parser_peek_raw(current);
+        if symbol_matches(after, "(") {
+            let paren_result = collect_parenthesized(current);
+            if paren_result.success {
+                let mut segment_tokens -> Token[] = [];
+                let mut angle -> number = 0;
+                let mut paren -> number = 0;
+                let mut brace -> number = 0;
+                let mut bracket -> number = 0;
+
+                let mut index -> number = 0;
+                loop {
+                    if index >= paren_result.tokens.length {
+                        break;
+                    }
+                    let tok = paren_result.tokens[index];
+                    if tok.kind.variant == "Symbol" {
+                        let sym = tok.lexeme;
+                        if strings_equal(sym, "<") {
+                            angle += 1;
+                        } else if strings_equal(sym, ">") && angle > 0 {
+                            angle -= 1;
+                        } else if strings_equal(sym, "(") {
+                            paren += 1;
+                        } else if strings_equal(sym, ")") && paren > 0 {
+                            paren -= 1;
+                        } else if strings_equal(sym, "{") {
+                            brace += 1;
+                        } else if strings_equal(sym, "}") && brace > 0 {
+                            brace -= 1;
+                        } else if strings_equal(sym, "[") {
+                            bracket += 1;
+                        } else if strings_equal(sym, "]") && bracket > 0 {
+                            bracket -= 1;
+                        }
+
+                        let at_top_level = angle == 0 && paren == 0 && brace == 0 && bracket == 0;
+                        if strings_equal(sym, ",") && at_top_level {
+                            let trimmed_tokens = trim_token_edges(segment_tokens);
+                            let argument = parse_decorator_argument(trimmed_tokens);
+                            if argument != null {
+                                decorator_arguments = append_decorator_argument(decorator_arguments, argument);
+                            }
+                            segment_tokens = [];
+                            index += 1;
+                            continue;
+                        }
+                    }
+                    segment_tokens = append_token(segment_tokens, tok);
+                    index += 1;
+                }
+
+                let final_tokens = trim_token_edges(segment_tokens);
+                let trailing_argument = parse_decorator_argument(final_tokens);
+                if trailing_argument != null {
+                    decorator_arguments = append_decorator_argument(decorator_arguments, trailing_argument);
+                }
+                current = paren_result.parser;
+            } else {
+                current = decorator_start;
+                break;
+            }
+        }
+
+        decorators = append_decorator(decorators, Decorator { name: name, arguments: decorator_arguments });
+    }
+
+    return DecoratorParseResult { parser: current, decorators: decorators };
+}
+
+fn parse_decorator_argument(tokens -> Token[]) -> DecoratorArgument? {
+    if tokens.length == 0 {
+        return null;
+    }
+
+    let colon_index = find_top_level_colon(tokens);
+    if colon_index == -1 {
+        let trimmed_tokens = trim_token_edges(tokens);
+        if trimmed_tokens.length == 0 {
+            return null;
+        }
+        let expr = normalize_expression(trimmed_tokens, expression_from_tokens(trimmed_tokens));
+        return DecoratorArgument { name: null, expression: expr };
+    }
+
+    let name_tokens = trim_token_edges(token_slice(tokens, 0, colon_index));
+    let value_tokens = trim_token_edges(token_slice(tokens, colon_index + 1, tokens.length));
+
+    if value_tokens.length == 0 {
+        return null;
+    }
+
+    let name_text = trim_text(tokens_to_text(name_tokens));
+    if name_text.length == 0 {
+        return null;
+    }
+
+    let mut expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens));
+    if expr.variant == "Raw" {
+        let raw_text = trim_text(tokens_to_text(value_tokens));
+        if raw_text.length >= 2 && char_at(raw_text, 0) == "\"" && char_at(raw_text, raw_text.length - 1) == "\"" {
+            let literal = strip_surrounding_quotes(raw_text);
+            expr = Expression.StringLiteral { value: literal };
+        } else if raw_text == "true" {
+            expr = Expression.BooleanLiteral { value: "true" };
+        } else if raw_text == "false" {
+            expr = Expression.BooleanLiteral { value: "false" };
+        } else if looks_like_number(raw_text) {
+            expr = Expression.NumberLiteral { value: raw_text };
+        }
+    }
+    return DecoratorArgument { name: name_text, expression: expr };
+}
+
+// ============================================================================
+// Effect List Parsing
+// ============================================================================
+
+fn parse_effect_list(initial_parser -> Parser) -> EffectParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let token = parser_peek_raw(parser);
+    if !symbol_matches(token, "!") {
+        return EffectParseResult { parser: parser, effects: [] };
+    }
+
+    parser = parser_advance_raw(parser);
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, "[");
+
+    let mut effects -> string[] = [];
+    parser = skip_trivia(parser);
+    loop {
+        let current = parser_peek_raw(parser);
+        if symbol_matches(current, "]") {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if current.kind.variant == "Identifier" {
+            let effect = identifier_text(current);
+            effects = append_string(effects, effect);
+            parser = parser_advance_raw(parser);
+            parser = skip_trivia(parser);
+            let separator = parser_peek_raw(parser);
+            if symbol_matches(separator, ",") {
+                parser = parser_advance_raw(parser);
+                parser = skip_trivia(parser);
+                continue;
+            }
+            continue;
+        }
+        parser = parser_advance_raw(parser);
+        parser = skip_trivia(parser);
+    }
+
+    return EffectParseResult { parser: parser, effects: effects };
+}
+
+// ============================================================================
+// Type Parameter Clause
+// ============================================================================
+
+fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
+    let mut current = skip_trivia(parser);
+    let token = parser_peek_raw(current);
+    if !symbol_matches(token, "<") {
+        return TypeParameterParseResult { parser: parser, parameters: [] };
+    }
+
+    current = parser_advance_raw(current);
+    let mut collected -> Token[] = [];
+    let mut depth -> number = 1;
+
+    loop {
+        let tok = parser_peek_raw(current);
+        if tok.kind.variant == "EndOfFile" {
+            break;
+        }
+        if tok.kind.variant == "Symbol" {
+            let sym = tok.lexeme;
+            if strings_equal(sym, "<") {
+                depth += 1;
+            } else if strings_equal(sym, ">") {
+                depth -= 1;
+                if depth == 0 {
+                    current = parser_advance_raw(current);
+                    break;
+                }
+            }
+        }
+        collected = append_token(collected, tok);
+        current = parser_advance_raw(current);
+    }
+
+    let slices = split_token_slices_by_comma(collected);
+    let mut parameters -> TypeParameter[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= slices.length {
+            break;
+        }
+        let slice_tokens = trim_token_edges(slices[index]);
+        if slice_tokens.length > 0 {
+            let colon_index = find_top_level_symbol(slice_tokens, ":");
+            let mut name_tokens = slice_tokens;
+            let mut bound_tokens -> Token[] = [];
+            if colon_index != -1 {
+                name_tokens = token_slice(slice_tokens, 0, colon_index);
+                bound_tokens = token_slice(slice_tokens, colon_index + 1, slice_tokens.length);
+            }
+
+            let name_text = trim_text(tokens_to_text(name_tokens));
+            if name_text.length > 0 {
+                let mut bound -> TypeAnnotation? = null;
+                let bound_text = trim_text(tokens_to_text(bound_tokens));
+                if bound_tokens.length > 0 && bound_text.length > 0 {
+                    bound = TypeAnnotation { text: bound_text };
+                }
+                let name_span = source_span_from_tokens(name_tokens);
+                let parameter = TypeParameter { name: name_text, bound: bound, span: name_span };
+                parameters.push(parameter);
+            }
+        }
+        index += 1;
+    }
+
+    return TypeParameterParseResult { parser: current, parameters: parameters };
+}
+
+// ============================================================================
+// Implements Clause
+// ============================================================================
+
+fn parse_implements_clause(parser -> Parser) -> ImplementsParseResult {
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "implements") {
+        return ImplementsParseResult { parser: parser, types: [], found: false };
+    }
+
+    current = consume_keyword(current, "implements");
+    current = skip_trivia(current);
+
+    let capture = collect_until(current, ["{"]);
+    current = capture.parser;
+
+    let mut implements_types -> TypeAnnotation[] = [];
+    let entries = split_tokens_by_comma(capture.tokens);
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let text = trim_text(entries[index]);
+        if text.length > 0 {
+            implements_types = append_type_annotation(implements_types, TypeAnnotation { text: text });
+        }
+        index += 1;
+    }
+
+    return ImplementsParseResult {
+        parser: current,
+        types: implements_types,
+        found: true,
+    };
+}
+
+// ============================================================================
+// Parameter Parsing
+// ============================================================================
+
+fn parse_parameter_list(initial_parser -> Parser) -> ParameterListParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let mut parameters -> Parameter[] = [];
+
+    let token = parser_peek_raw(parser);
+    if symbol_matches(token, ")") {
+        parser = parser_advance_raw(parser);
+        return ParameterListParseResult { parser: parser, parameters: parameters };
+    }
+
+    loop {
+        let param_result = parse_single_parameter(parser);
+        parser = param_result.parser;
+        parameters = append_parameter(parameters, param_result.parameter);
+        parser = skip_trivia(parser);
+        let separator = parser_peek_raw(parser);
+        if symbol_matches(separator, ",") {
+            parser = parser_advance_raw(parser);
+            parser = skip_trivia(parser);
+            continue;
+        }
+        if symbol_matches(separator, ")") {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if separator.kind.variant == "EndOfFile" {
+            break;
+        }
+    }
+
+    return ParameterListParseResult { parser: parser, parameters: parameters };
+}
+
+fn parse_single_parameter(initial_parser -> Parser) -> ParameterParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let tokens_ref = parser.tokens;
+    let start_index = parser.index;
+
+    let mut is_mutable = false;
+    let token = parser_peek_raw(parser);
+    if identifier_matches(token, "mut") {
+        parser = parser_advance_raw(parser);
+        is_mutable = true;
+    }
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    parser = parser_advance_raw(parser);
+
+    let mut type_annotation -> TypeAnnotation? = null;
+    parser = skip_trivia(parser);
+    let separator_result = consume_type_separator(parser);
+    if separator_result.found {
+        parser = separator_result.parser;
+        let capture = collect_until(skip_trivia(parser), ["=", ",", ")"]);
+        parser = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            type_annotation = TypeAnnotation { text: text };
+        }
+    }
+
+    let mut default_value -> Expression? = null;
+    parser = skip_trivia(parser);
+    let assign = parser_peek_raw(parser);
+    if symbol_matches(assign, "=") {
+        parser = parser_advance_raw(parser);
+        let capture = collect_until(skip_trivia(parser), [",", ")"]);
+        parser = capture.parser;
+        default_value = expression_from_tokens(capture.tokens);
+    }
+
+    let end_index = parser.index;
+    let parameter_tokens = token_slice(tokens_ref, start_index, end_index);
+    let span = source_span_from_tokens(parameter_tokens);
+
+    let parameter = Parameter {
+        name: name,
+        type_annotation: type_annotation,
+        default_value: default_value,
+        mutable: is_mutable,
+        span: span,
+    };
+    return ParameterParseResult { parser: parser, parameter: parameter };
+}
+
+// ============================================================================
+// Import/Export Parsing
+// ============================================================================
+
+fn parse_import(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "import");
+    let specifier_result = parse_specifier_list(parser);
+    parser = specifier_result.parser;
+    let import_specifiers = build_import_specifiers(specifier_result.specifiers);
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "from");
+
+    parser = skip_trivia(parser);
+    let mut source = "";
+    let token = parser_peek_raw(parser);
+    let text = token.lexeme;
+    if text.length > 0 && strings_equal(char_at(text, 0), "\"") {
+        source = string_literal_value(token);
+        parser = parser_advance_raw(parser);
+    } else {
+        let capture = collect_until(parser, [";"]);
+        parser = capture.parser;
+        source = trim_text(tokens_to_text(capture.tokens));
+        source = strip_surrounding_quotes(strip_loose_quotes(source));
+    }
+
+    parser = skip_trivia(parser);
+    let import_terminator = parser_peek_raw(parser);
+    if symbol_matches(import_terminator, ";") {
+        parser = parser_advance_raw(parser);
+    }
+
+    let statement = Statement.ImportDeclaration {
+        import_specifiers: import_specifiers,
+        source: source,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+fn parse_export(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "export");
+    let specifier_result = parse_specifier_list(parser);
+    parser = specifier_result.parser;
+    let export_specifiers = build_export_specifiers(specifier_result.specifiers);
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "from");
+
+    parser = skip_trivia(parser);
+    let mut source = "";
+    let token = parser_peek_raw(parser);
+    let text = token.lexeme;
+    if text.length > 0 && strings_equal(char_at(text, 0), "\"") {
+        source = string_literal_value(token);
+        parser = parser_advance_raw(parser);
+    } else {
+        let capture = collect_until(parser, [";"]);
+        parser = capture.parser;
+        source = trim_text(tokens_to_text(capture.tokens));
+        source = strip_surrounding_quotes(strip_loose_quotes(source));
+    }
+
+    parser = skip_trivia(parser);
+    let export_terminator = parser_peek_raw(parser);
+    if symbol_matches(export_terminator, ";") {
+        parser = parser_advance_raw(parser);
+    }
+
+    let statement = Statement.ExportDeclaration {
+        export_specifiers: export_specifiers,
+        source: source,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, "{");
+
+    let mut specifiers -> NamedSpecifier[] = [];
+    parser = skip_trivia(parser);
+    loop {
+        let current = parser_peek_raw(parser);
+        if symbol_matches(current, "}") {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if current.kind.variant != "Identifier" {
+            break;
+        }
+
+        let name = identifier_text(current);
+        parser = parser_advance_raw(parser);
+        parser = skip_trivia(parser);
+
+        let mut alias -> string? = null;
+        let potential_alias = parser_peek_raw(parser);
+        if identifier_matches(potential_alias, "as") {
+            parser = consume_keyword(parser, "as");
+            parser = skip_trivia(parser);
+            let alias_token = parser_peek_raw(parser);
+            if alias_token.kind.variant == "Identifier" {
+                alias = identifier_text(alias_token);
+                parser = parser_advance_raw(parser);
+                parser = skip_trivia(parser);
+            }
+        }
+
+        specifiers.push(NamedSpecifier { name: name, alias: alias });
+
+        let separator = parser_peek_raw(parser);
+        if symbol_matches(separator, ",") {
+            parser = parser_advance_raw(parser);
+            parser = skip_trivia(parser);
+            continue;
+        }
+    }
+
+    parser = skip_trivia(parser);
+    if symbol_matches(parser_peek_raw(parser), "}") {
+        parser = parser_advance_raw(parser);
+    }
+
+    return SpecifierListParseResult { parser: parser, specifiers: specifiers };
+}
+
+fn build_import_specifiers(values -> NamedSpecifier[]) -> ImportSpecifier[] {
+    let mut result -> ImportSpecifier[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        let entry = values[index];
+        result.push(ImportSpecifier { name: entry.name, alias: entry.alias });
+        index += 1;
+    }
+    return result;
+}
+
+fn build_export_specifiers(values -> NamedSpecifier[]) -> ExportSpecifier[] {
+    let mut result -> ExportSpecifier[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        let entry = values[index];
+        result.push(ExportSpecifier { name: entry.name, alias: entry.alias });
+        index += 1;
+    }
+    return result;
+}
+
+// ============================================================================
+// Variable Declaration
+// ============================================================================
+
+fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let mut statement_tokens -> Token[] = [];
+    let let_token = parser_peek_raw(parser);
+    statement_tokens = append_token(statement_tokens, let_token);
+    parser = consume_keyword(parser, "let");
+
+    let mut mutable_flag = false;
+    parser = skip_trivia(parser);
+    let mut_token = parser_peek_raw(parser);
+    if identifier_matches(mut_token, "mut") {
+        statement_tokens = append_token(statement_tokens, mut_token);
+        parser = consume_keyword(parser, "mut");
+        mutable_flag = true;
+    }
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    statement_tokens = append_token(statement_tokens, name_token);
+    let name = identifier_text(name_token);
+    parser = parser_advance_raw(parser);
+
+    let mut type_annotation -> TypeAnnotation? = null;
+    parser = skip_trivia(parser);
+    let separator_token = parser_peek_raw(parser);
+    let separator_result = consume_type_separator(parser);
+    if separator_result.found {
+        statement_tokens = append_token(statement_tokens, separator_token);
+        parser = separator_result.parser;
+        let capture = collect_until(skip_trivia(parser), ["=", ";"]);
+        let mut index -> number = 0;
+        loop {
+            if index >= capture.tokens.length {
+                break;
+            }
+            statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+            index += 1;
+        }
+        parser = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            type_annotation = TypeAnnotation { text: text };
+        }
+    }
+
+    let mut initializer -> Expression? = null;
+    let mut initializer_span -> SourceSpan? = null;
+    parser = skip_trivia(parser);
+    let assign = parser_peek_raw(parser);
+    if symbol_matches(assign, "=") {
+        statement_tokens = append_token(statement_tokens, assign);
+        parser = parser_advance_raw(parser);
+        let capture = collect_until(skip_trivia(parser), [";"]);
+        let mut index -> number = 0;
+        loop {
+            if index >= capture.tokens.length {
+                break;
+            }
+            statement_tokens = append_token(statement_tokens, capture.tokens[index]);
+            index += 1;
+        }
+        parser = capture.parser;
+        if capture.tokens.length > 0 {
+            initializer_span = source_span_from_tokens(capture.tokens);
+            initializer = expression_from_tokens(capture.tokens);
+        }
+    }
+
+    parser = skip_trivia(parser);
+    let terminator = parser_peek_raw(parser);
+    if symbol_matches(terminator, ";") {
+        statement_tokens = append_token(statement_tokens, terminator);
+        parser = parser_advance_raw(parser);
+    }
+
+    let span = source_span_from_tokens(statement_tokens);
+
+    let statement = Statement.VariableDeclaration {
+        name: name,
+        mutable: mutable_flag,
+        type_annotation: type_annotation,
+        initializer: initializer,
+        span: span,
+        initializer_span: initializer_span,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+// ============================================================================
+// Function Declaration
+// ============================================================================
+
+fn parse_function(initial_parser -> Parser, starts_with_async -> boolean, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let mut is_async = false;
+    if starts_with_async {
+        parser = consume_keyword(parser, "async");
+        is_async = true;
+    } else {
+        let look = parser_peek_raw(parser);
+        if identifier_matches(look, "async") {
+            let lookahead = skip_trivia(parser_advance_raw(parser));
+            let next = parser_peek_raw(lookahead);
+            if identifier_matches(next, "fn") {
+                parser = consume_keyword(parser, "async");
+                parser = skip_trivia(parser);
+                is_async = true;
+            }
+        }
+    }
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "fn");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    let type_param_result = parse_type_parameter_clause(parser);
+    parser = type_param_result.parser;
+    let mut type_parameters = type_param_result.parameters;
+
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, "(");
+    let parameter_result = parse_parameter_list(parser);
+    parser = parameter_result.parser;
+    let parameters = parameter_result.parameters;
+
+    parser = skip_trivia(parser);
+    let mut return_type -> TypeAnnotation? = null;
+    let sep_result = consume_type_separator(parser);
+    if sep_result.found {
+        parser = sep_result.parser;
+        let capture = collect_until(skip_trivia(parser), ["!", "{"]);
+        parser = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            return_type = TypeAnnotation { text: text };
+        }
+    }
+
+    let effect_result = parse_effect_list(parser);
+    parser = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+
+    // Allow `fn foo() ![effects] -> T {}` ordering.
+    if return_type == null {
+        parser = skip_trivia(parser);
+        let late_sep = consume_type_separator(parser);
+        if late_sep.found {
+            parser = late_sep.parser;
+            let capture = collect_until(skip_trivia(parser), ["{"]);
+            parser = capture.parser;
+            let text = trim_text(tokens_to_text(capture.tokens));
+            if text.length > 0 {
+                return_type = TypeAnnotation { text: text };
+            }
+        }
+    }
+
+    let block_result = parse_block(parser);
+    parser = block_result.parser;
+    let body = block_result.block;
+
+    let signature = FunctionSignature {
+        name: name,
+        is_async: is_async,
+        parameters: parameters,
+        return_type: return_type,
+        effects: inferred_effects,
+        type_parameters: type_parameters,
+        name_span: name_span,
+    };
+
+    let statement = Statement.FunctionDeclaration {
+        signature: signature,
+        body: body,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+fn parse_extern_function(initial_parser -> Parser, starts_with_unsafe -> boolean, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let mut is_unsafe = false;
+    if starts_with_unsafe {
+        parser = consume_keyword(parser, "unsafe");
+        is_unsafe = true;
+    }
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "extern");
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "fn");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    let type_param_result = parse_type_parameter_clause(parser);
+    parser = type_param_result.parser;
+    let type_parameters = type_param_result.parameters;
+
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, "(");
+    let parameter_result = parse_parameter_list(parser);
+    parser = parameter_result.parser;
+    let parameters = parameter_result.parameters;
+
+    parser = skip_trivia(parser);
+    let mut return_type -> TypeAnnotation? = null;
+    let sep_result = consume_type_separator(parser);
+    if sep_result.found {
+        parser = sep_result.parser;
+        let capture = collect_until(skip_trivia(parser), ["!", ";"]);
+        parser = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            return_type = TypeAnnotation { text: text };
+        }
+    }
+
+    let effect_result = parse_effect_list(parser);
+    parser = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+
+    // Allow `extern fn foo() ![effects] -> T;` ordering.
+    if return_type == null {
+        parser = skip_trivia(parser);
+        let late_sep = consume_type_separator(parser);
+        if late_sep.found {
+            parser = late_sep.parser;
+            let capture = collect_until(skip_trivia(parser), [";"]);
+            parser = capture.parser;
+            let text = trim_text(tokens_to_text(capture.tokens));
+            if text.length > 0 {
+                return_type = TypeAnnotation { text: text };
+            }
+        }
+    }
+
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, ";");
+
+    let signature = FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: parameters,
+        return_type: return_type,
+        effects: inferred_effects,
+        type_parameters: type_parameters,
+        name_span: name_span,
+    };
+
+    let statement = Statement.ExternFunctionDeclaration {
+        signature: signature,
+        unsafe: is_unsafe,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+// ============================================================================
+// Struct Declaration
+// ============================================================================
+
+fn parse_struct(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "struct");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    let type_param_result = parse_type_parameter_clause(parser);
+    parser = type_param_result.parser;
+    let mut type_parameters = type_param_result.parameters;
+
+    let implements_result = parse_implements_clause(parser);
+    parser = implements_result.parser;
+    let mut implements_types = implements_result.types;
+
+    parser = skip_trivia(parser);
+    parser = advance_to_symbol(parser, "{");
+    parser = consume_symbol(parser, "{");
+
+    let mut fields -> FieldDeclaration[] = [];
+    let mut methods -> MethodDeclaration[] = [];
+
+    loop {
+        parser = skip_trivia(parser);
+        let member_start = parser;
+
+        let decorator_result = parse_decorators(parser);
+        parser = decorator_result.parser;
+        let member_decorators = decorator_result.decorators;
+
+        parser = skip_trivia(parser);
+        let token = parser_peek_raw(parser);
+        if symbol_matches(token, "}") {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if token.kind.variant == "EndOfFile" {
+            break;
+        }
+
+        let field_result = parse_struct_field(parser);
+        if field_result.success && member_decorators.length == 0 {
+            if field_result.field != null {
+                fields = append_field(fields, field_result.field);
+            }
+            parser = field_result.parser;
+            continue;
+        }
+
+        let method_result = parse_struct_method(parser, member_decorators);
+        if method_result.success {
+            if method_result.method != null {
+                methods = append_method(methods, method_result.method);
+            }
+            parser = method_result.parser;
+            continue;
+        }
+
+        parser = skip_struct_member(member_start);
+    }
+
+    let statement = Statement.StructDeclaration {
+        name: name,
+        name_span: name_span,
+        type_parameters: type_parameters,
+        implements_types: implements_types,
+        fields: fields,
+        methods: methods,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
+    let mut current = skip_trivia(parser);
+
+    let mut is_mutable = false;
+    let token = parser_peek_raw(current);
+    let mut token_to_use = token;
+    if identifier_matches(token_to_use, "mut") {
+        current = parser_advance_raw(current);
+        is_mutable = true;
+        current = skip_trivia(current);
+        token_to_use = parser_peek_raw(current);
+    }
+
+    if token_to_use.kind.variant != "Identifier" {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+
+    let name = identifier_text(token_to_use);
+    let name_span = source_span_from_tokens([token_to_use]);
+    current = parser_advance_raw(current);
+
+    current = skip_trivia(current);
+    let separator_result = consume_type_separator(current);
+    current = separator_result.parser;
+    if !separator_result.found {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+
+    let capture = collect_until(skip_trivia(current), [";", ",", "}"]);
+    current = capture.parser;
+    let type_text = trim_text(tokens_to_text(capture.tokens));
+    if type_text.length == 0 {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if !symbol_matches(terminator, ";") {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+    current = parser_advance_raw(current);
+
+    let field = FieldDeclaration {
+        name: name,
+        type_annotation: TypeAnnotation { text: type_text },
+        mutable: is_mutable,
+        name_span: name_span,
+    };
+
+    return StructFieldParseResult {
+        parser: current,
+        field: field,
+        success: true,
+    };
+}
+
+fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodParseResult {
+    let mut current = skip_trivia(parser);
+
+    let mut is_async = false;
+    let peek = parser_peek_raw(current);
+    if identifier_matches(peek, "async") {
+        let lookahead = skip_trivia(parser_advance_raw(current));
+        if identifier_matches(parser_peek_raw(lookahead), "fn") {
+            current = consume_keyword(current, "async");
+            is_async = true;
+        }
+    }
+
+    current = skip_trivia(current);
+    if !identifier_matches(parser_peek_raw(current), "fn") {
+        return MethodParseResult { parser: parser, method: null, success: false };
+    }
+    current = consume_keyword(current, "fn");
+
+    current = skip_trivia(current);
+    let name_token = parser_peek_raw(current);
+    if name_token.kind.variant != "Identifier" {
+        return MethodParseResult { parser: parser, method: null, success: false };
+    }
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    current = parser_advance_raw(current);
+
+    let type_param_result = parse_type_parameter_clause(current);
+    current = type_param_result.parser;
+    let mut type_parameters = type_param_result.parameters;
+
+    current = skip_trivia(current);
+    current = consume_symbol(current, "(");
+    let parameter_result = parse_parameter_list(current);
+    current = parameter_result.parser;
+    let parameters = parameter_result.parameters;
+
+    current = skip_trivia(current);
+    let mut return_type -> TypeAnnotation? = null;
+    let sep_result = consume_type_separator(current);
+    if sep_result.found {
+        current = sep_result.parser;
+        let capture = collect_until(skip_trivia(current), ["!", "{"]);
+        current = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            return_type = TypeAnnotation { text: text };
+        }
+    }
+
+    let effect_result = parse_effect_list(current);
+    current = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+
+    let block_result = parse_block(current);
+    current = block_result.parser;
+    let body = block_result.block;
+
+    let signature = FunctionSignature {
+        name: name,
+        is_async: is_async,
+        parameters: parameters,
+        return_type: return_type,
+        effects: inferred_effects,
+        type_parameters: type_parameters,
+        name_span: name_span,
+    };
+
+    let method = MethodDeclaration {
+        signature: signature,
+        body: body,
+        decorators: decorators,
+    };
+
+    return MethodParseResult {
+        parser: current,
+        method: method,
+        success: true,
+    };
+}
+
+// ============================================================================
+// Enum Declaration
+// ============================================================================
+
+fn parse_enum(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    let original = parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "enum");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    if name_token.kind.variant != "Identifier" {
+        return parse_unknown(original);
+    }
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    let type_param_result = parse_type_parameter_clause(parser);
+    parser = type_param_result.parser;
+    let mut type_parameters = type_param_result.parameters;
+
+    parser = skip_trivia(parser);
+    parser = advance_to_symbol(parser, "{");
+    parser = consume_symbol(parser, "{");
+
+    let mut variants -> EnumVariant[] = [];
+    loop {
+        parser = skip_trivia(parser);
+        let token = parser_peek_raw(parser);
+        if symbol_matches(token, "}") {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if token.kind.variant == "EndOfFile" {
+            break;
+        }
+
+        let variant_result = parse_enum_variant(parser);
+        if variant_result.success {
+            parser = variant_result.parser;
+            if variant_result.variant != null {
+                variants = append_enum_variant(variants, variant_result.variant);
+            }
+            parser = skip_trailing_comma(parser);
+            continue;
+        }
+
+        parser = skip_struct_member(parser);
+    }
+
+    let statement = Statement.EnumDeclaration {
+        name: name,
+        name_span: name_span,
+        type_parameters: type_parameters,
+        variants: variants,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    let name_token = parser_peek_raw(current);
+    if name_token.kind.variant != "Identifier" {
+        return EnumVariantParseResult { parser: original, variant: null, success: false };
+    }
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    current = parser_advance_raw(current);
+
+    let mut fields -> FieldDeclaration[] = [];
+    current = skip_trivia(current);
+    let next = parser_peek_raw(current);
+    if symbol_matches(next, "{") {
+        current = parser_advance_raw(current);
+        loop {
+            current = skip_trivia(current);
+            let token = parser_peek_raw(current);
+            if symbol_matches(token, "}") {
+                current = parser_advance_raw(current);
+                break;
+            }
+            if token.kind.variant == "EndOfFile" {
+                break;
+            }
+
+            let field_result = parse_enum_variant_field(current);
+            if field_result.success {
+                current = field_result.parser;
+                if field_result.field != null {
+                    fields = append_field(fields, field_result.field);
+                }
+                continue;
+            }
+
+            current = skip_enum_variant_entry(current);
+        }
+    }
+
+    current = skip_trivia(current);
+    let mut terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+        terminator = parser_peek_raw(current);
+    }
+
+    let variant = EnumVariant {
+        name: name,
+        fields: fields,
+        name_span: name_span,
+    };
+
+    return EnumVariantParseResult {
+        parser: current,
+        variant: variant,
+        success: true,
+    };
+}
+
+fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
+    let mut current = skip_trivia(parser);
+
+    let mut is_mutable -> boolean = false;
+    let token = parser_peek_raw(current);
+    let mut token_to_use = token;
+    if identifier_matches(token_to_use, "mut") {
+        current = parser_advance_raw(current);
+        is_mutable = true;
+        current = skip_trivia(current);
+        token_to_use = parser_peek_raw(current);
+    }
+
+    if token_to_use.kind.variant != "Identifier" {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+
+    let name = identifier_text(token_to_use);
+    let name_span = source_span_from_tokens([token_to_use]);
+    current = parser_advance_raw(current);
+
+    current = skip_trivia(current);
+    let sep_result = consume_type_separator(current);
+    if !sep_result.found {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+    current = sep_result.parser;
+
+    let capture = collect_until(skip_trivia(current), [",", "}", ";"]);
+    current = capture.parser;
+    let mut type_text = trim_text(tokens_to_text(capture.tokens));
+    loop {
+        if type_text.length == 0 {
+            break;
+        }
+        let last = char_at(type_text, type_text.length - 1);
+        if last != ";" {
+            break;
+        }
+        let trimmed = substring(type_text, 0, type_text.length - 1);
+        type_text = trim_text(trimmed);
+    }
+    if type_text.length == 0 {
+        return StructFieldParseResult { parser: parser, field: null, success: false };
+    }
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ",") {
+        current = parser_advance_raw(current);
+    } else if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+        current = skip_trivia(current);
+        let maybe_comma = parser_peek_raw(current);
+        if symbol_matches(maybe_comma, ",") {
+            current = parser_advance_raw(current);
+        }
+    }
+
+    let field = FieldDeclaration {
+        name: name,
+        type_annotation: TypeAnnotation { text: type_text },
+        mutable: is_mutable,
+        name_span: name_span,
+    };
+
+    return StructFieldParseResult {
+        parser: current,
+        field: field,
+        success: true,
+    };
+}
+
+// ============================================================================
+// Interface Declaration
+// ============================================================================
+
+fn parse_interface(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    let original = parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "interface");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    if name_token.kind.variant != "Identifier" {
+        return parse_unknown(original);
+    }
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    let type_param_result = parse_type_parameter_clause(parser);
+    parser = type_param_result.parser;
+    let mut type_parameters = type_param_result.parameters;
+
+    parser = skip_trivia(parser);
+    parser = advance_to_symbol(parser, "{");
+    parser = consume_symbol(parser, "{");
+
+    let mut members -> FunctionSignature[] = [];
+    loop {
+        parser = skip_trivia(parser);
+        let token = parser_peek_raw(parser);
+        if symbol_matches(token, "}") {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if token.kind.variant == "EndOfFile" {
+            break;
+        }
+
+        let member_start = parser;
+        let decorator_result = parse_decorators(parser);
+        parser = decorator_result.parser;
+        let member_decorators = decorator_result.decorators;
+
+        parser = skip_trivia(parser);
+        let member_result = parse_interface_member(parser, member_decorators);
+        if member_result.success {
+            parser = member_result.parser;
+            if member_result.signature != null {
+                members = append_signature(members, member_result.signature);
+            }
+            continue;
+        }
+
+        parser = skip_struct_member(member_start);
+    }
+
+    let statement = Statement.InterfaceDeclaration {
+        name: name,
+        name_span: name_span,
+        type_parameters: type_parameters,
+        members: members,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+fn parse_interface_member(parser -> Parser, decorators -> Decorator[]) -> InterfaceMemberParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+
+    let mut is_async = false;
+    let peek = parser_peek_raw(current);
+    if identifier_matches(peek, "async") {
+        let lookahead = skip_trivia(parser_advance_raw(current));
+        if identifier_matches(parser_peek_raw(lookahead), "fn") {
+            current = consume_keyword(current, "async");
+            is_async = true;
+        }
+    }
+
+    current = skip_trivia(current);
+    if !identifier_matches(parser_peek_raw(current), "fn") {
+        return InterfaceMemberParseResult { parser: original, signature: null, success: false };
+    }
+    current = consume_keyword(current, "fn");
+
+    current = skip_trivia(current);
+    let name_token = parser_peek_raw(current);
+    if name_token.kind.variant != "Identifier" {
+        return InterfaceMemberParseResult { parser: original, signature: null, success: false };
+    }
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    current = parser_advance_raw(current);
+
+    let type_param_result = parse_type_parameter_clause(current);
+    current = type_param_result.parser;
+    let mut type_parameters = type_param_result.parameters;
+
+    current = skip_trivia(current);
+    current = consume_symbol(current, "(");
+    let parameter_result = parse_parameter_list(current);
+    current = parameter_result.parser;
+    let parameters = parameter_result.parameters;
+
+    current = skip_trivia(current);
+    let mut return_type -> TypeAnnotation? = null;
+    let separator_result = consume_type_separator(current);
+    if separator_result.found {
+        current = separator_result.parser;
+        let capture = collect_until(skip_trivia(current), ["!", ";", "{" ]);
+        current = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            return_type = TypeAnnotation { text: text };
+        }
+    }
+
+    let effect_result = parse_effect_list(current);
+    current = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+
+    current = skip_trivia(current);
+    if current.index < current.tokens.length {
+        let terminator = parser_peek_raw(current);
+        if symbol_matches(terminator, ";") {
+            current = parser_advance_raw(current);
+        }
+    }
+
+    let signature = FunctionSignature {
+        name: name,
+        is_async: is_async,
+        parameters: parameters,
+        return_type: return_type,
+        effects: inferred_effects,
+        type_parameters: type_parameters,
+        name_span: name_span,
+    };
+
+    return InterfaceMemberParseResult {
+        parser: current,
+        signature: signature,
+        success: true,
+    };
+}
+
+// ============================================================================
+// Type Alias Declaration
+// ============================================================================
+
+fn parse_type_alias(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    let original = parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "type");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    if name_token.kind.variant != "Identifier" {
+        return parse_unknown(original);
+    }
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    let type_param_result = parse_type_parameter_clause(parser);
+    parser = type_param_result.parser;
+    let mut type_parameters = type_param_result.parameters;
+
+    parser = skip_trivia(parser);
+    let equals = parser_peek_raw(parser);
+    if !symbol_matches(equals, "=") {
+        return parse_unknown(original);
+    }
+    parser = parser_advance_raw(parser);
+
+    let capture = collect_until(skip_trivia(parser), [";"]);
+    parser = capture.parser;
+    let aliased_text = trim_text(tokens_to_text(capture.tokens));
+    if aliased_text.length == 0 {
+        return parse_unknown(original);
+    }
+    let aliased_type = TypeAnnotation { text: aliased_text };
+
+    parser = skip_trivia(parser);
+    let alias_terminator = parser_peek_raw(parser);
+    if symbol_matches(alias_terminator, ";") {
+        parser = parser_advance_raw(parser);
+    }
+
+    let statement = Statement.TypeAliasDeclaration {
+        name: name,
+        name_span: name_span,
+        type_parameters: type_parameters,
+        aliased_type: aliased_type,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+// ============================================================================
+// Model Declaration
+// ============================================================================
+
+fn parse_model(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    let original = parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "model");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    parser = skip_trivia(parser);
+    parser = advance_to_symbol(parser, ":");
+    parser = consume_symbol(parser, ":");
+
+    let type_capture = collect_until(skip_trivia(parser), ["!", "{"]);
+    parser = type_capture.parser;
+    let type_text = trim_text(tokens_to_text(type_capture.tokens));
+    if type_text.length == 0 {
+        return parse_unknown(original);
+    }
+    let model_type = TypeAnnotation { text: type_text };
+
+    let effect_result = parse_effect_list(parser);
+    parser = effect_result.parser;
+    let effects = effect_result.effects;
+
+    parser = skip_trivia(parser);
+    parser = advance_to_symbol(parser, "{");
+    parser = consume_symbol(parser, "{");
+
+    let mut properties -> ModelProperty[] = [];
+    loop {
+        parser = skip_trivia(parser);
+        let token = parser_peek_raw(parser);
+        if symbol_matches(token, "}") {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if token.kind.variant == "EndOfFile" {
+            break;
+        }
+
+        let entry_start = parser;
+        let property_result = parse_model_property(parser);
+        if property_result.success && property_result.property != null {
+            parser = property_result.parser;
+            properties = append_model_property(properties, property_result.property);
+            continue;
+        }
+
+        parser = skip_struct_member(entry_start);
+        parser = skip_trivia(parser);
+        let maybe_close = parser_peek_raw(parser);
+        if symbol_matches(maybe_close, "}") {
+            parser = parser_advance_raw(parser);
+            break;
+        }
+        if maybe_close.kind.variant == "EndOfFile" {
+            break;
+        }
+    }
+
+    let statement = Statement.ModelDeclaration {
+        name: name,
+        name_span: name_span,
+        model_type: model_type,
+        properties: properties,
+        effects: effects,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+fn parse_model_property(parser -> Parser) -> ModelPropertyParseResult {
+    let mut current = skip_trivia(parser);
+    let name_token = parser_peek_raw(current);
+    if name_token.kind.variant != "Identifier" {
+        return ModelPropertyParseResult { parser: parser, property: null, success: false };
+    }
+    let name = identifier_text(name_token);
+    current = parser_advance_raw(current);
+
+    current = skip_trivia(current);
+    let equals = parser_peek_raw(current);
+    if !symbol_matches(equals, "=") {
+        return ModelPropertyParseResult { parser: parser, property: null, success: false };
+    }
+    current = parser_advance_raw(current);
+
+    let capture = collect_until(skip_trivia(current), [";"]);
+    current = capture.parser;
+    let value_expression = expression_from_tokens(capture.tokens);
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if !symbol_matches(terminator, ";") {
+        return ModelPropertyParseResult { parser: parser, property: null, success: false };
+    }
+    current = parser_advance_raw(current);
+
+    let property = ModelProperty {
+        name: name,
+        value: value_expression,
+        span: source_span_from_tokens([name_token]),
+    };
+
+    return ModelPropertyParseResult { parser: current, property: property, success: true };
+}
+
+// ============================================================================
+// Pipeline Declaration
+// ============================================================================
+
+fn parse_pipeline(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "pipeline");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    let type_param_result = parse_type_parameter_clause(parser);
+    parser = type_param_result.parser;
+    let mut type_parameters = type_param_result.parameters;
+
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, "(");
+    let parameter_result = parse_parameter_list(parser);
+    parser = parameter_result.parser;
+    let parameters = parameter_result.parameters;
+
+    parser = skip_trivia(parser);
+    let mut return_type -> TypeAnnotation? = null;
+    let sep_result = consume_type_separator(parser);
+    if sep_result.found {
+        parser = sep_result.parser;
+        let capture = collect_until(skip_trivia(parser), ["!", "{"]);
+        parser = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            return_type = TypeAnnotation { text: text };
+        }
+    }
+
+    let effect_result = parse_effect_list(parser);
+    parser = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+
+    // Allow `pipeline foo() ![effects] -> T {}` ordering.
+    if return_type == null {
+        parser = skip_trivia(parser);
+        let late_sep = consume_type_separator(parser);
+        if late_sep.found {
+            parser = late_sep.parser;
+            let capture = collect_until(skip_trivia(parser), ["{"]);
+            parser = capture.parser;
+            let text = trim_text(tokens_to_text(capture.tokens));
+            if text.length > 0 {
+                return_type = TypeAnnotation { text: text };
+            }
+        }
+    }
+
+    let block_result = parse_block(parser);
+    parser = block_result.parser;
+    let body = block_result.block;
+
+    let signature = FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: parameters,
+        return_type: return_type,
+        effects: inferred_effects,
+        type_parameters: [],
+        name_span: name_span,
+    };
+
+    let statement = Statement.PipelineDeclaration {
+        signature: signature,
+        body: body,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+// ============================================================================
+// Tool Declaration
+// ============================================================================
+
+fn parse_tool(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "tool");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, "(");
+    let parameter_result = parse_parameter_list(parser);
+    parser = parameter_result.parser;
+    let parameters = parameter_result.parameters;
+
+    parser = skip_trivia(parser);
+    let mut return_type -> TypeAnnotation? = null;
+    let sep_result = consume_type_separator(parser);
+    if sep_result.found {
+        parser = sep_result.parser;
+        let capture = collect_until(skip_trivia(parser), ["!", "{"]);
+        parser = capture.parser;
+        let text = trim_text(tokens_to_text(capture.tokens));
+        if text.length > 0 {
+            return_type = TypeAnnotation { text: text };
+        }
+    }
+
+    let effect_result = parse_effect_list(parser);
+    parser = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+
+    // Allow `tool foo() ![effects] -> T {}` ordering.
+    if return_type == null {
+        parser = skip_trivia(parser);
+        let late_sep = consume_type_separator(parser);
+        if late_sep.found {
+            parser = late_sep.parser;
+            let capture = collect_until(skip_trivia(parser), ["{"]);
+            parser = capture.parser;
+            let text = trim_text(tokens_to_text(capture.tokens));
+            if text.length > 0 {
+                return_type = TypeAnnotation { text: text };
+            }
+        }
+    }
+
+    let block_result = parse_block(parser);
+    parser = block_result.parser;
+    let body = block_result.block;
+
+    let signature = FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: parameters,
+        return_type: return_type,
+        effects: inferred_effects,
+        type_parameters: [],
+        name_span: name_span,
+    };
+
+    let statement = Statement.ToolDeclaration {
+        signature: signature,
+        body: body,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+// ============================================================================
+// Test Declaration
+// ============================================================================
+
+fn parse_test(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    let original = parser;
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "test");
+
+    let name_capture = collect_until(skip_trivia(parser), ["!", "{"]);
+    parser = name_capture.parser;
+    let name_text = trim_text(tokens_to_text(name_capture.tokens));
+    if name_text.length == 0 {
+        return parse_unknown(original);
+    }
+    let name_span = source_span_from_tokens(name_capture.tokens);
+    let name = normalize_test_name(name_text);
+
+    let effect_result = parse_effect_list(parser);
+    parser = effect_result.parser;
+    let parsed_effects = effect_result.effects;
+    let inferred_effects = infer_effects(parsed_effects, decorator_names(decorators));
+
+    let block_result = parse_block(parser);
+    parser = block_result.parser;
+    let body = block_result.block;
+
+    let statement = Statement.TestDeclaration {
+        name: name,
+        name_span: name_span,
+        body: body,
+        effects: inferred_effects,
+        decorators: decorators,
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
+// ============================================================================
+// Unknown Statement (fallback)
+// ============================================================================
+
+fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
+    let mut parser -> Parser = initial_parser;
+    parser = skip_trivia(parser);
+    let mut tokens -> Token[] = [];
+    let mut current = parser;
+    let mut depth -> number = 0;
+    let iteration_limit -> number = 16384;
+    let mut iteration_count -> number = 0;
+    let mut truncated -> boolean = false;
+
+    loop {
+        if iteration_count >= iteration_limit {
+            truncated = true;
+            current = parser_advance_raw(current);
+            break;
+        }
+        iteration_count += 1;
+        let tok = parser_peek_raw(current);
+        tokens = append_token(tokens, tok);
+
+        if symbol_matches(tok, "{") {
+            depth += 1;
+        } else if symbol_matches(tok, "}") {
+            if depth > 0 {
+                depth -= 1;
+            }
+            if depth == 0 {
+                current = parser_advance_raw(current);
+                break;
+            }
+        } else if depth == 0 && symbol_matches(tok, ";") {
+            current = parser_advance_raw(current);
+            break;
+        }
+
+        if is_end_of_file(current, tok) {
+            current = parser_advance_raw(current);
+            break;
+        }
+
+        current = parser_advance_raw(current);
+    }
+
+    let mut text -> string = tokens_to_text(tokens);
+    if truncated {
+        text = text + " /* parse_unknown truncated */";
+    }
+    let block = Statement.Unknown { tokens: tokens, text: text };
+    parser = skip_trivia(current);
+    return StatementParseResult { parser: parser, statement: block };
+}
+
+// ============================================================================
+// Append Helpers
+// ============================================================================
+
+fn append_string(values -> string[], value -> string) -> string[] {
+    values.push(value);
+    return values;
+}
+
+fn append_parameter(parameters -> Parameter[], parameter -> Parameter) -> Parameter[] {
+    parameters.push(parameter);
+    return parameters;
+}
+
+fn append_field(fields -> FieldDeclaration[], field -> FieldDeclaration) -> FieldDeclaration[] {
+    fields.push(field);
+    return fields;
+}
+
+fn append_method(methods -> MethodDeclaration[], method -> MethodDeclaration) -> MethodDeclaration[] {
+    methods.push(method);
+    return methods;
+}
+
+fn append_signature(signatures -> FunctionSignature[], signature -> FunctionSignature) -> FunctionSignature[] {
+    signatures.push(signature);
+    return signatures;
+}
+
+fn append_enum_variant(variants -> EnumVariant[], variant -> EnumVariant) -> EnumVariant[] {
+    variants.push(variant);
+    return variants;
+}
+
+fn append_type_annotation(types -> TypeAnnotation[], item -> TypeAnnotation) -> TypeAnnotation[] {
+    types.push(item);
+    return types;
+}
+
+fn append_model_property(properties -> ModelProperty[], property -> ModelProperty) -> ModelProperty[] {
+    properties.push(property);
+    return properties;
+}
+
+fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
+    decorators.push(decorator);
+    return decorators;
+}
+
+fn append_decorator_argument(arguments -> DecoratorArgument[], argument -> DecoratorArgument) -> DecoratorArgument[] {
+    arguments.push(argument);
+    return arguments;
+}

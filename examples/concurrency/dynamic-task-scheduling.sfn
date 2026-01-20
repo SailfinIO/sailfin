@@ -1,6 +1,6 @@
 // examples/concurrency/dynamic-task-scheduling.sfn
 
-import { Channel, channel } from "sail/async";
+import { Channel, channel } from "sfn/async";
 
 fn main() ![io] {
     let tasks -> Channel<fn() -> void> = channel();

@@ -1,0 +1,42 @@
+[tool.semantic_release]
+version_source = "file"
+version_variables = ["compiler/src/version.sfn:__version__"]
+upload_to_pypi = false
+# GitHub Actions builds and attaches native artifacts after the tag is created.
+# Keep semantic-release fast + deterministic by skipping local build steps here.
+build_command = "true"
+commit_parser = "conventional"
+tag_format = "v{version}"
+commit_message = "chore(release): {version}"
+
+[tool.semantic_release.environment]
+github_token_var = "RELEASE_PAT"
+
+[tool.semantic_release.changelog]
+directory = "."
+filename = "CHANGELOG.md"
+include_v_prefix = true
+
+[tool.semantic_release.github]
+release_method = "github"
+# Assets are uploaded by CI (see .github/workflows/ci.yml).
+assets = []
+
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.branches.rc]
+match = "rc"
+prerelease = true
+prerelease_token = "rc"
+
+[tool.semantic_release.branches.beta]
+match = "beta"
+prerelease = true
+prerelease_token = "beta"
+
+[tool.semantic_release.branches.alpha]
+match = "alpha"
+prerelease = true
+prerelease_token = "alpha"

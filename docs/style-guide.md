@@ -1,193 +1,118 @@
 # Sailfin Style & Layout Guide
-Updated: October 2025
 
-This guide codifies the Sailfin project layout conventions referenced in
-`CONTRIBUTING.md` and mirrors the expectations the bootstrap (stage0) and
-Sailfin-native (stage1) compilers follow. Use it when creating new capsules,
-reorganising modules, or documenting runtime surfaces so that contributors
-and agents see a stable, predictable structure.
+This guide captures the current Sailfin repository layout and the conventions
+the compiler, runtime, and examples follow. Treat it as the source of truth
+for naming, organization, and where new work should land.
 
 ## Goals
 
-- Keep one major concern per file (lexer, parser, emitter, etc.).
-- Ensure filenames and suffixes communicate intent without opening the file.
-- Centralise each domain’s public API behind a single `mod.sfn`.
-- Mirror source, tests, and docs so searches and renames stay trivial.
+- Keep one major concern per file (lexer, parser, lowering, etc.).
+- Make intent obvious from the path and filename.
+- Use `mod.sfn` to present stable public APIs within a folder.
+- Mirror source and tests so navigation and refactors stay predictable.
 
-## Repository Layout
-
-Canonical single-capsule layout:
+## Repository Layout (Current)
 
 ```
 sailfin/
-├─ sail.toml                    # capsule manifest
-├─ src/
-│  ├─ main.sfn                  # entry point; imports from submodules only
-│  ├─ compiler/                 # subsystem (domain) folder
-│  │  ├─ mod.sfn                # domain public surface (re-exports)
-│  │  ├─ ast.types.sfn          # AST data declarations only
-│  │  ├─ ast.visitors.sfn       # visitors & transforms
-│  │  ├─ token.types.sfn        # token enums/structs
-│  │  ├─ token.util.sfn         # token helpers (builders, EOF sentinel)
-│  │  ├─ lexer.scan.sfn         # lexing logic
-│  │  ├─ parser.parse.sfn       # parsing logic
-│  │  ├─ parser.errors.sfn      # error types & recovery helpers
-│  │  ├─ effects.rules.sfn      # effect model & validation rules
-│  │  ├─ decorators.semantics.sfn # decorator interpretation
-│  │  ├─ emit.sailfin.sfn       # Sailfin→Sailfin emitter
-│  │  ├─ emit.python.sfn        # Sailfin→Python emitter (optional backend)
-│  │  └─ codegen.core.sfn       # shared codegen utilities
-│  └─ runtime/                  # runtime shims or std capsules (optional)
-│     ├─ mod.sfn
-│     └─ io.sfn
-├─ tests/
-│  ├─ compiler/
-│  │  ├─ lexer.scan.spec.sfn
-│  │  ├─ parser.parse.spec.sfn
-│  │  ├─ effects.rules.spec.sfn
-│  │  └─ emit.sailfin.spec.sfn
+├─ compiler/
+│  ├─ src/                       # self-hosted compiler sources (.sfn)
+│  │  ├─ main.sfn                # compiler entry point
+│  │  ├─ lexer.sfn
+│  │  ├─ parser/                 # parser domain
+│  │  │  ├─ mod.sfn              # public parser API
+│  │  │  ├─ declarations.sfn
+│  │  │  ├─ expressions.sfn
+│  │  │  ├─ statements.sfn
+│  │  │  └─ types.sfn
+│  │  ├─ llvm/                   # native backend lowering
+│  │  │  ├─ mod.sfn              # public LLVM backend API
+│  │  │  ├─ lowering/
+│  │  │  └─ expression_lowering/
+│  │  └─ ...                     # typecheck, effects, emitters, utilities
+│  ├─ tests/
+│  │  ├─ unit/
+│  │  ├─ integration/
+│  │  └─ e2e/
+│  ├─ build/                     # generated bootstrap artifacts (do not edit)
+│  └─ *.py                       # legacy bootstrap sources (emergency only)
+├─ runtime/
+│  ├─ prelude.sfn                # Sailfin-visible runtime surface
+│  ├─ native/                    # C runtime implementation
+│  └─ (no Python shims)          # Python runtime shims removed pre-1.0
 ├─ docs/
-│  ├─ style-guide.md            # this document
-│  └─ compiler-architecture.md  # high-level overview (roadmap item)
 ├─ examples/
-│  └─ hello_world/
-│     └─ main.sfn
+├─ scripts/
+└─ tools/
 ```
 
-When expanding beyond a single capsule, group related domains (e.g.
-`runtime/`, `registry/`, `std/`) as siblings under `src/` and give each its
-own `mod.sfn`.
+If a subsystem grows large, give it its own folder under `compiler/src/` with a
+`mod.sfn` and keep cross-module imports going through that `mod.sfn`.
 
 ## File Naming Conventions
 
-| Suffix          | Purpose                              | Example                    |
-|-----------------|--------------------------------------|----------------------------|
-| `*.types.sfn`   | Data declarations only               | `ast.types.sfn`            |
-| `*.visitors.sfn`| Traversal helpers on the types       | `ast.visitors.sfn`         |
-| `*.util.sfn`    | Pure helpers for related types       | `token.util.sfn`           |
-| `*.scan.sfn`    | Lexing / scanners                    | `lexer.scan.sfn`           |
-| `*.parse.sfn`   | Parsing logic                        | `parser.parse.sfn`         |
-| `*.errors.sfn`  | Error types & formatting             | `parser.errors.sfn`        |
-| `*.semantics.sfn` | Semantic extraction from syntax    | `decorators.semantics.sfn` |
-| `*.rules.sfn`   | Validation and effect rules          | `effects.rules.sfn`        |
-| `emit.*.sfn`    | Emitters per backend                 | `emit.python.sfn`          |
-| `*.core.sfn`    | Cross-cutting utilities for a domain | `codegen.core.sfn`         |
-| `mod.sfn`       | Folder public surface (re-exports)   | `compiler/mod.sfn`         |
-| `*.spec.sfn`    | Tests mirroring source filenames     | `parser.parse.spec.sfn`    |
-
-Rule of thumb: data-only declarations live in `*.types.sfn`. Code that mutates
-state or performs computation resides in a separate file with the appropriate
-suffix.
+- Use `snake_case` for filenames and keep them short but descriptive.
+- Prefer name + role suffixes that match existing usage:
+  - `*_utils.sfn` for helpers (`string_utils.sfn`, `token_utils.sfn`)
+  - `*_checker.sfn` for validators (`effect_checker.sfn`)
+  - `*_lowering.sfn` for lowering passes (`core_ops_lowering.sfn`, `core_literals_lowering.sfn`)
+  - `*_ir.sfn` for IR definitions (`native_ir.sfn`)
+  - `*_semantics.sfn` for semantic interpretation (`decorator_semantics.sfn`)
+- In multi-file domains, use neutral names like `types.sfn`, `utils.sfn`,
+  `expressions.sfn`, and keep the public entry point as `mod.sfn`.
+- Test files use `_test.sfn` suffixes and live under the matching test tier.
 
 ## Module APIs (`mod.sfn`)
 
-Each domain exposes a single `mod.sfn` that re-exports the “safe” public API so
-consumers and refactors have one stable import path:
+Use `mod.sfn` to re-export public APIs for a folder. Keep imports from other
+folders pointing at `mod.sfn` so internal files can move freely.
 
 ```sfn
-// src/compiler/mod.sfn
-// region: public-api
-export {
-    Program,
-    Statement,
-    Expression,
-    Token,
-    TokenKind,
-} from "./ast.types";
-
-export { eof_token } from "./token.util";
-
-export { lex } from "./lexer.scan";
-export { parse_program } from "./parser.parse";
-export { analyze_effects } from "./effects.rules";
-export { emit_program as emit_sailfin } from "./emit.sailfin";
-export { emit_program as emit_python } from "./emit.python";
-// endregion
+// compiler/src/parser/mod.sfn
+export { parse_declaration } from "./declarations";
+export { parse_expression } from "./expressions";
+export { parse_statement } from "./statements";
+export { parse_type } from "./types";
 ```
-
-Outside the domain, import only from the corresponding `mod.sfn`:
 
 ```sfn
-import { parse_program, emit_sailfin } from "./compiler/mod";
+import { parse_expression } from "./parser/mod";
 ```
 
-## Source File Organisation
+## Source Organization
 
-- Start with a short header comment describing the file’s role.
-- Place exports near the top; public routines precede internal helpers.
-- Group related sections with lightweight regions for agent editing:
-
-  ```sfn
-  // region: helpers
-  fn is_whitespace(ch -> string) -> boolean { ... }
-  // endregion
-  ```
-
-- Define small helper structs/enums locally when they are private to the file.
-- Keep internal helper functions at the bottom to preserve top-down read flow.
+- Keep public exports near the top; helpers follow below.
+- Group related helpers in small sections if it improves scanability.
+- Prefer additional files over large mixed concerns in a single file.
 
 ## Imports
 
-- Use relative paths (`./`) within a domain to reference sibling files.
-- When crossing domain boundaries, import exclusively via the domain’s
-  `mod.sfn` to keep internal filenames free to move.
-- Keep effect vocabularies and decorator metadata centralised; do not duplicate
-  constant strings or type aliases across files.
+- Use relative imports within a folder (`./utils`, `./types`).
+- When crossing a domain boundary (e.g., `parser` to `llvm`), import from that
+  folder's `mod.sfn` rather than internal files.
 
-## Testing Layout
+## Tests
 
-- Mirror filenames between `src/` and `tests/`. For example,
-  `src/compiler/parser.parse.sfn` pairs with
-  `tests/compiler/parser.parse.spec.sfn`.
-- Tests should import through the domain `mod.sfn` where possible.
-- Prefer table-driven tests—declare a `Case { name, input, expected }[]` and
-  iterate—so new cases are agent-friendly.
-- Store large golden inputs/outputs under `tests/fixtures/` and keep the spec
-  files focused on assertions.
+- Mirror `compiler/src/` paths under `compiler/tests/`.
+- Use `unit/`, `integration/`, and `e2e/` tiers; keep test files suffixed
+  `_test.sfn`.
+- Keep large fixtures under `compiler/tests/**/data` or `fixtures/` and keep
+  test files focused on assertions.
 
 ## Documentation Alignment
 
-- Update `docs/status.md` first whenever behaviour changes.
-- Keep this guide in sync with active repos (bootstrap vs. self-hosted) and
-  note stage-specific differences inline when needed.
-- Host subsystem explainers (e.g. compiler architecture) in dedicated docs
-  under `docs/` and cross-link them from `README.md` entries.
-- Avoid duplicating manifest or capability guidance; defer to `docs/spec.md`
-  and `docs/roadmap.md` for language surface area.
+- Update `docs/status.md` first whenever behavior changes.
+- Follow up with `docs/spec.md` and `docs/roadmap.md` as needed.
+- Add or adjust proposal docs under `docs/proposals/` for future work.
 
-## Effects and Decorators
+## Sailfin Language Style
 
-- Centralise recognised effect names in `effects.rules.sfn`. Export a single
-  `KNOWN_EFFECTS` (or equivalent) array and helpers for validation.
-- Parse and interpret decorators in `decorators.semantics.sfn`; downstream
-  phases should consume typed decorator metadata rather than raw syntax.
-- When capability manifests grow, introduce `capabilities.types.sfn` and
-  `capabilities.rules.sfn` instead of scattering capability checks.
+- Spell effects explicitly: `fn foo() -> Bar ![io, model]`.
+- Order effect lists by impact (most impactful first).
+- Use `CamelCase` for models/capsules and `snake_case` for locals.
+- Note currency or latency literals as comments until syntax lands.
 
 ## Comments and Docstrings
 
-- Use triple-slash (`///`) doc comments for public items. The first sentence
-  becomes the summary; subsequent paragraphs can call out invariants.
-- Include runnable snippets under an `/// Examples:` block so agents can lift
-  them directly into tests or documentation.
-- Inline comments should clarify intent or future syntax gaps—avoid restating
-  obvious operations.
-
-## Migration Notes for the Current Compiler
-
-The existing stage0 files map cleanly onto this layout:
-
-- `ast.sfn` → `src/compiler/ast.types.sfn`
-- `token.sfn` → `src/compiler/token.types.sfn`
-- `lexer.sfn` → `src/compiler/lexer.scan.sfn`
-- `parser.sfn` → `src/compiler/parser.parse.sfn`
-- `effect_checker.sfn` → `src/compiler/effects.rules.sfn`
-- `decorator_semantics.sfn` → `src/compiler/decorators.semantics.sfn`
-- `emitter_sailfin.sfn` → `src/compiler/emit.sailfin.sfn`
-- `native_lowering.sfn` (with `emit_native.sfn`) → `src/compiler/emit.python.sfn`
-  or `src/compiler/codegen.core.sfn` depending on the contents
-- Add `src/compiler/mod.sfn` to re-export the public surface
-
-Follow the same mapping for the Sailfin-native compiler sources under
-`compiler/src/` once bootstrap and self-hosted parity lands.
-
+- Use `///` doc comments for public items; keep the first sentence a summary.
+- Use inline comments only for intent or future syntax gaps.
