@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.132 (2026-01-20)
+
+### Bug Fixes
+
+- Dispatch release workflow
+  ([`3f1d719`](https://github.com/SailfinIO/sailfin/commit/3f1d719dae8ccc3c288e239177c1487f7d564b24))
+
+
 ## v0.1.1-alpha.131 (2026-01-20)
 
 ### Bug Fixes
