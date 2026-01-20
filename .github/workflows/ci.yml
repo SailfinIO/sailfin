@@ -3,7 +3,7 @@ name: CI
 env:
   # Pinned seed used for self-host bootstrap in CI.
   # Bump this once the latest release assets are healthy again.
-  SEED_VERSION: 0.1.1-alpha.121
+  SEED_VERSION: 0.1.1-alpha.126
 
 on:
   push:
