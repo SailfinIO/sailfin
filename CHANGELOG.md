@@ -5,8 +5,26 @@
 
 ### Bug Fixes
 
+- Add check for testing and compiling
+  ([`97a8eef`](https://github.com/SailfinIO/sailfin/commit/97a8eef63d58851d8d4392007dba95a3c70e3099))
+
+- Add check for testing and compiling
+  ([`cc19448`](https://github.com/SailfinIO/sailfin/commit/cc19448f66f60d40d09a4fe84acf07c526f7045a))
+
 - Asset upload
   ([`e3821a6`](https://github.com/SailfinIO/sailfin/commit/e3821a629e2a75ec2adc2b020ba3589a30e90f20))
+
+- Missing package
+  ([`a558cef`](https://github.com/SailfinIO/sailfin/commit/a558cef7e7e8460a2bfd0e50821cdcfe719c00e0))
+
+- Packaging redundancies and fixed point gating
+  ([`e40bdf4`](https://github.com/SailfinIO/sailfin/commit/e40bdf4f81ce527969af238c9056c430d6ae2b01))
+
+- Remove legacy stage1
+  ([`3f1b021`](https://github.com/SailfinIO/sailfin/commit/3f1b02131b8a25c7af16b89d7b0316ea08840a7d))
+
+- Remove legacy stage1
+  ([`9321f1d`](https://github.com/SailfinIO/sailfin/commit/9321f1d2aaaa35edb449f606b02be63f93820019))
 
 - Split core into manageable files
   ([`b78b92e`](https://github.com/SailfinIO/sailfin/commit/b78b92ecd7c59fcd823d5f7758b029335ffcfbef))
