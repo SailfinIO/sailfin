@@ -8,11 +8,9 @@ Sailfin is an AI-native, systems-friendly programming language designed for prec
 
 **Current architecture:**
 
-- **Native compiler (primary)**: Native backend targeting LLVM with `.sfn-asm` intermediate representation; release artifacts install as `sailfin`/`sfn`.
-- **Stage1 (legacy bootstrap)**: Deprecated bootstrap pipeline kept for emergency recovery while marching toward 1.0.
-- **Stage0 (legacy)**: Historical Python bootstrap compiler.
+- **Native compiler (primary)**: Self-hosted compiler targeting LLVM with `.sfn-asm` intermediate representation; release artifacts install as `sailfin`/`sfn`.
 
-Note: the codebase may still contain historical `stage2` names in internal paths; prefer “native compiler” terminology going forward.
+Note: the codebase may still contain historical `stage2` names in internal paths; prefer “native compiler” terminology.
 
 The runtime currently ships as C under `runtime/native/` and is planned to move into Sailfin for the 1.0 release.
 
@@ -31,7 +29,10 @@ make env              # Create/update the 'sailfin' Conda environment
 ```bash
 make compile          # Build the compiler by self-hosting from a released seed (preferred)
 make install          # Install the built compiler into PREFIX/bin (default: /usr/local/bin)
-make bootstrap-legacy # Legacy stage1/bootstrap pipeline (deprecated)
+make rebuild          # Force a rebuild from a released seed
+make smoke            # Rebuild + run smoke tests
+make rebuild-asan     # Rebuild with ASAN (diagnostic)
+make check            # Compile (if needed) then run the full test suite
 make test             # Run full suite
 make test-unit        # Run Sailfin-native unit tests
 make test-integration # Run Sailfin-native integration tests
@@ -41,26 +42,21 @@ make test-integration # Run Sailfin-native integration tests
 
 ```bash
 make clean            # Remove dist/ artifacts
-make clean-stage1     # Remove compiler/build/ (requires stage1 to rebuild)
-make native-debug     # Build native compiler with -O0/-g for lldb (bootstrap-built)
-make native-asan      # Build native compiler with AddressSanitizer (bootstrap-built)
-make selfhost-smoke-native # Smoke selfhost from a released seed
-make check-native-determinism # Rebuild twice and diff outputs
+make clean-build       # Remove build/* artifacts (keeps build/seed by default)
 ```
 
 ## Architecture & Key Concepts
 
-### Bootstrap Compiler Pipeline (legacy stage1)
+### Compiler Pipeline (native)
 
-The bootstrap compiler (`compiler/src/`) follows this flow:
+The compiler (`compiler/src/`) follows this flow:
 
 1. **Lexer** (`lexer.sfn`) → tokens
 2. **Parser** (`parser.sfn`) → AST (`ast.sfn`)
 3. **Type Checker** (`typecheck.sfn`) → duplicate symbols, interface conformance
 4. **Effect Checker** (`effect_checker.sfn`) → validates `![effect, ...]` annotations
 5. **Native Emitter** (`emit_native.sfn`) → `.sfn-asm` IR (`native_ir.sfn`)
-6. **Python Lowering** (`native_lowering.sfn`) → executable Python code
-7. **LLVM Lowering** (`native_llvm_lowering.sfn`, native compiler only) → LLVM IR
+6. **LLVM Lowering** (`native_llvm_lowering.sfn`) → LLVM IR
 
 **Critical files:**
 
@@ -100,22 +96,15 @@ Sailfin uses move-by-default semantics with explicit borrows:
 
 **Bootstrap status:** Parsed but not enforced. The native LLVM backend tracks ownership metadata, rejects conflicting borrows, and flags use-after-move.
 
-### Capability Bridges (Hybrid Stage)
+### Runtime Bridges
 
-Bootstrap helpers in `runtime/prelude.sfn` bridge effects to Python:
-
-- **Sailfin-native:** `substring`, `find_char`, `array_map`, `array_filter`, `check_type`, `format_interpolated`
-- **Python bridges:** `sleep`, `channel`, `spawn`, `serve`, `console`, `fs_bridge`, `http_bridge`, `model_bridge`
-
-See `docs/runtime_audit.md` for the full migration plan.
+The runtime currently ships as C under `runtime/native/`. Higher-level integration helpers (e.g., runners) still live in Python under `runtime/`.
 
 ### Testing Philosophy
 
-- **Unit tests** (`-m unit`): Fast, focused on single passes (lexer, parser, typecheck, effect checker)
-- **Integration tests** (`-m integration`): Artifact packaging, self-hosting, CLI workflows
-- **Native (LLVM) tests** (`-m stage2`): LLVM lowering and execution via `llvmlite`
-
-**Regression strategy:** Lock behavior with snapshot tests (`compiler/tests/test_stage2_golden.py`) and execution fixtures (`compiler/tests/test_native_llvm_execution.py`).
+- **Unit tests**: `compiler/tests/unit/*_test.sfn`
+- **Integration tests**: `compiler/tests/integration/*_test.sfn`
+- **E2E tests**: `compiler/tests/e2e/*_test.sfn`
 
 ## Common Development Patterns
 
@@ -124,11 +113,10 @@ See `docs/runtime_audit.md` for the full migration plan.
 1. Update `compiler/src/parser.sfn` to recognize new syntax
 2. Add AST node(s) to `compiler/src/ast.sfn`
 3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
-4. Modify `compiler/src/native_lowering.sfn` to generate Python
-5. (Native compiler) Extend `compiler/src/native_llvm_lowering.sfn` for LLVM
-6. Add regression tests to `compiler/tests/`
-7. Update `docs/spec.md` (Part A if shipped, Part B if planned)
-8. Update `docs/status.md` with implementation status
+4. Extend `compiler/src/native_llvm_lowering.sfn` for LLVM
+5. Add regression tests to `compiler/tests/`
+6. Update `docs/spec.md` (Part A if shipped, Part B if planned)
+7. Update `docs/status.md` with implementation status
 
 ### Fixing Effect Checker Issues
 

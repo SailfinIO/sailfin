@@ -252,6 +252,20 @@ jobs:
       - name: Package native artifacts (selfhosted)
         run: conda run -n sailfin python tools/package_native.py --skip-build --target ${{ matrix.package_label }} --out dist --native-out build/native/import-context
 
+      - name: Stage installer payload (selfhosted)
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          INSTALLER_DIR="dist/installer-${{ matrix.package_label }}"
+          rm -rf "$INSTALLER_DIR"
+          mkdir -p "$INSTALLER_DIR/bin"
+          cp -f build/native/sailfin "$INSTALLER_DIR/bin/sailfin"
+          cp -f build/native/sailfin "$INSTALLER_DIR/bin/sfn"
+          mkdir -p "$INSTALLER_DIR/runtime"
+          cp -R runtime/native "$INSTALLER_DIR/runtime/native"
+          mkdir -p "$INSTALLER_DIR/runtime/native/obj"
+          cp -f build/selfhost/native/obj/runtime/prelude.o "$INSTALLER_DIR/runtime/native/obj/prelude.o"
+
       - name: Upload native artifacts (selfhosted)
         uses: actions/upload-artifact@v4
         with:
@@ -260,6 +274,13 @@ jobs:
             dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz
             dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz.sha256
             dist/sailfin-native-${{ matrix.package_label }}-*.manifest.json
+          if-no-files-found: error
+
+      - name: Upload installer payload (selfhosted)
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.package_label }}
+          path: dist/installer-${{ matrix.package_label }}
           if-no-files-found: error
 
   semantic-release:
@@ -335,9 +356,18 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: native-*
+          pattern: "*"
           merge-multiple: true
           path: .
+
+      - name: Normalize artifact layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz' -exec mv -f {} dist/ \;
+          find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz.sha256' -exec mv -f {} dist/ \;
+          find . -maxdepth 3 -type f -name 'sailfin-native-*.manifest.json' -exec mv -f {} dist/ \;
 
       - name: Prepare installer assets
         shell: bash
@@ -345,10 +375,9 @@ jobs:
           set -euo pipefail
           tag="${{ needs.semantic-release.outputs.tag }}"
           version="${tag#v}"
-          mkdir -p dist
-          for archive in $(find . -type f -name 'sailfin-native-*.tar.gz'); do
-            name="$(basename "$archive")"
-            case "$name" in
+          for payload in $(find dist -maxdepth 1 -type d -name 'installer-*'); do
+            label="$(basename "$payload")"
+            case "$label" in
               *linux-x86_64*)
                 os="linux"
                 arch="x86_64"
@@ -358,12 +387,12 @@ jobs:
                 arch="arm64"
                 ;;
               *)
-                echo "unknown target for $name" >&2
+                echo "unknown installer payload $label" >&2
                 continue
                 ;;
             esac
             installer_name="sailfin_${version}_${os}_${arch}.tar.gz"
-            cp -f "$archive" "dist/${installer_name}"
+            tar -czf "dist/${installer_name}" -C "$payload" .
             if command -v sha256sum >/dev/null 2>&1; then
               sha256sum "dist/${installer_name}" > "dist/${installer_name}.sha256"
             else

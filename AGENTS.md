@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-- `compiler/src/` carries the Sailfin-native compiler sources; the **self-hosted native compiler** (legacy name: stage2) is the primary toolchain today, with stage1/bootstrapping kept only for emergency recovery and slated for removal at 1.0.
+- `compiler/src/` carries the Sailfin-native compiler sources; the **self-hosted native compiler** (legacy name: stage2) is the primary toolchain.
 - `docs/` now has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), roadmap (`docs/roadmap.md`), bootstrap spec (`docs/spec.md`), grammar, and keyword references. Update the status doc first whenever behaviour changes, then adjust the spec/roadmap accordingly.
 - `docs/proposals/` holds future-facing designs (e.g., package management); leave implementation notes there until the status page marks them shipped.
 - `runtime/native/` hosts the current C runtime implementation; the runtime is planned to move into Sailfin for the 1.0 release.
@@ -10,11 +10,11 @@
 ## Build, Test, and Development Commands
 
 - `make env` provisions or updates the `sailfin` Conda env defined in `environment.yml`.
-- `make test` runs all test cases.
-- `make compile` builds the compiler by self-hosting from the latest released seed (no stage1/bootstrap).
+- `make test` runs all test cases (using an already compiled build).
+- `make compile` builds the compiler by self-hosting from the latest released seed.
+- `make check` compiles (if needed) and runs the full test suite.
 - `make install` installs the built compiler binary into `PREFIX/bin` (default: `/usr/local/bin`).
-- `make bootstrap-legacy` runs the legacy stage1 → stage2 bootstrap pipeline (deprecated; for emergency recovery only).
-- `make clean` removes packaged artifacts (`dist/`); use `make clean-stage1` if you intentionally want to delete `compiler/build/` (requires an installed stage1 to rebuild).
+- `make clean` removes packaged artifacts (`dist/`).
 - if you need to do some debugging, use the /scratch directory and run/place scripts there. This is a conda environment so you may have to account for your path to the compiler when running scripts.
 - Do not under any circumstances use here-doc (<<'PY') commands. They WILL NOT WORK in your environment. Use scratch files instead.
 

@@ -10,8 +10,7 @@ This is the self-host check CI ultimately needs:
     (no `aot-prepare-dir`).
 - Compile/link a fresh native compiler binary.
 
-This does NOT import stage1-generated Python compiler artifacts and does NOT run
-`scripts/bootstrap_native.py`.
+This does NOT import stage1-generated Python compiler artifacts.
 """
 
 from __future__ import annotations
@@ -1262,7 +1261,7 @@ def _collect_stage2_sources(repo_root: pathlib.Path) -> list[pathlib.Path]:
     if not runtime_src.exists():
         raise SystemExit(f"missing runtime sources: {runtime_src}")
 
-    # Match `scripts/bootstrap_native.py`: include all compiler sources.
+    # Include all compiler sources.
     sources = [p for p in sorted(compiler_src.rglob("*.sfn"))]
     runtime_sources = sorted(runtime_src.rglob("*.sfn"))
     all_sources = sources + runtime_sources

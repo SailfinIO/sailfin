@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 import tempfile
+import subprocess
 from typing import Dict, Iterable, List, Optional, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -21,12 +22,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.compile_with_stage1 import (  # noqa: E402
-    Stage1CompileError,
-    compile_stage1,
-    link_native_binary,
-)
-from scripts import bootstrap_native  # noqa: E402
+"""NOTE: this tool is intentionally selfhost-only.
+
+CI produces native artifacts via the selfhost pipeline, then packages them via
+`--skip-build --native-out <dir>`.
+"""
 
 
 class NativePackageError(RuntimeError):
@@ -114,41 +114,13 @@ def _infer_commit_hash() -> str:
         return "unknown"
 
 
-def _resolve_stage1_sources() -> Iterable[pathlib.Path]:
-    compiler_src = (REPO_ROOT / "compiler" / "src").resolve()
-    runtime_src = (REPO_ROOT / "runtime").resolve()
-    yield compiler_src
-    yield runtime_src
-
-
-def _run_stage1_compile(output_dir: pathlib.Path) -> None:
-    compile_stage1(_resolve_stage1_sources(), output_dir)
-
-
-def _run_native_bootstrap(
-    output_dir: pathlib.Path,
-    *,
-    quiet: bool = False,
-    validate: bool = True,
-) -> Tuple[List[pathlib.Path], Optional[bootstrap_native.DiagnosticAggregator]]:
-    result = bootstrap_native.compile_compiler_to_native(
-        output_dir,
-        debug=not quiet,
-        quiet=quiet,
-    )
-
-    modules: List[pathlib.Path]
-    aggregator: Optional[bootstrap_native.DiagnosticAggregator]
-
-    if len(result) == 3:
-        modules, aggregator, _lowered = result
-    else:
-        modules, aggregator = result
-
-    if validate:
-        bootstrap_native.validate_native_artifacts(modules, debug=False)
-
-    return modules, aggregator
+def _run_make_target(target: str) -> None:
+    try:
+        subprocess.run(["make", target], cwd=REPO_ROOT, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise NativePackageError(
+            f"failed to run 'make {target}' (rc={exc.returncode})"
+        ) from exc
 
 
 def _compute_sha256(path: pathlib.Path) -> str:
@@ -180,7 +152,6 @@ def _write_metadata(
     *,
     version: str,
     target_label: str,
-    aggregator: Optional[bootstrap_native.DiagnosticAggregator],
     artifacts: Optional[List[Dict[str, object]]] = None,
 ) -> Dict[str, object]:
     metadata: dict[str, object] = {
@@ -189,18 +160,6 @@ def _write_metadata(
         "commit": _infer_commit_hash(),
         "generated_at": _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat(),
     }
-
-    if aggregator is not None:
-        categories = sorted(
-            aggregator.categories.items(),
-            key=lambda item: item[1],
-            reverse=True,
-        )
-        metadata["diagnostics"] = {
-            "total": aggregator.total_count,
-            "fatal": aggregator.fatal_count,
-            "top_categories": categories[:20],
-        }
 
     if artifacts:
         metadata["artifacts"] = artifacts
@@ -244,8 +203,8 @@ This archive contains the raw native LLVM outputs generated from the Sailfin
 compiler sources. The bundle includes:
 
 - `artifacts/` – `.ll`, `.sfn-asm`, and `.layout-manifest` files for each compiled module.
-- `bin/` – optional native compiler binary (when built with `--link-binary`).
-- `metadata.json` – build metadata (version, commit, timestamp, diagnostics summary).
+- `bin/` – optional native compiler binary (when included via `--compiler-bin`).
+- `metadata.json` – build metadata (version, commit, timestamp).
 - `runtime/native/` – runtime sources plus the prelude object used for native linking.
 
 This bundle also ships the native runtime sources plus a compiled prelude
@@ -310,27 +269,19 @@ def _create_archive(source_dir: pathlib.Path, output_path: pathlib.Path) -> path
 def package_native(
     *,
     output_dir: pathlib.Path,
-    stage1_output: pathlib.Path,
     native_output: pathlib.Path,
+    compiler_bin: Optional[pathlib.Path],
     version: str,
     target_label: str,
-    quiet: bool,
     skip_build: bool,
-    link_binary: bool,
-    clang: str,
-    linker_flags: Optional[List[str]],
 ) -> pathlib.Path:
-    modules: List[pathlib.Path] = []
-    aggregator: Optional[bootstrap_native.DiagnosticAggregator] = None
-
     if not skip_build:
-        _run_stage1_compile(stage1_output)
-        modules, aggregator = _run_native_bootstrap(
-            native_output, quiet=quiet, validate=True)
-    else:
-        if not native_output.exists():
-            raise NativePackageError(
-                "native output directory does not exist; run the bootstrap first")
+        _run_make_target("rebuild")
+
+    if not native_output.exists():
+        raise NativePackageError(
+            f"native output directory does not exist: {native_output}"
+        )
 
     staging_root = pathlib.Path(tempfile.mkdtemp(prefix="sailfin-native-"))
     try:
@@ -345,28 +296,24 @@ def package_native(
             metadata_path,
             version=version,
             target_label=target_label,
-            aggregator=aggregator,
             artifacts=inventory,
         )
         _write_readme(archive_root / "README.md", target_label=target_label)
         _copy_runtime_bundle(archive_root)
 
-        if link_binary:
-            if not modules:
-                inferred_modules = sorted(native_output.glob("*.ll"))
-                if not inferred_modules:
-                    raise NativePackageError(
-                        "no LLVM modules found to link into a binary")
-                modules = inferred_modules
-
+        if compiler_bin is not None:
+            compiler_bin = compiler_bin.resolve()
+            if not compiler_bin.exists():
+                raise NativePackageError(
+                    f"compiler binary does not exist: {compiler_bin}"
+                )
+            if not os.access(compiler_bin, os.X_OK):
+                raise NativePackageError(
+                    f"compiler binary is not executable: {compiler_bin}"
+                )
             bin_dir = archive_root / "bin"
             bin_dir.mkdir(parents=True, exist_ok=True)
-            output_binary = bin_dir / "sailfin"
-            try:
-                link_native_binary(modules, output_binary,
-                                   clang=clang, extra_flags=linker_flags)
-            except Stage1CompileError as exc:
-                raise NativePackageError(str(exc)) from exc
+            shutil.copy2(compiler_bin, bin_dir / "sailfin")
 
         output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -388,48 +335,78 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         description="Package Sailfin native compiler artifacts")
     parser.add_argument("--out", dest="out", type=pathlib.Path, default=REPO_ROOT / "dist",
                         help="Directory to receive the packaged archive (default: dist/)")
-    parser.add_argument("--stage1-out", dest="stage1_out", type=pathlib.Path,
-                        default=REPO_ROOT / "compiler" / "build",
-                        help="Directory for Stage1 Python outputs (default: compiler/build)")
+    parser.add_argument(
+        "--stage1-out",
+        dest="stage1_out",
+        type=pathlib.Path,
+        default=REPO_ROOT / "compiler" / "build",
+        help="DEPRECATED (ignored): legacy Stage1 output directory",
+    )
     parser.add_argument("--native-out", dest="native_out", type=pathlib.Path,
-                        default=REPO_ROOT / "build" / "native" / "artifacts",
-                        help="Directory containing native LLVM outputs (default: build/native/artifacts)")
+                        default=REPO_ROOT / "build" / "native" / "import-context",
+                        help="Directory containing native artifacts to package (default: build/native/import-context)")
     parser.add_argument("--version", dest="version",
                         help="Override the version string for the archive name")
     parser.add_argument("--target", dest="target",
                         help="Override the target label (default: auto-detected)")
-    parser.add_argument("--clang", dest="clang", default=os.environ.get("SAILFIN_NATIVE_CLANG", "clang"),
-                        help="clang executable to use when linking a native compiler binary (default: clang)")
-    parser.add_argument("--ldflag", dest="ldflags", action="append",
-                        help="Additional linker flags when producing the native compiler binary (repeatable)")
-    parser.add_argument("--quiet", action="store_true",
-                        help="Suppress verbose bootstrap output")
+    parser.add_argument(
+        "--compiler-bin",
+        dest="compiler_bin",
+        type=pathlib.Path,
+        default=None,
+        help="Optional compiler binary to include in the archive (e.g. build/native/sailfin)",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="DEPRECATED (ignored): legacy bootstrap verbosity flag",
+    )
     parser.add_argument("--skip-build", dest="skip_build", action="store_true",
                         help="Skip rebuilding and package existing artifacts")
-    parser.add_argument("--link-binary", dest="link_binary", action="store_true",
-                        help="Attempt to link a compiler binary into the archive (experimental)")
+    parser.add_argument(
+        "--link-binary",
+        dest="link_binary",
+        action="store_true",
+        help="DEPRECATED: include build/native/sailfin in the archive bin/",
+    )
+    parser.add_argument(
+        "--clang",
+        dest="clang",
+        default=os.environ.get("SAILFIN_NATIVE_CLANG", "clang"),
+        help="DEPRECATED (ignored): legacy linker control",
+    )
+    parser.add_argument(
+        "--ldflag",
+        dest="ldflags",
+        action="append",
+        help="DEPRECATED (ignored): legacy linker flags",
+    )
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = _parse_args(argv)
 
+    if args.link_binary and args.compiler_bin is None:
+        args.compiler_bin = REPO_ROOT / "build" / "native" / "sailfin"
+    if args.clang != "clang" or (args.ldflags and len(args.ldflags) > 0):
+        print(
+            "[package-native][warn] --clang/--ldflag are deprecated and ignored in selfhost-only packaging",
+            file=sys.stderr,
+        )
+
     version = args.version or _infer_version()
     try:
         target_label = args.target or target_label_for_host()
         archive_path = package_native(
             output_dir=args.out,
-            stage1_output=args.stage1_out,
             native_output=args.native_out,
+            compiler_bin=args.compiler_bin,
             version=version,
             target_label=target_label,
-            quiet=args.quiet,
             skip_build=args.skip_build,
-            link_binary=args.link_binary,
-            clang=args.clang,
-            linker_flags=args.ldflags,
         )
-    except (Stage1CompileError, NativePackageError) as exc:
+    except NativePackageError as exc:
         print(f"[package-native][error] {exc}", file=sys.stderr)
         return 1
 

@@ -8,7 +8,7 @@ Sailfin is an AI-native, systems-friendly programming language designed for prec
 
 For a comprehensive overview of the project, please refer to the [README.md](README.md).
 
-The primary compiler is the self-hosted native compiler (legacy name: stage2); stage1 and bootstrap steps still exist for now but are slated for removal by the 1.0 release. The runtime currently ships in C and is planned to move into Sailfin for 1.0.
+The primary compiler is the self-hosted native compiler (legacy name: stage2). The runtime currently ships in C and is planned to move into Sailfin for 1.0.
 
 ## Getting Started
 
@@ -28,8 +28,7 @@ The primary workflow for development is as follows:
 2.  **Implement the Task**: Make the necessary code changes to complete the task.
 3.  **Compile and Test**: Re-compile the language and run the test suite to ensure that your changes have not introduced any regressions.
     ```bash
-    make compile
-    make test
+    make check
     ```
 4.  **Update Documentation**: Update the [roadmap.md](docs/roadmap.md), [docs/status.md](docs/status.md), and any other relevant documentation to reflect the changes you have made.
 5.  **Add New Tasks**: If you discover any new tasks during the development process, add them to the [roadmap.md](docs/roadmap.md).
@@ -38,15 +37,15 @@ The primary workflow for development is as follows:
 
 The following commands are available for development:
 
- - `make env`: Create or update the Conda environment used for the compiler.
- - `make install`: Install the built compiler into `PREFIX/bin` (default: `/usr/local/bin`).
+- `make env`: Create or update the Conda environment used for the compiler.
+- `make install`: Install the built compiler into `PREFIX/bin` (default: `/usr/local/bin`).
 - `make test`: Run the full suite.
 - `make compile`: Build the native compiler by self-hosting from a released seed (preferred).
+- `make check`: Compile (if needed) then run the full test suite.
+- `make rebuild`: Force rebuild the compiler from a released seed.
+- `make smoke`: Rebuild + run smoke tests.
+- `make rebuild-asan`: Rebuild with AddressSanitizer instrumentation (diagnostic).
 - `make clean`: Remove packaged artifacts (`dist/`).
-- `make native-debug`: Build the native compiler with debug symbols for lldb (bootstrap-built).
-- `make native-asan`: Build the native compiler with AddressSanitizer (bootstrap-built).
-- `make selfhost-smoke-native`: Run a fast smoke rebuild of the native compiler from a released seed.
-- `make check-native-determinism`: Rebuild native compiler twice and diff outputs.
 
 ## Documentation
 
@@ -71,7 +70,7 @@ You can also run specific test suites:
 - `make test-unit`: Run fast Sailfin-focused unit coverage.
 - `make test-integration`: Run Sailfin-native integration tests.
 
-Note: the repo still contains historical `stage2` naming in targets and artifact paths; docs prefer “native compiler” terminology going forward.
+Note: the repo still contains historical `stage2` naming in some internal paths; docs prefer “native compiler” terminology going forward.
 
 Before submitting any changes, please ensure that all tests pass.
 
