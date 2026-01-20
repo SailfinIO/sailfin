@@ -278,7 +278,7 @@ jobs:
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-native-${{ matrix.package_label }}
+          name: ci-native-${{ matrix.package_label }}
           path: |
             dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz
             dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz.sha256
@@ -288,7 +288,7 @@ jobs:
       - name: Upload installer archive
         uses: actions/upload-artifact@v4
         with:
-          name: release-installer-${{ matrix.package_label }}
+          name: ci-installer-${{ matrix.package_label }}
           path: dist/installer-${{ matrix.package_label }}.tar.gz
           if-no-files-found: error
 
@@ -643,7 +643,7 @@ jobs:
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: native-${{ matrix.package_label }}
+          name: release-native-${{ matrix.package_label }}
           path: |
             dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz
             dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz.sha256
@@ -653,7 +653,7 @@ jobs:
       - name: Upload installer archive
         uses: actions/upload-artifact@v4
         with:
-          name: installer-${{ matrix.package_label }}
+          name: release-installer-${{ matrix.package_label }}
           path: dist/installer-${{ matrix.package_label }}.tar.gz
           if-no-files-found: error
 
