@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.130 (2026-01-20)
+
+### Bug Fixes
+
+- Use release pat
+  ([`a9dcfb0`](https://github.com/SailfinIO/sailfin/commit/a9dcfb089b8f278b091f91ca9cdf801e2f40d55d))
+
+- Use release pat
+  ([`06880ad`](https://github.com/SailfinIO/sailfin/commit/06880ad68805fa59a40d9afa442d7ded939fd6ce))
+
+
 ## v0.1.1-alpha.129 (2026-01-20)
 
 ### Bug Fixes
