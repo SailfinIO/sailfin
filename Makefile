@@ -311,7 +311,7 @@ ci-package-installer:
 	mkdir -p "$$INSTALLER_DIR/runtime"; \
 	cp -R runtime/native "$$INSTALLER_DIR/runtime/native"; \
 	mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-	# prelude.o comes from selfhost build outputs; ensure ci-prepare-test-artifacts ran.
+	: "prelude.o comes from selfhost build outputs; ensure ci-prepare-test-artifacts ran."; \
 	if [ ! -f build/selfhost/native/obj/runtime/prelude.o ]; then \
 		echo "[ci-package-installer][error] missing build/selfhost/native/obj/runtime/prelude.o" >&2; \
 		exit 1; \
