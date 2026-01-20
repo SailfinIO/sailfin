@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.126 (2026-01-20)
+
+### Bug Fixes
+
+- Remove stage2 fallback
+  ([`ef75e07`](https://github.com/SailfinIO/sailfin/commit/ef75e07cf514542d2567a33b3e184d62f8879976))
+
+- Remove stage2 naming
+  ([`6fd8411`](https://github.com/SailfinIO/sailfin/commit/6fd8411483a5637c61001ae7b91d8626692e5bc0))
+
+
 ## v0.1.1-alpha.125 (2026-01-20)
 
 ### Bug Fixes
