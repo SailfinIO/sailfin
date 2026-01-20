@@ -1,6 +1,41 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.128 (2026-01-20)
+
+### Bug Fixes
+
+- Ci refactor
+  ([`3c70cfd`](https://github.com/SailfinIO/sailfin/commit/3c70cfd18f39f880db45b5204d2cc9ce5bfc1d88))
+
+- Ci version checking
+  ([`c130ebc`](https://github.com/SailfinIO/sailfin/commit/c130ebc1aab0db2d860580126d4ae0ae1942de22))
+
+- Conda env
+  ([`1c69454`](https://github.com/SailfinIO/sailfin/commit/1c694547520a04c34b4d01a3b2d0170ad210549e))
+
+- Install symlinks
+  ([`60b0c48`](https://github.com/SailfinIO/sailfin/commit/60b0c48bc1bb3dda78189c2acc985457b4ef601c))
+
+- Makefile
+  ([`ffa12dc`](https://github.com/SailfinIO/sailfin/commit/ffa12dc893bebf1ee212110c1a6944af98caf237))
+
+- Pin seed
+  ([`0242091`](https://github.com/SailfinIO/sailfin/commit/0242091ec10d5483300d23f96fffae2d400d61bc))
+
+- Pin seed
+  ([`69fea14`](https://github.com/SailfinIO/sailfin/commit/69fea14bf4eb2ad7fffee54318d3dae105451e76))
+
+- Pin seed
+  ([`b01fac1`](https://github.com/SailfinIO/sailfin/commit/b01fac1a9aae7898b30c2d8505522c27e7139a0c))
+
+- Pipefail and targets
+  ([`2804ddc`](https://github.com/SailfinIO/sailfin/commit/2804ddce83518fe78c24382aa4948f1ed4415ff3))
+
+- Use release seed
+  ([`699934b`](https://github.com/SailfinIO/sailfin/commit/699934bb1afdaa54ea129cbd32e61aeb716474b4))
+
+
 ## v0.1.1-alpha.127 (2026-01-20)
 
 ### Bug Fixes
