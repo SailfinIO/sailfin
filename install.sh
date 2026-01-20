@@ -275,6 +275,13 @@ fi
 
 $MAYBE_SUDO install -m 0755 "$SRC_BINARY" "${TARGET_DIR}/${DEST_BASENAME}"
 
+# When INSTALL_BASE / GLOBAL_BIN_DIR are relative paths (as in CI), creating a
+# symlink to a relative TARGET_DIR will produce a broken link (the link target
+# is resolved relative to the link's directory). Resolve to absolute paths so
+# symlinks work regardless of cwd.
+TARGET_DIR_ABS="$(cd "${TARGET_DIR}" && pwd)"
+LINK_TARGET="${TARGET_DIR_ABS}/${DEST_BASENAME}"
+
 if [ -d "${ROOT_DIR}/runtime" ]; then
   log "Installing runtime bundle to ${TARGET_DIR}/runtime…"
   $MAYBE_SUDO rm -rf "${TARGET_DIR}/runtime" 2>/dev/null || true
@@ -289,7 +296,7 @@ LINK_PATH="${GLOBAL_BIN_DIR}/${DEST_BASENAME}"
 if [ -L "$LINK_PATH" ] || [ -f "$LINK_PATH" ]; then
   $MAYBE_SUDO rm -f "$LINK_PATH"
 fi
-if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$LINK_PATH" 2>/dev/null; then
+if ! $MAYBE_SUDO ln -s "${LINK_TARGET}" "$LINK_PATH" 2>/dev/null; then
   log "Symlink failed; copying binary instead."
   $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$LINK_PATH"
   $MAYBE_SUDO chmod 0755 "$LINK_PATH" || true
@@ -304,12 +311,12 @@ ALIAS_PATH="${GLOBAL_BIN_DIR}/${ALIAS_BASENAME}"
 if [ -L "$ALIAS_PATH" ] || [ -f "$ALIAS_PATH" ]; then
   $MAYBE_SUDO rm -f "$ALIAS_PATH"
 fi
-if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$ALIAS_PATH" 2>/dev/null; then
+if ! $MAYBE_SUDO ln -s "${LINK_TARGET}" "$ALIAS_PATH" 2>/dev/null; then
   log "Symlink failed for ${ALIAS_BASENAME}; copying binary instead."
   $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$ALIAS_PATH"
   $MAYBE_SUDO chmod 0755 "$ALIAS_PATH" || true
 fi
-log "Linked: ${ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
+log "Linked: ${ALIAS_PATH} -> ${LINK_TARGET}"
 
 SAILFIN_ALIAS_BASENAME="sailfin"
 if [ "$OS" = "windows" ] && [[ "$DEST_BASENAME" == *.exe ]]; then
@@ -320,12 +327,12 @@ SAILFIN_ALIAS_PATH="${GLOBAL_BIN_DIR}/${SAILFIN_ALIAS_BASENAME}"
 if [ -L "$SAILFIN_ALIAS_PATH" ] || [ -f "$SAILFIN_ALIAS_PATH" ]; then
   $MAYBE_SUDO rm -f "$SAILFIN_ALIAS_PATH"
 fi
-if ! $MAYBE_SUDO ln -s "${TARGET_DIR}/${DEST_BASENAME}" "$SAILFIN_ALIAS_PATH" 2>/dev/null; then
+if ! $MAYBE_SUDO ln -s "${LINK_TARGET}" "$SAILFIN_ALIAS_PATH" 2>/dev/null; then
   log "Symlink failed for ${SAILFIN_ALIAS_BASENAME}; copying binary instead."
   $MAYBE_SUDO cp -f "${TARGET_DIR}/${DEST_BASENAME}" "$SAILFIN_ALIAS_PATH"
   $MAYBE_SUDO chmod 0755 "$SAILFIN_ALIAS_PATH" || true
 fi
-log "Linked: ${SAILFIN_ALIAS_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
+log "Linked: ${SAILFIN_ALIAS_PATH} -> ${LINK_TARGET}"
 
 RESOLVED_SFN="$(command -v sfn 2>/dev/null || true)"
 if [ -n "$RESOLVED_SFN" ] && [ "$RESOLVED_SFN" != "$ALIAS_PATH" ]; then
@@ -333,8 +340,8 @@ if [ -n "$RESOLVED_SFN" ] && [ "$RESOLVED_SFN" != "$ALIAS_PATH" ]; then
   log "If you previously installed Stage0, remove that binary or ensure ${GLOBAL_BIN_DIR} comes first in PATH."
 fi
 
-log "Installed: ${TARGET_DIR}/${DEST_BASENAME}"
-log "Linked: ${LINK_PATH} -> ${TARGET_DIR}/${DEST_BASENAME}"
+log "Installed: ${TARGET_DIR_ABS}/${DEST_BASENAME}"
+log "Linked: ${LINK_PATH} -> ${LINK_TARGET}"
 
 if [[ ":$PATH:" != *":${GLOBAL_BIN_DIR}:"* ]]; then
   echo
