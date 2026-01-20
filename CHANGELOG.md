@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.127 (2026-01-20)
+
+### Bug Fixes
+
+- Ci version checking
+  ([`275991b`](https://github.com/SailfinIO/sailfin/commit/275991b5eff3007c27ba854c737e737dad98a17a))
+
+
 ## v0.1.1-alpha.126 (2026-01-20)
 
 ### Bug Fixes
