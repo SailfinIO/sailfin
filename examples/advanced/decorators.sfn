@@ -1,6 +1,13 @@
 // examples/advanced/decorators.sfn
 
+import { logExecution } from "runtime/prelude";
+
 @logExecution
 fn compute(x -> number) -> number ![io] {
   return x * x;
+}
+
+fn main() ![io] {
+  let value = compute(5);
+  print.info("compute(5) = {{value}}");
 }

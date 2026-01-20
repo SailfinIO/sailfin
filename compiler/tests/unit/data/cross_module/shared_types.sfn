@@ -1,0 +1,43 @@
+// compiler/tests/data/cross_module/shared_types.sfn
+// Defines structs and enums that will be imported by consumer modules
+
+struct Point {
+  x -> number;
+  y -> number;
+
+  fn distance_from_origin(self -> Point) -> number {
+    let x_squared = self.x * self.x;
+    let y_squared = self.y * self.y;
+    return x_squared + y_squared;  // simplified - no sqrt for now
+  }
+}
+
+struct Rectangle {
+  top_left -> Point;
+  width -> number;
+  height -> number;
+}
+
+enum Color {
+  Red,
+  Green,
+  Blue,
+  Custom { r -> int; g -> int; b -> int; }
+}
+
+enum Shape {
+  Circle { center -> Point; radius -> number; }
+  Box { bounds -> Rectangle; }
+  Empty;
+}
+
+fn make_red() -> Color {
+  return Color.Red;
+}
+
+fn make_circle(x -> number, y -> number, r -> number) -> Shape {
+  return Shape.Circle {
+    center: Point { x: x, y: y },
+    radius: r
+  };
+}

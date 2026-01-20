@@ -9,8 +9,8 @@ capsules, model artefacts, capability manifests, and reproducible build
 metadata. The interface mirrors modern dependency managers but is designed for
 deterministic, AI-native projects.
 
-> Implementation note: The Python bootstrap toolchain does not yet ship an `sfn`
-> CLI. Registry workflows live in this proposal until the integration work in
+> Implementation note: The `sfn` CLI is in active development. Registry
+> workflows live in this proposal until the integration work in
 > `docs/roadmap.md` lands.
 
 ## Getting Started
@@ -18,14 +18,14 @@ deterministic, AI-native projects.
 ### Installing Capsules
 
 ```bash
-sfn add sailfin/http
+sfn add sfn/http
 ```
 
-This fetches the `sailfin/http` capsule from the Sailfin registry and records it
+This fetches the `sfn/http` capsule from the Sailfin registry and records it
 in your `sail.toml` manifest. Multiple capsules can be added at once:
 
 ```bash
-sfn add sailfin/http sailfin/io sailfin/net
+sfn add sfn/http sfn/io sfn/net
 ```
 
 ### The `sail.toml` Manifest
@@ -180,7 +180,7 @@ sfn add sailfin/http
 Write code using Sailfin syntax:
 
 ```sailfin
-import { serve } from "sailfin/http"
+import { serve } from "sfn/http"
 
 fn main() {
     serve(fn(req, res) {
@@ -216,7 +216,7 @@ hashes, generation cards, capability manifests, and evaluator baselines.
 Consumers can replay model calls using the bundled cards for deterministic
 evaluation.
 
-The registry is live today, but the bootstrap toolchain lacks native commands
+The registry is live today, but the current toolchain lacks native commands
 for interacting with it; the flows above remain design targets until the CLI
 arrives.
 

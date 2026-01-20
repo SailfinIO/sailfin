@@ -1,0 +1,748 @@
+// compiler/src/llvm/lifetime.sfn
+//
+// Lifetime tracking, borrow checking, and ownership analysis for LLVM lowering.
+// Handles borrow expression parsing, lifetime region management, and conflict detection.
+
+import { NativeFunction, NativeSourceSpan } from "../native_ir";
+import { substring, find_char } from "../string_utils";
+import {
+    LocalBinding, ParameterBinding, OwnershipInfo, OwnershipConsumption, OwnershipAnalysis,
+    LifetimeRegionMetadata, LifetimeReleaseEvent, BorrowParseResult, BorrowArgumentParse,
+    ScopeMetadata, LLVMOperand, ExpressionResult, StringConstant
+} from "./types";
+import { trim_text, append_string, starts_with, ends_with, char_at, sanitize_symbol, is_identifier_start_char, is_identifier_part_char, number_to_string } from "./utils";
+import { empty_string_constant_set } from "./strings";
+import { find_local_binding, find_parameter_binding, is_simple_identifier, is_effect_delimiter, strip_enclosing_parentheses, is_copy_type } from "./expressions";
+import { unwrap_move_wrapper } from "./type_mapping";
+
+// =============================================================================
+// Borrow Expression Parsing
+// =============================================================================
+
+fn parse_borrow_expression(text -> string) -> BorrowParseResult {
+    let trimmed = trim_text(text);
+    let diagnostics -> string[] = [];
+    if trimmed.length == 0 {
+        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+    }
+
+    if starts_with(trimmed, "borrow") {
+        // Require a token boundary after `borrow` so we don't misinterpret
+        // identifiers like `borrow_span` / `borrow_parse` as borrow expressions.
+        if trimmed.length > 6 {
+            let next = char_at(trimmed, 6);
+            if next != " " && next != "\t" && next != "(" {
+                return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+            }
+        }
+        let mut remainder -> string = trim_text(substring(trimmed, 6, trimmed.length));
+        if remainder.length == 0 {
+            let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+            return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: issue };
+        }
+        let mut mutable_flag -> boolean = false;
+        if starts_with(remainder, "mut") {
+            let after_mut = substring(remainder, 3, remainder.length);
+            mutable_flag = true;
+            remainder = trim_text(after_mut);
+        }
+        if remainder.length > 0 && remainder[0] == "(" {
+            let argument_parse = extract_borrow_argument(remainder);
+            let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
+            if !argument_parse.success {
+                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+            }
+            let mut argument_text -> string = argument_parse.argument;
+            if starts_with(argument_text, "mut") {
+                let after_mut = substring(argument_text, 3, argument_text.length);
+                let trimmed_after_mut = trim_text(after_mut);
+                if trimmed_after_mut.length > 0 {
+                    mutable_flag = true;
+                    argument_text = trimmed_after_mut;
+                }
+            }
+            if argument_text.length == 0 {
+                messages = append_string(messages, "llvm lowering: borrow expression missing target");
+                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+            }
+            if !is_valid_borrow_target(argument_text) {
+                return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+            }
+            return BorrowParseResult { recognized: true, success: true, target: argument_text, mutable: mutable_flag, diagnostics: messages };
+        }
+
+        let simple_parse = extract_simple_borrow_target(remainder);
+        if !simple_parse.success {
+            return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+        }
+        if !is_valid_borrow_target(simple_parse.argument) {
+            return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+        }
+        return BorrowParseResult { recognized: true, success: true, target: simple_parse.argument, mutable: mutable_flag, diagnostics: diagnostics };
+    }
+
+    if !starts_with(trimmed, "&") {
+        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+    }
+    if starts_with(trimmed, "&&") {
+        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+    }
+    let mut remainder -> string = trim_text(substring(trimmed, 1, trimmed.length));
+    let mut mutable_flag -> boolean = false;
+    if starts_with(remainder, "mut") {
+        mutable_flag = true;
+        let after_mut = substring(remainder, 3, remainder.length);
+        remainder = trim_text(after_mut);
+    }
+    if remainder.length == 0 {
+        let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: issue };
+    }
+    return BorrowParseResult { recognized: true, success: true, target: trim_text(remainder), mutable: mutable_flag, diagnostics: diagnostics };
+}
+
+fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
+    let mut diagnostics -> string[] = [];
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    let mut closing_index -> number = -1;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "(" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if depth == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing opening `(`");
+                return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+            }
+            depth -= 1;
+            let current_index = index;
+            index += 1;
+            if depth == 0 {
+                closing_index = current_index;
+                break;
+            }
+            continue;
+        }
+        index += 1;
+    }
+    if closing_index < 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing closing `)`");
+        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+    }
+    let inner = substring(text, 1, closing_index);
+    let remainder = trim_text(substring(text, closing_index + 1, text.length));
+    if remainder.length > 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`");
+        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+    }
+    return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
+}
+
+fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
+    let mut diagnostics -> string[] = [];
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if is_effect_delimiter(ch) {
+            break;
+        }
+        index += 1;
+    }
+    let target = trim_text(substring(trimmed, 0, index));
+    if target.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+    }
+    let remainder = trim_text(substring(trimmed, index, trimmed.length));
+    if remainder.length > 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`");
+        return BorrowArgumentParse { success: false, argument: target, diagnostics: diagnostics };
+    }
+    return BorrowArgumentParse { success: true, argument: target, diagnostics: diagnostics };
+}
+
+fn is_valid_borrow_target(text -> string) -> boolean {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if ch == "." {
+            index += 1;
+            continue;
+        }
+        if index == 0 {
+            if !is_identifier_start_char(ch) {
+                return false;
+            }
+        } else {
+            if !is_identifier_part_char(ch) {
+                return false;
+            }
+        }
+        index += 1;
+    }
+    return true;
+}
+
+// =============================================================================
+// Borrow Expression Lowering
+// =============================================================================
+
+fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[]) -> ExpressionResult {
+    let mut diagnostics -> string[] = parse.diagnostics;
+    let empty_constants = empty_string_constant_set();
+    if !parse.success {
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+
+    let mut target = strip_enclosing_parentheses(parse.target);
+    target = trim_text(target);
+    if target.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+
+    let local = find_local_binding(locals, target);
+    if local == null {
+        let parameter = find_parameter_binding(bindings, target);
+        if parameter == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: borrow target `" + target + "` not found");
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        }
+
+        // If the parameter is already a reference/pointer type, borrowing it is an identity.
+        if ends_with(parameter.llvm_type, "*") {
+            let operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+        }
+
+        diagnostics = append_string(diagnostics, "llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+
+    let pointer_type = local.llvm_type + "*";
+    let operand = LLVMOperand { llvm_type: pointer_type, value: local.pointer };
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+}
+
+// =============================================================================
+// Ownership Analysis
+// =============================================================================
+
+fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
+    if initializer == null {
+        return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: [] };
+    }
+    let trimmed = trim_text(initializer);
+    if trimmed.length == 0 {
+        return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: [] };
+    }
+
+    let parse = parse_borrow_expression(trimmed);
+    let mut diagnostics -> string[] = parse.diagnostics;
+    if parse.recognized {
+        if !parse.success {
+            return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+        }
+        let resolved_base = resolve_borrow_base(parse.target, locals);
+        if resolved_base.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+            return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+        }
+    let ownership = OwnershipInfo { variant: "Borrow", base: resolved_base, mutable: parse.mutable, span: span, region_id: -1 };
+        return OwnershipAnalysis { ownership: ownership, consumption: null, diagnostics: diagnostics };
+    }
+
+    if is_simple_identifier(trimmed) {
+        let name = trimmed;
+        let local = find_local_binding(locals, name);
+        if local != null {
+            if local.consumed {
+                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span));
+                return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+            }
+            if is_copy_type(local.type_annotation, local.llvm_type) {
+                return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+            }
+            let consumption = OwnershipConsumption { kind: "local", name: name };
+            return OwnershipAnalysis { ownership: null, consumption: consumption, diagnostics: diagnostics };
+        }
+
+        let parameter = find_parameter_binding(bindings, name);
+        if parameter != null {
+            if parameter.consumed {
+                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span));
+                return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+            }
+            if is_copy_type(parameter.type_annotation, parameter.llvm_type) {
+                return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+            }
+            let consumption = OwnershipConsumption { kind: "parameter", name: name };
+            return OwnershipAnalysis { ownership: null, consumption: consumption, diagnostics: diagnostics };
+        }
+    }
+
+    return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
+}
+
+fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership -> OwnershipInfo?) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let entry = locals[index];
+        if entry.name == name {
+            let updated = LocalBinding {
+                name: entry.name,
+                pointer: entry.pointer,
+                llvm_type: entry.llvm_type,
+                type_annotation: entry.type_annotation,
+                ownership: ownership,
+                consumed: entry.consumed,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
+            };
+            result.push(updated);
+        } else {
+            result.push(entry);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+// =============================================================================
+// Borrow Conflict Detection
+// =============================================================================
+
+fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {
+    let mut diagnostics -> string[] = [];
+    if ownership == null {
+        return diagnostics;
+    }
+    if ownership.variant != "Borrow" {
+        return diagnostics;
+    }
+    let base = trim_text(ownership.base);
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let existing = locals[index];
+        if existing.ownership != null {
+            let details = existing.ownership;
+            if details.variant == "Borrow" {
+                let existing_base = trim_text(details.base);
+                if existing_base == base {
+                    if ownership.mutable {
+                        if details.mutable {
+                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                        } else {
+                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active shared borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                        }
+                    } else {
+                        if details.mutable {
+                            diagnostics = append_string(diagnostics, "llvm lowering: shared borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                        }
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return diagnostics;
+}
+
+fn resolve_borrow_base(target -> string, locals -> LocalBinding[]) -> string {
+    return resolve_borrow_base_inner(trim_text(target), locals, 0);
+}
+
+fn resolve_borrow_base_inner(target -> string, locals -> LocalBinding[], depth -> number) -> string {
+    let trimmed = trim_text(target);
+    if trimmed.length == 0 {
+        return trimmed;
+    }
+    if depth >= 8 {
+        return trimmed;
+    }
+    if !is_simple_identifier(trimmed) {
+        return trimmed;
+    }
+    let binding = find_local_binding(locals, trimmed);
+    if binding == null {
+        return trimmed;
+    }
+    if binding.ownership == null {
+        return trimmed;
+    }
+    let details = binding.ownership;
+    if details.variant != "Borrow" {
+        return trimmed;
+    }
+    return resolve_borrow_base_inner(details.base, locals, depth + 1);
+}
+
+fn normalise_borrow_base(raw_base -> string) -> string {
+    let mut trimmed = trim_text(raw_base);
+    loop {
+        if trimmed.length == 0 {
+            break;
+        }
+        if trimmed[0] == "*" {
+            trimmed = trim_text(substring(trimmed, 1, trimmed.length));
+            continue;
+        }
+        break;
+    }
+    if trimmed.length >= 2 {
+        if trimmed[0] == "(" {
+            if trimmed[trimmed.length - 1] == ")" {
+                let inner = trim_text(substring(trimmed, 1, trimmed.length - 1));
+                if inner.length > 0 {
+                    return inner;
+                }
+            }
+        }
+    }
+    return trimmed;
+}
+
+fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 {
+        return false;
+    }
+    let normalized = unwrap_move_wrapper(trimmed);
+    if normalized.length == 0 {
+        return false;
+    }
+    if normalized[0] != "&" {
+        return false;
+    }
+    let remainder = trim_text(substring(normalized, 1, normalized.length));
+    if remainder.length == 0 {
+        return false;
+    }
+    if starts_with(remainder, "mut") {
+        return true;
+    }
+    return false;
+}
+
+// =============================================================================
+// Lifetime Region Management
+// =============================================================================
+
+fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeRegionMetadata) -> LifetimeRegionMetadata[] {
+    return values.concat([value]);
+}
+
+fn append_lifetime_release_event(events -> LifetimeReleaseEvent[], event -> LifetimeReleaseEvent) -> LifetimeReleaseEvent[] {
+    return events.concat([event]);
+}
+
+fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id -> number, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata[] {
+    let mut result -> LifetimeRegionMetadata[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= regions.length {
+            break;
+        }
+        let entry = regions[index];
+        if entry.id == region_id {
+            let updated = LifetimeRegionMetadata {
+                id: entry.id,
+                binding: entry.binding,
+                base: entry.base,
+                mutable: entry.mutable,
+                start_span: entry.start_span,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
+                base_scope_id: entry.base_scope_id,
+                base_scope_depth: entry.base_scope_depth,
+                end_scope_id: scope_id,
+                end_scope_depth: scope_depth,
+                released: true,
+            };
+            result.push(updated);
+        } else {
+            result.push(entry);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn apply_lifetime_release_events(regions -> LifetimeRegionMetadata[], releases -> LifetimeReleaseEvent[]) -> LifetimeRegionMetadata[] {
+    if releases.length == 0 {
+        return regions;
+    }
+    let mut current_regions -> LifetimeRegionMetadata[] = regions;
+    let mut index -> number = 0;
+    loop {
+        if index >= releases.length {
+            break;
+        }
+        let release = releases[index];
+        current_regions = mark_lifetime_region_released(current_regions, release.region_id, release.scope_id, release.scope_depth);
+        index += 1;
+    }
+    return current_regions;
+}
+
+fn make_lifetime_region_metadata(id -> number, binding -> string, ownership -> OwnershipInfo, scope_id -> string, scope_depth -> number, base_scope_id -> string, base_scope_depth -> number) -> LifetimeRegionMetadata {
+    return LifetimeRegionMetadata {
+        id: id,
+        binding: binding,
+        base: ownership.base,
+        mutable: ownership.mutable,
+        start_span: ownership.span,
+        scope_id: scope_id,
+        scope_depth: scope_depth,
+        base_scope_id: base_scope_id,
+        base_scope_depth: base_scope_depth,
+        end_scope_id: "",
+        end_scope_depth: 0,
+        released: false,
+    };
+}
+
+fn infer_borrow_base_scope(base -> string, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string) -> ScopeMetadata {
+    let local = find_local_binding(locals, base);
+    if local != null {
+        return ScopeMetadata { scope_id: local.scope_id, scope_depth: local.scope_depth };
+    }
+    let parameter = find_parameter_binding(bindings, base);
+    if parameter != null {
+        return ScopeMetadata { scope_id: format_root_scope_id(function_name), scope_depth: 0 };
+    }
+    return ScopeMetadata { scope_id: format_root_scope_id(function_name), scope_depth: 0 };
+}
+
+// =============================================================================
+// Lifetime Validation
+// =============================================================================
+
+fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegionMetadata[]) -> string[] {
+    let mut diagnostics -> string[] = [];
+    let mut index -> number = 0;
+    let root_scope = format_root_scope_id(function.name);
+    loop {
+        if index >= regions.length {
+            break;
+        }
+        let region = regions[index];
+        let mut base_scope_id = region.base_scope_id;
+        let mut base_scope_depth = region.base_scope_depth;
+        if base_scope_id.length == 0 {
+            base_scope_id = root_scope;
+            base_scope_depth = 0;
+        }
+        let mut violation -> boolean = false;
+        if region.released {
+            if region.end_scope_id.length == 0 {
+                violation = true;
+            } else if !is_scope_descendant(base_scope_id, region.end_scope_id) {
+                violation = true;
+            }
+        } else {
+            if region.scope_depth < base_scope_depth {
+                violation = true;
+            } else if !is_scope_descendant(base_scope_id, region.scope_id) {
+                violation = true;
+            }
+        }
+        if violation {
+            let mut location -> string = "";
+            if region.start_span != null {
+                location = " at " + format_span_location(region.start_span);
+            }
+            diagnostics = append_string(diagnostics, "llvm lowering: borrow `" + region.binding + "` of `" + region.base + "` escapes lifetime of `" + region.base + "` in `" + function.name + "`" + location);
+        }
+        index += 1;
+    }
+    return diagnostics;
+}
+
+// =============================================================================
+// Suspension Conflict Detection (for async/await)
+// =============================================================================
+
+fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string, suspension_span -> NativeSourceSpan?) -> string[] {
+    let mut diagnostics -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= locals.length {
+            break;
+        }
+        let local = locals[index];
+        if !local.consumed && local.ownership != null {
+            let details = local.ownership;
+            if details.variant == "Borrow" && details.mutable {
+                let base_name = normalise_borrow_base(details.base);
+                let location = format_suspension_location(keyword, details.span, suspension_span);
+                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+            }
+        }
+        index += 1;
+    }
+    let mut parameter_index -> number = 0;
+    loop {
+        if parameter_index >= bindings.length {
+            break;
+        }
+        let binding = bindings[parameter_index];
+        if !binding.consumed {
+            if is_mutable_borrow_annotation(binding.type_annotation) {
+                let location = format_suspension_location(keyword, binding.span, suspension_span);
+                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location);
+            }
+        }
+        parameter_index += 1;
+    }
+    return diagnostics;
+}
+
+fn detect_suspension_conflicts(expression -> string?, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string, suspension_span -> NativeSourceSpan?) -> string[] {
+    if expression == null {
+        return [];
+    }
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 {
+        return [];
+    }
+    let keyword = find_suspension_keyword(trimmed);
+    if keyword.length == 0 {
+        return [];
+    }
+    return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span);
+}
+
+fn find_suspension_keyword(text -> string) -> string {
+    if starts_with(text, "await") {
+        if text.length == 5 {
+            return "await";
+        }
+        let next = char_at(text, 5);
+        if next == " " || next == "\t" || next == "(" {
+            return "await";
+        }
+    }
+    if starts_with(text, "yield") {
+        if text.length == 5 {
+            return "yield";
+        }
+        let next = char_at(text, 5);
+        if next == " " || next == "\t" || next == "(" {
+            return "yield";
+        }
+    }
+    return "";
+}
+
+// =============================================================================
+// Scope ID Helpers
+// =============================================================================
+
+fn format_root_scope_id(function_name -> string) -> string {
+    let mut sanitized -> string = sanitize_symbol(function_name);
+    if sanitized.length == 0 {
+        sanitized = "fn";
+    }
+    return "fn:" + sanitized;
+}
+
+fn make_child_scope_id(parent -> string, child -> string) -> string {
+    let mut sanitized_child -> string = sanitize_symbol(child);
+    if sanitized_child.length == 0 {
+        sanitized_child = "scope";
+    }
+    if parent.length == 0 {
+        return sanitized_child;
+    }
+    return parent + "::" + sanitized_child;
+}
+
+fn is_scope_descendant(parent -> string, candidate -> string) -> boolean {
+    if parent.length == 0 {
+        return true;
+    }
+    if candidate.length == 0 {
+        return false;
+    }
+    if candidate == parent {
+        return true;
+    }
+    let prefix = parent + "::";
+    if candidate.length <= prefix.length {
+        return false;
+    }
+    return starts_with(candidate, prefix);
+}
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
+
+fn format_use_after_move_message(name -> string, span -> NativeSourceSpan?) -> string {
+    if span == null {
+        return "llvm lowering: use-after-move of `" + name + "`";
+    }
+    return "llvm lowering: use-after-move of `" + name + "` at " + format_span_location(span);
+}
+
+fn format_span_location(span -> NativeSourceSpan) -> string {
+    let start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column);
+    let end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column);
+    return start + "-" + end;
+}
+
+fn format_suspension_location(keyword -> string, borrow_span -> NativeSourceSpan?, suspension_span -> NativeSourceSpan?) -> string {
+    let mut has_segment -> boolean = false;
+    let mut combined -> string = "";
+    if borrow_span != null {
+        combined = "borrow at " + format_span_location(borrow_span);
+        has_segment = true;
+    }
+    if suspension_span != null {
+        let mut label -> string = keyword;
+        if label.length == 0 {
+            label = "suspend";
+        }
+        let segment = label + " at " + format_span_location(suspension_span);
+        if has_segment {
+            combined = combined + "; " + segment;
+        } else {
+            combined = segment;
+            has_segment = true;
+        }
+    }
+    if !has_segment {
+        return "";
+    }
+    return " (" + combined + ")";
+}

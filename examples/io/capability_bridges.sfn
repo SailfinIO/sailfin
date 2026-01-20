@@ -1,0 +1,12 @@
+// examples/io/capability_bridges.sfn
+// Demonstrates runtime capability bridges for filesystem I/O.
+
+import { capability_grant, fs_bridge } from "runtime/prelude";
+
+fn main() ![io] {
+    let grant = capability_grant(["io"]);
+    let bridge = fs_bridge(grant);
+    bridge.write_text("scratch/capability-bridge.txt", "Hello from Sailfin capability bridges.");
+    let contents = bridge.read_text("scratch/capability-bridge.txt");
+    print.info("Read back: {{ contents }}");
+}

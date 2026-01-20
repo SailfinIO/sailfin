@@ -3,16 +3,21 @@
 (filename: `enbf.md`)
 
 The Sailfin grammar is written using an extended Backus–Naur form that mirrors
-current bootstrap behaviour while signalling upcoming AI-native features.
+current compiler behavior while signalling upcoming AI-native features.
 Non-terminals are written in `PascalCase`, terminals in double quotes.
 Parentheses group expressions, square brackets denote optional elements, and
 braces denote repetition (`{ x }` means zero or more occurrences of `x`).
 
 ```
-Program            = { ImportDeclaration | Declaration | Statement } ;
+Program            = { ImportDeclaration | ExportDeclaration | Declaration | Statement } ;
 
-ImportDeclaration  = "import" "{" [ Identifier { "," Identifier } ] "}" "from"
-                     StringLiteral ";" ;
+ImportDeclaration  = "import" ImportSpecifierList "from" StringLiteral ";" ;
+
+ExportDeclaration  = "export" ImportSpecifierList [ "from" StringLiteral ] ";" ;
+
+ImportSpecifierList = "{" [ ImportSpecifier { "," ImportSpecifier } ] "}" ;
+
+ImportSpecifier    = Identifier [ "as" Identifier ] ;
 
 Declaration        = StructDeclaration
                    | EnumDeclaration
@@ -49,9 +54,22 @@ TypeAliasDeclaration = "type" Identifier [ TypeParameters ] "=" Type ";" ;
 TypeParameters     = "<" TypeParameter { "," TypeParameter } ">" ;
 TypeParameter      = Identifier [ ":" Type ] ;
 
-FunctionDeclaration = { Decorator } [ "async" ] "fn" Identifier
-                       [ TypeParameters ] "(" [ Parameters ] ")"
-                       [ TypeSep Type ] [ EffectList ] Block ;
+FunctionDeclaration = { Decorator } { FunctionModifier }
+                      "fn" Identifier [ TypeParameters ]
+                      "(" [ Parameters ] ")"
+                      [ TypeSep Type ] [ EffectList ] ( Block | ";" ) ;
+
+FunctionModifier    = "async" | "unsafe" | "extern" ;
+
+// Extern function declarations (FFI bindings to C libraries)
+// When both "unsafe" and "extern" modifiers are present, the function
+// declares an external C symbol. These declarations end with ";" instead
+// of a block body.
+//
+// Examples:
+//   unsafe extern fn malloc(size -> usize) -> *u8;
+//   unsafe extern fn free(ptr -> *u8) -> void;
+//   unsafe extern fn strlen(s -> *u8) -> usize;
 
 PipelineDeclaration = "pipeline" Identifier "(" [ Parameters ] ")"
                       [ TypeSep Type ] [ EffectList ] Block ;
@@ -78,6 +96,10 @@ Block              = "{" { Statement } "}" ;
 
 Statement          = VariableDeclaration
                    | IfStatement
+                   | ForStatement
+                   | LoopStatement
+                   | BreakStatement
+                   | ContinueStatement
                    | MatchStatement
                    | TryStatement
                    | RoutineDeclaration
@@ -86,11 +108,13 @@ Statement          = VariableDeclaration
                    | WithStatement
                    | PromptStatement
                    | AssertStatement
+                   | UnsafeBlock
                    | Block
                    | AssignmentStatement
                    | ExpressionStatement ;
+UnsafeBlock        = "unsafe" Block ;
 
-AssertStatement    = "assert" Expression ";" ;  // Bootstrap: no parentheses required
+AssertStatement    = "assert" Expression ";" ;
 
 VariableDeclaration  = "let" [ "mut" ] Identifier [ TypeSep Type ]
                        [ "=" Expression ] ";" ;
@@ -115,9 +139,14 @@ ThrowStatement     = "throw" Expression ";" ;
 
 WithStatement      = "with" Expression { "," Expression } Block ;
 
+ForStatement       = "for" Expression "in" Expression Block [ ";" ] ;
+LoopStatement      = "loop" Block [ ";" ] ;
+BreakStatement     = "break" [ ";" ] ;
+ContinueStatement  = "continue" [ ";" ] ;
+
 PromptStatement    = "prompt" PromptChannel Block ;
-// Bootstrap status: channels are parsed as identifiers; canonical channel names are
-// system | user | assistant | tool (not enforced by the bootstrap lexer/parser).
+// Channels are parsed as identifiers; canonical channel names are
+// system | user | assistant | tool (not enforced yet).
 PromptChannel      = Identifier ;
 
 AssignmentStatement = Assignment ";" ;
@@ -129,9 +158,9 @@ Expression         = LambdaExpression | PipelineExpression ;
 
 LambdaExpression   = "fn" "(" [ Parameters ] ")" [ TypeSep Type ] Block ;
 
-// Planned (self-hosted target). The bootstrap parser does not implement the
-// pipeline operator; this rule is included for design reference only. `|>`
-// binds looser than all expression operators and associates left-to-right.
+// Planned. The pipeline operator is not implemented yet; this rule is included
+// for design reference only. `|>` binds looser than all expression operators
+// and associates left-to-right.
 PipelineExpression = LogicalOr { "|>" LogicalOr } ;
 
 LogicalOr          = LogicalAnd { "||" LogicalAnd } ;
@@ -140,12 +169,30 @@ Equality           = Comparison { (("==" | "!=") Comparison) | ("is" Type) } ;
 Comparison         = Term { ("<" | "<=" | ">" | ">=") Term } ;
 Term               = Factor { ("+" | "-") Factor } ;
 Factor             = Unary { ("*" | "/") Unary } ;
-Unary              = ("!" | "-" | "+" | "await") Unary | Postfix ;
+Unary              = ("!" | "-" | "+" | "await") Unary
+                   | "&" [ "mut" ] Unary           // Reference creation (&x, &mut x)
+                   | "&" "raw" Unary               // Raw pointer creation (only in unsafe)
+                   | "borrow" "(" Expression ")"   // Explicit borrow expression
+                   | "*" Unary                     // Pointer dereference (only in unsafe)
+                   | Postfix ;
 
-Postfix            = Primary { PostfixOp } ;
+// Pointer/Reference Expressions:
+//   &x       — Create shared borrow (safe)
+//   &mut x   — Create mutable borrow (safe)
+//   &raw x   — Create raw pointer from value (requires unsafe)
+//   *ptr     — Dereference raw pointer (requires unsafe)
+//   borrow(x) — Explicit borrow expression (safe)
+
+Postfix            = Primary { PostfixOp } [ "as" Type ] ;
 PostfixOp          = "(" [ Arguments ] ")"
                    | "." Identifier
                    | "[" Expression "]" ;
+
+// The "as" operator performs type casting. Inside unsafe blocks, it can
+// cast between pointer types:
+//   ptr as *i32       — Cast raw pointer to different element type
+//   ptr as *u8        — Cast to byte pointer (for free, etc.)
+//   value as f64      — Safe numeric conversion
 
 Argument           = [ Identifier ":" ] Expression ;
 Arguments          = Argument { "," Argument } ;
@@ -172,9 +219,26 @@ StructField        = Identifier ":" Expression ;
 Type               = UnionType ;
 UnionType          = OptionalType { "|" OptionalType } ;
 OptionalType       = SimpleType [ "?" ] ;
-SimpleType         = QualifiedName [ "<" Type { "," Type } ">" ] ;
+SimpleType         = ReferencePrefix PointerType ;
+ReferencePrefix    = { "&" [ "mut" ] } ;
+PointerType        = { "*" [ "mut" ] } BaseType ;
+BaseType           = QualifiedName [ "<" Type { "," Type } ">" ]
+                   | "opaque" ;  // Opaque pointer target for foreign-managed memory
 NominalType        = SimpleType ;
 QualifiedName      = Identifier { "." Identifier } ;
+
+// Pointer Types:
+//   *T       — Read-only raw pointer to type T
+//   *mut T   — Mutable raw pointer to type T
+//   *opaque  — Opaque pointer to foreign-managed memory (equivalent to void*)
+//
+// Reference Types (safe, lifetime-tracked):
+//   &T       — Shared borrow (read-only reference)
+//   &mut T   — Exclusive mutable borrow
+//
+// Raw pointers (*T, *mut T) are only usable inside `unsafe` blocks.
+// References (&T, &mut T) are the safe alternative with compile-time
+// lifetime enforcement.
 
 Pattern            = "_"
                    | LiteralPattern
@@ -219,9 +283,9 @@ correspond to capabilities granted via manifests (`sail.toml`, aggregated in
 auditable use of I/O (`io`), networking (`net`), randomness (`rand`), model
 invocation (`model`), accelerator usage (`gpu`), and clocks/timers (`clock`).
 
-Bootstrap enforcement note: The stage0 effect checker validates only `model`,
-`io`, and `net`. Other effect identifiers are parsed and recorded on
-declarations but are not enforced in bootstrap.
+Current enforcement note: The compiler validates `model`, `io`, and `net`
+effects today. Other effect identifiers are parsed and recorded on declarations
+but are not enforced yet.
 
 ### Prompt Blocks
 

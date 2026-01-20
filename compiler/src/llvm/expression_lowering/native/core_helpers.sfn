@@ -1,0 +1,78 @@
+// compiler/src/llvm/expression_lowering/native/core_helpers.sfn
+//
+// Small helper utilities extracted from core.sfn to reduce file size.
+
+import { NativeParameter } from "../../../native_ir";
+import { TypeContext } from "../../types";
+import { substring, find_last_index_of_char } from "../../../string_utils";
+import { append_string } from "../../utils";
+import { map_parameter_type, map_struct_type_annotation_ctx } from "./core_type_mapping";
+
+fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[], function_name -> string) -> string[] {
+    let mut types -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
+
+        // Mirror `prepare_parameters`: infer method receiver type when `self` is unannotated.
+        if parameter.type_annotation.length == 0 && parameter.name == "self" && index == 0 {
+            let double_colon_pos = find_last_index_of_char(function_name, ":");
+            if double_colon_pos > 0 && substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+                let struct_name = substring(function_name, 0, double_colon_pos - 1);
+                let struct_type = map_struct_type_annotation_ctx(context, struct_name);
+                if struct_type.length > 0 {
+                    llvm_type = struct_type + "*";
+                }
+            }
+        }
+        if llvm_type.length == 0 {
+            types = append_string(types, "double");
+        } else {
+            types = append_string(types, llvm_type);
+        }
+        index += 1;
+    }
+    return types;
+}
+
+fn operation_name_for_symbol(symbol -> string, llvm_type -> string) -> string {
+    if llvm_type == "double" {
+        if symbol == "+" {
+            return "fadd";
+        }
+        if symbol == "-" {
+            return "fsub";
+        }
+        if symbol == "*" {
+            return "fmul";
+        }
+        if symbol == "/" {
+            return "fdiv";
+        }
+        if symbol == "%" {
+            return "frem";
+        }
+    }
+    if symbol == "+" {
+        return "add";
+    }
+    if symbol == "-" {
+        return "sub";
+    }
+    if symbol == "*" {
+        return "mul";
+    }
+    if symbol == "/" {
+        return "sdiv";
+    }
+    if symbol == "%" {
+        return "srem";
+    }
+    return "add";
+}
+
+export { collect_parameter_types, operation_name_for_symbol };

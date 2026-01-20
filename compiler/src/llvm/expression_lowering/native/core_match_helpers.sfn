@@ -1,0 +1,12 @@
+// compiler/src/llvm/expression_lowering/native/core_match_helpers.sfn
+//
+// Small helpers used by match lowering that historically lived in core.sfn.
+
+import { MatchArmMutations } from "../../types";
+
+fn append_match_arm_mutations(list -> MatchArmMutations[], arm -> MatchArmMutations) -> MatchArmMutations[] {
+    list.push(arm);
+    return list;
+}
+
+export { append_match_arm_mutations };

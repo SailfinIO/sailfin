@@ -1,0 +1,262 @@
+// compiler/src/parser/types.sfn
+//
+// Parser type definitions - result structs for various parsing operations.
+// These types are used throughout the parser to return parse results along
+// with updated parser state.
+
+import { Token } from "../token";
+import {
+    Block,
+    Decorator,
+    DecoratorArgument,
+    Expression,
+    FieldDeclaration,
+    FunctionSignature,
+    EnumVariant,
+    MethodDeclaration,
+    ModelProperty,
+    ObjectField,
+    Parameter,
+    Statement,
+    ImportSpecifier,
+    ExportSpecifier,
+    TypeParameter,
+    TypeAnnotation,
+    MatchCase,
+    ElseBranch,
+    WithClause,
+    SourceSpan,
+} from "../ast";
+
+
+// ============================================================================
+// Core Parser State
+// ============================================================================
+
+struct Parser {
+    tokens -> Token[];
+    index -> number;
+}
+
+// ============================================================================
+// Statement Parsing Results
+// ============================================================================
+
+struct StatementParseResult {
+    parser -> Parser;
+    statement -> Statement;
+}
+
+struct BlockStatementParseResult {
+    parser -> Parser;
+    statement -> Statement?;
+    success -> boolean;
+}
+
+struct BlockParseResult {
+    parser -> Parser;
+    block -> Block;
+}
+
+// ============================================================================
+// Declaration Parsing Results
+// ============================================================================
+
+struct ParameterParseResult {
+    parser -> Parser;
+    parameter -> Parameter;
+}
+
+struct ParameterListParseResult {
+    parser -> Parser;
+    parameters -> Parameter[];
+}
+
+struct StructFieldParseResult {
+    parser -> Parser;
+    field -> FieldDeclaration?;
+    success -> boolean;
+}
+
+struct ModelPropertyParseResult {
+    parser -> Parser;
+    property -> ModelProperty?;
+    success -> boolean;
+}
+
+struct MethodParseResult {
+    parser -> Parser;
+    method -> MethodDeclaration?;
+    success -> boolean;
+}
+
+struct InterfaceMemberParseResult {
+    parser -> Parser;
+    signature -> FunctionSignature?;
+    success -> boolean;
+}
+
+struct EnumVariantParseResult {
+    parser -> Parser;
+    variant -> EnumVariant?;
+    success -> boolean;
+}
+
+struct TypeParameterParseResult {
+    parser -> Parser;
+    parameters -> TypeParameter[];
+}
+
+struct ImplementsParseResult {
+    parser -> Parser;
+    types -> TypeAnnotation[];
+    found -> boolean;
+}
+
+struct DecoratorParseResult {
+    parser -> Parser;
+    decorators -> Decorator[];
+}
+
+struct EffectParseResult {
+    parser -> Parser;
+    effects -> string[];
+}
+
+struct TypeSeparatorParseResult {
+    parser -> Parser;
+    found -> boolean;
+}
+
+// ============================================================================
+// Import/Export Parsing Results
+// ============================================================================
+
+struct SpecifierListParseResult {
+    parser -> Parser;
+    specifiers -> NamedSpecifier[];
+}
+
+struct NamedSpecifier {
+    name -> string;
+    alias -> string?;
+}
+
+// ============================================================================
+// Token Collection Results
+// ============================================================================
+
+struct CaptureResult {
+    parser -> Parser;
+    tokens -> Token[];
+}
+
+struct ParenthesizedParseResult {
+    parser -> Parser;
+    tokens -> Token[];
+    success -> boolean;
+}
+
+struct PatternCaptureResult {
+    parser -> Parser;
+    tokens -> Token[];
+    success -> boolean;
+}
+
+// ============================================================================
+// Match Statement Results
+// ============================================================================
+
+struct MatchCasesParseResult {
+    parser -> Parser;
+    cases -> MatchCase[];
+    success -> boolean;
+}
+
+struct MatchCaseParseResult {
+    parser -> Parser;
+    case -> MatchCase?;
+    success -> boolean;
+}
+
+struct MatchCaseTokenSplit {
+    pattern_tokens -> Token[];
+    guard_tokens -> Token[];
+    has_guard -> boolean;
+}
+
+// ============================================================================
+// Expression Parsing State and Results
+// ============================================================================
+
+struct ExpressionTokens {
+    tokens -> Token[];
+    index -> number;
+}
+
+struct ExpressionParseResult {
+    state -> ExpressionTokens;
+    expression -> Expression;
+    success -> boolean;
+}
+
+struct ExpressionTypeSeparatorParseResult {
+    state -> ExpressionTokens;
+    used_separator -> string;
+    found -> boolean;
+}
+
+struct ExpressionCollectResult {
+    state -> ExpressionTokens;
+    tokens -> Token[];
+    success -> boolean;
+}
+
+struct ExpressionBlockParseResult {
+    state -> ExpressionTokens;
+    tokens -> Token[];
+    success -> boolean;
+}
+
+// ============================================================================
+// Lambda Parsing Results
+// ============================================================================
+
+struct LambdaParameterParseResult {
+    state -> ExpressionTokens;
+    parameter -> Parameter;
+    success -> boolean;
+}
+
+struct LambdaParameterListParseResult {
+    state -> ExpressionTokens;
+    parameters -> Parameter[];
+    success -> boolean;
+}
+
+// ============================================================================
+// Literal Parsing Results
+// ============================================================================
+
+struct CallArgumentsParseResult {
+    state -> ExpressionTokens;
+    arguments -> Expression[];
+    success -> boolean;
+}
+
+struct ArrayLiteralParseResult {
+    state -> ExpressionTokens;
+    elements -> Expression[];
+    success -> boolean;
+}
+
+struct ObjectLiteralParseResult {
+    state -> ExpressionTokens;
+    fields -> ObjectField[];
+    success -> boolean;
+}
+
+struct StructTypeNameResult {
+    parts -> string[];
+    success -> boolean;
+}

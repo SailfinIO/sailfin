@@ -16,6 +16,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.pytest-stage1/
 .tox/
 .nox/
 .mypy_cache/
@@ -29,9 +30,7 @@ dmypy.json
 .poetry
 bootstrap/poetry.lock
 
-# Packaging / build
-build/
-compiler/build/
+# Packaging
 dist/
 .eggs/
 .eggs/**
@@ -66,23 +65,19 @@ logs/
 *.orig
 *.rej
 
-# Node / VS Code extension
-node_modules/
-*.vsix
-# Extension build artifacts (kept even if extension/.gitignore exists)
-extension/out/
-extension/dist/
-extension/node_modules/
-
 # Optional platform specific
 $RECYCLE.BIN/
 
-# Project-specific
-# Do not ignore Poetry lock at repo root by default. The bootstrap folder controls its own lock-file behavior.
-# Generated CLI binaries
-bootstrap/dist/
-bootstrap/output.py
-bootstrap/parser.out
-bootstrap/parsetab.py
-
 scratch/
+
+# Build outputs (Stage2 bootstrap/native artifacts). These are generated and
+# should never be committed; use dist/ for release packaging instead.
+/build/
+
+# Stage1 bootstrap compiler (checked-in Python).
+# We want CI to have the stage1 llvm support modules, but we do NOT want to
+# commit bytecode caches.
+!compiler/build/llvm/
+!compiler/build/llvm/**/*.py
+compiler/build/llvm/**/__pycache__/
+compiler/build/llvm/**/*.pyc

@@ -1,0 +1,808 @@
+// compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn
+//
+// Call lowering extracted from core.sfn.
+
+import { NativeFunction } from "../../../native_ir";
+
+import {
+    TypeContext,
+    ParameterBinding,
+    LocalBinding,
+    ExpressionResult,
+    LLVMOperand,
+    StringConstant,
+    StructLiteralField,
+    EnumLiteralParse,
+    RuntimeHelperDescriptor,
+} from "../../types";
+
+import {
+    trim_text,
+    starts_with,
+    ends_with,
+    append_string,
+    extend_string_array,
+    number_to_string,
+    join_with_separator,
+} from "../../utils";
+
+import { substring, index_of, find_last_index_of_char } from "../../../string_utils";
+
+import { empty_string_constant_set, merge_string_constants } from "../../strings";
+
+import { format_temp_name, format_typed_operand } from "../../expressions";
+
+import { is_simple_identifier } from "../../expressions";
+
+import {
+    ends_with_pointer_suffix,
+    strip_pointer_suffix,
+} from "../../type_mapping";
+
+import {
+    find_interface_info_by_name,
+    resolve_struct_info_for_method_target,
+    resolve_interface_info_for_method_target,
+    resolve_enum_info_for_literal,
+    resolve_enum_variant_info,
+} from "../../type_context";
+
+import { find_function_by_name } from "../../rendering";
+
+import { find_runtime_helper } from "../../runtime_helpers";
+
+import {
+    array_pointer_element_type,
+    lower_struct_array_concat,
+    lower_array_push_in_place,
+} from "../arrays";
+
+import {
+    parse_member_access,
+} from "./core_parse";
+
+import {
+    find_local_binding,
+    find_parameter_binding,
+    replace_llvm_operand,
+} from "./core_scopes";
+
+import {
+    load_local_operand,
+} from "./core_operands";
+
+import { sanitize_symbol } from "./core_text";
+
+import { coerce_operand_to_type } from "./core_operands";
+
+import {
+    collect_parameter_types,
+} from "./core_helpers";
+
+import {
+    map_return_type,
+    future_pointer_type_for_return_type,
+} from "./core_type_mapping";
+
+import { lower_enum_literal } from "./core_literals_lowering";
+
+// Mutually recursive with core.sfn
+import { lower_expression } from "./core";
+
+fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+    let mut diagnostics -> string[] = [];
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+    let empty_constants = empty_string_constant_set();
+    let mut trimmed_target = trim_text(target);
+    if trimmed_target.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: call target missing");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+
+    // Check if this is an enum variant constructor call (e.g., LiteralValue.Null())
+    // Enum variant constructors look like EnumName.VariantName() and should be converted to enum literals
+    let dot_index = index_of(trimmed_target, ".");
+    if dot_index > 0 {
+        let enum_name = trim_text(substring(trimmed_target, 0, dot_index));
+        let variant_name = trim_text(substring(trimmed_target, dot_index + 1, trimmed_target.length));
+
+        // Try to resolve this as an enum
+        let enum_info = resolve_enum_info_for_literal(context, enum_name);
+        if enum_info != null {
+            // This is an enum variant constructor!
+            // Convert the call into an enum literal
+            let mut fields -> StructLiteralField[] = [];
+
+            // If there are arguments, they should map to the variant's fields
+            if arguments.length > 0 {
+                // Get the variant info to map arguments to field names
+                let variant_info = resolve_enum_variant_info(enum_info, variant_name);
+                if variant_info != null && variant_info.fields.length == arguments.length {
+                    let mut arg_index -> number = 0;
+                    loop {
+                        if arg_index >= arguments.length {
+                            break;
+                        }
+                        let field_info = variant_info.fields[arg_index];
+                        fields.push(StructLiteralField {
+                            name: field_info.name,
+                            value: arguments[arg_index]
+                        });
+                        arg_index += 1;
+                    }
+                } else {
+                    // Argument count mismatch or variant not found - will be caught by lower_enum_literal
+                }
+            }
+
+            // Create an EnumLiteralParse and lower it
+            let enum_parse = EnumLiteralParse {
+                recognized: true,
+                success: true,
+                enum_name: enum_name,
+                variant_name: variant_name,
+                fields: fields,
+                diagnostics: []
+            };
+
+            return lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, "");
+        }
+    }
+
+    let mut current_lines = lines;
+    let mut current_temp -> number = temp_index;
+    let mut operands -> LLVMOperand[] = [];
+    let mut injected_argument_count -> number = 0;
+    let mut method_operand -> LLVMOperand? = null;
+    let mut helper_descriptor -> RuntimeHelperDescriptor? = null;
+    let mut array_concat_element_type -> string = "";
+    let mut is_array_concat -> boolean = false;
+    let mut array_push_element_type -> string = "";
+    let mut is_array_push -> boolean = false;
+
+    // Defensive: some front-end rewriting paths can fuse a receiver name into the call
+    // target (e.g. `values.concat(xs)` becomes `valuesconcat(xs)` or (rarely) `@valuesconcat(xs)`).
+    // Recover the intended concat by injecting the receiver and calling the runtime
+    // helper `concat` (or inlining for struct arrays).
+    let mut fused_target = trimmed_target;
+    if starts_with(fused_target, "@") && fused_target.length > 1 {
+        fused_target = substring(fused_target, 1, fused_target.length);
+    }
+    let canonical_fused = sanitize_symbol(fused_target);
+    if ends_with(canonical_fused, "concat") && canonical_fused.length > 6 {
+        let receiver_name = trim_text(substring(canonical_fused, 0, canonical_fused.length - 6));
+        if receiver_name.length > 0 && is_simple_identifier(receiver_name) {
+            let local = find_local_binding(locals, receiver_name);
+            let parameter = find_parameter_binding(bindings, receiver_name);
+            let mut receiver_operand -> LLVMOperand? = null;
+
+            if local != null {
+                let load_result = load_local_operand(local, current_temp, current_lines);
+                diagnostics = diagnostics.concat(load_result.diagnostics);
+                current_lines = load_result.lines;
+                current_temp = load_result.temp_index;
+                receiver_operand = load_result.operand;
+            } else if parameter != null {
+                receiver_operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
+            }
+
+            if receiver_operand != null {
+                method_operand = receiver_operand;
+                injected_argument_count = 1;
+                trimmed_target = "concat";
+
+                let receiver_type = trim_text(receiver_operand.llvm_type);
+                let element_type = array_pointer_element_type(receiver_type);
+                if element_type.length > 0 {
+                    is_array_concat = true;
+                    array_concat_element_type = element_type;
+
+                    if !ends_with_pointer_suffix(element_type) {
+                        helper_descriptor = RuntimeHelperDescriptor {
+                            target: "concat",
+                            symbol: "",
+                            return_type: receiver_operand.llvm_type,
+                            parameter_types: [receiver_operand.llvm_type, receiver_operand.llvm_type],
+                            effects: [],
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    let method_parse = parse_member_access(trimmed_target);
+    if method_parse.success {
+        if method_parse.field == "concat" || method_parse.field == "push" {
+            let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+            diagnostics = diagnostics.concat(lowered_self.diagnostics);
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+            current_lines = lowered_self.lines;
+            current_temp = lowered_self.temp_index;
+            if lowered_self.operand == null {
+                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+
+            let base_operand = lowered_self.operand;
+            let array_element_type = array_pointer_element_type(base_operand.llvm_type);
+            if array_element_type.length > 0 {
+                if method_parse.field == "concat" {
+                    method_operand = base_operand;
+                    trimmed_target = "concat";
+                    injected_argument_count = 1;
+                    array_concat_element_type = array_element_type;
+                    is_array_concat = true;
+
+                    if !ends_with_pointer_suffix(array_element_type) {
+                        helper_descriptor = RuntimeHelperDescriptor {
+                            target: "concat",
+                            symbol: "",
+                            return_type: base_operand.llvm_type,
+                            parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
+                            effects: [],
+                        };
+                    }
+                } else {
+                    method_operand = base_operand;
+                    trimmed_target = "push";
+                    injected_argument_count = 1;
+                    array_push_element_type = array_element_type;
+                    is_array_push = true;
+                    helper_descriptor = RuntimeHelperDescriptor {
+                        target: "push",
+                        symbol: "",
+                        return_type: base_operand.llvm_type,
+                        parameter_types: [base_operand.llvm_type, array_element_type],
+                        effects: [],
+                    };
+                }
+            }
+        }
+
+        let method_info = resolve_struct_info_for_method_target(method_parse.base, bindings, locals, context);
+        let interface_info = resolve_interface_info_for_method_target(method_parse.base, bindings, locals, context);
+
+        if method_info != null {
+            let base_name = trim_text(method_parse.base);
+
+            if is_simple_identifier(base_name) {
+                let bound_local = find_local_binding(locals, base_name);
+                let bound_param = find_parameter_binding(bindings, base_name);
+                if bound_local == null && bound_param == null {
+                    trimmed_target = method_info.name + "::" + method_parse.field;
+                    injected_argument_count = 0;
+                } else {
+                    let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+                    diagnostics = diagnostics.concat(lowered_self.diagnostics);
+                    collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+                    current_lines = lowered_self.lines;
+                    current_temp = lowered_self.temp_index;
+                    if lowered_self.operand != null {
+                        method_operand = lowered_self.operand;
+                        trimmed_target = method_info.name + "::" + method_parse.field;
+                        injected_argument_count = 1;
+                    } else {
+                        diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                    }
+                }
+            } else {
+                let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+                diagnostics = diagnostics.concat(lowered_self.diagnostics);
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+                current_lines = lowered_self.lines;
+                current_temp = lowered_self.temp_index;
+                if lowered_self.operand != null {
+                    method_operand = lowered_self.operand;
+                    trimmed_target = method_info.name + "::" + method_parse.field;
+                    injected_argument_count = 1;
+                } else {
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                }
+            }
+        } else if interface_info != null {
+            let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+            diagnostics = diagnostics.concat(lowered_self.diagnostics);
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+            current_lines = lowered_self.lines;
+            current_temp = lowered_self.temp_index;
+            if lowered_self.operand != null {
+                method_operand = lowered_self.operand;
+                trimmed_target = "trait_dispatch::" + interface_info.name + "::" + method_parse.field;
+                injected_argument_count = 1;
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+        } else {
+            let qualified_helper = find_runtime_helper(trimmed_target);
+            if qualified_helper != null {
+                helper_descriptor = qualified_helper;
+            } else {
+                let field_helper = find_runtime_helper(method_parse.field);
+                let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
+                diagnostics = diagnostics.concat(lowered_self.diagnostics);
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
+                current_lines = lowered_self.lines;
+                current_temp = lowered_self.temp_index;
+                if lowered_self.operand == null {
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                }
+
+                let base_operand = lowered_self.operand;
+                if field_helper != null {
+                    method_operand = base_operand;
+                    trimmed_target = method_parse.field;
+                    injected_argument_count = 1;
+                    helper_descriptor = field_helper;
+                }
+
+                let array_element_type = array_pointer_element_type(base_operand.llvm_type);
+                if array_element_type.length > 0 && method_parse.field == "concat" {
+                    method_operand = base_operand;
+                    trimmed_target = "concat";
+                    injected_argument_count = 1;
+                    array_concat_element_type = array_element_type;
+                    is_array_concat = true;
+
+                    if !ends_with_pointer_suffix(array_element_type) {
+                        helper_descriptor = RuntimeHelperDescriptor {
+                            target: "concat",
+                            symbol: "",
+                            return_type: base_operand.llvm_type,
+                            parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
+                            effects: [],
+                        };
+                    }
+                } else if array_element_type.length > 0 && method_parse.field == "push" {
+                    method_operand = base_operand;
+                    trimmed_target = "push";
+                    injected_argument_count = 1;
+                    array_push_element_type = array_element_type;
+                    is_array_push = true;
+
+                    helper_descriptor = RuntimeHelperDescriptor {
+                        target: "push",
+                        symbol: "",
+                        return_type: base_operand.llvm_type,
+                        parameter_types: [base_operand.llvm_type, array_element_type],
+                        effects: [],
+                    };
+                }
+            }
+        }
+    }
+
+    let mut function_entry -> NativeFunction? = null;
+    let mut llvm_return -> string = "double";
+    let mut expected_params -> string[] = [];
+    let mut is_trait_dispatch -> boolean = false;
+
+    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
+        is_trait_dispatch = true;
+        let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
+        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
+        if double_colon_pos > 0 && substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+            let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
+            let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
+            let interface_info2 = find_interface_info_by_name(context, interface_name);
+            if interface_info2 != null {
+                let mut sig_idx -> number = 0;
+                loop {
+                    if sig_idx >= interface_info2.signatures.length {
+                        break;
+                    }
+                    let sig = interface_info2.signatures[sig_idx];
+                    if sig.name == method_name {
+                        llvm_return = map_return_type(context, sig.return_type);
+                        if llvm_return.length == 0 {
+                            llvm_return = "double";
+                        }
+                        expected_params = ["i8*"];
+                        break;
+                    }
+                    sig_idx += 1;
+                }
+            }
+        }
+    }
+
+    function_entry = find_function_by_name(functions, trimmed_target);
+    if helper_descriptor == null {
+        helper_descriptor = find_runtime_helper(trimmed_target);
+    }
+
+    if !is_trait_dispatch {
+        if helper_descriptor != null {
+            let descriptor = helper_descriptor;
+            llvm_return = descriptor.return_type;
+            expected_params = descriptor.parameter_types;
+            function_entry = null;
+        } else if function_entry != null {
+            if function_entry.is_async {
+                let future_return = future_pointer_type_for_return_type(function_entry.return_type);
+                if future_return.length == 0 {
+                    diagnostics = append_string(diagnostics, "llvm lowering: async function `" + trimmed_target + "` has unsupported return type `" + function_entry.return_type + "`");
+                    llvm_return = "i8*";
+                } else {
+                    llvm_return = future_return;
+                }
+                expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target);
+            } else {
+                llvm_return = map_return_type(context, function_entry.return_type);
+                if llvm_return.length == 0 {
+                    diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
+                    llvm_return = "double";
+                }
+                expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target);
+            }
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
+        }
+    }
+
+    if trimmed_target == "concat" && method_operand != null {
+        let receiver = method_operand;
+        let receiver_type = trim_text(receiver.llvm_type);
+        let element_type = array_pointer_element_type(receiver_type);
+        if element_type.length > 0 {
+            is_array_concat = true;
+            array_concat_element_type = element_type;
+            if !ends_with_pointer_suffix(element_type) {
+                llvm_return = receiver_type;
+                expected_params = [receiver_type, receiver_type];
+                helper_descriptor = RuntimeHelperDescriptor {
+                    target: "concat",
+                    symbol: "",
+                    return_type: receiver_type,
+                    parameter_types: expected_params,
+                    effects: [],
+                };
+                function_entry = null;
+            }
+        }
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= arguments.length {
+            break;
+        }
+        let argument_text = trim_text(arguments[index]);
+        if argument_text.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: empty argument in call to `" + trimmed_target + "`");
+        }
+        let mut argument_expected_type -> string = "";
+        let parameter_index = index + injected_argument_count;
+        if expected_params.length > parameter_index {
+            argument_expected_type = expected_params[parameter_index];
+        }
+        let lowered = lower_expression(argument_text, bindings, locals, current_temp, current_lines, functions, context, argument_expected_type);
+        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+        current_lines = lowered.lines;
+        current_temp = lowered.temp_index;
+        if lowered.operand != null {
+            operands.push(lowered.operand);
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
+        }
+        index += 1;
+    }
+
+    if method_operand != null {
+        let operand_value = method_operand;
+        let mut combined_operands -> LLVMOperand[] = [];
+        combined_operands.push(operand_value);
+        let mut operand_index -> number = 0;
+        loop {
+            if operand_index >= operands.length {
+                break;
+            }
+            combined_operands.push(operands[operand_index]);
+            operand_index += 1;
+        }
+        operands = combined_operands;
+    }
+
+    let expected_operand_count = arguments.length + injected_argument_count;
+    if operands.length != expected_operand_count {
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors");
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+
+    if trimmed_target == "concat" && operands.length >= 2 {
+        let inferred_element_type = array_pointer_element_type(operands[0].llvm_type);
+        if inferred_element_type.length > 0 {
+            is_array_concat = true;
+            array_concat_element_type = inferred_element_type;
+
+            if !ends_with_pointer_suffix(inferred_element_type) {
+                llvm_return = operands[0].llvm_type;
+                expected_params = [operands[0].llvm_type, operands[0].llvm_type];
+                helper_descriptor = RuntimeHelperDescriptor {
+                    target: "concat",
+                    symbol: "",
+                    return_type: operands[0].llvm_type,
+                    parameter_types: expected_params,
+                    effects: [],
+                };
+            }
+        }
+    }
+
+    if function_entry != null && operands.length < expected_params.length {
+        let mut param_index -> number = operands.length;
+        loop {
+            if param_index >= expected_params.length {
+                break;
+            }
+            if param_index >= function_entry.parameters.length {
+                break;
+            }
+            let param = function_entry.parameters[param_index];
+            if param.default_value == null {
+                break;
+            }
+            let expected_type = expected_params[param_index];
+            let lowered_default = lower_expression(param.default_value, bindings, locals, current_temp, current_lines, functions, context, expected_type);
+            diagnostics = extend_string_array(diagnostics, lowered_default.diagnostics);
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered_default.string_constants);
+            current_lines = lowered_default.lines;
+            current_temp = lowered_default.temp_index;
+            if lowered_default.operand == null {
+                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower default argument for parameter `" + param.name + "` in call to `" + trimmed_target + "`");
+                break;
+            }
+            operands.push(lowered_default.operand);
+            param_index += 1;
+        }
+    }
+
+    if function_entry != null && injected_argument_count == 1 {
+        if operands.length > 0 && expected_params.length > 0 {
+            let expected_self_type = expected_params[0];
+            let self_operand = operands[0];
+            if self_operand.llvm_type != expected_self_type {
+                if ends_with_pointer_suffix(self_operand.llvm_type) {
+                    let stripped = strip_pointer_suffix(self_operand.llvm_type);
+                    if stripped == expected_self_type {
+                        let load_name = format_temp_name(current_temp);
+                        current_lines = append_string(current_lines, "  " + load_name + " = load " + expected_self_type + ", " + expected_self_type + "* " + self_operand.value);
+                        current_temp += 1;
+                        let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: load_name };
+                        operands = replace_llvm_operand(operands, 0, updated_operand);
+                    } else {
+                        diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                    }
+                } else if ends_with_pointer_suffix(expected_self_type) {
+                    let base_name = trim_text(method_parse.base);
+                    if is_simple_identifier(base_name) {
+                        let local_pointer = find_local_binding(locals, base_name);
+                        if local_pointer != null && (local_pointer.llvm_type + "*") == expected_self_type {
+                            let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: local_pointer.pointer };
+                            operands = replace_llvm_operand(operands, 0, updated_operand);
+                        } else {
+                            let parameter_pointer = find_parameter_binding(bindings, base_name);
+                            if parameter_pointer != null && parameter_pointer.llvm_type == expected_self_type {
+                                let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: parameter_pointer.llvm_name };
+                                operands = replace_llvm_operand(operands, 0, updated_operand);
+                            } else if parameter_pointer != null && parameter_pointer.llvm_type == strip_pointer_suffix(expected_self_type) {
+                                // avoid warning
+                            } else {
+                                diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                            }
+                        }
+                    } else {
+                        let receiver_base = strip_pointer_suffix(expected_self_type);
+                        if self_operand.llvm_type == receiver_base && (starts_with(receiver_base, "%") || starts_with(receiver_base, "{")) {
+                            // ok
+                        } else {
+                            diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                        }
+                    }
+                } else {
+                    diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                }
+            }
+        }
+    }
+
+    let mut coerced_operands -> LLVMOperand[] = [];
+    index = 0;
+    loop {
+        if index >= operands.length {
+            break;
+        }
+        let operand = operands[index];
+        let mut target_type -> string = "";
+        if expected_params.length > index {
+            target_type = expected_params[index];
+        }
+        if is_trait_dispatch && index == 0 {
+            coerced_operands.push(operand);
+        } else if target_type.length == 0 {
+            coerced_operands.push(operand);
+        } else {
+            let coerced = coerce_operand_to_type(operand, target_type, current_temp, current_lines);
+            diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
+            current_lines = coerced.lines;
+            current_temp = coerced.temp_index;
+            if coerced.operand == null {
+                diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
+                let placeholder = LLVMOperand { llvm_type: "i8*", value: "null" };
+                coerced_operands.push(placeholder);
+            } else {
+                coerced_operands.push(coerced.operand);
+            }
+        }
+        index += 1;
+    }
+    operands = coerced_operands;
+
+    if is_array_concat && array_concat_element_type.length > 0 && !ends_with_pointer_suffix(array_concat_element_type) {
+        if operands.length >= 2 {
+            let concat_result = lower_struct_array_concat(operands[0], operands[1], array_concat_element_type, current_lines, current_temp);
+            diagnostics = diagnostics.concat(concat_result.diagnostics);
+            current_lines = concat_result.lines;
+            current_temp = concat_result.temp_index;
+            if concat_result.operand == null {
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: concat_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: concat requires two operands");
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+    }
+
+    if is_array_push && array_push_element_type.length > 0 {
+        if operands.length >= 2 {
+            let push_result = lower_array_push_in_place(operands[0], operands[1], array_push_element_type, current_lines, current_temp);
+            diagnostics = diagnostics.concat(push_result.diagnostics);
+            current_lines = push_result.lines;
+            current_temp = push_result.temp_index;
+            if push_result.operand == null {
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            }
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: push_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: push requires two operands");
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        }
+    }
+
+    if function_entry != null || helper_descriptor != null {
+        if expected_params.length != operands.length {
+            diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(operands.length));
+        }
+    }
+
+    let mut rendered_args -> string[] = [];
+    index = 0;
+    loop {
+        if index >= operands.length {
+            break;
+        }
+        rendered_args = append_string(rendered_args, format_typed_operand(operands[index]));
+        index += 1;
+    }
+    let argument_text = join_with_separator(rendered_args, ", ");
+
+    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
+        let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
+        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
+        if double_colon_pos > 0 && substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+            let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
+            let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
+
+            if operands.length > 0 {
+                let trait_object = operands[0];
+
+                let data_ptr_temp = "%t" + number_to_string(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 0");
+
+                let vtable_ptr_temp = "%t" + number_to_string(current_temp);
+                current_temp += 1;
+                current_lines = append_string(current_lines, "  " + vtable_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 1");
+
+                let interface_info3 = find_interface_info_by_name(context, interface_name);
+                if interface_info3 != null {
+                    let mut method_index -> number = -1;
+                    let mut sig_idx -> number = 0;
+                    loop {
+                        if sig_idx >= interface_info3.signatures.length {
+                            break;
+                        }
+                        if interface_info3.signatures[sig_idx].name == method_name {
+                            method_index = sig_idx;
+                            break;
+                        }
+                        sig_idx += 1;
+                    }
+
+                    if method_index >= 0 {
+                        let mut fp_param_types -> string[] = ["i8*"];
+                        let mut arg_idx -> number = 1;
+                        loop {
+                            if arg_idx >= operands.length {
+                                break;
+                            }
+                            fp_param_types = append_string(fp_param_types, operands[arg_idx].llvm_type);
+                            arg_idx += 1;
+                        }
+                        let fp_params = join_with_separator(fp_param_types, ", ");
+                        let function_type = llvm_return + " (" + fp_params + ")*";
+
+                        let vtable_slots_temp = "%t" + number_to_string(current_temp);
+                        current_temp += 1;
+                        current_lines = append_string(current_lines, "  " + vtable_slots_temp + " = bitcast i8* " + vtable_ptr_temp + " to i8**");
+
+                        let slot_ptr_temp = "%t" + number_to_string(current_temp);
+                        current_temp += 1;
+                        current_lines = append_string(current_lines, "  " + slot_ptr_temp + " = getelementptr i8*, i8** " + vtable_slots_temp + ", i64 " + number_to_string(method_index));
+
+                        let raw_ptr_temp = "%t" + number_to_string(current_temp);
+                        current_temp += 1;
+                        current_lines = append_string(current_lines, "  " + raw_ptr_temp + " = load i8*, i8** " + slot_ptr_temp);
+
+                        let method_ptr_temp = "%t" + number_to_string(current_temp);
+                        current_temp += 1;
+                        current_lines = append_string(current_lines, "  " + method_ptr_temp + " = bitcast i8* " + raw_ptr_temp + " to " + function_type);
+
+                        let mut call_args -> string[] = ["i8* " + data_ptr_temp];
+                        arg_idx = 1;
+                        loop {
+                            if arg_idx >= rendered_args.length {
+                                break;
+                            }
+                            call_args = append_string(call_args, rendered_args[arg_idx]);
+                            arg_idx += 1;
+                        }
+                        let call_arg_text = join_with_separator(call_args, ", ");
+
+                        if llvm_return == "void" {
+                            current_lines = append_string(current_lines, "  call void " + method_ptr_temp + "(" + call_arg_text + ")");
+                            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                        } else {
+                            let result_temp = format_temp_name(current_temp);
+                            current_lines = append_string(current_lines, "  " + result_temp + " = call " + llvm_return + " " + method_ptr_temp + "(" + call_arg_text + ")");
+                            let result_operand = LLVMOperand { llvm_type: llvm_return, value: result_temp };
+                            return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: result_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+                        }
+                    } else {
+                        diagnostics = append_string(diagnostics, "llvm lowering: method `" + method_name + "` not found in interface `" + interface_name + "`");
+                    }
+                } else {
+                    diagnostics = append_string(diagnostics, "llvm lowering: interface `" + interface_name + "` not found for trait dispatch");
+                }
+            } else {
+                diagnostics = append_string(diagnostics, "llvm lowering: trait dispatch requires at least one argument (the trait object)");
+            }
+        } else {
+            diagnostics = append_string(diagnostics, "llvm lowering: malformed trait dispatch target `" + trimmed_target + "`");
+        }
+    }
+
+    let mut call_symbol = sanitize_symbol(trimmed_target);
+    if helper_descriptor != null {
+        call_symbol = helper_descriptor.symbol;
+    }
+    if llvm_return == "void" {
+        let call_line = "  call void @" + call_symbol + "(" + argument_text + ")";
+        current_lines = append_string(current_lines, call_line);
+        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    }
+
+    let temp_name = format_temp_name(current_temp);
+    let call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")";
+    current_lines = append_string(current_lines, call_line);
+    let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
+    return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+}
+
+export { lower_call_expression };

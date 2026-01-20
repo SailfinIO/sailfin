@@ -1,0 +1,817 @@
+// compiler/src/llvm/rendering.sfn
+//
+// LLVM IR rendering functions for type definitions, declarations, and metadata comments.
+// Handles rendering of struct types, enum types, interfaces, vtables, and function declarations.
+
+import { NativeFunction, NativeParameter, NativeInterfaceSignature, NativeImport } from "../native_ir";
+import { substring, find_last_index_of_char } from "../string_utils";
+import { TypeContext, TraitMetadata, RuntimeHelperDescriptor } from "./types";
+import { trim_text, append_string, join_with_separator, string_array_contains, sanitize_symbol, number_to_string } from "./utils";
+import { runtime_helper_descriptors } from "./runtime_helpers";
+import { map_return_type, map_parameter_type, map_struct_type_annotation } from "./type_mapping";
+
+// =============================================================================
+// Trait Metadata Comments
+// =============================================================================
+
+fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
+    let mut interface_lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= metadata.interfaces.length {
+            break;
+        }
+        let interface = metadata.interfaces[index];
+        let mut header -> string = "; interface " + interface.name;
+        if interface.type_parameters.length > 0 {
+            header = header + "<" + join_with_separator(interface.type_parameters, ", ") + ">";
+        }
+        interface_lines = append_string(interface_lines, header);
+
+        let mut signature_index -> number = 0;
+        loop {
+            if signature_index >= interface.signatures.length {
+                break;
+            }
+            let signature = interface.signatures[signature_index];
+            let rendered = render_interface_signature(signature);
+            interface_lines = append_string(interface_lines, ";   " + rendered);
+            signature_index += 1;
+        }
+        if interface.signatures.length == 0 {
+            interface_lines = append_string(interface_lines, ";   ; no signatures recorded");
+        }
+        index += 1;
+    }
+
+    let mut struct_lines -> string[] = [];
+    index = 0;
+    loop {
+        if index >= metadata.implementations.length {
+            break;
+        }
+        let implementation = metadata.implementations[index];
+        let mut line -> string = "; struct " + implementation.struct_name + " implements " + join_with_separator(implementation.interfaces, ", ");
+        struct_lines = append_string(struct_lines, line);
+        index += 1;
+    }
+
+    if interface_lines.length == 0 && struct_lines.length == 0 {
+        return [];
+    }
+
+    let mut lines -> string[] = [];
+    lines = append_string(lines, "; -- Trait Metadata --------------------------------");
+    lines = lines.concat(interface_lines);
+    if interface_lines.length > 0 && struct_lines.length > 0 {
+        lines = append_string(lines, ";");
+    }
+    lines = lines.concat(struct_lines);
+    lines = append_string(lines, "; -----------------------------------------------");
+    return lines;
+}
+
+// =============================================================================
+// Runtime Helper Declarations
+// =============================================================================
+
+fn render_runtime_helper_declarations(used_targets -> string[], local_functions -> NativeFunction[]) -> string[] {
+    if used_targets.length == 0 {
+        return [];
+    }
+    // Build list of local function symbols to avoid declaring helpers that are defined locally
+    let mut local_symbols -> string[] = [];
+    let mut local_index -> number = 0;
+    loop {
+        if local_index >= local_functions.length {
+            break;
+        }
+        local_symbols = append_string(local_symbols, sanitize_symbol(local_functions[local_index].name));
+        local_index += 1;
+    }
+
+    let mut lines -> string[] = [];
+    let mut declared_symbols -> string[] = [];
+    let descriptors = runtime_helper_descriptors();
+    let mut index -> number = 0;
+    loop {
+        if index >= descriptors.length {
+            break;
+        }
+        let descriptor = descriptors[index];
+        if string_array_contains(used_targets, descriptor.target) {
+            // Skip if this helper is actually defined locally (not just a runtime intrinsic)
+            if string_array_contains(local_symbols, descriptor.symbol) {
+                index += 1;
+                continue;
+            }
+            // Some helper targets intentionally alias the same runtime symbol.
+            // Avoid emitting duplicate declarations for the same symbol.
+            if string_array_contains(declared_symbols, descriptor.symbol) {
+                index += 1;
+                continue;
+            }
+            // Emit capability metadata comment if the intrinsic has effects
+            if descriptor.effects.length > 0 {
+                let effects_text = join_with_separator(descriptor.effects, ", ");
+                lines = append_string(lines, "; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]");
+            }
+            let mut parameter_text -> string = "";
+            if descriptor.parameter_types.length > 0 {
+                parameter_text = join_with_separator(descriptor.parameter_types, ", ");
+            }
+            let line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")";
+            lines = append_string(lines, line);
+            declared_symbols = append_string(declared_symbols, descriptor.symbol);
+        }
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// Imported Function Declarations
+// =============================================================================
+
+fn render_imported_function_declarations(imported_functions -> NativeFunction[], local_functions -> NativeFunction[], context -> TypeContext) -> string[] {
+    if imported_functions.length == 0 {
+        return [];
+    }
+    // Get all runtime helper symbols to avoid duplicates
+    let helper_descriptors = runtime_helper_descriptors();
+    let mut helper_symbols -> string[] = [];
+    let mut helper_index -> number = 0;
+    loop {
+        if helper_index >= helper_descriptors.length {
+            break;
+        }
+        helper_symbols = append_string(helper_symbols, helper_descriptors[helper_index].symbol);
+        helper_index += 1;
+    }
+
+    // Get all local function symbols to avoid redefinitions
+    let mut local_symbols -> string[] = [];
+    let mut local_index -> number = 0;
+    loop {
+        if local_index >= local_functions.length {
+            break;
+        }
+        local_symbols = append_string(local_symbols, sanitize_symbol(local_functions[local_index].name));
+        local_index += 1;
+    }
+
+    let mut lines -> string[] = [];
+    let mut emitted_declarations -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= imported_functions.length {
+            break;
+        }
+        let function = imported_functions[index];
+        let sanitized_name = sanitize_symbol(function.name);
+        // Skip if this function is already declared as a runtime helper or defined locally
+        if string_array_contains(helper_symbols, sanitized_name) || string_array_contains(local_symbols, sanitized_name) {
+            index += 1;
+            continue;
+        }
+        // Skip if we've already emitted a declaration for this function
+        if string_array_contains(emitted_declarations, sanitized_name) {
+            index += 1;
+            continue;
+        }
+        emitted_declarations = append_string(emitted_declarations, sanitized_name);
+        let return_type = map_return_type(context, function.return_type);
+        let param_types = collect_parameter_types(context, function.parameters, function.name);
+        let param_text = join_with_separator(param_types, ", ");
+        let line = "declare " + return_type + " @" + sanitized_name + "(" + param_text + ")";
+        lines = append_string(lines, line);
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// Struct Type Definitions
+// =============================================================================
+
+fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFunction[]) -> string[] {
+    let mut lines -> string[] = [];
+
+    // First pass: collect all referenced struct types
+    let mut referenced_types -> string[] = [];
+    let mut struct_index -> number = 0;
+    loop {
+        if struct_index >= context.structs.length {
+            break;
+        }
+        let info = context.structs[struct_index];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= info.fields.length {
+                break;
+            }
+            let field_type = info.fields[field_index].llvm_type;
+            let extracted = extract_struct_type_from_llvm(field_type);
+            if extracted.length > 0 && !string_array_contains(referenced_types, extracted) {
+                referenced_types = append_string(referenced_types, extracted);
+            }
+            field_index += 1;
+        }
+        struct_index += 1;
+    }
+
+    // Check enums too
+    let mut enum_index -> number = 0;
+    loop {
+        if enum_index >= context.enums.length {
+            break;
+        }
+        let enum_info = context.enums[enum_index];
+        let mut variant_index -> number = 0;
+        loop {
+            if variant_index >= enum_info.variants.length {
+                break;
+            }
+            let variant = enum_info.variants[variant_index];
+            // Check each field in the variant for struct references
+            let mut variant_field_index -> number = 0;
+            loop {
+                if variant_field_index >= variant.fields.length {
+                    break;
+                }
+                let field_type = variant.fields[variant_field_index].llvm_type;
+                let extracted = extract_struct_type_from_llvm(field_type);
+                if extracted.length > 0 && !string_array_contains(referenced_types, extracted) {
+                    referenced_types = append_string(referenced_types, extracted);
+                }
+                variant_field_index += 1;
+            }
+            variant_index += 1;
+        }
+        enum_index += 1;
+    }
+
+    // Check function signatures too (return types and parameters)
+    let mut func_index -> number = 0;
+    loop {
+        if func_index >= functions.length {
+            break;
+        }
+        let func = functions[func_index];
+        // Check return type
+        let return_llvm_type = map_return_type(context, func.return_type);
+        let extracted_return = extract_struct_type_from_llvm(return_llvm_type);
+        if extracted_return.length > 0 && !string_array_contains(referenced_types, extracted_return) {
+            referenced_types = append_string(referenced_types, extracted_return);
+        }
+        // Check each parameter type
+        let mut param_index -> number = 0;
+        loop {
+            if param_index >= func.parameters.length {
+                break;
+            }
+            let param_llvm_type = map_parameter_type(context, func.parameters[param_index].type_annotation);
+            let extracted_param = extract_struct_type_from_llvm(param_llvm_type);
+            if extracted_param.length > 0 && !string_array_contains(referenced_types, extracted_param) {
+                referenced_types = append_string(referenced_types, extracted_param);
+            }
+            param_index += 1;
+        }
+        func_index += 1;
+    }
+
+    // Emit opaque forward declarations for referenced but undefined types
+    let mut ref_index -> number = 0;
+    loop {
+        if ref_index >= referenced_types.length {
+            break;
+        }
+        let ref_type = referenced_types[ref_index];
+        // Check if this type is defined in our context (structs or enums)
+        let mut is_defined -> boolean = false;
+        let mut check_index -> number = 0;
+        loop {
+            if check_index >= context.structs.length {
+                break;
+            }
+            if context.structs[check_index].llvm_name == ref_type {
+                is_defined = true;
+                break;
+            }
+            check_index += 1;
+        }
+        // Also check enums
+        if !is_defined {
+            check_index = 0;
+            loop {
+                if check_index >= context.enums.length {
+                    break;
+                }
+                let enum_llvm_name = "%" + sanitize_symbol(context.enums[check_index].name);
+                if enum_llvm_name == ref_type {
+                    is_defined = true;
+                    break;
+                }
+                check_index += 1;
+            }
+        }
+        if !is_defined {
+            // Emit opaque declaration
+            lines = append_string(lines, ref_type + " = type opaque");
+        }
+        ref_index += 1;
+    }
+
+    // Second pass: emit actual struct definitions (deduplicated)
+    let mut index -> number = 0;
+    let mut emitted_types -> string[] = [];
+    loop {
+        if index >= context.structs.length {
+            break;
+        }
+        let info = context.structs[index];
+        // Skip if we already emitted this type
+        if string_array_contains(emitted_types, info.llvm_name) {
+            index += 1;
+            continue;
+        }
+        emitted_types = append_string(emitted_types, info.llvm_name);
+
+        let mut field_types -> string[] = [];
+        let mut field_index -> number = 0;
+        loop {
+            if field_index >= info.fields.length {
+                break;
+            }
+            field_types = append_string(field_types, info.fields[field_index].llvm_type);
+            field_index += 1;
+        }
+        let mut body -> string = "";
+        if field_types.length == 0 {
+            body = "{}";
+        } else {
+            body = "{ " + join_with_separator(field_types, ", ") + " }";
+        }
+        lines = append_string(lines, info.llvm_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// Enum Type Definitions
+// =============================================================================
+
+fn render_enum_type_definitions(context -> TypeContext) -> string[] {
+    let mut lines -> string[] = [];
+    let mut emitted_types -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= context.enums.length {
+            break;
+        }
+        let enum_info = context.enums[index];
+        let enum_llvm_name = "%" + sanitize_symbol(enum_info.name);
+
+        // Skip if we already emitted this type
+        if string_array_contains(emitted_types, enum_llvm_name) {
+            index += 1;
+            continue;
+        }
+        emitted_types = append_string(emitted_types, enum_llvm_name);
+
+        // Map tag type to LLVM type
+        let mut llvm_tag_type -> string = "i32";
+        if enum_info.tag_type == "i8" {
+            llvm_tag_type = "i8";
+        }
+        if enum_info.tag_type == "i16" {
+            llvm_tag_type = "i16";
+        }
+        if enum_info.tag_type == "i32" {
+            llvm_tag_type = "i32";
+        }
+        if enum_info.tag_type == "i64" {
+            llvm_tag_type = "i64";
+        }
+
+        // Calculate the maximum payload size across all variants
+        let mut max_payload_size -> number = 0;
+        let mut variant_idx -> number = 0;
+        loop {
+            if variant_idx >= enum_info.variants.length {
+                break;
+            }
+            let variant = enum_info.variants[variant_idx];
+            if variant.size > max_payload_size {
+                max_payload_size = variant.size;
+            }
+            variant_idx += 1;
+        }
+
+        // Enum layout:
+        // - Tag lives in the first field.
+        // - Payload is stored in a field whose *LLVM alignment* matches the enum's
+        //   ABI alignment. This is critical: if the payload field is `[N x i8]`, the
+        //   whole enum becomes only 4-byte aligned (due to the `i32` tag), which then
+        //   breaks the inferred offsets for structs that contain this enum.
+        // - If the enum's ABI alignment is larger than the tag, insert explicit
+        //   padding bytes so payload begins at an aligned offset.
+        //   This must match `.layout variant offset=...` produced by layout inference.
+        let mut pad_repr -> string = "";
+        let mut payload_repr -> string = "";
+        if max_payload_size > 0 {
+            let mut enum_align = enum_info.align;
+            if enum_align <= 0 {
+                enum_align = 1;
+            }
+
+            // Payload offset = align_to(tag_size, enum_align)
+            let mut payload_offset = enum_info.tag_size;
+            if enum_align > 1 {
+                let remainder = payload_offset % enum_align;
+                if remainder != 0 {
+                    payload_offset += (enum_align - remainder);
+                }
+            }
+            let pad_size = payload_offset - enum_info.tag_size;
+            if pad_size > 0 {
+                pad_repr = ", [" + number_to_string(pad_size) + " x i8]";
+            }
+
+            // Store payload in an aligned element array so the enum type itself has
+            // `enum_align` alignment.
+            let mut elem_type -> string = "i8";
+            let mut elem_size -> number = 1;
+            if enum_align >= 16 {
+                elem_type = "i128";
+                elem_size = 16;
+            } else if enum_align >= 8 {
+                elem_type = "i64";
+                elem_size = 8;
+            } else if enum_align >= 4 {
+                elem_type = "i32";
+                elem_size = 4;
+            } else if enum_align >= 2 {
+                elem_type = "i16";
+                elem_size = 2;
+            }
+
+            let mut payload_storage_size = max_payload_size;
+            let remainder = payload_storage_size % elem_size;
+            if remainder != 0 {
+                payload_storage_size += (elem_size - remainder);
+            }
+            let elem_count = payload_storage_size / elem_size;
+            payload_repr = ", [" + number_to_string(elem_count) + " x " + elem_type + "]";
+        }
+
+        let body = "{ " + llvm_tag_type + pad_repr + payload_repr + " }";
+        lines = append_string(lines, enum_info.llvm_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// Interface Type Definitions
+// =============================================================================
+
+fn render_interface_type_definitions(context -> TypeContext) -> string[] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= context.interfaces.length {
+            break;
+        }
+        let interface_info = context.interfaces[index];
+        // Trait object layout: { data_ptr, vtable_ptr }
+        let body = "{ i8*, i8* }";
+        lines = append_string(lines, interface_info.llvm_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// VTable Type Definitions and Constants
+// =============================================================================
+
+fn render_vtable_type_definitions(context -> TypeContext) -> string[] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= context.vtables.length {
+            break;
+        }
+        let vtable = context.vtables[index];
+        let mut entry_types -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= vtable.entries.length {
+                break;
+            }
+            entry_types = append_string(entry_types, vtable.entries[entry_index].function_pointer_type);
+            entry_index += 1;
+        }
+        let mut body -> string = "";
+        if entry_types.length == 0 {
+            body = "{}";
+        } else {
+            body = "{ " + join_with_separator(entry_types, ", ") + " }";
+        }
+        lines = append_string(lines, vtable.llvm_type_name + " = type " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+fn render_vtable_constants(context -> TypeContext) -> string[] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= context.vtables.length {
+            break;
+        }
+        let vtable = context.vtables[index];
+        let mut entry_values -> string[] = [];
+        let mut entry_index -> number = 0;
+        loop {
+            if entry_index >= vtable.entries.length {
+                break;
+            }
+            let entry = vtable.entries[entry_index];
+            let sanitized_method = sanitize_symbol(entry.method_name);
+            // Cast the method to i8* function pointer type
+            let cast_value = "bitcast (" + entry.function_pointer_type + " @" + sanitized_method + " to " + entry.function_pointer_type + ")";
+            let typed_value = entry.function_pointer_type + " " + cast_value;
+            entry_values = append_string(entry_values, typed_value);
+            entry_index += 1;
+        }
+        let mut body -> string = "";
+        if entry_values.length == 0 {
+            body = "zeroinitializer";
+        } else {
+            body = "{ " + join_with_separator(entry_values, ", ") + " }";
+        }
+        // Vtable globals are safe to keep module-local.
+        // Marking them internal avoids duplicate symbol collisions when linking
+        // multiple LLVM modules that share the same type context.
+        lines = append_string(lines, vtable.llvm_global_name + " = internal constant " + vtable.llvm_type_name + " " + body);
+        index += 1;
+    }
+    return lines;
+}
+
+// =============================================================================
+// Test Harness Rendering
+// =============================================================================
+
+fn render_test_harness_main(tests -> NativeFunction[]) -> string[] {
+    let mut lines -> string[] = [];
+    lines = lines.concat([
+        "define i32 @main(i32 %argc, i8** %argv) {",
+        "entry:",
+    ]);
+
+    let mut index -> number = 0;
+    loop {
+        if index >= tests.length {
+            break;
+        }
+        let sym = sanitize_symbol(tests[index].name);
+        lines = append_string(lines, "  call void @" + sym + "()");
+        index += 1;
+    }
+    lines = lines.concat([
+        "  ret i32 0",
+        "}",
+    ]);
+    return lines;
+}
+
+// =============================================================================
+// Interface Signature Rendering
+// =============================================================================
+
+fn render_interface_signature(signature -> NativeInterfaceSignature) -> string {
+    let mut line -> string = "fn " + signature.name;
+    if signature.type_parameters.length > 0 {
+        line = line + "<" + join_with_separator(signature.type_parameters, ", ") + ">";
+    }
+    line = line + "(" + render_interface_parameters(signature.parameters) + ")";
+    if signature.return_type.length > 0 && signature.return_type != "void" {
+        line = line + " -> " + signature.return_type;
+    }
+    if signature.effects.length > 0 {
+        line = line + " ![" + join_with_separator(signature.effects, ", ") + "]";
+    }
+    if signature.is_async {
+        line = "async " + line;
+    }
+    return line;
+}
+
+fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
+    if parameters.length == 0 {
+        return "";
+    }
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        let mut entry -> string = parameter.name;
+        if parameter.mutable {
+            entry = "mut " + entry;
+        }
+        if parameter.type_annotation.length > 0 {
+            entry = entry + " -> " + parameter.type_annotation;
+        }
+        if parameter.default_value != null {
+            entry = entry + " = " + parameter.default_value;
+        }
+        rendered = append_string(rendered, entry);
+        index += 1;
+    }
+    return join_with_separator(rendered, ", ");
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+fn extract_struct_type_from_llvm(llvm_type -> string) -> string {
+    // Extract struct type name from LLVM type like "%Token**" or "{ %Token**, i64 }*"
+    // Returns empty string if no struct type found
+    if llvm_type.length == 0 {
+        return "";
+    }
+    let mut result -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= llvm_type.length {
+            break;
+        }
+        let ch = substring(llvm_type, index, index + 1);
+        if ch == "%" {
+            // Found a struct type reference, extract the name
+            let mut end_index -> number = index + 1;
+            loop {
+                if end_index >= llvm_type.length {
+                    break;
+                }
+                let end_ch = substring(llvm_type, end_index, end_index + 1);
+                // Struct name ends at space, comma, *, }, or >
+                if end_ch == " " || end_ch == "," || end_ch == "*" || end_ch == "}" || end_ch == ">" {
+                    break;
+                }
+                end_index += 1;
+            }
+            if end_index > index + 1 {
+                result = substring(llvm_type, index, end_index);
+                break;
+            }
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[], function_name -> string) -> string[] {
+    let mut types -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
+
+        // Mirror `prepare_parameters`: infer method receiver type when `self` is unannotated.
+        if parameter.type_annotation.length == 0 && parameter.name == "self" && index == 0 {
+            let double_colon_pos = find_last_index_of_char(function_name, ":");
+            if double_colon_pos > 0 && substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+                let struct_name = substring(function_name, 0, double_colon_pos - 1);
+                let struct_type = map_struct_type_annotation(struct_name);
+                if struct_type.length > 0 {
+                    llvm_type = struct_type + "*";
+                }
+            }
+        }
+        if llvm_type.length == 0 {
+            types = append_string(types, "double");
+        } else {
+            types = append_string(types, llvm_type);
+        }
+        index += 1;
+    }
+    return types;
+}
+
+fn find_function_by_name(functions -> NativeFunction[], name -> string) -> NativeFunction? {
+    let mut index -> number = 0;
+    loop {
+        if index >= functions.length {
+            break;
+        }
+        if functions[index].name == name {
+            return functions[index];
+        }
+        index += 1;
+    }
+    return null;
+}
+
+// =============================================================================
+// Symbol Visibility Helpers
+// =============================================================================
+
+fn is_entry_point(entry_points -> string[], function_name -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= entry_points.length {
+            break;
+        }
+        if entry_points[index] == function_name {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn collect_exported_symbol_names(imports -> NativeImport[]) -> string[] {
+    let mut names -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= imports.length {
+            break;
+        }
+        let entry = imports[index];
+        if entry.kind == "export" {
+            let specifiers = entry.specifiers;
+            let mut spec_index -> number = 0;
+            loop {
+                if spec_index >= specifiers.length {
+                    break;
+                }
+                let exported = specifiers[spec_index].name;
+                if exported.length > 0 && !string_array_contains(names, exported) {
+                    names = append_string(names, exported);
+                }
+                spec_index += 1;
+            }
+        }
+        index += 1;
+    }
+    return names;
+}
+
+fn is_exported_symbol(exported_symbols -> string[], function_name -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= exported_symbols.length {
+            break;
+        }
+        if exported_symbols[index] == function_name {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn should_internalize_function(function -> NativeFunction, entry_points -> string[], exported_symbols -> string[], imported_functions -> NativeFunction[]) -> boolean {
+    // Externs are emitted as declarations.
+    if function.is_extern {
+        return false;
+    }
+
+    // Keep declared entry points externally visible.
+    if is_entry_point(entry_points, function.name) {
+        return false;
+    }
+
+    // Preserve explicitly exported symbols for cross-module linkage.
+    if is_exported_symbol(exported_symbols, function.name) {
+        return false;
+    }
+
+    // Treat leading-underscore helpers as module-local.
+    let sanitized = sanitize_symbol(function.name);
+    if sanitized.length > 0 && sanitized[0] == "_" {
+        return true;
+    }
+
+    // If another imported module already defines a function with this name,
+    // keep our copy module-local to avoid link-time collisions.
+    if find_function_by_name(imported_functions, function.name) != null {
+        return true;
+    }
+
+    // Default: keep module-local to prevent duplicate symbol collisions.
+    return true;
+}

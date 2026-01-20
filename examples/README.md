@@ -24,97 +24,106 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 
 ### `basics/`
 
-| Example | Effects | Notes |
-|---------|---------|-------|
-| `basic-enum.sfn` | `io` | Enum pattern matching with console logging. |
-| `conditionals.sfn` | `io` | Branching over values with `print.info`. |
-| `error-handling.sfn` | `io` | Struct-based error propagation matched with logging. |
-| `functions.sfn` | `io` | Function defaults and overloading with console output. |
-| `hello-world.sfn` | `io` | Minimal greeting emitted via `print.info`. |
-| `interfaces.sfn` | `io` | Trait-style dispatch routed through the console. |
-| `struct-composition.sfn` | `io` | Interface composition exercised with `print.info`. |
-| `structs.sfn` | `io` | Struct constructors and method calls with logging. |
-| `tagged-enum.sfn` | `io` | Tagged union match executed inside `main`. |
-| `tests.sfn` | `model` | Bootstrap `test` block; effect mirrors the current harness expectations. |
-| `try-catch-finally.sfn` | `io` | Structured error handling with explicit failure stubs. |
-| `variables.sfn` | `io` | Mutable vs. immutable bindings with console output. |
+| Example                  | Effects       | Notes                                                                                                                                      |
+| ------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `basic-enum.sfn`         | `io`          | Enum pattern matching with console logging.                                                                                                |
+| `borrowing.sfn`          | `mut`, `read` | Native compiler borrowing design sample (legacy name: stage2); shows moves, shared borrows, and reborrows without runtime enforcement yet. |
+| `conditionals.sfn`       | `io`          | Branching over values with `print.info`.                                                                                                   |
+| `error-handling.sfn`     | `io`          | Struct-based error propagation matched with logging.                                                                                       |
+| `functions.sfn`          | `io`          | Function defaults and overloading with console output.                                                                                     |
+| `hello-world.sfn`        | `io`          | Minimal greeting emitted via `print.info`.                                                                                                 |
+| `interfaces.sfn`         | `io`          | Trait-style dispatch routed through the console.                                                                                           |
+| `loops.sfn`              | `io`          | `for` iteration and `loop`/`break`/`continue` control flow.                                                                                |
+| `struct-composition.sfn` | `io`          | Interface composition exercised with `print.info`.                                                                                         |
+| `structs.sfn`            | `io`          | Struct constructors and method calls with logging.                                                                                         |
+| `tagged-enum.sfn`        | `io`          | Tagged union match executed inside `main`.                                                                                                 |
+| `tests.sfn`              | `model`       | Bootstrap `test` block; effect mirrors the current harness expectations.                                                                   |
+| `try-catch-finally.sfn`  | `io`          | Structured error handling with explicit failure stubs.                                                                                     |
+| `variables.sfn`          | `io`          | Mutable vs. immutable bindings with console output.                                                                                        |
 
 ### `algorithms/`
 
-| Example | Effects | Notes |
-|---------|---------|-------|
-| `quicksort.sfn` | `io` | Functional quicksort using `.map/.filter/.concat` helpers and logging. |
+| Example         | Effects | Notes                                                                  |
+| --------------- | ------- | ---------------------------------------------------------------------- |
+| `quicksort.sfn` | `io`    | Functional quicksort using `.map/.filter/.concat` helpers and logging. |
 
 ### `functional/`
 
-| Example | Effects | Notes |
-|---------|---------|-------|
-| `higher-order-functions.sfn` | `io` | Function values and callbacks with console output. |
-| `map-reduce.sfn` | `io` | Inline lambda transforms with chaining helpers. |
+| Example                      | Effects | Notes                                              |
+| ---------------------------- | ------- | -------------------------------------------------- |
+| `higher-order-functions.sfn` | `io`    | Function values and callbacks with console output. |
+| `map-reduce.sfn`             | `io`    | Inline lambda transforms with chaining helpers.    |
 
 ### `types/`
 
-| Example | Effects | Notes |
-|---------|---------|-------|
-| `recursive-types.sfn` | `io` | Recursive shape matching with `print.info`. |
-| `tagged-unions.sfn` | `io` | Union intersection sample with runtime logging. |
+| Example               | Effects | Notes                                           |
+| --------------------- | ------- | ----------------------------------------------- |
+| `recursive-types.sfn` | `io`    | Recursive shape matching with `print.info`.     |
+| `tagged-unions.sfn`   | `io`    | Union intersection sample with runtime logging. |
 
 ### `concurrency/`
 
-| Example | Effects | Notes |
-|---------|---------|-------|
-| `channels.sfn` | `io` | Channel send/receive with awaited reads. |
-| `dynamic-task-scheduling.sfn` | `io` | Work-stealing queue feeding background routines. |
-| `parallel.sfn` | `io` | `parallel [...]` execution returning aggregated results. |
-| `producer-consumer.sfn` | `clock`, `io` | Bounded buffer with `sleep` pacing producers and consumers. |
-| `routines.sfn` | `io` | Named and unnamed routines writing to the console. |
+| Example                       | Effects       | Notes                                                       |
+| ----------------------------- | ------------- | ----------------------------------------------------------- |
+| `channels.sfn`                | `io`          | Channel send/receive with awaited reads.                    |
+| `dynamic-task-scheduling.sfn` | `io`          | Work-stealing queue feeding background routines.            |
+| `parallel.sfn`                | `io`          | `parallel [...]` execution returning aggregated results.    |
+| `producer-consumer.sfn`       | `clock`, `io` | Bounded buffer with `sleep` pacing producers and consumers. |
+| `routines.sfn`                | `io`          | Named and unnamed routines writing to the console.          |
 
 ### `advanced/`
 
-| Example | Effects | Notes |
-|---------|---------|-------|
-| `decorators.sfn` | `io` | `@logExecution` decorator enforcing `io`. |
-| `effectful-interface.sfn` | `io`, `model` | Interfaces with model-bound methods and console output. |
-| `encapsulation-struct.sfn` | `io` | Mutable struct state with logging and error handling. |
-| `futures.sfn` | `io` | `async`/`await` fan-out joined with console logging. |
-| `generic-structures.sfn` | `io` | Generic struct methods manipulating collections. |
-| `interface-polymorphism.sfn` | `io` | Interface-backed dispatch printing results. |
-| `lambda-closure.sfn` | `io` | Inline closure capturing arguments and logging outputs. |
-| `matrix-multiplication.sfn` | `io` | Nested `.map/.reduce` over ranges with console output. |
-| `multithreaded-task.sfn` | `clock`, `io` | `parallel` tasks calling `sleep` and logging completion. |
-| `parametric-polymorphism.sfn` | `io` | Generic identity function with logged values. |
-| `type-guards.sfn` | `io` | Runtime type refinement and guarded matches within `main`. |
-| `unions.sfn` | `io` | Union + intersection typing with runtime checks. |
-| `web-server-with-concurrency.sfn` | `clock`, `io`, `net` | HTTP handler spawning routines and throttled background work. |
+| Example                           | Effects              | Notes                                                              |
+| --------------------------------- | -------------------- | ------------------------------------------------------------------ |
+| `decorators.sfn`                  | `io`                 | `@logExecution` decorator enforcing `io`.                          |
+| `effectful-interface.sfn`         | `io`, `model`        | Interfaces with model-bound methods and console output.            |
+| `encapsulation-struct.sfn`        | `io`                 | Mutable struct state with logging and error handling.              |
+| `futures.sfn`                     | `io`                 | `async`/`await` fan-out joined with console logging.               |
+| `generic-structures.sfn`          | `io`                 | Generic struct methods manipulating collections.                   |
+| `interface-polymorphism.sfn`      | `io`                 | Interface-backed dispatch printing results.                        |
+| `lambda-closure.sfn`              | `io`                 | Inline closure capturing arguments and logging outputs.            |
+| `matrix-multiplication.sfn`       | `io`                 | Nested `.map/.reduce` over ranges with console output.             |
+| `multithreaded-task.sfn`          | `clock`, `io`        | `parallel` tasks calling `sleep` and logging completion.           |
+| `parametric-polymorphism.sfn`     | `io`                 | Generic identity function with logged values.                      |
+| `type-guards.sfn`                 | `io`                 | Runtime type refinement and guarded matches within `main`.         |
+| `unions.sfn`                      | `io`                 | Union + intersection typing with runtime checks.                   |
+| `pointer-arithmetic.sfn`          | `io`, `unsafe`       | **Design-stage** pointer arithmetic with malloc/free.              |
+| `raw-pointers.sfn`                | `io`, `unsafe`       | **Design-stage** raw pointer creation and dereference with `&raw`. |
+| `unsafe-extern-interop.sfn`       | `io`, `unsafe`       | **Design-stage** extern function declarations and unsafe blocks.   |
+| `web-server-with-concurrency.sfn` | `clock`, `io`, `net` | HTTP handler spawning routines and throttled background work.      |
 
 ### `ai/`
 
-| Example | Effects | Notes |
-|---------|---------|-------|
-| `effectful-model-call.sfn` | `io`, `model` | Prompt-style helpers with mocked model calls and console logging. |
-| `model-workflow.sfn` | `io`, `model`, `net` | Pipeline wiring a model invocation with auxiliary `net` tool use. |
+| Example                    | Effects              | Notes                                                             |
+| -------------------------- | -------------------- | ----------------------------------------------------------------- |
+| `effectful-model-call.sfn` | `io`, `model`        | Prompt-style helpers with mocked model calls and console logging. |
+| `model-workflow.sfn`       | `io`, `model`, `net` | Pipeline wiring a model invocation with auxiliary `net` tool use. |
 
 ### `io/`
 
-| Example | Effects | Notes |
-|---------|---------|-------|
-| `read-file.sfn` | `io` | Mocked filesystem read via `runtime.fs.read`. |
-| `write-file.sfn` | `io` | Mocked filesystem write illustrating `fs.write`. |
+| Example                  | Effects | Notes                                                         |
+| ------------------------ | ------- | ------------------------------------------------------------- |
+| `capability_bridges.sfn` | `io`    | Uses runtime capability grants and filesystem bridge helpers. |
+| `read-file.sfn`          | `io`    | Mocked filesystem read via `runtime.fs.read`.                 |
+| `write-file.sfn`         | `io`    | Mocked filesystem write illustrating `fs.write`.              |
 
 ### `web/`
 
-| Example | Effects | Notes |
-|---------|---------|-------|
-| `async.sfn` | `io`, `net` | Async handler returning JSON responses. |
-| `fetch-data.sfn` | `io`, `net` | HTTP client fetch with logging. |
-| `http-server.sfn` | `net` | Minimal HTTP server responding to routes. |
-| `rest-api.sfn` | `io`, `net` | REST-style routing with console diagnostics. |
+| Example              | Effects     | Notes                                        |
+| -------------------- | ----------- | -------------------------------------------- |
+| `async.sfn`          | `io`, `net` | Async handler returning JSON responses.      |
+| `fetch-data.sfn`     | `io`, `net` | HTTP client fetch with logging.              |
+| `http-server.sfn`    | `net`       | Minimal HTTP server responding to routes.    |
+| `rest-api.sfn`       | `io`, `net` | REST-style routing with console diagnostics. |
 | `websocket-chat.sfn` | `io`, `net` | WebSocket echo server broadcasting messages. |
 
 ## Runtime Notes
 
-- **Bootstrap-friendly**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs tested in stage0.
+- **Bootstrap-friendly (legacy name: stage1)**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs covered by the bootstrap pipeline.
 - **Effect-sensitive**: `advanced`, `concurrency`, `ai`, `io`, and `web` rely on mocked helpers (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`, `model` prompts). Declare the exact effects listed above before running them through the bootstrap compiler.
+- **Design-stage examples**: Some examples demonstrate planned features that parse but aren't fully enforced yet. These are marked with **Design-stage** in the notes column. Examples include:
+  - `unsafe-extern-interop.sfn` — FFI interop with raw pointers and `unsafe` blocks. Parser accepts the syntax but unsafe semantics are not yet enforced. See `docs/spec.md` §6.1.5.
+  - `borrowing.sfn` — Ownership and borrowing syntax. Parser accepts but the bootstrap compiler does not enforce exclusivity. The native LLVM backend (legacy name: stage2) enforces borrow conflicts.
 - **Forward-looking commentary**: Any future syntax remains inside comments—runnable code in this directory sticks to the shipped bootstrap grammar. Update the index whenever you add new examples or adjust their effects.
 
 > Tip: Browse examples alongside the grammar (`docs/enbf.md`) and spec (`docs/spec.md`) to see how planned features map onto the implemented subset.

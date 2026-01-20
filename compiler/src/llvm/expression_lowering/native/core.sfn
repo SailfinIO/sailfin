@@ -1,0 +1,652 @@
+// compiler/src/llvm/expression_lowering/native/core.sfn
+//
+// Core expression lowering for LLVM backend.
+//
+// This module implements the primary `lower_expression` entry point that
+// transforms Sailfin expressions into LLVM IR. It handles ownership/borrow
+// analysis (`analyze_value_ownership`, `detect_borrow_conflicts`) and
+// orchestrates calls to helper modules for operands, scopes, parsing, and text.
+
+import { NativeFunction, NativeSourceSpan, NativeStruct, NativeEnum } from "../../../native_ir";
+import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
+
+import {
+    TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
+    InterfaceTypeInfo, VTableInfo, VTableEntry, LocalBinding, ParameterBinding,
+    OwnershipInfo, OwnershipConsumption, OwnershipAnalysis, LifetimeRegionMetadata,
+    LifetimeReleaseEvent, ScopeMetadata, LLVMOperand, ExpressionResult, CoercionResult,
+    BlockLoweringResult, LoweredLLVMFunction, LoweredLLVMResult, LetLoweringResult,
+    ModuleGlobalLoweringResult, OperatorMatch, BorrowParseResult, BorrowArgumentParse,
+    TernaryParseResult, AssignmentParseResult, InlineLetParseResult, MemberAccessParse,
+    IndexExpressionParse, RawAddressParseResult, CastParseResult, TraitMetadata,
+    TraitDescriptor, TraitImplementationDescriptor, FunctionEffectEntry, RuntimeHelperDescriptor,
+    CapabilityManifest, CapabilityManifestEntry, StringConstant, LocalMutation, LoopContext,
+    ImportedModuleContext, LayoutManifestApplication, TypeContextBuild, FunctionCallEntry,
+    StringPointerResult, InterpolatedTemplateParse, BodyResult, ParameterPreparation,
+    ArrayLiteralMetadata, TypeAllocationInfo, HeapBoxResult, StructLiteralField,
+    StructLiteralParse, EnumLiteralParse, ExpressionStatementResult, BlockLabelResult,
+    IfStructure, LoopStructure, TryStructure, RangeIterableParse, MatchCaseStructure,
+    MatchStructure, MatchFieldBinding, MatchStructFieldBinding, MatchCaseCondition,
+    ConditionConversion, ComparisonEmission, BinaryAlignmentResult,
+    ThrowLoweringResult, PhiMergeResult, PhiInputEntry, MutationMaterializationResult,
+    PhiStoreEntry, MatchArmMutations, LoadLocalResult
+} from "../../types";
+
+import {
+    starts_with, ends_with, char_at as utils_char_at,
+    is_identifier_start_char, is_identifier_part_char,
+    contains_text,
+    matches_keyword,
+    find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings,
+    is_effect_delimiter,
+    extend_string_array,
+} from "../../utils";
+
+import {
+    number_to_string,
+    matches_case_insensitive,
+    trim_text,
+    is_trim_char,
+    index_of,
+    find_last_index_of_char,
+    append_string,
+    string_array_contains,
+    join_with_separator,
+    find_substring_from,
+    is_union_llvm_type,
+    parse_union_payload_types,
+    extract_simple_identifier,
+    is_boolean_literal,
+    is_null_literal,
+    is_digit_char,
+    char_code_at_text,
+    is_integer_literal,
+    is_number_literal,
+    normalise_number_literal,
+    is_string_literal,
+    is_character_literal,
+    get_character_literal_value,
+    make_string_constant_name,
+    make_string_constant_name_for_module,
+    compute_string_constant_hash,
+    parse_interpolated_template,
+    encode_string_literal_for_sailfin,
+    escape_string_for_sailfin_literal,
+    unescape_string_literal,
+    sanitize_symbol,
+} from "./core_text";
+
+export {
+    parse_union_payload_types,
+    is_union_llvm_type,
+    extract_simple_identifier,
+    unescape_string_literal,
+    make_string_constant_name,
+    make_string_constant_name_for_module,
+} from "./core_text";
+
+import {
+    parse_struct_literal,
+    parse_struct_pattern,
+    parse_enum_literal,
+    parse_member_access,
+    parse_index_expression,
+    parse_range_iterable,
+} from "./core_parse";
+
+export {
+    parse_struct_literal,
+    parse_struct_pattern,
+    parse_enum_literal,
+    parse_member_access,
+    parse_index_expression,
+    parse_range_iterable,
+} from "./core_parse";
+
+import {
+    emit_comparison_instruction,
+    emit_boolean_and,
+    load_local_operand,
+    coerce_operand_to_type,
+    dominant_type,
+    is_string_pointer_type,
+    harmonise_operands,
+} from "./core_operands";
+
+export {
+    emit_comparison_instruction,
+    emit_boolean_and,
+    load_local_operand,
+    coerce_operand_to_type,
+    dominant_type,
+    is_string_pointer_type,
+    harmonise_operands,
+} from "./core_operands";
+
+import {
+    find_local_binding,
+    infer_borrow_base_scope,
+    append_lifetime_region,
+    append_lifetime_release_event,
+    apply_lifetime_release_events,
+    make_lifetime_region_metadata,
+    format_root_scope_id,
+    make_child_scope_id,
+    is_scope_descendant,
+    append_local_binding,
+    append_llvm_operand,
+    append_struct_literal_field,
+    append_native_struct,
+    append_native_enum,
+    replace_llvm_operand,
+} from "./core_scopes";
+
+export {
+    find_local_binding,
+    infer_borrow_base_scope,
+    append_lifetime_region,
+    append_lifetime_release_event,
+    apply_lifetime_release_events,
+    make_lifetime_region_metadata,
+    format_root_scope_id,
+    make_child_scope_id,
+    is_scope_descendant,
+    append_local_binding,
+    append_llvm_operand,
+    append_struct_literal_field,
+    append_native_struct,
+    append_native_enum,
+    replace_llvm_operand,
+} from "./core_scopes";
+
+import {
+    empty_string_constant_set, append_string_constant, merge_string_constants,
+    find_string_constant, find_string_constant_by_name, render_string_constants, escape_string_for_llvm
+} from "../../strings";
+
+import {
+    map_type_annotation,
+    ends_with_pointer_suffix,
+    strip_pointer_suffix,
+    layout_annotation_requires_pointer,
+    layout_annotation_base_type,
+    annotation_is_array,
+    layout_annotation_represents_user_value,
+    is_copy_type,
+    array_struct_type_for_element,
+} from "../../type_mapping";
+
+import {
+    fixup_enum_layouts,
+    find_struct_info_by_name,
+    find_interface_info_by_name,
+    find_vtable_for_struct_interface,
+    find_struct_info_by_llvm_type,
+    find_struct_field_index,
+    find_struct_field_info,
+    find_enum_info_by_llvm_type,
+    resolve_struct_info_from_llvm_type,
+    lookup_allocation_info,
+    resolve_struct_info_for_literal,
+    resolve_struct_info_for_method_target,
+    resolve_interface_info_for_method_target,
+    resolve_enum_info_for_literal,
+    resolve_enum_variant_info,
+    find_variant_field_info
+} from "../../type_context";
+
+import {
+    find_function_by_name,
+} from "../../rendering";
+
+import {
+    find_runtime_helper,
+} from "../../runtime_helpers";
+
+import {
+    format_temp_name,
+    format_local_pointer_name,
+    format_typed_operand,
+    default_return_literal,
+    strip_mut_prefix,
+    is_simple_identifier,
+} from "../../expressions";
+
+import {
+    find_parameter_binding,
+    mark_parameter_consumed,
+    mark_local_consumed,
+    reset_local_consumption,
+    update_local_ownership,
+} from "./core_bindings";
+
+import {
+    map_struct_type_annotation_ctx,
+    map_enum_type_annotation,
+    map_interface_type_annotation,
+    map_primitive_type,
+    map_optional_type,
+    map_reference_inner_type,
+    map_reference_type,
+    map_array_pointer_type,
+    unwrap_move_wrapper,
+    find_top_level_union_separator,
+    split_union_annotations,
+    is_union_annotation,
+    map_union_type,
+    map_return_type,
+    future_pointer_type_for_return_type,
+    await_symbol_for_future_pointer_type,
+    map_parameter_type,
+} from "./core_type_mapping";
+
+import {
+    parse_borrow_expression,
+    extract_borrow_argument,
+    extract_simple_borrow_target,
+    is_valid_borrow_target,
+    parse_ternary_expression,
+    parse_raw_address_expression,
+    parse_cast_expression,
+    parse_array_literal_metadata,
+    map_metadata_annotation,
+} from "./core_parsing";
+
+import {
+    strip_enclosing_parentheses,
+    find_top_level_operator,
+    find_comparison_operator,
+    find_logical_operator,
+    lines_end_with_terminator,
+} from "./core_operators";
+
+import {
+    lower_string_literal,
+    emit_string_concat,
+    coerce_operand_to_string,
+} from "./core_strings";
+
+import {
+    find_call_site,
+    split_call_arguments,
+} from "./core_calls";
+
+import {
+    lower_raw_address_expression,
+} from "./core_addressing";
+
+import {
+    analyze_value_ownership_impl,
+    detect_borrow_conflicts_impl,
+    format_suspension_location_impl,
+    resolve_borrow_base_impl,
+} from "./core_ownership";
+
+import {
+    split_array_elements,
+} from "../splitting";
+
+import {
+    collect_parameter_types,
+    operation_name_for_symbol,
+} from "./core_helpers";
+
+import {
+    lower_struct_array_concat,
+    lower_array_push_in_place,
+    find_top_level_comma_in_llvm_type,
+    array_pointer_element_type,
+} from "../arrays";
+
+import {
+    lower_logical_not_with_operand,
+    lower_logical_not_result,
+    lower_ternary_expression,
+    lower_binary_operation,
+    lower_comparison_operation,
+    lower_logical_and,
+    lower_logical_or,
+} from "./core_ops_lowering";
+
+import { lower_borrow_expression } from "./core_borrow_lowering";
+import { lower_call_expression } from "./core_call_lowering";
+import { lower_member_access } from "./core_member_lowering";
+import { lower_index_expression } from "./core_index_lowering";
+
+import {
+    lower_array_literal,
+    lower_struct_literal,
+    lower_enum_literal,
+    lower_cast_expression,
+    try_lower_interpolated_string_literal,
+} from "./core_literals_lowering";
+
+import { append_match_arm_mutations as append_match_arm_mutations_impl } from "./core_match_helpers";
+
+fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
+    return analyze_value_ownership_impl(initializer, span, locals, bindings);
+}
+
+fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {
+    return detect_borrow_conflicts_impl(ownership, locals, binding_name, function_name);
+}
+
+fn format_suspension_location(keyword -> string, borrow_span -> NativeSourceSpan?, suspension_span -> NativeSourceSpan?) -> string {
+    return format_suspension_location_impl(keyword, borrow_span, suspension_span);
+}
+
+fn resolve_borrow_base(target -> string, locals -> LocalBinding[]) -> string {
+    return resolve_borrow_base_impl(target, locals);
+}
+
+fn append_match_arm_mutations(list -> MatchArmMutations[], arm -> MatchArmMutations) -> MatchArmMutations[] {
+    return append_match_arm_mutations_impl(list, arm);
+}
+
+fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
+    let trimmed = trim_text(expression);
+    let mut diagnostics -> string[] = [];
+    let empty_constants = empty_string_constant_set();
+    if trimmed.length == 0 {
+        diagnostics = append_string(diagnostics, "llvm lowering: empty expression encountered");
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+
+    let stripped = strip_enclosing_parentheses(trimmed);
+    if stripped != trimmed {
+        return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    // Literal expressions.
+    if is_boolean_literal(stripped) {
+        let mut value = "0";
+        if matches_case_insensitive(trim_text(stripped), "true") {
+            value = "1";
+        }
+        let operand = LLVMOperand { llvm_type: "i1", value: value };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+    if is_null_literal(stripped) {
+        let trimmed_expected = trim_text(expected_type);
+        let mut null_type = "i8*";
+        if trimmed_expected.length > 0 && ends_with_pointer_suffix(trimmed_expected) {
+            null_type = trimmed_expected;
+        }
+        let operand = LLVMOperand { llvm_type: null_type, value: "null" };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+    if is_number_literal(stripped) {
+        let trimmed_expected = trim_text(expected_type);
+        if (trimmed_expected == "i64" || trimmed_expected == "i32") && is_integer_literal(stripped) {
+            let operand = LLVMOperand { llvm_type: trimmed_expected, value: trim_text(stripped) };
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+        }
+        let normalized = normalise_number_literal(stripped);
+        let operand = LLVMOperand { llvm_type: "double", value: normalized };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+    if is_string_literal(stripped) {
+        let interpolated = try_lower_interpolated_string_literal(stripped, bindings, locals, temp_index, lines, functions, context);
+        if interpolated != null {
+            let result = interpolated;
+            diagnostics = extend_string_array(diagnostics, result.diagnostics);
+            return ExpressionResult { lines: result.lines, temp_index: result.temp_index, operand: result.operand, diagnostics: diagnostics, string_constants: result.string_constants };
+        }
+        let literal_result = lower_string_literal(stripped, temp_index, lines);
+        diagnostics = extend_string_array(diagnostics, literal_result.diagnostics);
+        return ExpressionResult { lines: literal_result.lines, temp_index: literal_result.temp_index, operand: literal_result.operand, diagnostics: diagnostics, string_constants: literal_result.string_constants };
+    }
+
+    // `await <expr>` joins a thread-backed future and extracts its value.
+    if starts_with(stripped, "await") {
+        if stripped.length == 5 {
+            diagnostics = append_string(diagnostics, "llvm lowering: await expression missing operand");
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        }
+        let next = char_at(stripped, 5);
+        if next == " " || next == "\t" || next == "(" {
+            let remainder = trim_text(substring(stripped, 5, stripped.length));
+            if remainder.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: await expression missing operand");
+                return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+            }
+            let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
+            let combined = diagnostics.concat(lowered.diagnostics);
+            if lowered.operand == null {
+                return ExpressionResult { lines: lowered.lines, temp_index: lowered.temp_index, operand: null, diagnostics: combined, string_constants: lowered.string_constants };
+            }
+
+            let future_operand = lowered.operand;
+            let await_symbol = await_symbol_for_future_pointer_type(future_operand.llvm_type);
+            if await_symbol.length == 0 {
+                let with_issue = append_string(combined, "llvm lowering: await expects a Future pointer, got `" + future_operand.llvm_type + "`");
+                return ExpressionResult { lines: lowered.lines, temp_index: lowered.temp_index, operand: null, diagnostics: with_issue, string_constants: lowered.string_constants };
+            }
+
+            // Await returns a value whose type depends on the future kind.
+            if future_operand.llvm_type == "%SailfinFutureVoid*" {
+                let mut awaited_lines = append_string(lowered.lines, "  call void @" + await_symbol + "(%SailfinFutureVoid* " + future_operand.value + ")");
+                let out_operand = LLVMOperand { llvm_type: "void", value: "" };
+                return ExpressionResult { lines: awaited_lines, temp_index: lowered.temp_index, operand: out_operand, diagnostics: combined, string_constants: lowered.string_constants };
+            }
+
+            let mut result_type -> string = "i8*";
+            if future_operand.llvm_type == "%SailfinFutureNumber*" {
+                result_type = "double";
+            } else if future_operand.llvm_type == "%SailfinFutureBool*" {
+                result_type = "i1";
+            }
+            let result_temp = format_temp_name(lowered.temp_index);
+            let awaited_call = "  " + result_temp + " = call " + result_type + " @" + await_symbol + "(" + future_operand.llvm_type + " " + future_operand.value + ")";
+            let mut awaited_lines2 = append_string(lowered.lines, awaited_call);
+
+            // If we're awaiting an opaque pointer future in a typed context, try to unbox.
+            // This avoids leaking boxed aggregates (struct/enum values) returned as `i8*`.
+            let trimmed_expected = trim_text(expected_type);
+            if future_operand.llvm_type == "%SailfinFuturePtr*" && trimmed_expected.length > 0 && trimmed_expected != "i8*" && !ends_with_pointer_suffix(trimmed_expected) {
+                let typed_ptr_temp = format_temp_name(lowered.temp_index + 1);
+                let load_temp = format_temp_name(lowered.temp_index + 2);
+                awaited_lines2 = append_string(awaited_lines2, "  " + typed_ptr_temp + " = bitcast i8* " + result_temp + " to " + trimmed_expected + "*");
+                awaited_lines2 = append_string(awaited_lines2, "  " + load_temp + " = load " + trimmed_expected + ", " + trimmed_expected + "* " + typed_ptr_temp);
+                awaited_lines2 = append_string(awaited_lines2, "  call void @free(i8* " + result_temp + ")");
+                let out_operand_unboxed = LLVMOperand { llvm_type: trimmed_expected, value: load_temp };
+                return ExpressionResult { lines: awaited_lines2, temp_index: lowered.temp_index + 3, operand: out_operand_unboxed, diagnostics: combined, string_constants: lowered.string_constants };
+            }
+
+            let out_operand2 = LLVMOperand { llvm_type: result_type, value: result_temp };
+            return ExpressionResult { lines: awaited_lines2, temp_index: lowered.temp_index + 1, operand: out_operand2, diagnostics: combined, string_constants: lowered.string_constants };
+        }
+    }
+
+    // Check for ternary operator first (lowest precedence)
+    let ternary_parse = parse_ternary_expression(stripped);
+    if ternary_parse.success {
+        return lower_ternary_expression(ternary_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    let cast_parse = parse_cast_expression(stripped);
+    if cast_parse.recognized {
+        return lower_cast_expression(cast_parse, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    let raw_address_parse = parse_raw_address_expression(stripped);
+    if raw_address_parse.recognized {
+        return lower_raw_address_expression(raw_address_parse, bindings, locals, temp_index, lines);
+    }
+
+    let borrow_parse = parse_borrow_expression(stripped);
+    if borrow_parse.recognized {
+        return lower_borrow_expression(borrow_parse, bindings, locals, temp_index, lines);
+    }
+
+    let logical = find_logical_operator(stripped);
+    if logical.success {
+        if logical.symbol == "&&" {
+            return lower_logical_and(stripped, logical, bindings, locals, temp_index, lines, functions, context);
+        }
+        if logical.symbol == "||" {
+            return lower_logical_or(stripped, logical, bindings, locals, temp_index, lines, functions, context);
+        }
+    }
+
+    let comparison = find_comparison_operator(stripped);
+    if comparison.success {
+        return lower_comparison_operation(stripped, comparison, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    let additive = find_top_level_operator(stripped, "+-");
+    if additive.success {
+        return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    let multiplicative = find_top_level_operator(stripped, "*/%");
+    if multiplicative.success {
+        return lower_binary_operation(stripped, multiplicative, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // Unary prefix operators have higher precedence than binary operators.
+    // We therefore handle them only after attempting to split on lower-precedence
+    // operators like &&, ||, comparisons, +, -, *, /, %.
+    if stripped.length > 0 {
+        if char_code_at_text(stripped, 0) == char_code("!") {
+            let operand_text = trim_text(substring(stripped, 1, stripped.length));
+            if operand_text.length > 0 {
+                let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
+                return lower_logical_not_result(lowered_operand, diagnostics);
+            }
+        }
+        if char_code_at_text(stripped, 0) == char_code("*") {
+            let operand_text = trim_text(substring(stripped, 1, stripped.length));
+            if operand_text.length == 0 {
+                diagnostics = append_string(diagnostics, "llvm lowering: deref expression missing operand");
+                return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+            }
+            let lowered_ptr = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
+            let combined = diagnostics.concat(lowered_ptr.diagnostics);
+            if lowered_ptr.operand == null {
+                return ExpressionResult { lines: lowered_ptr.lines, temp_index: lowered_ptr.temp_index, operand: null, diagnostics: combined, string_constants: lowered_ptr.string_constants };
+            }
+            let ptr_operand = lowered_ptr.operand;
+            if !ends_with_pointer_suffix(ptr_operand.llvm_type) {
+                let with_issue = append_string(combined, "llvm lowering: cannot dereference non-pointer type `" + ptr_operand.llvm_type + "`");
+                return ExpressionResult { lines: lowered_ptr.lines, temp_index: lowered_ptr.temp_index, operand: null, diagnostics: with_issue, string_constants: lowered_ptr.string_constants };
+            }
+            let element_type = strip_pointer_suffix(ptr_operand.llvm_type);
+            let load_name = format_temp_name(lowered_ptr.temp_index);
+            let updated_lines = append_string(lowered_ptr.lines, "  " + load_name + " = load " + element_type + ", " + element_type + "* " + ptr_operand.value);
+            let operand = LLVMOperand { llvm_type: element_type, value: load_name };
+            return ExpressionResult { lines: updated_lines, temp_index: lowered_ptr.temp_index + 1, operand: operand, diagnostics: combined, string_constants: lowered_ptr.string_constants };
+        }
+    }
+
+    let call_index = find_call_site(stripped);
+    if call_index >= 0 && char_code_at_text(stripped, stripped.length - 1) == char_code(")") {
+        let target = trim_text(substring(stripped, 0, call_index));
+        let arguments_text = substring(stripped, call_index + 1, stripped.length - 1);
+        let argument_entries = split_call_arguments(arguments_text);
+        // Some member calls are syntactic sugar over runtime helpers for arrays.
+        // Rewrite `xs.concat(ys)` into `concat(xs, ys)` early (for simple identifier receivers)
+        // so we don't accidentally sanitize `xs.concat` into an undefined `@xsconcat` symbol.
+        let member_target = parse_member_access(target);
+        if member_target.success && member_target.field == "concat" {
+            let receiver_name = trim_text(member_target.base);
+            if is_simple_identifier(receiver_name) {
+                let local = find_local_binding(locals, receiver_name);
+                if local != null {
+                    let element_type = array_pointer_element_type(local.llvm_type);
+                    // Only rewrite string array concats; the generic runtime helper only supports i8* elements.
+                    if element_type == "i8*" {
+                        let mut rewritten_args -> string[] = [member_target.base];
+                        let mut arg_index -> number = 0;
+                        loop {
+                            if arg_index >= argument_entries.length {
+                                break;
+                            }
+                            rewritten_args.push(argument_entries[arg_index]);
+                            arg_index += 1;
+                        }
+                        return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context);
+                    }
+                } else {
+                    let param = find_parameter_binding(bindings, receiver_name);
+                    if param != null {
+                        let element_type = array_pointer_element_type(param.llvm_type);
+                        if element_type == "i8*" {
+                            let mut rewritten_args -> string[] = [member_target.base];
+                            let mut arg_index -> number = 0;
+                            loop {
+                                if arg_index >= argument_entries.length {
+                                    break;
+                                }
+                                rewritten_args.push(argument_entries[arg_index]);
+                                arg_index += 1;
+                            }
+                            return lower_call_expression("concat", rewritten_args, bindings, locals, temp_index, lines, functions, context);
+                        }
+                    }
+                }
+            }
+        }
+        return lower_call_expression(target, argument_entries, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    if stripped.length >= 2 {
+        let first_code = char_code_at_text(stripped, 0);
+        let last_code = char_code_at_text(stripped, stripped.length - 1);
+        if first_code == char_code("[") && last_code == char_code("]") {
+            return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+        }
+    }
+
+    // Try enum literal first - check if this looks like EnumName.VariantName
+    // This must come before struct literal parsing because Shape.Circle { ... } could be either
+    let enum_parse = parse_enum_literal(stripped);
+    if enum_parse.recognized && enum_parse.success {
+        // Verify this is actually an enum by checking context
+        let enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name);
+        if enum_info != null {
+            let lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
+            let combined = diagnostics.concat(lowered_enum.diagnostics);
+            return ExpressionResult { lines: lowered_enum.lines, temp_index: lowered_enum.temp_index, operand: lowered_enum.operand, diagnostics: combined, string_constants: lowered_enum.string_constants };
+        }
+    }
+
+    let struct_parse = parse_struct_literal(stripped);
+    if struct_parse.recognized {
+        if !struct_parse.success {
+            diagnostics = diagnostics.concat(struct_parse.diagnostics);
+            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        }
+        let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
+        let combined = diagnostics.concat(lowered_struct.diagnostics);
+        return ExpressionResult { lines: lowered_struct.lines, temp_index: lowered_struct.temp_index, operand: lowered_struct.operand, diagnostics: combined, string_constants: lowered_struct.string_constants };
+    }
+
+    // Try index expression before member access (array[index])
+    let index_parse = parse_index_expression(stripped);
+    if index_parse.success {
+        return lower_index_expression(index_parse, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // Not an enum or index, try member access
+    let member_parse = parse_member_access(stripped);
+    if member_parse.success {
+        return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    let parameter = find_parameter_binding(bindings, stripped);
+    if parameter != null {
+        let operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
+        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+
+    let local = find_local_binding(locals, stripped);
+    if local != null {
+        let load_result = load_local_operand(local, temp_index, lines);
+        diagnostics = diagnostics.concat(load_result.diagnostics);
+        return ExpressionResult { lines: load_result.lines, temp_index: load_result.temp_index, operand: load_result.operand, diagnostics: diagnostics, string_constants: empty_constants };
+    }
+
+    diagnostics = append_string(diagnostics, "llvm lowering: unable to lower expression `" + expression + "`");
+    return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+}

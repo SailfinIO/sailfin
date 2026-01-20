@@ -2,11 +2,11 @@
 
 fn checkNumber(value -> number) ![io] {
   if value > 0 {
-    print.info("{{value}} is positive");
+    print.info("{{ value }} is positive");
   } else if value < 0 {
-    print.info("{{value}} is negative");
+    print.info("{{ value }} is negative");
   } else {
-    print.info("{{value}} is zero");
+    print.info("{{ value }} is zero");
   }
 
   match value {
