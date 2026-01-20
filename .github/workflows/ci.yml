@@ -5,6 +5,9 @@ env:
   # Bump this once the latest release assets are healthy again.
   SEED_VERSION: 0.1.1-alpha.132
 
+permissions:
+  contents: read
+
 on:
   pull_request:
   workflow_dispatch:

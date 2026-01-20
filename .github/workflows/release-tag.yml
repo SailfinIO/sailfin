@@ -27,6 +27,8 @@ jobs:
     build:
         name: Build + Package [${{ matrix.package_label }}]
         runs-on: ${{ matrix.os }}
+        permissions:
+            contents: read
         timeout-minutes: 120
         strategy:
             fail-fast: false
