@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.131 (2026-01-20)
+
+### Bug Fixes
+
+- Semantic release skip ci removal
+  ([`37a8747`](https://github.com/SailfinIO/sailfin/commit/37a8747f7b3f80e6391033e0a22715cfe4b30a8f))
+
+
 ## v0.1.1-alpha.130 (2026-01-20)
 
 ### Bug Fixes
