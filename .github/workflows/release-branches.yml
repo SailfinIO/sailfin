@@ -150,3 +150,18 @@ jobs:
               shell: bash -l {0}
               run: |
                   CONDA=$(which conda) semantic-release publish
+
+            - name: Dispatch Release (tag) workflow
+              env:
+                  GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  version="$(python -c "import re, pathlib; text=pathlib.Path('compiler/src/version.sfn').read_text(encoding='utf-8'); m=re.search(r'__version__\\s*=\\s*\"([^\"]+)\"', text); print(m.group(1) if m else '')")"
+                  if [ -z "$version" ]; then
+                    echo "[ci][error] could not read compiler/src/version.sfn __version__" >&2
+                    exit 1
+                  fi
+                  tag="v${version}"
+                  echo "[ci] Dispatching Release (tag) for ${tag}"
+                  gh workflow run "Release (tag)" --ref "${GITHUB_REF_NAME}" -f "tag=${tag}" -R "${GITHUB_REPOSITORY}"
