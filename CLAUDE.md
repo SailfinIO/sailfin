@@ -56,7 +56,7 @@ The compiler (`compiler/src/`) follows this flow:
 3. **Type Checker** (`typecheck.sfn`) → duplicate symbols, interface conformance
 4. **Effect Checker** (`effect_checker.sfn`) → validates `![effect, ...]` annotations
 5. **Native Emitter** (`emit_native.sfn`) → `.sfn-asm` IR (`native_ir.sfn`)
-6. **LLVM Lowering** (`native_llvm_lowering.sfn`) → LLVM IR
+6. **LLVM Lowering** (`compiler/src/llvm/lowering/entrypoints.sfn`) → LLVM IR
 
 **Critical files:**
 
@@ -113,7 +113,7 @@ The runtime currently ships as C under `runtime/native/`. Higher-level integrati
 1. Update `compiler/src/parser.sfn` to recognize new syntax
 2. Add AST node(s) to `compiler/src/ast.sfn`
 3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
-4. Extend `compiler/src/native_llvm_lowering.sfn` for LLVM
+4. Extend `compiler/src/llvm/lowering/` (e.g. `entrypoints.sfn`) for LLVM
 5. Add regression tests to `compiler/tests/`
 6. Update `docs/spec.md` (Part A if shipped, Part B if planned)
 7. Update `docs/status.md` with implementation status
@@ -139,7 +139,7 @@ make test-e2e
 
 **Key files:**
 
-- `compiler/src/native_llvm_lowering.sfn` — LLVM IR generation
+- `compiler/src/llvm/` — LLVM IR generation (lowering, rendering, runtime helpers)
 - `compiler/tests/` — Sailfin-native unit/integration/e2e suites
 - `runtime/native/` — C runtime linked into the native compiler
 
@@ -183,7 +183,7 @@ Before declaring a feature "shipped in Stage1":
 1. Parses correctly (`compiler/src/parser.sfn`)
 2. Type-checks or effect-checks (`compiler/src/typecheck.sfn`, `compiler/src/effect_checker.sfn`)
 3. Emits valid `.sfn-asm` (`compiler/src/emit_native.sfn`)
-4. Lowers to LLVM IR (`compiler/src/native_llvm_lowering.sfn`)
+4. Lowers to LLVM IR (`compiler/src/llvm/lowering/entrypoints.sfn`)
 5. Has regression coverage (`compiler/tests/`)
 6. Self-hosts (compiler compiles itself)
 7. Documented in `docs/status.md` and `docs/spec.md` Part A

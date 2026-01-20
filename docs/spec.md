@@ -811,8 +811,9 @@ compilation pipeline.
 
 #### 7.2.1 Intrinsic Declarations
 
-Intrinsics are declared in `compiler/src/native_llvm_lowering.sfn` via the
-`RuntimeHelperDescriptor` structure, which associates each intrinsic with:
+Intrinsics are declared in `compiler/src/llvm/runtime_helpers.sfn` via the
+`RuntimeHelperDescriptor` structure (re-exported from `compiler/src/llvm/mod.sfn`),
+which associates each intrinsic with:
 
 - **Name** — the symbol used in the `.sfn-asm` intermediate representation
   (e.g., `console.info`, `fs.read`, `http.get`).

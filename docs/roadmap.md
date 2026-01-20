@@ -38,8 +38,6 @@ work after launch. Legacy compiler stages are no longer tracked in this plan.
    - [ ] Remove Python tooling/scripts from the release pipeline and developer entrypoints.
    - [x] Remove Python runtime shims (`runtime/runtime_support.py`, `runtime/native_runner*.py`).
    - [ ] Remove Python-generated compiler artifacts (`compiler/build/**`) from the 1.0 toolchain.
-   - [ ] Add CI guardrails that fail when Python tooling is invoked.
-   - [ ] Provide a dedicated `make test-native` target and keep `make test` stable for release.
 
 5. **Documentation for public release**
    - [ ] Remove legacy compiler-stage references across docs and examples.
