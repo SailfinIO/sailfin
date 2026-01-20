@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.122 (2026-01-20)
+
+### Bug Fixes
+
+- Clean up ci
+  ([`6c7249b`](https://github.com/SailfinIO/sailfin/commit/6c7249b40e26573df93916970aac2d49dcfb7467))
+
+- Remove stage2 referencing
+  ([`e1eb0bf`](https://github.com/SailfinIO/sailfin/commit/e1eb0bf1aa81af713d30c776474d9d9e7283bf0b))
+
+- Remove stage2 referencing
+  ([`353e392`](https://github.com/SailfinIO/sailfin/commit/353e392f15b90e07a615fe05f63c04c0a8fb1a1a))
+
+
 ## v0.1.1-alpha.121 (2026-01-19)
 
 ### Bug Fixes
