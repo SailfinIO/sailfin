@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.133 (2026-01-20)
+
+### Bug Fixes
+
+- Duplication in runs
+  ([`c126650`](https://github.com/SailfinIO/sailfin/commit/c126650674e077f34e22dc4e466a5e1008b422e9))
+
+- Permissions and seed version
+  ([`1ea7717`](https://github.com/SailfinIO/sailfin/commit/1ea771771ad6587e287cb737eb3a957afab6ae7b))
+
+
 ## v0.1.1-alpha.132 (2026-01-20)
 
 ### Bug Fixes
