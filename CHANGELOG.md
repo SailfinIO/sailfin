@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.123 (2026-01-20)
+
+### Bug Fixes
+
+- Asset upload
+  ([`e3821a6`](https://github.com/SailfinIO/sailfin/commit/e3821a629e2a75ec2adc2b020ba3589a30e90f20))
+
+- Split core into manageable files
+  ([`b78b92e`](https://github.com/SailfinIO/sailfin/commit/b78b92ecd7c59fcd823d5f7758b029335ffcfbef))
+
+
 ## v0.1.1-alpha.122 (2026-01-20)
 
 ### Bug Fixes
