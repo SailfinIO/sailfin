@@ -145,7 +145,7 @@ jobs:
           fi
 
       - name: Upload native artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ci-native-${{ matrix.package_label }}
           path: |
@@ -155,7 +155,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload installer archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ci-installer-${{ matrix.package_label }}
           path: dist/installer-${{ matrix.package_label }}.tar.gz
