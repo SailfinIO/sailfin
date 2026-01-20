@@ -66,7 +66,17 @@ ifeq ($(origin CONDA_EXE), undefined)
 CONDA_EXE := $(shell { type -P conda 2>/dev/null || /usr/bin/which conda 2>/dev/null; } | head -n 1)
 endif
 ifneq ($(strip $(CONDA_EXE)),)
-CONDA ?= $(CONDA_EXE)
+# Some environments export CONDA as the *install prefix* (a directory), not the
+# conda executable. If CONDA is unset or not executable, prefer the detected
+# executable path.
+ifeq ($(strip $(CONDA)),)
+CONDA := $(CONDA_EXE)
+else
+CONDA_IS_EXEC := $(shell [ -x "$(CONDA)" ] && echo yes || echo no)
+ifeq ($(CONDA_IS_EXEC),no)
+CONDA := $(CONDA_EXE)
+endif
+endif
 endif
 CONDA_ENV ?= sailfin
 CONDA_ENV_FILE ?= environment.yml
@@ -94,8 +104,8 @@ INSTALL_NAME ?= sailfin
 
 .PHONY: check-conda env install
 check-conda:
-	@if [ -z "$(CONDA)" ]; then \
-		echo "[conda] conda executable not found. Export CONDA_EXE or install Conda."; \
+	@if [ -z "$(CONDA)" ] || [ ! -x "$(CONDA)" ]; then \
+		echo "[conda] conda executable not found (CONDA='$(CONDA)'). Export CONDA_EXE or ensure conda is on PATH."; \
 		exit 1; \
 	fi
 

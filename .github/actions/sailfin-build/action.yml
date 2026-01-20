@@ -68,7 +68,7 @@ runs:
       shell: bash -l {0}
       run: |
         set -euo pipefail
-        make ci-prepare-test-artifacts
+        CONDA=$(which conda) make ci-prepare-test-artifacts
 
     - name: Run Sailfin-native tests
       shell: bash -l {0}
@@ -80,10 +80,10 @@ runs:
       shell: bash -l {0}
       run: |
         set -euo pipefail
-        make ci-package-native TARGET="${{ inputs.target }}"
+        CONDA=$(which conda) make ci-package-native TARGET="${{ inputs.target }}"
 
     - name: Package installer archive
       shell: bash -l {0}
       run: |
         set -euo pipefail
-        make ci-package-installer TARGET="${{ inputs.target }}"
+        CONDA=$(which conda) make ci-package-installer TARGET="${{ inputs.target }}"
