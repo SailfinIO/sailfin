@@ -243,7 +243,7 @@ package: check-conda
 # runner (import context + runtime prelude object). CI builds via
 # scripts/selfhost_native.py, which stages outputs under build/selfhost/native/.
 ci-prepare-test-artifacts:
-	@set -euo pipefail; \
+	@set -eu; \
 	SRC="build/selfhost/native/seed_cwd/build/import-context"; \
 	if [ ! -d "$$SRC" ]; then SRC="build/selfhost/native/seed_cwd/build/stage2"; fi; \
 	if [ ! -d "$$SRC" ]; then \
@@ -275,7 +275,7 @@ ci-prepare-test-artifacts:
 # - Requires the compiler already built at $(NATIVE_BIN).
 # - Exposes the staged import context to the packager.
 ci-package-native: check-conda
-	@if [ -z "${TARGET:-}" ]; then \
+	@if [ -z "$(TARGET)" ]; then \
 		echo "[ci-package-native][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
 		exit 1; \
 	fi
@@ -288,11 +288,11 @@ ci-package-native: check-conda
 # Create an installer payload (compiler + runtime bits) for a given target label.
 # Produces: dist/installer-$(TARGET).tar.gz
 ci-package-installer:
-	@if [ -z "${TARGET:-}" ]; then \
+	@if [ -z "$(TARGET)" ]; then \
 		echo "[ci-package-installer][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
 		exit 1; \
 	fi
-	@set -euo pipefail; \
+	@set -eu; \
 	INSTALLER_DIR="dist/installer-$(TARGET)"; \
 	rm -rf "$$INSTALLER_DIR"; \
 	mkdir -p "$$INSTALLER_DIR/bin"; \
