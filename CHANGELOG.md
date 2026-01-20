@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.134 (2026-01-20)
+
+### Bug Fixes
+
+- Permissions
+  ([`514749e`](https://github.com/SailfinIO/sailfin/commit/514749e9294b9ca626cf278164dfcf9cff606e11))
+
+
 ## v0.1.1-alpha.133 (2026-01-20)
 
 ### Bug Fixes
