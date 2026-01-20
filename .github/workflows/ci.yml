@@ -1,5 +1,10 @@
 name: CI
 
+env:
+  # Pinned seed used for self-host bootstrap in CI.
+  # Bump this once the latest release assets are healthy again.
+  SEED_VERSION: 0.1.1-alpha.126
+
 on:
   push:
     branches:
@@ -78,6 +83,7 @@ jobs:
           target: ${{ matrix.package_label }}
           max_attempts: ${{ matrix.max_attempts }}
           clang: ${{ matrix.clang }}
+          seed_version: ${{ env.SEED_VERSION }}
 
       - name: Report compiler metadata
         shell: bash -l {0}
@@ -308,6 +314,7 @@ jobs:
           target: ${{ matrix.package_label }}
           max_attempts: ${{ matrix.max_attempts }}
           clang: ${{ matrix.clang }}
+          seed_version: ${{ env.SEED_VERSION }}
 
       - name: Report compiler metadata
         shell: bash -l {0}
