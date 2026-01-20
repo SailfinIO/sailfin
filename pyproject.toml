@@ -7,7 +7,7 @@ upload_to_pypi = false
 build_command = "true"
 commit_parser = "conventional"
 tag_format = "v{version}"
-commit_message = "chore(release): {version} [skip ci]"
+commit_message = "chore(release): {version}"
 
 [tool.semantic_release.environment]
 github_token_var = "RELEASE_PAT"
