@@ -203,7 +203,9 @@ jobs:
           build/native/sailfin test compiler/tests/unit/cli_version_test.sfn
 
       - name: Self-host fixed-point rebuild (linux-x86_64, macos-arm64)
-        if: matrix.package_label == 'linux-x86_64' || matrix.package_label == 'macos-arm64'
+        if: >-
+          (matrix.package_label == 'linux-x86_64' || matrix.package_label == 'macos-arm64') &&
+          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc')
         shell: bash -l {0}
         run: |
           set -euo pipefail
@@ -266,6 +268,13 @@ jobs:
           mkdir -p "$INSTALLER_DIR/runtime/native/obj"
           cp -f build/selfhost/native/obj/runtime/prelude.o "$INSTALLER_DIR/runtime/native/obj/prelude.o"
 
+      - name: Package installer archive (selfhosted)
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          INSTALLER_DIR="dist/installer-${{ matrix.package_label }}"
+          tar -czf "dist/installer-${{ matrix.package_label }}.tar.gz" -C "$INSTALLER_DIR" .
+
       - name: Upload native artifacts (selfhosted)
         uses: actions/upload-artifact@v4
         with:
@@ -276,11 +285,11 @@ jobs:
             dist/sailfin-native-${{ matrix.package_label }}-*.manifest.json
           if-no-files-found: error
 
-      - name: Upload installer payload (selfhosted)
+      - name: Upload installer archive (selfhosted)
         uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.package_label }}
-          path: dist/installer-${{ matrix.package_label }}
+          path: dist/installer-${{ matrix.package_label }}.tar.gz
           if-no-files-found: error
 
   semantic-release:
@@ -368,6 +377,7 @@ jobs:
           find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz' -exec mv -f {} dist/ \;
           find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz.sha256' -exec mv -f {} dist/ \;
           find . -maxdepth 3 -type f -name 'sailfin-native-*.manifest.json' -exec mv -f {} dist/ \;
+          find . -maxdepth 3 -type f -name 'installer-*.tar.gz' -exec mv -f {} dist/ \;
 
       - name: Prepare installer assets
         shell: bash
@@ -375,8 +385,8 @@ jobs:
           set -euo pipefail
           tag="${{ needs.semantic-release.outputs.tag }}"
           version="${tag#v}"
-          for payload in $(find dist -maxdepth 1 -type d -name 'installer-*'); do
-            label="$(basename "$payload")"
+          for payload in $(find dist -maxdepth 1 -type f -name 'installer-*.tar.gz'); do
+            label="$(basename "$payload" .tar.gz)"
             case "$label" in
               *linux-x86_64*)
                 os="linux"
@@ -392,7 +402,7 @@ jobs:
                 ;;
             esac
             installer_name="sailfin_${version}_${os}_${arch}.tar.gz"
-            tar -czf "dist/${installer_name}" -C "$payload" .
+            mv -f "$payload" "dist/${installer_name}"
             if command -v sha256sum >/dev/null 2>&1; then
               sha256sum "dist/${installer_name}" > "dist/${installer_name}.sha256"
             else
