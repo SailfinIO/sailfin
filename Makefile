@@ -62,7 +62,7 @@ NATIVE_BIN ?= build/native/sailfin
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile bootstrap-legacy clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
+.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check bootstrap-legacy clean package native-stage2-debug native-stage2-asan check-stage2-determinism check-native-stage2-determinism check-seed-llvm-emission
 
 .PHONY: selfhost-native selfhost-smoke-native check-native-determinism native-debug native-asan native-ubsan
 
@@ -87,6 +87,7 @@ help:
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make test-e2e     # Run Sailfin-native end-to-end tests"
 	@echo "  make compile      # Build the compiler by self-hosting from a released seed"
+	@echo "  make check        # Compile (if needed) then run the full test suite"
 	@echo "  make selfhost-native # Rebuild the compiler from a seed"
 	@echo "  make selfhost-smoke-native # Selfhost + run smoke tests"
 	@echo "  make bootstrap-legacy # Legacy stage1/bootstrap pipeline (deprecated; emergency recovery only)"
@@ -227,8 +228,15 @@ clean-build:
 clean-all: clean clean-build
 
 compile:
-	@$(MAKE) selfhost-native
-	@echo "[compile] built $(NATIVE_OUT)"
+	@if [ -x "$(NATIVE_BIN)" ] && \
+		[ -z "$$(find compiler/src runtime -type f \( -name '*.sfn' -o -name '*.py' \) -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
+		echo "[compile] $(NATIVE_BIN) up-to-date"; \
+	else \
+		$(MAKE) selfhost-native; \
+		echo "[compile] built $(NATIVE_OUT)"; \
+	fi
+
+check: compile test
 
 # Naming aliases: prefer "native compiler" terminology.
 native-ubsan: native-stage2-ubsan
