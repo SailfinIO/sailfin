@@ -3,23 +3,25 @@ name: Release (tag)
 env:
     # Seed used only for bootstrapping the tag build.
     SEED_VERSION: 0.1.1-alpha.126
-    # Tag to build/upload. For push-tag runs this is github.ref_name; for manual
-    # runs this comes from the workflow input.
-    RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    # Tag to build/upload (e.g. v0.1.1-alpha.132)
+    RELEASE_TAG: ${{ inputs.tag }}
 
 on:
-    push:
-        tags:
-            - "v*"
+    workflow_call:
+        inputs:
+            tag:
+                description: "Tag to (re)build (e.g. v0.1.1-alpha.132)"
+                required: true
+                type: string
     workflow_dispatch:
         inputs:
             tag:
-                description: "Existing tag to (re)build (e.g. v0.1.1-alpha.127)"
+                description: "Existing tag to (re)build (e.g. v0.1.1-alpha.132)"
                 required: true
 
 concurrency:
-  group: "release-tag-${{ inputs.tag || github.ref_name }}"
-  cancel-in-progress: false
+    group: "release-tag-${{ inputs.tag }}"
+    cancel-in-progress: false
 
 jobs:
     build:
