@@ -328,7 +328,7 @@ jobs:
     needs:
       - selfhost-from-release-seed
       - semantic-release
-    if: needs.semantic-release.outputs.released == 'true'
+    if: needs.semantic-release.outputs.released == 'true' && needs.selfhost-from-release-seed.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -339,6 +339,38 @@ jobs:
           merge-multiple: true
           path: .
 
+      - name: Prepare installer assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.semantic-release.outputs.tag }}"
+          version="${tag#v}"
+          mkdir -p dist
+          for archive in $(find . -type f -name 'sailfin-native-*.tar.gz'); do
+            name="$(basename "$archive")"
+            case "$name" in
+              *linux-x86_64*)
+                os="linux"
+                arch="x86_64"
+                ;;
+              *macos-arm64*)
+                os="macos"
+                arch="arm64"
+                ;;
+              *)
+                echo "unknown target for $name" >&2
+                continue
+                ;;
+            esac
+            installer_name="sailfin_${version}_${os}_${arch}.tar.gz"
+            cp -f "$archive" "dist/${installer_name}"
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "dist/${installer_name}" > "dist/${installer_name}.sha256"
+            else
+              shasum -a 256 "dist/${installer_name}" > "dist/${installer_name}.sha256"
+            fi
+          done
+
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -347,5 +379,7 @@ jobs:
             dist/sailfin-native-*.tar.gz
             dist/sailfin-native-*.tar.gz.sha256
             dist/sailfin-native-*.manifest.json
+            dist/sailfin_*.tar.gz
+            dist/sailfin_*.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
