@@ -101,6 +101,14 @@ jobs:
             contents: write
 
         steps:
+                        - name: Require RELEASE_PAT (to trigger tag workflow)
+                            if: ${{ !secrets.RELEASE_PAT }}
+                            shell: bash
+                            run: |
+                                    echo "[ci][error] RELEASE_PAT secret is required for releases." >&2
+                                    echo "[ci][error] GITHUB_TOKEN-created tags will NOT trigger the tag workflow, so no assets get uploaded." >&2
+                                    exit 1
+
             - name: Checkout repository
               uses: actions/checkout@v4
               with:
@@ -109,7 +117,7 @@ jobs:
 
             - name: Configure git credentials
               env:
-                  RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+                                    RELEASE_TOKEN: ${{ secrets.RELEASE_PAT }}
               run: |
                   git config user.name "Sailfin Release Bot"
                   git config user.email "releases@sailfin.io"
@@ -125,18 +133,18 @@ jobs:
 
             - name: Semantic release version
               env:
-                  RELEASE_PAT: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-                  GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-                  GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+                  RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+                  GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+                  GH_TOKEN: ${{ secrets.RELEASE_PAT }}
               shell: bash -l {0}
               run: |
                   CONDA=$(which conda) semantic-release version
 
             - name: Semantic release publish
               env:
-                  RELEASE_PAT: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-                  GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-                  GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+                  RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+                  GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+                  GH_TOKEN: ${{ secrets.RELEASE_PAT }}
               shell: bash -l {0}
               run: |
                   CONDA=$(which conda) semantic-release publish
