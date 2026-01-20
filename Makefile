@@ -53,6 +53,8 @@ NATIVE_BIN ?= build/native/sailfin
 
 .PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check package clean
 
+.PHONY: ci-prepare-test-artifacts ci-package-native ci-package-installer
+
 .PHONY: rebuild rebuild-asan smoke
 
 # Back-compat aliases (deprecated; will be removed).
@@ -232,6 +234,80 @@ package: check-conda
 	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u tools/package_native.py \
 		--out dist \
 		--compiler-bin "$(NATIVE_BIN)"
+
+# =============================================================================
+# CI helpers (used by .github/workflows/ci.yml)
+# =============================================================================
+
+# Prepare build artifacts in the locations expected by the Sailfin-native test
+# runner (import context + runtime prelude object). CI builds via
+# scripts/selfhost_native.py, which stages outputs under build/selfhost/native/.
+ci-prepare-test-artifacts:
+	@set -euo pipefail; \
+	SRC="build/selfhost/native/seed_cwd/build/import-context"; \
+	if [ ! -d "$$SRC" ]; then SRC="build/selfhost/native/seed_cwd/build/stage2"; fi; \
+	if [ ! -d "$$SRC" ]; then \
+		echo "[ci-prepare-test-artifacts][error] missing $$SRC (selfhost did not stage import artifacts?)" >&2; \
+		find build/selfhost -maxdepth 5 -type d -name import-context -o -name stage2 -print || true; \
+		exit 1; \
+	fi; \
+	rm -rf build/native/import-context; \
+	mkdir -p build/native/import-context; \
+	cp -a "$$SRC/." build/native/import-context/; \
+	rm -rf build/stage2 2>/dev/null || true; \
+	ln -s build/native/import-context build/stage2 2>/dev/null || { \
+		mkdir -p build/stage2; \
+		cp -a build/native/import-context/. build/stage2/; \
+	}; \
+	if [ ! -f build/selfhost/native/obj/runtime/prelude.o ]; then \
+		echo "[ci-prepare-test-artifacts][error] missing build/selfhost/native/obj/runtime/prelude.o" >&2; \
+		find build/selfhost -maxdepth 4 -type f -name 'prelude.o' -print || true; \
+		exit 1; \
+	fi; \
+	mkdir -p build/native/obj/runtime; \
+	cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
+	true
+
+# Package native compiler artifacts for a given target label.
+# Usage:
+#   make ci-package-native TARGET=linux-x86_64
+# Notes:
+# - Requires the compiler already built at $(NATIVE_BIN).
+# - Exposes the staged import context to the packager.
+ci-package-native: check-conda
+	@if [ -z "${TARGET:-}" ]; then \
+		echo "[ci-package-native][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
+		exit 1; \
+	fi
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u tools/package_native.py \
+		--skip-build \
+		--target "$(TARGET)" \
+		--out dist \
+		--native-out build/native/import-context
+
+# Create an installer payload (compiler + runtime bits) for a given target label.
+# Produces: dist/installer-$(TARGET).tar.gz
+ci-package-installer:
+	@if [ -z "${TARGET:-}" ]; then \
+		echo "[ci-package-installer][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
+		exit 1; \
+	fi
+	@set -euo pipefail; \
+	INSTALLER_DIR="dist/installer-$(TARGET)"; \
+	rm -rf "$$INSTALLER_DIR"; \
+	mkdir -p "$$INSTALLER_DIR/bin"; \
+	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sailfin"; \
+	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sfn"; \
+	mkdir -p "$$INSTALLER_DIR/runtime"; \
+	cp -R runtime/native "$$INSTALLER_DIR/runtime/native"; \
+	mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+	# prelude.o comes from selfhost build outputs; ensure ci-prepare-test-artifacts ran.
+	if [ ! -f build/selfhost/native/obj/runtime/prelude.o ]; then \
+		echo "[ci-package-installer][error] missing build/selfhost/native/obj/runtime/prelude.o" >&2; \
+		exit 1; \
+	fi; \
+	cp -f build/selfhost/native/obj/runtime/prelude.o "$$INSTALLER_DIR/runtime/native/obj/prelude.o"; \
+	tar -czf "dist/installer-$(TARGET).tar.gz" -C "$$INSTALLER_DIR" .
 
 # Usage:
 #   make rebuild

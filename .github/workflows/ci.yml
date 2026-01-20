@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-from-release-seed:
@@ -35,11 +35,13 @@ jobs:
             package_label: macos-arm64
             asset_os: macos
             asset_arch: arm64
+            clang: clang
             max_attempts: 15
           - os: ubuntu-24.04
             package_label: linux-x86_64
             asset_os: linux
             asset_arch: x86_64
+            clang: clang-18
             max_attempts: 10
 
     steps:
@@ -60,33 +62,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-18 llvm-18 jq
           echo "CLANG=clang-18" >> "$GITHUB_ENV"
-          echo "LLVM_LINK=llvm-link-18" >> "$GITHUB_ENV"
-
-      - name: Preflight llvm-link opaque pointers (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          llvm_link="${LLVM_LINK:-llvm-link}"
-          echo "[ci] $($llvm_link --version | head -n 1)"
-          printf '%s\n' 'define ptr @id(ptr %p) { ret ptr %p }' > /tmp/sailfin-opaque.ll
-          if "$llvm_link" /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
-            echo "LLVM_LINK_FLAGS=" >> "$GITHUB_ENV"
-          else
-            if grep -qi "ptr type is only supported in -opaque-pointers mode" /tmp/sailfin-opaque.err; then
-              if "$llvm_link" -opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
-                echo "LLVM_LINK_FLAGS=-opaque-pointers" >> "$GITHUB_ENV"
-              else
-                echo "[ci][error] llvm-link requires opaque pointers but -opaque-pointers failed" >&2
-                cat /tmp/sailfin-opaque.err >&2 || true
-                exit 1
-              fi
-            else
-              echo "[ci][error] llvm-link failed on ptr IR" >&2
-              cat /tmp/sailfin-opaque.err >&2 || true
-              exit 1
-            fi
-          fi
 
       - name: Install jq + LLVM tools (macOS)
         if: runner.os == 'macOS'
@@ -95,46 +70,14 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-      - name: Install latest released seed (via install.sh)
-        shell: bash -l {0}
+      - name: Build + test + package (via Makefile)
+        uses: ./.github/actions/sailfin-build
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          # Optional: set repo variables to pin or exclude a seed during incidents.
-          # - SELFHOST_SEED_VERSION: e.g. 0.1.1-alpha.121 (or 'latest')
-          # - SELFHOST_SEED_EXCLUDE_TAG: e.g. v0.1.1-alpha.999
-          # Pinned while we remove stage1/bootstrap and harden selfhost-only CI.
-          VERSION: 0.1.1-alpha.121
-          EXCLUDE_TAG: ""
-          GLOBAL_BIN_DIR: ${{ github.workspace }}/build/seed/bin
-          INSTALL_BASE: ${{ github.workspace }}/build/seed/versions
-        run: |
-          set -euo pipefail
-          ./install.sh
-          echo "SEED_NATIVE=${GLOBAL_BIN_DIR}/sailfin" >> "$GITHUB_ENV"
-
-      - name: Report installed seed version
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          ls -lh "$SEED_NATIVE"
-          "$SEED_NATIVE" version
-
-      - name: Build from released seed
-        id: build_seed_try
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          rm -f build/native/sailfin
-          conda run -n sailfin python scripts/selfhost_native.py \
-            --seed "$SEED_NATIVE" \
-            --no-prefer-asan-seed \
-            --out build/native/sailfin \
-            --clang "${CLANG:-clang}" \
-            --jobs 2 \
-            --import-context-jobs 1 \
-            --max-attempts ${{ matrix.max_attempts }} \
-            --max-total-seconds 1800
+        with:
+          target: ${{ matrix.package_label }}
+          max_attempts: ${{ matrix.max_attempts }}
+          clang: ${{ matrix.clang }}
 
       - name: Report compiler metadata
         shell: bash -l {0}
@@ -143,47 +86,6 @@ jobs:
           ls -lh build/native/sailfin
           (file build/native/sailfin || true)
           build/native/sailfin version || build/native/sailfin --version || true
-
-      - name: Expose build/native import context for tests
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          SRC="build/selfhost/native/seed_cwd/build/import-context"
-          if [ ! -d "$SRC" ]; then
-            SRC="build/selfhost/native/seed_cwd/build/stage2"
-          fi
-          if [ ! -d "$SRC" ]; then
-            echo "missing $SRC (selfhost did not stage import artifacts?)" >&2
-            find build/selfhost -maxdepth 5 -type d -name import-context -o -name stage2 -print || true
-            exit 1
-          fi
-          rm -rf build/native/import-context
-          mkdir -p build/native/import-context
-          cp -a "$SRC/." build/native/import-context/
-          if [ -e build/stage2 ]; then
-            rm -rf build/stage2
-          fi
-          ln -s build/native/import-context build/stage2 2>/dev/null || {
-            mkdir -p build/stage2
-            cp -a build/native/import-context/. build/stage2/
-          }
-          ls -1 build/native/import-context | head -n 20
-
-      - name: Expose runtime prelude object for tests
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          # The CLI test runner requires a runtime bundle prelude object.
-          # In a fresh CI checkout, the selfhost build produces it under build/selfhost/native/obj/runtime/
-          # but the CLI searches build/native/obj/runtime/prelude.o as a fallback.
-          if [ ! -f build/selfhost/native/obj/runtime/prelude.o ]; then
-            echo "missing build/selfhost/native/obj/runtime/prelude.o (selfhost did not build runtime__prelude?)" >&2
-            find build/selfhost -maxdepth 4 -type f -name 'prelude.o' -print || true
-            exit 1
-          fi
-          mkdir -p build/native/obj/runtime
-          cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o
-          ls -lh build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o
 
       - name: Enable test runner trace (macOS)
         if: runner.os == 'macOS'
@@ -245,36 +147,6 @@ jobs:
             build/native/sailfin-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
 
-      - name: Run Sailfin-native tests
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          CONDA=$(which conda) make test
-
-      - name: Package native artifacts
-        run: conda run -n sailfin python tools/package_native.py --skip-build --target ${{ matrix.package_label }} --out dist --native-out build/native/import-context
-
-      - name: Stage installer payload
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          INSTALLER_DIR="dist/installer-${{ matrix.package_label }}"
-          rm -rf "$INSTALLER_DIR"
-          mkdir -p "$INSTALLER_DIR/bin"
-          cp -f build/native/sailfin "$INSTALLER_DIR/bin/sailfin"
-          cp -f build/native/sailfin "$INSTALLER_DIR/bin/sfn"
-          mkdir -p "$INSTALLER_DIR/runtime"
-          cp -R runtime/native "$INSTALLER_DIR/runtime/native"
-          mkdir -p "$INSTALLER_DIR/runtime/native/obj"
-          cp -f build/selfhost/native/obj/runtime/prelude.o "$INSTALLER_DIR/runtime/native/obj/prelude.o"
-
-      - name: Package installer archive
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          INSTALLER_DIR="dist/installer-${{ matrix.package_label }}"
-          tar -czf "dist/installer-${{ matrix.package_label }}.tar.gz" -C "$INSTALLER_DIR" .
-
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -294,8 +166,17 @@ jobs:
 
   semantic-release:
     needs: build-from-release-seed
-    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+    if: >-
+      github.event_name == 'push' &&
+      !startsWith(github.ref, 'refs/tags/') &&
+      (
+        github.event.head_commit.author.name != 'semantic-release' &&
+        github.event.head_commit.author.name != 'Sailfin Release Bot' &&
+        !contains(github.event.head_commit.author.email, 'semantic-release')
+      )
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       released: ${{ steps.release_tag.outputs.released }}
       tag: ${{ steps.release_tag.outputs.tag }}
@@ -309,11 +190,11 @@ jobs:
 
       - name: Configure git credentials
         env:
-          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "Sailfin Release Bot"
           git config user.email "releases@sailfin.io"
-          git remote set-url origin "https://mcereal:${RELEASE_PAT}@github.com/SailfinIO/sailfin.git"
+          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git"
 
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@v3
@@ -325,18 +206,18 @@ jobs:
 
       - name: Semantic release version
         env:
-          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         shell: bash -l {0}
         run: |
           CONDA=$(which conda) semantic-release version
 
       - name: Run semantic release
         env:
-          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         shell: bash -l {0}
         run: |
           CONDA=$(which conda) semantic-release publish
@@ -370,11 +251,13 @@ jobs:
             package_label: macos-arm64
             asset_os: macos
             asset_arch: arm64
+            clang: clang
             max_attempts: 15
           - os: ubuntu-24.04
             package_label: linux-x86_64
             asset_os: linux
             asset_arch: x86_64
+            clang: clang-18
             max_attempts: 10
 
     steps:
@@ -409,33 +292,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-18 llvm-18 jq
           echo "CLANG=clang-18" >> "$GITHUB_ENV"
-          echo "LLVM_LINK=llvm-link-18" >> "$GITHUB_ENV"
-
-      - name: Preflight llvm-link opaque pointers (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          llvm_link="${LLVM_LINK:-llvm-link}"
-          echo "[ci] $($llvm_link --version | head -n 1)"
-          printf '%s\n' 'define ptr @id(ptr %p) { ret ptr %p }' > /tmp/sailfin-opaque.ll
-          if "$llvm_link" /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
-            echo "LLVM_LINK_FLAGS=" >> "$GITHUB_ENV"
-          else
-            if grep -qi "ptr type is only supported in -opaque-pointers mode" /tmp/sailfin-opaque.err; then
-              if "$llvm_link" -opaque-pointers /tmp/sailfin-opaque.ll -o /tmp/sailfin-opaque.bc 2>/tmp/sailfin-opaque.err; then
-                echo "LLVM_LINK_FLAGS=-opaque-pointers" >> "$GITHUB_ENV"
-              else
-                echo "[ci][error] llvm-link requires opaque pointers but -opaque-pointers failed" >&2
-                cat /tmp/sailfin-opaque.err >&2 || true
-                exit 1
-              fi
-            else
-              echo "[ci][error] llvm-link failed on ptr IR" >&2
-              cat /tmp/sailfin-opaque.err >&2 || true
-              exit 1
-            fi
-          fi
 
       - name: Install jq + LLVM tools (macOS)
         if: runner.os == 'macOS'
@@ -444,46 +300,14 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-      - name: Install latest released seed (via install.sh)
-        shell: bash -l {0}
+      - name: Build + test + package (via Makefile)
+        uses: ./.github/actions/sailfin-build
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          # Optional: set repo variables to pin or exclude a seed during incidents.
-          # - SELFHOST_SEED_VERSION: e.g. 0.1.1-alpha.121 (or 'latest')
-          # - SELFHOST_SEED_EXCLUDE_TAG: e.g. v0.1.1-alpha.999
-          # Pinned while we remove stage1/bootstrap and harden selfhost-only CI.
-          VERSION: 0.1.1-alpha.121
-          EXCLUDE_TAG: ""
-          GLOBAL_BIN_DIR: ${{ github.workspace }}/build/seed/bin
-          INSTALL_BASE: ${{ github.workspace }}/build/seed/versions
-        run: |
-          set -euo pipefail
-          ./install.sh
-          echo "SEED_NATIVE=${GLOBAL_BIN_DIR}/sailfin" >> "$GITHUB_ENV"
-
-      - name: Report installed seed version
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          ls -lh "$SEED_NATIVE"
-          "$SEED_NATIVE" version
-
-      - name: Build from released seed
-        id: build_seed_try
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          rm -f build/native/sailfin
-          conda run -n sailfin python scripts/selfhost_native.py \
-            --seed "$SEED_NATIVE" \
-            --no-prefer-asan-seed \
-            --out build/native/sailfin \
-            --clang "${CLANG:-clang}" \
-            --jobs 2 \
-            --import-context-jobs 1 \
-            --max-attempts ${{ matrix.max_attempts }} \
-            --max-total-seconds 1800
+        with:
+          target: ${{ matrix.package_label }}
+          max_attempts: ${{ matrix.max_attempts }}
+          clang: ${{ matrix.clang }}
 
       - name: Report compiler metadata
         shell: bash -l {0}
@@ -508,47 +332,6 @@ jobs:
             echo "[ci][error] compiler reports $actual, expected $expected" >&2
             exit 1
           fi
-
-      - name: Expose build/native import context for tests
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          SRC="build/selfhost/native/seed_cwd/build/import-context"
-          if [ ! -d "$SRC" ]; then
-            SRC="build/selfhost/native/seed_cwd/build/stage2"
-          fi
-          if [ ! -d "$SRC" ]; then
-            echo "missing $SRC (selfhost did not stage import artifacts?)" >&2
-            find build/selfhost -maxdepth 5 -type d -name import-context -o -name stage2 -print || true
-            exit 1
-          fi
-          rm -rf build/native/import-context
-          mkdir -p build/native/import-context
-          cp -a "$SRC/." build/native/import-context/
-          if [ -e build/stage2 ]; then
-            rm -rf build/stage2
-          fi
-          ln -s build/native/import-context build/stage2 2>/dev/null || {
-            mkdir -p build/stage2
-            cp -a build/native/import-context/. build/stage2/
-          }
-          ls -1 build/native/import-context | head -n 20
-
-      - name: Expose runtime prelude object for tests
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          # The CLI test runner requires a runtime bundle prelude object.
-          # In a fresh CI checkout, the selfhost build produces it under build/selfhost/native/obj/runtime/
-          # but the CLI searches build/native/obj/runtime/prelude.o as a fallback.
-          if [ ! -f build/selfhost/native/obj/runtime/prelude.o ]; then
-            echo "missing build/selfhost/native/obj/runtime/prelude.o (selfhost did not build runtime__prelude?)" >&2
-            find build/selfhost -maxdepth 4 -type f -name 'prelude.o' -print || true
-            exit 1
-          fi
-          mkdir -p build/native/obj/runtime
-          cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o
-          ls -lh build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o
 
       - name: Enable test runner trace (macOS)
         if: runner.os == 'macOS'
@@ -610,36 +393,6 @@ jobs:
             build/native/sailfin-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
 
-      - name: Run Sailfin-native tests
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          CONDA=$(which conda) make test
-
-      - name: Package native artifacts
-        run: conda run -n sailfin python tools/package_native.py --skip-build --target ${{ matrix.package_label }} --out dist --native-out build/native/import-context
-
-      - name: Stage installer payload
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          INSTALLER_DIR="dist/installer-${{ matrix.package_label }}"
-          rm -rf "$INSTALLER_DIR"
-          mkdir -p "$INSTALLER_DIR/bin"
-          cp -f build/native/sailfin "$INSTALLER_DIR/bin/sailfin"
-          cp -f build/native/sailfin "$INSTALLER_DIR/bin/sfn"
-          mkdir -p "$INSTALLER_DIR/runtime"
-          cp -R runtime/native "$INSTALLER_DIR/runtime/native"
-          mkdir -p "$INSTALLER_DIR/runtime/native/obj"
-          cp -f build/selfhost/native/obj/runtime/prelude.o "$INSTALLER_DIR/runtime/native/obj/prelude.o"
-
-      - name: Package installer archive
-        shell: bash -l {0}
-        run: |
-          set -euo pipefail
-          INSTALLER_DIR="dist/installer-${{ matrix.package_label }}"
-          tar -czf "dist/installer-${{ matrix.package_label }}.tar.gz" -C "$INSTALLER_DIR" .
-
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -665,6 +418,8 @@ jobs:
       needs.semantic-release.outputs.released == 'true' &&
       needs.build-from-release-tag.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       RELEASE_TAG: ${{ needs.semantic-release.outputs.tag }}
 
@@ -721,6 +476,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
+          # semantic-release creates the release entry, but if it ever doesn't
+          # (or if this job runs against a tag-only rerun), make the intent explicit:
+          prerelease: ${{ github.ref_name != 'main' }}
+          make_latest: ${{ github.ref_name == 'main' }}
           files: |
             dist/sailfin-native-*.tar.gz
             dist/sailfin-native-*.tar.gz.sha256

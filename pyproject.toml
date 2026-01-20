@@ -2,7 +2,9 @@
 version_source = "file"
 version_variables = ["compiler/src/version.sfn:__version__"]
 upload_to_pypi = false
-build_command = "make package"
+# GitHub Actions builds and attaches native artifacts after the tag is created.
+# Keep semantic-release fast + deterministic by skipping local build steps here.
+build_command = "true"
 commit_parser = "conventional"
 tag_format = "v{version}"
 
@@ -16,7 +18,8 @@ include_v_prefix = true
 
 [tool.semantic_release.github]
 release_method = "github"
-assets = ["dist/*.tar.gz", "dist/*.sha256", "dist/*.manifest.json"]
+# Assets are uploaded by CI (see .github/workflows/ci.yml).
+assets = []
 
 [tool.semantic_release.branches.main]
 match = "main"
