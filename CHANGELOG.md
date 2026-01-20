@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.125 (2026-01-20)
+
+### Bug Fixes
+
+- Stage2 reference in benchmark
+  ([`973b861`](https://github.com/SailfinIO/sailfin/commit/973b861d0defa246afef8f77712e61b1850c868f))
+
+
 ## v0.1.1-alpha.124 (2026-01-20)
 
 ### Bug Fixes
