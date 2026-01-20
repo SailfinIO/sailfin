@@ -156,7 +156,6 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
 
     // Normalize relative module specifiers (./foo, ../bar, foo/../baz) into
     // a stable slug that matches our import-context artifact layout.
-    // (Primary: build/native/import-context; legacy: build/stage2.)
     // Examples:
     // - "./llvm/type_context" -> "llvm/type_context"
     // - "../native_ir" -> "native_ir"
@@ -237,28 +236,12 @@ fn native_text_path_for_slug(slug -> string) -> string {
     return "build/native/import-context/" + slug + ".sfn-asm";
 }
 
-fn _legacy_layout_manifest_path_for_slug(slug -> string) -> string {
-    return "build/stage2/" + slug + ".layout-manifest";
-}
-
-fn _legacy_native_text_path_for_slug(slug -> string) -> string {
-    return "build/stage2/" + slug + ".sfn-asm";
-}
-
 fn _selfhost_layout_manifest_path_for_slug(slug -> string) -> string {
-    return "build/selfhost/native/seed_cwd/build/import-context/" + slug + ".layout-manifest";
+    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug + ".layout-manifest";
 }
 
 fn _selfhost_native_text_path_for_slug(slug -> string) -> string {
-    return "build/selfhost/native/seed_cwd/build/import-context/" + slug + ".sfn-asm";
-}
-
-fn _selfhost_legacy_layout_manifest_path_for_slug(slug -> string) -> string {
-    return "build/selfhost/native/seed_cwd/build/stage2/" + slug + ".layout-manifest";
-}
-
-fn _selfhost_legacy_native_text_path_for_slug(slug -> string) -> string {
-    return "build/selfhost/native/seed_cwd/build/stage2/" + slug + ".sfn-asm";
+    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug + ".sfn-asm";
 }
 
 fn _resolve_layout_manifest_path_for_slug(slug -> string) -> string ![io] {
@@ -266,19 +249,11 @@ fn _resolve_layout_manifest_path_for_slug(slug -> string) -> string ![io] {
     if fs.exists(primary) {
         return primary;
     }
-    let legacy = _legacy_layout_manifest_path_for_slug(slug);
-    if fs.exists(legacy) {
-        return legacy;
-    }
     let fallback = _selfhost_layout_manifest_path_for_slug(slug);
     if fs.exists(fallback) {
         return fallback;
     }
-    let selfhost_legacy = _selfhost_legacy_layout_manifest_path_for_slug(slug);
-    if fs.exists(selfhost_legacy) {
-        return selfhost_legacy;
-    }
-    return legacy;
+    return primary;
 }
 
 fn _resolve_native_text_path_for_slug(slug -> string) -> string ![io] {
@@ -286,19 +261,11 @@ fn _resolve_native_text_path_for_slug(slug -> string) -> string ![io] {
     if fs.exists(primary) {
         return primary;
     }
-    let legacy = _legacy_native_text_path_for_slug(slug);
-    if fs.exists(legacy) {
-        return legacy;
-    }
     let fallback = _selfhost_native_text_path_for_slug(slug);
     if fs.exists(fallback) {
         return fallback;
     }
-    let selfhost_legacy = _selfhost_legacy_native_text_path_for_slug(slug);
-    if fs.exists(selfhost_legacy) {
-        return selfhost_legacy;
-    }
-    return legacy;
+    return primary;
 }
 
 fn normalize_import_module_path(value -> string) -> string {
