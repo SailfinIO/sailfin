@@ -3,7 +3,7 @@ name: Release (branches)
 env:
     # Pinned seed used for self-host bootstrap in CI.
     # Bump this once the latest release assets are healthy again.
-    SEED_VERSION: 0.1.1-alpha.126
+    SEED_VERSION: 0.1.1-alpha.132
 
 on:
     push:
@@ -168,6 +168,8 @@ jobs:
     release-tag:
         name: Release Assets [${{ needs.semantic-release.outputs.release_tag }}]
         needs: semantic-release
+        permissions:
+            contents: write
         uses: ./.github/workflows/release-tag.yml
         with:
             tag: ${{ needs.semantic-release.outputs.release_tag }}
