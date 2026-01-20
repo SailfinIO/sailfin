@@ -1,0 +1,1393 @@
+// compiler/src/cli_main.sfn
+//
+// Sailfin-native CLI entrypoint invoked by the native C shim.
+
+import {
+    compile_to_llvm,
+    compile_to_llvm_with_module,
+    compile_to_llvm_with_module_timed,
+    compile_to_llvm_lines_with_module,
+    compile_to_llvm_lines_with_module_timed,
+    compile_tests_to_llvm,
+    compile_tests_to_llvm_with_module,
+    compile_to_sailfin,
+    number_to_string,
+    module_name_from_path,
+} from "./main";
+import { compile_to_native_text } from "./main";
+import { split_lines } from "./native_ir";
+import { sailfin_version } from "./version";
+
+fn _usage() -> string {
+    return "usage:\n" +
+        "  sfn --version\n" +
+        "  sfn version\n" +
+        "  sfn emit [--timing] llvm|sailfin|native <file.sfn>\n" +
+        "  sfn emit-llvm-file [--timing] <file.sfn> <out.ll>\n" +
+        "  sfn build [-o OUTPUT] <file.sfn>\n" +
+        "  sfn run <file.sfn>\n" +
+        "  sfn run <exe>\n" +
+    "  sfn test [path]\n" +
+        "\n" +
+        "examples:\n" +
+        "  sfn emit llvm examples/basics/hello-world.sfn\n" +
+        "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" +
+        "  sfn run examples/basics/hello-world.sfn\n" +
+    "  sfn run build/native/examples/hello\n" +
+    "  sfn test .\n";
+}
+
+fn _ends_with(value -> string, suffix -> string) -> boolean {
+    if suffix.length == 0 {
+        return true;
+    }
+    if value.length < suffix.length {
+        return false;
+    }
+    let start = value.length - suffix.length;
+    return substring(value, start, value.length) == suffix;
+}
+
+fn _is_flag(value -> string, flag -> string) -> boolean {
+    return value == flag;
+}
+
+fn _path_join(base -> string, name -> string) -> string {
+    if base.length == 0 {
+        return name;
+    }
+    if base[base.length - 1] == "/" {
+        return base + name;
+    }
+    return base + "/" + name;
+}
+
+fn _path_pop_last(parts -> string[]) -> string[] {
+    if parts.length == 0 {
+        return [];
+    }
+    let mut out -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index + 1 >= parts.length {
+            break;
+        }
+        out = out.concat([parts[index]]);
+        index += 1;
+    }
+    return out;
+}
+
+fn _read_non_empty_lines(path -> string) -> string[] ![io] {
+    if !fs.exists(path) {
+        return [];
+    }
+    let text = fs.readFile(path);
+    let lines = split_lines(text);
+    let mut out -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = lines[index];
+        if line.length > 0 {
+            out = out.concat([line]);
+        }
+        index += 1;
+    }
+    return out;
+}
+
+fn _path_join_parts(parts -> string[]) -> string {
+    let mut out -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= parts.length {
+            break;
+        }
+        if index == 0 {
+            out = parts[index];
+        } else {
+            out = out + "/" + parts[index];
+        }
+        index += 1;
+    }
+    return out;
+}
+
+fn _path_normalize(path -> string) -> string {
+    if path.length == 0 {
+        return ".";
+    }
+
+    let is_abs = path[0] == "/";
+    let mut parts -> string[] = [];
+
+    let mut seg_start -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= path.length {
+            break;
+        }
+        if path[i] == "/" {
+            let seg = substring(path, seg_start, i);
+            if seg.length == 0 || seg == "." {
+                // skip
+            } else if seg == ".." {
+                if parts.length > 0 && parts[parts.length - 1] != ".." {
+                    parts = _path_pop_last(parts);
+                } else if !is_abs {
+                    parts = parts.concat([".."]); 
+                }
+            } else {
+                parts = parts.concat([seg]);
+            }
+            seg_start = i + 1;
+        }
+        i += 1;
+    }
+
+    // trailing segment
+    if seg_start <= path.length {
+        let seg = substring(path, seg_start, path.length);
+        if seg.length == 0 || seg == "." {
+            // skip
+        } else if seg == ".." {
+            if parts.length > 0 && parts[parts.length - 1] != ".." {
+                parts = _path_pop_last(parts);
+            } else if !is_abs {
+                parts = parts.concat([".."]); 
+            }
+        } else {
+            parts = parts.concat([seg]);
+        }
+    }
+
+    let joined = _path_join_parts(parts);
+    if is_abs {
+        if joined.length == 0 {
+            return "/";
+        }
+        return "/" + joined;
+    }
+    if joined.length == 0 {
+        return ".";
+    }
+    return joined;
+}
+
+fn _has_prefix(value -> string, prefix -> string) -> boolean {
+    if prefix.length > value.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        if value[index] != prefix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn _dirname(path -> string) -> string {
+    let mut last_slash -> number = -1;
+    let mut index -> number = 0;
+    loop {
+        if index >= path.length {
+            break;
+        }
+        if path[index] == "/" {
+            last_slash = index;
+        }
+        index += 1;
+    }
+    if last_slash < 0 {
+        return ".";
+    }
+    if last_slash == 0 {
+        return "/";
+    }
+    return substring(path, 0, last_slash);
+}
+
+struct _RelativeImportSpan {
+    start -> number;
+    end -> number;
+    spec -> string;
+}
+
+fn _is_ident_char(ch -> string) -> boolean {
+    // ASCII identifier-ish predicate: [A-Za-z0-9_]
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return _string_contains(allowed, ch);
+}
+
+fn _word_matches(source -> string, index -> number, word -> string) -> boolean {
+    if word.length == 0 {
+        return false;
+    }
+    if index < 0 {
+        return false;
+    }
+    if index + word.length > source.length {
+        return false;
+    }
+    if substring_unchecked(source, index, index + word.length) != word {
+        return false;
+    }
+    if index > 0 {
+        if _is_ident_char(source[index - 1]) {
+            return false;
+        }
+    }
+    if index + word.length < source.length {
+        if _is_ident_char(source[index + word.length]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
+    // Scan for actual `import {..} from "./...";` statements, ignoring occurrences
+    // inside strings/comments. Returns the full statement spans to remove.
+    let mut spans -> _RelativeImportSpan[] = [];
+
+    let mut i -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut escaping -> boolean = false;
+    let mut in_line_comment -> boolean = false;
+    let mut in_block_comment -> boolean = false;
+
+    loop {
+        if i >= source.length {
+            break;
+        }
+        let ch = source[i];
+
+        if in_line_comment {
+            if ch == "\n" {
+                in_line_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if in_block_comment {
+            if ch == "*" && i + 1 < source.length && source[i + 1] == "/" {
+                in_block_comment = false;
+                i += 2;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Not inside string/comment.
+        if ch == "/" && i + 1 < source.length {
+            let next = source[i + 1];
+            if next == "/" {
+                in_line_comment = true;
+                i += 2;
+                continue;
+            }
+            if next == "*" {
+                in_block_comment = true;
+                i += 2;
+                continue;
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+
+        if _word_matches(source, i, "import") {
+            let stmt_start = i;
+            let mut j -> number = i;
+
+            let mut stmt_in_string -> boolean = false;
+            let mut stmt_escaping -> boolean = false;
+            let mut stmt_in_line_comment -> boolean = false;
+            let mut stmt_in_block_comment -> boolean = false;
+
+            let mut spec -> string = "";
+            let mut stmt_end -> number = -1;
+
+            loop {
+                if j >= source.length {
+                    break;
+                }
+                let cj = source[j];
+
+                if stmt_in_line_comment {
+                    if cj == "\n" {
+                        stmt_in_line_comment = false;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if stmt_in_block_comment {
+                    if cj == "*" && j + 1 < source.length && source[j + 1] == "/" {
+                        stmt_in_block_comment = false;
+                        j += 2;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if stmt_in_string {
+                    if stmt_escaping {
+                        stmt_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        stmt_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        stmt_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+
+                if cj == "/" && j + 1 < source.length {
+                    let nextj = source[j + 1];
+                    if nextj == "/" {
+                        stmt_in_line_comment = true;
+                        j += 2;
+                        continue;
+                    }
+                    if nextj == "*" {
+                        stmt_in_block_comment = true;
+                        j += 2;
+                        continue;
+                    }
+                }
+                if cj == "\"" {
+                    stmt_in_string = true;
+                    j += 1;
+                    continue;
+                }
+
+                if spec.length == 0 && _word_matches(source, j, "from") {
+                    let mut k = j + 4;
+                    // skip whitespace
+                    loop {
+                        if k >= source.length {
+                            break;
+                        }
+                        let wk = source[k];
+                        if wk == " " || wk == "\t" || wk == "\n" || wk == "\r" {
+                            k += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    if k < source.length && source[k] == "\"" {
+                        // parse string literal value
+                        k += 1;
+                        let mut start = k;
+                        let mut esc -> boolean = false;
+                        loop {
+                            if k >= source.length {
+                                break;
+                            }
+                            let sk = source[k];
+                            if esc {
+                                esc = false;
+                                k += 1;
+                                continue;
+                            }
+                            if sk == "\\" {
+                                esc = true;
+                                k += 1;
+                                continue;
+                            }
+                            if sk == "\"" {
+                                spec = substring_unchecked(source, start, k);
+                                break;
+                            }
+                            k += 1;
+                        }
+                    }
+                }
+
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+
+            if stmt_end > 0 && spec.length > 0 {
+                if _has_prefix(spec, "./") || _has_prefix(spec, "../") {
+                    spans.push(_RelativeImportSpan { start: stmt_start, end: stmt_end, spec: spec });
+                }
+            }
+
+            if stmt_end > 0 {
+                i = stmt_end;
+                continue;
+            }
+        }
+
+        i += 1;
+    }
+
+    return spans;
+}
+
+fn _extract_relative_import_specs(source -> string) -> string[] {
+    let spans = _collect_relative_import_spans(source);
+    if spans.length == 0 {
+        return [];
+    }
+    let mut specs -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= spans.length {
+            break;
+        }
+        specs = specs.concat([spans[index].spec]);
+        index += 1;
+    }
+    return specs;
+}
+
+fn _resolve_import_path(base_dir -> string, spec -> string) -> string {
+    // Resolve leading ./ and ../ segments without relying on full path
+    // normalization (keeps behaviour stable for test inlining).
+    let mut current_base = base_dir;
+    let mut remainder = spec;
+    loop {
+        if _has_prefix(remainder, "../") {
+            current_base = _dirname(current_base);
+            remainder = substring(remainder, 3, remainder.length);
+            continue;
+        }
+        if _has_prefix(remainder, "./") {
+            remainder = substring(remainder, 2, remainder.length);
+            continue;
+        }
+        break;
+    }
+
+    let mut path = _path_join(current_base, remainder);
+    if _ends_with(path, ".sfn") {
+        return path;
+    }
+    return path + ".sfn";
+}
+
+fn _string_list_contains(items -> string[], value -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= items.length {
+            break;
+        }
+        if items[index] == value {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn _string_contains(haystack -> string, needle -> string) -> boolean {
+    if needle.length == 0 {
+        return true;
+    }
+    let haystack_len = haystack.length;
+    let mut i -> number = 0;
+    loop {
+        if i >= haystack_len {
+            break;
+        }
+        if haystack[i] == needle {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn _sanitize_filename(value -> string) -> string {
+    // Keep this simple and self-contained (no extra imports): replace anything
+    // not [A-Za-z0-9._-] with '_'.
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-";
+    let mut out -> string = "";
+    let value_len = value.length;
+    let mut index -> number = 0;
+    loop {
+        if index >= value_len {
+            break;
+        }
+        let ch = value[index];
+        if _string_contains(allowed, ch) {
+            out = out + ch;
+        } else {
+            out = out + "_";
+        }
+        index += 1;
+    }
+    if out.length == 0 {
+        return "_";
+    }
+    return out;
+}
+
+fn _strip_relative_import_lines(source -> string) -> string {
+    // Remove whole relative import statements; safe for multi-line imports and
+    // avoids matching `from "./..."` that appears inside strings/comments.
+    let spans = _collect_relative_import_spans(source);
+    if spans.length == 0 {
+        return source;
+    }
+
+    let mut out -> string = "";
+    let mut keep_start -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= spans.length {
+            break;
+        }
+        let span = spans[index];
+        if span.start > keep_start {
+            out = out + substring_unchecked(source, keep_start, span.start);
+        }
+        keep_start = span.end;
+        index += 1;
+    }
+    if keep_start < source.length {
+        out = out + substring_unchecked(source, keep_start, source.length);
+    }
+    return out;
+}
+
+fn _inline_relative_imports(source -> string, base_dir -> string, depth -> number, visited -> string[]) -> string ![io] {
+    if depth <= 0 {
+        return _strip_relative_import_lines(source);
+    }
+
+    let spans = _collect_relative_import_spans(source);
+    let mut combined -> string = "";
+    let mut next_visited = visited;
+    let mut remove -> _RelativeImportSpan[] = [];
+
+    let mut index -> number = 0;
+    loop {
+        if index >= spans.length {
+            break;
+        }
+        if fs.exists("build/sailfin/.dump_test_sources") {
+            print.info("test import inlining: base=" + base_dir + " spec=" + spans[index].spec);
+        }
+        let dep_path = _resolve_import_path(base_dir, spans[index].spec);
+        let is_prebuilt = _has_prefix(dep_path, "compiler/src/") || _has_prefix(dep_path, "runtime/");
+        if !is_prebuilt {
+            if !_string_list_contains(next_visited, dep_path) {
+                if !fs.exists(dep_path) {
+                    print.warn("test import inlining: missing dependency: " + dep_path);
+                    index += 1;
+                    continue;
+                }
+                let dep_source = fs.readFile(dep_path);
+                if dep_source.length == 0 {
+                    print.warn("test import inlining: empty dependency source: " + dep_path);
+                }
+                next_visited = next_visited.concat([dep_path]);
+                let dep_base = _dirname(dep_path);
+                let inlined_dep = _inline_relative_imports(dep_source, dep_base, depth - 1, next_visited);
+                combined = combined + inlined_dep + "\n";
+            }
+            // Only remove the statement when we actually inline it.
+            remove.push(spans[index]);
+        }
+        index += 1;
+    }
+
+    let mut stripped = source;
+    if remove.length > 0 {
+        let mut out -> string = "";
+        let mut keep_start -> number = 0;
+        index = 0;
+        loop {
+            if index >= remove.length {
+                break;
+            }
+            let span = remove[index];
+            if span.start > keep_start {
+                out = out + substring_unchecked(source, keep_start, span.start);
+            }
+            keep_start = span.end;
+            index += 1;
+        }
+        if keep_start < source.length {
+            out = out + substring_unchecked(source, keep_start, source.length);
+        }
+        stripped = out;
+    }
+
+    combined = combined + stripped;
+    return combined;
+}
+
+fn _looks_like_test_file(name -> string) -> boolean {
+    return _ends_with(name, "_test.sfn");
+}
+
+fn _collect_test_files(root -> string, max_depth -> number) -> string[] ![io] {
+    // Best-effort recursive walk using fs.listDirectory; directories that
+    // appear empty are treated as non-directories.
+    let mut results -> string[] = [];
+    if _ends_with(root, ".sfn") {
+        return [root];
+    }
+    if max_depth < 0 {
+        return [];
+    }
+
+    let entries = fs.listDirectory(root);
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let entry = entries[index];
+        let full = _path_join(root, entry);
+        if _looks_like_test_file(entry) {
+            results = results.concat([full]);
+        }
+
+        // Recurse when it looks like a directory (has entries).
+        let child_entries = fs.listDirectory(full);
+        if child_entries.length > 0 {
+            results = results.concat(_collect_test_files(full, max_depth - 1));
+        }
+        index += 1;
+    }
+    return results;
+}
+
+fn _write_text(path -> string, text -> string) ![io] {
+    fs.writeFile(path, text);
+}
+
+fn _write_lines(path -> string, lines -> string[]) ![io] {
+    fs.writeLines(path, lines);
+}
+
+fn _write_llvm_text(path -> string, llvm -> string) ![io] {
+    // Avoid passing potentially large/fragile `string[]` buffers across the
+    // native runtime boundary via fs.writeLines, which can hang if array ABI
+    // metadata is corrupted.
+    fs.writeFile(path, llvm);
+}
+
+fn _ensure_dir(path -> string) ![io] {
+    // best-effort; ignore false.
+    fs.createDirectory(path, true);
+}
+
+fn _clear_cache_dir(path -> string) ![io] {
+    if path.length == 0 {
+        return;
+    }
+    if !fs.exists(path) {
+        return;
+    }
+    let entries = fs.listDirectory(path);
+    let mut index -> number = 0;
+    loop {
+        if index >= entries.length {
+            break;
+        }
+        let entry = entries[index];
+        let full = _path_join(path, entry);
+        // Best-effort: only delete files; ignore failures.
+        fs.deleteFile(full);
+        index += 1;
+    }
+}
+
+fn _runtime_bundle_exists(root -> string) -> boolean ![io] {
+    if root.length == 0 {
+        return false;
+    }
+    let include_dir = _path_join(root, "native/include");
+    let runtime_src = _path_join(root, "native/src/sailfin_runtime.c");
+    let runtime_ir = _path_join(root, "native/ir/runtime_globals.ll");
+    let prelude_obj = _runtime_prelude_path(root);
+    return fs.exists(include_dir) &&
+        fs.exists(runtime_src) &&
+        fs.exists(runtime_ir) &&
+        prelude_obj.length > 0;
+}
+
+fn _runtime_prelude_path(root -> string) -> string ![io] {
+    let bundled = _path_join(root, "native/obj/prelude.o");
+    if fs.exists(bundled) {
+        return bundled;
+    }
+    let bundled_nested = _path_join(root, "native/obj/runtime/prelude.o");
+    if fs.exists(bundled_nested) {
+        return bundled_nested;
+    }
+    let parent = _dirname(root);
+    let fallback = _path_join(parent, "build/native/obj/prelude.o");
+    if fs.exists(fallback) {
+        return fallback;
+    }
+    let fallback_nested = _path_join(parent, "build/native/obj/runtime/prelude.o");
+    if fs.exists(fallback_nested) {
+        return fallback_nested;
+    }
+    return "";
+}
+
+fn _clang_compile_runtime_objects(runtime_root -> string, out_dir -> string, opt_flag -> string) -> string[] ![io] {
+    // Build (or reuse) cached runtime object files so repeated `test` invocations
+    // don't recompile the runtime C sources per test file.
+    if runtime_root.length == 0 {
+        return ["", "", ""]; 
+    }
+    if !_runtime_bundle_exists(runtime_root) {
+        return ["", "", ""]; 
+    }
+
+    let include_dir = _path_join(runtime_root, "native/include");
+    let runtime_src = _path_join(runtime_root, "native/src/sailfin_runtime.c");
+    let runtime_ir = _path_join(runtime_root, "native/ir/runtime_globals.ll");
+    let prelude_obj = _runtime_prelude_path(runtime_root);
+
+    let runtime_obj = _path_join(out_dir, "sailfin_runtime" + opt_flag + ".o");
+    let globals_obj = _path_join(out_dir, "runtime_globals" + opt_flag + ".o");
+
+    if !fs.exists(runtime_obj) {
+        let rc = process.run([
+            "clang",
+            opt_flag,
+            "-Wno-override-module",
+            "-I" + include_dir,
+            "-c",
+            runtime_src,
+            "-o",
+            runtime_obj,
+        ]);
+        if rc != 0 {
+            return ["", "", ""]; 
+        }
+    }
+
+    if !fs.exists(globals_obj) {
+        let rc2 = process.run([
+            "clang",
+            opt_flag,
+            "-Wno-override-module",
+            "-c",
+            runtime_ir,
+            "-o",
+            globals_obj,
+        ]);
+        if rc2 != 0 {
+            return ["", "", ""]; 
+        }
+    }
+
+    return [runtime_obj, globals_obj, prelude_obj];
+}
+
+fn _clang_link_with_opt(ll_path -> string, out_path -> string, runtime_root -> string, opt_flag -> string, cache_dir -> string) -> number ![io] {
+    if runtime_root.length == 0 {
+        print.error("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary");
+        return 1;
+    }
+    if !_runtime_bundle_exists(runtime_root) {
+        print.error("runtime bundle missing expected files under: " + runtime_root);
+        return 1;
+    }
+
+    // Cache runtime compilation products under build/sailfin.
+    _ensure_dir("build");
+    _ensure_dir("build/sailfin");
+    _ensure_dir(cache_dir);
+    let cached = _clang_compile_runtime_objects(runtime_root, cache_dir, opt_flag);
+    let runtime_obj = cached[0];
+    let globals_obj = cached[1];
+    let prelude_obj = cached[2];
+
+    if runtime_obj.length == 0 || globals_obj.length == 0 || prelude_obj.length == 0 {
+        print.error("failed to build cached runtime objects");
+        return 1;
+    }
+
+    let args -> string[] = [
+        "clang",
+        opt_flag,
+        "-Wno-override-module",
+        runtime_obj,
+        globals_obj,
+        prelude_obj,
+        ll_path,
+        "-o",
+        out_path,
+        "-lm",
+    ];
+    return process.run(args);
+}
+
+fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
+    // Default link used by `build` and `run`.
+    return _clang_link_with_opt(ll_path, out_path, runtime_root, "-O2", "build/sailfin");
+}
+
+fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
+    // Tests prioritize compile/link latency over runtime performance.
+    // Unit tests often import compiler modules (compiler/src/...), which are already
+    // compiled as part of the native compiler build. Link against those objects
+    // to satisfy symbols.
+
+    if runtime_root.length == 0 {
+        print.error("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary");
+        return 1;
+    }
+    if !_runtime_bundle_exists(runtime_root) {
+        print.error("runtime bundle missing expected files under: " + runtime_root);
+        return 1;
+    }
+
+    _ensure_dir("build");
+    _ensure_dir("build/sailfin");
+    let cache_dir = "build/sailfin/test-o0";
+    _ensure_dir(cache_dir);
+    let cached = _clang_compile_runtime_objects(runtime_root, cache_dir, "-O0");
+    let runtime_obj = cached[0];
+    let globals_obj = cached[1];
+    let prelude_obj = cached[2];
+    if runtime_obj.length == 0 || globals_obj.length == 0 || prelude_obj.length == 0 {
+        print.error("failed to build cached runtime objects");
+        return 1;
+    }
+
+    // Best-effort: include native module objects if present.
+    let mut module_objs -> string[] = [];
+    let modules = _read_non_empty_lines("build/native/aot/modules.txt");
+    if modules.length > 0 {
+        let mut index -> number = 0;
+        loop {
+            if index >= modules.length {
+                break;
+            }
+            // Do not link runtime modules here; the test link already
+            // includes the runtime bundle objects (including prelude.o).
+            if _has_prefix(modules[index], "runtime/") {
+                index += 1;
+                continue;
+            }
+            let obj = "build/native/obj/" + modules[index] + ".o";
+            if fs.exists(obj) {
+                module_objs.push(obj);
+            }
+            index += 1;
+        }
+    }
+
+    // Selfhost-only builds may not populate build/native/obj or modules.txt.
+    // In that case, fall back to the linked object produced by
+    // scripts/selfhost_native.py.
+    let selfhost_linked = "build/selfhost/native/obj/native.linked.o";
+
+    let mut args -> string[] = [
+        "clang",
+        "-O0",
+        "-Wno-override-module",
+        runtime_obj,
+        globals_obj,
+        prelude_obj,
+    ];
+    if module_objs.length > 0 {
+        args = args.concat(module_objs);
+    } else {
+        if fs.exists(selfhost_linked) {
+            args = args.concat([selfhost_linked]);
+        }
+    }
+    args = args.concat([
+        ll_path,
+        "-o",
+        out_path,
+        "-lm",
+    ]);
+    return process.run(args);
+}
+
+fn sailfin_cli_main(argv -> string[]) -> number ![io] {
+    if argv.length == 0 {
+        print.error(_usage());
+        return 2;
+    }
+
+    let mut runtime_root -> string = "";
+    let mut start_index -> number = 0;
+    if argv.length >= 2 && argv[0] == "--runtime-root" {
+        runtime_root = argv[1];
+        start_index = 2;
+    }
+    if runtime_root.length == 0 && _runtime_bundle_exists("runtime") {
+        runtime_root = "runtime";
+    }
+
+    let mut args -> string[] = [];
+    let mut arg_index -> number = start_index;
+    loop {
+        if arg_index >= argv.length {
+            break;
+        }
+        args = args.concat([argv[arg_index]]);
+        arg_index += 1;
+    }
+    if args.length == 0 {
+        print.error(_usage());
+        return 2;
+    }
+
+    if args.length == 1 && (_is_flag(args[0], "--version") || _is_flag(args[0], "-V")) {
+        print.info("sfn " + sailfin_version());
+        return 0;
+    }
+
+    // Back-compat with older driver UX: --emit MODE file
+    if args.length == 3 && _is_flag(args[0], "--emit") {
+        let mode = args[1];
+        let path = args[2];
+        if !fs.exists(path) {
+            print.error("file not found: " + path);
+            return 1;
+        }
+        let source = fs.readFile(path);
+        let module_name = module_name_from_path(path);
+        if mode == "llvm" {
+            print.info(compile_to_llvm_with_module(source, module_name));
+            return 0;
+        }
+        if mode == "sailfin" {
+            print.info(compile_to_sailfin(source));
+            return 0;
+        }
+        if mode == "native" {
+            print.info(compile_to_native_text(source));
+            return 0;
+        }
+        print.error("unknown --emit mode: " + mode);
+        print.error(_usage());
+        return 2;
+    }
+
+    let cmd = args[0];
+
+    if cmd == "version" {
+        if args.length != 1 {
+            print.error(_usage());
+            return 2;
+        }
+        print.info("sfn " + sailfin_version());
+        return 0;
+    }
+
+    if cmd == "emit" {
+        let mut timing = false;
+        let mut base_index = 1;
+        if args.length >= 2 && _is_flag(args[1], "--timing") {
+            timing = true;
+            base_index = 2;
+        }
+        if args.length != base_index + 2 {
+            print.error(_usage());
+            return 2;
+        }
+        let mode = args[base_index];
+        let path = args[base_index + 1];
+        if !fs.exists(path) {
+            print.error("file not found: " + path);
+            return 1;
+        }
+        let source = fs.readFile(path);
+        let module_name = module_name_from_path(path);
+        if mode == "llvm" {
+            if timing {
+                print.info(compile_to_llvm_with_module_timed(source, module_name));
+            } else {
+                print.info(compile_to_llvm_with_module(source, module_name));
+            }
+            return 0;
+        }
+        if mode == "sailfin" {
+            print.info(compile_to_sailfin(source));
+            return 0;
+        }
+        if mode == "native" {
+            print.info(compile_to_native_text(source));
+            return 0;
+        }
+        print.error("unknown emit mode: " + mode);
+        return 2;
+    }
+
+    if cmd == "emit-llvm-file" {
+        let mut timing = false;
+        let mut base_index = 1;
+        if args.length >= 2 && _is_flag(args[1], "--timing") {
+            timing = true;
+            base_index = 2;
+        }
+        if args.length != base_index + 2 {
+            print.error(_usage());
+            return 2;
+        }
+
+        let path = args[base_index];
+        let out_path = args[base_index + 1];
+        if !fs.exists(path) {
+            print.error("file not found: " + path);
+            return 1;
+        }
+        let source = fs.readFile(path);
+        let module_name = module_name_from_path(path);
+        let llvm -> string = "";
+        if timing {
+            llvm = compile_to_llvm_with_module_timed(source, module_name);
+        } else {
+            llvm = compile_to_llvm_with_module(source, module_name);
+        }
+        _write_llvm_text(out_path, llvm);
+        return 0;
+    }
+
+    if cmd == "build" {
+        // build [-o OUTPUT] file
+        let mut out_path -> string = "";
+        let mut input_path -> string = "";
+
+        if args.length == 2 {
+            input_path = args[1];
+            out_path = "build/sailfin/program";
+        } else if args.length == 4 && args[1] == "-o" {
+            out_path = args[2];
+            input_path = args[3];
+        } else {
+            print.error(_usage());
+            return 2;
+        }
+
+        if !fs.exists(input_path) {
+            print.error("file not found: " + input_path);
+            return 1;
+        }
+
+        let source = fs.readFile(input_path);
+        let module_name = module_name_from_path(input_path);
+        let llvm = compile_to_llvm_with_module(source, module_name);
+
+        _ensure_dir("build");
+        _ensure_dir("build/sailfin");
+
+        let ll_path = "build/sailfin/program.ll";
+        _write_llvm_text(ll_path, llvm);
+
+        let exe_path = out_path;
+        let rc = _clang_link(ll_path, exe_path, runtime_root);
+        if rc != 0 {
+            print.error("link failed (clang exit=" + number_to_string(rc) + ")");
+            return rc;
+        }
+        print.info("built: " + exe_path);
+        return 0;
+    }
+
+    if cmd == "run" {
+        if args.length != 2 {
+            print.error(_usage());
+            return 2;
+        }
+        let input_path = args[1];
+
+        // If the argument doesn't look like Sailfin source, treat it as an executable.
+        if !_ends_with(input_path, ".sfn") {
+            return process.run([input_path]);
+        }
+
+        if !fs.exists(input_path) {
+            print.error("file not found: " + input_path);
+            return 1;
+        }
+
+        // compile + link into build/sailfin/run then execute
+        let source = fs.readFile(input_path);
+        let module_name = module_name_from_path(input_path);
+        let llvm = compile_to_llvm_with_module(source, module_name);
+
+        _ensure_dir("build");
+        _ensure_dir("build/sailfin");
+
+        let ll_path = "build/sailfin/run.ll";
+        let exe_path = "build/sailfin/run";
+
+        _write_text(ll_path, llvm);
+
+        let link_rc = _clang_link(ll_path, exe_path, runtime_root);
+        if link_rc != 0 {
+            print.error("link failed (clang exit=" + number_to_string(link_rc) + ")");
+            return link_rc;
+        }
+
+        let run_rc = process.run([exe_path]);
+        return run_rc;
+    }
+
+    if cmd == "test" {
+        // test [path]
+        let mut root -> string = ".";
+        if args.length == 2 {
+            root = args[1];
+        } else if args.length != 1 {
+            print.error(_usage());
+            return 2;
+        }
+
+        _ensure_dir("build");
+        _ensure_dir("build/sailfin");
+
+        // Clear cached runtime compilation artifacts once per test run.
+        // The cache is purely an optimization and can otherwise reuse stale
+        // object files after runtime/native changes.
+        _clear_cache_dir("build/sailfin/test-o0");
+
+        let test_runner_active_path = "build/sailfin/.test_runner_active";
+        _write_text(test_runner_active_path, "");
+
+        let test_files = _collect_test_files(root, 25);
+        if test_files.length == 0 {
+            print.error("no Sailfin test files found under: " + root);
+            fs.deleteFile(test_runner_active_path);
+            return 1;
+        }
+
+        let ll_path = "build/sailfin/test.ll";
+        let exe_path = "build/sailfin/test";
+        let dump_sources = fs.exists("build/sailfin/.dump_test_sources");
+        let trace_runner = fs.exists("build/sailfin/.trace_test_runner");
+
+        let mut index -> number = 0;
+        loop {
+            if index >= test_files.length {
+                break;
+            }
+            let path = test_files[index];
+            print.info("test: " + path);
+            let source = fs.readFile(path);
+            let module_name = module_name_from_path(path);
+
+            // Inline relative imports (../ and ./) into a single compilation unit.
+            // This avoids duplicate symbols when linking multiple LLVM modules.
+            let base_dir = _dirname(path);
+            if trace_runner {
+                print.info("test runner: inlining start");
+            }
+            let combined_source = _inline_relative_imports(source, base_dir, 10, []);
+            if trace_runner {
+                print.info("test runner: inlining done (bytes=" + number_to_string(combined_source.length) + ")");
+            }
+
+            if dump_sources {
+                let safe = _sanitize_filename(path);
+                _write_text("build/sailfin/test-source-" + safe + ".sfn", combined_source);
+            }
+
+            if trace_runner {
+                print.info("test runner: compile start");
+            }
+            let llvm = compile_tests_to_llvm_with_module(combined_source, module_name);
+            if trace_runner {
+                print.info("test runner: compile done (bytes=" + number_to_string(llvm.length) + ")");
+            }
+            if llvm.length == 0 {
+                print.error("test compile failed: " + path);
+                fs.deleteFile(test_runner_active_path);
+                return 1;
+            }
+            let cleaned = _strip_native_log_prefixes(llvm);
+            _write_text(ll_path, cleaned);
+
+            if trace_runner {
+                print.info("test runner: link start");
+            }
+            let link_rc = _clang_link_test(ll_path, exe_path, runtime_root);
+            if link_rc != 0 {
+                print.error("link failed (clang exit=" + number_to_string(link_rc) + ")");
+                fs.deleteFile(test_runner_active_path);
+                return link_rc;
+            }
+            if trace_runner {
+                print.info("test runner: link done");
+                print.info("test runner: exec start");
+            }
+            let run_rc = process.run([exe_path]);
+            if trace_runner {
+                print.info("test runner: exec done (exit=" + number_to_string(run_rc) + ")");
+            }
+            if run_rc != 0 {
+                print.error("test failed: " + path);
+                fs.deleteFile(test_runner_active_path);
+                return run_rc;
+            }
+            index += 1;
+        }
+        fs.deleteFile(test_runner_active_path);
+        return 0;
+    }
+
+    if cmd == "-h" || cmd == "--help" {
+        print.info(_usage());
+        return 0;
+    }
+
+    print.error("unknown command: " + cmd);
+    print.error(_usage());
+    return 2;
+}
+
+// Exported entrypoint for the native argv shim.
+fn native_cli_main(argv -> string[]) -> number ![io] {
+    return sailfin_cli_main(argv);
+}
+
+fn _join_with_separator_cli(values -> string[], separator -> string) -> string {
+    if values.length == 0 {
+        return "";
+    }
+    if values.length == 1 {
+        return values[0];
+    }
+    let mut parts -> string[] = values;
+    loop {
+        if parts.length <= 1 {
+            break;
+        }
+        let mut next -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= parts.length {
+                break;
+            }
+            if index + 1 < parts.length {
+                let combined = parts[index] + separator + parts[index + 1];
+                next = next.concat([combined]);
+                index += 2;
+                continue;
+            }
+            next = next.concat([parts[index]]);
+            index += 1;
+        }
+        parts = next;
+    }
+    return parts[0];
+}
+
+fn _strip_native_log_prefixes(text -> string) -> string {
+    // Some native builds annotate LLVM output lines with a log-level prefix.
+    // Strip those prefixes so clang can parse the IR.
+    // Fast path: avoid touching large IR blobs unless we see a prefix.
+    if text.length >= 6 {
+        // Only detect at start-of-text; full scan is expensive.
+        let head7 = substring(text, 0, 7);
+        if head7 != "[info] " && head7 != "[warn] " {
+            if text.length >= 8 {
+                let head8 = substring(text, 0, 8);
+                if head8 != "[error] " {
+                    return text;
+                }
+            } else {
+                return text;
+            }
+        }
+    } else {
+        return text;
+    }
+
+    let mut out -> string[] = [];
+    let mut start -> number = 0;
+    loop {
+        if start > text.length {
+            break;
+        }
+        let mut end -> number = start;
+        loop {
+            if end >= text.length {
+                break;
+            }
+            if text[end] == "\n" {
+                break;
+            }
+            end += 1;
+        }
+
+        let mut line = substring(text, start, end);
+        if line.length >= 7 {
+            let prefix7 = substring(line, 0, 7);
+            if prefix7 == "[info] " {
+                line = substring(line, 7, line.length);
+            } else if prefix7 == "[warn] " {
+                line = substring(line, 7, line.length);
+            } else if line.length >= 8 {
+                let prefix8 = substring(line, 0, 8);
+                if prefix8 == "[error] " {
+                    line = substring(line, 8, line.length);
+                }
+            }
+        } else if line.length >= 8 {
+            let prefix8 = substring(line, 0, 8);
+            if prefix8 == "[error] " {
+                line = substring(line, 8, line.length);
+            }
+        }
+        out = append_string(out, line);
+
+        if end >= text.length {
+            break;
+        }
+        start = end + 1;
+    }
+    return _join_with_separator_cli(out, "\n") + "\n";
+}

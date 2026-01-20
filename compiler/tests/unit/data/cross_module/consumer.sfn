@@ -1,0 +1,50 @@
+// compiler/tests/data/cross_module/consumer.sfn
+// Imports and uses types from shared_types module
+
+import { Point, Rectangle, Color, Shape, make_red, make_circle } from "./shared_types";
+
+fn use_point() -> number {
+  let p = Point { x: 3.0, y: 4.0 };
+  return p.distance_from_origin();
+}
+
+fn use_rectangle() -> number {
+  let rect = Rectangle {
+    top_left: Point { x: 0.0, y: 0.0 },
+    width: 10.0,
+    height: 20.0
+  };
+  return rect.width * rect.height;
+}
+
+fn use_color() -> int {
+  let c = make_red();
+  match c {
+    Color.Red => { return 1; }
+    Color.Green => { return 2; }
+    Color.Blue => { return 3; }
+    Color.Custom { r, g, b } => { return r + g + b; }
+  }
+}
+
+fn use_shape() -> number {
+  let s = make_circle(5.0, 5.0, 3.0);
+  match s {
+    Shape.Circle { center, radius } => {
+      return center.x + center.y + radius;
+    }
+    Shape.Box { bounds } => {
+      return bounds.width;
+    }
+    Shape.Empty => {
+      return 0.0;
+    }
+  }
+}
+
+fn main() -> number {
+  let point_result = use_point();
+  let rect_result = use_rectangle();
+  let shape_result = use_shape();
+  return point_result + rect_result + shape_result;
+}

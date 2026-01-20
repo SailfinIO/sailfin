@@ -9,5 +9,5 @@ fn increment() -> void {
 
 fn main() ![io] {
     increment();
-    print.info("Age is now {{age}}");
+    print.info("{{name}} is now {{age}}");
 }

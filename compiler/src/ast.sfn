@@ -17,6 +17,7 @@ struct TypeAnnotation {
 struct TypeParameter {
     name -> string;
     bound -> TypeAnnotation?;
+    span -> SourceSpan?;
 }
 
 struct Block {
@@ -25,11 +26,18 @@ struct Block {
     statements -> Statement[];
 }
 
+struct SourceSpan {
+    start_line -> number;
+    start_column -> number;
+    end_line -> number;
+    end_column -> number;
+}
+
 enum Expression {
     Identifier { name -> string },
     NumberLiteral { value -> string },
     StringLiteral { value -> string },
-    BooleanLiteral { value -> boolean },
+    BooleanLiteral { value -> string },
     NullLiteral,
     Unary { operator -> string, operand -> Expression },
     Binary { operator -> string, left -> Expression, right -> Expression },
@@ -49,6 +57,7 @@ struct Parameter {
     type_annotation -> TypeAnnotation?;
     default_value -> Expression?;
     mutable -> boolean;
+    span -> SourceSpan?;
 }
 
 struct WithClause {
@@ -80,12 +89,14 @@ struct MatchCase {
 struct ModelProperty {
     name -> string;
     value -> Expression;
+    span -> SourceSpan?;
 }
 
 struct FieldDeclaration {
     name -> string;
     type_annotation -> TypeAnnotation;
     mutable -> boolean;
+    name_span -> SourceSpan?;
 }
 
 struct MethodDeclaration {
@@ -97,6 +108,7 @@ struct MethodDeclaration {
 struct EnumVariant {
     name -> string;
     fields -> FieldDeclaration[];
+    name_span -> SourceSpan?;
 }
 
 struct FunctionSignature {
@@ -106,6 +118,7 @@ struct FunctionSignature {
     return_type -> TypeAnnotation?;
     effects -> string[];
     type_parameters -> TypeParameter[];
+    name_span -> SourceSpan?;
 }
 
 struct PipelineDeclaration {
@@ -145,9 +158,36 @@ struct DecoratorArgument {
     expression -> Expression;
 }
 
+fn decorator_names(decorators -> Decorator[]) -> string[] {
+    let mut names -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= decorators.length {
+            break;
+        }
+        names.push(decorators[index].name);
+        index += 1;
+    }
+    return names;
+}
+
+struct ImportSpecifier {
+    name -> string;
+    alias -> string?;
+}
+
+struct ExportSpecifier {
+    name -> string;
+    alias -> string?;
+}
+
 enum Statement {
     ImportDeclaration {
-        items -> string[];
+        import_specifiers -> ImportSpecifier[];
+        source -> string;
+    },
+    ExportDeclaration {
+        export_specifiers -> ExportSpecifier[];
         source -> string;
     },
     VariableDeclaration {
@@ -155,9 +195,12 @@ enum Statement {
         mutable -> boolean;
         type_annotation -> TypeAnnotation?;
         initializer -> Expression?;
+        span -> SourceSpan?;
+        initializer_span -> SourceSpan?;
     },
     ModelDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         model_type -> TypeAnnotation;
         properties -> ModelProperty[];
         effects -> string[];
@@ -175,6 +218,7 @@ enum Statement {
     },
     TestDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         body -> Block;
         effects -> string[];
         decorators -> Decorator[];
@@ -184,8 +228,14 @@ enum Statement {
         body -> Block;
         decorators -> Decorator[];
     },
+    ExternFunctionDeclaration {
+        signature -> FunctionSignature;
+        unsafe -> boolean;
+        decorators -> Decorator[];
+    },
     StructDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         type_parameters -> TypeParameter[];
         implements_types -> TypeAnnotation[];
         fields -> FieldDeclaration[];
@@ -194,24 +244,29 @@ enum Statement {
     },
     TypeAliasDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         type_parameters -> TypeParameter[];
         aliased_type -> TypeAnnotation;
         decorators -> Decorator[];
     },
     InterfaceDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         type_parameters -> TypeParameter[];
         members -> FunctionSignature[];
         decorators -> Decorator[];
     },
     EnumDeclaration {
         name -> string;
+        name_span -> SourceSpan?;
         type_parameters -> TypeParameter[];
         variants -> EnumVariant[];
         decorators -> Decorator[];
     },
     PromptStatement {
         channel -> string;
+        keyword_token -> Token;
+        channel_token -> Token;
         body -> Block;
         decorators -> Decorator[];
     },
@@ -242,11 +297,27 @@ enum Statement {
         else_branch -> ElseBranch?;
         decorators -> Decorator[];
     },
+    BlockStatement {
+        body -> Block;
+    },
     ReturnStatement {
         expression -> Expression?;
+        span -> SourceSpan?;
+    },
+    ThrowStatement {
+        expression -> Expression;
+        span -> SourceSpan?;
+    },
+    TryStatement {
+        try_block -> Block;
+        catch_name -> string?;
+        catch_name_token -> Token?;
+        catch_block -> Block?;
+        finally_block -> Block?;
     },
     ExpressionStatement {
         expression -> Expression;
+        span -> SourceSpan?;
     },
     Unknown {
         tokens -> Token[];

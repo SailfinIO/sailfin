@@ -1,0 +1,28 @@
+interface Meter {
+    fn total(self -> Meter) -> number;
+}
+
+struct Person implements Meter {
+    years -> number;
+
+    fn total(self -> Person) -> number {
+        return self.years;
+    }
+}
+
+fn make_people() -> Person[] {
+    return [Person { years: 36 }, Person { years: 42 }];
+}
+
+fn total_years(values -> Person[]) -> number {
+    let mut total -> number = 0;
+    for person in values {
+        total = total + person.years;
+    }
+    return total;
+}
+
+fn main() -> number {
+    let people = make_people();
+    return total_years(people);
+}

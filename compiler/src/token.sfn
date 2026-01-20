@@ -5,11 +5,11 @@
 // without committing to every token the language might eventually surface.
 
 enum TokenKind {
-    Identifier { value -> string },
-    NumberLiteral { value -> string },
-    StringLiteral { value -> string },
-    BooleanLiteral { value -> boolean },
-    Symbol { value -> string },
+    Identifier,
+    NumberLiteral,
+    StringLiteral,
+    BooleanLiteral,
+    Symbol,
     Whitespace,
     Comment,
     EndOfFile,

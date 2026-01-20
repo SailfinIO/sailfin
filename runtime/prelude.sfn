@@ -9,50 +9,765 @@ let fs = runtime.fs;
 let http = runtime.http;
 let websocket = runtime.websocket;
 
-struct Scheduler {
-    fn spawn(self, task, name -> string = "") ![io] {
-        spawn(task, name);
-    }
+let runtime_create_capability_grant = runtime.create_capability_grant;
+let runtime_create_filesystem_bridge = runtime.create_filesystem_bridge;
+let runtime_create_http_bridge = runtime.create_http_bridge;
+let runtime_create_model_bridge = runtime.create_model_bridge;
+let runtime_sleep_fn = runtime.sleep;
+let runtime_monotonic_millis_fn = runtime.monotonic_millis;
+let runtime_channel_fn = runtime.channel;
+let runtime_spawn_fn = runtime.spawn;
+let runtime_log_execution_fn = runtime.logExecution;
+let runtime_to_debug_string_fn = runtime.to_debug_string;
+let runtime_raise_value_error_fn = runtime.raise_value_error;
+let runtime_is_string_fn = runtime.is_string;
+let runtime_is_number_fn = runtime.is_number;
+let runtime_is_boolean_fn = runtime.is_boolean;
+let runtime_is_void_fn = runtime.is_void;
+let runtime_is_array_fn = runtime.is_array;
+let runtime_is_callable_fn = runtime.is_callable;
+let runtime_resolve_runtime_type_fn = runtime.resolve_runtime_type;
+let runtime_instance_of_fn = runtime.instance_of;
+let runtime_serve_fn = runtime.serve;
+let runtime_char_code_fn = runtime.char_code;
+let runtime_parallel_fn = runtime.parallel;
+let runtime_array_map_fn = runtime.array_map;
+let runtime_array_filter_fn = runtime.array_filter;
+let runtime_array_reduce_fn = runtime.array_reduce;
+let runtime_grapheme_count_fn = runtime.grapheme_count;
+let runtime_grapheme_at_fn = runtime.grapheme_at;
+
+fn capability_grant(effects -> string[]) -> any {
+    return runtime_create_capability_grant(effects);
 }
 
-let scheduler -> Scheduler = Scheduler {};
+fn fs_bridge(grant -> any) -> any {
+    return runtime_create_filesystem_bridge(grant);
+}
+
+fn http_bridge(grant -> any) -> any {
+    return runtime_create_http_bridge(grant);
+}
+
+fn model_bridge(grant -> any) -> any {
+    return runtime_create_model_bridge(grant);
+}
+
+struct EnumField {
+    name -> string;
+    value -> any;
+}
+
+struct EnumVariantDefinition {
+    name -> string;
+    field_names -> string[];
+}
+
+struct EnumType {
+    name -> string;
+    variants -> EnumVariantDefinition[];
+}
+
+struct EnumInstance {
+    type -> EnumType;
+    variant -> string;
+    fields -> EnumField[];
+}
+
+struct StructField {
+    name -> string;
+    value -> any;
+}
+
+struct TypeDescriptor {
+    kind -> string;
+    name -> string?;
+    items -> TypeDescriptor[];
+}
 
 fn sleep(milliseconds -> number) ![clock] {
-    runtime.sleep(milliseconds);
+    runtime_sleep_fn(milliseconds);
 }
 
-fn channel<T>(capacity -> number = 0) ![io] {
-    return runtime.channel(capacity);
+fn monotonic_millis() -> number ![clock] {
+    return runtime_monotonic_millis_fn();
 }
 
-fn parallel(tasks) ![io] {
-    return runtime.parallel(tasks);
+fn channel<T>(capacity -> number = 0) -> any ![io] {
+    return runtime_channel_fn(capacity);
 }
 
-fn spawn(task, name -> string = "") ![io] {
-    if name.length == 0 {
-        runtime.spawn(task);
-        return;
+fn parallel(tasks -> any[]) -> any[] ![io] {
+    return runtime_parallel_fn(tasks);
+}
+
+fn spawn(task -> any, name -> string = "") -> void ![io] {
+    runtime_spawn_fn(task, name);
+}
+
+fn logExecution(callable -> any) -> any {
+    return runtime_log_execution_fn(callable);
+}
+
+fn array_map(items -> any[], mapper -> any) -> any[] {
+    return runtime_array_map_fn(items, mapper);
+}
+
+fn array_filter(items -> any[], predicate -> any) -> any[] {
+    return runtime_array_filter_fn(items, predicate);
+}
+
+fn array_reduce(items -> any[], initial -> any, reducer -> any) -> any {
+    return runtime_array_reduce_fn(items, initial, reducer);
+}
+
+fn char_at(value -> string, index -> number) -> string {
+    if value.length == 0 {
+        return "";
     }
-    runtime.spawn(task, name);
+    if index < 0 {
+        return "";
+    }
+    if index >= value.length {
+        return "";
+    }
+    return runtime_grapheme_at_fn(value, index);
 }
 
-fn logExecution(callable) {
-    return runtime.logExecution(callable);
+fn enum_type(name -> string) -> EnumType {
+    return EnumType { name: name, variants: [] };
 }
 
-fn array_map(items, mapper) {
-    return runtime.array_map(items, mapper);
+fn enum_field(name -> string, value -> any) -> EnumField {
+    return EnumField { name: name, value: value };
 }
 
-fn array_filter(items, predicate) {
-    return runtime.array_filter(items, predicate);
+fn enum_define_variant(enum_type -> EnumType, variant_name -> string, field_names -> string[]) -> EnumType {
+    let variant = EnumVariantDefinition { name: variant_name, field_names: field_names };
+    let updated = enum_type.variants.concat([variant]);
+    return EnumType { name: enum_type.name, variants: updated };
 }
 
-fn array_reduce(items, initial, reducer) {
-    return runtime.array_reduce(items, initial, reducer);
+fn enum_lookup_field(fields -> EnumField[], name -> string) -> EnumField? {
+    let mut index = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        let field = fields[index];
+        if field.name == name {
+            return field;
+        }
+        index = index + 1;
+    }
+    return null;
 }
 
-fn serve(handler, config = null) ![io, net] {
-    runtime.serve(handler, config);
+fn enum_find_variant(enum_type -> EnumType, variant_name -> string) -> EnumVariantDefinition? {
+    let mut index = 0;
+    loop {
+        if index >= enum_type.variants.length {
+            break;
+        }
+        let variant = enum_type.variants[index];
+        if variant.name == variant_name {
+            return variant;
+        }
+        index = index + 1;
+    }
+    return null;
 }
+
+fn enum_normalize_fields(definition -> EnumVariantDefinition?, provided -> EnumField[]) -> EnumField[] {
+    if definition == null {
+        return provided;
+    }
+    let expected = definition.field_names;
+    if expected.length == 0 {
+        return [];
+    }
+    let mut normalized -> EnumField[] = [];
+    let mut index = 0;
+    loop {
+        if index >= expected.length {
+            break;
+        }
+        let field_name = expected[index];
+        let candidate = enum_lookup_field(provided, field_name);
+        let value = null;
+        if candidate != null {
+            value = candidate.value;
+        }
+        normalized = normalized.concat([EnumField { name: field_name, value: value }]);
+        index = index + 1;
+    }
+    return normalized;
+}
+
+fn enum_instantiate(enum_type -> EnumType, variant_name -> string, provided -> EnumField[]) -> EnumInstance {
+    let definition = enum_find_variant(enum_type, variant_name);
+    let fields = enum_normalize_fields(definition, provided);
+    return EnumInstance { type: enum_type, variant: variant_name, fields: fields };
+}
+
+fn enum_get_field(instance -> EnumInstance, name -> string) -> any {
+    let mut index = 0;
+    loop {
+    if index >= instance.fields.length {
+        break;
+    }
+    let field = instance.fields[index];
+    if field.name == name {
+        return field.value;
+    }
+    index = index + 1;
+    }
+    return null;
+}
+
+fn struct_field(name -> string, value -> any) -> StructField {
+    return StructField { name: name, value: value };
+}
+
+fn struct_repr(name -> string, fields -> StructField[]) -> string {
+    let mut result = name + "(";
+    let mut index = 0;
+    loop {
+        if index >= fields.length {
+            break;
+        }
+        if index > 0 {
+            result = result + ", ";
+        }
+        let field = fields[index];
+        let value_text = to_debug_string(field.value);
+        result = result + field.name + "=" + value_text;
+        index = index + 1;
+    }
+    result = result + ")";
+    return result;
+}
+
+fn to_debug_string(value -> any) -> string {
+    return runtime_to_debug_string_fn(value);
+}
+
+fn format_interpolated(parts -> string[], values -> any[]) -> string {
+    let mut result = "";
+    let mut index = 0;
+    loop {
+        if index >= parts.length {
+            break;
+        }
+        result = result + parts[index];
+        if index < values.length {
+            result = result + to_debug_string(values[index]);
+        }
+        index = index + 1;
+    }
+    return result;
+}
+
+fn type_descriptor(kind -> string, name -> string?, items -> TypeDescriptor[]) -> TypeDescriptor {
+    return TypeDescriptor { kind: kind, name: name, items: items };
+}
+
+fn type_descriptor_primitive(name -> string) -> TypeDescriptor {
+    return type_descriptor("primitive", name, []);
+}
+
+fn type_descriptor_union(descriptors -> TypeDescriptor[]) -> TypeDescriptor {
+    return type_descriptor("union", null, descriptors);
+}
+
+fn type_descriptor_intersection(descriptors -> TypeDescriptor[]) -> TypeDescriptor {
+    return type_descriptor("intersection", null, descriptors);
+}
+
+fn type_descriptor_array(inner -> TypeDescriptor) -> TypeDescriptor {
+    return type_descriptor("array", null, [inner]);
+}
+
+fn type_descriptor_function() -> TypeDescriptor {
+    return type_descriptor("function", null, []);
+}
+
+fn type_descriptor_named(name -> string) -> TypeDescriptor {
+    return type_descriptor("named", name, []);
+}
+
+fn type_descriptor_unknown() -> TypeDescriptor {
+    return type_descriptor("unknown", null, []);
+}
+
+fn descriptor_trim(value -> string) -> string {
+    let mut start = 0;
+    let mut end = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+    let ch = char_at(value, start);
+        if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
+            start = start + 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = char_at(value, end - 1);
+        if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
+            end = end - 1;
+            continue;
+        }
+        break;
+    }
+    return substring(value, start, end);
+}
+
+fn string_starts_with(value -> string, prefix -> string) -> boolean {
+    if prefix.length > value.length {
+        return false;
+    }
+    let mut index = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        let value_ch = char_at(value, index);
+        let prefix_ch = char_at(prefix, index);
+        if value_ch != prefix_ch {
+            return false;
+        }
+        index = index + 1;
+    }
+    return true;
+}
+
+fn string_ends_with(value -> string, suffix -> string) -> boolean {
+    if suffix.length > value.length {
+        return false;
+    }
+    let mut offset = value.length - suffix.length;
+    let mut index = 0;
+    loop {
+        if index >= suffix.length {
+            break;
+        }
+        let value_ch = char_at(value, offset + index);
+        let suffix_ch = char_at(suffix, index);
+        if value_ch != suffix_ch {
+            return false;
+        }
+        index = index + 1;
+    }
+    return true;
+}
+
+fn descriptor_find_top_level(value -> string, needle -> string) -> number {
+    let trimmed = descriptor_trim(value);
+    if needle.length != 1 {
+        return -1;
+    }
+    let target = char_at(needle, 0);
+    let mut index = 0;
+    let mut paren_depth = 0;
+    let mut angle_depth = 0;
+    let mut bracket_depth = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+    let ch = char_at(trimmed, index);
+        if ch == "(" {
+            paren_depth = paren_depth + 1;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth = paren_depth - 1;
+            }
+        } else if ch == "<" {
+            angle_depth = angle_depth + 1;
+        } else if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth = angle_depth - 1;
+            }
+        } else if ch == "[" {
+            bracket_depth = bracket_depth + 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth = bracket_depth - 1;
+            }
+        }
+        if ch == target && paren_depth == 0 && angle_depth == 0 && bracket_depth == 0 {
+            return index;
+        }
+        index = index + 1;
+    }
+    return -1;
+}
+
+fn descriptor_strip_outer_parens(value -> string) -> string {
+    let mut current = descriptor_trim(value);
+    loop {
+        if current.length < 2 {
+            return current;
+        }
+        if char_at(current, 0) != "(" {
+            return current;
+        }
+        if char_at(current, current.length - 1) != ")" {
+            return current;
+        }
+        let mut depth = 0;
+        let mut index = 0;
+        let mut valid = true;
+        loop {
+            if index >= current.length {
+                break;
+            }
+            let ch = char_at(current, index);
+            if ch == "(" {
+                depth = depth + 1;
+            } else if ch == ")" {
+                depth = depth - 1;
+                if depth < 0 {
+                    valid = false;
+                    break;
+                }
+                if depth == 0 && index < current.length - 1 {
+                    valid = false;
+                    break;
+                }
+            }
+            index = index + 1;
+        }
+        if !valid || depth != 0 {
+            return current;
+        }
+        current = descriptor_trim(substring(current, 1, current.length - 1));
+    }
+    return current;
+}
+
+fn split_descriptor(value -> string, separator -> string) -> string[] {
+    let trimmed = descriptor_trim(value);
+    if separator.length != 1 {
+        return [trimmed];
+    }
+    let mut parts -> string[] = [];
+    let mut start = 0;
+    let mut index = 0;
+    let mut paren_depth = 0;
+    let mut angle_depth = 0;
+    let mut bracket_depth = 0;
+    let target = char_at(separator, 0);
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+    let ch = char_at(trimmed, index);
+        if ch == "(" {
+            paren_depth = paren_depth + 1;
+        } else if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth = paren_depth - 1;
+            }
+        } else if ch == "<" {
+            angle_depth = angle_depth + 1;
+        } else if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth = angle_depth - 1;
+            }
+        } else if ch == "[" {
+            bracket_depth = bracket_depth + 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth = bracket_depth - 1;
+            }
+        }
+        if ch == target && paren_depth == 0 && angle_depth == 0 && bracket_depth == 0 {
+            let segment = substring(trimmed, start, index);
+            parts = parts.concat([descriptor_trim(segment)]);
+            start = index + 1;
+        }
+        index = index + 1;
+    }
+    let tail = substring(trimmed, start, trimmed.length);
+    let cleaned_tail = descriptor_trim(tail);
+    if cleaned_tail.length > 0 || parts.length == 0 {
+        parts = parts.concat([cleaned_tail]);
+    }
+    return parts;
+}
+
+fn parse_descriptor_list(parts -> string[]) -> TypeDescriptor[] {
+    let mut descriptors -> TypeDescriptor[] = [];
+    let mut index = 0;
+    loop {
+        if index >= parts.length {
+            break;
+        }
+        let entry = parts[index];
+        if entry.length > 0 {
+            descriptors = descriptors.concat([parse_type_descriptor(entry)]);
+        }
+        index = index + 1;
+    }
+    return descriptors;
+}
+
+fn parse_type_descriptor(text -> string) -> TypeDescriptor {
+    let trimmed = descriptor_strip_outer_parens(text);
+    if trimmed.length == 0 {
+        return type_descriptor_unknown();
+    }
+    let union_parts = split_descriptor(trimmed, "|");
+    if union_parts.length > 1 {
+        return type_descriptor_union(parse_descriptor_list(union_parts));
+    }
+    let intersection_parts = split_descriptor(trimmed, "&");
+    if intersection_parts.length > 1 {
+        return type_descriptor_intersection(parse_descriptor_list(intersection_parts));
+    }
+    if string_ends_with(trimmed, "[]") {
+        let inner_text = substring(trimmed, 0, trimmed.length - 2);
+        return type_descriptor_array(parse_type_descriptor(inner_text));
+    }
+    if string_starts_with(trimmed, "fn(") {
+        return type_descriptor_function();
+    }
+    if char_at(trimmed, trimmed.length - 1) == "?" {
+        let base_text = substring(trimmed, 0, trimmed.length - 1);
+        let base_descriptor = parse_type_descriptor(base_text);
+        let void_descriptor = type_descriptor_primitive("void");
+        return type_descriptor_union([base_descriptor, void_descriptor]);
+    }
+    let generic_index = descriptor_find_top_level(trimmed, "<");
+    let mut normalized = trimmed;
+    if generic_index >= 0 {
+        normalized = descriptor_trim(substring(trimmed, 0, generic_index));
+    }
+    if string_starts_with(normalized, "runtime.") {
+        normalized = descriptor_trim(substring(normalized, 8, normalized.length));
+    }
+    if normalized == "string" || normalized == "number" || normalized == "boolean" || normalized == "void" {
+        return type_descriptor_primitive(normalized);
+    }
+    return type_descriptor_named(normalized);
+}
+
+fn check_type_primitive(value -> any, name -> string) -> boolean {
+    if name == "string" {
+        return runtime_is_string_fn(value);
+    }
+    if name == "number" {
+        return runtime_is_number_fn(value);
+    }
+    if name == "boolean" {
+        return runtime_is_boolean_fn(value);
+    }
+    if name == "void" {
+        return runtime_is_void_fn(value);
+    }
+    return false;
+}
+
+fn check_type_descriptor(value -> any, descriptor -> TypeDescriptor) -> boolean {
+    if descriptor.kind == "primitive" {
+        if descriptor.name == null {
+            return false;
+        }
+        return check_type_primitive(value, descriptor.name);
+    }
+    if descriptor.kind == "union" {
+        let mut index = 0;
+        loop {
+            if index >= descriptor.items.length {
+                break;
+            }
+            if check_type_descriptor(value, descriptor.items[index]) {
+                return true;
+            }
+            index = index + 1;
+        }
+        return false;
+    }
+    if descriptor.kind == "intersection" {
+        let mut index = 0;
+        loop {
+            if index >= descriptor.items.length {
+                break;
+            }
+            if !check_type_descriptor(value, descriptor.items[index]) {
+                return false;
+            }
+            index = index + 1;
+        }
+        return descriptor.items.length > 0;
+    }
+    if descriptor.kind == "array" {
+        if descriptor.items.length == 0 {
+            return runtime_is_array_fn(value);
+        }
+        if !runtime_is_array_fn(value) {
+            return false;
+        }
+        let element_descriptor = descriptor.items[0];
+        let mut index = 0;
+        loop {
+            if index >= value.length {
+                break;
+            }
+            if !check_type_descriptor(value[index], element_descriptor) {
+                return false;
+            }
+            index = index + 1;
+        }
+        return true;
+    }
+    if descriptor.kind == "function" {
+        return runtime_is_callable_fn(value);
+    }
+    if descriptor.kind == "named" {
+        if descriptor.name == null {
+            return false;
+        }
+        let resolved = runtime_resolve_runtime_type_fn(descriptor.name);
+        return runtime_instance_of_fn(value, resolved);
+    }
+    if descriptor.kind == "unknown" {
+        return false;
+    }
+    return false;
+}
+
+fn check_type(value -> any, descriptor -> string) -> boolean {
+    let parsed = parse_type_descriptor(descriptor);
+    return check_type_descriptor(value, parsed);
+}
+
+fn serve(handler -> any, config -> any? = null) -> void ![io, net] {
+    runtime_serve_fn(handler, config);
+}
+
+fn clamp(value -> number, minimum -> number, maximum -> number) -> number {
+    if value < minimum {
+        return minimum;
+    }
+    if value > maximum {
+        return maximum;
+    }
+    return value;
+}
+
+fn substring(text -> string, start -> number, end -> number) -> string {
+    let length = text.length;
+    if length == 0 {
+        return "";
+    }
+    let mut normalized_start = clamp(start, 0, length);
+    let mut normalized_end = clamp(end, 0, length);
+    if normalized_start >= normalized_end {
+        return "";
+    }
+    let mut index = normalized_start;
+    let mut result -> string = "";
+    loop {
+        if index >= normalized_end {
+            break;
+        }
+        result = result + char_at(text, index);
+        index = index + 1;
+    }
+    return result;
+}
+
+fn strings_equal(left -> string, right -> string) -> boolean {
+    if left.length != right.length {
+        return false;
+    }
+    let mut index = 0;
+    loop {
+        if index >= left.length {
+            break;
+        }
+        let left_char = char_at(left, index);
+        let right_char = char_at(right, index);
+        if runtime_char_code_fn(left_char) != runtime_char_code_fn(right_char) {
+            return false;
+        }
+        index = index + 1;
+    }
+    return true;
+}
+
+fn find_char(text -> string, character -> string, start -> number = 0) -> number {
+    let length = text.length;
+    if length == 0 {
+        return -1;
+    }
+
+    let mut normalized_start = start;
+    if normalized_start < 0 {
+        normalized_start = 0;
+    }
+    if normalized_start >= length {
+        return -1;
+    }
+
+    let mut target = character;
+    if target.length == 2 && char_at(target, 0) == "\\" {
+        let escape = char_at(target, 1);
+        if escape == "n" {
+            target = "\n";
+        } else if escape == "r" {
+            target = "\r";
+        } else if escape == "t" {
+            target = "\t";
+        }
+    }
+
+    let mut index = normalized_start;
+    loop {
+        if index >= length {
+            break;
+        }
+        if strings_equal(char_at(text, index), target) {
+            return index;
+        }
+        index = index + 1;
+    }
+
+    return -1;
+}
+
+fn match_exhaustive_failed(value -> any) -> void {
+    let message = "Non-exhaustive match for value {{ value }}";
+    runtime_raise_value_error_fn(message);
+}
+
+fn char_code(character -> string) -> number {
+    if character.length == 0 {
+        return -1;
+    }
+
+    // Performance note: this function sits on hot paths in the compiler.
+    // Prefer the runtime intrinsic instead of scanning through ASCII tables.
+    // `char_at` returns a single grapheme; `runtime_char_code_fn` returns the
+    // corresponding Unicode code point.
+    return runtime_char_code_fn(char_at(character, 0));
+}
+
+
+fn grapheme_count(text -> string) -> number {
+    return runtime_grapheme_count_fn(text);
+}
+
+fn grapheme_at(text -> string, index -> number) -> string {
+    return runtime_grapheme_at_fn(text, index);
+}
+
+export { capability_grant, fs_bridge, http_bridge, model_bridge, clamp, substring, find_char, grapheme_count, grapheme_at, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated };

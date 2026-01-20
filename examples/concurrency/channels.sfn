@@ -1,6 +1,6 @@
 // examples/concurrency/channels.sfn
 
-import { Channel, channel } from "sail/async";
+import { Channel, channel } from "sfn/async";
 
 async fn main() ![io] {
     let messages -> Channel<number> = channel();

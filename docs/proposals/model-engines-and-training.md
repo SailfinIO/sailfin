@@ -27,7 +27,8 @@ This proposal formalizes:
 
 These additions make Sailfin a fully AI-native systems language: capable of defining, training, and deploying models reproducibly.
 
-Bootstrap reality: All features in this document are “planned/self-hosted” unless explicitly stated as available in `bootstrap/`. Where the bootstrap adds stubs, they are noted.
+Status note: All features in this document are planned unless explicitly marked
+as shipped in `docs/status.md`.
 
 ---
 
@@ -65,14 +66,12 @@ Notes:
 2) Resolve an adapter by provider via an Adapter Registry (see §3).
 3) Resolve artifacts: local cache, provider registry, or remote endpoint.
 4) Materialize an EnginePlan:
-   - Executable target (binary, Python module, or HTTP endpoint)
+   - Executable target (binary or HTTP endpoint)
    - Tokenizer spec and I/O schemas
    - Device/precision settings
    - Declared capabilities (`infer` and optionally `train`)
 5) Enforce effects: `![model]` required for inference, `![train]` for training.
 6) Execute via sandboxed adapter, producing a generation card (inference) or training card (training).
-
-Bootstrap note: Stage0 may implement a minimal `openai` (HTTP) and `torch` (local Python) adapter with provenance stubs only.
 
 ---
 
@@ -95,8 +94,8 @@ Adapters are sandboxed modules or subprocesses that implement a unified interfac
   "provider": "torch",
   "supports": ["infer", "train"],
   "transport": "process",
-  "entrypoint": "python3 -m sailfin.adapters.torch",
-  "env": ["PYTHONPATH"],
+  "entrypoint": "sfn-adapter-torch",
+  "env": [],
   "map": {
     "engineParam": "model",
     "temperature": "temperature",
@@ -105,31 +104,17 @@ Adapters are sandboxed modules or subprocesses that implement a unified interfac
 }
 ```
 
-### 3.3 Bootstrap Adapter Interface (Python, planned stub)
+### 3.3 Adapter Interface (planned)
 
-```python
-class EngineAdapter:
-    def infer(self, request):
-        """Run forward inference. Returns output + telemetry card."""
-        raise NotImplementedError
-
-    def train(self, train_spec):
-        """Optional. Runs training/finetuning, yields TrainingCard."""
-        raise NotImplementedError
-
-class AdapterRegistry:
-    def __init__(self):
-        self._adapters = {
-            "openai": OpenAIAdapter(),
-            "torch": TorchAdapter(),
-        }
-
-    def resolve(self, engine_ident: str) -> EngineAdapter:
-        # Parse provider from engine_ident and return the adapter
-        ...
+```sfn
+interface EngineAdapter {
+  fn infer(request: EngineRequest) -> EngineResponse ![model];
+  fn train(request: TrainRequest) -> TrainResponse ![train];
+}
 ```
 
-Transport choices: `process`, `http`, or `inproc` (bootstrap-only). Self-hosted targets prefer sandboxed processes.
+Transport choices: `process` or `http`. `inproc` is reserved for trusted
+environments.
 
 ---
 
@@ -159,8 +144,6 @@ let x -> Tensor<[N, D], f32> = tensor.zeros([N, D])
 let y = tensor.add(x, 1.0)
 let z = tensor.matmul(x, y)
 ```
-
-Bootstrap note: Stage0 can route ops through adapter backends (e.g., Torch/JAX) for demonstration while deferring a native tensor engine.
 
 ### 4.3 Algorithm Capsules (user-level, planned)
 
@@ -249,7 +232,8 @@ dataset -> dataloader -> forward -> loss -> backward -> step
 - Produces a signed TrainingCard (engine, dataset hashes, optimizer, seed, device, metrics).
 - Resumable via checkpoints and replayable through the registry.
 
-Bootstrap note: Provide a `sfn train` CLI that validates manifests and prints a dry-run plan; no real training in stage0.
+Note: Provide a `sfn train` CLI that validates manifests and prints a dry-run
+plan; no real training in the initial implementation.
 
 ---
 
@@ -383,28 +367,27 @@ These can be replayed deterministically or published to the registry.
 - Once accepted:
   - Add section “Engines & Training” to `docs/spec.md`.
   - Extend EBNF for `EngineIdent`, `TrainingDeclaration`, and Tensor types in `docs/enbf.md`.
-  - Implement stub Adapter Registry in `bootstrap/runtime_support.py`.
+  - Implement Adapter Registry in `runtime/adapters/`.
   - Add CLI commands (`sfn train`, `sfn adapters list`).
-  - Add tests under `bootstrap/tests/engine_and_training/`.
+  - Add tests under `runtime/tests/engine_and_training/`.
 
 ---
 
-### Appendix A: Adapter Registry Sketch (Python, bootstrap)
+### Appendix A: Adapter Registry Sketch (pseudocode)
 
-```python
-class AdapterRegistry:
-    def __init__(self):
-        self._adapters = {
-            "openai": OpenAIAdapter(),
-            "torch": TorchAdapter(),
-        }
+```sfn
+struct AdapterRegistry {
+  adapters -> Map<string, EngineAdapter>;
+}
 
-    def resolve(self, engine_ident: str):
-        provider = engine_ident.split(":", 1)[0]
-        adapter = self._adapters.get(provider)
-        if not adapter:
-            raise RuntimeError(f"Unknown engine provider: {provider}")
-        return adapter
+fn resolve(registry: AdapterRegistry, engine_ident: string) -> EngineAdapter {
+  let provider = engine_ident.split(":", 1)[0];
+  let adapter = registry.adapters.get(provider);
+  if adapter == null {
+    throw RuntimeError("Unknown engine provider: {{ provider }}");
+  }
+  return adapter;
+}
 ```
 
 Notes:

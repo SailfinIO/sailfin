@@ -1,0 +1,89 @@
+name: "Sailfin Build + Package"
+description: "Builds the native compiler from a seed, prepares test artifacts, runs tests, and produces dist/ packages + installer archive."
+inputs:
+  target:
+    description: "Packaging target label (e.g. linux-x86_64, macos-arm64)"
+    required: true
+  max_attempts:
+    description: "Max attempts for selfhost rebuild (passed via BUILD_ARGS)"
+    required: true
+  build_jobs:
+    description: "Parallelism for build orchestrator"
+    required: false
+    default: "2"
+  clang:
+    description: "Clang executable"
+    required: false
+    default: "clang"
+  seed_repo:
+    description: "Repo used by install.sh for seed fetching"
+    required: false
+    default: "SailfinIO/sailfin"
+  seed_version:
+    description: "Seed version tag (without v), or 'latest'"
+    required: false
+    default: "latest"
+  seed_exclude_tag:
+    description: "Optional tag to exclude"
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Fetch released seed compiler
+      shell: bash -l {0}
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        seed_version="${{ inputs.seed_version }}"
+        seed_exclude_tag="${{ inputs.seed_exclude_tag }}"
+        if [ -z "$seed_version" ]; then
+          seed_version="latest"
+        fi
+        CONDA=$(which conda) \
+          make fetch-seed \
+            SEED_REPO="${{ inputs.seed_repo }}" \
+            SEED_VERSION="$seed_version" \
+            SEED_EXCLUDE_TAG="$seed_exclude_tag"
+        echo "[ci] seed binary: build/seed/bin/sailfin"
+        build/seed/bin/sailfin version
+
+    - name: Build native compiler (selfhost from released seed)
+      shell: bash -l {0}
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        # Let Makefile fetch the seed if needed.
+        # BUILD_ARGS is passed through to scripts/selfhost_native.py.
+        CONDA=$(which conda) \
+          make rebuild \
+            CLANG="${{ inputs.clang }}" \
+            BUILD_JOBS="${{ inputs.build_jobs }}" \
+            BUILD_ARGS="--max-attempts ${{ inputs.max_attempts }} --max-total-seconds 1800" \
+            SEED_NATIVE="build/seed/bin/sailfin"
+
+    - name: Prepare test artifacts
+      shell: bash -l {0}
+      run: |
+        set -euo pipefail
+        CONDA=$(which conda) make ci-prepare-test-artifacts
+
+    - name: Run Sailfin-native tests
+      shell: bash -l {0}
+      run: |
+        set -euo pipefail
+        CONDA=$(which conda) make test
+
+    - name: Package native artifacts
+      shell: bash -l {0}
+      run: |
+        set -euo pipefail
+        CONDA=$(which conda) make ci-package-native TARGET="${{ inputs.target }}"
+
+    - name: Package installer archive
+      shell: bash -l {0}
+      run: |
+        set -euo pipefail
+        CONDA=$(which conda) make ci-package-installer TARGET="${{ inputs.target }}"

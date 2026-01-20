@@ -2,18 +2,21 @@
 
 Updated: October 2025
 
-This reference lists the tokens that the Python bootstrap compiler (stage0)
-reserves today, along with notes about the Sailfin-native parser experiments.
+This reference lists the tokens that the Sailfin compiler reserves today, along
+with notes about parser behavior. For an implementation snapshot across the
+toolchain, consult `docs/status.md`.
 For an implementation snapshot across the toolchain, consult `docs/status.md`.
 
-## Bootstrap Keyword Set
+## Current Keyword Set
 
-The following keywords cannot be reused as identifiers in the stage0 compiler.
+The following keywords cannot be reused as identifiers in the compiler.
 
 ### Control Flow & Errors
 
 - `if`
 - `else`
+- `for`
+- `in`
 - `match`
 - `return`
 - `assert`
@@ -21,14 +24,19 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
 - `catch`
 - `finally`
 - `throw`
+- `loop`
+- `break`
+- `continue`
 
 ### Functions, Types & Declarations
 
 - `fn`
 - `async`
 - `await`
+- `extern`
 - `let`
 - `mut`
+- `unsafe`
 - `struct`
 - `enum`
 - `interface`
@@ -36,11 +44,20 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
 - `type`
 - `is`
 - `import`
+- `export`
 - `from`
+- `as` — Type casting operator (e.g., `ptr as *i32`)
 - `model`
 - `tool`
 - `pipeline`
 - `test`
+
+### Unsafe & FFI
+
+- `unsafe` — Marks functions or blocks that perform low-level operations
+- `extern` — Declares external C ABI functions
+- `raw` — Raw pointer creation expression (`&raw value`)
+- `opaque` — Target type for opaque foreign pointers (`*opaque`)
 
 ### Concurrency & Utilities
 
@@ -57,21 +74,20 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
 ### Prompt Composition
 
 - `prompt`
-- Channels (`system`, `user`, `assistant`, `tool`) are ordinary identifiers in
-  bootstrap; the canonical set is not enforced.
+- Channels (`system`, `user`, `assistant`, `tool`) are ordinary identifiers
+  unless the prompt syntax is used; the canonical set is not enforced yet.
 
-### Reserved Identifiers (Bootstrap Runtime)
+### Reserved Identifiers (Runtime)
 
-- `print` and `info` tokenise specially to support `print.info(...)`. The code
-  generator injects `print = runtime.console`; avoid shadowing `print`.
+- `print` and `info` tokenise specially to support `print.info(...)`. Avoid
+  shadowing `print`.
 
 > Behaviour notes:
-> - `assert` lowers to Python’s `assert`.
 > - `is` lowers to `runtime.check_type`.
-> - `model`, `pipeline`, `tool`, and `test` parse today but generate simple
->   stubs; the pipeline operator `|>` remains design-stage syntax.
+> - `model`, `pipeline`, `tool`, and `test` parse today but may generate stubs;
+>   the pipeline operator `|>` remains design-stage syntax.
 
-## Self-Hosted Parser Notes
+## Parser Notes
 
 - The Sailfin-native parser mirrors the keyword set above and emits structured
   nodes for `interface`, `enum`, `type`, `prompt`, and decorator-bearing
@@ -81,4 +97,4 @@ The following keywords cannot be reused as identifiers in the stage0 compiler.
   until they appear in `docs/status.md`.
 
 Track additions or removals through `docs/roadmap.md` and update this file when
-new keywords land in stage0.
+new keywords land.

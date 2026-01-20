@@ -1,0 +1,205 @@
+// compiler/src/llvm/expression_lowering/native/core_scopes.sfn
+//
+// Scope, local bindings, and lifetime tracking for expression lowering.
+//
+// Manages the symbol tables and lifetime metadata used during LLVM lowering:
+// `find_local_binding`, `find_parameter_binding`, `append_local_binding`,
+// `infer_borrow_base_scope`, lifetime region creation/release, and scope ID
+// construction (`format_root_scope_id`, `make_child_scope_id`).
+
+import { NativeStruct, NativeEnum } from "../../../native_ir";
+
+import {
+    OwnershipInfo,
+    LifetimeRegionMetadata,
+    LifetimeReleaseEvent,
+    ScopeMetadata,
+    LocalBinding,
+    ParameterBinding,
+    LLVMOperand,
+    StructLiteralField,
+} from "../../types";
+
+import { starts_with } from "../../utils";
+
+import { sanitize_symbol } from "./core_text";
+
+import { bindings_find_parameter_binding } from "../bindings";
+
+fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
+    return bindings_find_parameter_binding(bindings, name);
+}
+
+fn find_local_binding(locals -> LocalBinding[], name -> string) -> LocalBinding? {
+    let mut index -> number = locals.length;
+    loop {
+        if index <= 0 {
+            break;
+        }
+        index -= 1;
+        let entry = locals[index];
+        if entry.name == name {
+            return entry;
+        }
+    }
+    return null;
+}
+
+fn infer_borrow_base_scope(base -> string, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string) -> ScopeMetadata {
+    let local = find_local_binding(locals, base);
+    if local != null {
+        return ScopeMetadata { scope_id: local.scope_id, scope_depth: local.scope_depth };
+    }
+    let parameter = find_parameter_binding(bindings, base);
+    if parameter != null {
+        return ScopeMetadata { scope_id: format_root_scope_id(function_name), scope_depth: 0 };
+    }
+    return ScopeMetadata { scope_id: format_root_scope_id(function_name), scope_depth: 0 };
+}
+
+fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeRegionMetadata) -> LifetimeRegionMetadata[] {
+    return values.concat([value]);
+}
+
+fn append_lifetime_release_event(events -> LifetimeReleaseEvent[], event -> LifetimeReleaseEvent) -> LifetimeReleaseEvent[] {
+    return events.concat([event]);
+}
+
+fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id -> number, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata[] {
+    let mut result -> LifetimeRegionMetadata[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= regions.length {
+            break;
+        }
+        let entry = regions[index];
+        if entry.id == region_id {
+            let updated = LifetimeRegionMetadata {
+                id: entry.id,
+                binding: entry.binding,
+                base: entry.base,
+                mutable: entry.mutable,
+                start_span: entry.start_span,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
+                base_scope_id: entry.base_scope_id,
+                base_scope_depth: entry.base_scope_depth,
+                end_scope_id: scope_id,
+                end_scope_depth: scope_depth,
+                released: true,
+            };
+            result.push(updated);
+        } else {
+            result.push(entry);
+        }
+        index += 1;
+    }
+    return result;
+}
+
+fn apply_lifetime_release_events(regions -> LifetimeRegionMetadata[], releases -> LifetimeReleaseEvent[]) -> LifetimeRegionMetadata[] {
+    if releases.length == 0 {
+        return regions;
+    }
+    let mut current_regions -> LifetimeRegionMetadata[] = regions;
+    let mut index -> number = 0;
+    loop {
+        if index >= releases.length {
+            break;
+        }
+        let release = releases[index];
+        current_regions = mark_lifetime_region_released(current_regions, release.region_id, release.scope_id, release.scope_depth);
+        index += 1;
+    }
+    return current_regions;
+}
+
+fn make_lifetime_region_metadata(id -> number, binding -> string, ownership -> OwnershipInfo, scope_id -> string, scope_depth -> number, base_scope_id -> string, base_scope_depth -> number) -> LifetimeRegionMetadata {
+    return LifetimeRegionMetadata {
+        id: id,
+        binding: binding,
+        base: ownership.base,
+        mutable: ownership.mutable,
+        start_span: ownership.span,
+        scope_id: scope_id,
+        scope_depth: scope_depth,
+        base_scope_id: base_scope_id,
+        base_scope_depth: base_scope_depth,
+        end_scope_id: "",
+        end_scope_depth: 0,
+        released: false,
+    };
+}
+
+fn format_root_scope_id(function_name -> string) -> string {
+    let mut sanitized -> string = sanitize_symbol(function_name);
+    if sanitized.length == 0 {
+        sanitized = "fn";
+    }
+    return "fn:" + sanitized;
+}
+
+fn make_child_scope_id(parent -> string, child -> string) -> string {
+    let mut sanitized_child -> string = sanitize_symbol(child);
+    if sanitized_child.length == 0 {
+        sanitized_child = "scope";
+    }
+    if parent.length == 0 {
+        return sanitized_child;
+    }
+    return parent + "::" + sanitized_child;
+}
+
+fn is_scope_descendant(parent -> string, candidate -> string) -> boolean {
+    if parent.length == 0 {
+        return true;
+    }
+    if candidate.length == 0 {
+        return false;
+    }
+    if candidate == parent {
+        return true;
+    }
+    let prefix = parent + "::";
+    if candidate.length <= prefix.length {
+        return false;
+    }
+    return starts_with(candidate, prefix);
+}
+
+fn append_local_binding(values -> LocalBinding[], value -> LocalBinding) -> LocalBinding[] {
+    return values.concat([value]);
+}
+
+fn append_llvm_operand(values -> LLVMOperand[], value -> LLVMOperand) -> LLVMOperand[] {
+    return values.concat([value]);
+}
+
+fn append_struct_literal_field(values -> StructLiteralField[], value -> StructLiteralField) -> StructLiteralField[] {
+    return values.concat([value]);
+}
+
+fn append_native_struct(values -> NativeStruct[], value -> NativeStruct) -> NativeStruct[] {
+    return values.concat([value]);
+}
+
+fn append_native_enum(values -> NativeEnum[], value -> NativeEnum) -> NativeEnum[] {
+    return values.concat([value]);
+}
+
+fn replace_llvm_operand(values -> LLVMOperand[], index -> number, value -> LLVMOperand) -> LLVMOperand[] {
+    let mut result -> LLVMOperand[] = [];
+    let mut current -> number = 0;
+    loop {
+        if current >= values.length {
+            break;
+        }
+        if current == index {
+            result.push(value);
+        } else {
+            result.push(values[current]);
+        }
+        current += 1;
+    }
+    return result;
+}

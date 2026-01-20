@@ -1,6 +1,6 @@
 // examples/web/fetch-data.sfn
 
-import { http } from "sail/net";
+import { http } from "sfn/net";
 
 async fn fetchData(url -> string) -> string ![net] {
     let response = await http.get(url);

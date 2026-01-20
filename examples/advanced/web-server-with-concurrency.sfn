@@ -1,7 +1,7 @@
 // examples/advanced/web-server-with-concurrency.sfn
 
-import { serve } from "sail/http";
-import { sleep } from "sail/time";
+import { serve } from "sfn/http";
+import { sleep } from "sfn/time";
 
 fn handleRequest(req, res) {
     if req.path == "/compute" {
