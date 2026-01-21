@@ -1,13 +1,26 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.135 (2026-01-21)
+
+### Bug Fixes
+
+- Module naming
+  ([`80afafe`](https://github.com/SailfinIO/sailfin/commit/80afafed4f9265b3e4637792eabfdf1ed6435ff1))
+
+- Remove legacy stage2 ref
+  ([`3d2781d`](https://github.com/SailfinIO/sailfin/commit/3d2781d78a564672f8a5e4ec7df294f39f1d2e2b))
+
+
+## v0.1.1-beta.1 (2026-01-20)
+
+
 ## v0.1.1-alpha.134 (2026-01-20)
 
 ### Bug Fixes
 
 - Permissions
   ([`514749e`](https://github.com/SailfinIO/sailfin/commit/514749e9294b9ca626cf278164dfcf9cff606e11))
-## v0.1.1-beta.1 (2026-01-20)
 
 
 ## v0.1.1-alpha.133 (2026-01-20)
