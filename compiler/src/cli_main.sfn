@@ -8,13 +8,13 @@ import {
     compile_to_llvm_with_module_timed,
     compile_to_llvm_lines_with_module,
     compile_to_llvm_lines_with_module_timed,
+    compile_to_native_text_with_module,
     compile_tests_to_llvm,
     compile_tests_to_llvm_with_module,
     compile_to_sailfin,
     number_to_string,
     module_name_from_path,
 } from "./main";
-import { compile_to_native_text } from "./main";
 import { split_lines } from "./native_ir";
 import { sailfin_version } from "./version";
 
@@ -1007,7 +1007,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 0;
         }
         if mode == "native" {
-            print.info(compile_to_native_text(source));
+            print.info(compile_to_native_text_with_module(source, module_name));
             return 0;
         }
         print.error("unknown --emit mode: " + mode);
@@ -1058,7 +1058,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 0;
         }
         if mode == "native" {
-            print.info(compile_to_native_text(source));
+            print.info(compile_to_native_text_with_module(source, module_name));
             return 0;
         }
         print.error("unknown emit mode: " + mode);

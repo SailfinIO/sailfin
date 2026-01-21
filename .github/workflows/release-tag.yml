@@ -2,8 +2,8 @@ name: Release (tag)
 
 env:
     # Seed used only for bootstrapping the tag build.
-    SEED_VERSION: 0.1.1-alpha.132
-    # Tag to build/upload (e.g. v0.1.1-alpha.132)
+    SEED_VERSION: 0.1.1
+    # Tag to build/upload (e.g. v0.1.1)
     RELEASE_TAG: ${{ inputs.tag }}
 
 on:

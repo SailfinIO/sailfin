@@ -1357,6 +1357,24 @@ def _seed_emit_native_text(
     out_path.write_text(cleaned, encoding="utf-8")
 
 
+def _rewrite_native_module_header(native_text: str, module_slug: str) -> str:
+    """Ensure the native text `.module` header matches the module slug."""
+
+    if not module_slug:
+        return native_text
+
+    lines = native_text.splitlines()
+    for idx, line in enumerate(lines):
+        trimmed = line.strip()
+        if not trimmed:
+            continue
+        if trimmed.startswith(".module "):
+            lines[idx] = ".module " + module_slug
+            return "\n".join(lines) + "\n"
+        break
+    return native_text
+
+
 def _prepare_seed_import_context(
     *,
     seed_bin: pathlib.Path,
@@ -1477,6 +1495,8 @@ def _prepare_seed_import_context(
         )
         native_text = asm_path.read_text(
             encoding="utf-8", errors="replace")
+        native_text = _rewrite_native_module_header(native_text, slug)
+        asm_path.write_text(native_text, encoding="utf-8")
         _write_layout_manifest_from_native_text(
             native_text=native_text,
             out_path=manifest_path,
