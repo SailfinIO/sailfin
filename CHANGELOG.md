@@ -10,6 +10,7 @@
 
 - Remove legacy stage2 ref
   ([`3d2781d`](https://github.com/SailfinIO/sailfin/commit/3d2781d78a564672f8a5e4ec7df294f39f1d2e2b))
+## v0.1.1-beta.2 (2026-01-20)
 
 
 ## v0.1.1-beta.1 (2026-01-20)
