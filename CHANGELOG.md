@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.136 (2026-01-22)
+
+### Bug Fixes
+
+- Abi enahancement
+  ([`0762add`](https://github.com/SailfinIO/sailfin/commit/0762add251caf40f8271c53042cbcdb9eed98366))
+
+
+## v0.1.1-beta.2 (2026-01-20)
+
+### Bug Fixes
+
+- Merge conflicts by adding gitattributes
+  ([`0fdac52`](https://github.com/SailfinIO/sailfin/commit/0fdac52b61db42c5d7bbd0b8fbdc3844224cdba2))
+
+
 ## v0.1.1-alpha.135 (2026-01-21)
 
 ### Bug Fixes
@@ -10,7 +26,6 @@
 
 - Remove legacy stage2 ref
   ([`3d2781d`](https://github.com/SailfinIO/sailfin/commit/3d2781d78a564672f8a5e4ec7df294f39f1d2e2b))
-## v0.1.1-beta.2 (2026-01-20)
 
 
 ## v0.1.1-beta.1 (2026-01-20)
