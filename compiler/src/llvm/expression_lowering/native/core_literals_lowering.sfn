@@ -286,8 +286,15 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     current_lines = append_string(current_lines, "  " + array_bytes_is_zero + " = icmp eq i64 " + array_bytes + ", 0");
     current_temp += 1;
 
+    let element_size_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1");
+    let element_size_value = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64");
+
     let adjusted_array_bytes = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + adjusted_array_bytes + " = select i1 " + array_bytes_is_zero + ", i64 1, i64 " + array_bytes);
+    current_lines = append_string(current_lines, "  " + adjusted_array_bytes + " = select i1 " + array_bytes_is_zero + ", i64 " + element_size_value + ", i64 " + array_bytes);
     current_temp += 1;
 
     let raw_array_ptr = format_temp_name(current_temp);

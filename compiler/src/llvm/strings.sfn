@@ -32,7 +32,9 @@ fn clone_string_constants(constants -> StringConstant[]) -> StringConstant[] {
 }
 
 fn append_string_constant(set -> StringConstant[], constant -> StringConstant) -> StringConstant[] {
-    return set.concat([constant]);
+    let mut out = set;
+    out = out.push(constant);
+    return out;
 }
 
 fn merge_string_constants(existing -> StringConstant[], new_constants -> StringConstant[]) -> StringConstant[] {

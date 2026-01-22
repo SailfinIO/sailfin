@@ -12,11 +12,13 @@ import {
     lower_to_llvm_for_tests,
     lower_to_llvm_ir,
     lower_to_llvm_ir_for_tests,
+    lower_to_llvm_ir_for_tests_direct,
+    write_llvm_ir_for_tests,
     lower_to_llvm_lines_only,
     lower_to_llvm_with_manifests,
     lower_to_llvm_with_context,
 } from "./llvm/lowering/entrypoints";
-import { LayoutManifest, parse_layout_manifest } from "./native_ir";
+import { LayoutManifest, parse_layout_manifest, select_text_artifact, split_lines } from "./native_ir";
 import { substring } from "./string_utils";
 import { Token } from "./token";
 import { typecheck_program } from "./typecheck";
@@ -392,9 +394,90 @@ fn compile_tests_to_llvm_with_module(source -> string, module_name -> string) ->
     }
     let native_result = emit_native_with_module_name(program, module_name);
     if trace {
+        print.info("test compiler: native artifacts=" + number_to_string(native_result.module.artifacts.length));
+        let text_artifact = select_text_artifact(native_result.module.artifacts);
+        if text_artifact == null {
+            print.warn("test compiler: missing sailfin-native-text artifact");
+        } else {
+            print.info("test compiler: native text bytes=" + number_to_string(text_artifact.contents.length));
+        }
         print.info("test compiler: lower_to_llvm_for_tests start");
     }
-    return lower_to_llvm_ir_for_tests(native_result.module);
+    let llvm_text = lower_to_llvm_ir_for_tests_direct(native_result.module);
+    if trace {
+        print.info("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(llvm_text.length) + ")");
+    }
+    return llvm_text;
+}
+
+// Compile tests and write LLVM IR directly, avoiding large return values.
+fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> string, out_path -> string) -> boolean ![io] {
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    if trace {
+        print.info("test compiler: parse_program start");
+    }
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        return false;
+    }
+    if trace {
+        print.info("test compiler: emit_native_with_module_name start (module=" + module_name + ")");
+    }
+    let native_result = emit_native_with_module_name(program, module_name);
+    if trace {
+        print.info("test compiler: native artifacts=" + number_to_string(native_result.module.artifacts.length));
+        let text_artifact = select_text_artifact(native_result.module.artifacts);
+        if text_artifact == null {
+            print.warn("test compiler: missing sailfin-native-text artifact");
+        } else {
+            print.info("test compiler: native text bytes=" + number_to_string(text_artifact.contents.length));
+        }
+        print.info("test compiler: lower_to_llvm_for_tests start");
+    }
+    if fs.exists(out_path) {
+        fs.deleteFile(out_path);
+    }
+    let _wrote = write_llvm_ir_for_tests(native_result.module, out_path);
+    if trace {
+        if fs.exists(out_path) {
+            let size = fs.readFile(out_path).length;
+            print.info("test compiler: write_llvm_ir_for_tests bytes=" + number_to_string(size));
+        } else {
+            print.warn("test compiler: write_llvm_ir_for_tests produced no file");
+        }
+    }
+    return true;
+}
+
+fn compile_tests_to_llvm_lines_with_module(source -> string, module_name -> string) -> string[] ![io] {
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let program -> Program = parse_program(source);
+    let analysis_result = typecheck_program(program);
+    if analysis_result.diagnostics.length > 0 {
+        report_typecheck_errors(analysis_result.diagnostics, source);
+        return [];
+    }
+    let native_result = emit_native_with_module_name(program, module_name);
+    if trace {
+        print.info("test compiler: native artifacts=" + number_to_string(native_result.module.artifacts.length));
+        let text_artifact = select_text_artifact(native_result.module.artifacts);
+        if text_artifact == null {
+            print.warn("test compiler: missing sailfin-native-text artifact");
+        } else {
+            print.info("test compiler: native text bytes=" + number_to_string(text_artifact.contents.length));
+        }
+        print.info("test compiler: lower_to_llvm_ir_for_tests start");
+    }
+    let llvm_text = lower_to_llvm_ir_for_tests(native_result.module);
+    if trace {
+        print.info("test compiler: lower_to_llvm_ir_for_tests done (ir_bytes=" + number_to_string(llvm_text.length) + ")");
+    }
+    if llvm_text.length == 0 {
+        return [];
+    }
+    return split_lines(llvm_text);
 }
 
 fn compile_to_native_text(source -> string) -> string ![io] {

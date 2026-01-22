@@ -1,226 +1,226 @@
 name: Release (tag)
 
 env:
-    # Seed used only for bootstrapping the tag build.
-    SEED_VERSION: 0.1.1
-    # Tag to build/upload (e.g. v0.1.1)
-    RELEASE_TAG: ${{ inputs.tag }}
+  # Seed used only for bootstrapping the tag build.
+  SEED_VERSION: 0.1.1-alpha.135
+  # Tag to build/upload (e.g. v0.1.1)
+  RELEASE_TAG: ${{ inputs.tag }}
 
 on:
-    workflow_call:
-        inputs:
-            tag:
-                description: "Tag to (re)build (e.g. v0.1.1-alpha.132)"
-                required: true
-                type: string
-    workflow_dispatch:
-        inputs:
-            tag:
-                description: "Existing tag to (re)build (e.g. v0.1.1-alpha.132)"
-                required: true
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to (re)build (e.g. v0.1.1-alpha.132)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build (e.g. v0.1.1-alpha.132)"
+        required: true
 
 concurrency:
-    group: "release-tag-${{ inputs.tag }}"
-    cancel-in-progress: false
+  group: "release-tag-${{ inputs.tag }}"
+  cancel-in-progress: false
 
 jobs:
-    build:
-        name: Build + Package [${{ matrix.package_label }}]
-        runs-on: ${{ matrix.os }}
-        permissions:
-            contents: read
-        timeout-minutes: 120
-        strategy:
-            fail-fast: false
-            matrix:
-                include:
-                    - os: macos-latest
-                      package_label: macos-arm64
-                      clang: clang
-                      max_attempts: 15
-                    - os: ubuntu-24.04
-                      package_label: linux-x86_64
-                      clang: clang-18
-                      max_attempts: 10
+  build:
+    name: Build + Package [${{ matrix.package_label }}]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            package_label: macos-arm64
+            clang: clang
+            max_attempts: 15
+          - os: ubuntu-24.04
+            package_label: linux-x86_64
+            clang: clang-18
+            max_attempts: 10
 
-        steps:
-            - name: Checkout repository (tag)
-              uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
-                  ref: ${{ env.RELEASE_TAG }}
+    steps:
+      - name: Checkout repository (tag)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
 
-            - name: Verify tag checkout
-              shell: bash
-              run: |
-                  set -euo pipefail
-                  current="$(git describe --tags --exact-match)"
-                  if [ "$current" != "${RELEASE_TAG}" ]; then
-                    echo "[ci][error] expected ${RELEASE_TAG}, got $current" >&2
-                    exit 1
-                  fi
+      - name: Verify tag checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(git describe --tags --exact-match)"
+          if [ "$current" != "${RELEASE_TAG}" ]; then
+            echo "[ci][error] expected ${RELEASE_TAG}, got $current" >&2
+            exit 1
+          fi
 
-            - name: Set up Miniconda
-              uses: conda-incubator/setup-miniconda@v3
-              with:
-                  activate-environment: sailfin
-                  environment-file: environment.yml
-                  auto-update-conda: false
-                  use-mamba: true
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: sailfin
+          environment-file: environment.yml
+          auto-update-conda: false
+          use-mamba: true
 
-            - name: Install clang (Linux)
-              if: runner.os == 'Linux'
-              run: |
-                  sudo apt-get update
-                  sudo apt-get install -y clang-18 llvm-18 jq
-                  echo "CLANG=clang-18" >> "$GITHUB_ENV"
+      - name: Install clang (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18 jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
-            - name: Install jq + LLVM tools (macOS)
-              if: runner.os == 'macOS'
-              shell: bash
-              run: |
-                  brew install jq llvm
-                  echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+      - name: Install jq + LLVM tools (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install jq llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-            - name: Build + test + package (via Makefile)
-              uses: ./.github/actions/sailfin-build
-              env:
-                  GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-              with:
-                  target: ${{ matrix.package_label }}
-                  max_attempts: ${{ matrix.max_attempts }}
-                  clang: ${{ matrix.clang }}
-                  seed_version: ${{ env.SEED_VERSION }}
+      - name: Build + test + package (via Makefile)
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        with:
+          target: ${{ matrix.package_label }}
+          max_attempts: ${{ matrix.max_attempts }}
+          clang: ${{ matrix.clang }}
+          seed_version: ${{ env.SEED_VERSION }}
 
-            - name: Verify compiler version matches tag
-              shell: bash -l {0}
-              run: |
-                  set -euo pipefail
-                  expected="${RELEASE_TAG#v}"
-                  file_version="$(python -c "import re, pathlib; text=pathlib.Path('compiler/src/version.sfn').read_text(encoding='utf-8'); m=re.search(r'__version__\\s*=\\s*\"([^\"]+)\"', text); print(m.group(1) if m else '')")"
-                  if [ "$file_version" != "$expected" ]; then
-                    echo "[ci][error] compiler/src/version.sfn has '$file_version', expected '$expected'" >&2
-                    exit 1
-                  fi
-                  actual="$(build/native/sailfin version | sed -n 's/.*sfn //p')"
-                  if [ "$actual" != "$expected" ]; then
-                    echo "[ci][error] built compiler reports '$actual', expected '$expected'" >&2
-                    exit 1
-                  fi
+      - name: Verify compiler version matches tag
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          expected="${RELEASE_TAG#v}"
+          file_version="$(python -c "import re, pathlib; text=pathlib.Path('compiler/src/version.sfn').read_text(encoding='utf-8'); m=re.search(r'__version__\\s*=\\s*\"([^\"]+)\"', text); print(m.group(1) if m else '')")"
+          if [ "$file_version" != "$expected" ]; then
+            echo "[ci][error] compiler/src/version.sfn has '$file_version', expected '$expected'" >&2
+            exit 1
+          fi
+          actual="$(build/native/sailfin version | sed -n 's/.*sfn //p')"
+          if [ "$actual" != "$expected" ]; then
+            echo "[ci][error] built compiler reports '$actual', expected '$expected'" >&2
+            exit 1
+          fi
 
-            - name: Verify installer payload version
-              shell: bash -l {0}
-              run: |
-                  set -euo pipefail
-                  expected="${RELEASE_TAG#v}"
-                  rm -rf _installer_check
-                  mkdir -p _installer_check
-                  tar -xzf "dist/installer-${{ matrix.package_label }}.tar.gz" -C _installer_check
-                  chmod +x _installer_check/bin/sfn || true
-                  actual="$(_installer_check/bin/sfn version | sed -n 's/.*sfn //p')"
-                  if [ "$actual" != "$expected" ]; then
-                    echo "[ci][error] installer contains compiler '$actual', expected '$expected'" >&2
-                    exit 1
-                  fi
+      - name: Verify installer payload version
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          expected="${RELEASE_TAG#v}"
+          rm -rf _installer_check
+          mkdir -p _installer_check
+          tar -xzf "dist/installer-${{ matrix.package_label }}.tar.gz" -C _installer_check
+          chmod +x _installer_check/bin/sfn || true
+          actual="$(_installer_check/bin/sfn version | sed -n 's/.*sfn //p')"
+          if [ "$actual" != "$expected" ]; then
+            echo "[ci][error] installer contains compiler '$actual', expected '$expected'" >&2
+            exit 1
+          fi
 
-            - name: Upload native artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: release-native-${{ matrix.package_label }}
-                  path: |
-                      dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz
-                      dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz.sha256
-                      dist/sailfin-native-${{ matrix.package_label }}-*.manifest.json
-                  if-no-files-found: error
+      - name: Upload native artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-native-${{ matrix.package_label }}
+          path: |
+            dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz
+            dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz.sha256
+            dist/sailfin-native-${{ matrix.package_label }}-*.manifest.json
+          if-no-files-found: error
 
-            - name: Upload installer archive
-              uses: actions/upload-artifact@v4
-              with:
-                  name: release-installer-${{ matrix.package_label }}
-                  path: dist/installer-${{ matrix.package_label }}.tar.gz
-                  if-no-files-found: error
+      - name: Upload installer archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-installer-${{ matrix.package_label }}
+          path: dist/installer-${{ matrix.package_label }}.tar.gz
+          if-no-files-found: error
 
-    upload:
-        name: Upload Release Assets
-        needs: build
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
+  upload:
+    name: Upload Release Assets
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
-        steps:
-            - name: Download build artifacts
-              uses: actions/download-artifact@v4
-              with:
-                  pattern: "release-*"
-                  merge-multiple: true
-                  path: .
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "release-*"
+          merge-multiple: true
+          path: .
 
-            - name: Normalize artifact layout
-              shell: bash
-              run: |
-                  set -euo pipefail
-                  mkdir -p dist
-                  find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz' -exec mv -f {} dist/ \;
-                  find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz.sha256' -exec mv -f {} dist/ \;
-                  find . -maxdepth 3 -type f -name 'sailfin-native-*.manifest.json' -exec mv -f {} dist/ \;
-                  find . -maxdepth 3 -type f -name 'installer-*.tar.gz' -exec mv -f {} dist/ \;
+      - name: Normalize artifact layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz' -exec mv -f {} dist/ \;
+          find . -maxdepth 3 -type f -name 'sailfin-native-*.tar.gz.sha256' -exec mv -f {} dist/ \;
+          find . -maxdepth 3 -type f -name 'sailfin-native-*.manifest.json' -exec mv -f {} dist/ \;
+          find . -maxdepth 3 -type f -name 'installer-*.tar.gz' -exec mv -f {} dist/ \;
 
-            - name: Prepare installer assets
-              shell: bash
-              run: |
-                  set -euo pipefail
-                  version="${RELEASE_TAG#v}"
-                  for payload in $(find dist -maxdepth 1 -type f -name 'installer-*.tar.gz'); do
-                    label="$(basename "$payload" .tar.gz)"
-                    case "$label" in
-                      *linux-x86_64*)
-                        os="linux"
-                        arch="x86_64"
-                        ;;
-                      *macos-arm64*)
-                        os="macos"
-                        arch="arm64"
-                        ;;
-                      *)
-                        echo "unknown installer payload $label" >&2
-                        continue
-                        ;;
-                    esac
-                    installer_name="sailfin_${version}_${os}_${arch}.tar.gz"
-                    mv -f "$payload" "dist/${installer_name}"
-                    if command -v sha256sum >/dev/null 2>&1; then
-                      sha256sum "dist/${installer_name}" > "dist/${installer_name}.sha256"
-                    else
-                      shasum -a 256 "dist/${installer_name}" > "dist/${installer_name}.sha256"
-                    fi
-                  done
+      - name: Prepare installer assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          for payload in $(find dist -maxdepth 1 -type f -name 'installer-*.tar.gz'); do
+            label="$(basename "$payload" .tar.gz)"
+            case "$label" in
+              *linux-x86_64*)
+                os="linux"
+                arch="x86_64"
+                ;;
+              *macos-arm64*)
+                os="macos"
+                arch="arm64"
+                ;;
+              *)
+                echo "unknown installer payload $label" >&2
+                continue
+                ;;
+            esac
+            installer_name="sailfin_${version}_${os}_${arch}.tar.gz"
+            mv -f "$payload" "dist/${installer_name}"
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "dist/${installer_name}" > "dist/${installer_name}.sha256"
+            else
+              shasum -a 256 "dist/${installer_name}" > "dist/${installer_name}.sha256"
+            fi
+          done
 
-            - name: Remove existing assets (repair runs)
-              shell: bash
-              env:
-                  GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-              run: |
-                  set -euo pipefail
-                  if ! command -v gh >/dev/null 2>&1; then
-                    echo "[ci][error] gh CLI not available on runner" >&2
-                    exit 1
-                  fi
-                  for f in dist/*; do
-                    name="$(basename "$f")"
-                    gh release delete-asset "${RELEASE_TAG}" "${name}" -y >/dev/null 2>&1 || true
-                  done
+      - name: Remove existing assets (repair runs)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! command -v gh >/dev/null 2>&1; then
+            echo "[ci][error] gh CLI not available on runner" >&2
+            exit 1
+          fi
+          for f in dist/*; do
+            name="$(basename "$f")"
+            gh release delete-asset "${RELEASE_TAG}" "${name}" -y >/dev/null 2>&1 || true
+          done
 
-            - name: Upload release assets
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: ${{ env.RELEASE_TAG }}
-                  prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
-                  make_latest: ${{ !contains(env.RELEASE_TAG, '-') }}
-                  files: |
-                      dist/sailfin-native-*.tar.gz
-                      dist/sailfin-native-*.tar.gz.sha256
-                      dist/sailfin-native-*.manifest.json
-                      dist/sailfin_*.tar.gz
-                      dist/sailfin_*.tar.gz.sha256
-              env:
-                  GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+          make_latest: ${{ !contains(env.RELEASE_TAG, '-') }}
+          files: |
+            dist/sailfin-native-*.tar.gz
+            dist/sailfin-native-*.tar.gz.sha256
+            dist/sailfin-native-*.manifest.json
+            dist/sailfin_*.tar.gz
+            dist/sailfin_*.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}

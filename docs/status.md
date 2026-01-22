@@ -9,6 +9,7 @@ This document tracks what works today and what is in progress.
 - Experimental LLVM JIT execution remains available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test, and attach release assets.
 - Native compiler tests live in `compiler/tests/{unit,integration,e2e}` and run via `sfn test` (repo-local: `./sfn test .`; build output: `build/native/sailfin test .`; `make test-unit`, `make test-integration`, `make test-e2e`).
+- The test runner inlines relative imports (including `compiler/src/*`) into a single compilation unit to avoid missing symbols when executing `sfn test`.
 - Native AOT builds do not rely on any `aot-prepare` text rewrite step; the native compiler emits link-safe LLVM IR directly.
 
 ## Runtime (Current)
@@ -16,6 +17,7 @@ This document tracks what works today and what is in progress.
 - The runtime is implemented in C under `runtime/native/` and linked into the native compiler binary.
 - The native CLI locates a bundled runtime next to the executable (override with `SAILFIN_RUNTIME_ROOT`) when building or running programs.
 - Legacy Python runtime shims have been removed; the 1.0 toolchain does not rely on `runtime/*.py` helpers.
+- The native filesystem adapter supports `readFile`, `writeFile`, `appendFile`, `writeLines`, and directory helpers.
 - The runtime will be reimplemented in Sailfin before the 1.0 release.
 
 ## Installer (Current)

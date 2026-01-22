@@ -71,16 +71,14 @@ fn synthesize_unit_enum_layout(enum_def -> NativeEnum) -> NativeEnumLayout {
             break;
         }
         let variant = enum_def.variants[index];
-        layouts = layouts.concat([
-            NativeEnumVariantLayout {
-                name: variant.name,
-                tag: index,
-                offset: 0,
-                size: tag_size,
-                align: tag_align,
-                fields: [],
-            },
-        ]);
+        layouts.push(NativeEnumVariantLayout {
+            name: variant.name,
+            tag: index,
+            offset: 0,
+            size: tag_size,
+            align: tag_align,
+            fields: [],
+        });
         index += 1;
     }
     return NativeEnumLayout {
@@ -139,7 +137,7 @@ fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
                 fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
                 diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout"]);
             }
-            updated = updated.concat([fixed]);
+            updated.push(fixed);
             index += 1;
             continue;
         }
@@ -154,7 +152,7 @@ fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
             }
         }
 
-        updated = updated.concat([fixed]);
+        updated.push(fixed);
         index += 1;
     }
 
@@ -472,31 +470,45 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
 // =============================================================================
 
 fn append_struct_type_info(values -> StructTypeInfo[], value -> StructTypeInfo) -> StructTypeInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_struct_field_info(values -> StructFieldInfo[], value -> StructFieldInfo) -> StructFieldInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_enum_variant_info(values -> EnumVariantInfo[], value -> EnumVariantInfo) -> EnumVariantInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_enum_type_info(values -> EnumTypeInfo[], value -> EnumTypeInfo) -> EnumTypeInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_interface_type_info(values -> InterfaceTypeInfo[], value -> InterfaceTypeInfo) -> InterfaceTypeInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_vtable_info(values -> VTableInfo[], value -> VTableInfo) -> VTableInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_vtable_entry(values -> VTableEntry[], value -> VTableEntry) -> VTableEntry[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 // =============================================================================

@@ -3,7 +3,7 @@ name: CI (PR)
 env:
   # Pinned seed used for self-host bootstrap in CI.
   # Bump this once the latest release assets are healthy again.
-  SEED_VERSION: 0.1.1
+  SEED_VERSION: 0.1.1-alpha.135
 
 permissions:
   contents: read

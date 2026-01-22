@@ -320,6 +320,22 @@ fn emit_llvm_function(
         return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
     }
 
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    if trace {
+        let mut instr_preview -> string = "";
+        if function.instructions.length > 0 {
+            instr_preview = function.instructions[0].variant;
+        }
+        print.info(
+            "test llvm: emit_llvm_function preview "
+            + function.name
+            + " instrs="
+            + number_to_string(function.instructions.length)
+            + " first_variant="
+            + instr_preview
+        );
+    }
+
     let mut lines -> string[] = [];
     if effects.length > 0 {
         lines = append_string(lines, "; fn " + function.name + " effects: ![" + join_with_separator(effects, ", ") + "]");
@@ -395,6 +411,15 @@ fn emit_body(
     context -> TypeContext,
     entry_label -> string
 ) -> BodyResult {
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    if trace {
+        print.info(
+            "test llvm: emit_body start "
+            + function.name
+            + " instrs="
+            + number_to_string(function.instructions.length)
+        );
+    }
     let lowered = lower_instruction_range(
         function,
         0,
@@ -415,6 +440,22 @@ fn emit_body(
         0,
         entry_label
     );
+    if trace {
+        let mut term_label -> string = "false";
+        if lowered.terminated {
+            term_label = "true";
+        }
+        print.info(
+            "test llvm: emit_body lowered "
+            + function.name
+            + " lines="
+            + number_to_string(lowered.lines.length)
+            + " allocas="
+            + number_to_string(lowered.allocas.length)
+            + " terminated="
+            + term_label
+        );
+    }
     let mut diagnostics -> string[] = lowered.diagnostics;
     let mut lines -> string[] = [];
     lines = extend_string_array(lines, lowered.allocas);

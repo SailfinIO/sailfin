@@ -2,6 +2,8 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -445,6 +447,8 @@ static void _print_alloc_stats(void)
 // If later array ops drop it, that strongly implicates array length/ABI bugs.
 static pthread_mutex_t _sailfin_trace_header_lock = PTHREAD_MUTEX_INITIALIZER;
 static const char *_sailfin_tracked_source_filename = NULL;
+
+static void _trace_backtrace_budgeted(const char *label);
 static int _sailfin_tracked_source_budget = -1;
 
 // Recent array allocation tracking (data pointer ring).
@@ -496,6 +500,31 @@ static void _recent_string_record(const char *base, size_t len)
     _sailfin_recent_string_cursor = (_sailfin_recent_string_cursor + 1) % (sizeof(_sailfin_recent_strings) / sizeof(_sailfin_recent_strings[0]));
     pthread_mutex_unlock(&_sailfin_recent_string_lock);
 }
+
+#if defined(__APPLE__)
+static void _sailfin_crash_handler(int sig)
+{
+    fprintf(stderr, "[native] crash signal=%d\n", sig);
+    _trace_backtrace_budgeted("crash");
+    fflush(stderr);
+    _exit(128 + sig);
+}
+
+__attribute__((constructor)) static void _sailfin_install_crash_handler(void)
+{
+    const char *v = getenv("SAILFIN_TRACE_CRASH");
+    if (!v || v[0] == '\0' || v[0] == '0')
+    {
+        return;
+    }
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = _sailfin_crash_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+}
+#endif
 
 #if defined(__APPLE__)
 static void _trace_backtrace_budgeted(const char *label)
@@ -2811,6 +2840,7 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
                 (void *)a,
                 (void *)a->data,
                 (void *)tracked);
+            _trace_backtrace_budgeted("array_len_stomp");
             fflush(stderr);
         }
     }
@@ -4287,7 +4317,7 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
     FILE *f = fopen(path_str, "wb");
     if (!f)
     {
-        _print_line(stderr, "[stage2-native] fs.writeFile failed", path_str);
+        _print_line(stderr, "[native] fs.writeFile failed", path_str);
         return;
     }
 
@@ -4368,7 +4398,7 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
 
         fprintf(
             stderr,
-            "[stage2-native] fs.writeFile path=%s contents=%p%s cp=%u len=%lld preview=\"%s\" marker_source_filename=%lld marker_prototype=%lld range_base=%p range_len=%zu range_offset=%zu\n",
+            "[native] fs.writeFile path=%s contents=%p%s cp=%u len=%lld preview=\"%s\" marker_source_filename=%lld marker_prototype=%lld range_base=%p range_len=%zu range_offset=%zu\n",
             path_str,
             (void *)contents_str,
             immediate ? " immediate" : "",
@@ -4403,6 +4433,45 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
     fclose(f);
 }
 
+void sailfin_adapter_fs_append_file(void *path, void *contents)
+{
+    const char *path_str = (const char *)path;
+    const char *contents_str = (const char *)contents;
+    if (!path_str || !contents_str)
+    {
+        return;
+    }
+
+    FILE *f = fopen(path_str, "ab");
+    if (!f)
+    {
+        _print_line(stderr, "[native] fs.appendFile failed", path_str);
+        return;
+    }
+
+    uint32_t codepoint = 0;
+    bool immediate = _is_immediate_codepoint_string(contents_str, &codepoint);
+    if (immediate)
+    {
+        unsigned char buf[5] = {0};
+        size_t len = _utf8_encode(codepoint, buf);
+        if (len > 0)
+        {
+            (void)fwrite(buf, 1, len, f);
+        }
+    }
+    else
+    {
+        int64_t len64 = sailfin_runtime_string_length((char *)contents_str);
+        if (len64 > 0)
+        {
+            (void)fwrite(contents_str, 1, (size_t)len64, f);
+        }
+    }
+
+    fclose(f);
+}
+
 void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
 {
     const char *path_str = (const char *)path;
@@ -4414,7 +4483,7 @@ void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
     FILE *f = fopen(path_str, "wb");
     if (!f)
     {
-        _print_line(stderr, "[stage2-native] fs.writeLines failed", path_str);
+        _print_line(stderr, "[native] fs.writeLines failed", path_str);
         return;
     }
 
@@ -4429,14 +4498,14 @@ void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
     // writing for a very long time.
     if (n > (int64_t)10000000)
     {
-        fprintf(stderr, "[stage2-native] fs.writeLines refusing to write absurd line count=%lld (possible ABI corruption)\n", (long long)n);
+        fprintf(stderr, "[native] fs.writeLines refusing to write absurd line count=%lld (possible ABI corruption)\n", (long long)n);
         fclose(f);
         return;
     }
 
     if (!lines->data && n > 0)
     {
-        fprintf(stderr, "[stage2-native] fs.writeLines missing data pointer (len=%lld)\n", (long long)n);
+        fprintf(stderr, "[native] fs.writeLines missing data pointer (len=%lld)\n", (long long)n);
         fclose(f);
         return;
     }

@@ -478,7 +478,7 @@ fn sanitize_symbol(name -> string) -> string {
 
 fn append_string(values -> string[], value -> string) -> string[] {
     let mut out = values;
-    out.push(value);
+    out = out.push(value);
     return out;
 }
 
@@ -489,7 +489,7 @@ fn extend_string_array(values -> string[], additions -> string[]) -> string[] {
         if index >= additions.length {
             break;
         }
-        out.push(additions[index]);
+        out = out.push(additions[index]);
         index += 1;
     }
     return out;
@@ -596,7 +596,9 @@ fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> Par
 }
 
 fn append_parameter_binding(bindings -> ParameterBinding[], binding -> ParameterBinding) -> ParameterBinding[] {
-    return bindings.concat([binding]);
+    let mut out = bindings;
+    out = out.push(binding);
+    return out;
 }
 
 fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBinding[]) -> ParameterBinding[] {

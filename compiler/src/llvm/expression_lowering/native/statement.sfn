@@ -747,6 +747,21 @@ fn lower_return_instruction(
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
     let mut current_next_region -> number = next_region_id;
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    if trace {
+        let mut expr_len -> number = 0;
+        if instruction.expression != null {
+            expr_len = instruction.expression.length;
+        }
+        print.info(
+            "test llvm: lower_return start "
+            + function.name
+            + " expr_len="
+            + number_to_string(expr_len)
+            + " lines_before="
+            + number_to_string(current_lines.length)
+        );
+    }
 
     if instruction.expression == null || instruction.expression.length == 0 {
         if llvm_return == "void" {
@@ -754,6 +769,9 @@ fn lower_return_instruction(
         } else {
             diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`");
             current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+        }
+        if trace {
+            print.info("test llvm: lower_return empty_expr lines_after=" + number_to_string(current_lines.length));
         }
         let empty_constants = empty_string_constant_set();
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: empty_constants };
@@ -778,6 +796,9 @@ fn lower_return_instruction(
     if lowered.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+        if trace {
+            print.info("test llvm: lower_return no_operand lines_after=" + number_to_string(current_lines.length));
+        }
     return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
     }
 
@@ -795,6 +816,9 @@ fn lower_return_instruction(
     if coerced.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`");
         current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+        if trace {
+            print.info("test llvm: lower_return no_coerce lines_after=" + number_to_string(current_lines.length));
+        }
     return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
     }
 
@@ -804,6 +828,9 @@ fn lower_return_instruction(
         current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + coerced_operand.value + ")");
     }
     current_lines = append_string(current_lines, "  ret " + coerced_operand.llvm_type + " " + coerced_operand.value);
+    if trace {
+        print.info("test llvm: lower_return ok lines_after=" + number_to_string(current_lines.length));
+    }
     if consumption != null {
         if consumption.kind == "local" {
             current_locals = mark_local_consumed(current_locals, consumption.name);
@@ -1634,4 +1661,3 @@ fn map_local_type(context -> TypeContext, type_annotation -> string) -> string {
     // Fallback to generic pointer for unresolved types (e.g., imported structs/enums not in type context)
     return "i8*";
 }
-

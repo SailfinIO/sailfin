@@ -458,11 +458,15 @@ fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
 // =============================================================================
 
 fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeRegionMetadata) -> LifetimeRegionMetadata[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_lifetime_release_event(events -> LifetimeReleaseEvent[], event -> LifetimeReleaseEvent) -> LifetimeReleaseEvent[] {
-    return events.concat([event]);
+    let mut out = events;
+    out = out.push(event);
+    return out;
 }
 
 fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id -> number, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata[] {
@@ -549,6 +553,13 @@ fn infer_borrow_base_scope(base -> string, locals -> LocalBinding[], bindings ->
 
 fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegionMetadata[]) -> string[] {
     let mut diagnostics -> string[] = [];
+    if regions == null {
+        return diagnostics;
+    }
+    if regions.length > 1000000 {
+        diagnostics = append_string(diagnostics, "llvm lowering: lifetime region overflow in `" + function.name + "` (len=" + number_to_string(regions.length) + ")");
+        return diagnostics;
+    }
     let mut index -> number = 0;
     let root_scope = format_root_scope_id(function.name);
     loop {

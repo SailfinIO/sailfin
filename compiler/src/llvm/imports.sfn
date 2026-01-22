@@ -72,12 +72,16 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
             diagnostics = diagnostics.concat(["native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")"]);
         }
 
-        manifests = manifests.concat([LayoutManifest {
+        let mut updated_manifests = manifests;
+        updated_manifests = updated_manifests.push(LayoutManifest {
             structs: manifest_structs,
             enums: manifest_enums,
             diagnostics: [],
-        }]);
-        native_texts = native_texts.concat([native_text]);
+        });
+        manifests = updated_manifests;
+        let mut updated_texts = native_texts;
+        updated_texts = updated_texts.push(native_text);
+        native_texts = updated_texts;
         index += 1;
     }
 

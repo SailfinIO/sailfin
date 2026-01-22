@@ -1357,23 +1357,6 @@ def _seed_emit_native_text(
     out_path.write_text(cleaned, encoding="utf-8")
 
 
-def _rewrite_native_module_header(native_text: str, module_slug: str) -> str:
-    """Ensure the native text `.module` header matches the module slug."""
-
-    if not module_slug:
-        return native_text
-
-    lines = native_text.splitlines()
-    for idx, line in enumerate(lines):
-        trimmed = line.strip()
-        if not trimmed:
-            continue
-        if trimmed.startswith(".module "):
-            lines[idx] = ".module " + module_slug
-            return "\n".join(lines) + "\n"
-        break
-    return native_text
-
 
 def _prepare_seed_import_context(
     *,
@@ -1495,8 +1478,6 @@ def _prepare_seed_import_context(
         )
         native_text = asm_path.read_text(
             encoding="utf-8", errors="replace")
-        native_text = _rewrite_native_module_header(native_text, slug)
-        asm_path.write_text(native_text, encoding="utf-8")
         _write_layout_manifest_from_native_text(
             native_text=native_text,
             out_path=manifest_path,
@@ -1902,51 +1883,7 @@ def main(argv: list[str]) -> int:
         for p in obj_dir.rglob("*.o"):
             p.unlink()
 
-        # Normalize directory imports to explicit /mod for the seed compiler.
-        compat_compiler_src = seed_cwd / "compat_src" / "compiler" / "src"
-        if compat_compiler_src.exists():
-            shutil.rmtree(compat_compiler_src)
-        compat_compiler_src.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(REPO_ROOT / "compiler" / "src", compat_compiler_src)
-
-        def _normalize_dir_imports(path: pathlib.Path) -> None:
-            try:
-                text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                text = path.read_text(encoding="utf-8", errors="replace")
-
-            def _rewrite(match: re.Match[str]) -> str:
-                prefix = match.group("prefix")
-                module_ref = match.group("path")
-                suffix = match.group("suffix")
-                if not (module_ref.startswith("./") or module_ref.startswith("../")):
-                    return match.group(0)
-                if module_ref.endswith(".sfn") or module_ref.endswith("/mod"):
-                    return match.group(0)
-                candidate = (path.parent / module_ref / "mod.sfn")
-                if candidate.exists():
-                    return f'{prefix}{module_ref}/mod{suffix}'
-                return match.group(0)
-
-            dir_import_re = re.compile(
-                r'(?P<prefix>\bfrom\s+")(?P<path>[^"]+)(?P<suffix>"\s*;)',
-                re.MULTILINE,
-            )
-            new_text = dir_import_re.sub(_rewrite, text)
-            dir_import_re = re.compile(
-                r'(?P<prefix>^\s*import\s+")(?P<path>[^"]+)(?P<suffix>"\s*;)',
-                re.MULTILINE,
-            )
-            new_text = dir_import_re.sub(_rewrite, new_text)
-            if new_text != text:
-                path.write_text(new_text, encoding="utf-8")
-
-        for p in compat_compiler_src.rglob("*.sfn"):
-            _normalize_dir_imports(p)
-
-        sources = sorted(compat_compiler_src.rglob("*.sfn")) + sorted(
-            (REPO_ROOT / "runtime").rglob("*.sfn")
-        )
+        sources = _collect_sources(REPO_ROOT)
         module_names: list[str] = []
 
         # Shared cache of concrete named LLVM type definitions discovered while

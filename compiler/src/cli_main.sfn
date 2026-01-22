@@ -9,8 +9,7 @@ import {
     compile_to_llvm_lines_with_module,
     compile_to_llvm_lines_with_module_timed,
     compile_to_native_text_with_module,
-    compile_tests_to_llvm,
-    compile_tests_to_llvm_with_module,
+    compile_tests_to_llvm_file_with_module,
     compile_to_sailfin,
     number_to_string,
     module_name_from_path,
@@ -615,7 +614,7 @@ fn _inline_relative_imports(source -> string, base_dir -> string, depth -> numbe
             print.info("test import inlining: base=" + base_dir + " spec=" + spans[index].spec);
         }
         let dep_path = _resolve_import_path(base_dir, spans[index].spec);
-        let is_prebuilt = _has_prefix(dep_path, "compiler/src/") || _has_prefix(dep_path, "runtime/");
+        let is_prebuilt = _has_prefix(dep_path, "runtime/");
         if !is_prebuilt {
             if !_string_list_contains(next_visited, dep_path) {
                 if !fs.exists(dep_path) {
@@ -705,15 +704,53 @@ fn _write_text(path -> string, text -> string) ![io] {
     fs.writeFile(path, text);
 }
 
-fn _write_lines(path -> string, lines -> string[]) ![io] {
-    fs.writeLines(path, lines);
-}
-
 fn _write_llvm_text(path -> string, llvm -> string) ![io] {
     // Avoid passing potentially large/fragile `string[]` buffers across the
     // native runtime boundary via fs.writeLines, which can hang if array ABI
     // metadata is corrupted.
     fs.writeFile(path, llvm);
+}
+
+fn _write_llvm_lines(path -> string, lines -> string[]) ![io] {
+    if lines.length == 0 {
+        fs.writeFile(path, "");
+        return;
+    }
+
+    let chunk_limit = 65536;
+    let mut buffer -> string = "";
+    let mut buffered -> number = 0;
+    let mut wrote -> boolean = false;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = lines[index] + "\n";
+        let next_len = buffered + line.length;
+        if next_len > chunk_limit && buffer.length > 0 {
+            if wrote {
+                fs.appendFile(path, buffer);
+            } else {
+                fs.writeFile(path, buffer);
+                wrote = true;
+            }
+            buffer = "";
+            buffered = 0;
+        }
+        buffer = buffer + line;
+        buffered += line.length;
+        index += 1;
+    }
+
+    if buffer.length > 0 {
+        if wrote {
+            fs.appendFile(path, buffer);
+        } else {
+            fs.writeFile(path, buffer);
+        }
+    }
 }
 
 fn _ensure_dir(path -> string) ![io] {
@@ -1238,17 +1275,15 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             if trace_runner {
                 print.info("test runner: compile start");
             }
-            let llvm = compile_tests_to_llvm_with_module(combined_source, module_name);
+            let _compiled = compile_tests_to_llvm_file_with_module(combined_source, module_name, ll_path);
             if trace_runner {
-                print.info("test runner: compile done (bytes=" + number_to_string(llvm.length) + ")");
+                if fs.exists(ll_path) {
+                    let size = fs.readFile(ll_path).length;
+                    print.info("test runner: compile done (bytes=" + number_to_string(size) + ")");
+                } else {
+                    print.info("test runner: compile done (bytes=0)");
+                }
             }
-            if llvm.length == 0 {
-                print.error("test compile failed: " + path);
-                fs.deleteFile(test_runner_active_path);
-                return 1;
-            }
-            let cleaned = _strip_native_log_prefixes(llvm);
-            _write_text(ll_path, cleaned);
 
             if trace_runner {
                 print.info("test runner: link start");
@@ -1323,71 +1358,4 @@ fn _join_with_separator_cli(values -> string[], separator -> string) -> string {
         parts = next;
     }
     return parts[0];
-}
-
-fn _strip_native_log_prefixes(text -> string) -> string {
-    // Some native builds annotate LLVM output lines with a log-level prefix.
-    // Strip those prefixes so clang can parse the IR.
-    // Fast path: avoid touching large IR blobs unless we see a prefix.
-    if text.length >= 6 {
-        // Only detect at start-of-text; full scan is expensive.
-        let head7 = substring(text, 0, 7);
-        if head7 != "[info] " && head7 != "[warn] " {
-            if text.length >= 8 {
-                let head8 = substring(text, 0, 8);
-                if head8 != "[error] " {
-                    return text;
-                }
-            } else {
-                return text;
-            }
-        }
-    } else {
-        return text;
-    }
-
-    let mut out -> string[] = [];
-    let mut start -> number = 0;
-    loop {
-        if start > text.length {
-            break;
-        }
-        let mut end -> number = start;
-        loop {
-            if end >= text.length {
-                break;
-            }
-            if text[end] == "\n" {
-                break;
-            }
-            end += 1;
-        }
-
-        let mut line = substring(text, start, end);
-        if line.length >= 7 {
-            let prefix7 = substring(line, 0, 7);
-            if prefix7 == "[info] " {
-                line = substring(line, 7, line.length);
-            } else if prefix7 == "[warn] " {
-                line = substring(line, 7, line.length);
-            } else if line.length >= 8 {
-                let prefix8 = substring(line, 0, 8);
-                if prefix8 == "[error] " {
-                    line = substring(line, 8, line.length);
-                }
-            }
-        } else if line.length >= 8 {
-            let prefix8 = substring(line, 0, 8);
-            if prefix8 == "[error] " {
-                line = substring(line, 8, line.length);
-            }
-        }
-        out = append_string(out, line);
-
-        if end >= text.length {
-            break;
-        }
-        start = end + 1;
-    }
-    return _join_with_separator_cli(out, "\n") + "\n";
 }
