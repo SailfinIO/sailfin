@@ -1964,8 +1964,16 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse 
 }
 
 fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
-    let mut out = values;
+    let mut out -> string[] = [];
     let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        out = append_string(out, values[index]);
+        index += 1;
+    }
+    index = 0;
     loop {
         if index >= extras.length {
             break;
