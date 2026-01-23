@@ -781,8 +781,16 @@ fn append_native_function(values -> NativeFunction[], value -> NativeFunction) -
 }
 
 fn concat_native_functions(first -> NativeFunction[], second -> NativeFunction[]) -> NativeFunction[] {
-    let mut result -> NativeFunction[] = first;
+    let mut result -> NativeFunction[] = [];
     let mut index -> number = 0;
+    loop {
+        if index >= first.length {
+            break;
+        }
+        result = append_native_function(result, first[index]);
+        index += 1;
+    }
+    index = 0;
     loop {
         if index >= second.length {
             break;
