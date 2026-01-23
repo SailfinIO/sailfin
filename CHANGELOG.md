@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.137 (2026-01-23)
+
+### Bug Fixes
+
+- Pin 135 for now since 136 seems broken with duplicates
+  ([`9fd464d`](https://github.com/SailfinIO/sailfin/commit/9fd464d26e774b9859f845c20efff28493a42847))
+
+
 ## v0.1.1-alpha.136 (2026-01-22)
 
 ### Bug Fixes
