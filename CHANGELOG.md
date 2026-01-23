@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.138 (2026-01-23)
+
+### Bug Fixes
+
+- Making LLVM line concatenation non-mutating
+  ([`19eb092`](https://github.com/SailfinIO/sailfin/commit/19eb09202d277bbf53d2181e25d86474ad5269c7))
+
+
 ## v0.1.1-alpha.137 (2026-01-23)
 
 ### Bug Fixes
