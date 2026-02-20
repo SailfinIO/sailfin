@@ -3,7 +3,7 @@
 // General utility functions for the LLVM lowering pass. These are basic
 // string manipulation, array helpers, and parsing utilities.
 
-import { substring, char_code, char_at } from "../string_utils";
+import { substring, char_code, char_at as string_char_at } from "../string_utils";
 import { ParameterBinding } from "./types";
 
 // =============================================================================
@@ -39,6 +39,11 @@ fn trim_text(value -> string) -> string {
         return value;
     }
     return substring(value, start, end);
+}
+
+// Local wrapper to ensure a stable symbol for cross-module linking.
+fn char_at(value -> string, index -> number) -> string {
+    return string_char_at(value, index);
 }
 
 fn is_trim_char(ch -> string) -> boolean {
@@ -478,18 +483,28 @@ fn sanitize_symbol(name -> string) -> string {
 
 fn append_string(values -> string[], value -> string) -> string[] {
     let mut out = values;
+    if out == null {
+        out = [];
+    }
     out = out.push(value);
     return out;
 }
 
 fn extend_string_array(values -> string[], additions -> string[]) -> string[] {
     let mut out = values;
+    if out == null {
+        out = [];
+    }
+    let mut safe_additions = additions;
+    if safe_additions == null {
+        safe_additions = [];
+    }
     let mut index -> number = 0;
     loop {
-        if index >= additions.length {
+        if index >= safe_additions.length {
             break;
         }
-        out = out.push(additions[index]);
+        out = out.push(safe_additions[index]);
         index += 1;
     }
     return out;
@@ -497,18 +512,25 @@ fn extend_string_array(values -> string[], additions -> string[]) -> string[] {
 
 fn copy_string_array(values -> string[]) -> string[] {
     let mut result -> string[] = [];
+    let mut safe_values = values;
+    if safe_values == null {
+        safe_values = [];
+    }
     let mut index -> number = 0;
     loop {
-        if index >= values.length {
+        if index >= safe_values.length {
             break;
         }
-        result = append_string(result, values[index]);
+        result = append_string(result, safe_values[index]);
         index += 1;
     }
     return result;
 }
 
 fn string_arrays_equal(first -> string[], second -> string[]) -> boolean {
+    if first == null || second == null {
+        return first == null && second == null;
+    }
     if first.length != second.length {
         return false;
     }
@@ -526,6 +548,9 @@ fn string_arrays_equal(first -> string[], second -> string[]) -> boolean {
 }
 
 fn string_array_contains(values -> string[], target -> string) -> boolean {
+    if values == null {
+        return false;
+    }
     let mut index -> number = 0;
     loop {
         if index >= values.length {
@@ -540,6 +565,9 @@ fn string_array_contains(values -> string[], target -> string) -> boolean {
 }
 
 fn join_with_separator(values -> string[], separator -> string) -> string {
+    if values == null {
+        return "";
+    }
     if values.length == 0 {
         return "";
     }

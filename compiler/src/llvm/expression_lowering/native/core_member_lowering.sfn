@@ -103,6 +103,14 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
     current_lines = append_string(current_lines, "  " + call_temp + " = call i8* @sailfin_runtime_get_field(i8* " + base_operand.value + ", i8* " + field_pointer + ")");
     current_temp += 1;
 
+    if field == "align" || field == "size" || field == "offset" || field == "tag" || field == "tag_size" || field == "tag_align" || field == "max_payload_size" || field == "index" || field == "len" || field == "length" {
+        let number_temp = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + number_temp + " = call double @sailfin_runtime_string_to_number(i8* " + call_temp + ")");
+        current_temp += 1;
+        let operand = LLVMOperand { llvm_type: "double", value: number_temp };
+        return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
+    }
+
     let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
     return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
 }

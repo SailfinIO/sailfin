@@ -205,7 +205,6 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
     }
 
     uintptr_t raw = (uintptr_t)text;
-
     // Secondary encoding: sometimes a single-byte grapheme leaks through as a
     // near-null pointer (e.g. 0x2e for '.'). Treat ASCII values as immediate
     // codepoints so we never attempt to dereference them as C strings.
@@ -348,6 +347,99 @@ apple_upper32_immediate_done:
     }
     return true;
 }
+
+#if defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)
+static SAILFIN_NOINLINE int _string_ptr_mapped_readable(const void *ptr)
+{
+    if (!ptr)
+    {
+        return 0;
+    }
+
+    uintptr_t raw = (uintptr_t)ptr;
+    uintptr_t key = raw & ~(uintptr_t)0xfff;
+    enum
+    {
+        MAP_CACHE_SIZE = 256,
+        MAP_CACHE_PROBES = 8
+    };
+    static uintptr_t map_cache_keys[MAP_CACHE_SIZE];
+    static uint8_t map_cache_vals[MAP_CACHE_SIZE];
+
+    uint32_t h = (uint32_t)(key ^ (key >> 32) ^ (key >> 12));
+    uint32_t slot = h & (MAP_CACHE_SIZE - 1);
+
+    uint8_t cached_val = 0;
+    for (uint32_t probe = 0; probe < MAP_CACHE_PROBES; probe++)
+    {
+        uint32_t idx = (slot + probe) & (MAP_CACHE_SIZE - 1);
+        uintptr_t existing = map_cache_keys[idx];
+        uint8_t existing_val = map_cache_vals[idx];
+        if (existing == key && existing_val != 0)
+        {
+            cached_val = existing_val;
+            break;
+        }
+        if (existing_val == 0)
+        {
+            break;
+        }
+    }
+
+    if (cached_val == 1)
+    {
+        return 1;
+    }
+    if (cached_val == 2)
+    {
+        return 0;
+    }
+
+    bool mapped_readable = false;
+    {
+        mach_vm_address_t query = (mach_vm_address_t)(uintptr_t)ptr;
+        mach_vm_address_t region = query;
+        mach_vm_size_t region_size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object_name = MACH_PORT_NULL;
+
+        kern_return_t kr = mach_vm_region(
+            mach_task_self(),
+            &region,
+            &region_size,
+            VM_REGION_BASIC_INFO_64,
+            (vm_region_info_t)&info,
+            &count,
+            &object_name);
+
+        if (object_name != MACH_PORT_NULL)
+        {
+            mach_port_deallocate(mach_task_self(), object_name);
+        }
+
+        if (kr == KERN_SUCCESS)
+        {
+            bool readable = (info.protection & VM_PROT_READ) != 0;
+            bool contains = (query >= region) && (query < (region + region_size));
+            mapped_readable = readable && contains;
+        }
+    }
+
+    for (uint32_t probe = 0; probe < MAP_CACHE_PROBES; probe++)
+    {
+        uint32_t idx = (slot + probe) & (MAP_CACHE_SIZE - 1);
+        if (map_cache_vals[idx] == 0 || map_cache_keys[idx] == key)
+        {
+            map_cache_keys[idx] = key;
+            map_cache_vals[idx] = mapped_readable ? 1 : 2;
+            break;
+        }
+    }
+
+    return mapped_readable ? 1 : 0;
+}
+#endif
 
 // ---- Stage2-native memory tracking (bootstrap-safe) ----
 //
@@ -1167,6 +1259,41 @@ static void _maybe_print_string_backtrace(
 #endif
 }
 
+static void _maybe_print_array_backtrace(const char *context, const void *ptr)
+{
+    if (!_env_enabled("SAILFIN_TRACE_ARRAY_BACKTRACE"))
+    {
+        return;
+    }
+
+    static int remaining = -1;
+    if (remaining < 0)
+    {
+        remaining = _env_int("SAILFIN_TRACE_ARRAY_BACKTRACE_BUDGET", 3);
+    }
+    if (remaining <= 0)
+    {
+        return;
+    }
+    remaining--;
+
+    fprintf(
+        stderr,
+        "[stage2-native] backtrace (%s): array=%p\n",
+        context ? context : "?",
+        ptr);
+    fflush(stderr);
+
+#if defined(__APPLE__)
+    void *frames[64];
+    int count = backtrace(frames, (int)(sizeof(frames) / sizeof(frames[0])));
+    if (count > 0)
+    {
+        backtrace_symbols_fd(frames, count, fileno(stderr));
+    }
+#endif
+}
+
 static SAILFIN_NOINLINE bool _asan_poisoned(const void *addr);
 
 static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *text, bool *out_truncated)
@@ -1208,6 +1335,24 @@ static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *tex
             return 0;
         }
     }
+
+#if defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)
+    static int guard_init = 0;
+    static int guard_enabled = 0;
+    if (!guard_init)
+    {
+        guard_init = 1;
+        guard_enabled = _env_int("SAILFIN_GUARD_STRING_PTRS", 1) ? 1 : 0;
+    }
+    if (guard_enabled && !_string_ptr_mapped_readable(text))
+    {
+        if (out_truncated)
+        {
+            *out_truncated = true;
+        }
+        return 0;
+    }
+#endif
 
     // Defensive cap: most stage2 compiler strings are tiny, but the compiler
     // also manipulates large strings (notably full LLVM modules) that can
@@ -1883,6 +2028,51 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     size_t alen = a_immediate ? _utf8_encode(a_codepoint, a_buf) : _safe_strlen_asan(a, &a_truncated);
     size_t blen = b_immediate ? _utf8_encode(b_codepoint, b_buf) : _safe_strlen_asan(b, &b_truncated);
 
+    static int concat_limit_init = 0;
+    static size_t concat_limit = 0;
+    if (!concat_limit_init)
+    {
+        concat_limit_init = 1;
+        int limit = _env_int("SAILFIN_MAX_STRING_CONCAT", 20000000);
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        concat_limit = (size_t)limit;
+    }
+    if (concat_limit > 0 && (alen + blen) > concat_limit)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] string_concat limit exceeded (alen=%zu blen=%zu limit=%zu)\n",
+            alen,
+            blen,
+            concat_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string concat limit exceeded");
+    }
+    if (alen > SIZE_MAX - blen)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] string_concat overflow (alen=%zu blen=%zu)\n",
+            alen,
+            blen);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string concat overflow");
+    }
+    if (concat_limit > 0 && alen > concat_limit - blen)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] string_concat limit exceeded (alen=%zu blen=%zu limit=%zu)\n",
+            alen,
+            blen,
+            concat_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string concat limit exceeded");
+    }
+
     static int trace_min_len_init = 0;
     static size_t trace_min_len = 0;
     if (!trace_min_len_init)
@@ -2055,6 +2245,14 @@ char *sailfin_runtime_string_concat(char *a, char *b)
 
     memset(out + alen + blen, 0, 1 + pad);
     _track_owned_string(out);
+
+    // DEBUG: Check if we're creating a string that spans position 65535
+    if (alen + blen > 65535)
+    {
+        fprintf(stderr, "[stage2-native] string_concat created string len=%zu spanning 65535; out[65535]=%d\n",
+                alen + blen, (int)(unsigned char)out[65535]);
+        fflush(stderr);
+    }
 
     // Record recent large string allocations to help debug cases where
     // downstream code accidentally returns a pointer into the middle of a
@@ -2275,6 +2473,12 @@ char *sailfin_runtime_string_concat(char *a, char *b)
 
 char *sailfin_runtime_number_to_string(double value)
 {
+    static int trace_enabled = -1;
+    if (trace_enabled < 0)
+    {
+        const char *trace = getenv("SAILFIN_TRACE_NUMBER_TO_STRING");
+        trace_enabled = (trace && trace[0] != '\0' && trace[0] != '0') ? 1 : 0;
+    }
     char buf[64];
     // Use a `%.15g` style to match the typical language-level printing of numbers:
     // integers render without a trailing `.0`, floats preserve useful precision.
@@ -2297,11 +2501,54 @@ char *sailfin_runtime_number_to_string(double value)
     }
     memcpy(out, buf, len + 1);
     _track_owned_string(out);
+    if (trace_enabled)
+    {
+        static int trace_budget = 32;
+        if (trace_budget > 0)
+        {
+            trace_budget--;
+            fprintf(stderr, "[stage2-native] number_to_string(%.6f) -> %s\n", value, out);
+            fflush(stderr);
+        }
+    }
+    return out;
+}
+
+double sailfin_runtime_string_to_number(char *text)
+{
+    if (!text)
+    {
+        return 0.0;
+    }
+    char *end = NULL;
+    double out = strtod(text, &end);
     return out;
 }
 
 static SailfinPtrArray *_alloc_array(int64_t len)
 {
+    static int array_len_limit_init = 0;
+    static int64_t array_len_limit = 0;
+    if (!array_len_limit_init)
+    {
+        array_len_limit_init = 1;
+        int limit = _env_int("SAILFIN_MAX_ARRAY_LEN", 5000000);
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        array_len_limit = (int64_t)limit;
+    }
+    if (array_len_limit > 0 && len > array_len_limit)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array alloc limit exceeded (len=%lld limit=%lld)\n",
+            (long long)len,
+            (long long)array_len_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("array alloc limit exceeded");
+    }
     _maybe_init_alloc_stats();
     SailfinPtrArray *arr = (SailfinPtrArray *)malloc(sizeof(SailfinPtrArray));
     if (!arr)
@@ -2416,8 +2663,31 @@ static SailfinPtrArray *_alloc_array(int64_t len)
     return arr;
 }
 
+static int _array_is_suspicious_ptr(const void *ptr)
+{
+    uintptr_t value = (uintptr_t)ptr;
+    if (value < 4096u)
+    {
+        return 1;
+    }
+    return 0;
+}
+
 static void _array_check_canary(const char *label, SailfinPtrArray *arr)
 {
+    if (_array_is_suspicious_ptr(arr))
+    {
+        if (label)
+        {
+            fprintf(
+                stderr,
+                "[stage2-native] array_canary skipped suspicious ptr label=%s arr=%p\n",
+                label,
+                (void *)arr);
+            fflush(stderr);
+        }
+        return;
+    }
     static int canary_init = 0;
     static int canary_enabled = 0;
     if (!canary_init)
@@ -2478,6 +2748,24 @@ static void _array_check_canary(const char *label, SailfinPtrArray *arr)
 
 SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 {
+    if (_array_is_suspicious_ptr(a))
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array_concat suspicious a=%p (treating as NULL)\n",
+            (void *)a);
+        fflush(stderr);
+        a = NULL;
+    }
+    if (_array_is_suspicious_ptr(b))
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array_concat suspicious b=%p (treating as NULL)\n",
+            (void *)b);
+        fflush(stderr);
+        b = NULL;
+    }
     _array_check_canary("concat.a", a);
     _array_check_canary("concat.b", b);
 
@@ -2724,6 +3012,16 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 
 SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
 {
+    if (_array_is_suspicious_ptr(a))
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] append_string suspicious a=%p (treating as NULL)\n",
+            (void *)a);
+        fflush(stderr);
+        _maybe_print_array_backtrace("append_string suspicious", a);
+        a = NULL;
+    }
     _array_check_canary("append.in", a);
 
     int64_t raw_alen = a ? a->len : 0;
@@ -3349,6 +3647,28 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
         len = 0;
         *len_ptr = 0;
     }
+    static int array_push_limit_init = 0;
+    static int64_t array_push_limit = 0;
+    if (!array_push_limit_init)
+    {
+        array_push_limit_init = 1;
+        int limit = _env_int("SAILFIN_MAX_ARRAY_LEN", 5000000);
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        array_push_limit = (int64_t)limit;
+    }
+    if (array_push_limit > 0 && len > array_push_limit)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array_push len exceeded (len=%lld limit=%lld)\n",
+            (long long)len,
+            (long long)array_push_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("array push limit exceeded");
+    }
 
     const uint64_t header_magic = 0x5341494c46494e43ull;
     const size_t header_words = 4u; // magic, capacity, elem_size, reserved
@@ -3356,6 +3676,18 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
     const size_t canary_bytes = 32u;
 
     uint8_t *data = (uint8_t *)(*data_ptr_ptr);
+    if (data && (uintptr_t)data < 4096u)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array_push suspicious data=%p (resetting array)\n",
+            (void *)data);
+        fflush(stderr);
+        data = NULL;
+        *data_ptr_ptr = NULL;
+        *len_ptr = 0;
+        len = 0;
+    }
     size_t capacity = 0;
     bool has_header = false;
 
@@ -4014,6 +4346,39 @@ double sailfin_runtime_grapheme_count(char *text)
 
 char *sailfin_runtime_grapheme_at(char *text, double index)
 {
+    static int trace_enabled = -1;
+    if (trace_enabled < 0)
+    {
+        const char *trace = getenv("SAILFIN_TRACE_GRAPHEME_AT");
+        trace_enabled = (trace && trace[0] != '\0' && trace[0] != '0') ? 1 : 0;
+    }
+    if (trace_enabled)
+    {
+        static int trace_budget = 64;
+        if (trace_budget > 0)
+        {
+            trace_budget--;
+            uintptr_t raw = (uintptr_t)text;
+            unsigned char b0 = 0;
+            unsigned char b1 = 0;
+            bool has_bytes = false;
+            if (text && raw >= 4096u)
+            {
+                b0 = (unsigned char)text[0];
+                b1 = (unsigned char)text[1];
+                has_bytes = true;
+            }
+            if (has_bytes)
+            {
+                fprintf(stderr, "[stage2-native] grapheme_at(%p, %.2f) first_bytes=%02x%02x\n", (void *)text, index, b0, b1);
+            }
+            else
+            {
+                fprintf(stderr, "[stage2-native] grapheme_at(%p, %.2f)\n", (void *)text, index);
+            }
+            fflush(stderr);
+        }
+    }
     if (!text)
     {
         return "";
@@ -4323,6 +4688,34 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
 
     uint32_t codepoint = 0;
     bool immediate = _is_immediate_codepoint_string(contents_str, &codepoint);
+
+    // Enhanced debugging for zero-length writes
+    if (trace_write_enabled)
+    {
+        uintptr_t addr = (uintptr_t)contents_str;
+        fprintf(stderr, "[native] fs.writeFile PRE-LENGTH contents=%p immediate=%d cp=%u addr_low32=0x%x addr_high32=0x%x\n",
+                (void *)contents_str, immediate ? 1 : 0, (unsigned)codepoint,
+                (unsigned)(addr & 0xffffffffu), (unsigned)(addr >> 32));
+        fflush(stderr);
+
+        // Check for premature null termination around 65535
+        if (!immediate && contents_str)
+        {
+            size_t check_start = 65530;
+            size_t check_end = 65545;
+            fprintf(stderr, "[native] fs.writeFile checking bytes %zu-%zu\n", check_start, check_end);
+            for (size_t i = check_start; i < check_end; i++)
+            {
+                unsigned char byte = (unsigned char)contents_str[i];
+                if (byte == 0)
+                {
+                    fprintf(stderr, "[native] fs.writeFile found NULL at offset %zu\n", i);
+                    break;
+                }
+            }
+            fflush(stderr);
+        }
+    }
     if (trace_write_enabled)
     {
         char preview_buf[40];

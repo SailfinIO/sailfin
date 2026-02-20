@@ -88,8 +88,23 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             break;
         }
         let binding = bindings[index];
-        let mut type_annotation = trim_text(binding.type_annotation);
-        let mut effective_type_annotation = binding.type_annotation;
+        if binding == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: module binding was null; skipping");
+            index += 1;
+            continue;
+        }
+        let mut name = binding.name;
+        if name == null || name.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: module binding missing name; skipping");
+            index += 1;
+            continue;
+        }
+        let mut raw_type_annotation = binding.type_annotation;
+        if raw_type_annotation == null {
+            raw_type_annotation = "";
+        }
+        let mut type_annotation = trim_text(raw_type_annotation);
+        let mut effective_type_annotation = raw_type_annotation;
         if type_annotation.length == 0 && binding.value != null {
             let init_expr = trim_text(binding.value);
             if is_string_literal(init_expr) {
@@ -101,7 +116,6 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             index += 1;
             continue;
         }
-        let name = binding.name;
         let global_name = module_global_symbol(name);
         let mut llvm_type -> string = "";
         if type_annotation.length > 0 {
@@ -178,7 +192,22 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             break;
         }
         let binding = bindings[init_index];
-        let mut type_annotation = trim_text(binding.type_annotation);
+        if binding == null {
+            diagnostics = append_string(diagnostics, "llvm lowering: module init binding was null; skipping");
+            init_index += 1;
+            continue;
+        }
+        let mut name = binding.name;
+        if name == null || name.length == 0 {
+            diagnostics = append_string(diagnostics, "llvm lowering: module init binding missing name; skipping");
+            init_index += 1;
+            continue;
+        }
+        let mut raw_type_annotation = binding.type_annotation;
+        if raw_type_annotation == null {
+            raw_type_annotation = "";
+        }
+        let mut type_annotation = trim_text(raw_type_annotation);
         if type_annotation.length == 0 && binding.value != null {
             let init_expr = trim_text(binding.value);
             if is_string_literal(init_expr) {
@@ -193,7 +222,6 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             init_index += 1;
             continue;
         }
-        let name = binding.name;
         let global_name = module_global_symbol(name);
         let local = find_local_binding(locals, name);
         if local == null {

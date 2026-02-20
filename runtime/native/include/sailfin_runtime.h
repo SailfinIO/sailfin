@@ -41,6 +41,7 @@ extern "C"
     char *sailfin_runtime_string_concat(char *a, char *b);
     // Drop/free a runtime-owned string (no-op for non-owned/persistent values).
     void sailfin_runtime_string_drop(char *text);
+    double sailfin_runtime_string_to_number(char *text);
     // Dynamic member access for boxed/runtime values.
     // Currently used for `.variant` on boxed enums.
     char *sailfin_runtime_get_field(char *base, char *field);

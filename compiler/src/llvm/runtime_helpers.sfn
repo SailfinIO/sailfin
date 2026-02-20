@@ -554,6 +554,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.to_number",
+        symbol: "sailfin_runtime_string_to_number",
+        return_type: "double",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "strings_equal",
         symbol: "strings_equal",
         return_type: "i1",

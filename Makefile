@@ -233,7 +233,17 @@ compile:
 		echo "[compile] built $(NATIVE_OUT)"; \
 	fi
 
-check: compile test
+check: check-conda
+	@$(MAKE) compile
+	@seed="build/native/sailfin"; \
+	if [ ! -x "$$seed" ]; then \
+		echo "[check][error] missing $$seed (run: make compile)"; \
+		exit 1; \
+	fi; \
+	echo "[check] verifying seed selfhost..."; \
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py \
+		--seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-seedcheck
+	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
 
 # =============================================================================
 # Packaging (release artifacts)

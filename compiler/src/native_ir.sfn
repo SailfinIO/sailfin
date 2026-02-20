@@ -338,6 +338,22 @@ fn parse_native_artifact(text -> string) -> ParseNativeResult {
     return parse_native_artifact_impl(text, true, true);
 }
 
+fn parse_native_function_count_from_text(text -> string) -> number {
+    let parsed = parse_native_artifact_impl(text, false, false);
+    if parsed.functions == null {
+        return -1;
+    }
+    return parsed.functions.length;
+}
+
+fn parse_native_functions_from_text(text -> string) -> NativeFunction[] {
+    let parsed = parse_native_artifact_impl(text, true, true);
+    if parsed.functions == null {
+        return [];
+    }
+    return parsed.functions;
+}
+
 // Parse a native artifact in a mode suitable for import context:
 // - Keeps signatures, struct/method headers, and interface definitions.
 // - Skips instruction bodies (significant speedup for large imported modules).
@@ -683,21 +699,23 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         }
         // Instruction line (or top-level binding) handling.
 
-    let gather = gather_instruction(lines, index);
-    line = gather.text;
-    index += gather.lines_consumed;
-    let instruction_result = parse_instruction(line, pending_span, pending_value_span);
+        let gather = gather_instruction(lines, index);
+        let gathered_line = gather.text;
+        // Always advance by at least one line; `gather.lines_consumed` counts
+        // continuation lines beyond the current index.
+        index += gather.lines_consumed + 1;
+        let instruction_result = parse_instruction(gathered_line, pending_span, pending_value_span);
         let instructions = instruction_result.instructions;
         if instruction_result.span_consumed {
             pending_span = null;
         } else if pending_span != null {
-            diagnostics = append_string(diagnostics, "unused span metadata before: " + line);
+            diagnostics = append_string(diagnostics, "unused span metadata before: " + gathered_line);
             pending_span = null;
         }
         if instruction_result.value_span_consumed {
             pending_value_span = null;
         } else if pending_value_span != null {
-            diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + line);
+            diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + gathered_line);
             pending_value_span = null;
         }
 
@@ -706,10 +724,9 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
                 if instructions.length == 1 && instructions[0].variant == "Let" {
                     bindings = append_binding(bindings, binding_from_instruction(instructions[0]));
                 } else {
-                    diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + line);
+                    diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + gathered_line);
                 }
             }
-            index += 1;
             continue;
         }
         let mut instruction_index -> number = 0;
@@ -720,11 +737,12 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
             current = append_instruction(current, instructions[instruction_index]);
             instruction_index += 1;
         }
-        index += 1;
     }
 
     if current != null {
         diagnostics = append_string(diagnostics, "unterminated function at end of artifact");
+        functions = append_function(functions, current);
+        current = null;
     }
 
     if pending_decorators.length > 0 {
@@ -969,6 +987,9 @@ fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGa
             break;
         }
         let continuation = trim_text(lines[index]);
+        if is_native_directive_line(continuation) {
+            break;
+        }
         // Preserve structure for downstream parsing by keeping newline separators.
         if continuation.length == 0 {
             combined = combined + "\n";
@@ -985,6 +1006,14 @@ fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGa
     }
     let normalized = trim_text(combined);
     return InstructionGatherResult { text: normalized, lines_consumed: consumed };
+}
+
+fn is_native_directive_line(line -> string) -> boolean {
+    let trimmed = trim_text(line);
+    if trimmed.length == 0 {
+        return false;
+    }
+    return starts_with(trimmed, ".");
 }
 
 fn instruction_line_requires_operator_continuation(line -> string) -> boolean {

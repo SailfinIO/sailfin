@@ -26,7 +26,8 @@ import {
     is_simple_identifier,
     find_last_index_of_char,
     index_of,
-    string_array_contains
+    string_array_contains,
+    number_to_string
 } from "./utils";
 import {
     map_type_annotation,
@@ -122,6 +123,12 @@ fn enum_layout_matches_variants(enum_def -> NativeEnum, layout -> NativeEnumLayo
 }
 
 fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
+    if enums.length > 10000 {
+        return EnumLayoutFixupResult {
+            enums: [],
+            diagnostics: ["llvm lowering: enum layout fixup skipped (too many enums=" + number_to_string(enums.length) + ")"],
+        };
+    }
     let mut diagnostics -> string[] = [];
     let mut updated -> NativeEnum[] = [];
     let mut index -> number = 0;
@@ -168,6 +175,20 @@ fn empty_type_context() -> TypeContext {
 }
 
 fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[]) -> TypeContextBuild {
+    if structs.length > 10000 || enums.length > 10000 || interfaces.length > 10000 {
+        return TypeContextBuild {
+            context: empty_type_context(),
+            diagnostics: [
+                "llvm lowering: type context build skipped (counts structs="
+                + number_to_string(structs.length)
+                + " enums="
+                + number_to_string(enums.length)
+                + " interfaces="
+                + number_to_string(interfaces.length)
+                + ")",
+            ],
+        };
+    }
     let mut diagnostics -> string[] = [];
     let mut struct_entries -> StructTypeInfo[] = [];
     let mut index -> number = 0;
@@ -331,12 +352,16 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             break;
         }
         let struct_def = structs[struct_vtable_index];
+        let mut implements = struct_def.implements;
+        if implements == null {
+            implements = [];
+        }
         let mut implements_index -> number = 0;
         loop {
-            if implements_index >= struct_def.implements.length {
+            if implements_index >= implements.length {
                 break;
             }
-            let interface_name = struct_def.implements[implements_index];
+            let interface_name = implements[implements_index];
             // Find the interface definition
             let mut interface_def_opt -> NativeInterface? = null;
             let mut search_idx -> number = 0;
@@ -516,12 +541,16 @@ fn append_vtable_entry(values -> VTableEntry[], value -> VTableEntry) -> VTableE
 // =============================================================================
 
 fn struct_declares_interface(struct_def -> NativeStruct, interface_name -> string) -> boolean {
+    let mut implements = struct_def.implements;
+    if implements == null {
+        implements = [];
+    }
     let mut index -> number = 0;
     loop {
-        if index >= struct_def.implements.length {
+        if index >= implements.length {
             break;
         }
-        if struct_def.implements[index] == interface_name {
+        if implements[index] == interface_name {
             return true;
         }
         index += 1;
@@ -530,12 +559,16 @@ fn struct_declares_interface(struct_def -> NativeStruct, interface_name -> strin
 }
 
 fn find_struct_method(struct_def -> NativeStruct, method_name -> string) -> NativeFunction? {
+    let mut methods = struct_def.methods;
+    if methods == null {
+        return null;
+    }
     let mut index -> number = 0;
     loop {
-        if index >= struct_def.methods.length {
+        if index >= methods.length {
             break;
         }
-        let method = struct_def.methods[index];
+        let method = methods[index];
         if method.name == method_name {
             return method;
         }

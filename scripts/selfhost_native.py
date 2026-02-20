@@ -54,6 +54,10 @@ _LLVM_NAMED_TYPE_DEF_RE = re.compile(
     re.MULTILINE,
 )
 
+_LLVM_PHI_RE = re.compile(r"^\s*(%[\w\.]+)\s*=\s*phi\s+(.+)$")
+_LLVM_STORE_RE = re.compile(
+    r"^\s*store\s+([^,]+)\s+(%[\w\.]+),\s*\1\*\s+(%[\w\.]+)\s*$")
+
 
 _OPAQUE_PTR_CLANG_ERR_RE = re.compile(
     r"ptr type is only supported in -opaque-pointers mode",
@@ -317,6 +321,181 @@ def _mark_unaligned_enum_payload_accesses(llvm_ir: str) -> tuple[str, int]:
         out.append(ln)
 
     return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _reorder_phi_nodes_to_block_start(llvm_ir: str) -> tuple[str, int]:
+    """Move all phi nodes to the top of each basic block.
+
+    LLVM requires that phi nodes appear contiguously at the start of a block
+    (after the label). Some generated modules interleave phi nodes with other
+    instructions, which clang rejects.
+    """
+
+    lines = llvm_ir.splitlines()
+    if not lines:
+        return llvm_ir, 0
+
+    out: list[str] = []
+    changed = 0
+
+    def _flush_block(label: str | None, block_lines: list[str]) -> None:
+        nonlocal changed
+        if label is None:
+            out.extend(block_lines)
+            return
+
+        phi_lines: list[str] = []
+        other_lines: list[str] = []
+        for line in block_lines:
+            if _LLVM_PHI_RE.match(line):
+                phi_lines.append(line)
+            else:
+                other_lines.append(line)
+        if phi_lines:
+            if block_lines[: len(phi_lines)] != phi_lines:
+                changed += 1
+            out.append(label)
+            out.extend(phi_lines)
+            out.extend(other_lines)
+        else:
+            out.append(label)
+            out.extend(other_lines)
+
+    current_label: str | None = None
+    current_block: list[str] = []
+
+    label_re = re.compile(r"^\s*[A-Za-z_.$][A-Za-z0-9_.$]*:\s*(?:;.*)?$")
+    for line in lines:
+        if label_re.match(line):
+            _flush_block(current_label, current_block)
+            current_label = line
+            current_block = []
+            continue
+        if current_label is None:
+            out.append(line)
+        else:
+            current_block.append(line)
+
+    _flush_block(current_label, current_block)
+
+    return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+_STORE_NULL_RE = re.compile(
+    r"^(?P<indent>\s*)store\s+(?P<ty>[^,]+?)\s+null,\s+(?P=ty)\*\s+(?P<ptr>%[\w\.]+)(?P<tail>.*)$"
+)
+
+_RUNTIME_FIELD_PREFIX = ".runtime.field."
+
+
+def _fix_invalid_null_stores(llvm_ir: str) -> tuple[str, int]:
+    """Replace `store <non-pointer> null` with zeroinitializer.
+
+    LLVM only permits `null` for pointer-typed values. For aggregate or
+    integer/float types, use `zeroinitializer` instead.
+    """
+
+    lines = llvm_ir.splitlines()
+    out: list[str] = []
+    changed = 0
+    for line in lines:
+        m = _STORE_NULL_RE.match(line)
+        if not m:
+            out.append(line)
+            continue
+        ty = m.group("ty").strip()
+        if ty.endswith("*") or ty == "ptr":
+            out.append(line)
+            continue
+        indent = m.group("indent")
+        ptr = m.group("ptr")
+        tail = m.group("tail")
+        out.append(f"{indent}store {ty} zeroinitializer, {ty}* {ptr}{tail}")
+        changed += 1
+    return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _escape_llvm_string(text: str) -> str:
+    return (
+        text.replace("\\", "\\5C")
+        .replace("\n", "\\0A")
+        .replace("\r", "\\0D")
+        .replace("\t", "\\09")
+        .replace('"', "\\22")
+    )
+
+
+def _inject_runtime_field_constant(llvm_text: str, symbol: str) -> tuple[str, bool]:
+    """Inject a string constant for runtime field names when missing.
+
+    Example missing symbol: .runtime.field.parameters
+    Inject: @.runtime.field.parameters = private unnamed_addr constant [11 x i8] c"parameters\00"
+    """
+
+    if not symbol.startswith(_RUNTIME_FIELD_PREFIX):
+        return llvm_text, False
+
+    name = symbol[len(_RUNTIME_FIELD_PREFIX):]
+    if not name:
+        return llvm_text, False
+
+    needle = f"@{symbol} ="
+    if needle in llvm_text:
+        return llvm_text, False
+
+    escaped = _escape_llvm_string(name)
+    length = len(name.encode("utf-8")) + 1
+    definition = f"@{symbol} = private unnamed_addr constant [{length} x i8] c\"{escaped}\\00\""
+
+    lines = llvm_text.splitlines()
+    insert_at = None
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("define ") or stripped.startswith("declare "):
+            insert_at = idx
+            break
+    if insert_at is None:
+        lines.append(definition)
+    else:
+        lines.insert(insert_at, definition)
+    return "\n".join(lines) + ("\n" if llvm_text.endswith("\n") else ""), True
+
+
+def _rewrite_phi_store_to_load(llvm_ir: str) -> tuple[str, int]:
+    """Replace phi/store-back pairs with a load to avoid dominance errors."""
+    lines = llvm_ir.splitlines()
+    out: list[str] = []
+    rewritten = 0
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        phi_match = _LLVM_PHI_RE.match(line)
+        if phi_match:
+            phi_var = phi_match.group(1)
+            phi_body = phi_match.group(2).strip()
+            phi_type = phi_body.split(" [", 1)[0].strip()
+            lookahead = i + 1
+            store_match = None
+            while lookahead < len(lines):
+                next_line = lines[lookahead]
+                if _LLVM_PHI_RE.match(next_line):
+                    lookahead += 1
+                    continue
+                store_match = _LLVM_STORE_RE.match(next_line)
+                break
+            if store_match:
+                store_value = store_match.group(2)
+                store_ptr = store_match.group(3)
+                if store_value == phi_var:
+                    out.append(
+                        f"  {phi_var} = load {phi_type}, {phi_type}* {store_ptr}"
+                    )
+                    rewritten += 1
+                    i += 1
+                    continue
+        out.append(line)
+        i += 1
+    return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), rewritten
 
 
 def _inject_debug_enum_payload_probes(llvm_ir: str, module_name: str) -> tuple[str, int]:
@@ -811,7 +990,6 @@ def _seed_supports_emit_llvm_file(seed: pathlib.Path) -> bool:
     return proc.returncode != 0
 
 
-
 def _strip_cli_log_prefixes(text: str) -> str:
     """Remove leading log prefixes like '[info] ' from LLVM text.
 
@@ -1217,7 +1395,8 @@ def _trim_to_llvm_module_start(text: str) -> str:
         )
 
     lines = text.splitlines(keepends=True)
-    for i, raw_line in enumerate(lines[:400]):
+    scan_limit = min(len(lines), 20000)
+    for i, raw_line in enumerate(lines[:scan_limit]):
         line = raw_line.rstrip("\n")
         if not line.strip():
             continue
@@ -1350,12 +1529,22 @@ def _seed_emit_native_text(
         raise SystemExit(
             f"selfhost: seed emit native failed for {source_path} (rc={proc.returncode})\n{stderr_text}"
         )
-    raw = proc.stdout.decode("utf-8", errors="replace")
-    # Some seeds prefix stdout with log labels; strip those so the native-text
-    # parser can consume the artifact.
-    cleaned = _strip_cli_log_prefixes(raw)
-    out_path.write_text(cleaned, encoding="utf-8")
+    stdout_raw = proc.stdout.decode("utf-8", errors="replace")
+    stderr_raw = proc.stderr.decode("utf-8", errors="replace")
 
+    # Some seeds prefix output with log labels; strip those so the native-text
+    # parser can consume the artifact. Prefer stdout, but fall back to stderr
+    # when the native text was emitted there.
+    cleaned_stdout = _strip_cli_log_prefixes(stdout_raw)
+    cleaned_stderr = _strip_cli_log_prefixes(stderr_raw)
+
+    def _looks_like_native(text: str) -> bool:
+        return ".module " in text or ".fn " in text
+
+    cleaned = cleaned_stdout
+    if not _looks_like_native(cleaned_stdout) and _looks_like_native(cleaned_stderr):
+        cleaned = cleaned_stderr
+    out_path.write_text(cleaned, encoding="utf-8")
 
 
 def _prepare_seed_import_context(
@@ -1402,6 +1591,27 @@ def _prepare_seed_import_context(
 
         return "\n".join(lines) + "\n"
 
+    def _emit_native_with_retries(src: pathlib.Path, dest: pathlib.Path) -> bool:
+        last_err = ""
+        for attempt in range(1, 4):
+            try:
+                _seed_emit_native_text(
+                    seed_bin=seed_bin,
+                    source_path=src,
+                    out_path=dest,
+                    cwd=seed_cwd,
+                    env=env,
+                    timeout=timeout,
+                )
+                return True
+            except SystemExit as exc:
+                last_err = str(exc)
+                if attempt < 3:
+                    time.sleep(0.2)
+                continue
+        print(last_err, file=sys.stderr, flush=True)
+        return False
+
     def _ensure_import_context_cache_matches_seed() -> None:
         """Ensure build/native/import-context cache does not mix artifacts across seeds.
 
@@ -1445,7 +1655,14 @@ def _prepare_seed_import_context(
                 out_lines.append(stripped)
         out_path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
 
+    failure_count = 0
+    skip_remaining = False
+    max_failures = 1
+
     def _emit_one(p: pathlib.Path) -> None:
+        nonlocal failure_count, skip_remaining
+        if skip_remaining:
+            return
         slug = _slug_from_source_path(p)
         asm_path = import_cache / f"{slug}.sfn-asm"
         manifest_path = import_cache / f"{slug}.layout-manifest"
@@ -1468,14 +1685,16 @@ def _prepare_seed_import_context(
         seed_env_local["TMP"] = str(tmp_dir)
         seed_env_local["TEMP"] = str(tmp_dir)
 
-        _seed_emit_native_text(
-            seed_bin=seed_bin,
-            source_path=p,
-            out_path=asm_path,
-            cwd=seed_cwd,
-            env=seed_env_local,
-            timeout=timeout,
-        )
+        if not _emit_native_with_retries(p, asm_path):
+            failure_count += 1
+            if failure_count >= max_failures:
+                print(
+                    f"[selfhost][warn] import-context staging aborted after {failure_count} seed failures; continuing without full import context",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                skip_remaining = True
+            return
         native_text = asm_path.read_text(
             encoding="utf-8", errors="replace")
         _write_layout_manifest_from_native_text(
@@ -1570,6 +1789,19 @@ def main(argv: list[str]) -> int:
             "Number of modules to build in parallel (seed emit + clang compile). "
             "Default: 1 (sequential, most reliable)."
         ),
+    )
+    parser.add_argument(
+        "--use-repo-cwd",
+        action="store_true",
+        help=(
+            "Run seed emits in the repo root instead of an isolated per-attempt cwd. "
+            "Useful when isolated cwd runs produce truncated LLVM output."
+        ),
+    )
+    parser.add_argument(
+        "--disable-string-free",
+        action="store_true",
+        help="Set SAILFIN_DISABLE_STRING_FREE=1 for seed emits (off by default)",
     )
     parser.add_argument(
         "--attempt-sleep",
@@ -1745,6 +1977,10 @@ def main(argv: list[str]) -> int:
     clang_flags: list[str] = shlex.split(args.opt)
     if args.wno_override_module:
         clang_flags.append("-Wno-override-module")
+    if "-fno-delete-null-pointer-checks" not in clang_flags:
+        # Some generated LLVM IR uses null-based GEPs for size calculations.
+        # Avoid UB-driven optimizations that can miscompile the compiler itself.
+        clang_flags.append("-fno-delete-null-pointer-checks")
 
     if args.asan:
         # Prefer diagnostic builds when chasing selfhost corruption.
@@ -1893,8 +2129,10 @@ def main(argv: list[str]) -> int:
         known_named_type_defs_lock = threading.Lock()
 
         use_emit_llvm_file = prefer_emit_llvm_file and seed_supports_emit_llvm_file
+        disable_emit_llvm_file_after_failure = True
         seed_env = os.environ.copy()
-        seed_env["SAILFIN_DISABLE_STRING_FREE"] = "1"
+        if args.disable_string_free:
+            seed_env["SAILFIN_DISABLE_STRING_FREE"] = "1"
 
         seed_timeout = None
         if args.seed_timeout and args.seed_timeout > 0:
@@ -1944,6 +2182,7 @@ def main(argv: list[str]) -> int:
 
                 Returns (module_name, timing_phases, stats).
                 """
+                nonlocal use_emit_llvm_file
                 module_name = _module_name_from_source_path(source_path)
                 final_obj_path = obj_dir / f"{module_name}.o"
                 final_obj_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2016,10 +2255,16 @@ def main(argv: list[str]) -> int:
                     # per-attempt isolated cwd that still has access to the
                     # shared build/native/import-context cache.
                     seed_emit_cwd = attempt_tmp / "seed_cwd"
+                    if args.use_repo_cwd:
+                        seed_emit_cwd = REPO_ROOT
                     (seed_emit_cwd / "build").mkdir(parents=True, exist_ok=True)
+                    (seed_emit_cwd / "build" /
+                     "sailfin").mkdir(parents=True, exist_ok=True)
                     shared_import_cache = seed_cwd / "build" / "native" / "import-context"
                     local_import_cache = seed_emit_cwd / "build" / "native" / "import-context"
-                    local_import_cache.parent.mkdir(parents=True, exist_ok=True)
+                    local_import_cache.parent.mkdir(
+                        parents=True, exist_ok=True)
+
                     def _needs_import_cache_refresh() -> bool:
                         shared_stamp = shared_import_cache / ".seed_stamp"
                         local_stamp = local_import_cache / ".seed_stamp"
@@ -2050,14 +2295,16 @@ def main(argv: list[str]) -> int:
                     # the seed to treat local functions as imported externs,
                     # producing LLVM with missing definitions (link-time
                     # undefined symbols).
-                    cached_self_artifact = local_import_cache / \
-                        f"{module_name}.sfn-asm"
-                    if cached_self_artifact.exists():
-                        cached_self_artifact.unlink()
-                    cached_self_manifest = local_import_cache / \
-                        f"{module_name}.layout-manifest"
-                    if cached_self_manifest.exists():
-                        cached_self_manifest.unlink()
+                    module_slug = _slug_from_source_path(source_path)
+                    for cache_key in (module_slug, module_name):
+                        cached_self_artifact = local_import_cache / \
+                            f"{cache_key}.sfn-asm"
+                        if cached_self_artifact.exists():
+                            cached_self_artifact.unlink()
+                        cached_self_manifest = local_import_cache / \
+                            f"{cache_key}.layout-manifest"
+                        if cached_self_manifest.exists():
+                            cached_self_manifest.unlink()
                     # Some seeds appear to use fixed temp file names.
                     # When running modules in parallel, isolate TMPDIR to avoid
                     # cross-process temp collisions that can corrupt LLVM output.
@@ -2156,6 +2403,36 @@ def main(argv: list[str]) -> int:
                     last_rc = proc.returncode
                     last_stderr = proc.stderr.decode("utf-8", errors="replace")
                     if last_rc != 0:
+                        if use_emit_llvm_file_local:
+                            with attempt_path.open("wb") as out:
+                                cmd = [str(seed_bin), "emit"]
+                                if args.timing:
+                                    cmd.append("--timing")
+                                cmd.extend(["llvm", str(source_path)])
+                                proc = subprocess.run(
+                                    cmd,
+                                    cwd=str(seed_emit_cwd),
+                                    stdout=out,
+                                    stderr=subprocess.PIPE,
+                                    close_fds=False,
+                                    env=seed_env_local,
+                                    timeout=_cap_timeout(attempt_seed_timeout),
+                                )
+                            last_rc = proc.returncode
+                            last_stderr = proc.stderr.decode(
+                                "utf-8", errors="replace")
+                            if last_rc == 0:
+                                use_emit_llvm_file_local = False
+                                if disable_emit_llvm_file_after_failure:
+                                    use_emit_llvm_file = False
+                            else:
+                                if disable_emit_llvm_file_after_failure:
+                                    use_emit_llvm_file = False
+                                stats["seed_failures"] = int(
+                                    stats["seed_failures"]) + 1
+                                if args.attempt_sleep > 0:
+                                    time.sleep(args.attempt_sleep)
+                                continue
                         stats["seed_failures"] = int(
                             stats["seed_failures"]) + 1
                         if args.attempt_sleep > 0:
@@ -2263,6 +2540,14 @@ def main(argv: list[str]) -> int:
                     candidate, _ = _mark_unaligned_enum_payload_accesses(
                         candidate)
 
+                    # Ensure phi nodes are grouped at the top of each block.
+                    candidate, _ = _reorder_phi_nodes_to_block_start(candidate)
+
+                    # Optional heuristic fix for invalid phi inputs that break dominance.
+                    # Disabled by default because it can change semantics.
+                    if module_name == "native_ir" and os.environ.get("SAILFIN_REWRITE_PHI_STORE") == "1":
+                        candidate, _ = _rewrite_phi_store_to_load(candidate)
+
                     # Optional debugging: inject probes to dump enum payload raw bits
                     # and decoded pointers around Expression.Call.
                     candidate, _ = _inject_debug_enum_payload_probes(
@@ -2326,6 +2611,10 @@ def main(argv: list[str]) -> int:
                                 time.sleep(args.attempt_sleep)
                             continue
 
+                    # Final safeguard: ensure phi nodes are grouped at block starts
+                    # right before writing the candidate to disk.
+                    candidate, _ = _reorder_phi_nodes_to_block_start(candidate)
+                    candidate, _ = _fix_invalid_null_stores(candidate)
                     cleaned_attempt_path.write_text(
                         candidate, encoding="utf-8")
                     validate_obj = raw_dir / \
@@ -2346,7 +2635,7 @@ def main(argv: list[str]) -> int:
 
                     def _run_clang_compile(flags: list[str]) -> subprocess.CompletedProcess[str]:
                         return subprocess.run(
-                            [clang, *flags, "-fPIC", "-c",
+                            [clang, *flags, "-c",
                                 str(cleaned_attempt_path), "-o", str(validate_obj)],
                             cwd=str(REPO_ROOT),
                             stdout=subprocess.DEVNULL,
@@ -2398,13 +2687,21 @@ def main(argv: list[str]) -> int:
                         missing = m.group("name").strip()
                         if not missing or missing.startswith("llvm."):
                             break
-
-                        patched_candidate2, did_patch = _inject_declare_for_symbol(
-                            patched_candidate, missing
-                        )
+                        if missing.startswith(_RUNTIME_FIELD_PREFIX):
+                            patched_candidate2, did_patch = _inject_runtime_field_constant(
+                                patched_candidate, missing
+                            )
+                        else:
+                            patched_candidate2, did_patch = _inject_declare_for_symbol(
+                                patched_candidate, missing
+                            )
                         if not did_patch:
                             break
                         patched_candidate = patched_candidate2
+                        patched_candidate, _ = _reorder_phi_nodes_to_block_start(
+                            patched_candidate)
+                        patched_candidate, _ = _fix_invalid_null_stores(
+                            patched_candidate)
                         cleaned_attempt_path.write_text(
                             patched_candidate, encoding="utf-8")
                         try:
@@ -2412,7 +2709,7 @@ def main(argv: list[str]) -> int:
                         except FileNotFoundError:
                             pass
                         clang_proc2 = subprocess.run(
-                            [clang, *clang_flags, "-fPIC", "-c",
+                            [clang, *clang_flags, "-c",
                                 str(cleaned_attempt_path), "-o", str(validate_obj)],
                             cwd=str(REPO_ROOT),
                             stdout=subprocess.DEVNULL,

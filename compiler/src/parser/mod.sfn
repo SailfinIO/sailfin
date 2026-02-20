@@ -55,10 +55,15 @@ fn parse_tokens(tokens -> Token[]) -> Program {
             break;
         }
 
+        let prev_index = parser.index;
         let result = parse_statement(parser);
         parser = result.parser;
         statements = append_statement(statements, result.statement);
         parser = skip_trivia(parser);
+        if parser.index == prev_index {
+            print.warn("parser: no progress; aborting to avoid infinite loop");
+            break;
+        }
     }
 
     return Program { statements: statements };

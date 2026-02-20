@@ -378,6 +378,12 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
         }
     }
     if target_type == "double" {
+        if operand.llvm_type == "i8*" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = call double @sailfin_runtime_string_to_number(i8* " + operand.value + ")");
+            let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
         if operand.llvm_type == "i64" {
             let temp_name = format_temp_name(temp_index);
             current_lines = append_string(current_lines, "  " + temp_name + " = sitofp i64 " + operand.value + " to double");

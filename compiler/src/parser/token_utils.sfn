@@ -3,7 +3,7 @@
 // Token manipulation utilities - functions for working with token arrays,
 // parser state management, trivia handling, and token-to-text conversion.
 
-import { Token } from "../token";
+import { Token, eof_token } from "../token";
 import { SourceSpan } from "../ast";
 import { substring, char_code, char_at, strings_equal } from "../string_utils";
 import { Parser, CaptureResult, ParenthesizedParseResult, PatternCaptureResult } from "./types";
@@ -14,6 +14,12 @@ import { string_array_contains, trim_text } from "./utils";
 // ============================================================================
 
 fn parser_peek_raw(parser -> Parser) -> Token {
+    if parser.tokens == null {
+        return eof_token(0, 0);
+    }
+    if parser.tokens.length == 0 {
+        return eof_token(0, 0);
+    }
     if parser.index >= parser.tokens.length {
         return parser.tokens[parser.tokens.length - 1];
     }
@@ -21,6 +27,9 @@ fn parser_peek_raw(parser -> Parser) -> Token {
 }
 
 fn parser_advance_raw(parser -> Parser) -> Parser {
+    if parser.tokens == null {
+        return parser;
+    }
     if parser.index + 1 > parser.tokens.length {
         return parser;
     }
@@ -33,6 +42,9 @@ fn parser_advance_raw(parser -> Parser) -> Parser {
 fn skip_trivia(parser -> Parser) -> Parser {
     let mut current = parser;
     loop {
+        if current.tokens == null {
+            break;
+        }
         if current.index >= current.tokens.length {
             break;
         }
@@ -50,6 +62,9 @@ fn is_end_of_file(parser -> Parser, token -> Token) -> boolean {
     // Avoid relying on `token.kind.variant` in native mode.
     // The lexer appends a final EOF token; treat the last token with an empty
     // lexeme as end-of-file.
+    if parser.tokens == null {
+        return true;
+    }
     if parser.index + 1 >= parser.tokens.length {
         return token.lexeme.length == 0;
     }

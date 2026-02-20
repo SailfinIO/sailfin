@@ -27,13 +27,20 @@ fn lex(source -> string) -> Token[] {
     };
 
     let tokens -> Token[] = [];
+    let mut guard -> number = 0;
+    let max_guard = length * 8 + 1000;
 
     loop {
+        guard += 1;
+        if guard > max_guard {
+            print.warn("lexer: guard limit exceeded");
+            break;
+        }
         if state.index >= state.source_len {
             break;
         }
 
-        let ch = state.source[state.index];
+        let ch = byte_at(state.source, state.index);
 
         if is_whitespace(ch) {
             let start_index = state.index;
@@ -43,10 +50,10 @@ fn lex(source -> string) -> Token[] {
                 if state.index >= state.source_len {
                     break;
                 }
-                if !is_whitespace(state.source[state.index]) {
+                if !is_whitespace(byte_at(state.source, state.index)) {
                     break;
                 }
-                if state.source[state.index] == "\n" {
+                if byte_at(state.source, state.index) == "\n" {
                     state.index += 1;
                     state.line += 1;
                     state.column = 1;
@@ -68,7 +75,7 @@ fn lex(source -> string) -> Token[] {
         if ch == "/" {
             let has_next = state.index + 1 < state.source_len;
             if has_next {
-                let next = state.source[state.index + 1];
+                let next = byte_at(state.source, state.index + 1);
                 if next == "/" {
                 let start_index = state.index;
                 let start_line = state.line;
@@ -83,7 +90,7 @@ fn lex(source -> string) -> Token[] {
                     if scan_index >= state.source_len {
                         break;
                     }
-                    let scan_character = state.source[scan_index];
+                    let scan_character = byte_at(state.source, scan_index);
                     if scan_character == "\n" || scan_character == "\r" {
                         comment_end = scan_index;
                         break;
@@ -115,12 +122,12 @@ fn lex(source -> string) -> Token[] {
                     if state.index >= state.source_len {
                         break;
                     }
-                    if state.source[state.index] == "*" && state.index + 1 < state.source_len && state.source[state.index + 1] == "/" {
+                    if byte_at(state.source, state.index) == "*" && state.index + 1 < state.source_len && byte_at(state.source, state.index + 1) == "/" {
                         state.index += 2;
                         state.column += 2;
                         break;
                     }
-                    if state.source[state.index] == "\n" {
+                    if byte_at(state.source, state.index) == "\n" {
                         state.index += 1;
                         state.line += 1;
                         state.column = 1;
@@ -159,7 +166,7 @@ fn lex(source -> string) -> Token[] {
                 if state.index >= state.source_len {
                     break;
                 }
-                let current = state.source[state.index];
+                let current = byte_at(state.source, state.index);
                 if !escaped && is_double_quote(current) {
                     state.index += 1;
                     state.column += 1;
@@ -207,15 +214,15 @@ fn lex(source -> string) -> Token[] {
                 if state.index >= state.source_len {
                     break;
                 }
-                if !is_digit(state.source[state.index]) {
+                if !is_digit(byte_at(state.source, state.index)) {
                     break;
                 }
                 state.index += 1;
                 state.column += 1;
             }
 
-            if state.index < state.source_len && state.source[state.index] == "." {
-                let next_is_digit = state.index + 1 < state.source_len && is_digit(state.source[state.index + 1]);
+            if state.index < state.source_len && byte_at(state.source, state.index) == "." {
+                let next_is_digit = state.index + 1 < state.source_len && is_digit(byte_at(state.source, state.index + 1));
                 if next_is_digit {
                     state.index += 1;
                     state.column += 1;
@@ -223,7 +230,7 @@ fn lex(source -> string) -> Token[] {
                         if state.index >= state.source_len {
                             break;
                         }
-                        if !is_digit(state.source[state.index]) {
+                        if !is_digit(byte_at(state.source, state.index)) {
                             break;
                         }
                         state.index += 1;
@@ -252,7 +259,7 @@ fn lex(source -> string) -> Token[] {
                 if state.index >= state.source_len {
                     break;
                 }
-                if !is_identifier_part(state.source[state.index]) {
+                if !is_identifier_part(byte_at(state.source, state.index)) {
                     break;
                 }
                 state.index += 1;
@@ -360,7 +367,36 @@ fn is_backslash(ch -> string) -> boolean {
 }
 
 fn slice(text -> string, start -> number, end -> number) -> string {
-    return substring_unchecked(text, start, end);
+    let text_len = text.length;
+    let mut safe_start = start;
+    let mut safe_end = end;
+    if safe_start < 0 {
+        safe_start = 0;
+    }
+    if safe_end < safe_start {
+        safe_end = safe_start;
+    }
+    if safe_start > text_len {
+        safe_start = text_len;
+    }
+    if safe_end > text_len {
+        safe_end = text_len;
+    }
+    return substring_unchecked(text, safe_start, safe_end);
+}
+
+fn byte_at(text -> string, index -> number) -> string {
+    let text_len = text.length;
+    if text_len == 0 {
+        return "";
+    }
+    if index < 0 {
+        return "";
+    }
+    if index >= text_len {
+        return "";
+    }
+    return substring_unchecked(text, index, index + 1);
 }
 
 fn append(tokens -> Token[], token -> Token) -> Token[] {

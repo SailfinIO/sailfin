@@ -6,7 +6,7 @@
 import { NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest } from "../native_ir";
 import { substring } from "../string_utils";
 import { ImportedModuleContext, LayoutManifestApplication } from "./types";
-import { trim_text, append_string, string_array_contains, number_to_string, starts_with, ends_with, join_with_separator } from "./utils";
+import { trim_text, append_string, string_array_contains, number_to_string, starts_with, ends_with, join_with_separator, index_of } from "./utils";
 
 // =============================================================================
 // Import Context Collection
@@ -147,12 +147,42 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
     }
 
     let mut normalized = normalize_import_module_path(trimmed);
+    let mut current_slug = normalize_import_module_path(current_module_slug);
+    if current_slug.length > 0 {
+        let compiler_index = index_of(current_slug, "/compiler/");
+        if compiler_index >= 0 {
+            current_slug = substring(current_slug, compiler_index + 1, current_slug.length);
+        } else {
+            let runtime_index = index_of(current_slug, "/runtime/");
+            if runtime_index >= 0 {
+                current_slug = substring(current_slug, runtime_index + 1, current_slug.length);
+            }
+        }
+        if index_of(current_slug, "/") < 0 && index_of(current_slug, "__") >= 0 {
+            let mut rebuilt -> string = "";
+            let mut idx -> number = 0;
+            loop {
+                if idx >= current_slug.length {
+                    break;
+                }
+                let ch = current_slug[idx];
+                if ch == "_" && idx + 1 < current_slug.length && current_slug[idx + 1] == "_" {
+                    rebuilt = rebuilt + "/";
+                    idx += 2;
+                    continue;
+                }
+                rebuilt = rebuilt + ch;
+                idx += 1;
+            }
+            current_slug = rebuilt;
+        }
+    }
 
     // Resolve relative imports against the importing module's directory.
     // This is required now that we preserve directory structure for modules
     // (e.g. `parser/mod` importing `./token_utils`).
     if starts_with(normalized, "./") || starts_with(normalized, "../") {
-        let base_dir = dirname_for_module_slug(current_module_slug);
+        let base_dir = dirname_for_module_slug(current_slug);
         if base_dir.length > 0 {
             normalized = base_dir + "/" + normalized;
         }

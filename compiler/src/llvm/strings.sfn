@@ -19,13 +19,19 @@ fn string_constant_singleton(constant -> StringConstant) -> StringConstant[] {
 }
 
 fn clone_string_constants(constants -> StringConstant[]) -> StringConstant[] {
+    if constants == null {
+        return [];
+    }
     let mut copy -> StringConstant[] = [];
     let mut index -> number = 0;
     loop {
         if index >= constants.length {
             break;
         }
-        copy.push(constants[index]);
+        let candidate = constants[index];
+        if candidate != null {
+            copy.push(candidate);
+        }
         index += 1;
     }
     return copy;
@@ -33,34 +39,56 @@ fn clone_string_constants(constants -> StringConstant[]) -> StringConstant[] {
 
 fn append_string_constant(set -> StringConstant[], constant -> StringConstant) -> StringConstant[] {
     let mut out = set;
+    if out == null {
+        out = [];
+    }
+    if constant == null {
+        return out;
+    }
     out = out.push(constant);
     return out;
 }
 
 fn merge_string_constants(existing -> StringConstant[], new_constants -> StringConstant[]) -> StringConstant[] {
-    if new_constants.length == 0 {
-        return existing;
+    let mut safe_existing = existing;
+    if safe_existing == null {
+        safe_existing = [];
     }
-    if existing.length == 0 {
-        return new_constants;
+    let mut safe_new_constants = new_constants;
+    if safe_new_constants == null {
+        return safe_existing;
+    }
+    if safe_new_constants.length == 0 {
+        return safe_existing;
+    }
+    if safe_existing.length == 0 {
+        return safe_new_constants;
     }
 
     // Only allocate a new array if we actually need to add something.
     let mut index -> number = 0;
     loop {
-        if index >= new_constants.length {
+        if index >= safe_new_constants.length {
             break;
         }
-        let candidate = new_constants[index];
-        let found_by_name = find_string_constant_by_name(existing, candidate.name);
+        let candidate = safe_new_constants[index];
+        if candidate == null || candidate.name == null {
+            index += 1;
+            continue;
+        }
+        let found_by_name = find_string_constant_by_name(safe_existing, candidate.name);
         if found_by_name == null {
-            let mut result -> StringConstant[] = clone_string_constants(existing);
+            let mut result -> StringConstant[] = clone_string_constants(safe_existing);
             let mut merge_index -> number = index;
             loop {
-                if merge_index >= new_constants.length {
+                if merge_index >= safe_new_constants.length {
                     break;
                 }
-                let merge_candidate = new_constants[merge_index];
+                let merge_candidate = safe_new_constants[merge_index];
+                if merge_candidate == null || merge_candidate.name == null {
+                    merge_index += 1;
+                    continue;
+                }
                 let merge_found = find_string_constant_by_name(result, merge_candidate.name);
                 if merge_found == null {
                     result.push(merge_candidate);
@@ -71,7 +99,7 @@ fn merge_string_constants(existing -> StringConstant[], new_constants -> StringC
         }
         index += 1;
     }
-    return existing;
+    return safe_existing;
 }
 
 // =============================================================================
@@ -79,13 +107,16 @@ fn merge_string_constants(existing -> StringConstant[], new_constants -> StringC
 // =============================================================================
 
 fn find_string_constant(constants -> StringConstant[], content -> string) -> StringConstant? {
+    if constants == null {
+        return null;
+    }
     let mut index -> number = 0;
     loop {
         if index >= constants.length {
             break;
         }
         let candidate = constants[index];
-        if candidate.content == content {
+        if candidate != null && candidate.content == content {
             return candidate;
         }
         index += 1;
@@ -94,13 +125,16 @@ fn find_string_constant(constants -> StringConstant[], content -> string) -> Str
 }
 
 fn find_string_constant_by_name(constants -> StringConstant[], name -> string) -> StringConstant? {
+    if constants == null {
+        return null;
+    }
     let mut index -> number = 0;
     loop {
         if index >= constants.length {
             break;
         }
         let candidate = constants[index];
-        if candidate.name == name {
+        if candidate != null && candidate.name == name {
             return candidate;
         }
         index += 1;
@@ -113,6 +147,9 @@ fn find_string_constant_by_name(constants -> StringConstant[], name -> string) -
 // =============================================================================
 
 fn render_string_constants(constants -> StringConstant[]) -> string[] {
+    if constants == null {
+        return [];
+    }
     let mut lines -> string[] = [];
     let mut index -> number = 0;
     loop {
@@ -120,16 +157,21 @@ fn render_string_constants(constants -> StringConstant[]) -> string[] {
             break;
         }
         let constant = constants[index];
-        let escaped = escape_string_for_llvm(constant.content);
-        let length_str = number_to_string(constant.byte_count + 1);
-        let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\"";
-        lines = append_string(lines, declaration);
+        if constant != null && constant.name != null && constant.content != null {
+            let escaped = escape_string_for_llvm(constant.content);
+            let length_str = number_to_string(constant.byte_count + 1);
+            let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\"";
+            lines = append_string(lines, declaration);
+        }
         index += 1;
     }
     return lines;
 }
 
 fn escape_string_for_llvm(content -> string) -> string {
+    if content == null {
+        return "";
+    }
     let mut result -> string = "";
     let mut index -> number = 0;
     loop {
