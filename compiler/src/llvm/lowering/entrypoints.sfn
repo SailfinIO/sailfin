@@ -3710,7 +3710,7 @@ fn write_llvm_lines_chunked(path -> string, lines -> string[]) -> boolean ![io] 
         return fs.exists(path);
     }
 
-    let chunk_limit = 65536;
+    let chunk_limit = 100000000;
     let mut buffer -> string = "";
     let mut buffered -> number = 0;
     let mut wrote -> boolean = false;
