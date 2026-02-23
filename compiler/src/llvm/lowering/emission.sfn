@@ -67,16 +67,35 @@ import {
 } from "../lifetime";
 
 import {
-    should_internalize_function,
-} from "../rendering";
-
-import {
     lower_instruction_range,
 } from "./instructions";
 
 import {
     module_user_main_symbol,
 } from "./module_globals";
+
+fn is_safe_llvm_type_text(value -> string) -> boolean {
+    if value == null {
+        return false;
+    }
+    let trimmed = trim_text(value);
+    if trimmed.length == 0 || trimmed.length > 256 {
+        return false;
+    }
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_%*{}[],(). x-";
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        if index_of(allowed, ch) < 0 {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
 
 fn emit_llvm_function(
     function -> NativeFunction,
@@ -92,6 +111,7 @@ fn emit_llvm_function(
     needs_module_init_call -> boolean
 ) -> LoweredLLVMFunction {
     let mut diagnostics -> string[] = [];
+    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
 
     // Async lowering (minimal): async functions spawn a background thread and return
     // an opaque Future pointer. Await joins and extracts the value.
@@ -145,9 +165,6 @@ fn emit_llvm_function(
 
         let mut wrapper_lines -> string[] = [];
         let mut linkage -> string = "";
-        if should_internalize_function(function, entry_points, exported_symbols, imported_functions) {
-            linkage = "internal ";
-        }
 
         let wrapper_symbol = sanitize_symbol(function.name);
         let impl_symbol = sanitize_symbol(impl_name);
@@ -302,7 +319,14 @@ fn emit_llvm_function(
     let mut sanitized = sanitize_symbol(function.name);
     let mut emit_main_wrapper -> boolean = false;
     let mut llvm_return = map_return_type(context, function.return_type);
+    if debug_lowering {
+        print.warn("emit-llvm: emit_fn phase=ret_type name=" + function.name + " llvm_return=" + llvm_return);
+    }
     if index_of(sanitized, "parse_native_artifact") >= 0 || index_of(sanitized, "parse_native_functions_from_text") >= 0 {
+        llvm_return = "i8*";
+    }
+    if !is_safe_llvm_type_text(llvm_return) {
+        diagnostics = append_string(diagnostics, "llvm lowering: suspicious return type `" + llvm_return + "` in " + function.name + "; defaulting to i8*");
         llvm_return = "i8*";
     }
     if llvm_return.length == 0 {
@@ -320,6 +344,9 @@ fn emit_llvm_function(
 
     let preparation = prepare_parameters(function, context);
     diagnostics = extend_string_array(diagnostics, preparation.diagnostics);
+    if debug_lowering {
+        print.warn("emit-llvm: emit_fn phase=prepare_params name=" + function.name + " params=" + number_to_string(preparation.bindings.length));
+    }
 
     if function.is_extern {
         let mut signature -> string = join_with_separator(preparation.signature, ", ");
@@ -358,8 +385,8 @@ fn emit_llvm_function(
 
     let entry_label -> string = "block.entry";
     let mut linkage -> string = "";
-    if should_internalize_function(function, entry_points, exported_symbols, imported_functions) {
-        linkage = "internal ";
+    if debug_lowering {
+        print.warn("emit-llvm: emit_fn phase=internalize_check name=" + function.name + " (disabled)");
     }
     lines = append_string(lines, "define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {");
     lines = append_string(lines, entry_label + ":");
@@ -391,10 +418,36 @@ fn emit_llvm_function(
     }
 
     let body = emit_body(function, llvm_return, preparation.bindings, module_globals, functions, context, entry_label);
+    if debug_lowering {
+        print.warn("emit-llvm: emit_fn phase=body_done name=" + function.name + " body_lines=" + number_to_string(body.lines.length));
+    }
     lines = extend_string_array(lines, body.lines);
     diagnostics = extend_string_array(diagnostics, body.diagnostics);
     let lifetime_diagnostics = validate_borrow_lifetimes(function, body.lifetime_regions);
     diagnostics = extend_string_array(diagnostics, lifetime_diagnostics);
+
+    let mut function_has_terminator -> boolean = false;
+    let mut function_line_index -> number = 0;
+    loop {
+        if function_line_index >= lines.length {
+            break;
+        }
+        let trimmed_line = trim_text(lines[function_line_index]);
+        if starts_with(trimmed_line, "ret ")
+            || trimmed_line == "ret void"
+            || starts_with(trimmed_line, "br ")
+            || starts_with(trimmed_line, "switch ")
+            || trimmed_line == "unreachable" {
+            function_has_terminator = true;
+            break;
+        }
+        function_line_index += 1;
+    }
+    if !function_has_terminator {
+        diagnostics = append_string(diagnostics, "llvm lowering: function emitted without terminator `" + function.name + "`");
+        lines = append_string(lines, "  unreachable");
+    }
+
     lines = append_string(lines, "}");
 
     if emit_main_wrapper {
@@ -423,7 +476,6 @@ fn emit_body(
     entry_label -> string
 ) -> BodyResult {
     let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
-    let trace_lowering = fs.exists("build/sailfin/.trace_lowering");
     if trace {
         print.info(
             "test llvm: emit_body start "

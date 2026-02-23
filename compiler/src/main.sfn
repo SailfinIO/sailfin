@@ -659,6 +659,58 @@ fn write_native_text_file_with_module(source -> string, module_name -> string, o
     return emit_native_text_to_file_with_module_name(program, module_name, out_path);
 }
 
+fn _has_prefix(value -> string, prefix -> string) -> boolean {
+    if prefix.length > value.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        if value[index] != prefix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn _looks_like_llvm_text(text -> string) -> boolean {
+    if text.length < 16 {
+        return false;
+    }
+    let lines = split_lines(text);
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length || index >= 128 {
+            break;
+        }
+        let line = lines[index];
+        if line.length == 0 {
+            index += 1;
+            continue;
+        }
+        if line[0] == " " || line[0] == "\t" {
+            return false;
+        }
+        if _has_prefix(line, "source_filename =") {
+            return true;
+        }
+        if _has_prefix(line, "; ModuleID =") {
+            return true;
+        }
+        if _has_prefix(line, "target ") || _has_prefix(line, "declare ") || _has_prefix(line, "define ") {
+            return true;
+        }
+        if line[0] == "%" || line[0] == "@" || line[0] == "!" || line[0] == ";" {
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
 // Compile and write LLVM IR directly, avoiding large return values.
 fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out_path -> string) -> boolean ![io] {
     let program -> Program = parse_program(source);
@@ -672,6 +724,7 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
     } else {
         print.warn("emit-llvm-file: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
+
     let native_text_path = "build/sailfin/emit-native.tmp";
     if fs.exists(native_text_path) {
         fs.deleteFile(native_text_path);
@@ -685,19 +738,24 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
         fs.deleteFile(out_path);
     }
     let ok = write_llvm_ir_from_native_text_file(native_text_path, module_name, out_path);
-    if !ok {
-        print.warn("emit-llvm-file: empty llvm output for module " + module_name);
-        let native_result = emit_native_with_module_name(program, module_name);
-        let fallback_ok = write_llvm_ir(native_result.module, out_path);
-        if fallback_ok {
-            return true;
+    let mut output_valid -> boolean = false;
+    if ok && fs.exists(out_path) {
+        let written = fs.readFile(out_path);
+        output_valid = _looks_like_llvm_text(written);
+        if !output_valid {
+            print.warn("emit-llvm-file: malformed llvm output for module " + module_name + "; falling back");
+        }
+    }
+    if !ok || !output_valid {
+        if !ok {
+            print.warn("emit-llvm-file: empty llvm output for module " + module_name);
         }
         let llvm_text = compile_to_llvm_with_module(source, module_name);
-        if llvm_text.length > 0 {
+        if _looks_like_llvm_text(llvm_text) {
             fs.writeFile(out_path, llvm_text);
             if fs.exists(out_path) {
                 let contents = fs.readFile(out_path);
-                if contents.length > 0 {
+                if _looks_like_llvm_text(contents) {
                     return true;
                 }
             }

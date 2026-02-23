@@ -305,9 +305,19 @@ struct LayoutManifest {
 }
 
 fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
+    if artifacts == null {
+        return null;
+    }
+    let mut max_items -> number = artifacts.length;
+    if max_items != max_items || max_items < 0 {
+        return null;
+    }
+    if max_items > 10000 {
+        max_items = 10000;
+    }
     let mut index -> number = 0;
     loop {
-        if index >= artifacts.length {
+        if index >= max_items {
             break;
         }
         let artifact = artifacts[index];
@@ -320,9 +330,19 @@ fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
 }
 
 fn select_layout_manifest_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
+    if artifacts == null {
+        return null;
+    }
+    let mut max_items -> number = artifacts.length;
+    if max_items != max_items || max_items < 0 {
+        return null;
+    }
+    if max_items > 10000 {
+        max_items = 10000;
+    }
     let mut index -> number = 0;
     loop {
-        if index >= artifacts.length {
+        if index >= max_items {
             break;
         }
         let artifact = artifacts[index];

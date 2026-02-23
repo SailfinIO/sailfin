@@ -358,43 +358,6 @@ int main(int argc, char **argv)
 
         if (is_cli)
         {
-            if (strcmp(first, "emit-llvm-file") == 0)
-            {
-                if (argc < 4)
-                {
-                    fprintf(stderr, "emit-llvm-file: expected <file.sfn> <out.ll>\n");
-                    return 2;
-                }
-                const char *in_path = argv[2];
-                const char *out_path = argv[3];
-                char *source = _read_file(in_path);
-                if (!source)
-                {
-                    fprintf(stderr, "emit-llvm-file: failed to read %s\n", in_path);
-                    return 1;
-                }
-                if (_trace_emit_enabled())
-                {
-                    char *sailfin = compile_to_sailfin(source);
-                    _trace_llvm_snippet("emit-sailfin", sailfin);
-                }
-                char *llvm = compile_to_llvm(source);
-                _trace_llvm_snippet("emit-llvm-file", llvm);
-                _trace_llvm_dump(llvm);
-                free(source);
-                if (!llvm || llvm[0] == '\0')
-                {
-                    fprintf(stderr, "emit-llvm-file: empty llvm output\n");
-                    return 1;
-                }
-                int write_rc = _write_file(out_path, llvm);
-                if (write_rc != 0)
-                {
-                    fprintf(stderr, "emit-llvm-file: failed to write %s\n", out_path);
-                    return 1;
-                }
-                return 0;
-            }
             char *runtime_root = _resolve_runtime_root(argv[0]);
             SailfinPtrArray args;
             int64_t extra = runtime_root ? 2 : 0;

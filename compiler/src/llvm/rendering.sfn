@@ -874,13 +874,23 @@ fn should_internalize_function(function -> NativeFunction, entry_points -> strin
         return false;
     }
 
-    // Treat leading-underscore helpers as module-local.
+    // Preserve native driver API surface expected by selfhost/release linking.
     let sanitized = sanitize_symbol(function.name);
+    if function.name == "compile_to_llvm" || sanitized == "compile_to_llvm" {
+        return false;
+    }
+    if function.name == "compile_to_sailfin" || sanitized == "compile_to_sailfin" {
+        return false;
+    }
+    if function.name == "cli_main" || sanitized == "sailfin_cli_main__cli_main" {
+        return false;
+    }
+
+    // Treat leading-underscore helpers as module-local.
     if sanitized.length > 0 && sanitized[0] == "_" {
         return true;
     }
 
-    // Default: keep symbols externally visible so imports can link even when
-    // modules do not explicitly export their entrypoints.
+    // Default: preserve external visibility for existing linkage behavior.
     return false;
 }

@@ -2246,14 +2246,6 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     memset(out + alen + blen, 0, 1 + pad);
     _track_owned_string(out);
 
-    // DEBUG: Check if we're creating a string that spans position 65535
-    if (alen + blen > 65535)
-    {
-        fprintf(stderr, "[stage2-native] string_concat created string len=%zu spanning 65535; out[65535]=%d\n",
-                alen + blen, (int)(unsigned char)out[65535]);
-        fflush(stderr);
-    }
-
     // Record recent large string allocations to help debug cases where
     // downstream code accidentally returns a pointer into the middle of a
     // concatenated buffer (dropping prefixes like the LLVM module header).

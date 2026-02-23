@@ -2314,9 +2314,10 @@ def main(argv: list[str]) -> int:
 
                     attempt_seed_timeout = seed_timeout
                     if seed_timeout is not None:
-                        cap = max(seed_timeout, 1200.0)
-                        attempt_seed_timeout = min(
-                            seed_timeout * (2 ** (attempt - 1)), cap)
+                        # Keep a stable per-attempt timeout.
+                        # Exponential growth causes a few flaky modules to consume
+                        # most of the wall-time budget and makes retries appear stuck.
+                        attempt_seed_timeout = seed_timeout
 
                     print(
                         f"[selfhost] ({pass_name}) module {idx + 1}/{len(sources)} {module_name} attempt {attempt}/{max_attempts}",
@@ -2365,8 +2366,19 @@ def main(argv: list[str]) -> int:
                             last_rc = 124
                             last_stderr = (exc.stderr or b"").decode(
                                 "utf-8", errors="replace")
+                            print(
+                                f"[selfhost][warn] seed emit-llvm-file timed out for {module_name} after {attempt_seed_timeout}s; switching fallback path",
+                                file=sys.stderr,
+                                flush=True,
+                            )
                             stats["seed_timeouts"] = int(
                                 stats["seed_timeouts"]) + 1
+                            # emit-llvm-file timeout is a strong signal this seed/path
+                            # is unstable for the current module. Switch to streaming
+                            # emit immediately to avoid burning all retries.
+                            use_emit_llvm_file_local = False
+                            if disable_emit_llvm_file_after_failure:
+                                use_emit_llvm_file = False
                             if args.attempt_sleep > 0:
                                 time.sleep(args.attempt_sleep)
                             continue
@@ -2390,6 +2402,11 @@ def main(argv: list[str]) -> int:
                                 last_rc = 124
                                 last_stderr = (exc.stderr or b"").decode(
                                     "utf-8", errors="replace")
+                                print(
+                                    f"[selfhost][warn] seed emit llvm timed out for {module_name} after {attempt_seed_timeout}s",
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
                                 stats["seed_timeouts"] = int(
                                     stats["seed_timeouts"]) + 1
                                 if args.attempt_sleep > 0:
@@ -2405,19 +2422,37 @@ def main(argv: list[str]) -> int:
                     if last_rc != 0:
                         if use_emit_llvm_file_local:
                             with attempt_path.open("wb") as out:
-                                cmd = [str(seed_bin), "emit"]
-                                if args.timing:
-                                    cmd.append("--timing")
-                                cmd.extend(["llvm", str(source_path)])
-                                proc = subprocess.run(
-                                    cmd,
-                                    cwd=str(seed_emit_cwd),
-                                    stdout=out,
-                                    stderr=subprocess.PIPE,
-                                    close_fds=False,
-                                    env=seed_env_local,
-                                    timeout=_cap_timeout(attempt_seed_timeout),
-                                )
+                                try:
+                                    cmd = [str(seed_bin), "emit"]
+                                    if args.timing:
+                                        cmd.append("--timing")
+                                    cmd.extend(["llvm", str(source_path)])
+                                    proc = subprocess.run(
+                                        cmd,
+                                        cwd=str(seed_emit_cwd),
+                                        stdout=out,
+                                        stderr=subprocess.PIPE,
+                                        close_fds=False,
+                                        env=seed_env_local,
+                                        timeout=_cap_timeout(
+                                            attempt_seed_timeout),
+                                    )
+                                except subprocess.TimeoutExpired as exc:
+                                    last_rc = 124
+                                    last_stderr = (exc.stderr or b"").decode(
+                                        "utf-8", errors="replace")
+                                    print(
+                                        f"[selfhost][warn] fallback emit llvm timed out for {module_name} after {attempt_seed_timeout}s",
+                                        file=sys.stderr,
+                                        flush=True,
+                                    )
+                                    stats["seed_timeouts"] = int(
+                                        stats["seed_timeouts"]) + 1
+                                    if disable_emit_llvm_file_after_failure:
+                                        use_emit_llvm_file = False
+                                    if args.attempt_sleep > 0:
+                                        time.sleep(args.attempt_sleep)
+                                    continue
                             last_rc = proc.returncode
                             last_stderr = proc.stderr.decode(
                                 "utf-8", errors="replace")
@@ -2498,15 +2533,58 @@ def main(argv: list[str]) -> int:
                         candidate = _trim_to_llvm_module_start(candidate)
                         use_emit_llvm_file_local = False
 
+                    if not _looks_like_llvm_module(candidate) and use_emit_llvm_file_local:
+                        with attempt_path.open("wb") as out:
+                            try:
+                                cmd = [str(seed_bin), "emit"]
+                                if args.timing:
+                                    cmd.append("--timing")
+                                cmd.extend(["llvm", str(source_path)])
+                                proc = subprocess.run(
+                                    cmd,
+                                    cwd=str(seed_emit_cwd),
+                                    stdout=out,
+                                    stderr=subprocess.PIPE,
+                                    close_fds=False,
+                                    env=seed_env_local,
+                                    timeout=_cap_timeout(attempt_seed_timeout),
+                                )
+                            except subprocess.TimeoutExpired as exc:
+                                last_rc = 124
+                                last_stderr = (exc.stderr or b"").decode(
+                                    "utf-8", errors="replace")
+                                print(
+                                    f"[selfhost][warn] fallback-after-malformed emit llvm timed out for {module_name} after {attempt_seed_timeout}s",
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
+                                stats["seed_timeouts"] = int(
+                                    stats["seed_timeouts"]) + 1
+                                if args.attempt_sleep > 0:
+                                    time.sleep(args.attempt_sleep)
+                                continue
+                        last_rc = proc.returncode
+                        last_stderr = proc.stderr.decode(
+                            "utf-8", errors="replace")
+                        if last_rc == 0:
+                            raw = attempt_path.read_text(
+                                encoding="utf-8", errors="replace")
+                            candidate = _strip_cli_log_prefixes(raw)
+                            candidate = _trim_to_llvm_module_start(candidate)
+                            use_emit_llvm_file_local = False
+
                     if not _looks_like_llvm_module(candidate):
                         try:
                             size = attempt_path.stat().st_size
                         except OSError:
                             size = -1
                         preview = "\n".join(candidate.splitlines()[:25])
+                        stderr_preview = "\n".join(
+                            last_stderr.splitlines()[:25])
                         print(
                             f"[selfhost][warn] malformed seed output for {module_name} (rc=0, bytes={size})\n"
-                            f"[selfhost][warn] first lines:\n{preview}\n",
+                            f"[selfhost][warn] first lines:\n{preview}\n"
+                            f"[selfhost][warn] stderr preview:\n{stderr_preview}\n",
                             file=sys.stderr,
                             flush=True,
                         )
