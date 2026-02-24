@@ -2296,7 +2296,14 @@ def main(argv: list[str]) -> int:
                     # producing LLVM with missing definitions (link-time
                     # undefined symbols).
                     module_slug = _slug_from_source_path(source_path)
-                    keep_cached_self_artifact = True
+                    keep_cached_self_artifact = (
+                        module_slug == "llvm/rendering"
+                        or module_slug == "llvm/expression_lowering/native/core_ops_lowering"
+                        or module_slug == "main"
+                        or module_name == "llvm__rendering"
+                        or module_name == "llvm__expression_lowering__native__core_ops_lowering"
+                        or module_name == "main"
+                    )
                     for cache_key in (module_slug, module_name):
                         if not keep_cached_self_artifact:
                             cached_self_artifact = local_import_cache / \
