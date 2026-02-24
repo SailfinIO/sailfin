@@ -37,6 +37,10 @@ import {
 } from "../type_mapping";
 
 import {
+    should_internalize_function,
+} from "../rendering";
+
+import {
     prepare_parameters,
     future_pointer_type_for_return_type,
     spawn_symbol_for_return_type,
@@ -385,8 +389,16 @@ fn emit_llvm_function(
 
     let entry_label -> string = "block.entry";
     let mut linkage -> string = "";
+    let internalize = should_internalize_function(function, entry_points, exported_symbols, imported_functions);
+    if internalize {
+        linkage = "internal ";
+    }
     if debug_lowering {
-        print.warn("emit-llvm: emit_fn phase=internalize_check name=" + function.name + " (disabled)");
+        let mut internalize_text = "false";
+        if internalize {
+            internalize_text = "true";
+        }
+        print.warn("emit-llvm: emit_fn phase=internalize_check name=" + function.name + " internal=" + internalize_text);
     }
     lines = append_string(lines, "define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {");
     lines = append_string(lines, entry_label + ":");

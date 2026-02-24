@@ -799,8 +799,6 @@ fn is_entry_point(entry_points -> string[], function_name -> string) -> boolean 
 }
 
 fn collect_exported_symbol_names(imports -> NativeImport[]) -> string[] {
-    // Bootstrap guard: avoid iterating potentially corrupted import arrays.
-    return [];
     if imports == null {
         return [];
     }
@@ -885,12 +883,24 @@ fn should_internalize_function(function -> NativeFunction, entry_points -> strin
     if function.name == "cli_main" || sanitized == "sailfin_cli_main__cli_main" {
         return false;
     }
+    if function.name == "sailfin_cli_main" || sanitized == "sailfin_cli_main" {
+        return false;
+    }
+    if function.name == "native_cli_main" || sanitized == "native_cli_main" {
+        return false;
+    }
 
     // Treat leading-underscore helpers as module-local.
     if sanitized.length > 0 && sanitized[0] == "_" {
         return true;
     }
 
-    // Default: preserve external visibility for existing linkage behavior.
+    // Collision-prone local helper names observed across compiler modules.
+    // Keep these module-local to avoid duplicate symbol definitions at final link.
+    if sanitized == "contains_effect" {
+        return true;
+    }
+
+    // Default: preserve existing cross-module linkage behavior.
     return false;
 }

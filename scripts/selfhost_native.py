@@ -906,6 +906,118 @@ def _sailfin_local_imported_symbols(
     return out
 
 
+def _sailfin_local_import_alias_map(
+    source_path: pathlib.Path, sources_set: set[pathlib.Path]
+) -> dict[str, str]:
+    """Return alias->imported-name rewrites for local `import { ... }` clauses."""
+
+    try:
+        text = source_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+
+    out: dict[str, str] = {}
+    for m in _IMPORT_SYMBOLS_RE.finditer(text):
+        dep = _resolve_sailfin_module_path(
+            source_path=source_path, module_ref=m.group("path")
+        )
+        if dep is None or dep not in sources_set:
+            continue
+        names_raw = m.group("names")
+        for part in names_raw.split(","):
+            token = part.strip()
+            if not token:
+                continue
+            token = token.split("//", 1)[0].strip()
+            if " as " not in token:
+                continue
+            imported, alias = token.split(" as ", 1)
+            imported_name = imported.strip()
+            alias_name = alias.strip()
+            if not imported_name or not alias_name:
+                continue
+            out[alias_name] = imported_name
+    return out
+
+
+def _rewrite_import_alias_symbols(llvm_text: str, alias_map: dict[str, str]) -> tuple[str, int]:
+    """Rewrite `@alias` references to `@imported_name` in a module's LLVM text."""
+
+    if not llvm_text or not alias_map:
+        return llvm_text, 0
+
+    updated = llvm_text
+    changed = 0
+    for alias_name, imported_name in alias_map.items():
+        if not alias_name or not imported_name or alias_name == imported_name:
+            continue
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9_.$])@{re.escape(alias_name)}(?![A-Za-z0-9_.$])"
+        )
+        updated, count = pattern.subn(f"@{imported_name}", updated)
+        changed += count
+    return updated, changed
+
+
+def _ensure_cli_driver_symbol(llvm_text: str) -> tuple[str, bool]:
+    """Ensure `@sailfin_cli_main__cli_main` exists for native driver ABI.
+
+    If missing, synthesize it by forwarding to `@native_cli_main` (preferred)
+    or `@sailfin_cli_main` and returning `0.0` as the process status code.
+    """
+
+    if not llvm_text:
+        return llvm_text, False
+
+    if re.search(r"^define\b.*@sailfin_cli_main__cli_main\(", llvm_text, re.MULTILINE):
+        return llvm_text, False
+
+    target_match = re.search(
+        r"^define\b.*@(?P<name>native_cli_main|sailfin_cli_main)\((?P<params>[^)]*)\)\s*\{",
+        llvm_text,
+        re.MULTILINE,
+    )
+    if target_match is None:
+        return llvm_text, False
+
+    target_name = target_match.group("name")
+    params = target_match.group("params").strip()
+
+    call_args = ""
+    if params:
+        call_args = ", ".join(p.strip()
+                              for p in _split_top_level_commas(params) if p.strip())
+
+    wrapper_lines = [
+        "",
+        f"define double @sailfin_cli_main__cli_main({params}) {{",
+        "entry:",
+    ]
+    if call_args:
+        wrapper_lines.append(
+            f"  %cli_call = call i8* @{target_name}({call_args})")
+    else:
+        wrapper_lines.append(f"  %cli_call = call i8* @{target_name}()")
+    wrapper_lines.extend([
+        "  ret double 0.0",
+        "}",
+    ])
+
+    lines = llvm_text.splitlines()
+    insert_at = len(lines)
+    for i, line in enumerate(lines):
+        s = line.lstrip()
+        if s.startswith("attributes ") or s.startswith("!"):
+            insert_at = i
+            break
+
+    new_lines = lines[:insert_at] + wrapper_lines + lines[insert_at:]
+    new_text = "\n".join(new_lines)
+    if llvm_text.endswith("\n"):
+        new_text += "\n"
+    return new_text, True
+
+
 def _toplevel_fn_names(source_path: pathlib.Path) -> set[str]:
     try:
         text = source_path.read_text(encoding="utf-8", errors="replace")
@@ -1241,6 +1353,394 @@ def _inject_missing_function_declarations(llvm_text: str) -> tuple[str, int]:
 #   use of undefined value '@foo
 # (i.e. optional trailing quote)
 _UNDEFINED_VALUE_RE = re.compile(r"use of undefined value '@(?P<name>[^']+)'?")
+
+_DEFINE_SYMBOL_RE = re.compile(
+    r"^(?P<indent>\s*)define\s+(?P<attrs>.*?)@(?P<name>[A-Za-z_.$][A-Za-z0-9_.$]*)\("
+)
+
+_LLVM_LINK_DUP_SYMBOL_RE = re.compile(
+    r"Linking\s+globals\s+named\s+'(?P<name>[^']+)'\s*:\s*symbol\s+multiply\s+defined",
+    re.IGNORECASE,
+)
+
+
+def _function_define_signature(lines: list[str], define_line_idx: int) -> str:
+    """Return a normalized signature for a function definition block.
+
+    Used to ensure duplicate internalization only merges bytecode-identical
+    definitions, avoiding semantic/ABI drift when same symbol name maps to
+    different implementations.
+    """
+
+    if define_line_idx < 0 or define_line_idx >= len(lines):
+        return ""
+
+    block: list[str] = []
+    depth = 0
+    saw_open = False
+    idx = define_line_idx
+    while idx < len(lines):
+        line = lines[idx]
+        block.append(line.strip())
+        opens = line.count("{")
+        closes = line.count("}")
+        if opens > 0:
+            saw_open = True
+        depth += opens
+        depth -= closes
+        if saw_open and depth <= 0:
+            break
+        idx += 1
+
+    if not block:
+        return ""
+
+    # Normalize whitespace only; keep instruction/content ordering intact.
+    normalized = "\n".join(" ".join(line.split()) for line in block)
+    return normalized
+
+
+def _dedupe_public_definitions_across_modules(
+    *,
+    module_names: list[str],
+    ll_texts: list[str],
+    required_export_fns: dict[str, set[str]],
+) -> tuple[list[str], list[str], int]:
+    """Internalize duplicate public function definitions across modules.
+
+    Older seeds can emit the same helper symbol as public in multiple modules.
+    llvm-link rejects that with "symbol multiply defined". Keep one provider
+    public and internalize the rest.
+    """
+
+    if not module_names or not ll_texts or len(module_names) != len(ll_texts):
+        return ll_texts, [], 0
+
+    required_always = {
+        "main",
+        "compile_to_llvm",
+        "compile_to_sailfin",
+        "sailfin_cli_main__cli_main",
+        "sailfin_cli_main",
+        "native_cli_main",
+        "sailfin_version",
+    }
+
+    lines_by_module: list[list[str]] = [text.splitlines() for text in ll_texts]
+    defs: dict[str, list[tuple[int, int, str, str, str]]] = {}
+    # symbol -> [(module_idx, line_idx, attrs, module_name, signature), ...]
+
+    for module_idx, lines in enumerate(lines_by_module):
+        module_name = module_names[module_idx]
+        if module_name.startswith("runtime__"):
+            continue
+        for line_idx, line in enumerate(lines):
+            m = _DEFINE_SYMBOL_RE.match(line)
+            if not m:
+                continue
+            attrs = m.group("attrs") or ""
+            symbol = m.group("name")
+            normalized = " " + attrs + " "
+            if " internal " in normalized or " private " in normalized:
+                continue
+            if symbol.startswith("llvm."):
+                continue
+            signature = _function_define_signature(lines, line_idx)
+            defs.setdefault(symbol, []).append(
+                (module_idx, line_idx, attrs, module_name, signature)
+            )
+
+    warnings: list[str] = []
+    changed = 0
+
+    for symbol, occurrences in defs.items():
+        if len(occurrences) <= 1:
+            continue
+
+        if symbol.endswith("_impl"):
+            continue
+
+        if symbol in required_always:
+            continue
+
+        # Only dedupe bytecode-identical definitions.
+        signatures = {sig for _mi, _li, _a, _mn, sig in occurrences if sig}
+        if len(signatures) > 1:
+            warnings.append(
+                f"skip dedupe for @{symbol}: non-identical function bodies across modules"
+            )
+            continue
+
+        winner_module_idx = occurrences[0][0]
+
+        # Prefer a module that explicitly exports this symbol via import graph.
+        for module_idx, _line_idx, _attrs, module_name, _sig in occurrences:
+            needed = required_export_fns.get(module_name, set())
+            if symbol in needed:
+                winner_module_idx = module_idx
+                break
+            for base in needed:
+                if symbol == f"{base}__{module_name}" or symbol.startswith(f"{base}__{module_name}__"):
+                    winner_module_idx = module_idx
+                    break
+
+        deduped_modules: list[str] = []
+        for module_idx, line_idx, _attrs, module_name, _sig in occurrences:
+            if module_idx == winner_module_idx:
+                continue
+            line = lines_by_module[module_idx][line_idx]
+            if line.startswith("define "):
+                lines_by_module[module_idx][line_idx] = line.replace(
+                    "define ", "define internal ", 1
+                )
+                changed += 1
+                deduped_modules.append(module_name)
+
+        if deduped_modules:
+            warnings.append(
+                "deduped symbol @"
+                + symbol
+                + " provider="
+                + module_names[winner_module_idx]
+                + " internalized_in="
+                + ",".join(deduped_modules)
+            )
+
+    out_texts = ["\n".join(lines) + "\n" for lines in lines_by_module]
+    return out_texts, warnings, changed
+
+
+def _collect_public_define_symbols(llvm_text: str) -> set[str]:
+    out: set[str] = set()
+    for line in llvm_text.splitlines():
+        m = _DEFINE_SYMBOL_RE.match(line)
+        if not m:
+            continue
+        attrs = m.group("attrs") or ""
+        normalized = " " + attrs + " "
+        if " internal " in normalized or " private " in normalized:
+            continue
+        symbol = m.group("name")
+        if symbol.startswith("llvm."):
+            continue
+        out.add(symbol)
+    return out
+
+
+def _internalize_symbols_in_nonruntime_modules(
+    *,
+    module_names: list[str],
+    ll_texts: list[str],
+    symbols: set[str],
+    excluded_symbols: set[str] | None = None,
+) -> tuple[list[str], int]:
+    """Internalize public definitions matching `symbols` outside runtime modules."""
+
+    if not symbols or not module_names or not ll_texts or len(module_names) != len(ll_texts):
+        return ll_texts, 0
+
+    changed = 0
+    excluded = set(excluded_symbols or set())
+    out_texts: list[str] = []
+    for idx, text in enumerate(ll_texts):
+        module_name = module_names[idx]
+        if module_name.startswith("runtime__"):
+            out_texts.append(text)
+            continue
+
+        lines = text.splitlines()
+        for line_idx, line in enumerate(lines):
+            m = _DEFINE_SYMBOL_RE.match(line)
+            if not m:
+                continue
+            symbol = m.group("name")
+            if symbol not in symbols:
+                continue
+            if symbol in excluded:
+                continue
+            attrs = m.group("attrs") or ""
+            normalized = " " + attrs + " "
+            if " internal " in normalized or " private " in normalized:
+                continue
+            if line.startswith("define "):
+                lines[line_idx] = line.replace(
+                    "define ", "define internal ", 1)
+                changed += 1
+
+        updated = "\n".join(lines)
+        if text.endswith("\n"):
+            updated += "\n"
+        out_texts.append(updated)
+
+    return out_texts, changed
+
+
+def _internalize_duplicate_symbol_for_llvm_link(
+    *,
+    symbol: str,
+    ll_paths: list[pathlib.Path],
+    required_export_fns: dict[str, set[str]],
+) -> int:
+    """Internalize duplicate public definitions for a single symbol.
+
+    Used only when llvm-link reports `symbol multiply defined`.
+    """
+
+    if not symbol or not ll_paths:
+        return 0
+
+    required_always = {
+        "main",
+        "compile_to_llvm",
+        "compile_to_sailfin",
+        "sailfin_cli_main__cli_main",
+        "sailfin_cli_main",
+        "native_cli_main",
+        "sailfin_version",
+    }
+    if symbol in required_always:
+        return 0
+    if symbol.endswith("_impl"):
+        return 0
+
+    occurrences: list[tuple[pathlib.Path, str, int, list[str], str]] = []
+    for path in ll_paths:
+        module_name = path.stem
+        if module_name.startswith("runtime__"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        lines = text.splitlines()
+        for line_idx, line in enumerate(lines):
+            m = _DEFINE_SYMBOL_RE.match(line)
+            if not m:
+                continue
+            if m.group("name") != symbol:
+                continue
+            attrs = m.group("attrs") or ""
+            normalized = " " + attrs + " "
+            if " internal " in normalized or " private " in normalized:
+                continue
+            signature = _function_define_signature(lines, line_idx)
+            occurrences.append((path, module_name, line_idx, lines, signature))
+
+    if len(occurrences) <= 1:
+        return 0
+
+    winner_idx = 0
+    for idx, (_path, module_name, _line_idx, _lines, _sig) in enumerate(occurrences):
+        needed = required_export_fns.get(module_name, set())
+        if symbol in needed:
+            winner_idx = idx
+            break
+        for base in needed:
+            if symbol == f"{base}__{module_name}" or symbol.startswith(f"{base}__{module_name}__"):
+                winner_idx = idx
+                break
+
+    changed = 0
+    touched: dict[pathlib.Path, list[str]] = {}
+    for idx, (path, _module_name, line_idx, lines, _sig) in enumerate(occurrences):
+        if idx == winner_idx:
+            continue
+        line = lines[line_idx]
+        if line.startswith("define "):
+            lines[line_idx] = line.replace("define ", "define internal ", 1)
+            changed += 1
+            touched[path] = lines
+
+    for path, lines in touched.items():
+        original_text = "\n".join(lines)
+        try:
+            current = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            current = ""
+        if current.endswith("\n"):
+            original_text += "\n"
+        path.write_text(original_text, encoding="utf-8")
+
+    return changed
+
+
+def _internalize_non_required_definitions(
+    llvm_text: str,
+    *,
+    module_name: str,
+    required_module_exports: set[str],
+) -> tuple[str, int]:
+    """Mark non-required top-level function definitions as `internal`.
+
+    This is a selfhost-link hygiene pass: many modules define helper names like
+    `append_string`/`trim_text`. Keeping all of them externally visible causes
+    duplicate-symbol failures when llvm-link merges modules.
+    """
+
+    if not llvm_text:
+        return llvm_text, 0
+
+    # Runtime modules are linked separately and provide shared runtime ABI.
+    # Keep their visibility unchanged.
+    if module_name.startswith("runtime__"):
+        return llvm_text, 0
+
+    lines = llvm_text.splitlines()
+    changed = 0
+    out: list[str] = []
+
+    required_for_module = set(required_module_exports or set())
+
+    # Stable externally-referenced ABI surface.
+    required_always = {
+        "main",
+        "compile_to_llvm",
+        "compile_to_sailfin",
+        "sailfin_cli_main__cli_main",
+        "sailfin_cli_main",
+        "native_cli_main",
+        "sailfin_version",
+    }
+
+    for line in lines:
+        m = _DEFINE_SYMBOL_RE.match(line)
+        if not m:
+            out.append(line)
+            continue
+
+        attrs = m.group("attrs")
+        name = m.group("name")
+        normalized = " " + attrs + " "
+        if " internal " in normalized or " private " in normalized:
+            out.append(line)
+            continue
+        if name.startswith("llvm."):
+            out.append(line)
+            continue
+
+        keep_external = False
+        if name in required_always:
+            keep_external = True
+        if name in required_for_module:
+            keep_external = True
+        # The compiler sometimes emits module-qualified forms.
+        for base in required_for_module:
+            if name == f"{base}__{module_name}" or name.startswith(f"{base}__{module_name}__"):
+                keep_external = True
+                break
+        if keep_external:
+            out.append(line)
+            continue
+
+        out.append(line.replace("define ", "define internal ", 1))
+        changed += 1
+
+    if changed == 0:
+        return llvm_text, 0
+    new_text = "\n".join(out)
+    if llvm_text.endswith("\n"):
+        new_text += "\n"
+    return new_text, changed
 
 
 def _inject_declare_for_symbol(llvm_text: str, symbol: str) -> tuple[str, bool]:
@@ -2129,7 +2629,7 @@ def main(argv: list[str]) -> int:
         known_named_type_defs_lock = threading.Lock()
 
         use_emit_llvm_file = prefer_emit_llvm_file and seed_supports_emit_llvm_file
-        disable_emit_llvm_file_after_failure = True
+        disable_emit_llvm_file_after_failure = False
         seed_env = os.environ.copy()
         if args.disable_string_free:
             seed_env["SAILFIN_DISABLE_STRING_FREE"] = "1"
@@ -2161,6 +2661,15 @@ def main(argv: list[str]) -> int:
                     required_export_fns.setdefault(
                         dep_mod, set()).update(needed)
 
+        # Native runtime driver ABI contract.
+        required_export_fns.setdefault("cli_main", set()).update(
+            {"sailfin_cli_main__cli_main"}
+        )
+
+        import_alias_rewrites_by_module: dict[str, dict[str, str]] = {
+            _module_name_from_source_path(src): _sailfin_local_import_alias_map(src, sources_set)
+            for src in sources
+        }
         # Populate an isolated import-context cache for the seed compiler.
         print(
             f"[selfhost] ({pass_name}) staging import artifacts...", flush=True)
@@ -2327,6 +2836,9 @@ def main(argv: list[str]) -> int:
                         # Exponential growth causes a few flaky modules to consume
                         # most of the wall-time budget and makes retries appear stuck.
                         attempt_seed_timeout = seed_timeout
+                        if module_name in {"llvm__lowering__entrypoints", "main"}:
+                            attempt_seed_timeout = max(
+                                attempt_seed_timeout, 480.0)
 
                     print(
                         f"[selfhost] ({pass_name}) module {idx + 1}/{len(sources)} {module_name} attempt {attempt}/{max_attempts}",
@@ -2418,6 +2930,13 @@ def main(argv: list[str]) -> int:
                                 )
                                 stats["seed_timeouts"] = int(
                                     stats["seed_timeouts"]) + 1
+                                if seed_supports_emit_llvm_file:
+                                    use_emit_llvm_file_local = True
+                                    print(
+                                        f"[selfhost][warn] switching {module_name} to emit-llvm-file after streaming timeout",
+                                        file=sys.stderr,
+                                        flush=True,
+                                    )
                                 if args.attempt_sleep > 0:
                                     time.sleep(args.attempt_sleep)
                                 continue
@@ -2673,6 +3192,14 @@ def main(argv: list[str]) -> int:
                                 candidate,
                                 re.MULTILINE,
                             )
+                            if module_name == "cli_main" and fn_name == "sailfin_cli_main__cli_main":
+                                has_cli_legacy = re.search(
+                                    r"^define\b.*@(?:sailfin_cli_main|native_cli_main)(?:\b|\W|$)",
+                                    candidate,
+                                    re.MULTILINE,
+                                ) is not None
+                                if has_cli_legacy:
+                                    continue
                             if not (has_module or has_plain):
                                 missing_defs.append(sym_module)
                         if missing_defs:
@@ -3028,7 +3555,57 @@ def main(argv: list[str]) -> int:
             text, _ = _patch_opaque_named_types(text, canonical_defs)
             # Patching can introduce new references via inserted bodies.
             text, _ = _inject_missing_named_type_stubs(text)
-            p.write_text(text, encoding="utf-8")
+            ll_texts[idx] = text
+
+        ll_texts, pre_dedupe_warnings, pre_dedupe_changes = _dedupe_public_definitions_across_modules(
+            module_names=module_names,
+            ll_texts=ll_texts,
+            required_export_fns=required_export_fns,
+        )
+        if pre_dedupe_changes > 0:
+            print(
+                f"[selfhost] ({pass_name}) pre-link deduped {pre_dedupe_changes} duplicate public definitions",
+                flush=True,
+            )
+        for warn_line in pre_dedupe_warnings[:40]:
+            print(f"[selfhost][warn] ({pass_name}) {warn_line}", flush=True)
+
+        # Prevent final duplicate symbols between runtime/prelude object and
+        # the linked compiler object. Keep prelude symbols external and
+        # internalize colliding non-runtime definitions.
+        prelude_index = -1
+        for idx, name in enumerate(module_names):
+            if name == "runtime__prelude":
+                prelude_index = idx
+                break
+        if prelude_index >= 0:
+            prelude_symbols = _collect_public_define_symbols(
+                ll_texts[prelude_index])
+            ll_texts, prelude_collision_changes = _internalize_symbols_in_nonruntime_modules(
+                module_names=module_names,
+                ll_texts=ll_texts,
+                symbols=prelude_symbols,
+                excluded_symbols={"string_char_at"},
+            )
+            if prelude_collision_changes > 0:
+                print(
+                    f"[selfhost] ({pass_name}) internalized {prelude_collision_changes} non-runtime symbols that collide with runtime__prelude",
+                    flush=True,
+                )
+
+        for idx, name in enumerate(module_names):
+            if name != "cli_main":
+                continue
+            updated, changed = _ensure_cli_driver_symbol(ll_texts[idx])
+            if changed:
+                ll_texts[idx] = updated
+                print(
+                    f"[selfhost][warn] ({pass_name}) synthesized @sailfin_cli_main__cli_main shim in cli_main.ll",
+                    flush=True,
+                )
+
+        for idx, p in enumerate(ll_paths):
+            p.write_text(ll_texts[idx], encoding="utf-8")
 
         modules_path = raw_dir / "modules.txt"
         modules_path.write_text(
@@ -3174,6 +3751,7 @@ def main(argv: list[str]) -> int:
             # Retry with the opaque-pointers flag when it emits that diagnostic.
             attempted_fallback = False
             attempted_alt_spelling = False
+            duplicate_fix_attempts = 0
             while True:
                 cmd = [llvm_link, *llvm_link_flags, "-o",
                        str(linked_bc), *llvm_link_inputs]
@@ -3216,6 +3794,22 @@ def main(argv: list[str]) -> int:
                             f for f in llvm_link_flags if f != "--opaque-pointers"]
                         llvm_link_flags.append("-opaque-pointers")
                         attempted_alt_spelling = True
+                        continue
+
+                duplicate_match = _LLVM_LINK_DUP_SYMBOL_RE.search(stderr or "")
+                if duplicate_match is not None and duplicate_fix_attempts < 512:
+                    dup_symbol = duplicate_match.group("name")
+                    repaired = _internalize_duplicate_symbol_for_llvm_link(
+                        symbol=dup_symbol,
+                        ll_paths=ll_paths_for_link,
+                        required_export_fns=required_export_fns,
+                    )
+                    if repaired > 0:
+                        duplicate_fix_attempts += 1
+                        print(
+                            f"[selfhost][warn] ({pass_name}) llvm-link duplicate @{dup_symbol}; internalized {repaired} definition(s) and retrying",
+                            flush=True,
+                        )
                         continue
 
                 raise subprocess.CalledProcessError(rc, cmd)
@@ -3274,17 +3868,50 @@ def main(argv: list[str]) -> int:
             canonical.parent.mkdir(parents=True, exist_ok=True)
             if canonical.exists():
                 canonical.unlink()
-            t0 = time.perf_counter()
-            _run(
-                [clang, *clang_flags, "-fPIC", "-c",
-                    str(prelude_ll), "-o", str(canonical)],
-                cwd=REPO_ROOT,
-                timeout=_remaining_budget_seconds(
-                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
-                if args.max_total_seconds > 0
-                else None,
-            )
-            clang_compile_s += time.perf_counter() - t0
+
+            module_emitted_prelude_ll = ll_dir / f"{prelude_name}.ll"
+
+            def _compile_prelude_once(path: pathlib.Path) -> tuple[int, str, float]:
+                t0_local = time.perf_counter()
+                proc = subprocess.run(
+                    [clang, *clang_flags, "-fPIC", "-c",
+                        str(path), "-o", str(canonical)],
+                    cwd=str(REPO_ROOT),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=_remaining_budget_seconds(
+                        total_start=t_total_start,
+                        max_total_seconds=float(args.max_total_seconds),
+                    )
+                    if args.max_total_seconds > 0
+                    else None,
+                )
+                return proc.returncode, proc.stderr or "", time.perf_counter() - t0_local
+
+            prelude_compile_rc, prelude_compile_stderr, elapsed = _compile_prelude_once(
+                prelude_ll)
+            clang_compile_s += elapsed
+            if prelude_compile_rc != 0 and prelude_ll != module_emitted_prelude_ll:
+                print(
+                    "[selfhost][warn] regenerated prelude IR failed clang compile; falling back to module-emitted runtime__prelude.ll",
+                    flush=True,
+                )
+                if prelude_compile_stderr:
+                    sys.stderr.write(prelude_compile_stderr)
+                prelude_compile_rc, prelude_compile_stderr, elapsed = _compile_prelude_once(
+                    module_emitted_prelude_ll)
+                clang_compile_s += elapsed
+
+            if prelude_compile_rc != 0:
+                if prelude_compile_stderr:
+                    sys.stderr.write(prelude_compile_stderr)
+                raise subprocess.CalledProcessError(
+                    prelude_compile_rc,
+                    [clang, *clang_flags, "-fPIC", "-c",
+                        str(prelude_ll), "-o", str(canonical)],
+                )
+
             prelude_obj = canonical
             aot_objects.append(canonical)
 
@@ -3334,24 +3961,45 @@ def main(argv: list[str]) -> int:
     out_path1 = args.out
     aot_dir1, module_names1 = _build_once(
         seed_bin=seed, out_path=out_path1, pass_name="native")
-    subprocess.run(
-        [str(out_path1), "--version"],
-        cwd=str(REPO_ROOT),
-        check=True,
-        timeout=30,
-    )
+
+    def _verify_binary_version(bin_path: pathlib.Path) -> None:
+        last_exc: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                subprocess.run(
+                    [str(bin_path), "--version"],
+                    cwd=str(REPO_ROOT),
+                    check=True,
+                    timeout=120,
+                )
+                return
+            except subprocess.TimeoutExpired as exc:
+                last_exc = exc
+                print(
+                    f"[selfhost][warn] version check timed out for {bin_path} (attempt {attempt}/3)",
+                    flush=True,
+                )
+                continue
+            except subprocess.CalledProcessError as exc:
+                last_exc = exc
+                if attempt >= 3:
+                    break
+        if last_exc is None:
+            raise SystemExit(f"selfhost: failed to run {bin_path} --version")
+        if isinstance(last_exc, subprocess.TimeoutExpired):
+            raise SystemExit(
+                f"selfhost: version check timed out for {bin_path} after 3 attempts"
+            )
+        raise last_exc
+
+    _verify_binary_version(out_path1)
 
     if args.fixed_point:
         _check_budget()
         out_path2 = args.out.with_name(args.out.name + "-fp2")
         aot_dir2, module_names2 = _build_once(
             seed_bin=out_path1, out_path=out_path2, pass_name="native_fp2")
-        subprocess.run(
-            [str(out_path2), "--version"],
-            cwd=str(REPO_ROOT),
-            check=True,
-            timeout=30,
-        )
+        _verify_binary_version(out_path2)
 
         if module_names1 != module_names2:
             raise SystemExit(

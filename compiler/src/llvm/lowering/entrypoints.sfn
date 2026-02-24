@@ -1668,8 +1668,7 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
         print.info("test llvm: lower_to_llvm_lines_with_parsed_context start");
     }
 
-    // Bootstrap guard: skip exported symbol collection to avoid crashes.
-    let exported_symbols -> string[] = [];
+    let exported_symbols = collect_exported_symbol_names(parse.imports);
 
     let mut module_manifest -> LayoutManifest? = null;
 
@@ -2937,9 +2936,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print.info("test llvm: phase=parse ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
-    // Bootstrap guard: skip exported symbol collection to avoid crashes from
-    // corrupted import arrays in stage2.
-    let exported_symbols -> string[] = [];
+    let exported_symbols = collect_exported_symbol_names(safe_imports);
 
     let mut module_structs = safe_structs;
     let mut module_enums = safe_enums;
