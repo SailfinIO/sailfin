@@ -732,6 +732,25 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
     let native_ok = emit_native_text_to_file_with_module_name(program, module_name, native_text_path);
     if !native_ok {
         print.warn("emit-llvm-file: empty native output for module " + module_name);
+        let cached_native_path = "build/native/import-context/" + module_name + ".sfn-asm";
+        if fs.exists(cached_native_path) {
+            let cached_ok = write_llvm_ir_from_native_text_file(cached_native_path, module_name, out_path);
+            if cached_ok && fs.exists(out_path) {
+                let cached_contents = fs.readFile(out_path);
+                if _looks_like_llvm_text(cached_contents) {
+                    print.warn("emit-llvm-file: used cached native artifact fallback for module " + module_name);
+                    return true;
+                }
+            }
+        }
+        let native_result = emit_native_with_module_name(program, module_name);
+        let fallback_ok = write_llvm_ir(native_result.module, out_path);
+        if fallback_ok && fs.exists(out_path) {
+            let contents = fs.readFile(out_path);
+            if _looks_like_llvm_text(contents) {
+                return true;
+            }
+        }
         return false;
     }
     if fs.exists(out_path) {

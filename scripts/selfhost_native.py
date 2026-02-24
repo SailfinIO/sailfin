@@ -2296,15 +2296,17 @@ def main(argv: list[str]) -> int:
                     # producing LLVM with missing definitions (link-time
                     # undefined symbols).
                     module_slug = _slug_from_source_path(source_path)
+                    keep_cached_self_artifact = True
                     for cache_key in (module_slug, module_name):
-                        cached_self_artifact = local_import_cache / \
-                            f"{cache_key}.sfn-asm"
-                        if cached_self_artifact.exists():
-                            cached_self_artifact.unlink()
-                        cached_self_manifest = local_import_cache / \
-                            f"{cache_key}.layout-manifest"
-                        if cached_self_manifest.exists():
-                            cached_self_manifest.unlink()
+                        if not keep_cached_self_artifact:
+                            cached_self_artifact = local_import_cache / \
+                                f"{cache_key}.sfn-asm"
+                            if cached_self_artifact.exists():
+                                cached_self_artifact.unlink()
+                            cached_self_manifest = local_import_cache / \
+                                f"{cache_key}.layout-manifest"
+                            if cached_self_manifest.exists():
+                                cached_self_manifest.unlink()
                     # Some seeds appear to use fixed temp file names.
                     # When running modules in parallel, isolate TMPDIR to avoid
                     # cross-process temp collisions that can corrupt LLVM output.
