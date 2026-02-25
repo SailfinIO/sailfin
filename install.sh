@@ -4,7 +4,9 @@ set -euo pipefail
 # curlable installer for the Sailfin compiler binary.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | VERSION=0.1.1 bash
+#   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash -s -- --version 0.1.1
+#   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash  # installs latest
 #
 # Env overrides:
 #   REPO=owner/repo          (default: SailfinIO/sailfin)
@@ -22,6 +24,14 @@ REPO="${REPO:-SailfinIO/sailfin}"
 BINARY="${BINARY:-sailfin}"
 VERSION="${VERSION:-latest}"
 EXCLUDE_TAG="${EXCLUDE_TAG:-}"
+
+# Parse CLI arguments (supports: --version <ver>)
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version) VERSION="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 
 log() {
   printf '[%s] %s\n' "$(date +'%Y-%m-%dT%H:%M:%S%z')" "$*"
