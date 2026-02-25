@@ -98,7 +98,7 @@ help:
 	@echo "  make smoke        # Rebuild + run smoke tests"
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
 
-PREFIX ?= /usr/local
+PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= sailfin
 

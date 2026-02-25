@@ -22,7 +22,7 @@ This document tracks what works today and what is in progress.
 
 ## Installer (Current)
 
-- The installer defaults to `/usr/local/bin` on macOS when `GLOBAL_BIN_DIR` is unset and uses `~/.local/bin` on other platforms (override with `GLOBAL_BIN_DIR`).
+- The installer defaults to `~/.local/bin` on all platforms (override with `GLOBAL_BIN_DIR`).
 
 ## Near-Term Goals
 

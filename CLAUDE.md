@@ -28,7 +28,7 @@ make env              # Create/update the 'sailfin' Conda environment
 
 ```bash
 make compile          # Build the compiler by self-hosting from a released seed (preferred)
-make install          # Install the built compiler into PREFIX/bin (default: /usr/local/bin)
+make install          # Install the built compiler into PREFIX/bin (default: ~/.local/bin)
 make rebuild          # Force a rebuild from a released seed
 make smoke            # Rebuild + run smoke tests
 make rebuild-asan     # Rebuild with ASAN (diagnostic)

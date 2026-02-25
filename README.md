@@ -114,7 +114,7 @@ For now, experiment, record findings, and propose ideas through pull requests.
 - `make env` — create or update the `sailfin` Conda environment defined in `environment.yml`.
 - `make compile` — build the native compiler by self-hosting from a released seed.
 - `make test` — run the suite using the self-hosted native compiler.
-- `make install` — install the built compiler into `PREFIX/bin` (default: `/usr/local/bin`).
+- `make install` — install the built compiler into `PREFIX/bin` (default: `~/.local/bin`).
 
 Tip: use the repo-local wrapper `./sfn` to run the freshly built compiler without relying on PATH:
 

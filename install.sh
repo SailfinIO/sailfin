@@ -188,15 +188,7 @@ else
 fi
 
 INSTALL_BASE="${INSTALL_BASE:-$HOME/.local/share/sailfin/versions}"
-if [ -z "${GLOBAL_BIN_DIR:-}" ]; then
-  if [ "$OS" = "macos" ]; then
-    GLOBAL_BIN_DIR="/usr/local/bin"
-  else
-    GLOBAL_BIN_DIR="$HOME/.local/bin"
-  fi
-else
-  GLOBAL_BIN_DIR="${GLOBAL_BIN_DIR}"
-fi
+GLOBAL_BIN_DIR="${GLOBAL_BIN_DIR:-$HOME/.local/bin}"
 TARGET_DIR="${INSTALL_BASE}/${VERSION}"
 
 MAYBE_SUDO=""
