@@ -270,6 +270,20 @@ static char *_join_path(const char *base, const char *suffix)
     return out;
 }
 
+static char *_canonicalize_existing_path(const char *path)
+{
+    if (!path)
+    {
+        return NULL;
+    }
+    char resolved[PATH_MAX];
+    if (realpath(path, resolved))
+    {
+        return strdup(resolved);
+    }
+    return strdup(path);
+}
+
 static char *_resolve_runtime_root(const char *argv0)
 {
     const char *override = getenv("SAILFIN_RUNTIME_ROOT");
@@ -294,6 +308,13 @@ static char *_resolve_runtime_root(const char *argv0)
     char *candidate = _join_path(exe_dir, "runtime");
     if (candidate && _dir_exists(candidate))
     {
+        char *normalized = _canonicalize_existing_path(candidate);
+        if (normalized)
+        {
+            free(candidate);
+            free(exe_dir);
+            return normalized;
+        }
         free(exe_dir);
         return candidate;
     }
@@ -305,6 +326,13 @@ static char *_resolve_runtime_root(const char *argv0)
     candidate = _join_path(exe_dir, "../runtime");
     if (candidate && _dir_exists(candidate))
     {
+        char *normalized = _canonicalize_existing_path(candidate);
+        if (normalized)
+        {
+            free(candidate);
+            free(exe_dir);
+            return normalized;
+        }
         free(exe_dir);
         return candidate;
     }
@@ -316,6 +344,13 @@ static char *_resolve_runtime_root(const char *argv0)
     candidate = _join_path(exe_dir, "../../runtime");
     if (candidate && _dir_exists(candidate))
     {
+        char *normalized = _canonicalize_existing_path(candidate);
+        if (normalized)
+        {
+            free(candidate);
+            free(exe_dir);
+            return normalized;
+        }
         free(exe_dir);
         return candidate;
     }
