@@ -362,7 +362,7 @@ int main(int argc, char **argv)
             SailfinPtrArray args;
             int64_t extra = runtime_root ? 2 : 0;
             char **argv_copy = (char **)malloc(
-                sizeof(char *) * (size_t)(argc - 1 + extra));
+                sizeof(char *) * (size_t)(argc - 1 + extra + 1));
             if (!argv_copy)
             {
                 fprintf(stderr, "out of memory building native argv\n");
@@ -380,6 +380,7 @@ int main(int argc, char **argv)
             {
                 argv_copy[out_index++] = argv[i];
             }
+            argv_copy[out_index] = NULL;
 
             args.data = argv_copy;
             args.len = out_index;

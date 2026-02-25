@@ -1342,7 +1342,7 @@ static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *tex
     if (!guard_init)
     {
         guard_init = 1;
-        guard_enabled = _env_int("SAILFIN_GUARD_STRING_PTRS", 1) ? 1 : 0;
+        guard_enabled = _env_int("SAILFIN_GUARD_STRING_PTRS", 0) ? 1 : 0;
     }
     if (guard_enabled && !_string_ptr_mapped_readable(text))
     {

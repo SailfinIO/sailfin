@@ -1018,6 +1018,173 @@ def _ensure_cli_driver_symbol(llvm_text: str) -> tuple[str, bool]:
     return new_text, True
 
 
+def _ensure_string_char_at_alias(llvm_text: str) -> tuple[str, bool]:
+    """Inject `@string_char_at` alias to `@text_char_at` when missing."""
+
+    if not llvm_text:
+        return llvm_text, False
+
+    has_define_string_char_at = re.search(
+        r"^define\b.*@string_char_at\(", llvm_text, re.MULTILINE
+    ) is not None
+    if has_define_string_char_at:
+        return llvm_text, False
+
+    has_declare_string_char_at = re.search(
+        r"^declare\b.*@string_char_at\(", llvm_text, re.MULTILINE
+    ) is not None
+    if not has_declare_string_char_at:
+        return llvm_text, False
+
+    has_text_char_at_decl_or_def = re.search(
+        r"^(?:declare|define)\b.*@text_char_at\(", llvm_text, re.MULTILINE
+    ) is not None
+
+    alias_lines = [""]
+    if not has_text_char_at_decl_or_def:
+        alias_lines.append("declare i8* @text_char_at(i8*, double)")
+    alias_lines.extend([
+        "define i8* @string_char_at(i8* %value, double %index) {",
+        "entry:",
+        "  %t0 = call i8* @text_char_at(i8* %value, double %index)",
+        "  ret i8* %t0",
+        "}",
+    ])
+
+    lines = llvm_text.splitlines()
+    filtered_lines: list[str] = []
+    removed_declare = False
+    for line in lines:
+        if re.match(r"^declare\b.*@string_char_at\(", line):
+            removed_declare = True
+            continue
+        filtered_lines.append(line)
+
+    if not removed_declare:
+        return llvm_text, False
+
+    insert_at = len(lines)
+    for i, line in enumerate(filtered_lines):
+        s = line.lstrip()
+        if s.startswith("attributes ") or s.startswith("!"):
+            insert_at = i
+            break
+    new_lines = filtered_lines[:insert_at] + \
+        alias_lines + filtered_lines[insert_at:]
+    new_text = "\n".join(new_lines)
+    if llvm_text.endswith("\n"):
+        new_text += "\n"
+    return new_text, True
+
+
+def _ensure_text_char_at_alias(llvm_text: str) -> tuple[str, bool]:
+    """Inject `@text_char_at` implementation when only declarations exist."""
+
+    if not llvm_text:
+        return llvm_text, False
+
+    has_define_text_char_at = re.search(
+        r"^define\b.*@text_char_at\(", llvm_text, re.MULTILINE
+    ) is not None
+    if has_define_text_char_at:
+        return llvm_text, False
+
+    has_declare_text_char_at = re.search(
+        r"^declare\b.*@text_char_at\(", llvm_text, re.MULTILINE
+    ) is not None
+    if not has_declare_text_char_at:
+        return llvm_text, False
+
+    lines = llvm_text.splitlines()
+    filtered_lines: list[str] = []
+    removed_declare = False
+    for line in lines:
+        if re.match(r"^declare\b.*@text_char_at\(", line):
+            removed_declare = True
+            continue
+        filtered_lines.append(line)
+
+    if not removed_declare:
+        return llvm_text, False
+
+    has_runtime_grapheme_at_decl = re.search(
+        r"^declare\b.*@sailfin_runtime_grapheme_at\(",
+        "\n".join(filtered_lines),
+        re.MULTILINE,
+    ) is not None
+    has_mark_persistent_decl = re.search(
+        r"^declare\b.*@sailfin_runtime_mark_persistent\(",
+        "\n".join(filtered_lines),
+        re.MULTILINE,
+    ) is not None
+
+    alias_lines = [""]
+    if not has_runtime_grapheme_at_decl:
+        alias_lines.append(
+            "declare i8* @sailfin_runtime_grapheme_at(i8*, double)")
+    if not has_mark_persistent_decl:
+        alias_lines.append(
+            "declare void @sailfin_runtime_mark_persistent(i8*)")
+    alias_lines.extend([
+        "define i8* @text_char_at(i8* %value, double %index) {",
+        "entry:",
+        "  %t0 = call i8* @sailfin_runtime_grapheme_at(i8* %value, double %index)",
+        "  call void @sailfin_runtime_mark_persistent(i8* %t0)",
+        "  ret i8* %t0",
+        "}",
+    ])
+
+    insert_at = len(filtered_lines)
+    for i, line in enumerate(filtered_lines):
+        s = line.lstrip()
+        if s.startswith("attributes ") or s.startswith("!"):
+            insert_at = i
+            break
+
+    new_lines = filtered_lines[:insert_at] + \
+        alias_lines + filtered_lines[insert_at:]
+    new_text = "\n".join(new_lines)
+    if llvm_text.endswith("\n"):
+        new_text += "\n"
+    return new_text, True
+
+
+def _promote_symbol_definition_visibility(llvm_text: str, symbol: str) -> tuple[str, bool]:
+    """Make one internal/private `define` for `symbol` externally visible."""
+
+    if not llvm_text or not symbol:
+        return llvm_text, False
+
+    lines = llvm_text.splitlines()
+    changed = False
+    for idx, line in enumerate(lines):
+        m = _DEFINE_SYMBOL_RE.match(line)
+        if not m:
+            continue
+        if m.group("name") != symbol:
+            continue
+        attrs = m.group("attrs") or ""
+        normalized = " " + attrs + " "
+        if " internal " not in normalized and " private " not in normalized:
+            continue
+        if line.startswith("define internal "):
+            lines[idx] = line.replace("define internal ", "define ", 1)
+            changed = True
+            break
+        if line.startswith("define private "):
+            lines[idx] = line.replace("define private ", "define ", 1)
+            changed = True
+            break
+
+    if not changed:
+        return llvm_text, False
+
+    out = "\n".join(lines)
+    if llvm_text.endswith("\n"):
+        out += "\n"
+    return out, True
+
+
 def _toplevel_fn_names(source_path: pathlib.Path) -> set[str]:
     try:
         text = source_path.read_text(encoding="utf-8", errors="replace")
@@ -1424,6 +1591,8 @@ def _dedupe_public_definitions_across_modules(
         "sailfin_cli_main",
         "native_cli_main",
         "sailfin_version",
+        "text_char_at",
+        "string_char_at",
     }
 
     lines_by_module: list[list[str]] = [text.splitlines() for text in ll_texts]
@@ -1597,6 +1766,8 @@ def _internalize_duplicate_symbol_for_llvm_link(
         "sailfin_cli_main",
         "native_cli_main",
         "sailfin_version",
+        "text_char_at",
+        "string_char_at",
     }
     if symbol in required_always:
         return 0
@@ -1630,6 +1801,27 @@ def _internalize_duplicate_symbol_for_llvm_link(
         return 0
 
     winner_idx = 0
+
+    # Prefer a non-wrapper implementation if some providers call `symbol_impl`
+    # and others are direct implementations.
+    impl_name = f"@{symbol}_impl("
+    wrapper_idxs: list[int] = []
+    direct_idxs: list[int] = []
+    for idx, (_path, _module_name, _line_idx, _lines, sig) in enumerate(occurrences):
+        if impl_name in sig:
+            wrapper_idxs.append(idx)
+        else:
+            direct_idxs.append(idx)
+    if wrapper_idxs and direct_idxs:
+        winner_idx = direct_idxs[0]
+
+    if symbol == "append_match_arm_mutations" and direct_idxs:
+        for idx in direct_idxs:
+            _path, module_name, _line_idx, _lines, _sig = occurrences[idx]
+            if "core_match_helpers" in module_name:
+                winner_idx = idx
+                break
+
     for idx, (_path, module_name, _line_idx, _lines, _sig) in enumerate(occurrences):
         needed = required_export_fns.get(module_name, set())
         if symbol in needed:
@@ -1637,6 +1829,13 @@ def _internalize_duplicate_symbol_for_llvm_link(
             break
         for base in needed:
             if symbol == f"{base}__{module_name}" or symbol.startswith(f"{base}__{module_name}__"):
+                winner_idx = idx
+                break
+
+    if symbol == "append_match_arm_mutations" and direct_idxs:
+        for idx in direct_idxs:
+            _path, module_name, _line_idx, _lines, _sig = occurrences[idx]
+            if "core_match_helpers" in module_name:
                 winner_idx = idx
                 break
 
@@ -3225,6 +3424,15 @@ def main(argv: list[str]) -> int:
                                 time.sleep(args.attempt_sleep)
                             continue
 
+                    # Keep only required exports externally visible per-module.
+                    # This prevents cross-module symbol collisions at llvm-link
+                    # without relying on global duplicate winner heuristics.
+                    candidate, _ = _internalize_non_required_definitions(
+                        candidate,
+                        module_name=module_name,
+                        required_module_exports=required,
+                    )
+
                     # Final safeguard: ensure phi nodes are grouped at block starts
                     # right before writing the candidate to disk.
                     candidate, _ = _reorder_phi_nodes_to_block_start(candidate)
@@ -3585,13 +3793,56 @@ def main(argv: list[str]) -> int:
                 module_names=module_names,
                 ll_texts=ll_texts,
                 symbols=prelude_symbols,
-                excluded_symbols={"string_char_at"},
+                excluded_symbols={"string_char_at", "text_char_at"},
             )
             if prelude_collision_changes > 0:
                 print(
                     f"[selfhost] ({pass_name}) internalized {prelude_collision_changes} non-runtime symbols that collide with runtime__prelude",
                     flush=True,
                 )
+
+        has_public_text_char_at_define = any(
+            "text_char_at" in _collect_public_define_symbols(text) for text in ll_texts
+        )
+        if not has_public_text_char_at_define:
+            for idx, name in enumerate(module_names):
+                updated, changed = _promote_symbol_definition_visibility(
+                    ll_texts[idx], "text_char_at"
+                )
+                if changed:
+                    ll_texts[idx] = updated
+                    has_public_text_char_at_define = True
+                    print(
+                        f"[selfhost][warn] ({pass_name}) promoted @text_char_at visibility in {name}.ll",
+                        flush=True,
+                    )
+                    break
+
+        has_public_string_char_at_define = any(
+            "string_char_at" in _collect_public_define_symbols(text) for text in ll_texts
+        )
+
+        if not has_public_text_char_at_define:
+            for idx, name in enumerate(module_names):
+                updated, changed = _ensure_text_char_at_alias(ll_texts[idx])
+                if changed:
+                    ll_texts[idx] = updated
+                    print(
+                        f"[selfhost][warn] ({pass_name}) synthesized @text_char_at alias in {name}.ll",
+                        flush=True,
+                    )
+                    break
+
+        if not has_public_string_char_at_define:
+            for idx, name in enumerate(module_names):
+                updated, changed = _ensure_string_char_at_alias(ll_texts[idx])
+                if changed:
+                    ll_texts[idx] = updated
+                    print(
+                        f"[selfhost][warn] ({pass_name}) synthesized @string_char_at alias in {name}.ll",
+                        flush=True,
+                    )
+                    break
 
         for idx, name in enumerate(module_names):
             if name != "cli_main":

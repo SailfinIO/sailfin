@@ -889,6 +889,18 @@ fn should_internalize_function(function -> NativeFunction, entry_points -> strin
     if function.name == "native_cli_main" || sanitized == "native_cli_main" {
         return false;
     }
+    if function.name == "append_match_arm_mutations" || sanitized == "append_match_arm_mutations" {
+        return false;
+    }
+    if function.name == "append_match_arm_mutations_impl" || sanitized == "append_match_arm_mutations_impl" {
+        return false;
+    }
+    if function.name == "text_char_at" || sanitized == "text_char_at" {
+        return false;
+    }
+    if function.name == "string_char_at" || sanitized == "string_char_at" {
+        return false;
+    }
 
     // Treat leading-underscore helpers as module-local.
     if sanitized.length > 0 && sanitized[0] == "_" {
