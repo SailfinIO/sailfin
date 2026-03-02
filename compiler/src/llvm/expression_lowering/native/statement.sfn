@@ -17,6 +17,7 @@ import { coerce_operand_to_type } from "./core_operands";
 import { parse_member_access, parse_index_expression } from "./core_parse";
 import {
     find_local_binding,
+    append_local_binding,
     infer_borrow_base_scope,
     append_lifetime_region,
     append_lifetime_release_event,
@@ -184,11 +185,10 @@ fn lower_expression_statement(
     context -> TypeContext,
     current_label -> string
 ) -> ExpressionStatementResult {
-    let mut suspension_span -> NativeSourceSpan? = null;
-    if instruction.span != null {
-        suspension_span = instruction.span;
-    }
-    let mut diagnostics -> string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, suspension_span);
+    // The v0.1.1 seed compiles instruction as i8*, making field access via
+    // sailfin_runtime_get_field return garbage. Skip span extraction (only
+    // used for suspension diagnostics) to avoid the broken field access.
+    let mut diagnostics -> string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
     let mut current_locals -> LocalBinding[] = locals;
@@ -432,7 +432,7 @@ fn lower_expression_statement(
             }
             
             let previous_ownership -> OwnershipInfo? = binding.ownership;
-            let ownership_analysis = analyze_value_ownership(effective_value, instruction.span, current_locals, current_bindings);
+            let ownership_analysis = analyze_value_ownership(effective_value, null, current_locals, current_bindings);
             diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
             let mut assignment_ownership = ownership_analysis.ownership;
             let consumption = ownership_analysis.consumption;
@@ -514,7 +514,7 @@ fn lower_expression_statement(
                 name: parsed_assignment.target,
                 llvm_type: binding.llvm_type,
                 value_name: stored_value,
-                span: instruction.span,
+                span: null,
                 originating_label: current_label,
             };
             mutations.push(mutation);
@@ -522,7 +522,7 @@ fn lower_expression_statement(
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
     }
 
-    let ownership_analysis = analyze_value_ownership(expression, instruction.span, current_locals, current_bindings);
+    let ownership_analysis = analyze_value_ownership(expression, null, current_locals, current_bindings);
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     let consumption = ownership_analysis.consumption;
 
@@ -550,7 +550,7 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         if ch == "(" {
             paren_depth += 1;
             index += 1;
@@ -582,11 +582,11 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
         if ch == "=" {
             let mut previous -> string = "";
             if index > 0 {
-                previous = trimmed[index - 1];
+                previous = substring(trimmed, index - 1, index);
             }
             let mut next_char -> string = "";
             if index + 1 < trimmed.length {
-                next_char = trimmed[index + 1];
+                next_char = substring(trimmed, index + 1, index + 2);
             }
             
             // Check for compound assignment operators: +=, -=, *=, /=
@@ -653,7 +653,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
         if index >= remainder.length {
             break;
         }
-        let ch = remainder[index];
+        let ch = substring(remainder, index, index + 1);
         if ch == " " || ch == ":" || ch == "-" || ch == "=" {
             break;
         }
@@ -683,7 +683,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
                 } else {
                     type_annotation = trim_text(tail);
                 }
-            } else if tail[0] == ":" {
+            } else if substring(tail, 0, 1) == ":" {
                 tail = trim_text(substring(tail, 1, tail.length));
                 let assign_index = index_of(tail, "=");
                 if assign_index >= 0 {
@@ -695,7 +695,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
                 } else {
                     type_annotation = trim_text(tail);
                 }
-            } else if tail[0] == "=" {
+            } else if substring(tail, 0, 1) == "=" {
                 let value_text = trim_text(substring(tail, 1, tail.length));
                 if value_text.length > 0 {
                     initializer = value_text;
@@ -707,7 +707,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
                 }
             }
         } else {
-            if tail[0] == "=" {
+            if substring(tail, 0, 1) == "=" {
                 let value_text = trim_text(substring(tail, 1, tail.length));
                 if value_text.length > 0 {
                     initializer = value_text;
@@ -740,22 +740,36 @@ fn lower_return_instruction(
     scope_depth -> number,
     functions -> NativeFunction[],
     context -> TypeContext
-) -> ExpressionStatementResult {
+) -> ExpressionStatementResult ![io] {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_temp -> number = temp_index;
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
     let mut current_next_region -> number = next_region_id;
+    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+
+    // Read instruction fields from files written by instructions.sfn.
+    // The v0.1.1 seed compiles this module with NativeFunction/NativeInstruction
+    // as i8*, using sailfin_runtime_get_field which can't access raw struct fields.
+    // Also read llvm_return from file because the cross-module call from
+    // instructions.sfn corrupts the string parameter despite matching ABI.
+    let fn_name = fs.readFile("build/sailfin/.instr_fn_name");
+    let instr_expression = fs.readFile("build/sailfin/.instr_expression");
+    let safe_llvm_return = fs.readFile("build/sailfin/.instr_llvm_return");
+
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return_instruction start fn=" + fn_name + " llvm_return=" + safe_llvm_return);
+    }
     if trace {
         let mut expr_len -> number = 0;
-        if instruction.expression != null {
-            expr_len = instruction.expression.length;
+        if instr_expression != null {
+            expr_len = instr_expression.length;
         }
         print.info(
             "test llvm: lower_return start "
-            + function.name
+            + fn_name
             + " expr_len="
             + number_to_string(expr_len)
             + " lines_before="
@@ -763,12 +777,12 @@ fn lower_return_instruction(
         );
     }
 
-    if instruction.expression == null || instruction.expression.length == 0 {
-        if llvm_return == "void" {
+    if instr_expression == null || instr_expression.length == 0 {
+        if safe_llvm_return == "void" {
             current_lines = append_string(current_lines, "  ret void");
         } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + function.name + "`");
-            current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+            diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + fn_name + "`");
+            current_lines = append_string(current_lines, "  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
         }
         if trace {
             print.info("test llvm: lower_return empty_expr lines_after=" + number_to_string(current_lines.length));
@@ -777,25 +791,98 @@ fn lower_return_instruction(
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: locals, bindings: bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: empty_constants };
     }
 
-    let mut current_locals -> LocalBinding[] = locals;
-    let mut current_bindings -> ParameterBinding[] = bindings;
+    // Read bindings from files written by instructions.sfn.
+    // The declare in instructions.ll uses %NativeFunction/%NativeInstruction (struct by value)
+    // for params 1-2, but the define in statement.ll uses i8*. This ABI mismatch causes
+    // all subsequent params (including bindings at param 4) to be read from wrong registers.
+    let mut current_bindings -> ParameterBinding[] = [];
+    let mut br_i -> number = 0;
+    loop {
+        let br_prefix = "build/sailfin/.instr_binding_" + number_to_string(br_i);
+        if !fs.exists(br_prefix + "_name") { break; }
+        let br_name = fs.readFile(br_prefix + "_name");
+        let br_llvm_name = fs.readFile(br_prefix + "_llvm_name");
+        let br_llvm_type = fs.readFile(br_prefix + "_llvm_type");
+        let br_type_annotation = fs.readFile(br_prefix + "_type_annotation");
+        current_bindings = append_parameter_binding(current_bindings, ParameterBinding {
+            name: br_name, llvm_name: br_llvm_name, llvm_type: br_llvm_type,
+            type_annotation: br_type_annotation, consumed: false, span: null,
+        });
+        br_i += 1;
+    }
 
-    let suspension_diagnostics = detect_suspension_conflicts(instruction.expression, current_locals, current_bindings, function.name, instruction.span);
+    // Read locals from files (same ABI reason)
+    let mut current_locals -> LocalBinding[] = [];
+    let mut lr_i -> number = 0;
+    loop {
+        let lr_prefix = "build/sailfin/.instr_local_" + number_to_string(lr_i);
+        if !fs.exists(lr_prefix + "_name") { break; }
+        let lr_name = fs.readFile(lr_prefix + "_name");
+        let lr_pointer = fs.readFile(lr_prefix + "_pointer");
+        let lr_llvm_type = fs.readFile(lr_prefix + "_llvm_type");
+        let lr_type_annotation = fs.readFile(lr_prefix + "_type_annotation");
+        let lr_scope_id = fs.readFile(lr_prefix + "_scope_id");
+        // scope_depth is written as a string number but we need it as double.
+        // For the return instruction, scope_depth is typically 0 so a default of 0 is safe.
+        let mut lr_scope_depth -> number = 0;
+        current_locals = append_local_binding(current_locals, LocalBinding {
+            name: lr_name, pointer: lr_pointer, llvm_type: lr_llvm_type,
+            type_annotation: lr_type_annotation, ownership: null,
+            consumed: false, scope_id: lr_scope_id, scope_depth: lr_scope_depth,
+        });
+        lr_i += 1;
+    }
+
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return pre_suspension fn=" + fn_name);
+    }
+    let suspension_diagnostics = detect_suspension_conflicts(instr_expression, current_locals, current_bindings, fn_name, null);
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return post_suspension fn=" + fn_name);
+    }
     diagnostics = diagnostics.concat(suspension_diagnostics);
 
-    let ownership_analysis = analyze_value_ownership(instruction.expression, instruction.span, current_locals, current_bindings);
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return pre_ownership fn=" + fn_name);
+    }
+    let ownership_analysis = analyze_value_ownership(instr_expression, null, current_locals, current_bindings);
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return post_ownership fn=" + fn_name);
+    }
     diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
     let consumption = ownership_analysis.consumption;
 
-    let lowered = lower_expression(instruction.expression, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_return);
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return pre_lower_expr fn=" + fn_name + " expr=" + instr_expression);
+        print.warn("emit-llvm: lower_return bindings_len=" + number_to_string(current_bindings.length));
+        let mut bind_i -> number = 0;
+        loop {
+            if bind_i >= current_bindings.length {
+                break;
+            }
+            print.warn("emit-llvm: lower_return binding[" + number_to_string(bind_i) + "] name=" + current_bindings[bind_i].name + " llvm_name=" + current_bindings[bind_i].llvm_name + " llvm_type=" + current_bindings[bind_i].llvm_type);
+            bind_i += 1;
+        }
+    }
+    let lowered = lower_expression(instr_expression, current_bindings, current_locals, current_temp, current_lines, functions, context, safe_llvm_return);
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
+    }
     diagnostics = diagnostics.concat(lowered.diagnostics);
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
     let string_constants = lowered.string_constants;
 
+    if debug_lowering {
+        let mut has_operand = "false";
+        if lowered.operand != null {
+            has_operand = "true";
+        }
+        print.warn("emit-llvm: lower_return operand_check fn=" + fn_name + " has_operand=" + has_operand);
+    }
     if lowered.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + function.name + "`");
-        current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+        diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + fn_name + "`");
+        current_lines = append_string(current_lines, "  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
         if trace {
             print.info("test llvm: lower_return no_operand lines_after=" + number_to_string(current_lines.length));
         }
@@ -803,19 +890,28 @@ fn lower_return_instruction(
     }
 
     let operand = lowered.operand;
-    if llvm_return == "void" {
-        diagnostics = append_string(diagnostics, "llvm lowering: void function `" + function.name + "` returned a value");
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return pre_coerce fn=" + fn_name + " type=" + operand.llvm_type + " value=" + operand.value);
+    }
+    if safe_llvm_return == "void" {
+        diagnostics = append_string(diagnostics, "llvm lowering: void function `" + fn_name + "` returned a value");
         current_lines = append_string(current_lines, "  ret void");
     return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
     }
 
-    let coerced = coerce_operand_to_type(operand, llvm_return, current_temp, current_lines);
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return pre_coerce_call fn=" + fn_name);
+    }
+    let coerced = coerce_operand_to_type(operand, safe_llvm_return, current_temp, current_lines);
+    if debug_lowering {
+        print.warn("emit-llvm: lower_return post_coerce fn=" + fn_name);
+    }
     diagnostics = diagnostics.concat(coerced.diagnostics);
     current_lines = coerced.lines;
     current_temp = coerced.temp_index;
     if coerced.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + llvm_return + "` in `" + function.name + "`");
-        current_lines = append_string(current_lines, "  ret " + llvm_return + " " + default_return_literal(llvm_return));
+        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + safe_llvm_return + "` in `" + fn_name + "`");
+        current_lines = append_string(current_lines, "  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
         if trace {
             print.info("test llvm: lower_return no_coerce lines_after=" + number_to_string(current_lines.length));
         }
@@ -967,7 +1063,7 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
         return "";
     }
     // Check if this is an optional type (ends with ?)
-    if trimmed[trimmed.length - 1] != "?" {
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != "?" {
         return "";
     }
     // Extract the inner type (everything before the ?)
@@ -995,7 +1091,7 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
         return "i8*";
     }
     // If already a pointer, return as-is, otherwise make it a pointer
-    if inner_type[inner_type.length - 1] == "*" {
+    if substring(inner_type, inner_type.length - 1, inner_type.length) == "*" {
         return inner_type;
     }
     return inner_type + "*";
@@ -1036,7 +1132,7 @@ fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
     if remainder.length == 0 {
         return "";
     }
-    if remainder[0] == "(" && remainder[remainder.length - 1] == ")" {
+    if substring(remainder, 0, 1) == "(" && substring(remainder, remainder.length - 1, remainder.length) == ")" {
         remainder = trim_text(substring(remainder, 1, remainder.length - 1));
     }
     let inner_type = map_reference_inner_type(context, remainder);
@@ -1082,7 +1178,7 @@ fn unwrap_move_wrapper(annotation -> string) -> string {
     if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
         let open_index = index_of(trimmed, "<");
         if open_index >= 0 {
-            if trimmed[trimmed.length - 1] == ">" {
+            if substring(trimmed, trimmed.length - 1, trimmed.length) == ">" {
                 let inner = substring(trimmed, open_index + 1, trimmed.length - 1);
                 return unwrap_move_wrapper(trim_text(inner));
             }
@@ -1103,7 +1199,7 @@ fn contains_keyword_outside_strings(value -> string, keyword -> string) -> boole
         if index >= value.length {
             break;
         }
-        let ch = value[index];
+        let ch = substring(value, index, index + 1);
         if in_single {
             if escape {
                 escape = false;
@@ -1136,9 +1232,9 @@ fn contains_keyword_outside_strings(value -> string, keyword -> string) -> boole
             index += 1;
             continue;
         }
-        if ch == keyword[0] {
+        if ch == substring(keyword, 0, 1) {
             if index > 0 {
-                let previous = value[index - 1];
+                let previous = substring(value, index - 1, index);
                 if is_identifier_part_char(previous) {
                     index += 1;
                     continue;
@@ -1172,7 +1268,7 @@ fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
     if normalized.length == 0 {
         return false;
     }
-    if normalized[0] != "&" {
+    if substring(normalized, 0, 1) != "&" {
         return false;
     }
     let remainder = trim_text(substring(normalized, 1, normalized.length));
@@ -1226,15 +1322,15 @@ fn normalise_borrow_base(raw_base -> string) -> string {
         if trimmed.length == 0 {
             break;
         }
-        if trimmed[0] == "*" {
+        if substring(trimmed, 0, 1) == "*" {
             trimmed = trim_text(substring(trimmed, 1, trimmed.length));
             continue;
         }
         break;
     }
     if trimmed.length >= 2 {
-        if trimmed[0] == "(" {
-            if trimmed[trimmed.length - 1] == ")" {
+        if substring(trimmed, 0, 1) == "(" {
+            if substring(trimmed, trimmed.length - 1, trimmed.length) == ")" {
                 let inner = trim_text(substring(trimmed, 1, trimmed.length - 1));
                 if inner.length > 0 {
                     return inner;

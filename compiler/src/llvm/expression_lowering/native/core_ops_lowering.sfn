@@ -429,12 +429,8 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
     let mut left_operand = left_result.operand;
     let mut right_operand = right_result.operand;
     let mut is_equality -> boolean = false;
-    if match.symbol.length == 2 {
-        let c0 = char_code_at_text(match.symbol, 0);
-        let c1 = char_code_at_text(match.symbol, 1);
-        if (c0 == char_code("=") && c1 == char_code("=")) || (c0 == char_code("!") && c1 == char_code("=")) {
-            is_equality = true;
-        }
+    if match.symbol == "==" || match.symbol == "!=" {
+        is_equality = true;
     }
 
     if is_equality && left_operand != null && right_operand != null {
@@ -467,11 +463,8 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
                 let compare_temp = format_temp_name(alignment_temp);
                 alignment_temp += 1;
                 let mut predicate -> string = "icmp eq";
-                if match.symbol.length == 2 {
-                    let c0 = char_code_at_text(match.symbol, 0);
-                    if c0 == char_code("!") {
-                        predicate = "icmp ne";
-                    }
+                if match.symbol == "!=" {
+                    predicate = "icmp ne";
                 }
                 alignment_lines = append_string(alignment_lines, "  " + compare_temp + " = " + predicate + " " + tag_llvm_type + " " + left_tag_temp + ", " + right_tag_temp);
                 let operand = LLVMOperand { llvm_type: "i1", value: compare_temp };

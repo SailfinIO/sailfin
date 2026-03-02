@@ -167,18 +167,18 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         if ch == "\"" {
             index = skip_string_literal(trimmed, index + 1);
             continue;
         }
         if ch == "&" {
-            if index + 1 < trimmed.length && trimmed[index + 1] == "&" {
+            if index + 1 < trimmed.length && substring(trimmed, index + 1, index + 2) == "&" {
                 index += 2;
                 continue;
             }
             if index > 0 {
-                let prefix = trimmed[index - 1];
+                let prefix = substring(trimmed, index - 1, index);
                 if is_identifier_part_char(prefix) {
                     index += 1;
                     continue;
@@ -190,7 +190,7 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
                 let maybe_mut = substring(trimmed, cursor, cursor + 3);
                 if maybe_mut == "mut" {
                     let after_mut_index = cursor + 3;
-                    if after_mut_index >= trimmed.length || is_effect_delimiter(trimmed[after_mut_index]) {
+                    if after_mut_index >= trimmed.length || is_effect_delimiter(substring(trimmed, after_mut_index, after_mut_index + 1)) {
                         mutable_flag = true;
                         cursor = after_mut_index;
                     }
@@ -200,14 +200,14 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
                 if cursor >= trimmed.length {
                     break;
                 }
-                let current = trimmed[cursor];
+                let current = substring(trimmed, cursor, cursor + 1);
                 if !is_trim_char(current) {
                     break;
                 }
                 cursor += 1;
             }
             if cursor < trimmed.length {
-                let target_start = trimmed[cursor];
+                let target_start = substring(trimmed, cursor, cursor + 1);
                 if is_identifier_start_char(target_start) {
                     if mutable_flag {
                         effects = append_unique_effect(effects, "mut");
@@ -222,7 +222,7 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
         if ch == "b" {
             if matches_keyword(trimmed, index, "borrow") {
                 let before_index = index - 1;
-                if before_index < 0 || is_effect_prefix_char(trimmed[before_index]) {
+                if before_index < 0 || is_effect_prefix_char(substring(trimmed, before_index, before_index + 1)) {
                     effects = append_unique_effect(effects, "read");
                     index += 6;
                     continue;
@@ -360,7 +360,7 @@ fn extract_call_targets(expression -> string, function_names -> string[]) -> str
         if index >= expression_len {
             break;
         }
-        let ch = expression[index];
+        let ch = substring(expression, index, index + 1);
         if ch == "\"" {
             index = skip_string_literal(expression, index + 1);
             continue;
@@ -372,7 +372,7 @@ fn extract_call_targets(expression -> string, function_names -> string[]) -> str
                 if index >= expression_len {
                     break;
                 }
-                let current = expression[index];
+                let current = substring(expression, index, index + 1);
                 if is_identifier_part_char(current) {
                     index += 1;
                     continue;
@@ -397,7 +397,7 @@ fn extract_call_targets(expression -> string, function_names -> string[]) -> str
                     if cursor >= expression_len {
                         break;
                     }
-                    let next = expression[cursor];
+                    let next = substring(expression, cursor, cursor + 1);
                     if is_trim_char(next) {
                         cursor += 1;
                         continue;
@@ -428,7 +428,7 @@ fn extract_all_call_targets(expression -> string) -> string[] {
         if index >= expression_len {
             break;
         }
-        let ch = expression[index];
+        let ch = substring(expression, index, index + 1);
         if ch == "\"" {
             index = skip_string_literal(expression, index + 1);
             continue;
@@ -440,7 +440,7 @@ fn extract_all_call_targets(expression -> string) -> string[] {
                 if index >= expression_len {
                     break;
                 }
-                let current = expression[index];
+                let current = substring(expression, index, index + 1);
                 if is_identifier_part_char(current) {
                     index += 1;
                     continue;
@@ -458,7 +458,7 @@ fn extract_all_call_targets(expression -> string) -> string[] {
                     if cursor >= expression_len {
                         break;
                     }
-                    let next = expression[cursor];
+                    let next = substring(expression, cursor, cursor + 1);
                     if is_trim_char(next) {
                         cursor += 1;
                         continue;
@@ -676,7 +676,7 @@ fn contains_dot_property(expression -> string, name -> string) -> boolean {
         if index >= expression.length {
             break;
         }
-        let ch = expression[index];
+        let ch = substring(expression, index, index + 1);
         if in_double {
             if escape_next {
                 escape_next = false;

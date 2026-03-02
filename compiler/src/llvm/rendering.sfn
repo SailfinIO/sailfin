@@ -903,7 +903,7 @@ fn should_internalize_function(function -> NativeFunction, entry_points -> strin
     }
 
     // Treat leading-underscore helpers as module-local.
-    if sanitized.length > 0 && sanitized[0] == "_" {
+    if sanitized.length > 0 && substring(sanitized, 0, 1) == "_" {
         return true;
     }
 

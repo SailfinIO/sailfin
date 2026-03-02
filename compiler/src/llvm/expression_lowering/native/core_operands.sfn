@@ -16,6 +16,7 @@ import {
     char_code_at_text,
     is_union_llvm_type,
     parse_union_payload_types,
+    find_substring_from,
 } from "./core_text";
 
 import { starts_with } from "../../utils";
@@ -48,12 +49,8 @@ fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, ri
         diagnostics = append_string(diagnostics, "llvm lowering: comparison operands have mismatched types `" + left_operand.llvm_type + "` and `" + right_operand.llvm_type + "`");
     }
     let mut symbol_is_equality -> boolean = false;
-    if symbol.length == 2 {
-        let c0 = char_code_at_text(symbol, 0);
-        let c1 = char_code_at_text(symbol, 1);
-        if (c0 == char_code("=") && c1 == char_code("=")) || (c0 == char_code("!") && c1 == char_code("=")) {
-            symbol_is_equality = true;
-        }
+    if symbol == "==" || symbol == "!=" {
+        symbol_is_equality = true;
     }
     let left_is_string = is_string_pointer_type(left_operand.llvm_type);
     let right_is_string = is_string_pointer_type(right_operand.llvm_type);
@@ -64,14 +61,11 @@ fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, ri
         current_lines = append_string(current_lines, "  " + compare_temp + " = call i1 @strings_equal(i8* " + left_operand.value + ", i8* " + right_operand.value + ")");
         let mut next_index = temp_index + 1;
         let mut operand = LLVMOperand { llvm_type: "i1", value: compare_temp };
-        if symbol.length == 2 {
-            let c0 = char_code_at_text(symbol, 0);
-            if c0 == char_code("!") {
-                let inverted_temp = format_temp_name(next_index);
-                current_lines = append_string(current_lines, "  " + inverted_temp + " = xor i1 " + compare_temp + ", true");
-                operand = LLVMOperand { llvm_type: "i1", value: inverted_temp };
-                next_index += 1;
-            }
+        if symbol == "!=" {
+            let inverted_temp = format_temp_name(next_index);
+            current_lines = append_string(current_lines, "  " + inverted_temp + " = xor i1 " + compare_temp + ", true");
+            operand = LLVMOperand { llvm_type: "i1", value: inverted_temp };
+            next_index += 1;
         }
         return ComparisonEmission { lines: current_lines, temp_index: next_index, operand: operand, diagnostics: diagnostics };
     }
@@ -103,113 +97,49 @@ fn emit_boolean_and(left_operand -> LLVMOperand, right_operand -> LLVMOperand, t
 }
 
 fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> string {
-    let symbol_len = symbol.length;
-    let mut c0 -> number = -1;
-    let mut c1 -> number = -1;
-    if symbol_len >= 1 {
-        c0 = char_code_at_text(symbol, 0);
-    }
-    if symbol_len >= 2 {
-        c1 = char_code_at_text(symbol, 1);
-    }
-
+    // Use direct string == comparisons instead of char_code_at_text which is
+    // broken in older seeds.
     if llvm_type == "double" {
-        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
-            return "fcmp oeq";
-        }
-        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
-            return "fcmp une";
-        }
-        if symbol_len == 1 && c0 == char_code("<") {
-            return "fcmp olt";
-        }
-        if symbol_len == 2 && c0 == char_code("<") && c1 == char_code("=") {
-            return "fcmp ole";
-        }
-        if symbol_len == 1 && c0 == char_code(">") {
-            return "fcmp ogt";
-        }
-        if symbol_len == 2 && c0 == char_code(">") && c1 == char_code("=") {
-            return "fcmp oge";
-        }
+        if symbol == "==" { return "fcmp oeq"; }
+        if symbol == "!=" { return "fcmp une"; }
+        if symbol == "<" { return "fcmp olt"; }
+        if symbol == "<=" { return "fcmp ole"; }
+        if symbol == ">" { return "fcmp ogt"; }
+        if symbol == ">=" { return "fcmp oge"; }
         return "";
     }
     if llvm_type == "i32" || llvm_type == "i64" {
-        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
-            return "icmp eq";
-        }
-        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
-            return "icmp ne";
-        }
-        if symbol_len == 1 && c0 == char_code("<") {
-            return "icmp slt";
-        }
-        if symbol_len == 2 && c0 == char_code("<") && c1 == char_code("=") {
-            return "icmp sle";
-        }
-        if symbol_len == 1 && c0 == char_code(">") {
-            return "icmp sgt";
-        }
-        if symbol_len == 2 && c0 == char_code(">") && c1 == char_code("=") {
-            return "icmp sge";
-        }
+        if symbol == "==" { return "icmp eq"; }
+        if symbol == "!=" { return "icmp ne"; }
+        if symbol == "<" { return "icmp slt"; }
+        if symbol == "<=" { return "icmp sle"; }
+        if symbol == ">" { return "icmp sgt"; }
+        if symbol == ">=" { return "icmp sge"; }
         return "";
     }
     if llvm_type == "i1" {
-        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
-            return "icmp eq";
-        }
-        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
-            return "icmp ne";
-        }
+        if symbol == "==" { return "icmp eq"; }
+        if symbol == "!=" { return "icmp ne"; }
         return "";
     }
-    // Support character (i8) comparisons for lexer/parser string utilities
     if llvm_type == "i8" {
-        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
-            return "icmp eq";
-        }
-        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
-            return "icmp ne";
-        }
-        if symbol_len == 1 && c0 == char_code("<") {
-            return "icmp slt";
-        }
-        if symbol_len == 2 && c0 == char_code("<") && c1 == char_code("=") {
-            return "icmp sle";
-        }
-        if symbol_len == 1 && c0 == char_code(">") {
-            return "icmp sgt";
-        }
-        if symbol_len == 2 && c0 == char_code(">") && c1 == char_code("=") {
-            return "icmp sge";
-        }
+        if symbol == "==" { return "icmp eq"; }
+        if symbol == "!=" { return "icmp ne"; }
+        if symbol == "<" { return "icmp slt"; }
+        if symbol == "<=" { return "icmp sle"; }
+        if symbol == ">" { return "icmp sgt"; }
+        if symbol == ">=" { return "icmp sge"; }
         return "";
     }
     // Support pointer comparisons for equality checks (i8*, struct pointers, etc.)
     if ends_with_pointer_suffix(llvm_type) {
-        if symbol_len == 2 && c0 == char_code("=") && c1 == char_code("=") {
-            return "icmp eq";
-        }
-        if symbol_len == 2 && c0 == char_code("!") && c1 == char_code("=") {
-            return "icmp ne";
-        }
-        // For string pointers (i8*), support ordering for single-char comparisons
-        // Note: This performs pointer value comparison, suitable for comparing
-        // string literals that are stored at predictable addresses
+        if symbol == "==" { return "icmp eq"; }
+        if symbol == "!=" { return "icmp ne"; }
         if llvm_type == "i8*" {
-            if symbol_len == 1 && c0 == char_code("<") {
-                return "icmp ult";
-            }
-            if symbol_len == 2 && c0 == char_code("<") && c1 == char_code("=") {
-                return "icmp ule";
-            }
-            if symbol_len == 1 && c0 == char_code(">") {
-                return "icmp ugt";
-            }
-            if symbol_len == 2 && c0 == char_code(">") && c1 == char_code("=") {
-                return "icmp uge";
-            }
+            if symbol == "<" { return "icmp ult"; }
+            if symbol == "<=" { return "icmp ule"; }
+            if symbol == ">" { return "icmp ugt"; }
+            if symbol == ">=" { return "icmp uge"; }
         }
         return "";
     }
@@ -232,20 +162,333 @@ fn load_local_operand(local -> LocalBinding, temp_index -> number, lines -> stri
     return LoadLocalResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics };
 }
 
+// Collapse runs of consecutive spaces to a single space inside LLVM type strings.
+// Uses find_substring_from + substring which rely on the C runtime (grapheme_at)
+// rather than the [] operator that older seeds miscompile.
+fn collapse_type_spaces(value -> string) -> string {
+    let mut result = value;
+    loop {
+        let idx = find_substring_from(result, "  ", 0);
+        if idx < 0 {
+            break;
+        }
+        result = substring(result, 0, idx) + " " + substring(result, idx + 2, result.length);
+    }
+    return result;
+}
+
 fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_index -> number, lines -> string[]) -> CoercionResult {
+    let debug_coerce = fs.exists("build/sailfin/.trace_lowering");
+    if debug_coerce {
+        print.warn("emit-llvm: coerce_operand entry operand_type=" + operand.llvm_type + " target=" + target_type);
+    }
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
-    let operand_type = trim_text(operand.llvm_type);
-    if target_type.length == 0 {
+    let operand_type = collapse_type_spaces(trim_text(operand.llvm_type));
+    let target = collapse_type_spaces(trim_text(target_type));
+    if debug_coerce {
+        print.warn("emit-llvm: coerce_operand trimmed=" + operand_type + " target=" + target);
+    }
+    if target.length == 0 {
+        if debug_coerce {
+            print.warn("emit-llvm: coerce_operand early_return empty_target");
+        }
         return CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
     }
-    if operand_type == target_type {
+    if operand_type == target {
+        if debug_coerce {
+            print.warn("emit-llvm: coerce_operand early_return same_type");
+        }
         return CoercionResult { lines: current_lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics };
+    }
+    if debug_coerce {
+        print.warn("emit-llvm: coerce_operand type_mismatch operand=" + operand_type + " target=" + target);
     }
 
+    // ── Fast-path: numeric primitive coercions ──────────────────────────
+    // Placed BEFORE the complex boxing/union/pointer logic which calls helpers
+    // (ends_with_pointer_suffix, is_union_llvm_type) that use character-level
+    // string indexing.  Older seeds miscompile those helpers, so for any
+    // operand / target pair that are both simple primitives we handle them
+    // right here and return immediately.
+
+    // ── target = double ──
+    if target == "double" && operand_type == "i64" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = sitofp i64 " + operand.value + " to double");
+        let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "double" && operand_type == "i32" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = sitofp i32 " + operand.value + " to double");
+        let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "double" && operand_type == "i1" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = uitofp i1 " + operand.value + " to double");
+        let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "double" && operand_type == "i8" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = sitofp i8 " + operand.value + " to double");
+        let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+
+    // ── target = i64 ──
+    if target == "i64" && operand_type == "double" {
+        let round_temp = format_temp_name(temp_index);
+        let convert_temp = format_temp_name(temp_index + 1);
+        current_lines = append_string(current_lines, "  " + round_temp + " = call double @round(double " + operand.value + ")");
+        current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i64");
+        let coerced = LLVMOperand { llvm_type: "i64", value: convert_temp };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i64" && operand_type == "i32" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = sext i32 " + operand.value + " to i64");
+        let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i64" && operand_type == "i8" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = sext i8 " + operand.value + " to i64");
+        let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i64" && operand_type == "i1" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = zext i1 " + operand.value + " to i64");
+        let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+
+    // ── target = i32 ──
+    if target == "i32" && operand_type == "i64" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = trunc i64 " + operand.value + " to i32");
+        let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i32" && operand_type == "i8" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = sext i8 " + operand.value + " to i32");
+        let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i32" && operand_type == "i1" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = zext i1 " + operand.value + " to i32");
+        let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i32" && operand_type == "double" {
+        let round_temp = format_temp_name(temp_index);
+        let convert_temp = format_temp_name(temp_index + 1);
+        current_lines = append_string(current_lines, "  " + round_temp + " = call double @round(double " + operand.value + ")");
+        current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i32");
+        let coerced = LLVMOperand { llvm_type: "i32", value: convert_temp };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    }
+
+    // ── target = i8 ──
+    if target == "i8" && operand_type == "i64" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = trunc i64 " + operand.value + " to i8");
+        let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i8" && operand_type == "i32" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = trunc i32 " + operand.value + " to i8");
+        let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i8" && operand_type == "i1" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = zext i1 " + operand.value + " to i8");
+        let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i8" && operand_type == "double" {
+        let round_temp = format_temp_name(temp_index);
+        let convert_temp = format_temp_name(temp_index + 1);
+        current_lines = append_string(current_lines, "  " + round_temp + " = call double @round(double " + operand.value + ")");
+        current_lines = append_string(current_lines, "  " + convert_temp + " = fptosi double " + round_temp + " to i8");
+        let coerced = LLVMOperand { llvm_type: "i8", value: convert_temp };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    }
+
+    // ── target = i1 ──
+    if target == "i1" && operand_type == "double" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = fcmp one double " + operand.value + ", 0.0");
+        let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i1" && operand_type == "i64" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = icmp ne i64 " + operand.value + ", 0");
+        let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i1" && operand_type == "i32" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = icmp ne i32 " + operand.value + ", 0");
+        let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+
+    // ── target = i8* (string) from numeric primitives ──
+    if target == "i8*" && operand_type == "double" {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")");
+        let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i8*" && operand_type == "i64" {
+        let as_double = format_temp_name(temp_index);
+        let as_string = format_temp_name(temp_index + 1);
+        current_lines = append_string(current_lines, "  " + as_double + " = sitofp i64 " + operand.value + " to double");
+        current_lines = append_string(current_lines, "  " + as_string + " = call i8* @sailfin_runtime_number_to_string(double " + as_double + ")");
+        let coerced = LLVMOperand { llvm_type: "i8*", value: as_string };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    }
+
+    // ── i8* <-> i8 character/string coercions ──
+    if target == "i8" && operand_type == "i8*" {
+        // Extract first character from string pointer
+        let char_ptr_temp = format_temp_name(temp_index);
+        let char_value_temp = format_temp_name(temp_index + 1);
+        current_lines = append_string(current_lines, "  " + char_ptr_temp + " = getelementptr i8, i8* " + operand.value + ", i64 0");
+        current_lines = append_string(current_lines, "  " + char_value_temp + " = load i8, i8* " + char_ptr_temp);
+        let coerced = LLVMOperand { llvm_type: "i8", value: char_value_temp };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    }
+    if target == "i8*" && operand_type == "i8" {
+        // Create single-char heap string (char + null)
+        let malloc_temp = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 2)");
+        let char_ptr = format_temp_name(temp_index + 1);
+        current_lines = append_string(current_lines, "  " + char_ptr + " = getelementptr i8, i8* " + malloc_temp + ", i64 0");
+        current_lines = append_string(current_lines, "  store i8 " + operand.value + ", i8* " + char_ptr);
+        let null_ptr = format_temp_name(temp_index + 2);
+        current_lines = append_string(current_lines, "  " + null_ptr + " = getelementptr i8, i8* " + malloc_temp + ", i64 1");
+        current_lines = append_string(current_lines, "  store i8 0, i8* " + null_ptr);
+        let coerced = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 3, operand: coerced, diagnostics: diagnostics };
+    }
+
+    // ── pointer-to-pointer bitcast fast-path ──
+    // Handles i8* <-> other pointer types (common in struct/array boxing)
+    if target == "i8*" && operand_type != "i8*" && ends_with_pointer_suffix(operand_type) {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand_type + " " + operand.value + " to i8*");
+        let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if operand_type == "i8*" && target != "i8*" && ends_with_pointer_suffix(target) {
+        let temp_name = format_temp_name(temp_index);
+        current_lines = append_string(current_lines, "  " + temp_name + " = bitcast i8* " + operand.value + " to " + target);
+        let coerced = LLVMOperand { llvm_type: target, value: temp_name };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+
+    // ── Fast-path: pointer dereference (%T* → %T) ─────────────────────
+    // Uses only substring + == which are safe under the C runtime.
+    // This catches cases like %Block* → %Block without going through
+    // complex checks that may use broken character-level string ops.
+    if operand_type.length > 1 {
+        let op_last = substring(operand_type, operand_type.length - 1, operand_type.length);
+        if op_last == "*" {
+            let op_base = trim_text(substring(operand_type, 0, operand_type.length - 1));
+            if op_base == target {
+                let temp_name = format_temp_name(temp_index);
+                current_lines = append_string(current_lines, "  " + temp_name + " = load " + target + ", " + operand_type + " " + operand.value);
+                let coerced = LLVMOperand { llvm_type: target, value: temp_name };
+                return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+            }
+        }
+    }
+
+    // ── Fast-path: pointer boxing (%T → %T*) ────────────────────────
+    // If target is a pointer and operand is the pointed-to type, alloc+store.
+    if target.length > 1 {
+        let tgt_last = substring(target, target.length - 1, target.length);
+        if tgt_last == "*" {
+            let tgt_base = trim_text(substring(target, 0, target.length - 1));
+            if tgt_base == operand_type {
+                if starts_with(operand_type, "%") || starts_with(operand_type, "{") {
+                    let size_ptr_temp = format_temp_name(temp_index);
+                    let size_temp = format_temp_name(temp_index + 1);
+                    let malloc_temp = format_temp_name(temp_index + 2);
+                    let typed_ptr_temp = format_temp_name(temp_index + 3);
+
+                    current_lines = append_string(current_lines, "  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
+                    current_lines = append_string(current_lines, "  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
+                    current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                    current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
+                    current_lines = append_string(current_lines, "  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
+                    current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+
+                    let boxed = LLVMOperand { llvm_type: target, value: typed_ptr_temp };
+                    return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: boxed, diagnostics: diagnostics };
+                }
+            }
+        }
+    }
+
+    // ── Fast-path: pointer-to-pointer bitcast (%A* → %B*) ───────────
+    // Both are pointer types but different base types – bitcast between them.
+    if operand_type.length > 1 && target.length > 1 {
+        let op_last2 = substring(operand_type, operand_type.length - 1, operand_type.length);
+        let tgt_last2 = substring(target, target.length - 1, target.length);
+        if op_last2 == "*" && tgt_last2 == "*" && operand_type != target {
+            let temp_name = format_temp_name(temp_index);
+            current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand_type + " " + operand.value + " to " + target);
+            let coerced = LLVMOperand { llvm_type: target, value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+    }
+
+    // ── Fast-path: struct value → i8* (opaque pointer boxing) ──────────
+    // When a struct value (%T or {...}) needs to be returned/passed as i8*, alloc+store+bitcast.
+    if target == "i8*" && (starts_with(operand_type, "%") || starts_with(operand_type, "{")) {
+        let size_ptr_temp = format_temp_name(temp_index);
+        let size_temp = format_temp_name(temp_index + 1);
+        let malloc_temp = format_temp_name(temp_index + 2);
+        let typed_ptr_temp = format_temp_name(temp_index + 3);
+
+        current_lines = append_string(current_lines, "  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
+        current_lines = append_string(current_lines, "  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
+        current_lines = append_string(current_lines, "  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+        current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
+        current_lines = append_string(current_lines, "  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
+        current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+
+        let boxed = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: boxed, diagnostics: diagnostics };
+    }
+
+    // ── Fast-path: i8* → struct value (opaque pointer unboxing) ────────
+    // When i8* needs to become a struct value, bitcast+load.
+    if operand_type == "i8*" && (starts_with(target, "%") || starts_with(target, "{")) {
+        let typed_ptr_temp = format_temp_name(temp_index);
+        let loaded_temp = format_temp_name(temp_index + 1);
+        current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + operand.value + " to " + target + "*");
+        current_lines = append_string(current_lines, "  " + loaded_temp + " = load " + target + ", " + target + "* " + typed_ptr_temp);
+        let coerced = LLVMOperand { llvm_type: target, value: loaded_temp };
+        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    }
+
+    // ── end fast-path ──────────────────────────────────────────────────
+
     // General boxing: allow passing a by-value aggregate where a pointer-to-aggregate is expected.
-    if ends_with_pointer_suffix(target_type) && !ends_with_pointer_suffix(operand_type) {
-        let expected_value_type = strip_pointer_suffix(target_type);
+    if ends_with_pointer_suffix(target) && !ends_with_pointer_suffix(operand_type) {
+        let expected_value_type = strip_pointer_suffix(target);
         if expected_value_type == operand_type {
             if starts_with(operand_type, "%") || starts_with(operand_type, "{") {
                 let size_ptr_temp = format_temp_name(temp_index);
@@ -260,7 +503,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
                 current_lines = append_string(current_lines, "  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
                 current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
 
-                let boxed = LLVMOperand { llvm_type: target_type, value: typed_ptr_temp };
+                let boxed = LLVMOperand { llvm_type: target, value: typed_ptr_temp };
                 return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: boxed, diagnostics: diagnostics };
             }
         }
@@ -268,8 +511,8 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
 
     // Union construction: wrap a concrete value into an inline tagged union.
     // Union layout is `{ i32, <variant0>, <variant1>, ... }` with tag at index 0.
-    if is_union_llvm_type(target_type) {
-        let variants = parse_union_payload_types(target_type);
+    if is_union_llvm_type(target) {
+        let variants = parse_union_payload_types(target);
         let mut variant_index -> number = 0;
         loop {
             if variant_index >= variants.length {
@@ -326,9 +569,9 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             if has_value {
                 let tag_temp = format_temp_name(local_temp);
                 let union_temp = format_temp_name(local_temp + 1);
-                local_lines = append_string(local_lines, "  " + tag_temp + " = insertvalue " + target_type + " undef, i32 " + number_to_string(variant_index) + ", 0");
-                local_lines = append_string(local_lines, "  " + union_temp + " = insertvalue " + target_type + " " + tag_temp + ", " + variant_type + " " + value_text + ", " + number_to_string(variant_index + 1));
-                let coerced = LLVMOperand { llvm_type: target_type, value: union_temp };
+                local_lines = append_string(local_lines, "  " + tag_temp + " = insertvalue " + target + " undef, i32 " + number_to_string(variant_index) + ", 0");
+                local_lines = append_string(local_lines, "  " + union_temp + " = insertvalue " + target + " " + tag_temp + ", " + variant_type + " " + value_text + ", " + number_to_string(variant_index + 1));
+                let coerced = LLVMOperand { llvm_type: target, value: union_temp };
                 return CoercionResult { lines: local_lines, temp_index: local_temp + 2, operand: coerced, diagnostics: diagnostics };
             }
             variant_index += 1;
@@ -337,7 +580,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
 
     // Convenience stringification: allow passing numbers where a string is expected.
     // (e.g. `print.info(8)` instead of `print.info(number.to_string(8))`).
-    if target_type == "i8*" {
+    if target == "i8*" {
         if operand.llvm_type == "double" {
             let temp_name = format_temp_name(temp_index);
             current_lines = append_string(current_lines, "  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")");
@@ -354,12 +597,12 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
         }
     }
     // Allow implicit loads when a pointer-to-T is passed where T is expected.
-    if !ends_with_pointer_suffix(target_type) && ends_with_pointer_suffix(operand.llvm_type) {
+    if !ends_with_pointer_suffix(target) && ends_with_pointer_suffix(operand.llvm_type) {
         let source_base = strip_pointer_suffix(operand.llvm_type);
-        if source_base == target_type {
+        if source_base == target {
             let temp_name = format_temp_name(temp_index);
-            current_lines = append_string(current_lines, "  " + temp_name + " = load " + target_type + ", " + operand.llvm_type + " " + operand.value);
-            let coerced = LLVMOperand { llvm_type: target_type, value: temp_name };
+            current_lines = append_string(current_lines, "  " + temp_name + " = load " + target + ", " + operand.llvm_type + " " + operand.value);
+            let coerced = LLVMOperand { llvm_type: target, value: temp_name };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
         }
     }
@@ -367,17 +610,17 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     // Unbox boxed aggregate pointers: `i8*` -> `%T` by bitcasting to `%T*` and loading.
     // This is used when functions return boxed aggregates (ABI uses `i8*`) but the
     // surrounding expression context expects a by-value aggregate.
-    if operand_type == "i8*" && !ends_with_pointer_suffix(target_type) {
-        if starts_with(target_type, "%") || starts_with(target_type, "{") {
+    if operand_type == "i8*" && !ends_with_pointer_suffix(target) {
+        if starts_with(target,"%") || starts_with(target,"{") {
             let typed_ptr_temp = format_temp_name(temp_index);
             let load_temp = format_temp_name(temp_index + 1);
-            current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + operand.value + " to " + target_type + "*");
-            current_lines = append_string(current_lines, "  " + load_temp + " = load " + target_type + ", " + target_type + "* " + typed_ptr_temp);
-            let coerced = LLVMOperand { llvm_type: target_type, value: load_temp };
+            current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast i8* " + operand.value + " to " + target + "*");
+            current_lines = append_string(current_lines, "  " + load_temp + " = load " + target + ", " + target + "* " + typed_ptr_temp);
+            let coerced = LLVMOperand { llvm_type: target, value: load_temp };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
         }
     }
-    if target_type == "double" {
+    if target == "double" {
         if operand.llvm_type == "i8*" {
             let temp_name = format_temp_name(temp_index);
             current_lines = append_string(current_lines, "  " + temp_name + " = call double @sailfin_runtime_string_to_number(i8* " + operand.value + ")");
@@ -397,7 +640,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
         }
     }
-    if target_type == "i64" {
+    if target == "i64" {
         if operand.llvm_type == "double" {
             // CRITICAL FIX: Round the double value before converting to i64 to eliminate
             // floating-point accumulation errors from loop counters (e.g., 1000.00000001 → 1000.0)
@@ -428,7 +671,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
         }
     }
 
-    if target_type == "i32" {
+    if target == "i32" {
         if operand.llvm_type == "i64" {
             let temp_name = format_temp_name(temp_index);
             current_lines = append_string(current_lines, "  " + temp_name + " = trunc i64 " + operand.value + " to i32");
@@ -457,7 +700,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
         }
     }
 
-    if target_type == "i8" {
+    if target == "i8" {
         if operand.llvm_type == "i64" {
             let temp_name = format_temp_name(temp_index);
             current_lines = append_string(current_lines, "  " + temp_name + " = trunc i64 " + operand.value + " to i8");
@@ -485,7 +728,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
         }
     }
-    if target_type == "i1" {
+    if target == "i1" {
         if operand.llvm_type == "double" {
             let temp_name = format_temp_name(temp_index);
             current_lines = append_string(current_lines, "  " + temp_name + " = fcmp one double " + operand.value + ", 0.0");
@@ -501,7 +744,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     }
     // Special case: i8* string to i8 character conversion (extract first character)
     // This handles comparing string literals with character indexing results
-    if target_type == "i8" && operand.llvm_type == "i8*" {
+    if target == "i8" && operand.llvm_type == "i8*" {
         // Load the first character from the string pointer
         let char_ptr_temp = format_temp_name(temp_index);
         let char_value_temp = format_temp_name(temp_index + 1);
@@ -512,7 +755,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     }
     // Special case: i8 character to i8* string conversion (create single-char string)
     // This handles passing character literals to functions expecting strings
-    if target_type == "i8*" && operand.llvm_type == "i8" {
+    if target == "i8*" && operand.llvm_type == "i8" {
         // Allocate a 2-byte buffer (char + null terminator) on the heap.
         // IMPORTANT: returning a pointer into stack memory (alloca) is invalid once the
         // function returns and breaks string helpers like `char_code`.
@@ -532,7 +775,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     }
     // Generic pointer coercion: allow bitcast between i8* and typed struct pointers
     // This handles imported types that couldn't be resolved due to missing layout manifests
-    if target_type == "i8*" && ends_with_pointer_suffix(operand.llvm_type) {
+    if target == "i8*" && ends_with_pointer_suffix(operand.llvm_type) {
         // Bitcast from typed pointer to i8*
         let temp_name = format_temp_name(temp_index);
         current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to i8*");
@@ -543,7 +786,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     // Box a struct value into an i8* when `any` is represented as a pointer.
     // This is used for cross-boundary structs like LLVMCompilationResult where we
     // intentionally store complex values opaquely.
-    if target_type == "i8*" && !ends_with_pointer_suffix(operand.llvm_type) {
+    if target == "i8*" && !ends_with_pointer_suffix(operand.llvm_type) {
         if starts_with(operand.llvm_type, "%") || starts_with(operand.llvm_type, "{") {
             let size_ptr_temp = format_temp_name(temp_index);
             let size_temp = format_temp_name(temp_index + 1);
@@ -561,17 +804,17 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: coerced, diagnostics: diagnostics };
         }
     }
-    if operand.llvm_type == "i8*" && ends_with_pointer_suffix(target_type) {
+    if operand.llvm_type == "i8*" && ends_with_pointer_suffix(target) {
         // Bitcast from i8* to typed pointer
         let temp_name = format_temp_name(temp_index);
-        current_lines = append_string(current_lines, "  " + temp_name + " = bitcast i8* " + operand.value + " to " + target_type);
-        let coerced = LLVMOperand { llvm_type: target_type, value: temp_name };
+        current_lines = append_string(current_lines, "  " + temp_name + " = bitcast i8* " + operand.value + " to " + target);
+        let coerced = LLVMOperand { llvm_type: target, value: temp_name };
         return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
     }
     // Handle struct value to pointer: allocate, store, return pointer
     // This handles cases like: return StructName { field: value } where return type is StructName*
-    if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) {
-        let expected_value_type = strip_pointer_suffix(target_type);
+    if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target) {
+        let expected_value_type = strip_pointer_suffix(target);
         if expected_value_type == operand.llvm_type {
             // IMPORTANT: returning a pointer to stack storage (alloca) is invalid once the
             // function returns. This shows up as corrupted AST fields (e.g. TypeAnnotation.text
@@ -593,14 +836,14 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             let mut pointer_value -> string = typed_ptr_temp;
             let mut next_index -> number = temp_index + 4;
             let typed_pointer_type = operand.llvm_type + "*";
-            if typed_pointer_type != target_type {
+            if typed_pointer_type != target {
                 let cast_temp = format_temp_name(next_index);
-                current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast " + typed_pointer_type + " " + typed_ptr_temp + " to " + target_type);
+                current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast " + typed_pointer_type + " " + typed_ptr_temp + " to " + target);
                 pointer_value = cast_temp;
                 next_index += 1;
             }
 
-            let coerced = LLVMOperand { llvm_type: target_type, value: pointer_value };
+            let coerced = LLVMOperand { llvm_type: target, value: pointer_value };
             return CoercionResult { lines: current_lines, temp_index: next_index, operand: coerced, diagnostics: diagnostics };
         }
     }
@@ -608,7 +851,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     // Some parser helpers build { T*, i64 } structs inline and immediately pass them
     // through slice APIs expecting { T*, i64 }*. When the callee uses a named layout
     // (e.g. %Array$TokenSlice*), the names differ even though the layout matches.
-    if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) {
+    if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target) {
         let operand_array_element = array_pointer_element_type(operand.llvm_type + "*");
         if operand_array_element.length > 0 {
             // Spill the literal struct to the stack, then bitcast the pointer to the
@@ -619,50 +862,50 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             let mut next_index -> number = temp_index + 1;
             let mut pointer_value -> string = alloca_temp;
             let operand_pointer_type = operand.llvm_type + "*";
-            if operand_pointer_type != target_type {
+            if operand_pointer_type != target {
                 let bitcast_temp = format_temp_name(next_index);
-                current_lines = append_string(current_lines, "  " + bitcast_temp + " = bitcast " + operand_pointer_type + " " + alloca_temp + " to " + target_type);
+                current_lines = append_string(current_lines, "  " + bitcast_temp + " = bitcast " + operand_pointer_type + " " + alloca_temp + " to " + target);
                 pointer_value = bitcast_temp;
                 next_index += 1;
             }
-            let coerced = LLVMOperand { llvm_type: target_type, value: pointer_value };
+            let coerced = LLVMOperand { llvm_type: target, value: pointer_value };
             return CoercionResult { lines: current_lines, temp_index: next_index, operand: coerced, diagnostics: diagnostics };
         }
     }
     // Handle array struct pointer variance: allow bitcast between pointers whose layouts match
-    if ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) {
+    if ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target) {
         let source_element = array_pointer_element_type(operand.llvm_type);
-        let target_element = array_pointer_element_type(target_type);
+        let target_element = array_pointer_element_type(target);
         if source_element.length > 0 && target_element.length > 0 {
             // Both are array structs; emit bitcast between pointer types
             let temp_name = format_temp_name(temp_index);
-            current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type);
-            let coerced = LLVMOperand { llvm_type: target_type, value: temp_name };
+            current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target);
+            let coerced = LLVMOperand { llvm_type: target, value: temp_name };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
         }
         // If not array structs, still allow bitcast between any two pointer types
         // This handles struct pointer coercions when type information is unavailable
         let temp_name = format_temp_name(temp_index);
-        current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type);
-        let coerced = LLVMOperand { llvm_type: target_type, value: temp_name };
+        current_lines = append_string(current_lines, "  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target);
+        let coerced = LLVMOperand { llvm_type: target, value: temp_name };
         return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
     }
-    if operand.value == "null" && ends_with_pointer_suffix(target_type) {
-        let coerced = LLVMOperand { llvm_type: target_type, value: "null" };
+    if operand.value == "null" && ends_with_pointer_suffix(target) {
+        let coerced = LLVMOperand { llvm_type: target, value: "null" };
         return CoercionResult { lines: current_lines, temp_index: temp_index, operand: coerced, diagnostics: diagnostics };
     }
-    if operand.value == "null" && !ends_with_pointer_suffix(target_type) {
-        let literal = default_return_literal(target_type);
-        let coerced = LLVMOperand { llvm_type: target_type, value: literal };
+    if operand.value == "null" && !ends_with_pointer_suffix(target) {
+        let literal = default_return_literal(target);
+        let coerced = LLVMOperand { llvm_type: target, value: literal };
         return CoercionResult { lines: current_lines, temp_index: temp_index, operand: coerced, diagnostics: diagnostics };
     }
-    if !ends_with_pointer_suffix(target_type) && ends_with_pointer_suffix(operand.llvm_type) {
+    if !ends_with_pointer_suffix(target) && ends_with_pointer_suffix(operand.llvm_type) {
         let mut pointer_type -> string = operand.llvm_type;
         let mut pointer_value -> string = operand.value;
         let mut pointer_temp_index -> number = temp_index;
         let base_type = strip_pointer_suffix(pointer_type);
-        if base_type != target_type {
-            let desired_pointer_type = target_type + "*";
+        if base_type != target {
+            let desired_pointer_type = target + "*";
             let bitcast_temp = format_temp_name(pointer_temp_index);
             current_lines = append_string(current_lines, "  " + bitcast_temp + " = bitcast " + pointer_type + " " + pointer_value + " to " + desired_pointer_type);
             pointer_type = desired_pointer_type;
@@ -670,8 +913,8 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
             pointer_temp_index += 1;
         }
         let load_temp = format_temp_name(pointer_temp_index);
-        current_lines = append_string(current_lines, "  " + load_temp + " = load " + target_type + ", " + pointer_type + " " + pointer_value);
-        let coerced = LLVMOperand { llvm_type: target_type, value: load_temp };
+        current_lines = append_string(current_lines, "  " + load_temp + " = load " + target + ", " + pointer_type + " " + pointer_value);
+        let coerced = LLVMOperand { llvm_type: target, value: load_temp };
         return CoercionResult { lines: current_lines, temp_index: pointer_temp_index + 1, operand: coerced, diagnostics: diagnostics };
     }
     diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce operand of type `" + operand.llvm_type + "` to `" + target_type + "`");

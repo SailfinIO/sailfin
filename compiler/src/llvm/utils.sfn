@@ -99,24 +99,16 @@ fn index_of(value -> string, target -> string) -> number {
     if target.length == 0 {
         return 0;
     }
+    // Use substring + == instead of char_code_at_text comparisons.
+    // char_code_at_text is miscompiled by older seeds, but substring
+    // (backed by the C runtime grapheme_at) and == both work correctly.
     let mut index -> number = 0;
     loop {
         if index + target.length > value.length {
             break;
         }
-        let mut match_index -> number = 0;
-        let mut matches -> boolean = true;
-        loop {
-            if match_index >= target.length {
-                break;
-            }
-            if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index) {
-                matches = false;
-                break;
-            }
-            match_index += 1;
-        }
-        if matches {
+        let candidate = substring(value, index, index + target.length);
+        if candidate == target {
             return index;
         }
         index += 1;
@@ -128,14 +120,15 @@ fn find_last_index_of_char(value -> string, target -> string) -> number {
     if target.length != 1 {
         return -1;
     }
-    let target_code = char_code_at_text(target, 0);
+    // Use substring + == instead of char_code_at_text.
     let mut index -> number = value.length;
     loop {
         if index <= 0 {
             break;
         }
         index -= 1;
-        if char_code_at_text(value, index) == target_code {
+        let ch = substring(value, index, index + 1);
+        if ch == target {
             return index;
         }
     }
@@ -209,7 +202,7 @@ fn number_to_string(value -> number) -> string {
         }
         if started || count > 0 {
             started = true;
-            let ch = digits[count];
+            let ch = substring(digits, count, count + 1);
             output = output + ch;
         }
         index += 1;
@@ -275,7 +268,7 @@ fn is_integer_literal(text -> string) -> boolean {
         return false;
     }
     let mut index -> number = 0;
-    if char_code_at_text(trimmed, 0) == char_code("-") {
+    if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 {
             return false;
         }
@@ -286,8 +279,8 @@ fn is_integer_literal(text -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let code = char_code_at_text(trimmed, index);
-        if code >= char_code("0") && code <= char_code("9") {
+        let ch = substring(trimmed, index, index + 1);
+        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
             has_digit = true;
             index += 1;
             continue;
@@ -305,7 +298,7 @@ fn is_number_literal(text -> string) -> boolean {
     if trimmed.length == 0 {
         return false;
     }
-    if char_code_at_text(trimmed, 0) == char_code("-") {
+    if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 {
             return false;
         }
@@ -315,13 +308,13 @@ fn is_number_literal(text -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let code = char_code_at_text(trimmed, index);
-        if code >= char_code("0") && code <= char_code("9") {
+        let ch = substring(trimmed, index, index + 1);
+        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
             has_digit = true;
             index += 1;
             continue;
         }
-        if code == char_code(".") {
+        if ch == "." {
             if has_decimal {
                 return false;
             }
@@ -346,7 +339,7 @@ fn is_simple_identifier(value -> string) -> boolean {
     if trimmed.length == 0 {
         return false;
     }
-    let first = trimmed[0];
+    let first = substring(trimmed, 0, 1);
     if first >= "0" && first <= "9" {
         return false;
     }
@@ -396,7 +389,7 @@ fn matches_keyword(value -> string, start_index -> number, keyword -> string) ->
     if start_index + keyword.length >= value.length {
         return true;
     }
-    let next = value[start_index + keyword.length];
+    let next = substring(value, start_index + keyword.length, start_index + keyword.length + 1);
     if is_identifier_part_char(next) {
         return false;
     }
@@ -458,7 +451,7 @@ fn sanitize_symbol(name -> string) -> string {
         if index >= name.length {
             break;
         }
-        let ch = name[index];
+        let ch = substring(name, index, index + 1);
         if is_symbol_char(ch) {
             result = result + ch;
         }
@@ -467,7 +460,7 @@ fn sanitize_symbol(name -> string) -> string {
     if result.length == 0 {
         return "_";
     }
-    let first = result[0];
+    let first = substring(result, 0, 1);
     let first_code = char_code(first);
     let zero = char_code("0");
     let nine = char_code("9");
@@ -666,7 +659,7 @@ fn skip_string_literal(text -> string, start_index -> number) -> number {
         if index >= text.length {
             break;
         }
-        let current = text[index];
+        let current = substring(text, index, index + 1);
         if escaped {
             escaped = false;
         } else {

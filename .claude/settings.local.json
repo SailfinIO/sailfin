@@ -57,7 +57,8 @@
       "Bash(then echo 'Bad pattern in: $f' grep -n '\\[0 x { %' $f)",
       "WebSearch",
       "Bash(mkdir:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(make clean-build && make compile 2>&1)"
     ],
     "deny": [],
     "ask": []

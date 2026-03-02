@@ -2701,10 +2701,16 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print.warn("emit-llvm: native artifacts=" + number_to_string(artifact_count));
     }
     let mut parse = parse_in;
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-A parse_in assigned");
+    }
     // Keep this lowering path dependent on explicit parsed context and optional
     // override text only. Accessing `native_module.artifacts` here has caused
     // stage2 instability on some selfhost paths.
     let artifact_for_stable_parse -> NativeArtifact? = null;
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-B before override check path_len=" + number_to_string(native_text_override_path.length));
+    }
     if native_text_override_path.length > 0 {
         let reparsed = parse_native_artifact(native_text_override_path);
         if reparsed.functions.length >= parse.functions.length {
@@ -2734,6 +2740,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             }
         }
     }
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-C after reparse block");
+    }
     let mut safe_imported_manifests = imported_manifests;
     if safe_imported_manifests == null {
         safe_imported_manifests = [];
@@ -2741,12 +2750,18 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if safe_imported_manifests.length != sanitize_collection_length(safe_imported_manifests.length, 100000) {
         safe_imported_manifests = [];
     }
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-D after manifests sanitize");
+    }
     let mut safe_imported_native_texts = imported_native_texts;
     if safe_imported_native_texts == null {
         safe_imported_native_texts = [];
     }
     if safe_imported_native_texts.length != sanitize_collection_length(safe_imported_native_texts.length, 100000) {
         safe_imported_native_texts = [];
+    }
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-E after native_texts sanitize");
     }
     let mut safe_imported_diagnostics = diagnostics_in;
     if safe_imported_diagnostics == null {
@@ -2756,12 +2771,18 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_imported_diagnostics = [];
     }
     let mut diagnostics = safe_imported_diagnostics;
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-F after diagnostics sanitize");
+    }
     let mut safe_entry_points = native_module.entry_points;
     if safe_entry_points == null {
         safe_entry_points = [];
     }
     if safe_entry_points.length != sanitize_collection_length(safe_entry_points.length, 100000) {
         safe_entry_points = [];
+    }
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-G after entry_points sanitize");
     }
     let mut safe_imports = parse.imports;
     if safe_imports == null {
@@ -2809,12 +2830,24 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         diagnostics = append_string(diagnostics, "llvm lowering: interface list too large (" + number_to_string(safe_interfaces.length) + "); dropping");
         safe_interfaces = [];
     }
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-H after structs/enums/interfaces sanitize");
+    }
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-H1 before parse.functions access");
+    }
     let mut safe_functions = parse.functions;
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-H2 after parse.functions access");
+    }
     if debug_lowering && safe_functions == null {
         print.warn("emit-llvm: parse.functions is null");
     }
     if safe_functions == null {
         safe_functions = [];
+    }
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-H3 safe_functions.length=" + number_to_string(safe_functions.length));
     }
     if safe_functions.length != sanitize_collection_length(safe_functions.length, 200000) {
         if debug_lowering {
@@ -2822,17 +2855,38 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
         safe_functions = [];
     }
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-H4 after sanitize safe_functions.length=" + number_to_string(safe_functions.length));
+    }
     if safe_functions.length == 0 {
+        if debug_lowering {
+            print.warn("emit-llvm: dbg-R1 safe_functions empty, recovery path");
+        }
         let mut recovery_text = "";
         if native_text_override_path.length > 0 {
             recovery_text = native_text_override_path;
         } else if artifact_for_stable_parse != null {
             recovery_text = artifact_for_stable_parse.contents;
         }
+        if debug_lowering {
+            print.warn("emit-llvm: dbg-R2 recovery_text.length=" + number_to_string(recovery_text.length));
+        }
         if recovery_text.length == 0 && fs.exists("build/sailfin/emit-native.tmp") {
+            if debug_lowering {
+                print.warn("emit-llvm: dbg-R3 reading emit-native.tmp");
+            }
             recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+            if debug_lowering {
+                print.warn("emit-llvm: dbg-R4 read emit-native.tmp bytes=" + number_to_string(recovery_text.length));
+            }
+        }
+        if debug_lowering {
+            print.warn("emit-llvm: dbg-R5 before parse recovery_text.length=" + number_to_string(recovery_text.length));
         }
         if recovery_text.length > 0 {
+            if debug_lowering {
+                print.warn("emit-llvm: dbg-R6 calling parse_native_functions_from_text");
+            }
             let mut recovered_functions = parse_native_functions_from_text(recovery_text);
             let mut recovered_has_body = false;
             let mut recovered_index -> number = 0;
@@ -3410,19 +3464,20 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         if safe_return_type == null {
             safe_return_type = "";
         }
-        let mut effective_function = current_function;
-        if current_function.parameters == null || current_function.effects == null || current_function.decorators == null || current_function.instructions == null || current_function.name == null || current_function.return_type == null {
-            effective_function = NativeFunction {
-                name: safe_function_name,
-                is_async: current_function.is_async,
-                parameters: safe_parameters,
-                return_type: safe_return_type,
-                effects: safe_effects,
-                decorators: safe_decorators,
-                instructions: safe_instructions,
-                is_extern: current_function.is_extern,
-            };
-        }
+        // Always construct a fresh NativeFunction from safe_* values.
+        // Removing the `mut` + conditional eliminates a PHI node for the
+        // NativeFunction struct, which the v0.1.1 seed miscompiles to null
+        // when passed to cross-module calls expecting i8*.
+        let effective_function = NativeFunction {
+            name: safe_function_name,
+            is_async: current_function.is_async,
+            parameters: safe_parameters,
+            return_type: safe_return_type,
+            effects: safe_effects,
+            decorators: safe_decorators,
+            instructions: safe_instructions,
+            is_extern: current_function.is_extern,
+        };
         if trace {
             let mut return_count -> number = 0;
             let mut instr_index -> number = 0;
@@ -3462,6 +3517,46 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         );
         if debug_lowering {
             print.warn("emit-llvm: function-start " + safe_function_name + " idx=" + number_to_string(index));
+        }
+        // Write NativeFunction field values to disk for emission.sfn to read.
+        // The v0.1.1 seed compiles emission.sfn with NativeFunction as i8*,
+        // making direct field access return garbage. This file-based channel
+        // bypasses the cross-module struct layout mismatch.
+        let mut is_async_flag = "0";
+        if current_function.is_async {
+            is_async_flag = "1";
+        }
+        let mut is_extern_flag = "0";
+        if current_function.is_extern {
+            is_extern_flag = "1";
+        }
+        fs.writeFile("build/sailfin/.fn_name", safe_function_name);
+        fs.writeFile("build/sailfin/.fn_return_type", safe_return_type);
+        fs.writeFile("build/sailfin/.fn_is_async", is_async_flag);
+        fs.writeFile("build/sailfin/.fn_is_extern", is_extern_flag);
+        fs.writeFile("build/sailfin/.fn_param_count", number_to_string(safe_parameters.length));
+        fs.writeFile("build/sailfin/.fn_instr_count", number_to_string(safe_instructions.length));
+        fs.writeFile("build/sailfin/.fn_decorator_count", number_to_string(safe_decorators.length));
+        // Write individual parameter names and types so emission.sfn can build
+        // ParameterPreparation from files instead of calling prepare_parameters
+        // (which the v0.1.1 seed compiles with i8* NativeFunction, breaking
+        // field access in the statement module).
+        let mut param_write_i -> number = 0;
+        loop {
+            if param_write_i >= safe_parameters.length {
+                break;
+            }
+            fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_name", safe_parameters[param_write_i].name);
+            fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_type", safe_parameters[param_write_i].type_annotation);
+            param_write_i += 1;
+        }
+        let mut dec_write_i -> number = 0;
+        loop {
+            if dec_write_i >= safe_decorators.length {
+                break;
+            }
+            fs.writeFile("build/sailfin/.fn_decorator_" + number_to_string(dec_write_i), safe_decorators[dec_write_i]);
+            dec_write_i += 1;
         }
         let lowered = emit_llvm_function(
             effective_function,

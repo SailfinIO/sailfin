@@ -135,7 +135,7 @@ fn find_last_label(lines -> string[], fallback -> string) -> string {
         if line.length == 0 {
             continue;
         }
-        if line[line.length - 1] == ":" {
+        if substring(line, line.length - 1, line.length) == ":" {
             return substring(line, 0, line.length - 1);
         }
     }
@@ -405,7 +405,7 @@ fn emit_phi_merges_for_straight_if(
                 if then_source_label.length == 0 {
                     then_source_label = then_label;
                 }
-                let phi_inputs = [
+                let phi_inputs -> string[] = [
                     "[ " + mutation.value_name + ", %" + then_source_label + " ]",
                     "[ " + preloaded_value + ", %" + base_label + " ]",
                 ];

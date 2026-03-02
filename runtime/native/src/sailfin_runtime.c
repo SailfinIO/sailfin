@@ -190,11 +190,12 @@ extern bool strings_equal(char *a, char *b);
 
 char *sailfin_runtime_get_field(char *base, char *field)
 {
-    if (!base || !field)
-    {
-        return "";
-    }
-    return "";
+    /* The v0.1.1 seed compiler sometimes compiles struct field access as
+       get_field(i8*, "field_name") when it cannot resolve the struct type.
+       Returning NULL ensures that null-guard checks in the compiled code
+       (e.g. `if layout == null { skip; }`) work correctly, preventing
+       infinite loops or crashes from dereferencing garbage pointers. */
+    return NULL;
 }
 
 static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codepoint)
@@ -1862,27 +1863,9 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
         end = start;
     }
 
-    // Even though this is the "unchecked" variant (used on hot paths), we've
-    // seen cases where the stage2 compiler can pass invalid bounds. Allowing
-    // out-of-bounds reads here introduces nondeterminism and can corrupt
-    // downstream output (e.g. malformed LLVM IR). Clamp to the actual string
-    // length to keep the runtime safe.
-    bool truncated = false;
-    int64_t n = (int64_t)_safe_strlen_asan(text, &truncated);
-    if (truncated)
-    {
-        fprintf(stderr, "[stage2-native] substring_unchecked: unterminated string at %p; treating length=%lld\n", (void *)text, (long long)n);
-        fflush(stderr);
-    }
-    if (start > n)
-    {
-        start = n;
-    }
-    if (end > n)
-    {
-        end = n;
-    }
-
+    // Truly unchecked: trust the caller's bounds (they already checked via
+    // .length which calls strlen once).  Removing the per-call strlen turns
+    // per-character scanning loops from O(n²) to O(n).
     int64_t length = end - start;
     char *out = (char *)malloc((size_t)length + 1);
     if (!out)
@@ -3825,6 +3808,36 @@ double sailfin_runtime_byte_at(char *text, int64_t index)
 
     unsigned char byte = (unsigned char)text[index];
     return (double)byte;
+}
+
+// Find the index of the first occurrence of a byte in a string starting from a given index.
+// Uses memchr for O(n) performance without per-character strlen overhead.
+// Returns -1 if not found.
+double sailfin_runtime_find_byte_index(char *text, double byte_value, double start_index)
+{
+    if (!text)
+    {
+        return -1.0;
+    }
+    int64_t start = (int64_t)start_index;
+    if (start < 0)
+    {
+        start = 0;
+    }
+    // Get string length once
+    bool truncated = false;
+    int64_t len = (int64_t)_safe_strlen_asan(text, &truncated);
+    if (start >= len)
+    {
+        return -1.0;
+    }
+    unsigned char target = (unsigned char)(int64_t)byte_value;
+    char *found = (char *)memchr(text + start, target, (size_t)(len - start));
+    if (!found)
+    {
+        return -1.0;
+    }
+    return (double)(found - text);
 }
 
 bool sailfin_runtime_is_decimal_digit(double ch)

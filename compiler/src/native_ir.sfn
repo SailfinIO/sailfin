@@ -3553,7 +3553,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                             // Add payload field to last variant
                             let last_index = variants.length - 1;
                             let last_variant = variants[last_index];
-                            let updated_fields = append_struct_layout_field(last_variant.fields, payload_result.field);
+                            let updated_fields -> NativeStructLayoutField[] = append_struct_layout_field(last_variant.fields, payload_result.field);
                             variants[last_index] = NativeEnumVariantLayout {
                                 name: last_variant.name,
                                 tag: last_variant.tag,

@@ -347,6 +347,10 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     let trimmed = trim_text(expression);
     let mut diagnostics -> string[] = [];
     let empty_constants = empty_string_constant_set();
+    let dbg_expr = fs.exists("build/sailfin/.trace_lowering");
+    if dbg_expr {
+        print.warn("emit-llvm: lower_expression ENTER expr=" + trimmed + " bindings_len=" + number_to_string(bindings.length) + " expected=" + expected_type);
+    }
     if trimmed.length == 0 {
         diagnostics = append_string(diagnostics, "llvm lowering: empty expression encountered");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
@@ -495,7 +499,15 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     }
 
     let additive = find_top_level_operator(stripped, "+-");
+    if dbg_expr {
+        let mut add_succ = "false";
+        if additive.success { add_succ = "true"; }
+        print.warn("emit-llvm: lower_expression additive_check expr=" + stripped + " success=" + add_succ + " index=" + number_to_string(additive.index) + " symbol=" + additive.symbol);
+    }
     if additive.success {
+        if dbg_expr {
+            print.warn("emit-llvm: lower_expression DISPATCH binary_op expr=" + stripped);
+        }
         return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions, context);
     }
 
@@ -508,14 +520,14 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     // We therefore handle them only after attempting to split on lower-precedence
     // operators like &&, ||, comparisons, +, -, *, /, %.
     if stripped.length > 0 {
-        if char_code_at_text(stripped, 0) == char_code("!") {
+        if substring(stripped, 0, 1) == "!" {
             let operand_text = trim_text(substring(stripped, 1, stripped.length));
             if operand_text.length > 0 {
                 let lowered_operand = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
                 return lower_logical_not_result(lowered_operand, diagnostics);
             }
         }
-        if char_code_at_text(stripped, 0) == char_code("*") {
+        if substring(stripped, 0, 1) == "*" {
             let operand_text = trim_text(substring(stripped, 1, stripped.length));
             if operand_text.length == 0 {
                 diagnostics = append_string(diagnostics, "llvm lowering: deref expression missing operand");
@@ -540,7 +552,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     }
 
     let call_index = find_call_site(stripped);
-    if call_index >= 0 && char_code_at_text(stripped, stripped.length - 1) == char_code(")") {
+    if call_index >= 0 && substring(stripped, stripped.length - 1, stripped.length) == ")" {
         let target = trim_text(substring(stripped, 0, call_index));
         let arguments_text = substring(stripped, call_index + 1, stripped.length - 1);
         let argument_entries = split_call_arguments(arguments_text);
@@ -591,9 +603,9 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     }
 
     if stripped.length >= 2 {
-        let first_code = char_code_at_text(stripped, 0);
-        let last_code = char_code_at_text(stripped, stripped.length - 1);
-        if first_code == char_code("[") && last_code == char_code("]") {
+        let first_ch = substring(stripped, 0, 1);
+        let last_ch = substring(stripped, stripped.length - 1, stripped.length);
+        if first_ch == "[" && last_ch == "]" {
             return lower_array_literal(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
         }
     }
@@ -635,6 +647,13 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     }
 
     let parameter = find_parameter_binding(bindings, stripped);
+    if dbg_expr {
+        let mut param_found = "null";
+        if parameter != null {
+            param_found = parameter.name + " -> " + parameter.llvm_name;
+        }
+        print.warn("emit-llvm: lower_expression param_lookup stripped=" + stripped + " result=" + param_found);
+    }
     if parameter != null {
         let operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
@@ -647,6 +666,9 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
         return ExpressionResult { lines: load_result.lines, temp_index: load_result.temp_index, operand: load_result.operand, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
+    if dbg_expr {
+        print.warn("emit-llvm: lower_expression FALLTHROUGH expr=" + stripped + " (unhandled)");
+    }
     diagnostics = append_string(diagnostics, "llvm lowering: unable to lower expression `" + expression + "`");
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
 }

@@ -62,6 +62,8 @@ extern "C"
 
     // Returns the raw byte at `index` as a `number` (double) for the native ABI.
     double sailfin_runtime_byte_at(char *text, int64_t index);
+    // Find byte in string using memchr. Returns index or -1 if not found.
+    double sailfin_runtime_find_byte_index(char *text, double byte_value, double start_index);
 
     // ---- Process helpers ----
     // Execute a command (argv[0] is program). Returns the exit code.

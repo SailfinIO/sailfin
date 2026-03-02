@@ -247,7 +247,7 @@ fn lower_instruction_range(
     scope_id -> string,
     scope_depth -> number,
     current_label -> string
-) -> BlockLoweringResult {
+) -> BlockLoweringResult ![io] {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_allocas -> string[] = allocas;
@@ -266,6 +266,11 @@ fn lower_instruction_range(
     let mut active_label -> string = current_label;
     let mut guard -> number = 0;
     let max_guard = (end - start_index) * 16 + 1024;
+    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    if debug_lowering {
+        print.warn("emit-llvm: lower_instruction_range name=" + function.name + " start=" + number_to_string(start_index) + " end=" + number_to_string(end) + " depth=" + number_to_string(scope_depth));
+        print.warn("emit-llvm: lower_instruction_range bindings_len=" + number_to_string(bindings.length) + " current_bindings_len=" + number_to_string(current_bindings.length));
+    }
     let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
     if trace && start_index == 0 && scope_depth == 0 {
         print.info(
@@ -314,6 +319,9 @@ fn lower_instruction_range(
         guard += 1;
 
         let instruction = function.instructions[index];
+        if debug_lowering {
+            print.warn("emit-llvm: lir guard=" + number_to_string(guard) + " index=" + number_to_string(index) + " variant=" + instruction.variant + " fn=" + function.name + " depth=" + number_to_string(scope_depth));
+        }
         if trace && index == start_index {
             print.info("test llvm: lower_instruction_range first_variant " + instruction.variant);
         }
@@ -337,7 +345,13 @@ fn lower_instruction_range(
                 print.info("test llvm: infer_effects after Let lines=" + number_to_string(current_lines.length));
             }
         } else if instruction.variant == "Expression" {
+            if debug_lowering {
+                print.warn("emit-llvm: lir Expression pre_trim fn=" + function.name + " depth=" + number_to_string(scope_depth));
+            }
             let trimmed_expression = trim_text(instruction.expression);
+            if debug_lowering {
+                print.warn("emit-llvm: lir Expression post_trim fn=" + function.name + " expr=" + trimmed_expression);
+            }
             let mut handled_inline_let -> boolean = false;
             if trimmed_expression.length >= 4 {
                 let prefix = substring(trimmed_expression, 0, 4);
@@ -372,7 +386,22 @@ fn lower_instruction_range(
                 }
             }
             if !handled_inline_let {
+                if debug_lowering {
+                    print.warn("emit-llvm: lir Expression pre_call fn=" + function.name + " expr=" + trimmed_expression);
+                }
+                // Write instruction span marker for statement.sfn file-based access.
+                let mut has_span = "0";
+                if instruction.span != null {
+                    has_span = "1";
+                }
+                fs.writeFile("build/sailfin/.instr_has_span", has_span);
+                if debug_lowering {
+                    print.warn("emit-llvm: lir Expression pre_lower_expr_stmt fn=" + function.name);
+                }
                 let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
+                if debug_lowering {
+                    print.warn("emit-llvm: lir Expression post_lower_expr_stmt fn=" + function.name);
+                }
                 diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
@@ -390,10 +419,81 @@ fn lower_instruction_range(
                 print.info("test llvm: infer_effects after Expression lines=" + number_to_string(current_lines.length));
             }
         } else if starts_with(instruction.variant, "Return") {
+            if debug_lowering {
+                print.warn("emit-llvm: lir pre_return fn=" + function.name + " depth=" + number_to_string(scope_depth) + " llvm_return=" + llvm_return);
+            }
             if trace {
                 print.info("test llvm: lower_instruction_range hit return in " + function.name);
             }
+            // Write instruction fields to files for statement.sfn to read.
+            // The v0.1.1 seed compiles statement.sfn with NativeFunction/NativeInstruction
+            // as i8*, using sailfin_runtime_get_field which can't access raw struct fields.
+            let mut safe_instr_expr -> string = "";
+            if instruction.expression != null {
+                safe_instr_expr = instruction.expression;
+            }
+            fs.writeFile("build/sailfin/.instr_fn_name", function.name);
+            fs.writeFile("build/sailfin/.instr_expression", safe_instr_expr);
+            fs.writeFile("build/sailfin/.instr_llvm_return", llvm_return);
+            // Write bindings to files for statement.sfn to read.
+            // The declare in instructions.ll uses %NativeFunction/%NativeInstruction (struct by value)
+            // but the define in statement.ll uses i8* for params 1-2. This ABI mismatch
+            // causes all subsequent params (including bindings at param 4) to be read from
+            // wrong registers. File-based passing avoids this.
+            // First, clean up any stale binding files from a previous function
+            let mut bc_i -> number = 0;
+            loop {
+                let bc_prefix = "build/sailfin/.instr_binding_" + number_to_string(bc_i);
+                if !fs.exists(bc_prefix + "_name") { break; }
+                fs.deleteFile(bc_prefix + "_name");
+                fs.deleteFile(bc_prefix + "_llvm_name");
+                fs.deleteFile(bc_prefix + "_llvm_type");
+                fs.deleteFile(bc_prefix + "_type_annotation");
+                bc_i += 1;
+            }
+            let mut bw_i -> number = 0;
+            loop {
+                if bw_i >= current_bindings.length {
+                    break;
+                }
+                let bw_prefix = "build/sailfin/.instr_binding_" + number_to_string(bw_i);
+                fs.writeFile(bw_prefix + "_name", current_bindings[bw_i].name);
+                fs.writeFile(bw_prefix + "_llvm_name", current_bindings[bw_i].llvm_name);
+                fs.writeFile(bw_prefix + "_llvm_type", current_bindings[bw_i].llvm_type);
+                fs.writeFile(bw_prefix + "_type_annotation", current_bindings[bw_i].type_annotation);
+                bw_i += 1;
+            }
+            // Also clean up and write locals for the same ABI reason
+            let mut lc_i -> number = 0;
+            loop {
+                let lc_prefix = "build/sailfin/.instr_local_" + number_to_string(lc_i);
+                if !fs.exists(lc_prefix + "_name") { break; }
+                fs.deleteFile(lc_prefix + "_name");
+                fs.deleteFile(lc_prefix + "_pointer");
+                fs.deleteFile(lc_prefix + "_llvm_type");
+                fs.deleteFile(lc_prefix + "_type_annotation");
+                fs.deleteFile(lc_prefix + "_scope_id");
+                fs.deleteFile(lc_prefix + "_scope_depth");
+                lc_i += 1;
+            }
+            let mut lw_i -> number = 0;
+            loop {
+                if lw_i >= current_locals.length {
+                    break;
+                }
+                let lw_prefix = "build/sailfin/.instr_local_" + number_to_string(lw_i);
+                fs.writeFile(lw_prefix + "_name", current_locals[lw_i].name);
+                fs.writeFile(lw_prefix + "_pointer", current_locals[lw_i].pointer);
+                fs.writeFile(lw_prefix + "_llvm_type", current_locals[lw_i].llvm_type);
+                fs.writeFile(lw_prefix + "_type_annotation", current_locals[lw_i].type_annotation);
+                fs.writeFile(lw_prefix + "_scope_id", current_locals[lw_i].scope_id);
+                fs.writeFile(lw_prefix + "_scope_depth", number_to_string(current_locals[lw_i].scope_depth));
+                lw_i += 1;
+            }
             let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
+            if debug_lowering {
+                print.warn("emit-llvm: lir post_return fn=" + function.name + " depth=" + number_to_string(scope_depth));
+            }
             diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
@@ -412,6 +512,9 @@ fn lower_instruction_range(
             }
             break;
         } else if instruction.variant == "If" {
+            if debug_lowering {
+                print.warn("emit-llvm: lir pre_if fn=" + function.name + " index=" + number_to_string(index) + " depth=" + number_to_string(scope_depth));
+            }
             if trace && function.name == "infer_effects" {
                 print.info("test llvm: infer_effects before If lines=" + number_to_string(current_lines.length));
             }
@@ -435,6 +538,9 @@ fn lower_instruction_range(
                 scope_depth,
                 active_label
             );
+            if debug_lowering {
+                print.warn("emit-llvm: lir post_if fn=" + function.name + " index=" + number_to_string(index) + " depth=" + number_to_string(scope_depth));
+            }
             diagnostics = diagnostics.concat(lowered.diagnostics);
             collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
             current_lines = lowered.lines;
@@ -1321,7 +1427,14 @@ fn lower_loop_instruction(
     let mut collected_mutations -> LocalMutation[] = [];
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
+    let debug_loop = fs.exists("build/sailfin/.trace_lowering");
+    if debug_loop {
+        print.warn("emit-llvm: lower_loop start fn=" + function.name + " start_index=" + number_to_string(start_index) + " end=" + number_to_string(end));
+    }
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
+    if debug_loop {
+        print.warn("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+    }
     diagnostics = diagnostics.concat(structure.diagnostics);
 
     // Preload all locals before entering the loop for phi node merging
@@ -1371,6 +1484,9 @@ fn lower_loop_instruction(
 
     // Lower the body to discover mutations
     let body_scope_id = make_child_scope_id(scope_id, body_label);
+    if debug_loop {
+        print.warn("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+    }
     let body_result = lower_instruction_range(
         function,
         structure.body_start,
@@ -1391,6 +1507,9 @@ fn lower_loop_instruction(
         scope_depth + 1,
         body_label
     );
+    if debug_loop {
+        print.warn("emit-llvm: lower_loop post_body_lir fn=" + function.name + " body_lines=" + number_to_string(body_result.lines.length));
+    }
 
     diagnostics = diagnostics.concat(body_result.diagnostics);
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
@@ -4155,7 +4274,7 @@ fn lower_let_instruction(
 
     if llvm_type.length == 0 {
         if operand != null {
-            llvm_type = operand.llvm_type;
+            llvm_type = trim_text(operand.llvm_type);
         }
     }
 

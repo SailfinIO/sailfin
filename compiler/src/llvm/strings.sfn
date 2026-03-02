@@ -3,6 +3,7 @@
 // String constant management for LLVM IR generation. Handles deduplication,
 // escaping, and rendering of string constants in LLVM IR format.
 
+import { substring } from "../string_utils";
 import { StringConstant } from "./types";
 import { number_to_string, append_string } from "./utils";
 
@@ -178,7 +179,7 @@ fn escape_string_for_llvm(content -> string) -> string {
         if index >= content.length {
             break;
         }
-        let ch = content[index];
+        let ch = substring(content, index, index + 1);
         if ch == "\n" {
             result = result + "\\0A";
         } else if ch == "\r" {
