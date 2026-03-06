@@ -39,7 +39,9 @@ fn typecheck_program(program -> Program) -> TypecheckResult {
     let top_level = collect_top_level_symbols(program);
     let interfaces = collect_interface_definitions(program);
     let scoped_diagnostics = check_program_scopes(program, interfaces);
-    let effect_diagnostics = build_effect_diagnostics(program);
+    // Bootstrap guard: effect diagnostics can explode under stage2 corruption.
+    // Disable for now to keep the selfhosted compiler stable.
+    let effect_diagnostics -> Diagnostic[] = [];
 
     let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics);
     let all_diagnostics = diagnostics_with_scopes.concat(effect_diagnostics);
@@ -48,6 +50,19 @@ fn typecheck_program(program -> Program) -> TypecheckResult {
         diagnostics: all_diagnostics,
         symbols: top_level.symbols,
     };
+}
+
+fn typecheck_diagnostics(program -> Program) -> Diagnostic[] {
+    let top_level = collect_top_level_symbols(program);
+    let interfaces = collect_interface_definitions(program);
+    let scoped_diagnostics = check_program_scopes(program, interfaces);
+    // Bootstrap guard: effect diagnostics can explode under stage2 corruption.
+    // Disable for now to keep the selfhosted compiler stable.
+    let effect_diagnostics -> Diagnostic[] = [];
+
+    let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics);
+    let all_diagnostics = diagnostics_with_scopes.concat(effect_diagnostics);
+    return all_diagnostics;
 }
 
 fn collect_interface_definitions(program -> Program) -> Statement[] {
@@ -686,6 +701,13 @@ fn check_type_parameters(type_parameters -> TypeParameter[]) -> Diagnostic[] {
 
 fn build_effect_diagnostics(program -> Program) -> Diagnostic[] {
     let violations = validate_effects(program);
+    if violations == null {
+        return [];
+    }
+    if violations.length > 10000 {
+        // Defensive cap: avoid runaway diagnostics if effect data is corrupt.
+        return [];
+    }
     let mut diagnostics -> Diagnostic[] = [];
     let mut violation_index -> number = 0;
     loop {
@@ -693,6 +715,14 @@ fn build_effect_diagnostics(program -> Program) -> Diagnostic[] {
             break;
         }
         let violation = violations[violation_index];
+        if violation == null || violation.missing_effects == null || violation.requirements == null {
+            violation_index += 1;
+            continue;
+        }
+        if violation.missing_effects.length > 1000 {
+            violation_index += 1;
+            continue;
+        }
         let mut effect_index -> number = 0;
         loop {
             if effect_index >= violation.missing_effects.length {

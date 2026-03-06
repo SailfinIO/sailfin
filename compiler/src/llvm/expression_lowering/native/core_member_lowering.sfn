@@ -103,6 +103,14 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
     current_lines = append_string(current_lines, "  " + call_temp + " = call i8* @sailfin_runtime_get_field(i8* " + base_operand.value + ", i8* " + field_pointer + ")");
     current_temp += 1;
 
+    if field == "align" || field == "size" || field == "offset" || field == "tag" || field == "tag_size" || field == "tag_align" || field == "max_payload_size" || field == "index" || field == "len" || field == "length" {
+        let number_temp = format_temp_name(current_temp);
+        current_lines = append_string(current_lines, "  " + number_temp + " = call double @sailfin_runtime_string_to_number(i8* " + call_temp + ")");
+        current_temp += 1;
+        let operand = LLVMOperand { llvm_type: "double", value: number_temp };
+        return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
+    }
+
     let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
     return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
 }
@@ -340,7 +348,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     }
     let mut pointer_coercion -> boolean = false;
     if pointer_depth_mismatch {
-        if (max_pointer_depth - min_pointer_depth == 1) && base_type.length > 0 && base_type[0] == "%" {
+        if (max_pointer_depth - min_pointer_depth == 1) && base_type.length > 0 && substring(base_type, 0, 1) == "%" {
             pointer_coercion = true;
             field_type = base_type + "*";
         } else {
@@ -453,7 +461,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
 
     if parse.field == "length" && ends_with_pointer_suffix(base_operand.llvm_type) {
         let inner_type = strip_pointer_suffix(base_operand.llvm_type);
-        if starts_with(inner_type, "{") && inner_type.length > 0 && inner_type[inner_type.length - 1] == "}" {
+        if starts_with(inner_type, "{") && inner_type.length > 0 && substring(inner_type, inner_type.length - 1, inner_type.length) == "}" {
             let struct_inner = trim_text(substring(inner_type, 1, inner_type.length - 1));
             if contains_text(struct_inner, ", i64") {
                 let loaded_array = format_temp_name(current_temp);
@@ -481,37 +489,44 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     let mut struct_info -> StructTypeInfo? = null;
     let mut pointer_available -> boolean = false;
     let pointer_operand = base_operand;
+    let mut base_type_trimmed -> string = base_operand.llvm_type;
+    loop {
+        if !starts_with(base_type_trimmed, " ") {
+            break;
+        }
+        base_type_trimmed = substring(base_type_trimmed, 1, base_type_trimmed.length);
+    }
 
-    if ends_with_pointer_suffix(base_operand.llvm_type) {
-        let candidate = strip_pointer_suffix(base_operand.llvm_type);
+    if ends_with_pointer_suffix(base_type_trimmed) {
+        let candidate = trim_text(strip_pointer_suffix(base_type_trimmed));
         struct_info = find_struct_info_by_llvm_type(context, candidate);
         if struct_info == null {
             let enum_info_candidate = find_enum_info_by_llvm_type(context, candidate);
             if enum_info_candidate != null {
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, true, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
-            if base_operand.llvm_type == "i8*" {
+            if base_type_trimmed == "i8*" {
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
 
-            if base_operand.llvm_type != "double" && base_operand.llvm_type != "i8" {
-                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            if base_type_trimmed != "double" && base_type_trimmed != "i8" {
+                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_type_trimmed + "` lacks struct metadata");
             }
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
         pointer_available = true;
     } else {
-        struct_info = find_struct_info_by_llvm_type(context, base_operand.llvm_type);
+        struct_info = find_struct_info_by_llvm_type(context, base_type_trimmed);
         if struct_info == null {
-            let enum_info_candidate = find_enum_info_by_llvm_type(context, base_operand.llvm_type);
+            let enum_info_candidate = find_enum_info_by_llvm_type(context, base_type_trimmed);
             if enum_info_candidate != null {
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
-            if base_operand.llvm_type == "i8*" {
+            if base_type_trimmed == "i8*" {
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
-            if base_operand.llvm_type != "double" && base_operand.llvm_type != "i8" {
-                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            if base_type_trimmed != "double" && base_type_trimmed != "i8" {
+                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_type_trimmed + "` lacks struct metadata");
             }
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }

@@ -89,6 +89,30 @@ import { lower_enum_literal } from "./core_literals_lowering";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
 
+fn find_function_by_name_or_import_suffix(functions -> NativeFunction[], target -> string) -> NativeFunction? {
+    let exact = find_function_by_name(functions, target);
+    if exact != null {
+        return exact;
+    }
+    let suffix_prefix = target + "__";
+    let mut match_result -> NativeFunction? = null;
+    let mut index -> number = 0;
+    loop {
+        if index >= functions.length {
+            break;
+        }
+        let candidate = functions[index];
+        if starts_with(candidate.name, suffix_prefix) {
+            if match_result != null {
+                return null;
+            }
+            match_result = candidate;
+        }
+        index += 1;
+    }
+    return match_result;
+}
+
 fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
     let mut diagnostics -> string[] = [];
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
@@ -377,7 +401,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     }
 
     let mut function_entry -> NativeFunction? = null;
-    let mut llvm_return -> string = "double";
+    let mut llvm_return -> string = "i8*";
     let mut expected_params -> string[] = [];
     let mut is_trait_dispatch -> boolean = false;
 
@@ -399,7 +423,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                     if sig.name == method_name {
                         llvm_return = map_return_type(context, sig.return_type);
                         if llvm_return.length == 0 {
-                            llvm_return = "double";
+                            llvm_return = "i8*";
                         }
                         expected_params = ["i8*"];
                         break;
@@ -410,7 +434,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
     }
 
-    function_entry = find_function_by_name(functions, trimmed_target);
+    function_entry = find_function_by_name_or_import_suffix(functions, trimmed_target);
     if helper_descriptor == null {
         helper_descriptor = find_runtime_helper(trimmed_target);
     }
@@ -422,6 +446,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             expected_params = descriptor.parameter_types;
             function_entry = null;
         } else if function_entry != null {
+            trimmed_target = function_entry.name;
             if function_entry.is_async {
                 let future_return = future_pointer_type_for_return_type(function_entry.return_type);
                 if future_return.length == 0 {
@@ -435,7 +460,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                 llvm_return = map_return_type(context, function_entry.return_type);
                 if llvm_return.length == 0 {
                     diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
-                    llvm_return = "double";
+                    llvm_return = "i8*";
                 }
                 expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target);
             }

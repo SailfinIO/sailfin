@@ -3,7 +3,7 @@
 // General utility functions for the LLVM lowering pass. These are basic
 // string manipulation, array helpers, and parsing utilities.
 
-import { substring, char_code, char_at } from "../string_utils";
+import { substring, char_code, char_at as string_char_at } from "../string_utils";
 import { ParameterBinding } from "./types";
 
 // =============================================================================
@@ -39,6 +39,11 @@ fn trim_text(value -> string) -> string {
         return value;
     }
     return substring(value, start, end);
+}
+
+// Local wrapper to ensure a stable symbol for cross-module linking.
+fn char_at(value -> string, index -> number) -> string {
+    return string_char_at(value, index);
 }
 
 fn is_trim_char(ch -> string) -> boolean {
@@ -94,24 +99,16 @@ fn index_of(value -> string, target -> string) -> number {
     if target.length == 0 {
         return 0;
     }
+    // Use substring + == instead of char_code_at_text comparisons.
+    // char_code_at_text is miscompiled by older seeds, but substring
+    // (backed by the C runtime grapheme_at) and == both work correctly.
     let mut index -> number = 0;
     loop {
         if index + target.length > value.length {
             break;
         }
-        let mut match_index -> number = 0;
-        let mut matches -> boolean = true;
-        loop {
-            if match_index >= target.length {
-                break;
-            }
-            if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index) {
-                matches = false;
-                break;
-            }
-            match_index += 1;
-        }
-        if matches {
+        let candidate = substring(value, index, index + target.length);
+        if candidate == target {
             return index;
         }
         index += 1;
@@ -123,14 +120,15 @@ fn find_last_index_of_char(value -> string, target -> string) -> number {
     if target.length != 1 {
         return -1;
     }
-    let target_code = char_code_at_text(target, 0);
+    // Use substring + == instead of char_code_at_text.
     let mut index -> number = value.length;
     loop {
         if index <= 0 {
             break;
         }
         index -= 1;
-        if char_code_at_text(value, index) == target_code {
+        let ch = substring(value, index, index + 1);
+        if ch == target {
             return index;
         }
     }
@@ -204,7 +202,7 @@ fn number_to_string(value -> number) -> string {
         }
         if started || count > 0 {
             started = true;
-            let ch = digits[count];
+            let ch = substring(digits, count, count + 1);
             output = output + ch;
         }
         index += 1;
@@ -270,7 +268,7 @@ fn is_integer_literal(text -> string) -> boolean {
         return false;
     }
     let mut index -> number = 0;
-    if char_code_at_text(trimmed, 0) == char_code("-") {
+    if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 {
             return false;
         }
@@ -281,8 +279,8 @@ fn is_integer_literal(text -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let code = char_code_at_text(trimmed, index);
-        if code >= char_code("0") && code <= char_code("9") {
+        let ch = substring(trimmed, index, index + 1);
+        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
             has_digit = true;
             index += 1;
             continue;
@@ -300,7 +298,7 @@ fn is_number_literal(text -> string) -> boolean {
     if trimmed.length == 0 {
         return false;
     }
-    if char_code_at_text(trimmed, 0) == char_code("-") {
+    if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 {
             return false;
         }
@@ -310,13 +308,13 @@ fn is_number_literal(text -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let code = char_code_at_text(trimmed, index);
-        if code >= char_code("0") && code <= char_code("9") {
+        let ch = substring(trimmed, index, index + 1);
+        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
             has_digit = true;
             index += 1;
             continue;
         }
-        if code == char_code(".") {
+        if ch == "." {
             if has_decimal {
                 return false;
             }
@@ -341,7 +339,7 @@ fn is_simple_identifier(value -> string) -> boolean {
     if trimmed.length == 0 {
         return false;
     }
-    let first = trimmed[0];
+    let first = substring(trimmed, 0, 1);
     if first >= "0" && first <= "9" {
         return false;
     }
@@ -391,7 +389,7 @@ fn matches_keyword(value -> string, start_index -> number, keyword -> string) ->
     if start_index + keyword.length >= value.length {
         return true;
     }
-    let next = value[start_index + keyword.length];
+    let next = substring(value, start_index + keyword.length, start_index + keyword.length + 1);
     if is_identifier_part_char(next) {
         return false;
     }
@@ -453,7 +451,7 @@ fn sanitize_symbol(name -> string) -> string {
         if index >= name.length {
             break;
         }
-        let ch = name[index];
+        let ch = substring(name, index, index + 1);
         if is_symbol_char(ch) {
             result = result + ch;
         }
@@ -462,7 +460,7 @@ fn sanitize_symbol(name -> string) -> string {
     if result.length == 0 {
         return "_";
     }
-    let first = result[0];
+    let first = substring(result, 0, 1);
     let first_code = char_code(first);
     let zero = char_code("0");
     let nine = char_code("9");
@@ -478,18 +476,28 @@ fn sanitize_symbol(name -> string) -> string {
 
 fn append_string(values -> string[], value -> string) -> string[] {
     let mut out = values;
-    out.push(value);
+    if out == null {
+        out = [];
+    }
+    out = out.push(value);
     return out;
 }
 
 fn extend_string_array(values -> string[], additions -> string[]) -> string[] {
     let mut out = values;
+    if out == null {
+        out = [];
+    }
+    let mut safe_additions = additions;
+    if safe_additions == null {
+        safe_additions = [];
+    }
     let mut index -> number = 0;
     loop {
-        if index >= additions.length {
+        if index >= safe_additions.length {
             break;
         }
-        out.push(additions[index]);
+        out = out.push(safe_additions[index]);
         index += 1;
     }
     return out;
@@ -497,18 +505,25 @@ fn extend_string_array(values -> string[], additions -> string[]) -> string[] {
 
 fn copy_string_array(values -> string[]) -> string[] {
     let mut result -> string[] = [];
+    let mut safe_values = values;
+    if safe_values == null {
+        safe_values = [];
+    }
     let mut index -> number = 0;
     loop {
-        if index >= values.length {
+        if index >= safe_values.length {
             break;
         }
-        result = append_string(result, values[index]);
+        result = append_string(result, safe_values[index]);
         index += 1;
     }
     return result;
 }
 
 fn string_arrays_equal(first -> string[], second -> string[]) -> boolean {
+    if first == null || second == null {
+        return first == null && second == null;
+    }
     if first.length != second.length {
         return false;
     }
@@ -526,6 +541,9 @@ fn string_arrays_equal(first -> string[], second -> string[]) -> boolean {
 }
 
 fn string_array_contains(values -> string[], target -> string) -> boolean {
+    if values == null {
+        return false;
+    }
     let mut index -> number = 0;
     loop {
         if index >= values.length {
@@ -540,6 +558,9 @@ fn string_array_contains(values -> string[], target -> string) -> boolean {
 }
 
 fn join_with_separator(values -> string[], separator -> string) -> string {
+    if values == null {
+        return "";
+    }
     if values.length == 0 {
         return "";
     }
@@ -596,7 +617,9 @@ fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> Par
 }
 
 fn append_parameter_binding(bindings -> ParameterBinding[], binding -> ParameterBinding) -> ParameterBinding[] {
-    return bindings.concat([binding]);
+    let mut out = bindings;
+    out = out.push(binding);
+    return out;
 }
 
 fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBinding[]) -> ParameterBinding[] {
@@ -636,7 +659,7 @@ fn skip_string_literal(text -> string, start_index -> number) -> number {
         if index >= text.length {
             break;
         }
-        let current = text[index];
+        let current = substring(text, index, index + 1);
         if escaped {
             escaped = false;
         } else {

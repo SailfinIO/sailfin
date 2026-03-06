@@ -9,10 +9,10 @@ extern "C"
 {
 #endif
 
-    // Stage2 currently uses a legacy C-string ABI for many runtime calls.
+    // The native runtime currently uses a legacy C-string ABI for many runtime calls.
     // This header intentionally keeps the ABI minimal and conservative.
 
-    // Matches LLVM `{ i8**, i64 }` used broadly in stage2 IR.
+    // Matches LLVM `{ i8**, i64 }` used broadly in native IR.
     typedef struct SailfinPtrArray
     {
         char **data;
@@ -41,13 +41,14 @@ extern "C"
     char *sailfin_runtime_string_concat(char *a, char *b);
     // Drop/free a runtime-owned string (no-op for non-owned/persistent values).
     void sailfin_runtime_string_drop(char *text);
+    double sailfin_runtime_string_to_number(char *text);
     // Dynamic member access for boxed/runtime values.
     // Currently used for `.variant` on boxed enums.
     char *sailfin_runtime_get_field(char *base, char *field);
 
     // ---- Array helpers ----
 
-    // For `{ i8**, i64 }*` concatenation, stage2 uses `@sailfin_runtime_concat({i8**,i64}*,{i8**,i64}*)`.
+    // For `{ i8**, i64 }*` concatenation, native IR uses `@sailfin_runtime_concat({i8**,i64}*,{i8**,i64}*)`.
     SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b);
     SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text);
     SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value);
@@ -59,8 +60,10 @@ extern "C"
 
     // ---- Byte helpers ----
 
-    // Returns the raw byte at `index` as a `number` (double) for stage2.
+    // Returns the raw byte at `index` as a `number` (double) for the native ABI.
     double sailfin_runtime_byte_at(char *text, int64_t index);
+    // Find byte in string using memchr. Returns index or -1 if not found.
+    double sailfin_runtime_find_byte_index(char *text, double byte_value, double start_index);
 
     // ---- Process helpers ----
     // Execute a command (argv[0] is program). Returns the exit code.
@@ -74,7 +77,7 @@ extern "C"
     void sailfin_runtime_spawn(char *thunk, char *name);
     void sailfin_runtime_serve(char *handler, char *config);
 
-    // ---- Futures (stage2-native) ----
+    // ---- Futures (native runtime) ----
 
     typedef struct SailfinFutureNumber SailfinFutureNumber;
     typedef struct SailfinFutureBool SailfinFutureBool;
@@ -122,7 +125,7 @@ extern "C"
 
     // ---- Character helpers (runtime-provided) ----
 
-    // Stage2 represents characters/bytes as `number` (double) at the ABI.
+    // The native ABI represents characters/bytes as `number` (double).
     bool sailfin_runtime_is_decimal_digit(double ch);
     bool sailfin_runtime_is_whitespace_char(double ch);
     bool sailfin_runtime_is_alpha_char(double ch);
@@ -147,6 +150,7 @@ extern "C"
     // Filesystem adapter stubs.
     void *sailfin_adapter_fs_read_file(void *path);
     void sailfin_adapter_fs_write_file(void *path, void *contents);
+    void sailfin_adapter_fs_append_file(void *path, void *contents);
     SailfinPtrArray *sailfin_adapter_fs_list_directory(void *path);
     bool sailfin_adapter_fs_delete_file(void *path);
     bool sailfin_adapter_fs_create_directory(void *path, bool recursive);
@@ -161,9 +165,9 @@ extern "C"
     void *sailfin_runtime_to_debug_string(void *value);
     void sailfin_runtime_raise_value_error(void *message);
 
-    // ---- Exceptions (stage2-native minimal) ----
+    // ---- Exceptions (native runtime minimal) ----
 
-    // Exception state helpers (used by stage2-native lowering).
+    // Exception state helpers (used by native lowering).
     void sailfin_runtime_set_exception(char *message);
     void sailfin_runtime_clear_exception(void);
     bool sailfin_runtime_has_exception(void);

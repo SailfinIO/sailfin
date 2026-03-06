@@ -218,6 +218,58 @@ fn emit_native_with_module_name(program -> Program, module_name -> string) -> Em
     };
 }
 
+// Emit native text without returning the NativeModule struct (avoids ABI issues in stage2).
+fn emit_native_text_with_module_name(program -> Program, module_name -> string) -> string {
+    let layout_context = build_layout_context(program);
+    let mut state -> NativeState = state_new(layout_context);
+    state = state_emit_line(state, "; Sailfin Native Prototype");
+    let mut module_line = ".module ";
+    if module_name.length == 0 {
+        module_line = module_line + "main";
+    } else {
+        module_line = module_line + module_name;
+    }
+    state = state_emit_line(state, module_line);
+    if program.statements.length > 0 {
+        state = state_emit_blank(state);
+    }
+
+    let mut index -> number = 0;
+    loop {
+        if index >= program.statements.length {
+            break;
+        }
+        state = emit_statement(state, program.statements[index]);
+        if index + 1 < program.statements.length {
+            state = state_emit_blank(state);
+        }
+        index += 1;
+    }
+    let text = builder_to_string(state.builder);
+    if text == null {
+        return "";
+    }
+    return text;
+}
+
+// Emit native text directly to a file to avoid returning large strings across ABI boundaries.
+fn emit_native_text_to_file_with_module_name(program -> Program, module_name -> string, out_path -> string) -> boolean ![io] {
+    let text = emit_native_text_with_module_name(program, module_name);
+    if text.length == 0 {
+        return false;
+    }
+    if fs.exists(out_path) {
+        fs.deleteFile(out_path);
+    }
+    fs.writeFile(out_path, text);
+    return fs.exists(out_path);
+}
+
+fn emit_native_module_with_module_name(program -> Program, module_name -> string) -> NativeModule {
+    let result = emit_native_with_module_name(program, module_name);
+    return result.module;
+}
+
 fn emit_statement(state -> NativeState, statement -> Statement) -> NativeState {
     if statement.variant == "ImportDeclaration" {
         let mut line -> string = ".import \"" + statement.source + "\"";
@@ -2034,6 +2086,9 @@ fn builder_pop_indent(builder -> TextBuilder) -> TextBuilder {
 }
 
 fn builder_to_string(builder -> TextBuilder) -> string {
+    if builder.lines == null {
+        return "";
+    }
     let content = join_with_separator(builder.lines, "\n");
     if content.length == 0 {
         return "";
@@ -2061,10 +2116,18 @@ fn trim_right(value -> string) -> string {
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {
-    return values.concat([value]);
+    let mut out = values;
+    if out == null {
+        out = [];
+    }
+    out.push(value);
+    return out;
 }
 
 fn join_with_separator(values -> string[], separator -> string) -> string {
+    if values == null {
+        return "";
+    }
     if values.length == 0 {
         return "";
     }

@@ -346,6 +346,20 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_append_file",
+        symbol: "sailfin_adapter_fs_append_file",
+        return_type: "void",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.appendFile",
+        symbol: "sailfin_adapter_fs_append_file",
+        return_type: "void",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_write_lines",
         symbol: "sailfin_adapter_fs_write_lines",
         return_type: "void",
@@ -540,6 +554,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.to_number",
+        symbol: "sailfin_runtime_string_to_number",
+        return_type: "double",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "strings_equal",
         symbol: "strings_equal",
         return_type: "i1",
@@ -702,7 +723,9 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
 }
 
 fn append_runtime_helper(values -> RuntimeHelperDescriptor[], value -> RuntimeHelperDescriptor) -> RuntimeHelperDescriptor[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn find_runtime_helper(target -> string) -> RuntimeHelperDescriptor? {

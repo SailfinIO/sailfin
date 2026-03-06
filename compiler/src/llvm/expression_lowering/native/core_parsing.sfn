@@ -63,7 +63,7 @@ fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
         } else {
             return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
         }
-        if after_keyword.length == 0 || after_keyword[0] != "(" {
+        if after_keyword.length == 0 || substring(after_keyword, 0, 1) != "(" {
             return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
         }
         remainder = after_keyword;
@@ -82,7 +82,7 @@ fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
         return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: issue };
     }
 
-    if remainder.length > 0 && remainder[0] == "(" {
+    if remainder.length > 0 && substring(remainder, 0, 1) == "(" {
         let argument_parse = extract_borrow_argument(remainder);
         let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
         if !argument_parse.success {
@@ -126,7 +126,7 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = substring(text, index, index + 1);
         if ch == "(" {
             depth += 1;
             index += 1;
@@ -173,7 +173,7 @@ fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         if is_effect_delimiter(ch) {
             break;
         }
@@ -202,7 +202,7 @@ fn is_valid_borrow_target(text -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         if ch == "." {
             index += 1;
             continue;
@@ -239,7 +239,7 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         
         if ch == "(" || ch == "[" || ch == "{" {
             depth += 1;

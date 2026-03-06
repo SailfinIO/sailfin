@@ -8,13 +8,14 @@ import {
     compile_to_llvm_with_module_timed,
     compile_to_llvm_lines_with_module,
     compile_to_llvm_lines_with_module_timed,
-    compile_tests_to_llvm,
-    compile_tests_to_llvm_with_module,
+    compile_to_llvm_file_with_module,
+    compile_to_native_text_with_module,
+    write_native_text_file_with_module,
+    compile_tests_to_llvm_file_with_module,
     compile_to_sailfin,
     number_to_string,
     module_name_from_path,
 } from "./main";
-import { compile_to_native_text } from "./main";
 import { split_lines } from "./native_ir";
 import { sailfin_version } from "./version";
 
@@ -49,7 +50,7 @@ fn _ends_with(value -> string, suffix -> string) -> boolean {
 }
 
 fn _is_flag(value -> string, flag -> string) -> boolean {
-    return value == flag;
+    return strings_equal(value, flag);
 }
 
 fn _path_join(base -> string, name -> string) -> string {
@@ -177,6 +178,30 @@ fn _path_normalize(path -> string) -> string {
     return joined;
 }
 
+fn _emit_llvm_text_via_file(source -> string, module_name -> string) -> string ![io] {
+    let out_path = "build/sailfin/emit-llvm.tmp";
+    if fs.exists(out_path) {
+        fs.deleteFile(out_path);
+    }
+    let ok = compile_to_llvm_file_with_module(source, module_name, out_path);
+    if ok && fs.exists(out_path) {
+        return fs.readFile(out_path);
+    }
+    return compile_to_llvm_with_module(source, module_name);
+}
+
+fn _emit_native_text_via_file(source -> string, module_name -> string) -> string ![io] {
+    let out_path = "build/sailfin/emit-native.tmp";
+    if fs.exists(out_path) {
+        fs.deleteFile(out_path);
+    }
+    let ok = write_native_text_file_with_module(source, module_name, out_path);
+    if ok && fs.exists(out_path) {
+        return fs.readFile(out_path);
+    }
+    return compile_to_native_text_with_module(source, module_name);
+}
+
 fn _has_prefix(value -> string, prefix -> string) -> boolean {
     if prefix.length > value.length {
         return false;
@@ -227,6 +252,20 @@ fn _is_ident_char(ch -> string) -> boolean {
     return _string_contains(allowed, ch);
 }
 
+fn _byte_at(text -> string, index -> number) -> string {
+    let len = text.length;
+    if len == 0 {
+        return "";
+    }
+    if index < 0 {
+        return "";
+    }
+    if index >= len {
+        return "";
+    }
+    return substring_unchecked(text, index, index + 1);
+}
+
 fn _word_matches(source -> string, index -> number, word -> string) -> boolean {
     if word.length == 0 {
         return false;
@@ -241,12 +280,12 @@ fn _word_matches(source -> string, index -> number, word -> string) -> boolean {
         return false;
     }
     if index > 0 {
-        if _is_ident_char(source[index - 1]) {
+        if _is_ident_char(_byte_at(source, index - 1)) {
             return false;
         }
     }
     if index + word.length < source.length {
-        if _is_ident_char(source[index + word.length]) {
+        if _is_ident_char(_byte_at(source, index + word.length)) {
             return false;
         }
     }
@@ -257,6 +296,10 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
     // Scan for actual `import {..} from "./...";` statements, ignoring occurrences
     // inside strings/comments. Returns the full statement spans to remove.
     let mut spans -> _RelativeImportSpan[] = [];
+    let source_len = source.length;
+
+    let mut steps -> number = 0;
+    let max_steps = source_len * 6 + 1000;
 
     let mut i -> number = 0;
     let mut in_string -> boolean = false;
@@ -265,10 +308,15 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
     let mut in_block_comment -> boolean = false;
 
     loop {
-        if i >= source.length {
+        if i >= source_len {
             break;
         }
-        let ch = source[i];
+        steps += 1;
+        if steps > max_steps {
+            print.warn("test import inlining: aborting span scan (steps=" + number_to_string(steps) + ", len=" + number_to_string(source_len) + ")");
+            break;
+        }
+        let ch = _byte_at(source, i);
 
         if in_line_comment {
             if ch == "\n" {
@@ -279,7 +327,7 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
         }
 
         if in_block_comment {
-            if ch == "*" && i + 1 < source.length && source[i + 1] == "/" {
+            if ch == "*" && i + 1 < source_len && _byte_at(source, i + 1) == "/" {
                 in_block_comment = false;
                 i += 2;
                 continue;
@@ -309,8 +357,8 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
         }
 
         // Not inside string/comment.
-        if ch == "/" && i + 1 < source.length {
-            let next = source[i + 1];
+        if ch == "/" && i + 1 < source_len {
+            let next = _byte_at(source, i + 1);
             if next == "/" {
                 in_line_comment = true;
                 i += 2;
@@ -341,10 +389,15 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
             let mut stmt_end -> number = -1;
 
             loop {
-                if j >= source.length {
+                if j >= source_len {
                     break;
                 }
-                let cj = source[j];
+                steps += 1;
+                if steps > max_steps {
+                    print.warn("test import inlining: aborting statement scan (steps=" + number_to_string(steps) + ", len=" + number_to_string(source_len) + ")");
+                    break;
+                }
+                let cj = _byte_at(source, j);
 
                 if stmt_in_line_comment {
                     if cj == "\n" {
@@ -354,7 +407,7 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
                     continue;
                 }
                 if stmt_in_block_comment {
-                    if cj == "*" && j + 1 < source.length && source[j + 1] == "/" {
+                    if cj == "*" && j + 1 < source_len && _byte_at(source, j + 1) == "/" {
                         stmt_in_block_comment = false;
                         j += 2;
                         continue;
@@ -382,8 +435,8 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
                     continue;
                 }
 
-                if cj == "/" && j + 1 < source.length {
-                    let nextj = source[j + 1];
+                if cj == "/" && j + 1 < source_len {
+                    let nextj = _byte_at(source, j + 1);
                     if nextj == "/" {
                         stmt_in_line_comment = true;
                         j += 2;
@@ -405,26 +458,26 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
                     let mut k = j + 4;
                     // skip whitespace
                     loop {
-                        if k >= source.length {
+                        if k >= source_len {
                             break;
                         }
-                        let wk = source[k];
+                        let wk = _byte_at(source, k);
                         if wk == " " || wk == "\t" || wk == "\n" || wk == "\r" {
                             k += 1;
                             continue;
                         }
                         break;
                     }
-                    if k < source.length && source[k] == "\"" {
+                    if k < source_len && _byte_at(source, k) == "\"" {
                         // parse string literal value
                         k += 1;
                         let mut start = k;
                         let mut esc -> boolean = false;
                         loop {
-                            if k >= source.length {
+                            if k >= source_len {
                                 break;
                             }
-                            let sk = source[k];
+                            let sk = _byte_at(source, k);
                             if esc {
                                 esc = false;
                                 k += 1;
@@ -615,7 +668,7 @@ fn _inline_relative_imports(source -> string, base_dir -> string, depth -> numbe
             print.info("test import inlining: base=" + base_dir + " spec=" + spans[index].spec);
         }
         let dep_path = _resolve_import_path(base_dir, spans[index].spec);
-        let is_prebuilt = _has_prefix(dep_path, "compiler/src/") || _has_prefix(dep_path, "runtime/");
+        let is_prebuilt = _has_prefix(dep_path, "runtime/");
         if !is_prebuilt {
             if !_string_list_contains(next_visited, dep_path) {
                 if !fs.exists(dep_path) {
@@ -705,15 +758,53 @@ fn _write_text(path -> string, text -> string) ![io] {
     fs.writeFile(path, text);
 }
 
-fn _write_lines(path -> string, lines -> string[]) ![io] {
-    fs.writeLines(path, lines);
-}
-
 fn _write_llvm_text(path -> string, llvm -> string) ![io] {
     // Avoid passing potentially large/fragile `string[]` buffers across the
     // native runtime boundary via fs.writeLines, which can hang if array ABI
     // metadata is corrupted.
     fs.writeFile(path, llvm);
+}
+
+fn _write_llvm_lines(path -> string, lines -> string[]) ![io] {
+    if lines.length == 0 {
+        fs.writeFile(path, "");
+        return;
+    }
+
+    let chunk_limit = 65536;
+    let mut buffer -> string = "";
+    let mut buffered -> number = 0;
+    let mut wrote -> boolean = false;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = lines[index] + "\n";
+        let next_len = buffered + line.length;
+        if next_len > chunk_limit && buffer.length > 0 {
+            if wrote {
+                fs.appendFile(path, buffer);
+            } else {
+                fs.writeFile(path, buffer);
+                wrote = true;
+            }
+            buffer = "";
+            buffered = 0;
+        }
+        buffer = buffer + line;
+        buffered += line.length;
+        index += 1;
+    }
+
+    if buffer.length > 0 {
+        if wrote {
+            fs.appendFile(path, buffer);
+        } else {
+            fs.writeFile(path, buffer);
+        }
+    }
 }
 
 fn _ensure_dir(path -> string) ![io] {
@@ -773,6 +864,14 @@ fn _runtime_prelude_path(root -> string) -> string ![io] {
     let fallback_nested = _path_join(parent, "build/native/obj/runtime/prelude.o");
     if fs.exists(fallback_nested) {
         return fallback_nested;
+    }
+    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/prelude.o");
+    if fs.exists(selfhost_fallback) {
+        return selfhost_fallback;
+    }
+    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/prelude.o");
+    if fs.exists(selfhost_fallback_nested) {
+        return selfhost_fallback_nested;
     }
     return "";
 }
@@ -954,6 +1053,18 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
 }
 
 fn sailfin_cli_main(argv -> string[]) -> number ![io] {
+    let trace_argv = fs.exists("build/sailfin/.trace_argv");
+    if trace_argv {
+        print.warn("cli: argv.len=" + number_to_string(argv.length));
+        let mut trace_index -> number = 0;
+        loop {
+            if trace_index >= argv.length {
+                break;
+            }
+            print.warn("cli: argv[" + number_to_string(trace_index) + "]=" + argv[trace_index]);
+            trace_index += 1;
+        }
+    }
     if argv.length == 0 {
         print.error(_usage());
         return 2;
@@ -964,6 +1075,10 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     if argv.length >= 2 && argv[0] == "--runtime-root" {
         runtime_root = argv[1];
         start_index = 2;
+    }
+    if trace_argv {
+        print.warn("cli: runtime_root=" + runtime_root);
+        print.warn("cli: start_index=" + number_to_string(start_index));
     }
     if runtime_root.length == 0 && _runtime_bundle_exists("runtime") {
         runtime_root = "runtime";
@@ -982,6 +1097,32 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         print.error(_usage());
         return 2;
     }
+    if trace_argv {
+        print.warn("cli: args.len=" + number_to_string(args.length));
+        let mut arg_index_trace -> number = 0;
+        loop {
+            if arg_index_trace >= args.length {
+                break;
+            }
+            print.warn("cli: args[" + number_to_string(arg_index_trace) + "]=" + args[arg_index_trace]);
+            arg_index_trace += 1;
+        }
+        if args.length > 0 {
+            let cmd_check = args[0];
+            let eq_emit = strings_equal(cmd_check, "emit");
+            let eq_version = strings_equal(cmd_check, "version");
+            if eq_emit {
+                print.warn("cli: eq_emit=true");
+            } else {
+                print.warn("cli: eq_emit=false");
+            }
+            if eq_version {
+                print.warn("cli: eq_version=true");
+            } else {
+                print.warn("cli: eq_version=false");
+            }
+        }
+    }
 
     if args.length == 1 && (_is_flag(args[0], "--version") || _is_flag(args[0], "-V")) {
         print.info("sfn " + sailfin_version());
@@ -999,7 +1140,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
         if mode == "llvm" {
-            print.info(compile_to_llvm_with_module(source, module_name));
+            print.info(_emit_llvm_text_via_file(source, module_name));
             return 0;
         }
         if mode == "sailfin" {
@@ -1007,7 +1148,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 0;
         }
         if mode == "native" {
-            print.info(compile_to_native_text(source));
+            print.info(_emit_native_text_via_file(source, module_name));
             return 0;
         }
         print.error("unknown --emit mode: " + mode);
@@ -1016,8 +1157,23 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     }
 
     let cmd = args[0];
+    let is_emit = strings_equal(cmd, "emit");
+    let is_version = strings_equal(cmd, "version");
+    let is_emit_file = strings_equal(cmd, "emit-llvm-file");
+    let is_build = strings_equal(cmd, "build");
+    let is_run = strings_equal(cmd, "run");
+    let is_test = strings_equal(cmd, "test");
+    let is_help = strings_equal(cmd, "-h") || strings_equal(cmd, "--help");
+    if trace_argv {
+        if is_emit {
+            print.warn("cli: cmd_is_emit=true");
+        }
+        if is_version {
+            print.warn("cli: cmd_is_version=true");
+        }
+    }
 
-    if cmd == "version" {
+    if is_version {
         if args.length != 1 {
             print.error(_usage());
             return 2;
@@ -1026,7 +1182,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         return 0;
     }
 
-    if cmd == "emit" {
+    if is_emit {
         let mut timing = false;
         let mut base_index = 1;
         if args.length >= 2 && _is_flag(args[1], "--timing") {
@@ -1049,7 +1205,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             if timing {
                 print.info(compile_to_llvm_with_module_timed(source, module_name));
             } else {
-                print.info(compile_to_llvm_with_module(source, module_name));
+                print.info(_emit_llvm_text_via_file(source, module_name));
             }
             return 0;
         }
@@ -1058,14 +1214,14 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 0;
         }
         if mode == "native" {
-            print.info(compile_to_native_text(source));
+            print.info(_emit_native_text_via_file(source, module_name));
             return 0;
         }
         print.error("unknown emit mode: " + mode);
         return 2;
     }
 
-    if cmd == "emit-llvm-file" {
+    if is_emit_file {
         let mut timing = false;
         let mut base_index = 1;
         if args.length >= 2 && _is_flag(args[1], "--timing") {
@@ -1085,17 +1241,19 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
-        let llvm -> string = "";
         if timing {
-            llvm = compile_to_llvm_with_module_timed(source, module_name);
-        } else {
-            llvm = compile_to_llvm_with_module(source, module_name);
+            let llvm = compile_to_llvm_with_module_timed(source, module_name);
+            _write_llvm_text(out_path, llvm);
+            return 0;
         }
-        _write_llvm_text(out_path, llvm);
-        return 0;
+        let ok = compile_to_llvm_file_with_module(source, module_name, out_path);
+        if ok {
+            return 0;
+        }
+        return 1;
     }
 
-    if cmd == "build" {
+    if is_build {
         // build [-o OUTPUT] file
         let mut out_path -> string = "";
         let mut input_path -> string = "";
@@ -1116,15 +1274,17 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 1;
         }
 
-        let source = fs.readFile(input_path);
-        let module_name = module_name_from_path(input_path);
-        let llvm = compile_to_llvm_with_module(source, module_name);
-
         _ensure_dir("build");
         _ensure_dir("build/sailfin");
 
         let ll_path = "build/sailfin/program.ll";
-        _write_llvm_text(ll_path, llvm);
+        let source = fs.readFile(input_path);
+        let module_name = module_name_from_path(input_path);
+        let ok = compile_to_llvm_file_with_module(source, module_name, ll_path);
+        if !ok {
+            print.error("failed to compile LLVM for: " + input_path);
+            return 1;
+        }
 
         let exe_path = out_path;
         let rc = _clang_link(ll_path, exe_path, runtime_root);
@@ -1136,7 +1296,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         return 0;
     }
 
-    if cmd == "run" {
+    if is_run {
         if args.length != 2 {
             print.error(_usage());
             return 2;
@@ -1153,22 +1313,29 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 1;
         }
 
-        // compile + link into build/sailfin/run then execute
-        let source = fs.readFile(input_path);
-        let module_name = module_name_from_path(input_path);
-        let llvm = compile_to_llvm_with_module(source, module_name);
-
         _ensure_dir("build");
         _ensure_dir("build/sailfin");
 
         let ll_path = "build/sailfin/run.ll";
         let exe_path = "build/sailfin/run";
 
-        _write_text(ll_path, llvm);
+        // compile + link into build/sailfin/run then execute
+        let source = fs.readFile(input_path);
+        let module_name = module_name_from_path(input_path);
+        let ok = compile_to_llvm_file_with_module(source, module_name, ll_path);
+        if !ok {
+            print.error("failed to compile LLVM for: " + input_path);
+            return 1;
+        }
 
         let link_rc = _clang_link(ll_path, exe_path, runtime_root);
         if link_rc != 0 {
             print.error("link failed (clang exit=" + number_to_string(link_rc) + ")");
+            print.warn("run: native link failed; attempting seed fallback via `sfn run`");
+            let fallback_rc = process.run(["sfn", "run", input_path]);
+            if fallback_rc == 0 {
+                return 0;
+            }
             return link_rc;
         }
 
@@ -1176,7 +1343,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         return run_rc;
     }
 
-    if cmd == "test" {
+    if is_test {
         // test [path]
         let mut root -> string = ".";
         if args.length == 2 {
@@ -1208,6 +1375,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let exe_path = "build/sailfin/test";
         let dump_sources = fs.exists("build/sailfin/.dump_test_sources");
         let trace_runner = fs.exists("build/sailfin/.trace_test_runner");
+        let skip_inlining = fs.exists("build/sailfin/.skip_test_inlining");
 
         let mut index -> number = 0;
         loop {
@@ -1222,12 +1390,19 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             // Inline relative imports (../ and ./) into a single compilation unit.
             // This avoids duplicate symbols when linking multiple LLVM modules.
             let base_dir = _dirname(path);
-            if trace_runner {
-                print.info("test runner: inlining start");
-            }
-            let combined_source = _inline_relative_imports(source, base_dir, 10, []);
-            if trace_runner {
-                print.info("test runner: inlining done (bytes=" + number_to_string(combined_source.length) + ")");
+            let mut combined_source = source;
+            if skip_inlining {
+                if trace_runner {
+                    print.warn("test runner: skipping import inlining");
+                }
+            } else {
+                if trace_runner {
+                    print.info("test runner: inlining start");
+                }
+                combined_source = _inline_relative_imports(source, base_dir, 10, []);
+                if trace_runner {
+                    print.info("test runner: inlining done (bytes=" + number_to_string(combined_source.length) + ")");
+                }
             }
 
             if dump_sources {
@@ -1238,17 +1413,20 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             if trace_runner {
                 print.info("test runner: compile start");
             }
-            let llvm = compile_tests_to_llvm_with_module(combined_source, module_name);
-            if trace_runner {
-                print.info("test runner: compile done (bytes=" + number_to_string(llvm.length) + ")");
-            }
-            if llvm.length == 0 {
-                print.error("test compile failed: " + path);
+            let _compiled = compile_tests_to_llvm_file_with_module(combined_source, module_name, ll_path);
+            if !_compiled {
+                print.error("test runner: compile failed for " + path);
                 fs.deleteFile(test_runner_active_path);
                 return 1;
             }
-            let cleaned = _strip_native_log_prefixes(llvm);
-            _write_text(ll_path, cleaned);
+            if trace_runner {
+                if fs.exists(ll_path) {
+                    let size = fs.readFile(ll_path).length;
+                    print.info("test runner: compile done (bytes=" + number_to_string(size) + ")");
+                } else {
+                    print.info("test runner: compile done (bytes=0)");
+                }
+            }
 
             if trace_runner {
                 print.info("test runner: link start");
@@ -1278,7 +1456,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         return 0;
     }
 
-    if cmd == "-h" || cmd == "--help" {
+    if is_help {
         print.info(_usage());
         return 0;
     }
@@ -1323,71 +1501,4 @@ fn _join_with_separator_cli(values -> string[], separator -> string) -> string {
         parts = next;
     }
     return parts[0];
-}
-
-fn _strip_native_log_prefixes(text -> string) -> string {
-    // Some native builds annotate LLVM output lines with a log-level prefix.
-    // Strip those prefixes so clang can parse the IR.
-    // Fast path: avoid touching large IR blobs unless we see a prefix.
-    if text.length >= 6 {
-        // Only detect at start-of-text; full scan is expensive.
-        let head7 = substring(text, 0, 7);
-        if head7 != "[info] " && head7 != "[warn] " {
-            if text.length >= 8 {
-                let head8 = substring(text, 0, 8);
-                if head8 != "[error] " {
-                    return text;
-                }
-            } else {
-                return text;
-            }
-        }
-    } else {
-        return text;
-    }
-
-    let mut out -> string[] = [];
-    let mut start -> number = 0;
-    loop {
-        if start > text.length {
-            break;
-        }
-        let mut end -> number = start;
-        loop {
-            if end >= text.length {
-                break;
-            }
-            if text[end] == "\n" {
-                break;
-            }
-            end += 1;
-        }
-
-        let mut line = substring(text, start, end);
-        if line.length >= 7 {
-            let prefix7 = substring(line, 0, 7);
-            if prefix7 == "[info] " {
-                line = substring(line, 7, line.length);
-            } else if prefix7 == "[warn] " {
-                line = substring(line, 7, line.length);
-            } else if line.length >= 8 {
-                let prefix8 = substring(line, 0, 8);
-                if prefix8 == "[error] " {
-                    line = substring(line, 8, line.length);
-                }
-            }
-        } else if line.length >= 8 {
-            let prefix8 = substring(line, 0, 8);
-            if prefix8 == "[error] " {
-                line = substring(line, 8, line.length);
-            }
-        }
-        out = append_string(out, line);
-
-        if end >= text.length {
-            break;
-        }
-        start = end + 1;
-    }
-    return _join_with_separator_cli(out, "\n") + "\n";
 }

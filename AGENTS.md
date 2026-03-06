@@ -13,7 +13,7 @@
 - `make test` runs all test cases (using an already compiled build).
 - `make compile` builds the compiler by self-hosting from the latest released seed.
 - `make check` compiles (if needed) and runs the full test suite.
-- `make install` installs the built compiler binary into `PREFIX/bin` (default: `/usr/local/bin`).
+- `make install` installs the built compiler binary into `PREFIX/bin` (default: `~/.local/bin`).
 - `make clean` removes packaged artifacts (`dist/`).
 - if you need to do some debugging, use the /scratch directory and run/place scripts there. This is a conda environment so you may have to account for your path to the compiler when running scripts.
 - Do not under any circumstances use here-doc (<<'PY') commands. They WILL NOT WORK in your environment. Use scratch files instead.

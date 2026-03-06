@@ -76,14 +76,14 @@ token with `repo` scope.
 
 ```sh
 export GITHUB_TOKEN=<your-token>
-curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
 To pin a version:
 
 ```sh
 export GITHUB_TOKEN=<your-token>
-VERSION=0.1.1-alpha.121 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
+VERSION=0.1.1-alpha.135 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
 Notes:
@@ -114,7 +114,7 @@ For now, experiment, record findings, and propose ideas through pull requests.
 - `make env` — create or update the `sailfin` Conda environment defined in `environment.yml`.
 - `make compile` — build the native compiler by self-hosting from a released seed.
 - `make test` — run the suite using the self-hosted native compiler.
-- `make install` — install the built compiler into `PREFIX/bin` (default: `/usr/local/bin`).
+- `make install` — install the built compiler into `PREFIX/bin` (default: `~/.local/bin`).
 
 Tip: use the repo-local wrapper `./sfn` to run the freshly built compiler without relying on PATH:
 

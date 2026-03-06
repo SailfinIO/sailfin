@@ -218,7 +218,7 @@ fn find_top_level_comma_in_llvm_type(text -> string) -> number {
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = substring(text, index, index + 1);
         if ch == "{" {
             brace_depth += 1;
             index += 1;
@@ -246,17 +246,17 @@ fn array_pointer_element_type(llvm_type -> string) -> string {
     if trimmed.length == 0 {
         return "";
     }
-    if trimmed[trimmed.length - 1] != "*" {
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != "*" {
         return "";
     }
     let without_pointer = trim_text(substring(trimmed, 0, trimmed.length - 1));
     if without_pointer.length < 2 {
         return "";
     }
-    if without_pointer[0] != "{" {
+    if substring(without_pointer, 0, 1) != "{" {
         return "";
     }
-    if without_pointer[without_pointer.length - 1] != "}" {
+    if substring(without_pointer, without_pointer.length - 1, without_pointer.length) != "}" {
         return "";
     }
     let inner = trim_text(substring(without_pointer, 1, without_pointer.length - 1));
@@ -271,7 +271,7 @@ fn array_pointer_element_type(llvm_type -> string) -> string {
     if first_segment.length == 0 {
         return "";
     }
-    if first_segment[first_segment.length - 1] != "*" {
+    if substring(first_segment, first_segment.length - 1, first_segment.length) != "*" {
         return "";
     }
     let element = trim_text(substring(first_segment, 0, first_segment.length - 1));

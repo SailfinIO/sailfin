@@ -98,7 +98,7 @@ help:
 	@echo "  make smoke        # Rebuild + run smoke tests"
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
 
-PREFIX ?= /usr/local
+PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= sailfin
 
@@ -233,7 +233,28 @@ compile:
 		echo "[compile] built $(NATIVE_OUT)"; \
 	fi
 
-check: compile test
+check: check-conda
+	@$(MAKE) compile
+	@seed="build/native/sailfin"; \
+	if [ ! -x "$$seed" ]; then \
+		echo "[check][error] missing $$seed (run: make compile)"; \
+		exit 1; \
+	fi; \
+	echo "[check] verifying seed selfhost..."; \
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py \
+		--seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --max-total-seconds 3600 --out build/native/sailfin-seedcheck
+	@echo "[check] verifying seedcheck binary version..."
+	@sc_version=$$(build/native/sailfin-seedcheck version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'); \
+	fp_version=$$(build/native/sailfin version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'); \
+	if [ -z "$$sc_version" ]; then \
+		echo "[check][error] seedcheck binary did not return a version"; \
+		exit 1; \
+	fi; \
+	if [ "$$sc_version" != "$$fp_version" ]; then \
+		echo "[check][error] version mismatch: seedcheck=$$sc_version first-pass=$$fp_version"; \
+		exit 1; \
+	fi; \
+	echo "[check] seedcheck version matches: $$sc_version"
 
 # =============================================================================
 # Packaging (release artifacts)
@@ -254,21 +275,15 @@ package: check-conda
 # scripts/selfhost_native.py, which stages outputs under build/selfhost/native/.
 ci-prepare-test-artifacts:
 	@set -eu; \
-	SRC="build/selfhost/native/seed_cwd/build/import-context"; \
-	if [ ! -d "$$SRC" ]; then SRC="build/selfhost/native/seed_cwd/build/stage2"; fi; \
+	SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
 	if [ ! -d "$$SRC" ]; then \
 		echo "[ci-prepare-test-artifacts][error] missing $$SRC (selfhost did not stage import artifacts?)" >&2; \
-		find build/selfhost -maxdepth 5 -type d -name import-context -o -name stage2 -print || true; \
+		find build/selfhost -maxdepth 5 -type d -name import-context -print || true; \
 		exit 1; \
 	fi; \
 	rm -rf build/native/import-context; \
 	mkdir -p build/native/import-context; \
 	cp -a "$$SRC/." build/native/import-context/; \
-	rm -rf build/stage2 2>/dev/null || true; \
-	ln -s build/native/import-context build/stage2 2>/dev/null || { \
-		mkdir -p build/stage2; \
-		cp -a build/native/import-context/. build/stage2/; \
-	}; \
 	if [ ! -f build/selfhost/native/obj/runtime/prelude.o ]; then \
 		echo "[ci-prepare-test-artifacts][error] missing build/selfhost/native/obj/runtime/prelude.o" >&2; \
 		find build/selfhost -maxdepth 4 -type f -name 'prelude.o' -print || true; \
@@ -358,7 +373,7 @@ rebuild: check-conda
 	fi; \
 	echo "[rebuild] running build script (seed=$$seed)..."; \
 	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out $(NATIVE_OUT)
-	@SRC="build/selfhost/native/seed_cwd/build/import-context"; \
+	@SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
 	if [ ! -d "$$SRC" ]; then \
 		echo "[rebuild][error] missing import-context output at $$SRC" >&2; \
 		echo "[rebuild][error] ensure you're using a modern seed (or run: make fetch-seed)" >&2; \

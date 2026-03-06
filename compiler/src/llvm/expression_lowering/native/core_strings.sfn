@@ -137,6 +137,6 @@ fn coerce_operand_to_string(operand -> LLVMOperand, temp_index -> number, lines 
         return ExpressionResult { lines: out_lines, temp_index: false_lit.temp_index + 1, operand: out_operand, diagnostics: [], string_constants: empty_constants };
     }
 
-    let diagnostics = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"]; 
+    let diagnostics -> string[] = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"];
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
 }
