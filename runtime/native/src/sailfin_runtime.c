@@ -349,6 +349,81 @@ apple_upper32_immediate_done:
     return true;
 }
 
+// Encode a Unicode codepoint as UTF-8 into buf (which must have room for 5 bytes).
+// Returns the number of bytes written (1-4), or 0 on error.
+static int _codepoint_to_utf8(uint32_t cp, char *buf)
+{
+    if (cp <= 0x7fu)
+    {
+        buf[0] = (char)cp;
+        buf[1] = '\0';
+        return 1;
+    }
+    if (cp <= 0x7ffu)
+    {
+        buf[0] = (char)(0xc0u | (cp >> 6));
+        buf[1] = (char)(0x80u | (cp & 0x3fu));
+        buf[2] = '\0';
+        return 2;
+    }
+    if (cp <= 0xffffu)
+    {
+        buf[0] = (char)(0xe0u | (cp >> 12));
+        buf[1] = (char)(0x80u | ((cp >> 6) & 0x3fu));
+        buf[2] = (char)(0x80u | (cp & 0x3fu));
+        buf[3] = '\0';
+        return 3;
+    }
+    if (cp <= 0x10ffffu)
+    {
+        buf[0] = (char)(0xf0u | (cp >> 18));
+        buf[1] = (char)(0x80u | ((cp >> 12) & 0x3fu));
+        buf[2] = (char)(0x80u | ((cp >> 6) & 0x3fu));
+        buf[3] = (char)(0x80u | (cp & 0x3fu));
+        buf[4] = '\0';
+        return 4;
+    }
+    buf[0] = '\0';
+    return 0;
+}
+
+// Fast string equality check that handles immediate codepoint strings.
+// Called from the LLVM-level replacement of the prelude's grapheme-based
+// strings_equal (which is O(n^2) due to per-character grapheme_at calls).
+bool _strings_equal_fast(const char *a, const char *b)
+{
+    if (a == b)
+    {
+        return true;
+    }
+    if (!a || !b)
+    {
+        return false;
+    }
+
+    uint32_t a_cp = 0, b_cp = 0;
+    bool a_imm = _is_immediate_codepoint_string(a, &a_cp);
+    bool b_imm = _is_immediate_codepoint_string(b, &b_cp);
+
+    if (a_imm && b_imm)
+    {
+        return a_cp == b_cp;
+    }
+    if (a_imm)
+    {
+        char buf[5];
+        _codepoint_to_utf8(a_cp, buf);
+        return strcmp(buf, b) == 0;
+    }
+    if (b_imm)
+    {
+        char buf[5];
+        _codepoint_to_utf8(b_cp, buf);
+        return strcmp(a, buf) == 0;
+    }
+    return strcmp(a, b) == 0;
+}
+
 #if defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)
 static SAILFIN_NOINLINE int _string_ptr_mapped_readable(const void *ptr)
 {
@@ -1359,15 +1434,21 @@ static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *tex
     // also manipulates large strings (notably full LLVM modules) that can
     // exceed 1 MiB. Keep a bounded scan to avoid runaway reads for invalid
     // pointers, but allow a higher default and make it configurable.
-    size_t max_scan = _env_sizet("SAILFIN_MAX_STRLEN_SCAN", 16u * 1024u * 1024u);
-    if (max_scan < 4096u)
+    // Cache the result to avoid calling getenv on every string_length call.
+    static size_t cached_max_scan = 0;
+    if (!cached_max_scan)
     {
-        max_scan = 4096u;
+        cached_max_scan = _env_sizet("SAILFIN_MAX_STRLEN_SCAN", 16u * 1024u * 1024u);
+        if (cached_max_scan < 4096u)
+        {
+            cached_max_scan = 4096u;
+        }
+        if (cached_max_scan > (512u * 1024u * 1024u))
+        {
+            cached_max_scan = (512u * 1024u * 1024u);
+        }
     }
-    if (max_scan > (512u * 1024u * 1024u))
-    {
-        max_scan = (512u * 1024u * 1024u);
-    }
+    size_t max_scan = cached_max_scan;
 
 #if !defined(SAILFIN_WITH_ASAN)
     // Fast path for non-ASAN builds: rely on libc's bounded scan.

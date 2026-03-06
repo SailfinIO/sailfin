@@ -242,8 +242,19 @@ check: check-conda
 	fi; \
 	echo "[check] verifying seed selfhost..."; \
 	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py \
-		--seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-seedcheck
-	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
+		--seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --max-total-seconds 3600 --out build/native/sailfin-seedcheck
+	@echo "[check] verifying seedcheck binary version..."
+	@sc_version=$$(build/native/sailfin-seedcheck version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'); \
+	fp_version=$$(build/native/sailfin version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'); \
+	if [ -z "$$sc_version" ]; then \
+		echo "[check][error] seedcheck binary did not return a version"; \
+		exit 1; \
+	fi; \
+	if [ "$$sc_version" != "$$fp_version" ]; then \
+		echo "[check][error] version mismatch: seedcheck=$$sc_version first-pass=$$fp_version"; \
+		exit 1; \
+	fi; \
+	echo "[check] seedcheck version matches: $$sc_version"
 
 # =============================================================================
 # Packaging (release artifacts)

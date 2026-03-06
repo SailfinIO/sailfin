@@ -3,6 +3,7 @@
 // Function emission (wrapping, async spawning, and body lowering orchestration).
 
 import { NativeFunction } from "../../native_ir";
+import { substring, find_char } from "../../string_utils";
 
 import {
     TypeContext,
@@ -13,6 +14,7 @@ import {
     StringConstant,
     BodyResult,
     ParameterPreparation,
+    LifetimeRegionMetadata,
 } from "../types";
 
 import {
@@ -79,6 +81,25 @@ import {
 import {
     module_user_main_symbol,
 } from "./module_globals";
+
+fn _split_by_newline(content -> string) -> string[] {
+    let mut result -> string[] = [];
+    if content.length == 0 {
+        return result;
+    }
+    let mut start -> number = 0;
+    loop {
+        if start >= content.length { break; }
+        let next = find_char(content, "\n", start);
+        if next < 0 {
+            result = append_string(result, substring(content, start, content.length));
+            break;
+        }
+        result = append_string(result, substring(content, start, next));
+        start = next + 1;
+    }
+    return result;
+}
 
 fn is_safe_llvm_type_text(value -> string) -> boolean {
     if value == null {
@@ -630,31 +651,38 @@ fn emit_body(
         0,
         entry_label
     );
+
+    // The v0.1.1 seed compiles BlockLoweringResult as double/i8* null for
+    // cross-module struct returns.  Read results from files written by
+    // lower_instruction_range instead of accessing struct fields.
+    let _blk_lines_raw = fs.readFile("build/sailfin/.block_result_lines");
+    let _blk_body_lines = _split_by_newline(_blk_lines_raw);
+    let _blk_allocas_raw = fs.readFile("build/sailfin/.block_result_allocas");
+    let _blk_allocas = _split_by_newline(_blk_allocas_raw);
+    let _blk_term_str = fs.readFile("build/sailfin/.block_result_terminated");
+    let _blk_terminated = _blk_term_str == "1";
+    let _blk_diags_raw = fs.readFile("build/sailfin/.block_result_diagnostics");
+
     if trace {
         let mut term_label -> string = "false";
-        if lowered.terminated {
+        if _blk_terminated {
             term_label = "true";
         }
         print.info(
             "test llvm: emit_body lowered "
             + fn_name
             + " lines="
-            + number_to_string(lowered.lines.length)
+            + number_to_string(_blk_body_lines.length)
             + " allocas="
-            + number_to_string(lowered.allocas.length)
+            + number_to_string(_blk_allocas.length)
             + " terminated="
             + term_label
         );
     }
-    let mut diagnostics -> string[] = lowered.diagnostics;
+    let mut diagnostics -> string[] = _split_by_newline(_blk_diags_raw);
     let mut lines -> string[] = [];
-    lines = extend_string_array(lines, lowered.allocas);
-    lines = extend_string_array(lines, lowered.lines);
-
-    // NOTE: Previously had a fallback here that read function.instructions[0]
-    // directly. Removed because emission.sfn's compiled code misreads
-    // NativeFunction struct fields. lower_instruction_range (in instructions.sfn)
-    // handles the actual instruction lowering correctly.
+    lines = extend_string_array(lines, _blk_allocas);
+    lines = extend_string_array(lines, _blk_body_lines);
 
     let mut has_terminator -> boolean = false;
     let mut terminator_index -> number = 0;
@@ -674,7 +702,7 @@ fn emit_body(
         terminator_index += 1;
     }
 
-    if !lowered.terminated || !has_terminator {
+    if !_blk_terminated || !has_terminator {
         if llvm_return == "void" {
             lines = append_string(lines, "  ret void");
         } else {
@@ -683,5 +711,7 @@ fn emit_body(
         }
     }
 
-    return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: lowered.lifetime_regions, string_constants: lowered.string_constants };
+    let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let _empty_string_constants = empty_string_constant_set();
+    return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: _empty_string_constants };
 }

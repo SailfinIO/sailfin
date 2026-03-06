@@ -58,7 +58,16 @@
       "WebSearch",
       "Bash(mkdir:*)",
       "Bash(wc:*)",
-      "Bash(make clean-build && make compile 2>&1)"
+      "Bash(make clean-build && make compile 2>&1)",
+      "Bash(build/native/sailfin emit-llvm-file:*)",
+      "Bash(make check:*)",
+      "Bash(build/native/sailfin:*)",
+      "Bash(/Users/mcereal/dev/github.com/sailfin/sailfin/build/native/sailfin:*)",
+      "Bash(make:*)",
+      "Bash(nm:*)",
+      "Bash(build/seed/versions/0.1.1-alpha.138/sailfin emit:*)",
+      "Bash(./build/native/sailfin-seedcheck:*)",
+      "Bash(build/native/sailfin-seedcheck:*)"
     ],
     "deny": [],
     "ask": []
