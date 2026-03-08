@@ -232,7 +232,8 @@ fn _write_block_result_files(
     lines -> string[],
     allocas -> string[],
     terminated -> boolean,
-    diagnostics -> string[]
+    diagnostics -> string[],
+    string_constants -> StringConstant[]
 ) ![io] {
     let mut joined_lines -> string = "";
     let mut li -> number = 0;
@@ -275,6 +276,20 @@ fn _write_block_result_files(
         di = di + 1;
     }
     fs.writeFile("build/sailfin/.block_result_diagnostics", joined_diags);
+
+    // Serialize string constants so emit_body can read them back.
+    // Format: one constant per line as "name\tcontent\tbyte_count".
+    let mut joined_sc -> string = "";
+    let mut si -> number = 0;
+    loop {
+        if si >= string_constants.length { break; }
+        if si > 0 {
+            joined_sc = joined_sc + "\n";
+        }
+        joined_sc = joined_sc + string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count);
+        si = si + 1;
+    }
+    fs.writeFile("build/sailfin/.block_result_string_constants", joined_sc);
 }
 
 fn _parse_int_from_string(text -> string) -> number {
@@ -561,6 +576,37 @@ fn lower_instruction_range(
                     current_mutations = extend_mutations(current_mutations, [_mutation]);
                     _expr_mut_i += 1;
                 }
+                // Read string constants written by expression statement handler.
+                if fs.exists("build/sailfin/.expr_stmt_string_constants") {
+                    let _esc_raw = fs.readFile("build/sailfin/.expr_stmt_string_constants");
+                    if _esc_raw.length > 0 {
+                        let mut _esc_pos -> number = 0;
+                        loop {
+                            if _esc_pos >= _esc_raw.length { break; }
+                            let _enl_pos = index_of(substring(_esc_raw, _esc_pos, _esc_raw.length), "\n");
+                            let mut _esc_line -> string = "";
+                            if _enl_pos < 0 {
+                                _esc_line = substring(_esc_raw, _esc_pos, _esc_raw.length);
+                                _esc_pos = _esc_raw.length;
+                            } else {
+                                _esc_line = substring(_esc_raw, _esc_pos, _esc_pos + _enl_pos);
+                                _esc_pos = _esc_pos + _enl_pos + 1;
+                            }
+                            if _esc_line.length == 0 { continue; }
+                            let _et1 = index_of(_esc_line, "\t");
+                            if _et1 < 0 { continue; }
+                            let _esc_nm = substring(_esc_line, 0, _et1);
+                            let _esc_r2 = substring(_esc_line, _et1 + 1, _esc_line.length);
+                            let _et2 = index_of(_esc_r2, "\t");
+                            if _et2 < 0 { continue; }
+                            let _esc_ct = substring(_esc_r2, 0, _et2);
+                            let _esc_bct = substring(_esc_r2, _et2 + 1, _esc_r2.length);
+                            let _esc_bc = _parse_int_from_string(_esc_bct);
+                            collected_string_constants = merge_string_constants(collected_string_constants, [StringConstant { name: _esc_nm, content: _esc_ct, byte_count: _esc_bc }]);
+                        }
+                    }
+                    fs.writeFile("build/sailfin/.expr_stmt_string_constants", "");
+                }
             }
             active_label = find_last_label(current_lines, active_label);
             if trace && function.name == "infer_effects" {
@@ -657,6 +703,40 @@ fn lower_instruction_range(
             current_temp = _parse_int_from_string(_ret_temp_str);
             let _ret_region_str = fs.readFile("build/sailfin/.expr_stmt_next_region_id");
             current_next_region = _parse_int_from_string(_ret_region_str);
+            // Read string constants written by the return instruction handler.
+            if fs.exists("build/sailfin/.expr_stmt_string_constants") {
+                let _sc_raw = fs.readFile("build/sailfin/.expr_stmt_string_constants");
+                if _sc_raw.length > 0 {
+                    // Parse tab-separated lines without needing a split_lines helper.
+                    let mut _sc_pos -> number = 0;
+                    loop {
+                        if _sc_pos >= _sc_raw.length { break; }
+                        // Find end of this line.
+                        let _nl_pos = index_of(substring(_sc_raw, _sc_pos, _sc_raw.length), "\n");
+                        let mut _sc_line -> string = "";
+                        if _nl_pos < 0 {
+                            _sc_line = substring(_sc_raw, _sc_pos, _sc_raw.length);
+                            _sc_pos = _sc_raw.length;
+                        } else {
+                            _sc_line = substring(_sc_raw, _sc_pos, _sc_pos + _nl_pos);
+                            _sc_pos = _sc_pos + _nl_pos + 1;
+                        }
+                        if _sc_line.length == 0 { continue; }
+                        let _tab1 = index_of(_sc_line, "\t");
+                        if _tab1 < 0 { continue; }
+                        let _sc_name = substring(_sc_line, 0, _tab1);
+                        let _sc_rest = substring(_sc_line, _tab1 + 1, _sc_line.length);
+                        let _tab2 = index_of(_sc_rest, "\t");
+                        if _tab2 < 0 { continue; }
+                        let _sc_content = substring(_sc_rest, 0, _tab2);
+                        let _sc_bc_text = substring(_sc_rest, _tab2 + 1, _sc_rest.length);
+                        let _sc_bc = _parse_int_from_string(_sc_bc_text);
+                        collected_string_constants = merge_string_constants(collected_string_constants, [StringConstant { name: _sc_name, content: _sc_content, byte_count: _sc_bc }]);
+                    }
+                }
+                // Clear the file so stale constants don't leak to the next function.
+                fs.writeFile("build/sailfin/.expr_stmt_string_constants", "");
+            }
             terminated = true;
             index += 1;
             if index < end {
@@ -972,7 +1052,7 @@ fn lower_instruction_range(
     }
 
     if scope_depth == 0 {
-        _write_block_result_files(current_lines, current_allocas, terminated, diagnostics);
+        _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants);
     }
 
     return BlockLoweringResult {
@@ -3673,6 +3753,27 @@ fn lower_condition_to_i1(
     context -> TypeContext
 ) -> ConditionConversion {
     let mut diagnostics -> string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
+    // Write local type annotations to a file so the cross-module expression
+    // lowering can resolve struct types for method calls.  The v0.1.1 seed
+    // corrupts the locals array when passed across module boundaries, so
+    // resolve_struct_info_for_method_target can't inspect local.type_annotation.
+    let mut _lta_content -> string = "";
+    let mut _lta_i -> number = 0;
+    loop {
+        if _lta_i >= locals.length { break; }
+        if _lta_i > 0 { _lta_content = _lta_content + "\n"; }
+        let mut _lta_name = locals[_lta_i].name;
+        if _lta_name == null { _lta_name = ""; }
+        let mut _lta_type = locals[_lta_i].type_annotation;
+        if _lta_type == null { _lta_type = ""; }
+        let mut _lta_llvm = locals[_lta_i].llvm_type;
+        if _lta_llvm == null { _lta_llvm = ""; }
+        let mut _lta_ptr = locals[_lta_i].pointer;
+        if _lta_ptr == null { _lta_ptr = ""; }
+        _lta_content = _lta_content + _lta_name + "\t" + _lta_type + "\t" + _lta_llvm + "\t" + _lta_ptr;
+        _lta_i += 1;
+    }
+    fs.writeFile("build/sailfin/.condition_locals", _lta_content);
     let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context, "");
     diagnostics = diagnostics.concat(lowered.diagnostics);
     let mut current_lines -> string[] = lowered.lines;

@@ -113,7 +113,7 @@ fn find_function_by_name_or_import_suffix(functions -> NativeFunction[], target 
     return match_result;
 }
 
-fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics -> string[] = [];
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
     let empty_constants = empty_string_constant_set();
@@ -235,8 +235,58 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
     }
 
+    // File-based fallback FIRST: parse_member_access is cross-module and returns
+    // corrupted data with the v0.1.1 seed.  Handle base.method directly by reading
+    // the condition_locals file to find the struct name.
+    let _pre_dot = index_of(trimmed_target, ".");
+    if _pre_dot > 0 && method_operand == null && injected_argument_count == 0 {
+        let _pre_base = trim_text(substring(trimmed_target, 0, _pre_dot));
+        let _pre_field = trim_text(substring(trimmed_target, _pre_dot + 1, trimmed_target.length));
+        if _pre_base.length > 0 && _pre_field.length > 0 && _pre_field != "concat" && _pre_field != "push" && fs.exists("build/sailfin/.condition_locals") {
+            let _pre_raw = fs.readFile("build/sailfin/.condition_locals");
+            if _pre_raw.length > 0 {
+                let mut _pre_pos -> number = 0;
+                let mut _pre_struct -> string = "";
+                loop {
+                    if _pre_pos >= _pre_raw.length { break; }
+                    let _pre_nl = index_of(substring(_pre_raw, _pre_pos, _pre_raw.length), "\n");
+                    let mut _pre_line -> string = "";
+                    if _pre_nl < 0 {
+                        _pre_line = substring(_pre_raw, _pre_pos, _pre_raw.length);
+                        _pre_pos = _pre_raw.length;
+                    } else {
+                        _pre_line = substring(_pre_raw, _pre_pos, _pre_pos + _pre_nl);
+                        _pre_pos = _pre_pos + _pre_nl + 1;
+                    }
+                    if _pre_line.length == 0 { continue; }
+                    let _pre_t1 = index_of(_pre_line, "\t");
+                    if _pre_t1 < 0 { continue; }
+                    let _pre_name = substring(_pre_line, 0, _pre_t1);
+                    if _pre_name != _pre_base { continue; }
+                    let _pre_rest = substring(_pre_line, _pre_t1 + 1, _pre_line.length);
+                    let _pre_t2 = index_of(_pre_rest, "\t");
+                    if _pre_t2 < 0 { continue; }
+                    _pre_struct = substring(_pre_rest, 0, _pre_t2);
+                    break;
+                }
+                if _pre_struct.length > 0 {
+                    let _pre_lowered = lower_expression(_pre_base, bindings, locals, current_temp, current_lines, functions, context, "");
+                    diagnostics = diagnostics.concat(_pre_lowered.diagnostics);
+                    collected_string_constants = merge_string_constants(collected_string_constants, _pre_lowered.string_constants);
+                    current_lines = _pre_lowered.lines;
+                    current_temp = _pre_lowered.temp_index;
+                    if _pre_lowered.operand != null {
+                        method_operand = _pre_lowered.operand;
+                        trimmed_target = _pre_struct + "::" + _pre_field;
+                        injected_argument_count = 1;
+                    }
+                }
+            }
+        }
+    }
+
     let method_parse = parse_member_access(trimmed_target);
-    if method_parse.success {
+    if method_parse.success && method_operand == null {
         if method_parse.field == "concat" || method_parse.field == "push" {
             let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
             diagnostics = diagnostics.concat(lowered_self.diagnostics);

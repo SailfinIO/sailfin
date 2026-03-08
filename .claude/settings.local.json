@@ -67,7 +67,9 @@
       "Bash(nm:*)",
       "Bash(build/seed/versions/0.1.1-alpha.138/sailfin emit:*)",
       "Bash(./build/native/sailfin-seedcheck:*)",
-      "Bash(build/native/sailfin-seedcheck:*)"
+      "Bash(build/native/sailfin-seedcheck:*)",
+      "Bash(clang:*)",
+      "Bash(./build/native/sailfin test:*)"
     ],
     "deny": [],
     "ask": []

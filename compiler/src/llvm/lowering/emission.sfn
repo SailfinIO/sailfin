@@ -215,7 +215,7 @@ fn emit_llvm_function(
     module_globals -> LocalBinding[],
     module_init_symbol -> string,
     needs_module_init_call -> boolean
-) -> LoweredLLVMFunction {
+) -> LoweredLLVMFunction ![io] {
     let mut diagnostics -> string[] = [];
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
 
@@ -617,7 +617,7 @@ fn emit_body(
     functions -> NativeFunction[],
     context -> TypeContext,
     entry_label -> string
-) -> BodyResult {
+) -> BodyResult ![io] {
     let debug_body = fs.exists("build/sailfin/.trace_lowering");
     if debug_body {
         print.warn("emit-llvm: emit_body start fn=" + fn_name + " llvm_return=" + llvm_return + " bindings_len=" + number_to_string(bindings.length));
@@ -712,6 +712,53 @@ fn emit_body(
     }
 
     let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let _empty_string_constants = empty_string_constant_set();
-    return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: _empty_string_constants };
+    // Read string constants written by _write_block_result_files in instructions.sfn.
+    let mut _body_string_constants = empty_string_constant_set();
+    if fs.exists("build/sailfin/.block_result_string_constants") {
+        let sc_raw = fs.readFile("build/sailfin/.block_result_string_constants");
+        if sc_raw.length > 0 {
+            _body_string_constants = _parse_string_constants_from_file(sc_raw);
+        }
+    }
+    return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: _body_string_constants };
+}
+
+// Parse serialized string constants from the file written by _write_block_result_files.
+// Format: one constant per line as "name\tcontent\tbyte_count".
+fn _parse_string_constants_from_file(raw -> string) -> StringConstant[] {
+    let mut result -> StringConstant[] = [];
+    let lines = _split_by_newline(raw);
+    let mut i -> number = 0;
+    loop {
+        if i >= lines.length {
+            break;
+        }
+        let line = lines[i];
+        if line.length == 0 {
+            i += 1;
+            continue;
+        }
+        let tab1 = index_of(line, "\t");
+        if tab1 < 0 {
+            i += 1;
+            continue;
+        }
+        let name = substring(line, 0, tab1);
+        let rest = substring(line, tab1 + 1, line.length);
+        let tab2 = index_of(rest, "\t");
+        if tab2 < 0 {
+            i += 1;
+            continue;
+        }
+        let content = substring(rest, 0, tab2);
+        let byte_count_text = substring(rest, tab2 + 1, rest.length);
+        let byte_count = parse_simple_integer(byte_count_text);
+        result = append_string_constant(result, StringConstant {
+            name: name,
+            content: content,
+            byte_count: byte_count,
+        });
+        i += 1;
+    }
+    return result;
 }

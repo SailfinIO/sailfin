@@ -15,9 +15,13 @@ import {
     NativeImport,
     NativeImportSpecifier,
     NativeFunction,
+    NativeParameter,
     NativeInstruction,
     NativeInterface,
     NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
+    NativeStructLayoutField,
     NativeEnum,
     LayoutManifest,
     ParseNativeResult,
@@ -1014,10 +1018,48 @@ fn flatten_struct_methods(structs -> NativeStruct[]) -> NativeFunction[] {
             }
             let method = methods[method_index];
             let qualified_name = definition.name + "::" + method.name;
+            // Rebuild parameters so that the `self` parameter always carries
+            // the struct name as its type_annotation.  The ABI corruption in
+            // the v0.1.1 seed can leave nested parameter type_annotations as
+            // empty strings, producing `define ... @Fn( %self)` in LLVM IR.
+            let mut fixed_params -> NativeParameter[] = [];
+            let mut raw_params = method.parameters;
+            if raw_params == null {
+                raw_params = [];
+            }
+            let mut pi -> number = 0;
+            loop {
+                if pi >= raw_params.length {
+                    break;
+                }
+                let p = raw_params[pi];
+                let mut p_name = p.name;
+                if p_name == null {
+                    p_name = "";
+                }
+                let mut p_type = p.type_annotation;
+                if p_type == null {
+                    p_type = "";
+                }
+                // If this is the self parameter and type is empty, fill it
+                // with the struct name so type mapping resolves correctly.
+                if p_name == "self" && p_type.length == 0 {
+                    p_type = definition.name;
+                }
+                let fixed_p = NativeParameter {
+                    name: p_name,
+                    type_annotation: p_type,
+                    mutable: p.mutable,
+                    default_value: p.default_value,
+                    span: p.span,
+                };
+                fixed_params = fixed_params.concat([fixed_p]);
+                pi += 1;
+            }
             let qualified = NativeFunction {
                 name: qualified_name,
                 is_async: method.is_async,
-                parameters: method.parameters,
+                parameters: fixed_params,
                 return_type: method.return_type,
                 effects: method.effects,
                 decorators: method.decorators,
@@ -1070,12 +1112,24 @@ fn recover_function_name_from_header(line -> string) -> string {
     if !starts_with_local(line, ".fn ") {
         return "";
     }
-    let header = trim_text_local(substring(line, 4, line.length));
+    let mut header = trim_text_local(substring(line, 4, line.length));
+    // Strip "async " prefix if present.
+    if starts_with_local(header, "async ") {
+        header = trim_text_local(substring(header, 6, header.length));
+    }
     let open_paren = index_of_char_local(header, "(");
     if open_paren < 0 {
         return header;
     }
     return trim_text_local(substring(header, 0, open_paren));
+}
+
+fn recover_function_is_async_from_header(line -> string) -> boolean {
+    if !starts_with_local(line, ".fn ") {
+        return false;
+    }
+    let header = trim_text_local(substring(line, 4, line.length));
+    return starts_with_local(header, "async ");
 }
 
 fn is_trim_char_local(ch -> string) -> boolean {
@@ -1174,6 +1228,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     let lines = split_lines_local(native_text);
     let mut functions -> NativeFunction[] = [];
     let mut current -> NativeFunction? = null;
+    let mut current_struct_name -> string = "";
     let mut index -> number = 0;
     loop {
         if index >= lines.length {
@@ -1184,14 +1239,73 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             index += 1;
             continue;
         }
+        // Track struct context for method recovery.
+        if starts_with_local(line, ".struct ") {
+            current_struct_name = trim_text_local(substring(line, 8, line.length));
+            index += 1;
+            continue;
+        }
+        if line == ".endstruct" {
+            current_struct_name = "";
+            index += 1;
+            continue;
+        }
+        // Parse .method blocks inside structs as functions with StructName prefix.
+        if starts_with_local(line, ".method ") && current_struct_name.length > 0 {
+            if current != null {
+                functions = append_native_function(functions, current);
+            }
+            let method_header = trim_text_local(substring(line, 8, line.length));
+            // Parse "greet(self) -> string" to extract method name and return type.
+            let paren_idx = index_of(method_header, "(");
+            let mut method_name = method_header;
+            if paren_idx >= 0 {
+                method_name = trim_text_local(substring(method_header, 0, paren_idx));
+            }
+            let full_name = current_struct_name + method_name;
+            let mut method_return_type = "void";
+            let arrow_idx = index_of(method_header, " -> ");
+            if arrow_idx >= 0 {
+                method_return_type = trim_text_local(substring(method_header, arrow_idx + 4, method_header.length));
+            }
+            // Add self parameter with the struct type.
+            let self_param = NativeParameter {
+                name: "self",
+                type_annotation: current_struct_name,
+                mutable: false,
+                default_value: null,
+                span: null,
+            };
+            current = NativeFunction {
+                name: full_name,
+                is_async: false,
+                parameters: [self_param],
+                return_type: method_return_type,
+                effects: [],
+                decorators: [],
+                is_extern: false,
+                instructions: [],
+            };
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".endmethod") {
+            if current != null {
+                functions = append_native_function(functions, current);
+                current = null;
+            }
+            index += 1;
+            continue;
+        }
         if starts_with_local(line, ".fn ") {
             if current != null {
                 functions = append_native_function(functions, current);
             }
             let name = recover_function_name_from_header(line);
+            let fn_is_async = recover_function_is_async_from_header(line);
             current = NativeFunction {
                 name: name,
-                is_async: false,
+                is_async: fn_is_async,
                 parameters: [],
                 return_type: "void",
                 effects: [],
@@ -1214,7 +1328,78 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             index += 1;
             continue;
         }
-        if starts_with_local(line, ".meta ") || starts_with_local(line, ".param ") || starts_with_local(line, ".span ") || starts_with_local(line, ".init-span ") {
+        if starts_with_local(line, ".meta return ") {
+            let ret_type = trim_text_local(substring(line, 13, line.length));
+            if ret_type.length > 0 {
+                current = NativeFunction {
+                    name: current.name,
+                    is_async: current.is_async,
+                    parameters: current.parameters,
+                    return_type: ret_type,
+                    effects: current.effects,
+                    decorators: current.decorators,
+                    is_extern: current.is_extern,
+                    instructions: current.instructions,
+                };
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".meta effects ") {
+            let effects_text = trim_text_local(substring(line, 14, line.length));
+            if effects_text != "none" && effects_text.length > 0 {
+                let mut parsed_effects -> string[] = [];
+                parsed_effects = append_string(parsed_effects, effects_text);
+                current = NativeFunction {
+                    name: current.name,
+                    is_async: current.is_async,
+                    parameters: current.parameters,
+                    return_type: current.return_type,
+                    effects: parsed_effects,
+                    decorators: current.decorators,
+                    is_extern: current.is_extern,
+                    instructions: current.instructions,
+                };
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".meta ") {
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".param ") {
+            let param_text = trim_text_local(substring(line, 7, line.length));
+            let arrow_idx = index_of(param_text, " -> ");
+            if arrow_idx >= 0 {
+                let p_name = trim_text_local(substring(param_text, 0, arrow_idx));
+                let p_type = trim_text_local(substring(param_text, arrow_idx + 4, param_text.length));
+                if p_name.length > 0 && p_type.length > 0 {
+                    let new_param = NativeParameter {
+                        name: p_name,
+                        type_annotation: p_type,
+                        mutable: false,
+                        default_value: null,
+                        span: null,
+                    };
+                    let mut updated_params = current.parameters;
+                    updated_params = updated_params.push(new_param);
+                    current = NativeFunction {
+                        name: current.name,
+                        is_async: current.is_async,
+                        parameters: updated_params,
+                        return_type: current.return_type,
+                        effects: current.effects,
+                        decorators: current.decorators,
+                        is_extern: current.is_extern,
+                        instructions: current.instructions,
+                    };
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".span ") || starts_with_local(line, ".init-span ") {
             index += 1;
             continue;
         }
@@ -1262,6 +1447,219 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         functions = append_native_function(functions, current);
     }
     return functions;
+}
+
+fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
+    let lines = split_lines_local(native_text);
+    let mut structs -> NativeStruct[] = [];
+    let mut in_struct -> boolean = false;
+    let mut struct_name -> string = "";
+    let mut struct_fields -> NativeStructField[] = [];
+    let mut struct_methods -> NativeFunction[] = [];
+    let mut struct_layout -> NativeStructLayout? = null;
+    let mut layout_fields -> NativeStructLayoutField[] = [];
+    let mut layout_size -> number = 0;
+    let mut layout_align -> number = 0;
+
+    let mut in_method -> boolean = false;
+    let mut method_fn -> NativeFunction? = null;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = trim_text_local(lines[index]);
+        if line.length == 0 || starts_with_local(line, ";") {
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".struct ") {
+            in_struct = true;
+            struct_name = trim_text_local(substring(line, 8, line.length));
+            struct_fields = [];
+            struct_methods = [];
+            layout_fields = [];
+            layout_size = 0;
+            layout_align = 0;
+            struct_layout = null;
+            index += 1;
+            continue;
+        }
+        if line == ".endstruct" {
+            if in_struct {
+                if layout_size > 0 || layout_fields.length > 0 {
+                    struct_layout = NativeStructLayout {
+                        size: layout_size,
+                        align: layout_align,
+                        fields: layout_fields,
+                    };
+                }
+                let new_struct = NativeStruct {
+                    name: struct_name,
+                    fields: struct_fields,
+                    methods: struct_methods,
+                    implements: [],
+                    layout: struct_layout,
+                };
+                structs = structs.push(new_struct);
+                in_struct = false;
+            }
+            index += 1;
+            continue;
+        }
+        if !in_struct {
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".field ") {
+            let field_text = trim_text_local(substring(line, 7, line.length));
+            let arrow_idx = index_of(field_text, " -> ");
+            if arrow_idx >= 0 {
+                let f_name = trim_text_local(substring(field_text, 0, arrow_idx));
+                let f_type = trim_text_local(substring(field_text, arrow_idx + 4, field_text.length));
+                struct_fields = struct_fields.push(NativeStructField {
+                    name: f_name,
+                    type_annotation: f_type,
+                    mutable: false,
+                });
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".layout struct ") {
+            let layout_text = trim_text_local(substring(line, 15, line.length));
+            let size_idx = index_of(layout_text, "size=");
+            let align_idx = index_of(layout_text, "align=");
+            if size_idx >= 0 {
+                let size_start = size_idx + 5;
+                let size_end = index_of(substring(layout_text, size_start, layout_text.length), " ");
+                if size_end < 0 {
+                    layout_size = parse_number_local(substring(layout_text, size_start, layout_text.length));
+                } else {
+                    layout_size = parse_number_local(substring(layout_text, size_start, size_start + size_end));
+                }
+            }
+            if align_idx >= 0 {
+                let align_start = align_idx + 6;
+                let align_end = index_of(substring(layout_text, align_start, layout_text.length), " ");
+                if align_end < 0 {
+                    layout_align = parse_number_local(substring(layout_text, align_start, layout_text.length));
+                } else {
+                    layout_align = parse_number_local(substring(layout_text, align_start, align_start + align_end));
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".layout field ") {
+            let lf_text = trim_text_local(substring(line, 14, line.length));
+            let mut lf_name = "";
+            let mut lf_type = "";
+            let mut lf_offset -> number = 0;
+            let mut lf_size -> number = 0;
+            let mut lf_align -> number = 0;
+            let name_end = index_of(lf_text, " ");
+            if name_end >= 0 {
+                lf_name = substring(lf_text, 0, name_end);
+            }
+            let type_idx = index_of(lf_text, "type=");
+            if type_idx >= 0 {
+                let ts = type_idx + 5;
+                let te = index_of(substring(lf_text, ts, lf_text.length), " ");
+                if te < 0 {
+                    lf_type = substring(lf_text, ts, lf_text.length);
+                } else {
+                    lf_type = substring(lf_text, ts, ts + te);
+                }
+            }
+            let offset_idx = index_of(lf_text, "offset=");
+            if offset_idx >= 0 {
+                let os = offset_idx + 7;
+                let oe = index_of(substring(lf_text, os, lf_text.length), " ");
+                if oe < 0 {
+                    lf_offset = parse_number_local(substring(lf_text, os, lf_text.length));
+                } else {
+                    lf_offset = parse_number_local(substring(lf_text, os, os + oe));
+                }
+            }
+            let size_idx = index_of(lf_text, "size=");
+            if size_idx >= 0 {
+                let ss = size_idx + 5;
+                let se = index_of(substring(lf_text, ss, lf_text.length), " ");
+                if se < 0 {
+                    lf_size = parse_number_local(substring(lf_text, ss, lf_text.length));
+                } else {
+                    lf_size = parse_number_local(substring(lf_text, ss, ss + se));
+                }
+            }
+            let align_idx = index_of(lf_text, "align=");
+            if align_idx >= 0 {
+                let as_ = align_idx + 6;
+                let ae = index_of(substring(lf_text, as_, lf_text.length), " ");
+                if ae < 0 {
+                    lf_align = parse_number_local(substring(lf_text, as_, lf_text.length));
+                } else {
+                    lf_align = parse_number_local(substring(lf_text, as_, as_ + ae));
+                }
+            }
+            layout_fields = layout_fields.push(NativeStructLayoutField {
+                name: lf_name,
+                type_annotation: lf_type,
+                offset: lf_offset,
+                size: lf_size,
+                align: lf_align,
+            });
+            index += 1;
+            continue;
+        }
+        if starts_with_local(line, ".method ") || starts_with_local(line, ".endmethod") {
+            // Methods are recovered as functions by recover_native_functions_light
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+    if in_struct {
+        if layout_size > 0 || layout_fields.length > 0 {
+            struct_layout = NativeStructLayout {
+                size: layout_size,
+                align: layout_align,
+                fields: layout_fields,
+            };
+        }
+        structs = structs.push(NativeStruct {
+            name: struct_name,
+            fields: struct_fields,
+            methods: struct_methods,
+            implements: [],
+            layout: struct_layout,
+        });
+    }
+    return structs;
+}
+
+fn parse_number_local(text -> string) -> number {
+    let trimmed = trim_text_local(text);
+    if trimmed.length == 0 {
+        return 0;
+    }
+    let mut result -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[i];
+        let code = char_code(ch);
+        let digit = code - char_code("0");
+        if digit < 0 || digit > 9 {
+            break;
+        }
+        result = result * 10 + digit;
+        i += 1;
+    }
+    return result;
 }
 
 fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_text_override_path -> string, artifact_text -> string, debug_lowering -> boolean) -> NativeFunction[] ![io] {
@@ -1772,6 +2170,42 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     if trace {
         print.info("test llvm: type context build start");
     }
+    // Write struct info BEFORE the cross-module build_type_context call.
+    let mut _si1_content -> string = "";
+    let mut _si1_idx -> number = 0;
+    loop {
+        if _si1_idx >= combined_structs.length { break; }
+        let _si1_s = combined_structs[_si1_idx];
+        if _si1_s.name == null || _si1_s.name.length == 0 {
+            _si1_idx += 1;
+            continue;
+        }
+        if _si1_idx > 0 && _si1_content.length > 0 { _si1_content = _si1_content + "\n"; }
+        let _si1_llvm = "%" + sanitize_symbol(_si1_s.name);
+        _si1_content = _si1_content + _si1_s.name + "\t" + _si1_llvm + "\t";
+        let mut _fi1 -> number = 0;
+        let _si1_fields = _si1_s.fields;
+        if _si1_fields != null {
+            loop {
+                if _fi1 >= _si1_fields.length { break; }
+                let _sf1 = _si1_fields[_fi1];
+                if _fi1 > 0 { _si1_content = _si1_content + ","; }
+                let mut _fn1 = _sf1.name;
+                if _fn1 == null { _fn1 = ""; }
+                let mut _ft1 = "i8*";
+                let _ann1 = _sf1.type_annotation;
+                if _ann1 == "number" { _ft1 = "double"; }
+                else if _ann1 == "boolean" || _ann1 == "bool" { _ft1 = "i1"; }
+                else if _ann1 == "i64" || _ann1 == "int" || _ann1 == "usize" { _ft1 = "i64"; }
+                else if _ann1 == "i32" { _ft1 = "i32"; }
+                else if _ann1 == "u8" { _ft1 = "i8"; }
+                _si1_content = _si1_content + _fn1 + ":" + _ft1;
+                _fi1 += 1;
+            }
+        }
+        _si1_idx += 1;
+    }
+    fs.writeFile("build/sailfin/.struct_info", _si1_content);
     let type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces);
     diagnostics = extend_string_lines_checked(diagnostics, type_build.diagnostics, "type context");
     let type_context = type_build.context;
@@ -2115,6 +2549,10 @@ fn write_llvm_ir_for_tests_from_text(native_text -> string, module_name -> strin
         print.warn("test llvm: empty native text");
         return false;
     }
+    // Write the native text to emit-native.tmp so that the recovery path
+    // in lower_to_llvm_lines_with_parsed_context reads the correct module
+    // rather than stale data from a previous `run` invocation.
+    fs.writeFile("build/sailfin/emit-native.tmp", native_text);
     let parse = parse_native_artifact_with_retry(native_text, 3);
     let dummy_module = NativeModule {
         module_name: module_name,
@@ -2954,6 +3392,44 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             print.warn("emit-llvm: parse diagnostic " + parse.diagnostics[0]);
         }
     }
+    // Recover struct definitions when the main parser returned empty/corrupt results.
+    // The ABI may corrupt struct data so it passes the null/length checks above
+    // but the actual field data is garbage.  Validate that each struct has a
+    // non-empty name; if any struct looks corrupt, replace with light recovery.
+    let mut structs_look_corrupt -> boolean = safe_structs.length == 0;
+    if !structs_look_corrupt && safe_structs.length > 0 {
+        let mut check_i -> number = 0;
+        loop {
+            if check_i >= safe_structs.length {
+                break;
+            }
+            let check_struct = safe_structs[check_i];
+            if check_struct.name == null || check_struct.name.length == 0 {
+                structs_look_corrupt = true;
+                break;
+            }
+            if check_struct.fields == null {
+                structs_look_corrupt = true;
+                break;
+            }
+            check_i += 1;
+        }
+    }
+    if structs_look_corrupt {
+        let mut struct_recovery_text = "";
+        if native_text_override_path.length > 0 {
+            struct_recovery_text = native_text_override_path;
+        } else if fs.exists("build/sailfin/emit-native.tmp") {
+            struct_recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+        }
+        if struct_recovery_text.length > 0 {
+            let recovered_structs = recover_native_structs_light(struct_recovery_text);
+            if recovered_structs.length > 0 {
+                safe_structs = recovered_structs;
+            }
+        }
+    }
+
     let mut safe_bindings = parse.bindings;
     if safe_bindings == null {
         safe_bindings = [];
@@ -3126,6 +3602,44 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if trace {
         print.info("test llvm: type context build start");
     }
+    // Write struct info BEFORE the cross-module build_type_context call.
+    // combined_structs is local to this module and intact; after crossing the
+    // module boundary to type_context.sfn the data gets corrupted by the seed ABI.
+    let mut _si2_content -> string = "";
+    let mut _si2_idx -> number = 0;
+    loop {
+        if _si2_idx >= combined_structs.length { break; }
+        let _si2_s = combined_structs[_si2_idx];
+        if _si2_s.name == null || _si2_s.name.length == 0 {
+            _si2_idx += 1;
+            continue;
+        }
+        if _si2_idx > 0 && _si2_content.length > 0 { _si2_content = _si2_content + "\n"; }
+        let _si2_llvm = "%" + sanitize_symbol(_si2_s.name);
+        _si2_content = _si2_content + _si2_s.name + "\t" + _si2_llvm + "\t";
+        let mut _fi2 -> number = 0;
+        let _si2_fields = _si2_s.fields;
+        if _si2_fields != null {
+            loop {
+                if _fi2 >= _si2_fields.length { break; }
+                let _sf2 = _si2_fields[_fi2];
+                if _fi2 > 0 { _si2_content = _si2_content + ","; }
+                let mut _fn2 = _sf2.name;
+                if _fn2 == null { _fn2 = ""; }
+                let mut _ft2 = "i8*";
+                let _ann2 = _sf2.type_annotation;
+                if _ann2 == "number" { _ft2 = "double"; }
+                else if _ann2 == "boolean" || _ann2 == "bool" { _ft2 = "i1"; }
+                else if _ann2 == "i64" || _ann2 == "int" || _ann2 == "usize" { _ft2 = "i64"; }
+                else if _ann2 == "i32" { _ft2 = "i32"; }
+                else if _ann2 == "u8" { _ft2 = "i8"; }
+                _si2_content = _si2_content + _fn2 + ":" + _ft2;
+                _fi2 += 1;
+            }
+        }
+        _si2_idx += 1;
+    }
+    fs.writeFile("build/sailfin/.struct_info", _si2_content);
     let type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces);
     diagnostics = extend_string_lines_checked(diagnostics, type_build.diagnostics, "type context");
     let type_context = type_build.context;
@@ -3256,6 +3770,63 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if struct_type_lines.length > 0 {
         lines = extend_string_lines(lines, struct_type_lines);
         lines = append_string(lines, "");
+    }
+    // Supplement struct type definitions from .struct_info file ONLY when the cross-module
+    // render_struct_type_definitions produced nothing (i.e., TypeContext is corrupted).
+    if struct_type_lines.length == 0 && fs.exists("build/sailfin/.struct_info") {
+        let _std_raw = fs.readFile("build/sailfin/.struct_info");
+        if _std_raw.length > 0 {
+            let mut _std_pos -> number = 0;
+            loop {
+                if _std_pos >= _std_raw.length { break; }
+                let _std_nl = index_of(substring(_std_raw, _std_pos, _std_raw.length), "\n");
+                let mut _std_line -> string = "";
+                if _std_nl < 0 {
+                    _std_line = substring(_std_raw, _std_pos, _std_raw.length);
+                    _std_pos = _std_raw.length;
+                } else {
+                    _std_line = substring(_std_raw, _std_pos, _std_pos + _std_nl);
+                    _std_pos = _std_pos + _std_nl + 1;
+                }
+                if _std_line.length == 0 { continue; }
+                let _std_t1 = index_of(_std_line, "\t");
+                if _std_t1 < 0 { continue; }
+                let _std_rest = substring(_std_line, _std_t1 + 1, _std_line.length);
+                let _std_t2 = index_of(_std_rest, "\t");
+                if _std_t2 < 0 { continue; }
+                let _std_llvm = substring(_std_rest, 0, _std_t2);
+                let _std_fields_str = substring(_std_rest, _std_t2 + 1, _std_rest.length);
+                if _std_llvm.length == 0 { continue; }
+                // Skip if this type is already defined in existing lines
+                if index_of(_existing_types, _std_llvm + " = type") >= 0 { continue; }
+                // Build field type list
+                let mut _std_ftypes -> string = "";
+                if _std_fields_str.length > 0 {
+                    let mut _std_fpos -> number = 0;
+                    let mut _std_first -> boolean = true;
+                    loop {
+                        if _std_fpos >= _std_fields_str.length { break; }
+                        let _std_comma = index_of(substring(_std_fields_str, _std_fpos, _std_fields_str.length), ",");
+                        let mut _std_fentry -> string = "";
+                        if _std_comma < 0 {
+                            _std_fentry = substring(_std_fields_str, _std_fpos, _std_fields_str.length);
+                            _std_fpos = _std_fields_str.length;
+                        } else {
+                            _std_fentry = substring(_std_fields_str, _std_fpos, _std_fpos + _std_comma);
+                            _std_fpos = _std_fpos + _std_comma + 1;
+                        }
+                        let _std_colon = index_of(_std_fentry, ":");
+                        if _std_colon < 0 { continue; }
+                        let _std_ftype = substring(_std_fentry, _std_colon + 1, _std_fentry.length);
+                        if !_std_first { _std_ftypes = _std_ftypes + ", "; }
+                        _std_ftypes = _std_ftypes + _std_ftype;
+                        _std_first = false;
+                    }
+                }
+                lines = append_string(lines, _std_llvm + " = type { " + _std_ftypes + " }");
+            }
+            lines = append_string(lines, "");
+        }
     }
 
     if debug_lowering {

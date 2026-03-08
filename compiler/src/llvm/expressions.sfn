@@ -516,6 +516,9 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
 }
 
 fn default_return_literal(llvm_type -> string) -> string {
+    if llvm_type == "void" {
+        return "";
+    }
     if llvm_type == "double" {
         return "0.0";
     }

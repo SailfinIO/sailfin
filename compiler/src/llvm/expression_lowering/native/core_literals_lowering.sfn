@@ -17,6 +17,8 @@ import {
     EnumLiteralParse,
     HeapBoxResult,
     InterpolatedTemplateParse,
+    StructTypeInfo,
+    StructFieldInfo,
 } from "../../types";
 
 import {
@@ -29,7 +31,7 @@ import {
     string_array_contains,
 } from "../../utils";
 
-import { substring } from "../../../string_utils";
+import { substring, index_of } from "../../../string_utils";
 
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 
@@ -359,7 +361,78 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
     let mut current_temp -> number = temp_index;
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
-    let info = resolve_struct_info_for_literal(context, parse.type_name);
+    let mut info = resolve_struct_info_for_literal(context, parse.type_name);
+    // File-based fallback: when the cross-module TypeContext is corrupt
+    // (v0.1.1 seed ABI issue), resolve_struct_info_for_literal returns null.
+    // Read the struct info from the file written by lower_instruction_range.
+    if info == null && parse.type_name.length > 0 && fs.exists("build/sailfin/.struct_info") {
+        let _si_raw = fs.readFile("build/sailfin/.struct_info");
+        if _si_raw.length > 0 {
+            let mut _si_pos -> number = 0;
+            loop {
+                if _si_pos >= _si_raw.length { break; }
+                let _si_nl = index_of(substring(_si_raw, _si_pos, _si_raw.length), "\n");
+                let mut _si_line -> string = "";
+                if _si_nl < 0 {
+                    _si_line = substring(_si_raw, _si_pos, _si_raw.length);
+                    _si_pos = _si_raw.length;
+                } else {
+                    _si_line = substring(_si_raw, _si_pos, _si_pos + _si_nl);
+                    _si_pos = _si_pos + _si_nl + 1;
+                }
+                if _si_line.length == 0 { continue; }
+                // Format: struct_name\tllvm_name\tfield1_name:field1_type,...
+                let _t1 = index_of(_si_line, "\t");
+                if _t1 < 0 { continue; }
+                let _si_name = substring(_si_line, 0, _t1);
+                if _si_name != parse.type_name { continue; }
+                let _si_rest = substring(_si_line, _t1 + 1, _si_line.length);
+                let _t2 = index_of(_si_rest, "\t");
+                if _t2 < 0 { continue; }
+                let _si_llvm = substring(_si_rest, 0, _t2);
+                let _si_fields_str = substring(_si_rest, _t2 + 1, _si_rest.length);
+                let mut _si_fields -> StructFieldInfo[] = [];
+                if _si_fields_str.length > 0 {
+                    // Parse comma-separated field entries: name:type
+                    let mut _fp -> number = 0;
+                    let mut _fi -> number = 0;
+                    loop {
+                        if _fp >= _si_fields_str.length { break; }
+                        let _fc = index_of(substring(_si_fields_str, _fp, _si_fields_str.length), ",");
+                        let mut _f_entry -> string = "";
+                        if _fc < 0 {
+                            _f_entry = substring(_si_fields_str, _fp, _si_fields_str.length);
+                            _fp = _si_fields_str.length;
+                        } else {
+                            _f_entry = substring(_si_fields_str, _fp, _fp + _fc);
+                            _fp = _fp + _fc + 1;
+                        }
+                        if _f_entry.length == 0 { _fi += 1; continue; }
+                        let _colon = index_of(_f_entry, ":");
+                        if _colon < 0 { _fi += 1; continue; }
+                        let _f_name = substring(_f_entry, 0, _colon);
+                        let _f_type = substring(_f_entry, _colon + 1, _f_entry.length);
+                        _si_fields = _si_fields.concat([StructFieldInfo {
+                            name: _f_name,
+                            llvm_type: _f_type,
+                            type_annotation: "",
+                            index: _fi,
+                            offset: 0,
+                        }]);
+                        _fi += 1;
+                    }
+                }
+                info = StructTypeInfo {
+                    name: _si_name,
+                    llvm_name: _si_llvm,
+                    fields: _si_fields,
+                    size: 0,
+                    align: 0,
+                };
+                break;
+            }
+        }
+    }
     if info == null {
         if parse.type_name.length > 0 {
             diagnostics = append_string(diagnostics, "llvm lowering: struct literal references unknown struct `" + parse.type_name + "`");
