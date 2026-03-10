@@ -126,12 +126,23 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     // Check if this is an enum variant constructor call (e.g., LiteralValue.Null())
     // Enum variant constructors look like EnumName.VariantName() and should be converted to enum literals
     let dot_index = index_of(trimmed_target, ".");
+    let trace_calls = fs.exists("build/sailfin/.trace_call_lowering");
+    if trace_calls {
+        print.info("call_lowering: target='" + trimmed_target + "' dot_index=" + number_to_string(dot_index) + " enums=" + number_to_string(context.enums.length));
+    }
     if dot_index > 0 {
         let enum_name = trim_text(substring(trimmed_target, 0, dot_index));
         let variant_name = trim_text(substring(trimmed_target, dot_index + 1, trimmed_target.length));
 
         // Try to resolve this as an enum
         let enum_info = resolve_enum_info_for_literal(context, enum_name);
+        if trace_calls {
+            let mut found_text -> string = "null";
+            if enum_info != null {
+                found_text = "found";
+            }
+            print.info("call_lowering: enum_name='" + enum_name + "' variant='" + variant_name + "' resolved=" + found_text);
+        }
         if enum_info != null {
             // This is an enum variant constructor!
             // Convert the call into an enum literal

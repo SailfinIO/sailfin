@@ -1028,6 +1028,30 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
     // scripts/selfhost_native.py.
     let selfhost_linked = "build/selfhost/native/obj/native.linked.o";
 
+    // Weaken compiler module objects so test-defined symbols (from inlined
+    // imports) take precedence, avoiding duplicate-symbol link errors.
+    let mut link_objs -> string[] = [];
+    if module_objs.length > 0 {
+        let mut wi -> number = 0;
+        loop {
+            if wi >= module_objs.length {
+                break;
+            }
+            let weak_path = cache_dir + "/weak_" + number_to_string(wi) + ".o";
+            process.run(["cp", module_objs[wi], weak_path]);
+            process.run(["llvm-objcopy", "--weaken", weak_path]);
+            link_objs.push(weak_path);
+            wi += 1;
+        }
+    } else {
+        if fs.exists(selfhost_linked) {
+            let weak_path = cache_dir + "/native.linked.weak.o";
+            process.run(["cp", selfhost_linked, weak_path]);
+            process.run(["llvm-objcopy", "--weaken", weak_path]);
+            link_objs.push(weak_path);
+        }
+    }
+
     let mut args -> string[] = [
         "clang",
         "-O0",
@@ -1036,13 +1060,7 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
         globals_obj,
         prelude_obj,
     ];
-    if module_objs.length > 0 {
-        args = args.concat(module_objs);
-    } else {
-        if fs.exists(selfhost_linked) {
-            args = args.concat([selfhost_linked]);
-        }
-    }
+    args = args.concat(link_objs);
     args = args.concat([
         ll_path,
         "-o",

@@ -40,6 +40,8 @@ import {
     LifetimeRegionMetadata,
     StringConstant,
     CapabilityManifest,
+    EnumTypeInfo,
+    EnumVariantInfo,
 } from "../types";
 
 import {
@@ -3247,15 +3249,29 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_structs = [];
     }
     let mut safe_enums = parse.enums;
+    let _trace_enums = fs.exists("build/sailfin/.trace_call_lowering");
+    if _trace_enums {
+        let mut _enum_len_text -> string = "null";
+        if safe_enums != null {
+            _enum_len_text = number_to_string(safe_enums.length);
+        }
+        print.info("enum_trace: parse.enums=" + _enum_len_text);
+    }
     if safe_enums == null {
         safe_enums = [];
     }
     if safe_enums.length != sanitize_collection_length(safe_enums.length, 100000) {
+        if _trace_enums {
+            print.info("enum_trace: sanitize dropped enums (len=" + number_to_string(safe_enums.length) + " sanitized=" + number_to_string(sanitize_collection_length(safe_enums.length, 100000)) + ")");
+        }
         safe_enums = [];
     }
     if safe_enums.length > 100000 {
         diagnostics = append_string(diagnostics, "llvm lowering: enum list too large (" + number_to_string(safe_enums.length) + "); dropping");
         safe_enums = [];
+    }
+    if _trace_enums {
+        print.info("enum_trace: safe_enums.length=" + number_to_string(safe_enums.length));
     }
     let mut safe_interfaces = parse.interfaces;
     if safe_interfaces == null {
@@ -3640,9 +3656,159 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         _si2_idx += 1;
     }
     fs.writeFile("build/sailfin/.struct_info", _si2_content);
+    // Write enum info to a file-based channel so build_type_context can read it
+    // even if the enums array gets corrupted crossing the module boundary.
+    let mut _ei_content -> string = "";
+    let mut _ei_idx -> number = 0;
+    loop {
+        if _ei_idx >= fixed_enums.enums.length { break; }
+        let _ei_e = fixed_enums.enums[_ei_idx];
+        if _ei_e.name == null || _ei_e.name.length == 0 {
+            _ei_idx += 1;
+            continue;
+        }
+        if _ei_idx > 0 && _ei_content.length > 0 { _ei_content = _ei_content + "\n"; }
+        let mut _ei_tag_type -> string = "i32";
+        let mut _ei_tag_size -> string = "4";
+        let mut _ei_tag_align -> string = "4";
+        let mut _ei_size -> string = "4";
+        let mut _ei_align -> string = "4";
+        if _ei_e.layout != null {
+            _ei_tag_type = _ei_e.layout.tag_type;
+            _ei_tag_size = number_to_string(_ei_e.layout.tag_size);
+            _ei_tag_align = number_to_string(_ei_e.layout.tag_align);
+            _ei_size = number_to_string(_ei_e.layout.size);
+            _ei_align = number_to_string(_ei_e.layout.align);
+        }
+        _ei_content = _ei_content + _ei_e.name + "\t" + _ei_tag_type + "\t" + _ei_tag_size + "\t" + _ei_tag_align + "\t" + _ei_size + "\t" + _ei_align + "\t";
+        let mut _vi -> number = 0;
+        let _variants = _ei_e.variants;
+        if _variants != null {
+            loop {
+                if _vi >= _variants.length { break; }
+                let _v = _variants[_vi];
+                if _vi > 0 { _ei_content = _ei_content + ","; }
+                _ei_content = _ei_content + _v.name + "=" + number_to_string(_vi);
+                _vi += 1;
+            }
+        }
+        _ei_idx += 1;
+    }
+    fs.writeFile("build/sailfin/.enum_info", _ei_content);
+    if _trace_enums {
+        print.info("enum_trace: combined_enums=" + number_to_string(combined_enums.length) + " fixed_enums=" + number_to_string(fixed_enums.enums.length));
+        print.info("enum_trace: wrote .enum_info bytes=" + number_to_string(_ei_content.length));
+    }
     let type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces);
     diagnostics = extend_string_lines_checked(diagnostics, type_build.diagnostics, "type context");
-    let type_context = type_build.context;
+    let mut type_context = type_build.context;
+
+    // Recover enum info from file-based channel if cross-module ABI corruption
+    // caused the enums parameter to arrive empty in build_type_context.
+    if type_context.enums.length == 0 && fs.exists("build/sailfin/.enum_info") {
+        let _ei_raw = fs.readFile("build/sailfin/.enum_info");
+        if _ei_raw.length > 0 {
+            let _ei_lines = split_lines_local(_ei_raw);
+            let mut _recovered_enums -> EnumTypeInfo[] = [];
+            let mut _eli -> number = 0;
+            loop {
+                if _eli >= _ei_lines.length { break; }
+                let _el = _ei_lines[_eli];
+                // Format: name\ttag_type\ttag_size\ttag_align\tsize\talign\tv0=t0,v1=t1,...
+                let _tab1 = index_of(_el, "\t");
+                if _tab1 < 0 { _eli += 1; continue; }
+                let _ename = substring(_el, 0, _tab1);
+                let _rest1 = substring(_el, _tab1 + 1, _el.length);
+                let _tab2 = index_of(_rest1, "\t");
+                if _tab2 < 0 { _eli += 1; continue; }
+                let _etag_type = substring(_rest1, 0, _tab2);
+                let _rest2 = substring(_rest1, _tab2 + 1, _rest1.length);
+                let _tab3 = index_of(_rest2, "\t");
+                if _tab3 < 0 { _eli += 1; continue; }
+                let _etag_size = parse_number_local(substring(_rest2, 0, _tab3));
+                let _rest3 = substring(_rest2, _tab3 + 1, _rest2.length);
+                let _tab4 = index_of(_rest3, "\t");
+                if _tab4 < 0 { _eli += 1; continue; }
+                let _etag_align = parse_number_local(substring(_rest3, 0, _tab4));
+                let _rest4 = substring(_rest3, _tab4 + 1, _rest3.length);
+                let _tab5 = index_of(_rest4, "\t");
+                if _tab5 < 0 { _eli += 1; continue; }
+                let _esize = parse_number_local(substring(_rest4, 0, _tab5));
+                let _rest5 = substring(_rest4, _tab5 + 1, _rest4.length);
+                let _tab6 = index_of(_rest5, "\t");
+                let mut _ealign -> number = 4;
+                let mut _variants_str -> string = "";
+                if _tab6 >= 0 {
+                    _ealign = parse_number_local(substring(_rest5, 0, _tab6));
+                    _variants_str = substring(_rest5, _tab6 + 1, _rest5.length);
+                } else {
+                    _ealign = parse_number_local(_rest5);
+                }
+
+                // Parse variants: v0=t0,v1=t1,...
+                let mut _evariants -> EnumVariantInfo[] = [];
+                if _variants_str.length > 0 {
+                    let mut _vpos -> number = 0;
+                    let mut _vtag -> number = 0;
+                    loop {
+                        let _comma = index_of(substring(_variants_str, _vpos, _variants_str.length), ",");
+                        let mut _vend -> number = _variants_str.length;
+                        if _comma >= 0 {
+                            _vend = _vpos + _comma;
+                        }
+                        let _vpair = substring(_variants_str, _vpos, _vend);
+                        let _eq = index_of(_vpair, "=");
+                        let mut _vname -> string = _vpair;
+                        if _eq >= 0 {
+                            _vname = substring(_vpair, 0, _eq);
+                            _vtag = parse_number_local(substring(_vpair, _eq + 1, _vpair.length));
+                        }
+                        if _vname.length > 0 {
+                            _evariants.push(EnumVariantInfo {
+                                name: _vname,
+                                tag: _vtag,
+                                offset: 0,
+                                size: 0,
+                                align: 1,
+                                fields: []
+                            });
+                        }
+                        _vtag += 1;
+                        if _comma < 0 { break; }
+                        _vpos = _vend + 1;
+                    }
+                }
+
+                let _ellvm = "%" + sanitize_symbol(_ename);
+                _recovered_enums.push(EnumTypeInfo {
+                    name: _ename,
+                    llvm_name: _ellvm,
+                    tag_type: _etag_type,
+                    tag_size: _etag_size,
+                    tag_align: _etag_align,
+                    max_payload_size: 0,
+                    size: _esize,
+                    align: _ealign,
+                    variants: _evariants
+                });
+                _eli += 1;
+            }
+            if _recovered_enums.length > 0 {
+                type_context = TypeContext {
+                    structs: type_context.structs,
+                    enums: _recovered_enums,
+                    interfaces: type_context.interfaces,
+                    vtables: type_context.vtables
+                };
+                if _trace_enums {
+                    print.info("enum_trace: recovered " + number_to_string(_recovered_enums.length) + " enum(s) from .enum_info");
+                }
+            }
+        }
+    }
+    if _trace_enums {
+        print.info("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
+    }
     if trace {
         print.info("test llvm: type context built");
     }

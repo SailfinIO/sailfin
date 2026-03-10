@@ -69,7 +69,8 @@
       "Bash(./build/native/sailfin-seedcheck:*)",
       "Bash(build/native/sailfin-seedcheck:*)",
       "Bash(clang:*)",
-      "Bash(./build/native/sailfin test:*)"
+      "Bash(./build/native/sailfin test:*)",
+      "Bash(SAILFIN_TRACE_ARGV=1 timeout 5 build/native/sailfin-seedcheck version:*)"
     ],
     "deny": [],
     "ask": []
