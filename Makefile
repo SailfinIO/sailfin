@@ -166,10 +166,6 @@ test-unit:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		FALLBACK_COMPILER="$${FALLBACK_COMPILER:-}" \
-		LINK_OBJ_1=build/sailfin/sailfin_runtime-O2.o \
-		LINK_OBJ_2=build/sailfin/runtime_globals-O2.o \
-		LINK_OBJ_3=build/native/obj/runtime/prelude.o \
 		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
 	done
 
@@ -185,10 +181,6 @@ test-integration:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		FALLBACK_COMPILER="$${FALLBACK_COMPILER:-}" \
-		LINK_OBJ_1=build/sailfin/sailfin_runtime-O2.o \
-		LINK_OBJ_2=build/sailfin/runtime_globals-O2.o \
-		LINK_OBJ_3=build/native/obj/runtime/prelude.o \
 		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
 	done
 
@@ -204,10 +196,6 @@ test-e2e:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		FALLBACK_COMPILER="$${FALLBACK_COMPILER:-}" \
-		LINK_OBJ_1=build/sailfin/sailfin_runtime-O2.o \
-		LINK_OBJ_2=build/sailfin/runtime_globals-O2.o \
-		LINK_OBJ_3=build/native/obj/runtime/prelude.o \
 		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
 	done
 
@@ -255,7 +243,16 @@ check: check-conda
 	echo "[check] verifying seed selfhost..."; \
 	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py \
 		--seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --max-total-seconds 3600 --out build/native/sailfin-seedcheck
-	@FALLBACK_COMPILER=build/native/sailfin $(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
+	@echo "[check] validating seedcheck binary can run programs..."
+	@sc="build/native/sailfin-seedcheck"; \
+	if ! timeout 10 $$sc run examples/basics/hello-world.sfn >/dev/null 2>&1; then \
+		echo "[check][FAIL] seedcheck binary cannot run hello-world.sfn (hangs or crashes)"; \
+		echo "[check][FAIL] the seedcheck compiler is NOT viable — fix the compiler, not the build script"; \
+		exit 1; \
+	fi; \
+	echo "[check] seedcheck binary runs hello-world.sfn OK"
+	@echo "[check] running test suite with seedcheck binary (no fallbacks)..."
+	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
 
 # =============================================================================
 # Packaging (release artifacts)

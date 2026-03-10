@@ -165,6 +165,30 @@ When uncertain about feature status or semantics:
 
 **Examples are bootstrap-only** unless marked with future syntax comments (e.g., `|>` pipeline operator, currency literals like `$0.05`).
 
+## Stabilization Goals (Pre-1.0)
+
+The project is marching toward a 1.0 release with a **pure Sailfin toolchain** — no Python, no C runtime, no downstream fixup scripts. All compiler improvements must target the compiler source code itself (`compiler/src/*.sfn`), not external workarounds.
+
+### Current Critical Bug
+
+The LLVM lowering of `.loop` / `.if` / `.break` control flow produces broken loop headers where every loop unconditionally enters the body with no exit condition. The bug is in `compiler/src/llvm/lowering/instructions.sfn`. This causes the seedcheck binary to hang on any operation. See `SELFHOST_STABILIZATION_PROMPT.md` for full analysis.
+
+### Development Principles
+
+- **Fix the compiler, not the build script.** `scripts/selfhost_native.py` has ~30 post-processing fixup passes that patch generated LLVM IR. These are technical debt. Every fix should go into the compiler source (`compiler/src/*.sfn`) so the fixup passes can be removed.
+- **The seedcheck binary must be a fully functional standalone compiler.** `make check` validates that it can run `hello-world.sfn` and pass the test suite directly — no Python fallbacks, no fallback compilers.
+- **Build must be fast and deterministic.** Target: under 5 minutes, zero retries. If the build needs retries, the compiler has a bug to fix.
+- **Reduce complexity, don't add it.** The fixup pass count should decrease over time. Don't add new fixup passes — fix the root cause in the compiler source.
+
+### `make check` Validation
+
+`make check` does:
+1. Builds seedcheck binary from the first-pass binary
+2. Validates the seedcheck can actually run `examples/basics/hello-world.sfn` (fails if it hangs)
+3. Runs the full test suite using the seedcheck binary directly (no fallbacks)
+
+If `make check` fails, it means the compiler has a bug. Fix the compiler.
+
 ## Important Constraints
 
 ### Bootstrap Limitations
