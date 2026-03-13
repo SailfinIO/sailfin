@@ -68,9 +68,10 @@ fn _path_pop_last(parts -> string[]) -> string[] {
         return [];
     }
     let mut out -> string[] = [];
+    let _last_index = parts.length - 1;
     let mut index -> number = 0;
     loop {
-        if index + 1 >= parts.length {
+        if index >= _last_index {
             break;
         }
         out = out.concat([parts[index]]);
@@ -273,10 +274,11 @@ fn _word_matches(source -> string, index -> number, word -> string) -> boolean {
     if index < 0 {
         return false;
     }
-    if index + word.length > source.length {
+    let _end_pos = index + word.length;
+    if _end_pos > source.length {
         return false;
     }
-    if substring_unchecked(source, index, index + word.length) != word {
+    if substring_unchecked(source, index, _end_pos) != word {
         return false;
     }
     if index > 0 {
@@ -284,7 +286,7 @@ fn _word_matches(source -> string, index -> number, word -> string) -> boolean {
             return false;
         }
     }
-    if index + word.length < source.length {
+    if _end_pos < source.length {
         if _is_ident_char(_byte_at(source, index + word.length)) {
             return false;
         }
@@ -327,7 +329,8 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
         }
 
         if in_block_comment {
-            if ch == "*" && i + 1 < source_len && _byte_at(source, i + 1) == "/" {
+            let _bc_next = i + 1;
+            if ch == "*" && _bc_next < source_len && _byte_at(source, _bc_next) == "/" {
                 in_block_comment = false;
                 i += 2;
                 continue;
@@ -357,8 +360,9 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
         }
 
         // Not inside string/comment.
-        if ch == "/" && i + 1 < source_len {
-            let next = _byte_at(source, i + 1);
+        let _sl_next = i + 1;
+        if ch == "/" && _sl_next < source_len {
+            let next = _byte_at(source, _sl_next);
             if next == "/" {
                 in_line_comment = true;
                 i += 2;
@@ -407,7 +411,8 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
                     continue;
                 }
                 if stmt_in_block_comment {
-                    if cj == "*" && j + 1 < source_len && _byte_at(source, j + 1) == "/" {
+                    let _sbc_next = j + 1;
+                    if cj == "*" && _sbc_next < source_len && _byte_at(source, _sbc_next) == "/" {
                         stmt_in_block_comment = false;
                         j += 2;
                         continue;
@@ -435,8 +440,9 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
                     continue;
                 }
 
-                if cj == "/" && j + 1 < source_len {
-                    let nextj = _byte_at(source, j + 1);
+                let _ssl_next = j + 1;
+                if cj == "/" && _ssl_next < source_len {
+                    let nextj = _byte_at(source, _ssl_next);
                     if nextj == "/" {
                         stmt_in_line_comment = true;
                         j += 2;
@@ -1207,12 +1213,14 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             timing = true;
             base_index = 2;
         }
-        if args.length != base_index + 2 {
+        let _expected_args = base_index + 2;
+        if args.length != _expected_args {
             print.error(_usage());
             return 2;
         }
         let mode = args[base_index];
-        let path = args[base_index + 1];
+        let _path_idx = base_index + 1;
+        let path = args[_path_idx];
         if !fs.exists(path) {
             print.error("file not found: " + path);
             return 1;
@@ -1246,13 +1254,15 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             timing = true;
             base_index = 2;
         }
-        if args.length != base_index + 2 {
+        let _expected_args2 = base_index + 2;
+        if args.length != _expected_args2 {
             print.error(_usage());
             return 2;
         }
 
         let path = args[base_index];
-        let out_path = args[base_index + 1];
+        let _path_idx2 = base_index + 1;
+        let out_path = args[_path_idx2];
         if !fs.exists(path) {
             print.error("file not found: " + path);
             return 1;
@@ -1507,8 +1517,9 @@ fn _join_with_separator_cli(values -> string[], separator -> string) -> string {
             if index >= parts.length {
                 break;
             }
-            if index + 1 < parts.length {
-                let combined = parts[index] + separator + parts[index + 1];
+            let _jn_next = index + 1;
+            if _jn_next < parts.length {
+                let combined = parts[index] + separator + parts[_jn_next];
                 next = next.concat([combined]);
                 index += 2;
                 continue;

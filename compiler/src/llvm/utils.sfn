@@ -81,9 +81,10 @@ fn contains_text(haystack -> string, needle -> string) -> boolean {
     if haystack.length < needle.length {
         return false;
     }
+    let _search_limit = haystack.length - needle.length;
     let mut index -> number = 0;
     loop {
-        if index + needle.length > haystack.length {
+        if index > _search_limit {
             break;
         }
         let candidate = substring(haystack, index, index + needle.length);
@@ -102,9 +103,10 @@ fn index_of(value -> string, target -> string) -> number {
     // Use substring + == instead of char_code_at_text comparisons.
     // char_code_at_text is miscompiled by older seeds, but substring
     // (backed by the C runtime grapheme_at) and == both work correctly.
+    let _search_limit = value.length - target.length;
     let mut index -> number = 0;
     loop {
-        if index + target.length > value.length {
+        if index > _search_limit {
             break;
         }
         let candidate = substring(value, index, index + target.length);
@@ -386,10 +388,11 @@ fn matches_keyword(value -> string, start_index -> number, keyword -> string) ->
     if slice != keyword {
         return false;
     }
-    if start_index + keyword.length >= value.length {
+    let _keyword_end = start_index + keyword.length;
+    if _keyword_end >= value.length {
         return true;
     }
-    let next = substring(value, start_index + keyword.length, start_index + keyword.length + 1);
+    let next = substring(value, _keyword_end, _keyword_end + 1);
     if is_identifier_part_char(next) {
         return false;
     }
@@ -583,8 +586,9 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             if index >= parts.length {
                 break;
             }
-            if index + 1 < parts.length {
-                let combined = parts[index] + separator + parts[index + 1];
+            let _jn_next = index + 1;
+            if _jn_next < parts.length {
+                let combined = parts[index] + separator + parts[_jn_next];
                 next = append_string(next, combined);
                 index += 2;
                 continue;

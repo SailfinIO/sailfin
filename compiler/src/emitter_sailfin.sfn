@@ -345,7 +345,8 @@ fn emit_struct(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
         let method = statement.methods[method_index];
         current = emit_decorators(current, method.decorators);
         current = emit_block_with_header(current, format_method_header(method.signature), method.body);
-        if method_index + 1 < statement.methods.length {
+        let _next_method = method_index + 1;
+        if _next_method < statement.methods.length {
             current = builder_emit_blank(current);
         }
         method_index += 1;

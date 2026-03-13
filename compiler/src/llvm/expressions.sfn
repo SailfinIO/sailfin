@@ -429,9 +429,10 @@ fn contains_text(haystack -> string, needle -> string) -> boolean {
     if haystack.length < needle.length {
         return false;
     }
+    let _search_limit = haystack.length - needle.length;
     let mut index -> number = 0;
     loop {
-        if index + needle.length > haystack.length {
+        if index > _search_limit {
             break;
         }
         let candidate = substring(haystack, index, index + needle.length);
@@ -667,8 +668,9 @@ fn find_top_level_operator(expression -> string, operators -> string) -> Operato
         }
         if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
             // Check for multi-character operators first
-            if index + 2 <= expression.length {
-                let two_char = substring(expression, index, index + 2);
+            let _op_next2 = index + 2;
+            if _op_next2 <= expression.length {
+                let two_char = substring(expression, index, _op_next2);
                 if contains_text(operators, two_char) {
                     // Prefer rightmost occurrence for left-associativity
                     candidate_index = index;
@@ -776,8 +778,10 @@ fn find_top_level_range_separator(value -> string) -> number {
             continue;
         }
         if ch == "." {
-            if index + 1 < value.length {
-                if substring(value, index + 1, index + 2) == "." {
+            let _dot_next = index + 1;
+            if _dot_next < value.length {
+                let _dot_next2 = index + 2;
+                if substring(value, _dot_next, _dot_next2) == "." {
                     if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
                         return index;
                     }
@@ -975,7 +979,8 @@ fn parse_member_access(expression -> string) -> MemberAccessParse {
         if ch == "." {
             if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
                 // Skip ".." range operators
-                if index + 1 < trimmed.length && char_at(trimmed, index + 1) == "." {
+                let _rng_next = index + 1;
+                if _rng_next < trimmed.length && char_at(trimmed, _rng_next) == "." {
                     index += 2;
                     continue;
                 }
@@ -1216,8 +1221,9 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
                         continue;
                     }
                 }
-                if index + 1 < trimmed.length {
-                    let next = char_at(trimmed, index + 1);
+                let _eq_next = index + 1;
+                if _eq_next < trimmed.length {
+                    let next = char_at(trimmed, _eq_next);
                     if next == "=" {
                         index += 2;
                         continue;
@@ -1525,8 +1531,9 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
         }
 
         if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
-            if index + 4 <= trimmed.length {
-                let window = substring(trimmed, index, index + 4);
+            let _as_end = index + 4;
+            if _as_end <= trimmed.length {
+                let window = substring(trimmed, index, _as_end);
                 if window == " as " {
                     match_index = index;
                 }

@@ -191,7 +191,8 @@ fn emit_native_with_module_name(program -> Program, module_name -> string) -> Em
             break;
         }
         state = emit_statement(state, program.statements[index]);
-        if index + 1 < program.statements.length {
+        let _next_stmt = index + 1;
+        if _next_stmt < program.statements.length {
             state = state_emit_blank(state);
         }
         index += 1;
@@ -240,7 +241,8 @@ fn emit_native_text_with_module_name(program -> Program, module_name -> string) 
             break;
         }
         state = emit_statement(state, program.statements[index]);
-        if index + 1 < program.statements.length {
+        let _next_stmt2 = index + 1;
+        if _next_stmt2 < program.statements.length {
             state = state_emit_blank(state);
         }
         index += 1;
@@ -1503,7 +1505,8 @@ fn ends_with(value -> string, suffix -> string) -> boolean {
         if index >= suffix.length {
             break;
         }
-        if value[start + index] != suffix[index] {
+        let _cmp_pos = start + index;
+        if value[_cmp_pos] != suffix[index] {
             return false;
         }
         index += 1;

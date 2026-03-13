@@ -173,7 +173,9 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
             continue;
         }
         if ch == "&" {
-            if index + 1 < trimmed.length && substring(trimmed, index + 1, index + 2) == "&" {
+            let _amp_next = index + 1;
+            let _amp_next2 = index + 2;
+            if _amp_next < trimmed.length && substring(trimmed, _amp_next, _amp_next2) == "&" {
                 index += 2;
                 continue;
             }
@@ -184,13 +186,15 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
                     continue;
                 }
             }
-            let mut cursor -> number = index + 1;
+            let mut cursor -> number = _amp_next;
             let mut mutable_flag -> boolean = false;
-            if cursor + 3 <= trimmed.length {
-                let maybe_mut = substring(trimmed, cursor, cursor + 3);
+            let _cursor_plus3 = cursor + 3;
+            if _cursor_plus3 <= trimmed.length {
+                let maybe_mut = substring(trimmed, cursor, _cursor_plus3);
                 if maybe_mut == "mut" {
-                    let after_mut_index = cursor + 3;
-                    if after_mut_index >= trimmed.length || is_effect_delimiter(substring(trimmed, after_mut_index, after_mut_index + 1)) {
+                    let after_mut_index = _cursor_plus3;
+                    let _after_mut_next = after_mut_index + 1;
+                    if after_mut_index >= trimmed.length || is_effect_delimiter(substring(trimmed, after_mut_index, _after_mut_next)) {
                         mutable_flag = true;
                         cursor = after_mut_index;
                     }
@@ -222,7 +226,8 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
         if ch == "b" {
             if matches_keyword(trimmed, index, "borrow") {
                 let before_index = index - 1;
-                if before_index < 0 || is_effect_prefix_char(substring(trimmed, before_index, before_index + 1)) {
+                let _before_next = before_index + 1;
+                if before_index < 0 || is_effect_prefix_char(substring(trimmed, before_index, _before_next)) {
                     effects = append_unique_effect(effects, "read");
                     index += 6;
                     continue;
@@ -609,15 +614,17 @@ fn filter_runtime_helper_targets(targets -> string[]) -> string[] {
         let mut helper = find_runtime_helper(trimmed);
         if helper == null {
             let dot_index = find_last_index_of_char(trimmed, ".");
-            if dot_index >= 0 && dot_index + 1 < trimmed.length {
-                let suffix = substring(trimmed, dot_index + 1, trimmed.length);
+            let _dot_after = dot_index + 1;
+            if dot_index >= 0 && _dot_after < trimmed.length {
+                let suffix = substring(trimmed, _dot_after, trimmed.length);
                 helper = find_runtime_helper(suffix);
             }
         }
         if helper == null {
             let colon_index = find_last_index_of_char(trimmed, ":");
-            if colon_index >= 0 && colon_index + 1 < trimmed.length {
-                let suffix = substring(trimmed, colon_index + 1, trimmed.length);
+            let _colon_after = colon_index + 1;
+            if colon_index >= 0 && _colon_after < trimmed.length {
+                let suffix = substring(trimmed, _colon_after, trimmed.length);
                 helper = find_runtime_helper(suffix);
             }
         }
@@ -709,14 +716,16 @@ fn contains_dot_property(expression -> string, name -> string) -> boolean {
             index += 1;
             continue;
         }
-        if index + suffix_length <= expression.length {
+        let _sfx_end = index + suffix_length;
+        if _sfx_end <= expression.length {
             let mut match_index -> number = 0;
             let mut matches -> boolean = true;
             loop {
                 if match_index >= suffix_length {
                     break;
                 }
-                let expr_char = char_at(expression, index + match_index);
+                let _expr_pos = index + match_index;
+                let expr_char = char_at(expression, _expr_pos);
                 let suffix_char = char_at(suffix, match_index);
                 if expr_char.length == 0 || suffix_char.length == 0 || expr_char != suffix_char {
                     matches = false;
@@ -725,7 +734,7 @@ fn contains_dot_property(expression -> string, name -> string) -> boolean {
                 match_index += 1;
             }
             if matches {
-                let after_index = index + suffix_length;
+                let after_index = _sfx_end;
                 let after_char = char_at(expression, after_index);
                 if after_char.length == 0 {
                     return true;

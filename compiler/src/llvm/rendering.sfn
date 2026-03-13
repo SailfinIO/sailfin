@@ -722,7 +722,8 @@ fn extract_struct_type_from_llvm(llvm_type -> string) -> string {
                 }
                 end_index += 1;
             }
-            if end_index > index + 1 {
+            let _ren_next = index + 1;
+            if end_index > _ren_next {
                 result = substring(llvm_type, index, end_index);
                 break;
             }

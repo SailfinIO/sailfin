@@ -374,6 +374,97 @@ fn parse_native_functions_from_text(text -> string) -> NativeFunction[] {
     return parsed.functions;
 }
 
+// Individual field extractors that return arrays instead of ParseNativeResult structs.
+// These avoid the seed v0.1.1 struct-return ABI bug (double encoding).
+fn parse_native_structs_from_text(text -> string) -> NativeStruct[] {
+    let parsed = parse_native_artifact_impl(text, true, true);
+    if parsed.structs == null {
+        return [];
+    }
+    return parsed.structs;
+}
+
+fn parse_native_imports_from_text(text -> string) -> NativeImport[] {
+    let parsed = parse_native_artifact_impl(text, true, true);
+    if parsed.imports == null {
+        return [];
+    }
+    return parsed.imports;
+}
+
+fn parse_native_interfaces_from_text(text -> string) -> NativeInterface[] {
+    let parsed = parse_native_artifact_impl(text, true, true);
+    if parsed.interfaces == null {
+        return [];
+    }
+    return parsed.interfaces;
+}
+
+fn parse_native_enums_from_text(text -> string) -> NativeEnum[] {
+    let parsed = parse_native_artifact_impl(text, true, true);
+    if parsed.enums == null {
+        return [];
+    }
+    return parsed.enums;
+}
+
+fn parse_native_bindings_from_text(text -> string) -> NativeBinding[] {
+    let parsed = parse_native_artifact_impl(text, true, true);
+    if parsed.bindings == null {
+        return [];
+    }
+    return parsed.bindings;
+}
+
+fn parse_native_diagnostics_from_text(text -> string) -> string[] {
+    let parsed = parse_native_artifact_impl(text, true, true);
+    if parsed.diagnostics == null {
+        return [];
+    }
+    return parsed.diagnostics;
+}
+
+// Import-context variants: skip instruction bodies and top-level bindings.
+fn parse_native_structs_for_import(text -> string) -> NativeStruct[] {
+    let parsed = parse_native_artifact_impl(text, false, false);
+    if parsed.structs == null {
+        return [];
+    }
+    return parsed.structs;
+}
+
+fn parse_native_imports_for_import(text -> string) -> NativeImport[] {
+    let parsed = parse_native_artifact_impl(text, false, false);
+    if parsed.imports == null {
+        return [];
+    }
+    return parsed.imports;
+}
+
+fn parse_native_interfaces_for_import(text -> string) -> NativeInterface[] {
+    let parsed = parse_native_artifact_impl(text, false, false);
+    if parsed.interfaces == null {
+        return [];
+    }
+    return parsed.interfaces;
+}
+
+fn parse_native_enums_for_import(text -> string) -> NativeEnum[] {
+    let parsed = parse_native_artifact_impl(text, false, false);
+    if parsed.enums == null {
+        return [];
+    }
+    return parsed.enums;
+}
+
+fn parse_native_functions_for_import(text -> string) -> NativeFunction[] {
+    let parsed = parse_native_artifact_impl(text, false, false);
+    if parsed.functions == null {
+        return [];
+    }
+    return parsed.functions;
+}
+
 // Parse a native artifact in a mode suitable for import context:
 // - Keeps signatures, struct/method headers, and interface definitions.
 // - Skips instruction bodies (significant speedup for large imported modules).
@@ -2014,8 +2105,9 @@ fn split_top_level_commas(text -> string) -> string[] {
         if quote.length > 0 {
             current = current + ch;
             if ch == "\\" {
-                if index + 1 < text.length {
-                    current = current + text[index + 1];
+                let _esc_next = index + 1;
+                if _esc_next < text.length {
+                    current = current + text[_esc_next];
                     index += 2;
                     continue;
                 }
@@ -2843,12 +2935,13 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
     }
     let identifier = tokens[0];
     let dot_index = index_of(identifier, ".");
-    if dot_index <= 0 || dot_index + 1 >= identifier.length {
+    let _dot_next = dot_index + 1;
+    if dot_index <= 0 || _dot_next >= identifier.length {
         diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload identifier `" + identifier + "` invalid");
         return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
     }
     let variant_name = substring(identifier, 0, dot_index);
-    let field_name = substring(identifier, dot_index + 1, identifier.length);
+    let field_name = substring(identifier, _dot_next, identifier.length);
     let mut type_text -> string = "";
     let mut offset_found -> boolean = false;
     let mut size_found -> boolean = false;
@@ -3140,8 +3233,9 @@ fn split_parameter_entries(body -> string) -> string[] {
         if quote.length > 0 {
             current = current + ch;
             if ch == "\\" {
-                if index + 1 < body.length {
-                    current = current + body[index + 1];
+                let _esc_next2 = index + 1;
+                if _esc_next2 < body.length {
+                    current = current + body[_esc_next2];
                     index += 2;
                     continue;
                 }
@@ -3632,9 +3726,10 @@ fn index_of(value -> string, target -> string) -> number {
     if target.length == 0 {
         return 0;
     }
+    let _search_limit = value.length - target.length;
     let mut index -> number = 0;
     loop {
-        if index + target.length > value.length {
+        if index > _search_limit {
             break;
         }
         let mut match_index -> number = 0;
@@ -3643,7 +3738,8 @@ fn index_of(value -> string, target -> string) -> number {
             if match_index >= target.length {
                 break;
             }
-            if value[index + match_index] != target[match_index] {
+            let _cmp_pos = index + match_index;
+            if value[_cmp_pos] != target[match_index] {
                 matches = false;
                 break;
             }
@@ -3672,7 +3768,8 @@ fn last_index_of(value -> string, target -> string) -> number {
             if match_index >= target.length {
                 break;
             }
-            if value[index + match_index] != target[match_index] {
+            let _cmp_pos2 = index + match_index;
+            if value[_cmp_pos2] != target[match_index] {
                 matches = false;
                 break;
             }

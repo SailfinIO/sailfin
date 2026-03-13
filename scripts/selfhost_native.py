@@ -109,6 +109,94 @@ double parse_native_functions_from_text(void* arg) {
     return u.d;
 }
 
+extern void* parse_native_structs_from_text__native_ir(void*);
+__attribute__((weak))
+double parse_native_structs_from_text(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_structs_from_text__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_imports_from_text__native_ir(void*);
+__attribute__((weak))
+double parse_native_imports_from_text(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_imports_from_text__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_interfaces_from_text__native_ir(void*);
+__attribute__((weak))
+double parse_native_interfaces_from_text(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_interfaces_from_text__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_enums_from_text__native_ir(void*);
+__attribute__((weak))
+double parse_native_enums_from_text(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_enums_from_text__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_bindings_from_text__native_ir(void*);
+__attribute__((weak))
+double parse_native_bindings_from_text(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_bindings_from_text__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_diagnostics_from_text__native_ir(void*);
+__attribute__((weak))
+double parse_native_diagnostics_from_text(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_diagnostics_from_text__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_structs_for_import__native_ir(void*);
+__attribute__((weak))
+double parse_native_structs_for_import(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_structs_for_import__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_imports_for_import__native_ir(void*);
+__attribute__((weak))
+double parse_native_imports_for_import(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_imports_for_import__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_interfaces_for_import__native_ir(void*);
+__attribute__((weak))
+double parse_native_interfaces_for_import(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_interfaces_for_import__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_enums_for_import__native_ir(void*);
+__attribute__((weak))
+double parse_native_enums_for_import(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_enums_for_import__native_ir(arg);
+    return u.d;
+}
+
+extern void* parse_native_functions_for_import__native_ir(void*);
+__attribute__((weak))
+double parse_native_functions_for_import(void* arg) {
+    union { double d; void* p; } u;
+    u.p = parse_native_functions_for_import__native_ir(arg);
+    return u.d;
+}
+
 extern void* number_to_string__llvm__utils(double);
 __attribute__((weak))
 double number_to_string(double arg) {
@@ -154,6 +242,40 @@ double parse_native_artifact_for_import_context(void* text) {
     *heap = parse_native_artifact_for_import_context__native_ir(text);
     union { double d; void* p; } u;
     u.p = heap;
+    return u.d;
+}
+
+/* ---- Lowering_core recovery function shims (ptr→double bit-cast) ---- */
+
+extern void* recover_native_functions_light__llvm__lowering__lowering_core(void*);
+__attribute__((weak))
+double recover_native_functions_light(void* arg) {
+    union { double d; void* p; } u;
+    u.p = recover_native_functions_light__llvm__lowering__lowering_core(arg);
+    return u.d;
+}
+
+extern void* recover_native_structs_light__llvm__lowering__lowering_core(void*);
+__attribute__((weak))
+double recover_native_structs_light(void* arg) {
+    union { double d; void* p; } u;
+    u.p = recover_native_structs_light__llvm__lowering__lowering_core(arg);
+    return u.d;
+}
+
+extern void* recover_native_imports_light__llvm__lowering__lowering_core(void*);
+__attribute__((weak))
+double recover_native_imports_light(void* arg) {
+    union { double d; void* p; } u;
+    u.p = recover_native_imports_light__llvm__lowering__lowering_core(arg);
+    return u.d;
+}
+
+extern void* build_parse_result_from_text__llvm__lowering__lowering_core(void*);
+__attribute__((weak))
+double build_parse_result_from_text(void* arg) {
+    union { double d; void* p; } u;
+    u.p = build_parse_result_from_text__llvm__lowering__lowering_core(arg);
     return u.d;
 }
 
@@ -532,59 +654,19 @@ def _fix_invalid_null_stores(llvm_ir: str) -> tuple[str, int]:
 def _fix_native_function_param_for_entrypoints(llvm_ir: str) -> tuple[str, int]:
     """Fix the NativeFunction parameter passed to emit_llvm_function.
 
-    The v0.1.1 seed cannot convert a %NativeFunction struct value to i8*
-    for cross-module calls, so it substitutes a random i8* or null.
-    This fixup:
-    1. Changes the declare's first param from i8* to %NativeFunction
-    2. Finds the call site and replaces the wrong i8* arg with the actual
-       %NativeFunction value loaded from a local alloca.
-    3. If no nearby load exists, inserts a fresh load from the nearest
-       NativeFunction alloca (e.g. current_function stored to %l7).
-
-    GUARD: Only apply this fixup if the seed also produced correct return
-    types for critical cross-module functions (e.g. parse_native_artifact
-    returning %ParseNativeResult, not double).  When the seed gets return
-    types wrong, the attempt needs to FAIL so the build pipeline retries
-    and hopefully gets an attempt with correct types everywhere.
+    NOTE: As of the module split, emit_llvm_function's first parameter was
+    changed from NativeFunction to string (function_name_hint).  The seed
+    now generates correct i8* for this parameter.  The NativeFunction
+    struct-to-pointer fixup is no longer needed.  This function is kept
+    as a no-op to avoid breaking the call sites in the build pipeline.
     """
+    return llvm_ir, 0
+
     import re
 
     EMIT_FN = "@emit_llvm_function__llvm__lowering__emission"
     if EMIT_FN not in llvm_ir:
         return llvm_ir, 0
-
-    # GUARD: Check that critical cross-module function declares have correct
-    # return types.  If the seed produced `declare double @parse_native_artifact...()`
-    # or `call double @parse_native_artifact...()` instead of the correct return type,
-    # this attempt has fundamentally broken types and we should NOT fix the NativeFunction
-    # param -- let this attempt fail clang validation so the pipeline retries.
-    CRITICAL_CHECKS = [
-        ("@parse_native_artifact__native_ir(", "%ParseNativeResult"),
-        ("@parse_native_functions_from_text__native_ir(", "{ %NativeFunction*, i64 }*"),
-    ]
-    for func_sig, expected_ret in CRITICAL_CHECKS:
-        for line in llvm_ir.splitlines():
-            stripped = line.strip()
-            # Check explicit declare statements
-            if stripped.startswith("declare") and func_sig in line:
-                if f"declare double {func_sig[:-1]}" in line or f"declare double  {func_sig[:-1]}" in line:
-                    print(
-                        f"[selfhost] NativeFunction fixup SKIPPED: {func_sig} returns double in declare (expected {expected_ret}); forcing retry",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                    # Inject intentional error to force clang failure and trigger retry
-                    return llvm_ir + "\n!GUARD_CHECK_FAILED_FORCE_RETRY\n", 0
-                break
-            # Also check call sites (raw LLVM output may not have explicit declares)
-            if f"call double {func_sig[:-1]}" in line or f"call double  {func_sig[:-1]}" in line:
-                print(
-                    f"[selfhost] NativeFunction fixup SKIPPED: {func_sig} called as double (expected {expected_ret}); forcing retry",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                # Inject intentional error to force clang failure and trigger retry
-                return llvm_ir + "\n!GUARD_CHECK_FAILED_FORCE_RETRY\n", 0
 
     lines = llvm_ir.splitlines()
     changed = 0
@@ -1190,6 +1272,73 @@ def _fix_double_pointer_mismatch(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
+def _fix_native_ir_return_types(llvm_ir: str) -> tuple[str, int]:
+    """Redirect mangled native_ir calls through double-returning shim wrappers.
+
+    The seed v0.1.1 declares all pointer-returning native_ir functions as
+    returning ``double``.  The calling code stores the double-encoded pointer
+    and later bitcasts it back.  This works when the callee also returns
+    ``double`` (via a shim), but the mangled ``__native_ir`` functions
+    actually return pointers.  With ``-O2``, LLVM detects this ABI mismatch
+    and inserts ``unreachable`` (``brk #0x1``), crashing the binary.
+
+    Fix: redirect calls from ``@fn__native_ir`` to ``@fn`` (the unmangled
+    shim in cross_module_shim.c that wraps the pointer→double conversion).
+    This preserves the double calling convention the generated code expects.
+    """
+    import re as _re
+
+    # Mangled functions that have double-returning shim wrappers.
+    _SHIM_REDIRECTS = {
+        "parse_native_functions_from_text__native_ir": "parse_native_functions_from_text",
+        "parse_native_artifact__native_ir": "parse_native_artifact",
+        "parse_native_artifact_for_import_context__native_ir": "parse_native_artifact_for_import_context",
+        "parse_native_structs_from_text__native_ir": "parse_native_structs_from_text",
+        "parse_native_imports_from_text__native_ir": "parse_native_imports_from_text",
+        "parse_native_interfaces_from_text__native_ir": "parse_native_interfaces_from_text",
+        "parse_native_enums_from_text__native_ir": "parse_native_enums_from_text",
+        "parse_native_bindings_from_text__native_ir": "parse_native_bindings_from_text",
+        "parse_native_diagnostics_from_text__native_ir": "parse_native_diagnostics_from_text",
+        "parse_native_structs_for_import__native_ir": "parse_native_structs_for_import",
+        "parse_native_imports_for_import__native_ir": "parse_native_imports_for_import",
+        "parse_native_interfaces_for_import__native_ir": "parse_native_interfaces_for_import",
+        "parse_native_enums_for_import__native_ir": "parse_native_enums_for_import",
+        "parse_native_functions_for_import__native_ir": "parse_native_functions_for_import",
+        "split_lines__native_ir": "split_lines",
+        "select_text_artifact__native_ir": "select_text_artifact",
+        # Lowering_core cross-module functions that return double incorrectly.
+        "recover_native_imports_light__llvm__lowering__lowering_core": "recover_native_imports_light",
+        "build_parse_result_from_text__llvm__lowering__lowering_core": "build_parse_result_from_text",
+    }
+
+    if not llvm_ir:
+        return llvm_ir, 0
+
+    changed = 0
+    lines = llvm_ir.splitlines()
+
+    for i, line in enumerate(lines):
+        for mangled, unmangled in _SHIM_REDIRECTS.items():
+            if f"@{mangled}" not in line:
+                continue
+            # Redirect declare: declare double @fn__native_ir → declare double @fn
+            if line.strip().startswith("declare") and f"@{mangled}" in line:
+                new_line = line.replace(f"@{mangled}", f"@{unmangled}")
+                if new_line != line:
+                    lines[i] = new_line
+                    changed += 1
+                break
+            # Redirect calls: call double @fn__native_ir → call double @fn
+            if "call" in line and f"@{mangled}" in line:
+                new_line = line.replace(f"@{mangled}", f"@{unmangled}")
+                if new_line != line:
+                    lines[i] = new_line
+                    changed += 1
+                break
+
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
 def _fix_store_type_mismatches(llvm_ir: str) -> tuple[str, int]:
     """Fix store instructions where the value type doesn't match the stored type.
 
@@ -1347,16 +1496,33 @@ def _fix_degenerate_loops(llvm_ir: str) -> tuple[str, int]:
         s = lines[i].strip()
         # Check for "loop.latchN:" label
         if s.startswith("loop.latch") and s.endswith(":"):
-            next_line = lines[i + 1].strip()
-            header_match = _re.match(
-                r"br label %loop\.header(\d+)\s*$", next_line
-            )
-            if header_match:
+            latch_label = s[:-1]  # e.g. "loop.latch2"
+            # The latch block may contain load instructions before the
+            # final ``br label %loop.headerN``.  Scan ahead up to 15
+            # lines to find the terminating branch.
+            header_match = None
+            br_line_idx = None
+            load_line_indices = []
+            for scan in range(i + 1, min(i + 16, len(lines))):
+                candidate = lines[scan].strip()
+                # Stop if we hit another label (we've left the latch).
+                if candidate and not candidate.startswith(";") and not candidate.startswith("%") and not candidate.startswith("br ") and not candidate.startswith("store ") and "=" not in candidate and candidate.endswith(":"):
+                    break
+                header_match = _re.match(
+                    r"br label %loop\.header(\d+)\s*$", candidate
+                )
+                if header_match:
+                    br_line_idx = scan
+                    break
+                # Track load instructions in the latch.
+                if "= load " in candidate:
+                    load_line_indices.append(scan)
+            if header_match and br_line_idx is not None:
                 header_label = f"loop.header{header_match.group(1)}"
 
-                # Find the afterloop label that follows this latch.
+                # Find the afterloop label that follows the branch.
                 after_label = None
-                for j in range(i + 2, min(i + 5, len(lines))):
+                for j in range(br_line_idx + 1, min(br_line_idx + 5, len(lines))):
                     after_s = lines[j].strip()
                     after_match = _re.match(r"(afterloop\d+):", after_s)
                     if after_match:
@@ -1368,22 +1534,55 @@ def _fix_degenerate_loops(llvm_ir: str) -> tuple[str, int]:
                     continue
 
                 # Scan the loop body (header → latch) for any branch to
-                # %afterloop.  If the body already exits the loop, it is
-                # NOT degenerate and must be left alone.
+                # %afterloop OR any ret instruction.  If the body already
+                # exits the loop (via branch or return), it is NOT
+                # degenerate and must be left alone.
                 body_has_exit = False
                 # Walk backwards from the latch to find the header.
+                header_line_idx = None
                 for k in range(i - 1, -1, -1):
                     if lines[k].strip() == f"{header_label}:":
+                        header_line_idx = k
                         # Scan forward from header to latch.
                         for m in range(k + 1, i):
-                            if f"%{after_label}" in lines[m]:
+                            stripped_m = lines[m].strip()
+                            if f"%{after_label}" in stripped_m:
+                                body_has_exit = True
+                                break
+                            # A ret instruction is also a valid loop exit
+                            if stripped_m.startswith("ret "):
                                 body_has_exit = True
                                 break
                         break
 
                 if not body_has_exit:
-                    indent = lines[i + 1][:len(lines[i + 1]) - len(lines[i + 1].lstrip())]
-                    lines[i + 1] = f"{indent}br label %{after_label}"
+                    indent = lines[br_line_idx][:len(lines[br_line_idx]) - len(lines[br_line_idx].lstrip())]
+                    lines[br_line_idx] = f"{indent}br label %{after_label}"
+                    # Comment out load instructions in the latch (now dead
+                    # code since the latch no longer loops back).
+                    for li in load_line_indices:
+                        lines[li] = f"{indent}; dead latch load: {lines[li].strip()}"
+                    # Remove phi entries that reference this latch label
+                    # from the header block (the latch no longer branches
+                    # to the header, so phi predecessors are invalid).
+                    if header_line_idx is not None:
+                        for h in range(header_line_idx + 1, i):
+                            hl = lines[h].strip()
+                            if "= phi " in hl and f"%{latch_label}" in hl:
+                                # Remove the latch alternative from the phi.
+                                # Pattern: [ %val, %loop.latchN ]
+                                lines[h] = _re.sub(
+                                    r",?\s*\[\s*%\w+\s*,\s*%" + _re.escape(latch_label) + r"\s*\]",
+                                    "",
+                                    lines[h],
+                                )
+                                # If the phi now has only one incoming, convert
+                                # to a simple assignment.
+                                one_arm = _re.match(
+                                    r"\s*(%\w+)\s*=\s*phi\s+(\S+)\s+\[\s*(%\S+)\s*,\s*%\S+\s*\]\s*$",
+                                    lines[h],
+                                )
+                                # Single-predecessor phi is valid LLVM IR; leave as-is.
                     changed += 1
         i += 1
 
@@ -1466,6 +1665,639 @@ def _stub_missing_entrypoint_helpers(llvm_ir: str) -> tuple[str, int]:
         changed += 1
 
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
+    """Replace seed-generated `ret null` bodies in struct construction helpers.
+
+    The seed v0.1.1 drops all struct literal constructions, compiling them
+    to ``ret i8* null``.  This pass detects known struct-construction helper
+    functions and replaces their bodies with correct LLVM IR that allocates
+    the struct and sets each field.
+    """
+    import re as _re
+
+    # Map: function name suffix → replacement body generator.
+    # Each generator receives the function's parameter names and produces
+    # the body lines (between ``block.entry:`` and the closing ``}``).
+
+    def _empty_array(lines, t, elem_type, elem_llvm):
+        """Emit code for an empty typed array and return the register name."""
+        # Allocate element storage (1 byte min).
+        lines.append(f"  %{t}_esz = getelementptr {elem_llvm}, {elem_llvm}* null, i32 1")
+        lines.append(f"  %{t}_eszi = ptrtoint {elem_llvm}* %{t}_esz to i64")
+        lines.append(f"  %{t}_esel = select i1 false, i64 1, i64 %{t}_eszi")
+        lines.append(f"  %{t}_eraw = call i8* @malloc(i64 %{t}_esel)")
+        lines.append(f"  %{t}_eptr = bitcast i8* %{t}_eraw to {elem_llvm}*")
+        # Allocate array header { elem*, i64 }.
+        arr_type = f"{{ {elem_llvm}*, i64 }}"
+        lines.append(f"  %{t}_asz = getelementptr {arr_type}, {arr_type}* null, i32 1")
+        lines.append(f"  %{t}_aszi = ptrtoint {arr_type}* %{t}_asz to i64")
+        lines.append(f"  %{t}_araw = call i8* @malloc(i64 %{t}_aszi)")
+        lines.append(f"  %{t}_aptr = bitcast i8* %{t}_araw to {arr_type}*")
+        lines.append(f"  %{t}_dp = getelementptr {arr_type}, {arr_type}* %{t}_aptr, i32 0, i32 0")
+        lines.append(f"  store {elem_llvm}* %{t}_eptr, {elem_llvm}** %{t}_dp")
+        lines.append(f"  %{t}_lp = getelementptr {arr_type}, {arr_type}* %{t}_aptr, i32 0, i32 1")
+        lines.append(f"  store i64 0, i64* %{t}_lp")
+        return f"%{t}_aptr"
+
+    def _alloc_struct(lines, t, llvm_type):
+        """Emit struct allocation, return pointer register."""
+        lines.append(f"  %{t}_sz = getelementptr {llvm_type}, {llvm_type}* null, i32 1")
+        lines.append(f"  %{t}_szi = ptrtoint {llvm_type}* %{t}_sz to i64")
+        lines.append(f"  %{t}_raw = call i8* @malloc(i64 %{t}_szi)")
+        lines.append(f"  %{t}_ptr = bitcast i8* %{t}_raw to {llvm_type}*")
+        return f"%{t}_ptr"
+
+    def _set_field(lines, t, struct_ptr, struct_type, idx, field_type, value):
+        """Emit GEP + store for a struct field."""
+        lines.append(f"  %{t}_fp = getelementptr {struct_type}, {struct_type}* {struct_ptr}, i32 0, i32 {idx}")
+        lines.append(f"  store {field_type} {value}, {field_type}* %{t}_fp")
+
+    # --- Helper: make_native_function_basic(name: i8*, is_async: i1) -> NativeFunction* ---
+    # %NativeFunction = type { i8*, i1, { %NativeParameter*, i64 }*, i8*, { i8**, i64 }*, { i8**, i64 }*, i1, { %NativeInstruction*, i64 }* }
+    _HELPERS: dict[str, str] = {}
+
+    def _gen_make_native_function_basic():
+        NF = "%NativeFunction"
+        NP = "%NativeParameter"
+        NI = "%NativeInstruction"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NF)
+        _set_field(lines, "f0", ptr, NF, 0, "i8*", "%name")
+        _set_field(lines, "f1", ptr, NF, 1, "i1", "%is_async")
+        # parameters: empty NativeParameter[]
+        params_arr = _empty_array(lines, "p", "NativeParameter", NP)
+        _set_field(lines, "f2", ptr, NF, 2, f"{{ {NP}*, i64 }}*", params_arr)
+        # return_type: "void"
+        lines.append('  %rt = call i8* @malloc(i64 5)')
+        lines.append('  %rtc = bitcast i8* %rt to [5 x i8]*')
+        lines.append('  store [5 x i8] c"void\\00", [5 x i8]* %rtc, align 1')
+        _set_field(lines, "f3", ptr, NF, 3, "i8*", "%rt")
+        # effects: empty string[]
+        effects_arr = _empty_array(lines, "e", "string", "i8*")
+        _set_field(lines, "f4", ptr, NF, 4, "{ i8**, i64 }*", effects_arr)
+        # decorators: empty string[]
+        dec_arr = _empty_array(lines, "d", "string", "i8*")
+        _set_field(lines, "f5", ptr, NF, 5, "{ i8**, i64 }*", dec_arr)
+        # is_extern: false
+        _set_field(lines, "f6", ptr, NF, 6, "i1", "false")
+        # instructions: empty NativeInstruction[]
+        instr_arr = _empty_array(lines, "i", "NativeInstruction", NI)
+        _set_field(lines, "f7", ptr, NF, 7, f"{{ {NI}*, i64 }}*", instr_arr)
+        lines.append(f"  %ret = bitcast {NF}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_function_basic"] = _gen_make_native_function_basic()
+
+    def _gen_make_native_function_method():
+        NF = "%NativeFunction"
+        NP = "%NativeParameter"
+        NI = "%NativeInstruction"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NF)
+        _set_field(lines, "f0", ptr, NF, 0, "i8*", "%name")
+        _set_field(lines, "f1", ptr, NF, 1, "i1", "false")  # not async
+        # self parameter
+        sp = _alloc_struct(lines, "sp", NP)
+        lines.append('  %selfstr = call i8* @malloc(i64 5)')
+        lines.append('  %selfstrc = bitcast i8* %selfstr to [5 x i8]*')
+        lines.append('  store [5 x i8] c"self\\00", [5 x i8]* %selfstrc, align 1')
+        _set_field(lines, "sp0", sp, NP, 0, "i8*", "%selfstr")
+        _set_field(lines, "sp1", sp, NP, 1, "i8*", "%self_type")
+        _set_field(lines, "sp2", sp, NP, 2, "i1", "false")
+        _set_field(lines, "sp3", sp, NP, 3, "i8*", "null")
+        _set_field(lines, "sp4", sp, NP, 4, "%NativeSourceSpan*", "null")
+        # params array with self
+        params_arr = _empty_array(lines, "p", "NativeParameter", NP)
+        lines.append(f"  %spcast = bitcast {NP}* {sp} to i8*")
+        pa_type = f"{{ {NP}*, i64 }}"
+        lines.append(f"  %pa_dp = getelementptr {pa_type}, {pa_type}* {params_arr}, i32 0, i32 0")
+        lines.append(f"  %pa_dp_raw = load {NP}*, {NP}** %pa_dp")
+        lines.append(f"  store {NP} zeroinitializer, {NP}* %pa_dp_raw")
+        # Copy self_param into the array slot
+        lines.append(f"  %sp_loaded = load {NP}, {NP}* {sp}")
+        lines.append(f"  store {NP} %sp_loaded, {NP}* %pa_dp_raw")
+        lines.append(f"  %pa_lp = getelementptr {pa_type}, {pa_type}* {params_arr}, i32 0, i32 1")
+        lines.append(f"  store i64 1, i64* %pa_lp")
+        _set_field(lines, "f2", ptr, NF, 2, f"{pa_type}*", params_arr)
+        _set_field(lines, "f3", ptr, NF, 3, "i8*", "%ret_type")
+        effects_arr = _empty_array(lines, "e", "string", "i8*")
+        _set_field(lines, "f4", ptr, NF, 4, "{ i8**, i64 }*", effects_arr)
+        dec_arr = _empty_array(lines, "d", "string", "i8*")
+        _set_field(lines, "f5", ptr, NF, 5, "{ i8**, i64 }*", dec_arr)
+        _set_field(lines, "f6", ptr, NF, 6, "i1", "false")
+        instr_arr = _empty_array(lines, "i", "NativeInstruction", NI)
+        _set_field(lines, "f7", ptr, NF, 7, f"{{ {NI}*, i64 }}*", instr_arr)
+        lines.append(f"  %ret = bitcast {NF}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_function_method"] = _gen_make_native_function_method()
+
+    def _gen_update_function_field(field_idx, field_type, param_name):
+        """Generate updater: copy all fields, replace one."""
+        NF = "%NativeFunction"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NF)
+        lines.append(f"  %src = bitcast i8* %fn_val to {NF}*")
+        field_types = [
+            ("i8*", 0), ("i1", 1),
+            ("{ %NativeParameter*, i64 }*", 2), ("i8*", 3),
+            ("{ i8**, i64 }*", 4), ("{ i8**, i64 }*", 5),
+            ("i1", 6), ("{ %NativeInstruction*, i64 }*", 7),
+        ]
+        for ft, fi in field_types:
+            src_gep = f"  %sg{fi} = getelementptr {NF}, {NF}* %src, i32 0, i32 {fi}"
+            src_load = f"  %sv{fi} = load {ft}, {ft}* %sg{fi}"
+            lines.append(src_gep)
+            lines.append(src_load)
+            if fi == field_idx:
+                val = param_name
+            else:
+                val = f"%sv{fi}"
+            _set_field(lines, f"u{fi}", ptr, NF, fi, ft, val)
+        lines.append(f"  %ret = bitcast {NF}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["update_function_return_type"] = _gen_update_function_field(3, "i8*", "%ret_type")
+    _HELPERS["update_function_effects"] = _gen_update_function_field(4, "{ i8**, i64 }*", "%effects")
+    _HELPERS["update_function_params"] = _gen_update_function_field(2, "{ %NativeParameter*, i64 }*", "%params")
+    _HELPERS["update_function_instructions"] = _gen_update_function_field(7, "{ %NativeInstruction*, i64 }*", "%instrs")
+
+    def _gen_make_native_import():
+        NIS = "%NativeImportSpecifier"
+        NIM = "%NativeImport"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NIM)
+        lines.append('  %kind = call i8* @malloc(i64 6)')
+        lines.append('  %kindc = bitcast i8* %kind to [6 x i8]*')
+        lines.append('  store [6 x i8] c"named\\00", [6 x i8]* %kindc, align 1')
+        _set_field(lines, "f0", ptr, NIM, 0, "i8*", "%kind")
+        _set_field(lines, "f1", ptr, NIM, 1, "i8*", "%module_path")
+        specs_arr = _empty_array(lines, "sp", "NativeImportSpecifier", NIS)
+        _set_field(lines, "f2", ptr, NIM, 2, f"{{ {NIS}*, i64 }}*", specs_arr)
+        lines.append(f"  %ret = bitcast {NIM}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_import"] = _gen_make_native_import()
+
+    def _gen_make_native_struct():
+        NS = "%NativeStruct"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NS)
+        _set_field(lines, "f0", ptr, NS, 0, "i8*", "%sname")
+        _set_field(lines, "f1", ptr, NS, 1, "{ %NativeStructField*, i64 }*", "%sfields")
+        _set_field(lines, "f2", ptr, NS, 2, "{ %NativeFunction*, i64 }*", "%smethods")
+        impl_arr = _empty_array(lines, "im", "implements", "i8*")
+        _set_field(lines, "f3", ptr, NS, 3, "{ i8**, i64 }*", impl_arr)
+        _set_field(lines, "f4", ptr, NS, 4, "%NativeStructLayout*", "%slayout")
+        lines.append(f"  %ret = bitcast {NS}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_struct"] = _gen_make_native_struct()
+
+    def _gen_make_native_struct_layout():
+        NSL = "%NativeStructLayout"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NSL)
+        _set_field(lines, "f0", ptr, NSL, 0, "double", "%sz")
+        _set_field(lines, "f1", ptr, NSL, 1, "double", "%al")
+        _set_field(lines, "f2", ptr, NSL, 2, "{ %NativeStructLayoutField*, i64 }*", "%flds")
+        lines.append(f"  %ret = bitcast {NSL}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_struct_layout"] = _gen_make_native_struct_layout()
+
+    def _gen_make_native_struct_field():
+        NSF = "%NativeStructField"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NSF)
+        _set_field(lines, "f0", ptr, NSF, 0, "i8*", "%fname")
+        _set_field(lines, "f1", ptr, NSF, 1, "i8*", "%ftype")
+        _set_field(lines, "f2", ptr, NSF, 2, "i1", "false")
+        lines.append(f"  %ret = bitcast {NSF}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_struct_field"] = _gen_make_native_struct_field()
+
+    def _gen_make_native_struct_layout_field():
+        NSLF = "%NativeStructLayoutField"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NSLF)
+        _set_field(lines, "f0", ptr, NSLF, 0, "i8*", "%lf_name")
+        _set_field(lines, "f1", ptr, NSLF, 1, "i8*", "%lf_type")
+        _set_field(lines, "f2", ptr, NSLF, 2, "double", "%lf_offset")
+        _set_field(lines, "f3", ptr, NSLF, 3, "double", "%lf_size")
+        _set_field(lines, "f4", ptr, NSLF, 4, "double", "%lf_align")
+        lines.append(f"  %ret = bitcast {NSLF}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_struct_layout_field"] = _gen_make_native_struct_layout_field()
+
+    def _gen_make_native_parameter():
+        NP = "%NativeParameter"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NP)
+        _set_field(lines, "f0", ptr, NP, 0, "i8*", "%pname")
+        _set_field(lines, "f1", ptr, NP, 1, "i8*", "%ptype")
+        _set_field(lines, "f2", ptr, NP, 2, "i1", "false")
+        _set_field(lines, "f3", ptr, NP, 3, "i8*", "null")
+        _set_field(lines, "f4", ptr, NP, 4, "%NativeSourceSpan*", "null")
+        lines.append(f"  %ret = bitcast {NP}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_parameter"] = _gen_make_native_parameter()
+
+    def _gen_append_param_to_function():
+        """append_param_to_function(func: i8*, param: i8*) -> i8*
+        Reads func.parameters array, appends param, returns new NativeFunction."""
+        NF = "%NativeFunction"
+        NP = "%NativeParameter"
+        ARR = "{ %NativeParameter*, i64 }"
+        lines = []
+        # Cast func
+        lines.append(f"  %src = bitcast i8* %func to {NF}*")
+        # Read parameters field (index 2)
+        lines.append(f"  %pg = getelementptr {NF}, {NF}* %src, i32 0, i32 2")
+        lines.append(f"  %arr = load {ARR}*, {ARR}** %pg")
+        # Read data ptr and length
+        lines.append(f"  %dp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 0")
+        lines.append(f"  %old_data = load {NP}*, {NP}** %dp")
+        lines.append(f"  %lp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 1")
+        lines.append(f"  %old_len = load i64, i64* %lp")
+        # Element size
+        lines.append(f"  %esz_p = getelementptr {NP}, {NP}* null, i32 1")
+        lines.append(f"  %esz = ptrtoint {NP}* %esz_p to i64")
+        # New length and allocation
+        lines.append(f"  %new_len = add i64 %old_len, 1")
+        lines.append(f"  %new_bytes = mul i64 %new_len, %esz")
+        lines.append(f"  %new_raw = call i8* @malloc(i64 %new_bytes)")
+        lines.append(f"  %new_data = bitcast i8* %new_raw to {NP}*")
+        # Copy old data via memcpy
+        lines.append(f"  %old_bytes = mul i64 %old_len, %esz")
+        lines.append(f"  %old_raw = bitcast {NP}* %old_data to i8*")
+        lines.append(f"  call void @memcpy(i8* %new_raw, i8* %old_raw, i64 %old_bytes)")
+        # Copy new param struct to last slot
+        lines.append(f"  %slot = getelementptr {NP}, {NP}* %new_data, i64 %old_len")
+        lines.append(f"  %param_ptr = bitcast i8* %param to {NP}*")
+        # Copy field by field (5 fields in NativeParameter)
+        for fi, ft in [(0, "i8*"), (1, "i8*"), (2, "i1"), (3, "i8*"), (4, "%NativeSourceSpan*")]:
+            lines.append(f"  %pf{fi}g = getelementptr {NP}, {NP}* %param_ptr, i32 0, i32 {fi}")
+            lines.append(f"  %pf{fi}v = load {ft}, {ft}* %pf{fi}g")
+            lines.append(f"  %sf{fi}g = getelementptr {NP}, {NP}* %slot, i32 0, i32 {fi}")
+            lines.append(f"  store {ft} %pf{fi}v, {ft}* %sf{fi}g")
+        # Build new array header
+        lines.append(f"  %narr_sz = getelementptr {ARR}, {ARR}* null, i32 1")
+        lines.append(f"  %narr_szi = ptrtoint {ARR}* %narr_sz to i64")
+        lines.append(f"  %narr_raw = call i8* @malloc(i64 %narr_szi)")
+        lines.append(f"  %narr = bitcast i8* %narr_raw to {ARR}*")
+        lines.append(f"  %ndp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 0")
+        lines.append(f"  store {NP}* %new_data, {NP}** %ndp")
+        lines.append(f"  %nlp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 1")
+        lines.append(f"  store i64 %new_len, i64* %nlp")
+        # Call update_function_params to build new NativeFunction
+        lines.append(f"  %narr_i8 = bitcast {ARR}* %narr to i8*")
+        lines.append(f"  %result = call i8* @update_function_params__llvm__lowering__lowering_core(i8* %func, i8* %narr_i8)")
+        lines.append(f"  ret i8* %result")
+        return "\n".join(lines)
+
+    _HELPERS["append_param_to_function"] = _gen_append_param_to_function()
+
+    def _gen_append_instruction_to_function():
+        """append_instruction_to_function(func: i8*, instr: i8*) -> i8*
+        Reads func.instructions array, appends instr, returns new NativeFunction."""
+        NF = "%NativeFunction"
+        NI = "%NativeInstruction"
+        ARR = "{ %NativeInstruction*, i64 }"
+        lines = []
+        # Cast func
+        lines.append(f"  %src = bitcast i8* %func to {NF}*")
+        # Read instructions field (index 7)
+        lines.append(f"  %ig = getelementptr {NF}, {NF}* %src, i32 0, i32 7")
+        lines.append(f"  %arr = load {ARR}*, {ARR}** %ig")
+        # Read data ptr and length
+        lines.append(f"  %dp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 0")
+        lines.append(f"  %old_data = load {NI}*, {NI}** %dp")
+        lines.append(f"  %lp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 1")
+        lines.append(f"  %old_len = load i64, i64* %lp")
+        # Element size
+        lines.append(f"  %esz_p = getelementptr {NI}, {NI}* null, i32 1")
+        lines.append(f"  %esz = ptrtoint {NI}* %esz_p to i64")
+        # New length and allocation
+        lines.append(f"  %new_len = add i64 %old_len, 1")
+        lines.append(f"  %new_bytes = mul i64 %new_len, %esz")
+        lines.append(f"  %new_raw = call i8* @malloc(i64 %new_bytes)")
+        lines.append(f"  %new_data = bitcast i8* %new_raw to {NI}*")
+        # Copy old data via memcpy
+        lines.append(f"  %old_bytes = mul i64 %old_len, %esz")
+        lines.append(f"  %old_raw = bitcast {NI}* %old_data to i8*")
+        lines.append(f"  call void @memcpy(i8* %new_raw, i8* %old_raw, i64 %old_bytes)")
+        # Copy new instruction to last slot
+        # %NativeInstruction = type { i32, [4 x i8], [6 x i64] }
+        # Load and store the whole struct (it's a value type)
+        lines.append(f"  %slot = getelementptr {NI}, {NI}* %new_data, i64 %old_len")
+        lines.append(f"  %instr_ptr = bitcast i8* %instr to {NI}*")
+        lines.append(f"  %ival = load {NI}, {NI}* %instr_ptr")
+        lines.append(f"  store {NI} %ival, {NI}* %slot")
+        # Build new array header
+        lines.append(f"  %narr_sz = getelementptr {ARR}, {ARR}* null, i32 1")
+        lines.append(f"  %narr_szi = ptrtoint {ARR}* %narr_sz to i64")
+        lines.append(f"  %narr_raw = call i8* @malloc(i64 %narr_szi)")
+        lines.append(f"  %narr = bitcast i8* %narr_raw to {ARR}*")
+        lines.append(f"  %ndp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 0")
+        lines.append(f"  store {NI}* %new_data, {NI}** %ndp")
+        lines.append(f"  %nlp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 1")
+        lines.append(f"  store i64 %new_len, i64* %nlp")
+        # Call update_function_instructions to build new NativeFunction
+        lines.append(f"  %narr_i8 = bitcast {ARR}* %narr to i8*")
+        lines.append(f"  %result = call i8* @update_function_instructions__llvm__lowering__lowering_core(i8* %func, i8* %narr_i8)")
+        lines.append(f"  ret i8* %result")
+        return "\n".join(lines)
+
+    _HELPERS["append_instruction_to_function"] = _gen_append_instruction_to_function()
+
+    def _gen_make_instruction_text():
+        """make_instruction_text(tag_val: double, text: i8*) -> NativeInstruction*
+        Allocates NativeInstruction { i32 tag, [4 x i8] pad, [6 x i64] payload }
+        Sets payload[0] = text pointer, payload[1..5] = 0."""
+        NI = "%NativeInstruction"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NI)
+        # Convert double tag to i32.
+        lines.append("  %tag_i32 = fptosi double %tag_val to i32")
+        _set_field(lines, "f0", ptr, NI, 0, "i32", "%tag_i32")
+        # Padding field: zero.
+        lines.append(f"  %pad_p = getelementptr {NI}, {NI}* {ptr}, i32 0, i32 1")
+        lines.append("  store [4 x i8] zeroinitializer, [4 x i8]* %pad_p")
+        # Payload: [6 x i64]. Set slot 0 = text ptr, rest = 0.
+        lines.append(f"  %pay_p = getelementptr {NI}, {NI}* {ptr}, i32 0, i32 2")
+        lines.append("  %text_i64 = ptrtoint i8* %text to i64")
+        # Build [6 x i64] with first element = text_i64, rest = 0.
+        lines.append("  %s0 = insertvalue [6 x i64] zeroinitializer, i64 %text_i64, 0")
+        lines.append("  store [6 x i64] %s0, [6 x i64]* %pay_p")
+        lines.append(f"  %ret = bitcast {NI}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_instruction_text"] = _gen_make_instruction_text()
+
+    def _gen_make_instruction_simple():
+        """make_instruction_simple(tag_val: double) -> NativeInstruction*
+        Allocates NativeInstruction with given tag and zero payload."""
+        NI = "%NativeInstruction"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NI)
+        lines.append("  %tag_i32 = fptosi double %tag_val to i32")
+        _set_field(lines, "f0", ptr, NI, 0, "i32", "%tag_i32")
+        lines.append(f"  %pad_p = getelementptr {NI}, {NI}* {ptr}, i32 0, i32 1")
+        lines.append("  store [4 x i8] zeroinitializer, [4 x i8]* %pad_p")
+        lines.append(f"  %pay_p = getelementptr {NI}, {NI}* {ptr}, i32 0, i32 2")
+        lines.append("  store [6 x i64] zeroinitializer, [6 x i64]* %pay_p")
+        lines.append(f"  %ret = bitcast {NI}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_instruction_simple"] = _gen_make_instruction_simple()
+
+    def _gen_build_parse_result_from_text():
+        """build_parse_result_from_text(native_text: i8*) -> ParseNativeResult*
+        Calls intra-module recovery functions then builds ParseNativeResult."""
+        # ParseNativeResult has 7 pointer fields — use concrete type to avoid opaque sizing.
+        PNR = "{ i8*, i8*, i8*, i8*, i8*, i8*, i8* }"
+        lines = []
+        # Call recovery functions (intra-module, correct types).
+        lines.append("  %fns = call { %NativeFunction*, i64 }* @recover_native_functions_light__llvm__lowering__lowering_core(i8* %native_text)")
+        lines.append("  %sts = call { %NativeStruct*, i64 }* @recover_native_structs_light__llvm__lowering__lowering_core(i8* %native_text)")
+        lines.append("  %ims = call { %NativeImport*, i64 }* @recover_native_imports_light__llvm__lowering__lowering_core(i8* %native_text)")
+        # Allocate ParseNativeResult (7 pointer fields = 56 bytes).
+        ptr = _alloc_struct(lines, "s", PNR)
+        # Field 0: functions
+        lines.append(f"  %fns_i8 = bitcast {{ %NativeFunction*, i64 }}* %fns to i8*")
+        _set_field(lines, "f0", ptr, PNR, 0, "i8*", "%fns_i8")
+        # Field 1: imports
+        lines.append(f"  %ims_i8 = bitcast {{ %NativeImport*, i64 }}* %ims to i8*")
+        _set_field(lines, "f1", ptr, PNR, 1, "i8*", "%ims_i8")
+        # Field 2: structs
+        lines.append(f"  %sts_i8 = bitcast {{ %NativeStruct*, i64 }}* %sts to i8*")
+        _set_field(lines, "f2", ptr, PNR, 2, "i8*", "%sts_i8")
+        # Fields 3-6: empty arrays (interfaces, enums, bindings, diagnostics)
+        for idx, label in [(3, "ifc"), (4, "enm"), (5, "bnd"), (6, "dia")]:
+            arr = _empty_array(lines, label, "empty", "i8*")
+            arr_i8 = f"%{label}_arr_i8"
+            lines.append(f"  {arr_i8} = bitcast {{ i8**, i64 }}* {arr} to i8*")
+            _set_field(lines, f"f{idx}", ptr, PNR, idx, "i8*", arr_i8)
+        lines.append(f"  %ret = bitcast {PNR}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["build_parse_result_from_text"] = _gen_build_parse_result_from_text()
+
+    def _gen_make_native_module_for_emit():
+        """make_native_module_for_emit(module_name: i8*, native_text: i8*) -> NativeModule*
+        Builds NativeModule { name, [NativeArtifact{...}], [], 0 }."""
+        # Use concrete types to avoid opaque struct sizing issues.
+        NA = "{ i8*, i8*, i8* }"  # NativeArtifact: name, format, contents
+        NM = "{ i8*, { i8*, i64 }*, { i8**, i64 }*, double }"  # NativeModule
+        lines = []
+        # Allocate NativeArtifact.
+        art_ptr = _alloc_struct(lines, "a", NA)
+        _set_field(lines, "a0", art_ptr, NA, 0, "i8*", "%module_name")
+        # "sailfin-native-text" string.
+        lines.append('  %fmt = call i8* @malloc(i64 20)')
+        lines.append('  %fmtc = bitcast i8* %fmt to [20 x i8]*')
+        lines.append('  store [20 x i8] c"sailfin-native-text\\00", [20 x i8]* %fmtc, align 1')
+        _set_field(lines, "a1", art_ptr, NA, 1, "i8*", "%fmt")
+        _set_field(lines, "a2", art_ptr, NA, 2, "i8*", "%native_text")
+        # Build artifacts array: { artifact_ptr, length }.
+        arr_type = "{ i8*, i64 }"
+        lines.append(f"  %arr_sz = getelementptr {arr_type}, {arr_type}* null, i32 1")
+        lines.append(f"  %arr_szi = ptrtoint {arr_type}* %arr_sz to i64")
+        lines.append(f"  %arr_raw = call i8* @malloc(i64 %arr_szi)")
+        lines.append(f"  %arr = bitcast i8* %arr_raw to {arr_type}*")
+        lines.append(f"  %art_i8 = bitcast {NA}* {art_ptr} to i8*")
+        lines.append(f"  %arr_dp = getelementptr {arr_type}, {arr_type}* %arr, i32 0, i32 0")
+        lines.append(f"  store i8* %art_i8, i8** %arr_dp")
+        lines.append(f"  %arr_lp = getelementptr {arr_type}, {arr_type}* %arr, i32 0, i32 1")
+        lines.append(f"  store i64 1, i64* %arr_lp")
+        # Allocate NativeModule.
+        mod_ptr = _alloc_struct(lines, "m", NM)
+        _set_field(lines, "m0", mod_ptr, NM, 0, "i8*", "%module_name")
+        _set_field(lines, "m1", mod_ptr, NM, 1, f"{{ i8*, i64 }}*", "%arr")
+        # entry_points: empty string array.
+        ep_arr = _empty_array(lines, "ep", "entry_points", "i8*")
+        _set_field(lines, "m2", mod_ptr, NM, 2, "{ i8**, i64 }*", ep_arr)
+        # symbol_count: 0.0 (double).
+        _set_field(lines, "m3", mod_ptr, NM, 3, "double", "0.0")
+        lines.append(f"  %ret = bitcast {NM}* {mod_ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_module_for_emit"] = _gen_make_native_module_for_emit()
+
+    # --- NativeFunction field accessor helpers ---
+    # Each takes ({ %NativeFunction*, i64 }* %functions, double %idx).
+    # The seed compiles by-value struct field access as 0.0; these helpers
+    # use proper GEP+load to extract the right field.
+    NF = "%NativeFunction"
+
+    def _gen_fn_field_accessor(field_idx, ret_type, field_llvm_type):
+        """Generate body for get_function_XXX_at(functions, idx)."""
+        lines = []
+        # Convert double idx to i64.
+        lines.append("  %idx_i = fptosi double %idx to i64")
+        # Load array header.
+        lines.append(f"  %hdr = load {{ {NF}*, i64 }}, {{ {NF}*, i64 }}* %functions")
+        lines.append(f"  %data = extractvalue {{ {NF}*, i64 }} %hdr, 0")
+        # GEP to element.
+        lines.append(f"  %elem_ptr = getelementptr {NF}, {NF}* %data, i64 %idx_i")
+        # GEP to field within element.
+        lines.append(f"  %field_ptr = getelementptr {NF}, {NF}* %elem_ptr, i32 0, i32 {field_idx}")
+        # Load field.
+        lines.append(f"  %val = load {field_llvm_type}, {field_llvm_type}* %field_ptr")
+        if ret_type == "i8*" and field_llvm_type == "i8*":
+            lines.append("  ret i8* %val")
+        elif ret_type == "i1" and field_llvm_type == "i1":
+            lines.append("  ret i1 %val")
+        elif ret_type == "i8*":
+            lines.append(f"  %ret = bitcast {field_llvm_type} %val to i8*")
+            lines.append("  ret i8* %ret")
+        else:
+            lines.append(f"  ret {ret_type} %val")
+        return "\n".join(lines)
+
+    # NativeFunction = { i8* name[0], i1 is_async[1], {NativeParameter*,i64}* params[2],
+    #                     i8* return_type[3], {i8**,i64}* effects[4], {i8**,i64}* decorators[5],
+    #                     i1 is_extern[6], {NativeInstruction*,i64}* instructions[7] }
+    _HELPERS["get_function_name_at"] = _gen_fn_field_accessor(0, "i8*", "i8*")
+    _HELPERS["get_function_return_type_at"] = _gen_fn_field_accessor(3, "i8*", "i8*")
+    _HELPERS["get_function_is_async_at"] = _gen_fn_field_accessor(1, "i1", "i1")
+    _HELPERS["get_function_is_extern_at"] = _gen_fn_field_accessor(6, "i1", "i1")
+    _HELPERS["get_function_parameters_at"] = _gen_fn_field_accessor(2, "i8*", "{ %NativeParameter*, i64 }*")
+    _HELPERS["get_function_instructions_at"] = _gen_fn_field_accessor(7, "i8*", "{ %NativeInstruction*, i64 }*")
+    _HELPERS["get_function_effects_at"] = _gen_fn_field_accessor(4, "i8*", "{ i8**, i64 }*")
+    _HELPERS["get_function_decorators_at"] = _gen_fn_field_accessor(5, "i8*", "{ i8**, i64 }*")
+
+    # --- NativeStruct field accessor helpers ---
+    # NativeStruct = { i8* name[0], {NativeStructField*,i64}* fields[1],
+    #                   {NativeFunction*,i64}* methods[2], {i8**,i64}* implements[3],
+    #                   %NativeStructLayout* layout[4] }
+    NS = "%NativeStruct"
+
+    def _gen_struct_field_accessor(field_idx, ret_type, field_llvm_type):
+        """Generate body for get_struct_XXX_at(structs, idx)."""
+        lines = []
+        lines.append("  %idx_i = fptosi double %idx to i64")
+        lines.append(f"  %hdr = load {{ {NS}*, i64 }}, {{ {NS}*, i64 }}* %structs")
+        lines.append(f"  %data = extractvalue {{ {NS}*, i64 }} %hdr, 0")
+        lines.append(f"  %elem_ptr = getelementptr {NS}, {NS}* %data, i64 %idx_i")
+        lines.append(f"  %field_ptr = getelementptr {NS}, {NS}* %elem_ptr, i32 0, i32 {field_idx}")
+        lines.append(f"  %val = load {field_llvm_type}, {field_llvm_type}* %field_ptr")
+        if ret_type == "i8*" and field_llvm_type == "i8*":
+            lines.append("  ret i8* %val")
+        elif ret_type == "i8*":
+            lines.append(f"  %ret = bitcast {field_llvm_type} %val to i8*")
+            lines.append("  ret i8* %ret")
+        else:
+            lines.append(f"  ret {ret_type} %val")
+        return "\n".join(lines)
+
+    _HELPERS["get_struct_name_at"] = _gen_struct_field_accessor(0, "i8*", "i8*")
+    _HELPERS["get_struct_fields_at"] = _gen_struct_field_accessor(1, "i8*", "{ %NativeStructField*, i64 }*")
+
+    # --- NativeStructField field accessor helpers ---
+    # NativeStructField = { i8* name[0], i8* type_annotation[1], i1 mutable[2] }
+    NSF = "%NativeStructField"
+
+    def _gen_struct_field_field_accessor(field_idx, ret_type, field_llvm_type):
+        """Generate body for get_struct_field_XXX_at(fields, idx)."""
+        lines = []
+        lines.append("  %idx_i = fptosi double %idx to i64")
+        lines.append(f"  %hdr = load {{ {NSF}*, i64 }}, {{ {NSF}*, i64 }}* %fields")
+        lines.append(f"  %data = extractvalue {{ {NSF}*, i64 }} %hdr, 0")
+        lines.append(f"  %elem_ptr = getelementptr {NSF}, {NSF}* %data, i64 %idx_i")
+        lines.append(f"  %field_ptr = getelementptr {NSF}, {NSF}* %elem_ptr, i32 0, i32 {field_idx}")
+        lines.append(f"  %val = load {field_llvm_type}, {field_llvm_type}* %field_ptr")
+        if ret_type == "i8*" and field_llvm_type == "i8*":
+            lines.append("  ret i8* %val")
+        else:
+            lines.append(f"  ret {ret_type} %val")
+        return "\n".join(lines)
+
+    _HELPERS["get_struct_field_name_at"] = _gen_struct_field_field_accessor(0, "i8*", "i8*")
+    _HELPERS["get_struct_field_type_at"] = _gen_struct_field_field_accessor(1, "i8*", "i8*")
+
+    # Scan the LLVM IR for known helper functions and replace their bodies.
+    # Match any return type (i8*, i1, etc.) to handle all accessor helpers.
+    fn_re = _re.compile(
+        r"^define\s+(?:internal\s+)?(?:i8\*|i1|double)\s+@(\w+?)__llvm__lowering__lowering_core\("
+    )
+    ir_lines = llvm_ir.split("\n")
+    changed = 0
+
+    i = 0
+    while i < len(ir_lines):
+        m = fn_re.match(ir_lines[i].strip())
+        if not m:
+            i += 1
+            continue
+        fn_name = m.group(1)
+        if fn_name not in _HELPERS:
+            i += 1
+            continue
+
+        # Find the body: next line should be block.entry:, then ret ..., then }
+        # Scan for the closing }.
+        fn_start = i
+        brace_depth = 0
+        j = i
+        while j < len(ir_lines):
+            if "{" in ir_lines[j]:
+                brace_depth += ir_lines[j].count("{") - ir_lines[j].count("}")
+            elif "}" in ir_lines[j]:
+                brace_depth += ir_lines[j].count("{") - ir_lines[j].count("}")
+            if brace_depth <= 0 and j > fn_start:
+                break
+            j += 1
+
+        # Replace the function body.  Strip 'internal' linkage so the
+        # cross-module shim can reference these symbols.
+        fn_header = ir_lines[fn_start].replace("define internal ", "define ")
+        replacement = [fn_header, "block.entry:"]
+        replacement.append(_HELPERS[fn_name])
+        replacement.append("}")
+
+        ir_lines[fn_start:j + 1] = replacement
+        changed += 1
+        i = fn_start + len(replacement)
+
+    # Ensure memcpy is declared if any append helpers were inserted.
+    if changed > 0:
+        result = "\n".join(ir_lines)
+        if "declare void @memcpy(" not in result and "define" not in result.split("@memcpy(")[0].split("\n")[-1] if "@memcpy(" in result else True:
+            # Add memcpy declaration near top (after other declares).
+            if "declare void @memcpy(" not in result:
+                # Insert after last existing declare line.
+                for idx in range(len(ir_lines) - 1, -1, -1):
+                    if ir_lines[idx].strip().startswith("declare "):
+                        ir_lines.insert(idx + 1, "declare void @memcpy(i8*, i8*, i64)")
+                        break
+                else:
+                    # No declares found; insert before first define.
+                    for idx in range(len(ir_lines)):
+                        if ir_lines[idx].strip().startswith("define "):
+                            ir_lines.insert(idx, "declare void @memcpy(i8*, i8*, i64)")
+                            break
+
+    return "\n".join(ir_lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
 def _fix_declare_define_conflicts(llvm_ir: str) -> tuple[str, int]:
@@ -1614,6 +2446,45 @@ def _dedup_type_definitions(llvm_ir: str) -> tuple[str, int]:
                 changed += 1
             else:
                 seen.add(name)
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _remove_degenerate_empty_functions(llvm_ir: str) -> tuple[str, int]:
+    """Remove degenerate @_0() functions produced by broken struct field access.
+
+    The seed v0.1.1 compiles by-value struct field access as ``0.0``, which
+    sometimes produces empty functions named ``@_0()``.  Multiple definitions
+    of the same name cause 'invalid redefinition' errors in LLVM.  We strip
+    all such functions, including ``declare void @_0()`` lines.
+    """
+    import re as _re
+    lines = llvm_ir.split("\n")
+    changed = 0
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        # Remove declare void @_0()
+        if stripped == "declare void @_0()":
+            lines[i] = "; removed degenerate declare: " + stripped
+            changed += 1
+            i += 1
+            continue
+        # Remove define internal void @_0() { ... }
+        if _re.match(r"^define\s+(?:internal\s+)?void\s+@_0\(\)", stripped):
+            fn_start = i
+            # Find closing brace
+            j = i + 1
+            while j < len(lines):
+                if lines[j].strip() == "}":
+                    break
+                j += 1
+            # Comment out the entire function
+            for k in range(fn_start, min(j + 1, len(lines))):
+                lines[k] = "; removed degenerate fn: " + lines[k]
+            changed += 1
+            i = j + 1
+            continue
+        i += 1
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
@@ -5296,7 +6167,7 @@ def main(argv: list[str]) -> int:
                         # Exponential growth causes a few flaky modules to consume
                         # most of the wall-time budget and makes retries appear stuck.
                         attempt_seed_timeout = seed_timeout
-                        if module_name in {"llvm__lowering__entrypoints", "main"}:
+                        if module_name in {"llvm__lowering__entrypoints", "llvm__lowering__lowering_core", "main"}:
                             attempt_seed_timeout = max(
                                 attempt_seed_timeout, 480.0)
 
@@ -5822,6 +6693,15 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
+                    # Fix native_ir function return types (double → pointer).
+                    candidate, nirt_changes = _fix_native_ir_return_types(candidate)
+                    if nirt_changes:
+                        print(
+                            f"[selfhost] fixed {nirt_changes} native_ir return type(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
                     # Fix double-to-pointer type mismatches.
                     candidate, dpm_changes = _fix_double_pointer_mismatch(candidate)
                     if dpm_changes:
@@ -5858,6 +6738,47 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
+                    # Fix struct construction helpers (seed drops struct literals).
+                    candidate, sch_changes = _fix_struct_construction_helpers(candidate)
+                    if sch_changes:
+                        print(
+                            f"[selfhost] fixed {sch_changes} struct construction helper(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Redirect intra-module calls in lowering_core: the seed emits
+                    # calls using the unmangled name (e.g. @build_parse_result_from_text)
+                    # which hits the cross-module shim with ABI mismatch.  Redirect to
+                    # the mangled intra-module definition instead.
+                    if module_name == "llvm__lowering__lowering_core":
+                        _INTRA_REDIRECTS = {
+                            "@build_parse_result_from_text(": "@build_parse_result_from_text__llvm__lowering__lowering_core(",
+                            "@make_native_module_for_emit(": "@make_native_module_for_emit__llvm__lowering__lowering_core(",
+                            "@recover_native_imports_light(": "@recover_native_imports_light__llvm__lowering__lowering_core(",
+                            "@recover_native_functions_light(": "@recover_native_functions_light__llvm__lowering__lowering_core(",
+                            "@recover_native_structs_light(": "@recover_native_structs_light__llvm__lowering__lowering_core(",
+                        }
+                        intra_count = 0
+                        for old_call, new_call in _INTRA_REDIRECTS.items():
+                            # Only replace call sites, not define/declare lines.
+                            new_lines = []
+                            for cline in candidate.splitlines():
+                                stripped = cline.strip()
+                                if (old_call in cline
+                                    and not stripped.startswith("define ")
+                                    and not stripped.startswith("declare ")):
+                                    cline = cline.replace(old_call, new_call)
+                                    intra_count += 1
+                                new_lines.append(cline)
+                            candidate = "\n".join(new_lines)
+                        if intra_count:
+                            print(
+                                f"[selfhost] redirected {intra_count} intra-module call(s) in {module_name}",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+
                     # Remove conflicting declare/define pairs.
                     candidate, decl_changes = _fix_declare_define_conflicts(candidate)
                     if decl_changes:
@@ -5872,6 +6793,15 @@ def main(argv: list[str]) -> int:
                     if trunc_changes:
                         print(
                             f"[selfhost] fixed {trunc_changes} truncated symbol name(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Remove degenerate @_0() functions from broken struct field access.
+                    candidate, degen_changes = _remove_degenerate_empty_functions(candidate)
+                    if degen_changes:
+                        print(
+                            f"[selfhost] removed {degen_changes} degenerate @_0() function(s) in {module_name}",
                             file=sys.stderr,
                             flush=True,
                         )
@@ -5936,7 +6866,7 @@ def main(argv: list[str]) -> int:
                     # A truncated instructions.sfn-asm in the import-context
                     # causes the seed to infer `double` as return type instead
                     # of `%BlockLoweringResult`, which silently breaks lowering.
-                    if "emission" in module_name or "entrypoints" in module_name:
+                    if "emission" in module_name or "entrypoints" in module_name or "lowering_core" in module_name:
                         candidate, lir_changes = _fix_lower_instruction_range_return_type(candidate)
                         if lir_changes:
                             print(
@@ -5955,8 +6885,8 @@ def main(argv: list[str]) -> int:
                                 flush=True,
                             )
 
-                    # Fix NativeFunction parameter in entrypoints module.
-                    if "entrypoints" in module_name:
+                    # Fix NativeFunction parameter in entrypoints/lowering_core module.
+                    if "entrypoints" in module_name or "lowering_core" in module_name:
                         candidate, nfp_changes = _fix_native_function_param_for_entrypoints(candidate)
                         if nfp_changes:
                             print(

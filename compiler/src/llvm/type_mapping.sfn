@@ -118,14 +118,17 @@ fn looks_like_user_type(annotation -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let current = substring(trimmed, index, index + 1);
-        if current == "." && index + 1 < trimmed.length {
-            let next = substring(trimmed, index + 1, index + 2);
+        let _tm_next = index + 1;
+        let current = substring(trimmed, index, _tm_next);
+        if current == "." && _tm_next < trimmed.length {
+            let _tm_next2 = index + 2;
+            let next = substring(trimmed, _tm_next, _tm_next2);
             if is_ascii_uppercase(next) {
                 return true;
             }
-            if next == "_" && index + 2 < trimmed.length {
-                let after = substring(trimmed, index + 2, index + 3);
+            let _tm_next3 = index + 3;
+            if next == "_" && _tm_next2 < trimmed.length {
+                let after = substring(trimmed, _tm_next2, _tm_next3);
                 if is_ascii_uppercase(after) {
                     return true;
                 }

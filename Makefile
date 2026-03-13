@@ -245,8 +245,10 @@ check: check-conda
 		--seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --max-total-seconds 3600 --out build/native/sailfin-seedcheck
 	@echo "[check] validating seedcheck binary can run programs..."
 	@sc="build/native/sailfin-seedcheck"; \
-	if ! timeout 10 $$sc run examples/basics/hello-world.sfn >/dev/null 2>&1; then \
-		echo "[check][FAIL] seedcheck binary cannot run hello-world.sfn (hangs or crashes)"; \
+	output=$$(timeout 10 $$sc run examples/basics/hello-world.sfn 2>&1) || true; \
+	if ! echo "$$output" | grep -q "Hello, Sailfin!"; then \
+		echo "[check][FAIL] seedcheck binary cannot run hello-world.sfn (expected 'Hello, Sailfin!' in output)"; \
+		echo "[check][FAIL] got: $$output"; \
 		echo "[check][FAIL] the seedcheck compiler is NOT viable — fix the compiler, not the build script"; \
 		exit 1; \
 	fi; \

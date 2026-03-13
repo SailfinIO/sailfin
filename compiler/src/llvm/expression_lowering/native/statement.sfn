@@ -699,8 +699,10 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
                 previous = substring(trimmed, index - 1, index);
             }
             let mut next_char -> string = "";
-            if index + 1 < trimmed.length {
-                next_char = substring(trimmed, index + 1, index + 2);
+            let _stmt_next = index + 1;
+            if _stmt_next < trimmed.length {
+                let _stmt_next2 = index + 2;
+                next_char = substring(trimmed, _stmt_next, _stmt_next2);
             }
             
             // Check for compound assignment operators: +=, -=, *=, /=

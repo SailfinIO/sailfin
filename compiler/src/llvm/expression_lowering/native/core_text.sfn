@@ -158,9 +158,10 @@ fn index_of(value -> string, target -> string) -> number {
     // Use substring + == instead of char_code_at_text comparisons.
     // char_code_at_text is miscompiled by older seeds, but substring
     // (backed by the C runtime grapheme_at) and == both work correctly.
+    let _search_limit = value.length - target.length;
     let mut index -> number = 0;
     loop {
-        if index + target.length > value.length {
+        if index > _search_limit {
             break;
         }
         let candidate = substring(value, index, index + target.length);
@@ -233,8 +234,9 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             if index >= parts.length {
                 break;
             }
-            if index + 1 < parts.length {
-                let combined = parts[index] + separator + parts[index + 1];
+            let _ct_next = index + 1;
+            if _ct_next < parts.length {
+                let combined = parts[index] + separator + parts[_ct_next];
                 next.push(combined);
                 index += 2;
                 continue;
@@ -257,8 +259,9 @@ fn find_substring_from(value -> string, target -> string, start -> number) -> nu
         index = 0;
     }
     // Use substring + == instead of char_code_at_text comparisons.
+    let _search_limit = value.length - target.length;
     loop {
-        if index + target.length > value.length {
+        if index > _search_limit {
             break;
         }
         let candidate = substring(value, index, index + target.length);
@@ -638,8 +641,9 @@ fn unescape_string_literal(literal -> string) -> string {
             break;
         }
         let ch = char_at(inner, index);
-        if char_code(ch) == char_code("\\") && index + 1 < inner.length {
-            let next = char_at(inner, index + 1);
+        let _esc_next = index + 1;
+        if char_code(ch) == char_code("\\") && _esc_next < inner.length {
+            let next = char_at(inner, _esc_next);
             let next_code = char_code(next);
             if next_code == char_code("n") {
                 result = result + "\n";

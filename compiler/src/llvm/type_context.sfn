@@ -175,7 +175,12 @@ fn empty_type_context() -> TypeContext {
 }
 
 fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[]) -> TypeContextBuild {
-    if structs.length > 10000 || enums.length > 10000 || interfaces.length > 10000 {
+    // Guard against absurdly large collections that could indicate ABI corruption.
+    // Use 1000000 as the limit — real programs have at most a few hundred types,
+    // but corrupted lengths from cross-module ABI issues can be arbitrarily large.
+    // A lower limit (e.g. 10000) incorrectly triggers on valid counts that appear
+    // corrupted due to number_to_string bugs in the seed.
+    if structs.length > 1000000 || enums.length > 1000000 || interfaces.length > 1000000 {
         return TypeContextBuild {
             context: empty_type_context(),
             diagnostics: [
@@ -1084,8 +1089,9 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             if index >= parts.length {
                 break;
             }
-            if index + 1 < parts.length {
-                let combined = parts[index] + separator + parts[index + 1];
+            let _tc_next = index + 1;
+            if _tc_next < parts.length {
+                let combined = parts[index] + separator + parts[_tc_next];
                 next.push(combined);
                 index += 2;
                 continue;

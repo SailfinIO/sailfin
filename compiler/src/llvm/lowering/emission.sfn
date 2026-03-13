@@ -204,7 +204,7 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
 }
 
 fn emit_llvm_function(
-    function -> NativeFunction,
+    function_name_hint -> string,
     functions -> NativeFunction[],
     effects -> string[],
     context -> TypeContext,

@@ -122,7 +122,8 @@ fn lex(source -> string) -> Token[] {
                     if state.index >= state.source_len {
                         break;
                     }
-                    if byte_at(state.source, state.index) == "*" && state.index + 1 < state.source_len && byte_at(state.source, state.index + 1) == "/" {
+                    let _next_idx = state.index + 1;
+                    if byte_at(state.source, state.index) == "*" && _next_idx < state.source_len && byte_at(state.source, _next_idx) == "/" {
                         state.index += 2;
                         state.column += 2;
                         break;
@@ -286,9 +287,11 @@ fn lex(source -> string) -> Token[] {
 
         let start_line = state.line;
         let start_column = state.column;
-        let mut lexeme = slice(state.source, state.index, state.index + 1);
-        if state.index + 1 < state.source_len {
-            let pair = slice(state.source, state.index, state.index + 2);
+        let _lex_next = state.index + 1;
+        let _lex_next2 = state.index + 2;
+        let mut lexeme = slice(state.source, state.index, _lex_next);
+        if _lex_next < state.source_len {
+            let pair = slice(state.source, state.index, _lex_next2);
             // Fast-path: keep <= / >= stable.
             if pair == "<=" || pair == ">=" {
                 lexeme = pair;

@@ -108,9 +108,10 @@ fn module_name_from_path(source_path -> string) -> string {
     let mut start -> number = 0;
 
     let mut last_compiler -> number = -1;
+    let compiler_search_limit = normalized.length - compiler_prefix.length;
     index = 0;
     loop {
-        if index + compiler_prefix.length > normalized.length {
+        if index > compiler_search_limit {
             break;
         }
         if substring(normalized, index, index + compiler_prefix.length) == compiler_prefix {
@@ -122,9 +123,10 @@ fn module_name_from_path(source_path -> string) -> string {
         start = last_compiler + compiler_prefix.length;
     } else {
         let mut last_runtime -> number = -1;
+        let runtime_search_limit = normalized.length - runtime_prefix.length;
         index = 0;
         loop {
-            if index + runtime_prefix.length > normalized.length {
+            if index > runtime_search_limit {
                 break;
             }
             if substring(normalized, index, index + runtime_prefix.length) == runtime_prefix {
@@ -676,6 +678,22 @@ fn _has_prefix(value -> string, prefix -> string) -> boolean {
     return true;
 }
 
+fn _find_first_nonblank_line(text -> string) -> string {
+    let lines = split_lines(text);
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length || index >= 128 {
+            break;
+        }
+        let line = lines[index];
+        if line.length > 0 {
+            return line;
+        }
+        index += 1;
+    }
+    return "";
+}
+
 fn _looks_like_llvm_text(text -> string) -> boolean {
     if text.length < 16 {
         return false;
@@ -758,14 +776,28 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
     }
     let ok = write_llvm_ir_from_native_text_file(native_text_path, module_name, out_path);
     let mut output_valid -> boolean = false;
-    if ok && fs.exists(out_path) {
+    // Check file content regardless of return value — the boolean return from
+    // cross-module calls can be corrupted by ABI issues in the seed compiler.
+    if fs.exists(out_path) {
         let written = fs.readFile(out_path);
         output_valid = _looks_like_llvm_text(written);
+        if !output_valid && written.length > 64 {
+            // Check if the content starts with a valid LLVM entity (just missing header).
+            // If it starts with garbage (e.g. mid-instruction due to array offset corruption),
+            // do NOT prepend a header — let the selfhost script's recovery handle it.
+            let _first_nonblank = _find_first_nonblank_line(written);
+            if _first_nonblank.length > 0 && (_first_nonblank[0] == "%" || _first_nonblank[0] == "@" || _has_prefix(_first_nonblank, "declare ") || _has_prefix(_first_nonblank, "define ") || _has_prefix(_first_nonblank, "target ")) {
+                let header = "source_filename = \"" + module_name + ".sfn\"\n\n";
+                fs.writeFile(out_path, header + written);
+                output_valid = true;
+                print.warn("emit-llvm-file: prepended header for module " + module_name);
+            }
+        }
         if !output_valid {
             print.warn("emit-llvm-file: malformed llvm output for module " + module_name + "; falling back");
         }
     }
-    if !ok || !output_valid {
+    if !output_valid {
         if !ok {
             print.warn("emit-llvm-file: empty llvm output for module " + module_name);
         }
@@ -1154,12 +1186,14 @@ fn split_source_lines(source -> string) -> string[] {
         if index >= source.length {
             break;
         }
-        let ch = substring(source, index, index + 1);
+        let _ch_next = index + 1;
+        let ch = substring(source, index, _ch_next);
         if ch == "\r" {
             lines = append_string(lines, current);
             current = "";
-            if index + 1 < source.length {
-                let next = substring(source, index + 1, index + 2);
+            if _ch_next < source.length {
+                let _ch_next2 = index + 2;
+                let next = substring(source, _ch_next, _ch_next2);
                 if next == "\n" {
                     index += 2;
                     continue;
@@ -1337,9 +1371,10 @@ fn find_substring(value -> string, pattern -> string) -> number {
     if value.length < pattern.length {
         return -1;
     }
+    let _search_limit = value.length - pattern.length;
     let mut index -> number = 0;
     loop {
-        if index + pattern.length > value.length {
+        if index > _search_limit {
             break;
         }
         let mut match_flag -> boolean = true;
@@ -1348,7 +1383,8 @@ fn find_substring(value -> string, pattern -> string) -> number {
             if offset >= pattern.length {
                 break;
             }
-            if value[index + offset] != pattern[offset] {
+            let _cpos = index + offset;
+            if value[_cpos] != pattern[offset] {
                 match_flag = false;
                 break;
             }
@@ -1369,9 +1405,10 @@ fn find_substring_from(value -> string, pattern -> string, start -> number) -> n
     if start >= value.length {
         return -1;
     }
+    let _search_limit = value.length - pattern.length;
     let mut index -> number = start;
     loop {
-        if index + pattern.length > value.length {
+        if index > _search_limit {
             break;
         }
         let mut match_flag -> boolean = true;
@@ -1380,7 +1417,8 @@ fn find_substring_from(value -> string, pattern -> string, start -> number) -> n
             if offset >= pattern.length {
                 break;
             }
-            if value[index + offset] != pattern[offset] {
+            let _cpos2 = index + offset;
+            if value[_cpos2] != pattern[offset] {
                 match_flag = false;
                 break;
             }

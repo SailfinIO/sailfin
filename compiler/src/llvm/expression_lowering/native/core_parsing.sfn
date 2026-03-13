@@ -445,8 +445,9 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
         }
 
         if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
-            if index + 4 <= trimmed.length {
-                let window = substring(trimmed, index, index + 4);
+            let _as_end = index + 4;
+            if _as_end <= trimmed.length {
+                let window = substring(trimmed, index, _as_end);
                 if window == " as " {
                     match_index = index;
                 }

@@ -502,10 +502,12 @@ fn contains_code(text -> string, needle -> string) -> boolean {
             break;
         }
 
-        let ch = substring(text, index, index + 1);
+        let _ec_next = index + 1;
+        let ch = substring(text, index, _ec_next);
         let mut two -> string = "";
-        if index + 1 < text.length {
-            two = substring(text, index, index + 2);
+        if _ec_next < text.length {
+            let _ec_next2 = index + 2;
+            two = substring(text, index, _ec_next2);
         }
 
         if in_string_quote.length > 0 {
@@ -563,7 +565,8 @@ fn contains_code(text -> string, needle -> string) -> boolean {
             continue;
         }
 
-        if index + needle.length <= text.length && substring(text, index, index + needle.length) == needle {
+        let _end_pos = index + needle.length;
+        if _end_pos <= text.length && substring(text, index, _end_pos) == needle {
             return true;
         }
         index += 1;

@@ -833,8 +833,10 @@ fn find_top_level_range_separator(value -> string) -> number {
             continue;
         }
         if ch == "." {
-            if index + 1 < value.length {
-                if substring(value, index + 1, index + 2) == "." {
+            let _cp_dot_next = index + 1;
+            if _cp_dot_next < value.length {
+                let _cp_dot_next2 = index + 2;
+                if substring(value, _cp_dot_next, _cp_dot_next2) == "." {
                     if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
                         return index;
                     }
@@ -855,7 +857,8 @@ fn find_top_level_range_separator_from(value -> string, start_index -> number) -
         if index >= value.length {
             break;
         }
-        let ch = substring(value, index, index + 1);
+        let _cp_rng_next = index + 1;
+        let ch = substring(value, index, _cp_rng_next);
         if ch == "(" {
             paren_depth += 1;
         } else if ch == ")" {
@@ -877,8 +880,10 @@ fn find_top_level_range_separator_from(value -> string, start_index -> number) -
         }
         if index >= start_index {
             if ch == "." {
-                if index + 1 < value.length {
-                    if substring(value, index + 1, index + 2) == "." {
+                let _cp_rng2_next = index + 1;
+                if _cp_rng2_next < value.length {
+                    let _cp_rng2_next2 = index + 2;
+                    if substring(value, _cp_rng2_next, _cp_rng2_next2) == "." {
                         if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
                             return index;
                         }
@@ -982,8 +987,9 @@ fn find_member_access_separator(value -> string) -> number {
                         continue;
                     }
                     if is_digit_char(previous) {
-                        if index + 1 < value.length {
-                            let next_digit = char_at(value, index + 1);
+                        let _ma_next = index + 1;
+                        if _ma_next < value.length {
+                            let next_digit = char_at(value, _ma_next);
                             if is_digit_char(next_digit) {
                                 index += 1;
                                 continue;
@@ -991,8 +997,9 @@ fn find_member_access_separator(value -> string) -> number {
                         }
                     }
                 }
-                if index + 1 < value.length {
-                    let next_char = char_at(value, index + 1);
+                let _ma_next2 = index + 1;
+                if _ma_next2 < value.length {
+                    let next_char = char_at(value, _ma_next2);
                     if next_char == "." {
                         index += 1;
                         continue;

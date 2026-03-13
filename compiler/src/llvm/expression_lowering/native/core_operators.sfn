@@ -264,8 +264,10 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
         }
 
         // Compare operators using substring + == (safe under older seeds).
-        if index + 1 < expression.length {
-            let two_char = substring(expression, index, index + 2);
+        let _co_next = index + 1;
+        let _co_next2 = index + 2;
+        if _co_next < expression.length {
+            let two_char = substring(expression, index, _co_next2);
             if two_char == "==" {
                 return OperatorMatch { index: index, symbol: "==", success: true };
             }
@@ -296,11 +298,13 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
     let mut in_string -> boolean = false;
     let mut escape_next -> boolean = false;
 
+    let _lo_limit = expression.length - 1;
     loop {
-        if index + 1 >= expression.length {
+        if index >= _lo_limit {
             break;
         }
-        let ch = substring(expression, index, index + 1);
+        let _lo_next = index + 1;
+        let ch = substring(expression, index, _lo_next);
         if in_string {
             if escape_next {
                 escape_next = false;
@@ -336,7 +340,8 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
             continue;
         }
         if depth == 0 {
-            let two = substring(expression, index, index + 2);
+            let _lo_next2 = index + 2;
+            let two = substring(expression, index, _lo_next2);
             if two == "||" {
                 return OperatorMatch { index: index, symbol: "||", success: true };
             }
@@ -349,10 +354,11 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
     in_string = false;
     escape_next = false;
     loop {
-        if index + 1 >= expression.length {
+        if index >= _lo_limit {
             break;
         }
-        let ch = substring(expression, index, index + 1);
+        let _lo2_next = index + 1;
+        let ch = substring(expression, index, _lo2_next);
         if in_string {
             if escape_next {
                 escape_next = false;
@@ -388,7 +394,8 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
             continue;
         }
         if depth == 0 {
-            let two = substring(expression, index, index + 2);
+            let _lo2_next2 = index + 2;
+            let two = substring(expression, index, _lo2_next2);
             if two == "&&" {
                 return OperatorMatch { index: index, symbol: "&&", success: true };
             }
