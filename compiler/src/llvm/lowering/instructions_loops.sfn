@@ -289,7 +289,12 @@ fn lower_throw_instruction(
         context,
         "i8*"
     );
-    diagnostics = diagnostics.concat(lowered_expr.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= lowered_expr.diagnostics.length { break; }
+        diagnostics.push(lowered_expr.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
     current_lines = lowered_expr.lines;
     current_temp = lowered_expr.temp_index;
     collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants);
@@ -301,7 +306,12 @@ fn lower_throw_instruction(
     }
 
     let coerced = coerce_operand_to_type(lowered_expr.operand, "i8*", current_temp, current_lines);
-    diagnostics = diagnostics.concat(coerced.diagnostics);
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= coerced.diagnostics.length { break; }
+        diagnostics.push(coerced.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     current_lines = coerced.lines;
     current_temp = coerced.temp_index;
     if coerced.operand == null {
@@ -422,7 +432,12 @@ fn lower_try_instruction(
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let structure = collect_try_structure(function.instructions, start_index, end, function.name);
-    diagnostics = diagnostics.concat(structure.diagnostics);
+    let mut _ci2 -> number = 0;
+    loop {
+        if _ci2 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci2]);
+        _ci2 += 1;
+    }
 
     let mut current_lines -> string[] = lines;
     let mut current_allocas -> string[] = allocas;
@@ -485,7 +500,12 @@ fn lower_try_instruction(
         scope_depth + 1,
         try_label
     );
-    diagnostics = diagnostics.concat(try_result.diagnostics);
+    let mut _ci3 -> number = 0;
+    loop {
+        if _ci3 >= try_result.diagnostics.length { break; }
+        diagnostics.push(try_result.diagnostics[_ci3]);
+        _ci3 += 1;
+    }
     lifetime_regions = extend_lifetime_regions(lifetime_regions, try_result.lifetime_regions);
     current_allocas = try_result.allocas;
     current_temp = try_result.temp_index;
@@ -562,7 +582,12 @@ fn lower_try_instruction(
             scope_depth + 1,
             catch_label
         );
-        diagnostics = diagnostics.concat(catch_result.diagnostics);
+        let mut _ci4 -> number = 0;
+        loop {
+            if _ci4 >= catch_result.diagnostics.length { break; }
+            diagnostics.push(catch_result.diagnostics[_ci4]);
+            _ci4 += 1;
+        }
         lifetime_regions = extend_lifetime_regions(lifetime_regions, catch_result.lifetime_regions);
         current_allocas = catch_result.allocas;
         current_temp = catch_result.temp_index;
@@ -604,7 +629,12 @@ fn lower_try_instruction(
             scope_depth + 1,
             finally_label
         );
-        diagnostics = diagnostics.concat(finally_result.diagnostics);
+        let mut _ci5 -> number = 0;
+        loop {
+            if _ci5 >= finally_result.diagnostics.length { break; }
+            diagnostics.push(finally_result.diagnostics[_ci5]);
+            _ci5 += 1;
+        }
         lifetime_regions = extend_lifetime_regions(lifetime_regions, finally_result.lifetime_regions);
         current_allocas = finally_result.allocas;
         current_temp = finally_result.temp_index;
@@ -775,7 +805,12 @@ fn lower_loop_instruction(
     if debug_loop {
         print.warn("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
     }
-    diagnostics = diagnostics.concat(structure.diagnostics);
+    let mut _ci6 -> number = 0;
+    loop {
+        if _ci6 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci6]);
+        _ci6 += 1;
+    }
 
     // Preload all locals before entering the loop for phi node merging
     let mut preloaded_locals -> string[] = [];
@@ -851,7 +886,12 @@ fn lower_loop_instruction(
         print.warn("emit-llvm: lower_loop post_body_lir fn=" + function.name + " body_lines=" + number_to_string(body_result.lines.length));
     }
 
-    diagnostics = diagnostics.concat(body_result.diagnostics);
+    let mut _ci7 -> number = 0;
+    loop {
+        if _ci7 >= body_result.diagnostics.length { break; }
+        diagnostics.push(body_result.diagnostics[_ci7]);
+        _ci7 += 1;
+    }
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_allocas = body_result.allocas;
     current_temp = body_result.temp_index;
@@ -1149,7 +1189,12 @@ fn lower_for_instruction(
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
-    diagnostics = diagnostics.concat(structure.diagnostics);
+    let mut _ci8 -> number = 0;
+    loop {
+        if _ci8 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci8]);
+        _ci8 += 1;
+    }
     let mut next_index -> number = structure.next_index + 1;
 
     let instruction = function.instructions[start_index];
@@ -1215,10 +1260,20 @@ fn lower_for_instruction(
 
     let range_parse = parse_range_iterable(instruction.iterable);
     if range_parse.success {
-        diagnostics = diagnostics.concat(range_parse.diagnostics);
+        let mut _ci9 -> number = 0;
+        loop {
+            if _ci9 >= range_parse.diagnostics.length { break; }
+            diagnostics.push(range_parse.diagnostics[_ci9]);
+            _ci9 += 1;
+        }
 
     let start_result = lower_expression(range_parse.start, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        diagnostics = diagnostics.concat(start_result.diagnostics);
+        let mut _ci10 -> number = 0;
+        loop {
+            if _ci10 >= start_result.diagnostics.length { break; }
+            diagnostics.push(start_result.diagnostics[_ci10]);
+            _ci10 += 1;
+        }
         current_lines = start_result.lines;
         current_temp = start_result.temp_index;
 
@@ -1242,7 +1297,12 @@ fn lower_for_instruction(
         }
 
     let end_result = lower_expression(range_parse.end, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        diagnostics = diagnostics.concat(end_result.diagnostics);
+        let mut _ci11 -> number = 0;
+        loop {
+            if _ci11 >= end_result.diagnostics.length { break; }
+            diagnostics.push(end_result.diagnostics[_ci11]);
+            _ci11 += 1;
+        }
         current_lines = end_result.lines;
         current_temp = end_result.temp_index;
 

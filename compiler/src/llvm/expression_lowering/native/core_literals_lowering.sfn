@@ -125,7 +125,11 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
                 }
                 let with_sep = emit_string_concat(current_operand, sep.operand, current_temp, current_lines);
-                diagnostics = diagnostics.concat(with_sep.diagnostics);
+                let _ci0 = 0;
+                while _ci0 < with_sep.diagnostics.length {
+                    diagnostics.push(with_sep.diagnostics[_ci0]);
+                    _ci0 += 1;
+                }
                 current_lines = with_sep.lines;
                 current_temp = with_sep.temp_index;
                 if with_sep.operand == null {
@@ -135,7 +139,11 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             }
 
             let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, "");
-            diagnostics = diagnostics.concat(lowered.diagnostics);
+            let _ci1 = 0;
+            while _ci1 < lowered.diagnostics.length {
+                diagnostics.push(lowered.diagnostics[_ci1]);
+                _ci1 += 1;
+            }
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
@@ -145,7 +153,11 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             }
 
             let as_string = coerce_operand_to_string(lowered.operand, current_temp, current_lines);
-            diagnostics = diagnostics.concat(as_string.diagnostics);
+            let _ci2 = 0;
+            while _ci2 < as_string.diagnostics.length {
+                diagnostics.push(as_string.diagnostics[_ci2]);
+                _ci2 += 1;
+            }
             collected_string_constants = merge_string_constants(collected_string_constants, as_string.string_constants);
             current_lines = as_string.lines;
             current_temp = as_string.temp_index;
@@ -155,7 +167,11 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             }
 
             let appended = emit_string_concat(current_operand, as_string.operand, current_temp, current_lines);
-            diagnostics = diagnostics.concat(appended.diagnostics);
+            let _ci3 = 0;
+            while _ci3 < appended.diagnostics.length {
+                diagnostics.push(appended.diagnostics[_ci3]);
+                _ci3 += 1;
+            }
             current_lines = appended.lines;
             current_temp = appended.temp_index;
             if appended.operand == null {
@@ -173,7 +189,11 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
         let finished = emit_string_concat(current_operand, close.operand, current_temp, current_lines);
-        diagnostics = diagnostics.concat(finished.diagnostics);
+        let _ci4 = 0;
+        while _ci4 < finished.diagnostics.length {
+            diagnostics.push(finished.diagnostics[_ci4]);
+            _ci4 += 1;
+        }
         current_lines = finished.lines;
         current_temp = finished.temp_index;
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: finished.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
@@ -412,13 +432,13 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
                         if _colon < 0 { _fi += 1; continue; }
                         let _f_name = substring(_f_entry, 0, _colon);
                         let _f_type = substring(_f_entry, _colon + 1, _f_entry.length);
-                        _si_fields = _si_fields.concat([StructFieldInfo {
+                        _si_fields.push(StructFieldInfo {
                             name: _f_name,
                             llvm_type: _f_type,
                             type_annotation: "",
                             index: _fi,
                             offset: 0,
-                        }]);
+                        });
                         _fi += 1;
                     }
                 }
@@ -472,13 +492,21 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
         if literal_index >= 0 {
             let literal_field = parse.fields[literal_index];
             let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
-            diagnostics = diagnostics.concat(lowered.diagnostics);
+            let _ci5 = 0;
+            while _ci5 < lowered.diagnostics.length {
+                diagnostics.push(lowered.diagnostics[_ci5]);
+                _ci5 += 1;
+            }
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
             if lowered.operand != null {
                 let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines);
-                diagnostics = diagnostics.concat(coerced.diagnostics);
+                let _ci6 = 0;
+                while _ci6 < coerced.diagnostics.length {
+                    diagnostics.push(coerced.diagnostics[_ci6]);
+                    _ci6 += 1;
+                }
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
                 if coerced.operand != null {
@@ -649,7 +677,11 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
             if literal_index >= 0 {
                 let literal_field = parse.fields[literal_index];
                 let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
-                diagnostics = diagnostics.concat(lowered.diagnostics);
+                let _ci7 = 0;
+                while _ci7 < lowered.diagnostics.length {
+                    diagnostics.push(lowered.diagnostics[_ci7]);
+                    _ci7 += 1;
+                }
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
                 if lowered.operand != null {

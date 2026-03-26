@@ -313,12 +313,22 @@ fn lower_match_instruction(
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
     let structure = collect_match_structure(function.instructions, start_index, end, function.name);
-    diagnostics = diagnostics.concat(structure.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
 
     let subject_instruction = function.instructions[start_index];
     let subject_name = extract_simple_identifier(subject_instruction.expression);
     let subject_result = lower_expression(subject_instruction.expression, bindings, current_locals, current_temp, current_lines, functions, context, "");
-    diagnostics = diagnostics.concat(subject_result.diagnostics);
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= subject_result.diagnostics.length { break; }
+        diagnostics.push(subject_result.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     current_lines = subject_result.lines;
     current_temp = subject_result.temp_index;
     collected_string_constants = merge_string_constants(collected_string_constants, subject_result.string_constants);
@@ -449,7 +459,12 @@ fn lower_match_instruction(
             functions,
             context
         );
-        diagnostics = diagnostics.concat(lowered_condition.diagnostics);
+        let mut _ci2 -> number = 0;
+        loop {
+            if _ci2 >= lowered_condition.diagnostics.length { break; }
+            diagnostics.push(lowered_condition.diagnostics[_ci2]);
+            _ci2 += 1;
+        }
         current_lines = lowered_condition.lines;
         current_temp = lowered_condition.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, lowered_condition.string_constants);
@@ -725,7 +740,12 @@ fn lower_match_instruction(
             body_labels[index]
         );
 
-        diagnostics = diagnostics.concat(body_result.diagnostics);
+        let mut _ci3 -> number = 0;
+        loop {
+            if _ci3 >= body_result.diagnostics.length { break; }
+            diagnostics.push(body_result.diagnostics[_ci3]);
+            _ci3 += 1;
+        }
         lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
         current_lines = extend_string_array(current_lines, body_result.lines);
         current_allocas = body_result.allocas;
@@ -883,7 +903,12 @@ fn lower_match_case_condition(
                     let variant_tag_operand = LLVMOperand { llvm_type: tag_llvm_type, value: number_to_string(variant_info.tag) };
 
                     let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines);
-                    diagnostics = diagnostics.concat(comparison.diagnostics);
+                    let mut _ci4 -> number = 0;
+                    loop {
+                        if _ci4 >= comparison.diagnostics.length { break; }
+                        diagnostics.push(comparison.diagnostics[_ci4]);
+                        _ci4 += 1;
+                    }
                     current_lines = comparison.lines;
                     current_temp = comparison.temp_index;
                     condition_operand = comparison.operand;
@@ -977,7 +1002,12 @@ fn lower_match_case_condition(
                             let tag_operand = LLVMOperand { llvm_type: "i32", value: tag_temp };
                             let expected_tag = LLVMOperand { llvm_type: "i32", value: number_to_string(found_index) };
                             let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
-                            diagnostics = diagnostics.concat(comparison.diagnostics);
+                            let mut _ci5 -> number = 0;
+                            loop {
+                                if _ci5 >= comparison.diagnostics.length { break; }
+                                diagnostics.push(comparison.diagnostics[_ci5]);
+                                _ci5 += 1;
+                            }
                             current_lines = comparison.lines;
                             current_temp = comparison.temp_index;
                             condition_operand = comparison.operand;
@@ -1033,7 +1063,12 @@ fn lower_match_case_condition(
             if condition_operand == null {
                 // Fallback to existing expression-based pattern matching
                 let pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context, "");
-                diagnostics = diagnostics.concat(pattern_result.diagnostics);
+                let mut _ci6 -> number = 0;
+                loop {
+                    if _ci6 >= pattern_result.diagnostics.length { break; }
+                    diagnostics.push(pattern_result.diagnostics[_ci6]);
+                    _ci6 += 1;
+                }
                 current_lines = pattern_result.lines;
                 current_temp = pattern_result.temp_index;
                 collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants);

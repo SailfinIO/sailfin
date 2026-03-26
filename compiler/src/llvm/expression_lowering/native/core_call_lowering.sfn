@@ -221,7 +221,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
 
             if local != null {
                 let load_result = load_local_operand(local, current_temp, current_lines);
-                diagnostics = diagnostics.concat(load_result.diagnostics);
+                let mut _ci0 -> number = 0;
+                loop {
+                    if _ci0 >= load_result.diagnostics.length { break; }
+                    diagnostics.push(load_result.diagnostics[_ci0]);
+                    _ci0 += 1;
+                }
                 current_lines = load_result.lines;
                 current_temp = load_result.temp_index;
                 receiver_operand = load_result.operand;
@@ -290,7 +295,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                 }
                 if _pre_struct.length > 0 {
                     let _pre_lowered = lower_expression(_pre_base, bindings, locals, current_temp, current_lines, functions, context, "");
-                    diagnostics = diagnostics.concat(_pre_lowered.diagnostics);
+                    let mut _ci1 -> number = 0;
+                    loop {
+                        if _ci1 >= _pre_lowered.diagnostics.length { break; }
+                        diagnostics.push(_pre_lowered.diagnostics[_ci1]);
+                        _ci1 += 1;
+                    }
                     collected_string_constants = merge_string_constants(collected_string_constants, _pre_lowered.string_constants);
                     current_lines = _pre_lowered.lines;
                     current_temp = _pre_lowered.temp_index;
@@ -308,7 +318,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     if method_parse.success && method_operand == null {
         if method_parse.field == "concat" || method_parse.field == "push" {
             let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
-            diagnostics = diagnostics.concat(lowered_self.diagnostics);
+            let mut _ci2 -> number = 0;
+            loop {
+                if _ci2 >= lowered_self.diagnostics.length { break; }
+                diagnostics.push(lowered_self.diagnostics[_ci2]);
+                _ci2 += 1;
+            }
             collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
             current_lines = lowered_self.lines;
             current_temp = lowered_self.temp_index;
@@ -367,7 +382,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                     injected_argument_count = 0;
                 } else {
                     let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
-                    diagnostics = diagnostics.concat(lowered_self.diagnostics);
+                    let mut _ci3 -> number = 0;
+                    loop {
+                        if _ci3 >= lowered_self.diagnostics.length { break; }
+                        diagnostics.push(lowered_self.diagnostics[_ci3]);
+                        _ci3 += 1;
+                    }
                     collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
                     current_lines = lowered_self.lines;
                     current_temp = lowered_self.temp_index;
@@ -382,7 +402,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                 }
             } else {
                 let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
-                diagnostics = diagnostics.concat(lowered_self.diagnostics);
+                let mut _ci4 -> number = 0;
+                loop {
+                    if _ci4 >= lowered_self.diagnostics.length { break; }
+                    diagnostics.push(lowered_self.diagnostics[_ci4]);
+                    _ci4 += 1;
+                }
                 collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
                 current_lines = lowered_self.lines;
                 current_temp = lowered_self.temp_index;

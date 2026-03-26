@@ -838,7 +838,13 @@ fn apply_module_symbol_mangling(
             shim_index += 1;
             continue;
         }
-        shim_lines = shim_lines.concat(render_function_shim(export_sym, target_sym, signature));
+        let _shim_result = render_function_shim(export_sym, target_sym, signature);
+        let mut _ci0 -> number = 0;
+        loop {
+            if _ci0 >= _shim_result.length { break; }
+            shim_lines.push(_shim_result[_ci0]);
+            _ci0 += 1;
+        }
         shim_lines = append_string(shim_lines, "");
         shim_index += 1;
     }
@@ -1007,7 +1013,7 @@ fn flatten_struct_methods(structs -> NativeStruct[]) -> NativeFunction[] {
                     default_value: p.default_value,
                     span: p.span,
                 };
-                fixed_params = fixed_params.concat([fixed_p]);
+                fixed_params.push(fixed_p);
                 pi += 1;
             }
             let qualified = NativeFunction {
