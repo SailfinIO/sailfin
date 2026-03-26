@@ -26,7 +26,7 @@ import {
 import { LayoutManifest, parse_layout_manifest, select_text_artifact, split_lines } from "./native_ir";
 import { substring } from "./string_utils";
 import { Token } from "./token";
-import { typecheck_diagnostics } from "./typecheck";
+import { typecheck_diagnostics, typecheck_has_errors } from "./typecheck";
 
 fn _ms_since(start_ms -> number) -> number {
     let end_ms = monotonic_millis();
@@ -45,8 +45,8 @@ fn _timing_line(module_name -> string, phase -> string, elapsed_ms -> number) ->
 
 fn compile_to_sailfin(source -> string) -> string ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         return "";
     }
@@ -55,8 +55,8 @@ fn compile_to_sailfin(source -> string) -> string ![io] {
 
 fn compile_to_native(source -> string) -> EmitNativeResult ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         return EmitNativeResult {
             module: empty_native_module(),
@@ -68,8 +68,8 @@ fn compile_to_native(source -> string) -> EmitNativeResult ![io] {
 
 fn compile_to_native_with_module_name(source -> string, module_name -> string) -> EmitNativeResult ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         return EmitNativeResult {
             module: empty_native_module(),
@@ -243,8 +243,8 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResultAny ![io] {
 
 fn compile_to_native_llvm_with_module(source -> string, module_name -> string) -> LoweredLLVMResultAny ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         let messages = format_typecheck_diagnostics(diagnostics, source);
         return LoweredLLVMResultAny {
@@ -299,8 +299,8 @@ fn compile_to_native_llvm_with_module(source -> string, module_name -> string) -
 // `LoweredLLVMResultAny` internally.
 fn compile_to_llvm(source -> string) -> string ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         return "";
     }
@@ -340,8 +340,8 @@ fn compile_to_llvm_with_module(source -> string, module_name -> string) -> strin
     let program -> Program = parse_program(source);
     let skip_typecheck = fs.exists("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
-        let diagnostics = typecheck_diagnostics(program);
-        if diagnostics.length > 0 {
+        if typecheck_has_errors(program) {
+            let diagnostics = typecheck_diagnostics(program);
             report_typecheck_errors(diagnostics, source);
             return "";
         }
@@ -387,9 +387,9 @@ fn compile_to_llvm_with_module_timed(source -> string, module_name -> string) ->
     let skip_typecheck = fs.exists("build/sailfin/.skip_typecheck");
     let mut t_typecheck -> number = 0;
     if !skip_typecheck {
-        let diagnostics = typecheck_diagnostics(program);
         t_typecheck = _ms_since(t1);
-        if diagnostics.length > 0 {
+        if typecheck_has_errors(program) {
+            let diagnostics = typecheck_diagnostics(program);
             report_typecheck_errors(diagnostics, source);
             print.warn(_timing_line(module_name, "parse", t_parse));
             print.warn(_timing_line(module_name, "typecheck", t_typecheck));
@@ -441,8 +441,8 @@ fn compile_to_llvm_lines_with_module(source -> string, module_name -> string) ->
     let program -> Program = parse_program(source);
     let skip_typecheck = fs.exists("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
-        let diagnostics = typecheck_diagnostics(program);
-        if diagnostics.length > 0 {
+        if typecheck_has_errors(program) {
+            let diagnostics = typecheck_diagnostics(program);
             report_typecheck_errors(diagnostics, source);
             return [];
         }
@@ -459,9 +459,9 @@ fn compile_to_llvm_lines_with_module_timed(source -> string, module_name -> stri
     let t_parse = _ms_since(t0);
 
     let t1 = monotonic_millis();
-    let diagnostics = typecheck_diagnostics(program);
     let t_typecheck = _ms_since(t1);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         print.warn(_timing_line(module_name, "parse", t_parse));
         print.warn(_timing_line(module_name, "typecheck", t_typecheck));
@@ -509,8 +509,8 @@ fn compile_tests_to_llvm_with_module(source -> string, module_name -> string) ->
         print.info("test compiler: parse_program start");
     }
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         return "";
     }
@@ -578,8 +578,8 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
         print.info("test compiler: parse_program start");
     }
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         return false;
     }
@@ -621,8 +621,8 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
 fn compile_tests_to_llvm_lines_with_module(source -> string, module_name -> string) -> string[] ![io] {
     let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         return [];
     }
@@ -653,8 +653,8 @@ fn compile_to_native_text(source -> string) -> string ![io] {
 
 fn compile_to_native_text_with_module(source -> string, module_name -> string) -> string ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         return "";
     }
@@ -673,8 +673,8 @@ fn compile_to_native_text_with_module(source -> string, module_name -> string) -
 // Write native text directly to a file to avoid returning large strings across ABI boundaries.
 fn write_native_text_file_with_module(source -> string, module_name -> string, out_path -> string) -> boolean ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         return false;
     }
@@ -754,8 +754,8 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
     let program -> Program = parse_program(source);
     let skip_typecheck = fs.exists("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
-        let diagnostics = typecheck_diagnostics(program);
-        if diagnostics.length > 0 {
+        if typecheck_has_errors(program) {
+            let diagnostics = typecheck_diagnostics(program);
             report_typecheck_errors(diagnostics, source);
             return false;
         }
@@ -878,8 +878,8 @@ fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] 
 
 fn compile_to_native_llvm_full_with_module(source -> string, module_name -> string) -> LLVMCompilationResult ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         let messages = format_typecheck_diagnostics(diagnostics, source);
         return LLVMCompilationResult {
@@ -997,8 +997,8 @@ fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> st
 
 fn compile_to_native_llvm_with_context_with_module(source -> string, module_name -> string, manifest_contents -> string[], native_artifacts -> string[]) -> LoweredLLVMResultAny ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         let messages = format_typecheck_diagnostics(diagnostics, source);
         return LoweredLLVMResultAny {
@@ -1077,8 +1077,8 @@ fn compile_to_native_llvm_with_context_with_module_and_entry_points(
     entry_points -> string[]
 ) -> LoweredLLVMResultAny ![io] {
     let program -> Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    if diagnostics.length > 0 {
+    if typecheck_has_errors(program) {
+        let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
         let messages = format_typecheck_diagnostics(diagnostics, source);
         return LoweredLLVMResultAny {

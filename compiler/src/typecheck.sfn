@@ -97,6 +97,16 @@ fn typecheck_diagnostics(program -> Program) -> Diagnostic[] {
     return all_diagnostics;
 }
 
+fn typecheck_error_count(program -> Program) -> number {
+    let diagnostics = typecheck_diagnostics(program);
+    return diagnostics.length;
+}
+
+fn typecheck_has_errors(program -> Program) -> boolean {
+    let count = typecheck_error_count(program);
+    return count > 0;
+}
+
 fn collect_interface_definitions(program -> Program) -> Statement[] {
     let mut interfaces -> Statement[] = [];
 
