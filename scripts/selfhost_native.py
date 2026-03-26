@@ -3477,34 +3477,117 @@ def _fix_degenerate_loops(llvm_ir: str) -> tuple[str, int]:
                         break
 
                 if not body_has_exit:
-                    indent = lines[br_line_idx][:len(lines[br_line_idx]) - len(lines[br_line_idx].lstrip())]
-                    lines[br_line_idx] = f"{indent}br label %{after_label}"
-                    # Comment out load instructions in the latch (now dead
-                    # code since the latch no longer loops back).
-                    for li in load_line_indices:
-                        lines[li] = f"{indent}; dead latch load: {lines[li].strip()}"
-                    # Remove phi entries that reference this latch label
-                    # from the header block (the latch no longer branches
-                    # to the header, so phi predecessors are invalid).
+                    # Check if header has phi nodes — if so, this is a real
+                    # iterating loop whose exit condition was dropped by the
+                    # compiler.  Don't break it; instead add an iteration
+                    # counter guard to the header so it can still iterate
+                    # but won't spin forever.
+                    has_header_phi = False
                     if header_line_idx is not None:
                         for h in range(header_line_idx + 1, i):
                             hl = lines[h].strip()
-                            if "= phi " in hl and f"%{latch_label}" in hl:
-                                # Remove the latch alternative from the phi.
-                                # Pattern: [ %val, %loop.latchN ]
-                                lines[h] = _re.sub(
-                                    r",?\s*\[\s*%\w+\s*,\s*%" + _re.escape(latch_label) + r"\s*\]",
-                                    "",
-                                    lines[h],
+                            if hl.endswith(":") and not "=" in hl:
+                                break  # hit another label
+                            if "= phi " in hl:
+                                has_header_phi = True
+                                break
+
+                    indent = lines[br_line_idx][:len(lines[br_line_idx]) - len(lines[br_line_idx].lstrip())]
+
+                    if has_header_phi:
+                        # Add a counter-based guard to the header.
+                        # Insert a phi for the counter right after existing
+                        # phi nodes (LLVM requires phis first in a block),
+                        # then add increment + comparison + conditional br
+                        # at the position of the old unconditional br.
+                        loop_n = header_match.group(1)
+                        counter_name = f"%_degen_ctr{loop_n}"
+                        counter_next = f"%_degen_ctr_next{loop_n}"
+                        counter_limit = f"%_degen_limit{loop_n}"
+                        body_label = f"loop.body{loop_n}"
+
+                        # Find the entry predecessor from existing phi.
+                        entry_pred = None
+                        last_phi_idx = None
+                        for h in range(header_line_idx + 1, i):
+                            hl = lines[h].strip()
+                            if hl.endswith(":") and "=" not in hl:
+                                break  # another label
+                            if "= phi " in hl:
+                                last_phi_idx = h
+                                phi_m = _re.search(
+                                    r"\[\s*%?\w+\s*,\s*(%\S+)\s*\].*\[\s*%?\w+\s*,\s*(%\S+)\s*\]", hl
                                 )
-                                # If the phi now has only one incoming, convert
-                                # to a simple assignment.
-                                one_arm = _re.match(
-                                    r"\s*(%\w+)\s*=\s*phi\s+(\S+)\s+\[\s*(%\S+)\s*,\s*%\S+\s*\]\s*$",
-                                    lines[h],
-                                )
-                                # Single-predecessor phi is valid LLVM IR; leave as-is.
-                    changed += 1
+                                if phi_m:
+                                    p1 = phi_m.group(1).lstrip("%")
+                                    p2 = phi_m.group(2).lstrip("%")
+                                    entry_pred = p1 if p2 == latch_label else p2
+
+                        if entry_pred is None:
+                            entry_pred = "block.entry"
+
+                        # Find where the header's br instruction is.
+                        header_br_idx = None
+                        for h in range(header_line_idx + 1, i):
+                            hl = lines[h].strip()
+                            if hl == f"br label %{body_label}":
+                                header_br_idx = h
+                                break
+
+                        if header_br_idx is not None and last_phi_idx is not None:
+                            # Insert counter phi right after the last existing phi.
+                            counter_phi = f"{indent}{counter_name} = phi i64 [ 0, %{entry_pred} ], [ {counter_next}, %{latch_label} ]"
+                            lines.insert(last_phi_idx + 1, counter_phi)
+                            # Adjust indices since we inserted a line.
+                            header_br_idx += 1
+                            br_line_idx += 1
+                            i += 1
+                            # Replace the unconditional br with counter
+                            # check + conditional br.
+                            guard_lines = [
+                                f"{indent}{counter_next} = add i64 {counter_name}, 1",
+                                f"{indent}{counter_limit} = icmp uge i64 {counter_name}, 10000000",
+                                f"{indent}br i1 {counter_limit}, label %{after_label}, label %{body_label}",
+                            ]
+                            lines[header_br_idx] = "\n".join(guard_lines)
+                            changed += 1
+                        else:
+                            # Fallback: break the loop as before.
+                            lines[br_line_idx] = f"{indent}br label %{after_label}"
+                            for li in load_line_indices:
+                                lines[li] = f"{indent}; dead latch load: {lines[li].strip()}"
+                            if header_line_idx is not None:
+                                for h in range(header_line_idx + 1, i):
+                                    hl = lines[h].strip()
+                                    if "= phi " in hl and f"%{latch_label}" in hl:
+                                        lines[h] = _re.sub(
+                                            r",?\s*\[\s*%\w+\s*,\s*%" + _re.escape(latch_label) + r"\s*\]",
+                                            "",
+                                            lines[h],
+                                        )
+                            changed += 1
+                    else:
+                        # No phi nodes — truly degenerate. Break it.
+                        lines[br_line_idx] = f"{indent}br label %{after_label}"
+                        # Comment out load instructions in the latch (now dead
+                        # code since the latch no longer loops back).
+                        for li in load_line_indices:
+                            lines[li] = f"{indent}; dead latch load: {lines[li].strip()}"
+                        # Remove phi entries that reference this latch label
+                        # from the header block (the latch no longer branches
+                        # to the header, so phi predecessors are invalid).
+                        if header_line_idx is not None:
+                            for h in range(header_line_idx + 1, i):
+                                hl = lines[h].strip()
+                                if "= phi " in hl and f"%{latch_label}" in hl:
+                                    # Remove the latch alternative from the phi.
+                                    # Pattern: [ %val, %loop.latchN ]
+                                    lines[h] = _re.sub(
+                                        r",?\s*\[\s*%\w+\s*,\s*%" + _re.escape(latch_label) + r"\s*\]",
+                                        "",
+                                        lines[h],
+                                    )
+                        changed += 1
         i += 1
 
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed

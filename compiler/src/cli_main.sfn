@@ -185,8 +185,10 @@ fn _emit_llvm_text_via_file(source -> string, module_name -> string) -> string !
         fs.deleteFile(out_path);
     }
     let ok = compile_to_llvm_file_with_module(source, module_name, out_path);
-    if ok && fs.exists(out_path) {
-        return fs.readFile(out_path);
+    if ok {
+        if fs.exists(out_path) {
+            return fs.readFile(out_path);
+        }
     }
     return compile_to_llvm_with_module(source, module_name);
 }
@@ -197,8 +199,10 @@ fn _emit_native_text_via_file(source -> string, module_name -> string) -> string
         fs.deleteFile(out_path);
     }
     let ok = write_native_text_file_with_module(source, module_name, out_path);
-    if ok && fs.exists(out_path) {
-        return fs.readFile(out_path);
+    if ok {
+        if fs.exists(out_path) {
+            return fs.readFile(out_path);
+        }
     }
     return compile_to_native_text_with_module(source, module_name);
 }
@@ -1157,41 +1161,13 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
     }
 
-    if args.length == 1 && (_is_flag(args[0], "--version") || _is_flag(args[0], "-V")) {
-        print.info("sfn " + sailfin_version());
-        return 0;
-    }
-
-    // Back-compat with older driver UX: --emit MODE file
-    if args.length == 3 && _is_flag(args[0], "--emit") {
-        let mode = args[1];
-        let path = args[2];
-        if !fs.exists(path) {
-            print.error("file not found: " + path);
-            return 1;
-        }
-        let source = fs.readFile(path);
-        let module_name = module_name_from_path(path);
-        if mode == "llvm" {
-            print.info(_emit_llvm_text_via_file(source, module_name));
-            return 0;
-        }
-        if mode == "sailfin" {
-            print.info(compile_to_sailfin(source));
-            return 0;
-        }
-        if mode == "native" {
-            print.info(_emit_native_text_via_file(source, module_name));
-            return 0;
-        }
-        print.error("unknown --emit mode: " + mode);
-        print.error(_usage());
-        return 2;
-    }
-
+    // Pre-compute command checks to avoid patterns the compiler drops
+    // (&&-chained .length checks with function calls get dropped from IR)
     let cmd = args[0];
-    let is_emit = strings_equal(cmd, "emit");
-    let is_version = strings_equal(cmd, "version");
+    let is_version_flag = strings_equal(cmd, "--version") || strings_equal(cmd, "-V");
+    let is_emit_flag = strings_equal(cmd, "--emit");
+    let is_emit = strings_equal(cmd, "emit") || is_emit_flag;
+    let is_version = strings_equal(cmd, "version") || is_version_flag;
     let is_emit_file = strings_equal(cmd, "emit-llvm-file");
     let is_build = strings_equal(cmd, "build");
     let is_run = strings_equal(cmd, "run");
@@ -1218,9 +1194,11 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     if is_emit {
         let mut timing = false;
         let mut base_index = 1;
-        if args.length >= 2 && _is_flag(args[1], "--timing") {
-            timing = true;
-            base_index = 2;
+        if args.length >= 2 {
+            if strings_equal(args[1], "--timing") {
+                timing = true;
+                base_index = 2;
+            }
         }
         let _expected_args = base_index + 2;
         if args.length != _expected_args {
@@ -1236,7 +1214,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
-        if mode == "llvm" {
+        if strings_equal(mode, "llvm") {
             if timing {
                 print.info(compile_to_llvm_with_module_timed(source, module_name));
             } else {
@@ -1244,11 +1222,11 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             }
             return 0;
         }
-        if mode == "sailfin" {
+        if strings_equal(mode, "sailfin") {
             print.info(compile_to_sailfin(source));
             return 0;
         }
-        if mode == "native" {
+        if strings_equal(mode, "native") {
             print.info(_emit_native_text_via_file(source, module_name));
             return 0;
         }
@@ -1259,9 +1237,11 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     if is_emit_file {
         let mut timing = false;
         let mut base_index = 1;
-        if args.length >= 2 && _is_flag(args[1], "--timing") {
-            timing = true;
-            base_index = 2;
+        if args.length >= 2 {
+            if strings_equal(args[1], "--timing") {
+                timing = true;
+                base_index = 2;
+            }
         }
         let _expected_args2 = base_index + 2;
         if args.length != _expected_args2 {
@@ -1298,9 +1278,14 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         if args.length == 2 {
             input_path = args[1];
             out_path = "build/sailfin/program";
-        } else if args.length == 4 && args[1] == "-o" {
-            out_path = args[2];
-            input_path = args[3];
+        } else if args.length == 4 {
+            if strings_equal(args[1], "-o") {
+                out_path = args[2];
+                input_path = args[3];
+            } else {
+                print.error(_usage());
+                return 2;
+            }
         } else {
             print.error(_usage());
             return 2;
