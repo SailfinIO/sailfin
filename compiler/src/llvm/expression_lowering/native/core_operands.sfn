@@ -982,7 +982,12 @@ fn harmonise_operands(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
     }
     let target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type);
     let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines);
-    diagnostics = diagnostics.concat(left_coercion.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= left_coercion.diagnostics.length { break; }
+        diagnostics.push(left_coercion.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
     if left_coercion.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to convert left operand from `" + left_operand.llvm_type + "` to `" + target_type + "`");
         return BinaryAlignmentResult {
@@ -999,7 +1004,12 @@ fn harmonise_operands(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
     current_temp = left_coercion.temp_index;
 
     let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines);
-    diagnostics = diagnostics.concat(right_coercion.diagnostics);
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= right_coercion.diagnostics.length { break; }
+        diagnostics.push(right_coercion.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if right_coercion.operand == null {
         diagnostics = append_string(diagnostics, "llvm lowering: unable to convert right operand from `" + right_operand.llvm_type + "` to `" + target_type + "`");
         return BinaryAlignmentResult {

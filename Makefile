@@ -242,7 +242,7 @@ check: check-conda
 	fi; \
 	echo "[check] verifying seed selfhost..."; \
 	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py \
-		--seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --max-total-seconds 3600 --out build/native/sailfin-seedcheck
+		--seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) --opt="-O0" $(BUILD_ARGS) --max-total-seconds 3600 --out build/native/sailfin-seedcheck
 	@echo "[check] validating seedcheck binary can run programs..."
 	@sc="build/native/sailfin-seedcheck"; \
 	output=$$(timeout 10 $$sc run examples/basics/hello-world.sfn 2>&1) || true; \
@@ -372,7 +372,7 @@ rebuild: check-conda
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi; \
 	echo "[rebuild] running build script (seed=$$seed)..."; \
-	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out $(NATIVE_OUT)
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out $(NATIVE_OUT)
 	@SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
 	if [ ! -d "$$SRC" ]; then \
 		echo "[rebuild][error] missing import-context output at $$SRC" >&2; \
@@ -445,7 +445,7 @@ rebuild-asan: check-conda
 		exit 1; \
 	fi; \
 	echo "[rebuild-asan] running build script (ASAN output; seed=$$seed)..."; \
-	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --asan --seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-selfhost
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --asan --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-selfhost
 	@echo "[rebuild-asan] built build/native/sailfin-selfhost"
 
 # Deprecated aliases.

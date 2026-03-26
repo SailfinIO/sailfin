@@ -179,10 +179,8 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
         };
     }
 
-    init_lines = init_lines.concat([
-        "define internal void " + init_symbol + "() {",
-        "block.entry:",
-    ]);
+    init_lines.push("define internal void " + init_symbol + "() {");
+    init_lines.push("block.entry:");
 
     let mut init_index -> number = 0;
     let mut current_temp -> number = 0;
@@ -233,7 +231,12 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
 
         if llvm_type == "i8*" {
             let lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type);
-            diagnostics = diagnostics.concat(lowered.diagnostics);
+            let mut _ci0 -> number = 0;
+            loop {
+                if _ci0 >= lowered.diagnostics.length { break; }
+                diagnostics.push(lowered.diagnostics[_ci0]);
+                _ci0 += 1;
+            }
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
@@ -258,13 +261,23 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             }
             if should_store {
                 let lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type);
-                diagnostics = diagnostics.concat(lowered.diagnostics);
+                let mut _ci1 -> number = 0;
+                loop {
+                    if _ci1 >= lowered.diagnostics.length { break; }
+                    diagnostics.push(lowered.diagnostics[_ci1]);
+                    _ci1 += 1;
+                }
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
                 collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                 if lowered.operand != null {
                     let coerced = coerce_operand_to_type(lowered.operand, llvm_type, current_temp, current_lines);
-                    diagnostics = diagnostics.concat(coerced.diagnostics);
+                    let mut _ci2 -> number = 0;
+                    loop {
+                        if _ci2 >= coerced.diagnostics.length { break; }
+                        diagnostics.push(coerced.diagnostics[_ci2]);
+                        _ci2 += 1;
+                    }
                     current_lines = coerced.lines;
                     current_temp = coerced.temp_index;
                     if coerced.operand != null {

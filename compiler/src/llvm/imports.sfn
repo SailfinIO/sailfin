@@ -62,14 +62,14 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
             manifest_structs = parsed_manifest.structs;
             manifest_enums = parsed_manifest.enums;
         } else {
-            diagnostics = diagnostics.concat(["layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")"]);
+            diagnostics.push("layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")");
         }
 
         let mut native_text -> string = "";
         if fs.exists(native_text_path) {
             native_text = fs.readFile(native_text_path);
         } else {
-            diagnostics = diagnostics.concat(["native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")"]);
+            diagnostics.push("native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")");
         }
 
         let mut updated_manifests = manifests;

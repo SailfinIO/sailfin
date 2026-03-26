@@ -67,9 +67,20 @@ fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
         return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: harmonised.diagnostics, string_constants: empty_string_constant_set() };
     }
     let left_aligned = coerce_operand_to_type(harmonised.left, "i8*", harmonised.temp_index, harmonised.lines);
-    let mut diagnostics = harmonised.diagnostics.concat(left_aligned.diagnostics);
+    let mut diagnostics -> string[] = harmonised.diagnostics;
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= left_aligned.diagnostics.length { break; }
+        diagnostics.push(left_aligned.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
     let right_aligned = coerce_operand_to_type(harmonised.right, "i8*", left_aligned.temp_index, left_aligned.lines);
-    diagnostics = diagnostics.concat(right_aligned.diagnostics);
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= right_aligned.diagnostics.length { break; }
+        diagnostics.push(right_aligned.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if left_aligned.operand == null || right_aligned.operand == null {
         return ExpressionResult { lines: right_aligned.lines, temp_index: right_aligned.temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_string_constant_set() };
     }

@@ -89,6 +89,14 @@ import { lower_enum_literal } from "./core_literals_lowering";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
 
+// Helper to access a string array element.
+// The seed compiler (v0.1.1) has a bug where `arr[idx]` inside complex loops
+// compiles as substring() on the wrong local variable.  Extracting the access
+// into a tiny function produces correct array-element-load LLVM IR.
+fn get_string_at(arr -> string[], idx -> number) -> string {
+    return arr[idx];
+}
+
 fn find_function_by_name_or_import_suffix(functions -> NativeFunction[], target -> string) -> NativeFunction? {
     let exact = find_function_by_name(functions, target);
     if exact != null {
@@ -557,7 +565,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         if index >= arguments.length {
             break;
         }
-        let argument_text = trim_text(arguments[index]);
+        let argument_text = trim_text(get_string_at(arguments, index));
         if argument_text.length == 0 {
             diagnostics = append_string(diagnostics, "llvm lowering: empty argument in call to `" + trimmed_target + "`");
         }

@@ -340,6 +340,73 @@ def _collect_concrete_named_type_defs(llvm_ir: str) -> dict[str, str]:
     return out
 
 
+def _infer_opaque_types_from_usage(llvm_ir: str) -> dict[str, str]:
+    """Infer concrete type definitions from ``insertvalue`` usage patterns.
+
+    When the seed emits ``%TypeName = type opaque`` but uses it concretely
+    (e.g., ``insertvalue %TypeName undef, i32 7, 0``), we can reconstruct
+    the concrete type definition by collecting all field types by index.
+
+    Returns a dict mapping ``%TypeName`` to the full definition line,
+    e.g. ``{"%TokenKind": "%TokenKind = type { i32 }"}``.
+    """
+
+    # Step 1: find all opaque types in this module.
+    opaque_types: set[str] = set()
+    for m in _LLVM_NAMED_TYPE_DEF_RE.finditer(llvm_ir):
+        if m.group("body").strip() == "opaque":
+            opaque_types.add(m.group("name"))
+
+    if not opaque_types:
+        return {}
+
+    # Step 2: scan insertvalue instructions.
+    # Pattern: insertvalue %TypeName undef, TYPE VALUE, INDEX
+    # or:      insertvalue %TypeName { ... }, TYPE VALUE, INDEX
+    # We only care about the initial 'undef' forms since those give us
+    # the first field, and we collect all indices to build the struct.
+    _insertvalue_re = re.compile(
+        r"insertvalue\s+(?P<type>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s+"
+        r"(?:undef|\{[^}]*\}|%[a-z0-9_.]+),\s+"
+        r"(?P<field_type>[^,]+?)\s+(?:undef|zeroinitializer|%[a-z0-9_.]+|[-0-9]+|null|"
+        r"(?:bitcast|inttoptr|getelementptr)[^,]*)\s*,\s*"
+        r"(?P<index>\d+)"
+    )
+
+    # Collect field types per opaque type, keyed by index.
+    fields_by_type: dict[str, dict[int, str]] = {}
+    for m in _insertvalue_re.finditer(llvm_ir):
+        type_name = m.group("type")
+        if type_name not in opaque_types:
+            continue
+        field_type = m.group("field_type").strip()
+        index = int(m.group("index"))
+        if type_name not in fields_by_type:
+            fields_by_type[type_name] = {}
+        # First seen wins for each index (they should be consistent).
+        if index not in fields_by_type[type_name]:
+            fields_by_type[type_name][index] = field_type
+
+    # Step 3: build concrete type definitions.
+    out: dict[str, str] = {}
+    for type_name, fields in fields_by_type.items():
+        if not fields:
+            continue
+        max_idx = max(fields.keys())
+        # All indices from 0..max must be present.
+        field_list = []
+        complete = True
+        for i in range(max_idx + 1):
+            if i not in fields:
+                complete = False
+                break
+            field_list.append(fields[i])
+        if complete and field_list:
+            body = "{ " + ", ".join(field_list) + " }"
+            out[type_name] = f"{type_name} = type {body}"
+    return out
+
+
 def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple[str, int]:
     """Replace `type opaque` declarations when a concrete definition is known.
 
@@ -396,19 +463,39 @@ def _patch_opaque_named_types(llvm_ir: str, known_defs: dict[str, str]) -> tuple
     changed = 0
     for line in lines_in:
         stripped = line.strip()
-        if stripped.endswith("= type opaque"):
-            prefix_len = len(line) - len(line.lstrip(" \t"))
-            prefix = line[:prefix_len]
-            name = stripped.split("=", 1)[0].strip()
-            if name in known_defs:
+        m = type_decl_re.match(stripped)
+        if m:
+            name = m.group("name")
+            body = m.group("body").strip()
+            if body == "opaque" and name in known_defs:
+                prefix_len = len(line) - len(line.lstrip(" \t"))
+                prefix = line[:prefix_len]
                 injected = _emit_with_deps(name)
                 if injected:
                     for inj in injected:
                         patched_lines.append(prefix + inj)
-                # Whether we injected a definition here or the module already
-                # had a concrete definition elsewhere, drop the opaque line.
                 changed += 1
                 continue
+            # Also fix incorrect concrete types: if the known definition
+            # has more fields (e.g. %Token = type { %TokenKind } should be
+            # %Token = type { %TokenKind, i8*, double, double }).
+            if body != "opaque" and name in known_defs:
+                known_body = known_defs[name].split("type", 1)[1].strip()
+                if body != known_body:
+                    # Count fields: the known definition should have >= fields.
+                    cur_fields = body.count(",") + 1 if body.startswith("{") else 0
+                    known_fields = known_body.count(",") + 1 if known_body.startswith("{") else 0
+                    if known_fields > cur_fields:
+                        prefix_len = len(line) - len(line.lstrip(" \t"))
+                        prefix = line[:prefix_len]
+                        # Replace with known definition but also emit deps.
+                        concrete_defined.discard(name)
+                        injected = _emit_with_deps(name)
+                        if injected:
+                            for inj in injected:
+                                patched_lines.append(prefix + inj)
+                            changed += 1
+                            continue
         patched_lines.append(line)
 
     return "\n".join(patched_lines) + "\n", changed
@@ -625,29 +712,41 @@ _RUNTIME_FIELD_PREFIX = ".runtime.field."
 
 
 def _fix_invalid_null_stores(llvm_ir: str) -> tuple[str, int]:
-    """Replace `store <non-pointer> null` with zeroinitializer.
+    """Replace `store <non-pointer> null` and `ret <non-pointer> null` with
+    zeroinitializer.
 
-    LLVM only permits `null` for pointer-typed values. For aggregate or
-    integer/float types, use `zeroinitializer` instead.
+    LLVM only permits `null`` for pointer-typed values. For aggregate or
+    integer/float types, use ``zeroinitializer`` instead.
     """
+
+    _RET_NULL_RE = re.compile(
+        r"^(?P<indent>\s*)ret\s+(?P<ty>%[A-Za-z_.$][A-Za-z0-9_.$]*)\s+null\s*$"
+    )
 
     lines = llvm_ir.splitlines()
     out: list[str] = []
     changed = 0
     for line in lines:
+        # Fix store ... null
         m = _STORE_NULL_RE.match(line)
-        if not m:
-            out.append(line)
+        if m:
+            ty = m.group("ty").strip()
+            if not (ty.endswith("*") or ty == "ptr"):
+                indent = m.group("indent")
+                ptr = m.group("ptr")
+                tail = m.group("tail")
+                out.append(f"{indent}store {ty} zeroinitializer, {ty}* {ptr}{tail}")
+                changed += 1
+                continue
+        # Fix ret %StructType null
+        rm = _RET_NULL_RE.match(line)
+        if rm:
+            ty = rm.group("ty").strip()
+            indent = rm.group("indent")
+            out.append(f"{indent}ret {ty} zeroinitializer")
+            changed += 1
             continue
-        ty = m.group("ty").strip()
-        if ty.endswith("*") or ty == "ptr":
-            out.append(line)
-            continue
-        indent = m.group("indent")
-        ptr = m.group("ptr")
-        tail = m.group("tail")
-        out.append(f"{indent}store {ty} zeroinitializer, {ty}* {ptr}{tail}")
-        changed += 1
+        out.append(line)
     return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
@@ -1051,6 +1150,1027 @@ def _fix_char_at_return_type(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
+# ---------------------------------------------------------------------------
+# Cross-module return type mismatch fix
+# ---------------------------------------------------------------------------
+
+def _collect_define_return_types(ll_texts: list[str]) -> dict[str, str]:
+    """Scan all module texts and collect function_name → return_type from ``define`` lines."""
+    ret_types: dict[str, str] = {}
+    _def_re = re.compile(
+        r"^define\s+(?:internal\s+)?(.+?)\s+(@\S+)\s*\(",
+        re.MULTILINE,
+    )
+    for text in ll_texts:
+        for m in _def_re.finditer(text):
+            ret_type = m.group(1).strip()
+            fn_name = m.group(2)
+            # Skip attributes like "noalias" that precede the actual type.
+            # The return type is the first token before @name.
+            ret_types[fn_name] = ret_type
+    return ret_types
+
+
+def _fix_cross_module_return_types(
+    llvm_ir: str,
+    global_ret_types: dict[str, str],
+) -> tuple[str, int]:
+    """Fix cross-module function declarations and call sites with wrong return types.
+
+    The seed compiler sometimes emits ``double`` as the return type for cross-module
+    function declarations, even when the actual function returns ``i1``, ``i8*``,
+    or a pointer type like ``{ i8**, i64 }*``.  On ARM64, this causes an ABI mismatch
+    (pointers/bools return in x0 but double is read from d0), producing garbage results
+    or worse, LLVM optimising away code paths based on UB from null dereferences.
+
+    This pass fixes:
+    1. ``declare`` lines: correct the return type.
+    2. ``call`` sites: correct the return type, rename the SSA value, and insert
+       a conversion back to the original (wrong) type so downstream code still
+       type-checks.  For pointer-returning functions where the next instruction is
+       ``store <ptr_type> null``, replace the null with the actual return value.
+    """
+    changed = 0
+
+    # Find all mismatched declares in this module.
+    _decl_re = re.compile(
+        r"^(declare\s+)(.+?)\s+(@\S+)\s*(\(.*\))\s*$",
+        re.MULTILINE,
+    )
+    mismatches: dict[str, tuple[str, str]] = {}  # fn_name -> (wrong_type, correct_type)
+    for m in _decl_re.finditer(llvm_ir):
+        wrong_type = m.group(2).strip()
+        fn_name = m.group(3)
+        correct_type = global_ret_types.get(fn_name)
+        if correct_type and correct_type != wrong_type:
+            mismatches[fn_name] = (wrong_type, correct_type)
+
+    if not mismatches:
+        return llvm_ir, 0
+
+    # Filter out mismatches we can't safely fix.
+    # Cases we handle: double → i1, double → i8*, double → <ptr_type>*,
+    #                  double → %NamedStruct (non-pointer named type).
+    # Cases we skip:   i8* → %NamedStruct (type may not be defined in this module).
+    fixable: dict[str, tuple[str, str]] = {}
+    for fn_name, (wrong_type, correct_type) in mismatches.items():
+        if wrong_type == "double":
+            fixable[fn_name] = (wrong_type, correct_type)
+        # Skip i8* → named struct, etc.
+    mismatches = fixable
+
+    if not mismatches:
+        return llvm_ir, 0
+
+    lines = llvm_ir.split("\n")
+    new_lines: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Fix declare lines.
+        if stripped.startswith("declare "):
+            for fn_name, (wrong_type, correct_type) in mismatches.items():
+                if fn_name in line:
+                    # Replace "declare <wrong_type> @fn" with "declare <correct_type> @fn"
+                    old_decl = f"declare {wrong_type} {fn_name}"
+                    new_decl = f"declare {correct_type} {fn_name}"
+                    if old_decl in line:
+                        line = line.replace(old_decl, new_decl, 1)
+                        changed += 1
+                        break
+            new_lines.append(line)
+            i += 1
+            continue
+
+        # Fix call sites.
+        handled = False
+        for fn_name, (wrong_type, correct_type) in mismatches.items():
+            call_pattern = f"call {wrong_type} {fn_name}("
+            if call_pattern not in stripped:
+                continue
+
+            # Extract the SSA name (e.g., %t189).
+            m_call = re.match(
+                r"(\s*)(%\S+)\s*=\s*call\s+" + re.escape(wrong_type) + r"\s+" + re.escape(fn_name) + r"\(",
+                line,
+            )
+            if not m_call:
+                # void call or unrecognised pattern — just fix the type in the call.
+                line = line.replace(call_pattern, f"call {correct_type} {fn_name}(", 1)
+                new_lines.append(line)
+                changed += 1
+                handled = True
+                break
+
+            indent = m_call.group(1)
+            ssa_name = m_call.group(2)
+
+            # Determine conversion strategy.
+            # Check i8* BEFORE generic pointer, since i8* needs special shadow handling.
+            is_ptr_type = correct_type.endswith("*") and correct_type != "i8*"
+            is_i1 = correct_type == "i1"
+            is_str = correct_type == "i8*"
+
+            if is_str and wrong_type == "double":
+                # i8* → double: fix call.  The downstream code stores the result
+                # in a double local, then later calls number_to_string(loaded_double)
+                # to get an i8*.  We need to:
+                # 1. Fix the call to return i8*.
+                # 2. Detect `store double %result, double* %lN` on the next line
+                #    and add a shadow i8* store.
+                # 3. Later, replace `number_to_string(load double %lN)` with
+                #    a load from the shadow.  This is done in _fix_string_double_shadow.
+                new_ssa = ssa_name + "_str"
+                new_call = line.replace(
+                    f"{ssa_name} = call {wrong_type} {fn_name}(",
+                    f"{new_ssa} = call {correct_type} {fn_name}(",
+                    1,
+                )
+                new_lines.append(new_call)
+                # Convert to double for type safety (downstream code expects double).
+                tmp_i64 = ssa_name + "_i64"
+                new_lines.append(f"{indent}{tmp_i64} = ptrtoint i8* {new_ssa} to i64")
+                new_lines.append(f"{indent}{ssa_name} = sitofp i64 {tmp_i64} to double")
+
+                # Detect store into double* local and add shadow i8* store.
+                if i + 1 < len(lines):
+                    m_store = re.match(
+                        r"\s*store double " + re.escape(ssa_name) + r", double\* (%l\d+)",
+                        lines[i + 1],
+                    )
+                    if m_store:
+                        local_name = m_store.group(1)
+                        shadow_name = local_name + "_shadow_str"
+                        new_lines.append(lines[i + 1])  # keep the double store
+                        new_lines.append(f"{indent}store i8* {new_ssa}, i8** {shadow_name}")
+                        i += 1  # skip the store line
+
+                # Also check for store i8* null pattern.
+                if i + 1 < len(lines):
+                    next_stripped = lines[i + 1].strip()
+                    if next_stripped.startswith("store i8* null,"):
+                        new_store = lines[i + 1].replace(
+                            "store i8* null,",
+                            f"store i8* {new_ssa},",
+                            1,
+                        )
+                        i += 1
+                        new_lines.append(new_store)
+
+                changed += 1
+                handled = True
+                break
+
+            elif is_ptr_type and wrong_type == "double":
+                # Pointer → double: fix call, try to replace downstream null store.
+                new_ssa = ssa_name + "_ptr"
+                new_call = line.replace(
+                    f"{ssa_name} = call {wrong_type} {fn_name}(",
+                    f"{new_ssa} = call {correct_type} {fn_name}(",
+                    1,
+                )
+                new_lines.append(new_call)
+
+                # Look at the next line for `store <correct_type> null, <correct_type>* %lN`.
+                null_store_replaced = False
+                if i + 1 < len(lines):
+                    next_stripped = lines[i + 1].strip()
+                    null_store_pattern = f"store {correct_type} null, {correct_type}* "
+                    if next_stripped.startswith(null_store_pattern):
+                        # Replace null with the actual pointer.
+                        next_indent = lines[i + 1][: len(lines[i + 1]) - len(lines[i + 1].lstrip())]
+                        new_store = lines[i + 1].replace(
+                            f"store {correct_type} null,",
+                            f"store {correct_type} {new_ssa},",
+                            1,
+                        )
+                        i += 1  # skip the null store line
+                        new_lines.append(new_store)
+                        null_store_replaced = True
+
+                # Insert conversion to double so any (unlikely) downstream usage
+                # of the original SSA name still type-checks.
+                # ptrtoint + sitofp: lossy for large pointers but preserves non-null.
+                tmp_i64 = ssa_name + "_i64"
+                new_lines.append(f"{indent}{tmp_i64} = ptrtoint {correct_type} {new_ssa} to i64")
+                new_lines.append(f"{indent}{ssa_name} = sitofp i64 {tmp_i64} to double")
+                changed += 1
+                handled = True
+                break
+
+            elif is_i1 and wrong_type == "double":
+                # i1 → double: fix call, convert back with uitofp.
+                new_ssa = ssa_name + "_i1"
+                new_call = line.replace(
+                    f"{ssa_name} = call {wrong_type} {fn_name}(",
+                    f"{new_ssa} = call {correct_type} {fn_name}(",
+                    1,
+                )
+                new_lines.append(new_call)
+                new_lines.append(f"{indent}{ssa_name} = uitofp i1 {new_ssa} to double")
+                changed += 1
+                handled = True
+                break
+
+            elif wrong_type == "double" and correct_type.startswith("%"):
+                # Named struct → double: fix call, alloca + bitcast to double*.
+                # The downstream code treats the result as a double; we reinterpret
+                # the first 8 bytes of the struct as a double.  This preserves
+                # the ABI (struct is returned correctly) while keeping downstream
+                # code valid.  Also fix the next store if it stores into double*.
+                new_ssa = ssa_name + "_struct"
+                new_call = line.replace(
+                    f"{ssa_name} = call {wrong_type} {fn_name}(",
+                    f"{new_ssa} = call {correct_type} {fn_name}(",
+                    1,
+                )
+                new_lines.append(new_call)
+                tmp_alloca = ssa_name + "_salloc"
+                tmp_dptr = ssa_name + "_dptr"
+                new_lines.append(f"{indent}{tmp_alloca} = alloca {correct_type}")
+                new_lines.append(f"{indent}store {correct_type} {new_ssa}, {correct_type}* {tmp_alloca}")
+                new_lines.append(f"{indent}{tmp_dptr} = bitcast {correct_type}* {tmp_alloca} to double*")
+                new_lines.append(f"{indent}{ssa_name} = load double, double* {tmp_dptr}")
+
+                # Also look at next line: `store double %tN, double* %lM`.
+                # Replace with store of the full struct into an appropriately-typed alloca.
+                # But since %lM is `double*`, we can't store a struct there.  The double
+                # reinterpretation is the best we can do.
+                changed += 1
+                handled = True
+                break
+
+            else:
+                # Other exotic mismatches (e.g., i8* → named struct).
+                # Skip — don't fix these as the type may be unsized/opaque
+                # in the declaring module.  The linker may resolve them,
+                # or they may need a targeted per-function fix.
+                pass
+
+        if not handled:
+            new_lines.append(line)
+        i += 1
+
+    return "\n".join(new_lines), changed
+
+
+def _fix_string_concat_as_gep(llvm_ir: str) -> tuple[str, int]:
+    r"""Fix broken string concatenation emitted as ptrtoint→sitofp→GEP.
+
+    The compiler sometimes emits string concatenation as:
+
+        %t_str = call i8* @some_function(...)
+        %t_i64 = ptrtoint i8* %t_str to i64
+        %t_dbl = sitofp i64 %t_i64 to double
+        ...
+        %t_round = call double @round(double %t_dbl)
+        %t_back = fptosi double %t_round to i64
+        %t_gep = getelementptr i8, i8* %base, i64 %t_back
+
+    This should be:
+
+        %t_str = call i8* @some_function(...)
+        %t_gep = call i8* @sailfin_runtime_string_concat(i8* %base, i8* %t_str)
+
+    Processes each function independently to avoid cross-function SSA name collisions.
+    """
+    if "_str to i64" not in llvm_ir:
+        return llvm_ir, 0
+
+    import re as _re
+
+    # Pattern: %var_i64 = ptrtoint i8* %var_str to i64
+    ptrtoint_re = _re.compile(
+        r"^\s+(%\S+) = ptrtoint i8\* (%\S+_str) to i64\s*$"
+    )
+    # Pattern: %var = sitofp i64 %src to double
+    sitofp_re = _re.compile(
+        r"^\s+(%\S+) = sitofp i64 (%\S+) to double\s*$"
+    )
+    # Pattern: %var = call double @round(double %src)
+    round_re = _re.compile(
+        r"^\s+(%\S+) = call double @round\(double (%\S+)\)\s*$"
+    )
+    # Pattern: %var = fptosi double %src to i64
+    fptosi_re = _re.compile(
+        r"^\s+(%\S+) = fptosi double (%\S+) to i64\s*$"
+    )
+    # Pattern: %var = getelementptr i8, i8* %base, i64 %offset
+    gep_re = _re.compile(
+        r"^\s+(%\S+) = getelementptr i8, i8\* (%\S+), i64 (%\S+)\s*$"
+    )
+    # Function boundaries
+    define_re = _re.compile(r"^define\s+")
+
+    lines = llvm_ir.split("\n")
+    total_changed = 0
+
+    # Find function boundaries
+    func_ranges: list[tuple[int, int]] = []
+    func_start: int | None = None
+    for i, line in enumerate(lines):
+        if define_re.match(line.strip()):
+            func_start = i
+        elif line.strip() == "}" and func_start is not None:
+            func_ranges.append((func_start, i))
+            func_start = None
+
+    skip_lines: set[int] = set()
+    replacements: dict[int, str] = {}
+
+    for fstart, fend in func_ranges:
+        # Build maps per-function
+        ptrtoint_map: dict[str, str] = {}
+        sitofp_map: dict[str, str] = {}
+        round_map: dict[str, str] = {}
+        fptosi_map: dict[str, str] = {}
+
+        for i in range(fstart, fend + 1):
+            line = lines[i]
+            m = ptrtoint_re.match(line)
+            if m:
+                ptrtoint_map[m.group(1)] = m.group(2)
+                continue
+            m = sitofp_re.match(line)
+            if m:
+                sitofp_map[m.group(1)] = m.group(2)
+                continue
+            m = round_re.match(line)
+            if m:
+                round_map[m.group(1)] = m.group(2)
+                continue
+            m = fptosi_re.match(line)
+            if m:
+                fptosi_map[m.group(1)] = m.group(2)
+                continue
+
+        # Find GEP lines within this function
+        for i in range(fstart, fend + 1):
+            m = gep_re.match(lines[i])
+            if not m:
+                continue
+            gep_dst = m.group(1)
+            gep_base = m.group(2)
+            gep_offset = m.group(3)
+
+            # Trace back the full chain
+            if gep_offset not in fptosi_map:
+                continue
+            round_var = fptosi_map[gep_offset]
+            if round_var not in round_map:
+                continue
+            sitofp_var = round_map[round_var]
+            if sitofp_var not in sitofp_map:
+                continue
+            ptrtoint_var = sitofp_map[sitofp_var]
+            if ptrtoint_var not in ptrtoint_map:
+                continue
+            original_str = ptrtoint_map[ptrtoint_var]
+
+            # Replace GEP with string_concat
+            replacements[i] = (
+                f"  {gep_dst} = call i8* @sailfin_runtime_string_concat("
+                f"i8* {gep_base}, i8* {original_str})"
+            )
+
+            # Mark intermediate lines for removal within this function
+            for j in range(fstart, fend + 1):
+                stripped = lines[j].strip()
+                if (stripped == f"{ptrtoint_var} = ptrtoint i8* {original_str} to i64" or
+                    stripped == f"{sitofp_var} = sitofp i64 {ptrtoint_var} to double" or
+                    stripped == f"{round_var} = call double @round(double {sitofp_var})" or
+                    stripped == f"{gep_offset} = fptosi double {round_var} to i64"):
+                    skip_lines.add(j)
+
+            total_changed += 1
+
+    if not total_changed:
+        return llvm_ir, 0
+
+    new_lines = []
+    for i, line in enumerate(lines):
+        if i in skip_lines:
+            continue
+        if i in replacements:
+            new_lines.append(replacements[i])
+        else:
+            new_lines.append(line)
+
+    # Ensure declare for string_concat exists
+    result = "\n".join(new_lines)
+    if "sailfin_runtime_string_concat" not in llvm_ir:
+        first_define = result.find("\ndefine ")
+        if first_define >= 0:
+            result = (
+                result[:first_define]
+                + "\ndeclare i8* @sailfin_runtime_string_concat(i8*, i8*)\n"
+                + result[first_define:]
+            )
+
+    return result, total_changed
+
+
+def _fix_string_double_shadow(llvm_ir: str) -> tuple[str, int]:
+    """Fix i8*-as-double shadow patterns introduced by _fix_cross_module_return_types.
+
+    When a cross-module function returning ``i8*`` was declared as returning
+    ``double``, the compiler generates:
+
+        %t = call double @fn(...)
+        store double %t, double* %lN
+        ...
+        %tK = load double, double* %lN
+        %tJ = call i8* @number_to_string(double %tK)
+
+    After _fix_cross_module_return_types, the call is fixed to return ``i8*``
+    and a shadow store ``store i8* %t_str, i8** %lN_shadow_str`` is inserted.
+    This pass processes each function independently:
+
+    1. Detects shadow stores (``store i8* ..., i8** %lN_shadow_str``).
+    2. Inserts corresponding ``alloca i8*`` at function entry.
+    3. Replaces ``%tJ = call i8* @number_to_string(double %tK)`` patterns where
+       ``%tK`` was loaded from ``%lN`` with ``%tJ = load i8*, i8** %lN_shadow_str``.
+    """
+    if "_shadow_str" not in llvm_ir:
+        return llvm_ir, 0
+
+    changed = 0
+    # Process per-function to handle local name clashes.
+    _define_re = re.compile(r"^define\s+")
+    _shadow_store_re = re.compile(r"store i8\* (%\S+), i8\*\* (%l\d+_shadow_str)")
+    _load_double_re = re.compile(r"\s*(%\S+) = load double, double\* (%l\d+)")
+    _nts_re = re.compile(
+        r"(\s*)(%\S+) = call i8\* @(?:sailfin_runtime_number_to_string|number_to_string__llvm__utils)\(double (%\S+)\)"
+    )
+
+    lines = llvm_ir.split("\n")
+    new_lines: list[str] = []
+
+    # Collect function boundaries.
+    func_ranges: list[tuple[int, int]] = []  # (start, end) inclusive
+    func_start: int | None = None
+    for i, line in enumerate(lines):
+        if _define_re.match(line.strip()):
+            func_start = i
+        elif line.strip() == "}" and func_start is not None:
+            func_ranges.append((func_start, i))
+            func_start = None
+
+    # Build set of lines that are inside functions needing shadow treatment.
+    func_set: set[int] = set()
+    for start, end in func_ranges:
+        chunk = "\n".join(lines[start:end + 1])
+        if "_shadow_str" in chunk:
+            for j in range(start, end + 1):
+                func_set.add(j)
+
+    # Process line by line.
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        if i not in func_set:
+            new_lines.append(line)
+            i += 1
+            continue
+
+        # Find the function this line belongs to.
+        func_range = None
+        for start, end in func_ranges:
+            if start <= i <= end:
+                func_range = (start, end)
+                break
+
+        if func_range is None:
+            new_lines.append(line)
+            i += 1
+            continue
+
+        fstart, fend = func_range
+        func_lines = lines[fstart:fend + 1]
+
+        # Collect shadow locals in this function.
+        shadow_locals: set[str] = set()
+        for fl in func_lines:
+            m = _shadow_store_re.search(fl)
+            if m:
+                shadow_locals.add(m.group(2))
+
+        if not shadow_locals:
+            # No shadows — pass through.
+            for j in range(fstart, fend + 1):
+                new_lines.append(lines[j])
+            i = fend + 1
+            continue
+
+        # Build double_to_shadow map.
+        double_to_shadow: dict[str, str] = {}
+        for shadow in shadow_locals:
+            base = shadow.replace("_shadow_str", "")
+            double_to_shadow[base] = shadow
+
+        # Process the function.
+        last_alloca_idx: int = -1
+        func_new_lines: list[str] = []
+        loaded_from: dict[str, str] = {}
+
+        for fl in func_lines:
+            stripped = fl.strip()
+
+            if stripped.startswith("%l") and "= alloca " in stripped:
+                last_alloca_idx = len(func_new_lines)
+
+            func_new_lines.append(fl)
+
+            # Track loads from double locals.
+            m_load = _load_double_re.match(fl)
+            if m_load:
+                ssa = m_load.group(1)
+                local = m_load.group(2)
+                if local in double_to_shadow:
+                    loaded_from[ssa] = local
+
+            # Replace number_to_string calls.
+            m_nts = _nts_re.match(fl)
+            if m_nts:
+                indent_nts = m_nts.group(1)
+                result_ssa = m_nts.group(2)
+                arg_ssa = m_nts.group(3)
+                if arg_ssa in loaded_from:
+                    local = loaded_from[arg_ssa]
+                    shadow = double_to_shadow[local]
+                    func_new_lines[-1] = f"{indent_nts}{result_ssa} = load i8*, i8** {shadow}"
+                    changed += 1
+
+        # Insert shadow allocas after the last alloca.
+        if last_alloca_idx >= 0:
+            insert_lines = []
+            for shadow in sorted(shadow_locals):
+                insert_lines.append(f"  {shadow} = alloca i8*")
+            for j, sl in enumerate(insert_lines):
+                func_new_lines.insert(last_alloca_idx + 1 + j, sl)
+            changed += len(insert_lines)
+
+        new_lines.extend(func_new_lines)
+        i = fend + 1
+
+    return "\n".join(new_lines), changed
+
+
+# ---------------------------------------------------------------------------
+# Fix number_to_string called on double-encoded string pointers
+# ---------------------------------------------------------------------------
+
+def _fix_number_to_string_of_ptr(llvm_ir: str) -> tuple[str, int]:
+    """Replace ``number_to_string(sitofp(ptrtoint(str)))`` with the original str.
+
+    The seed compiler encodes ``i8*`` string values as ``double`` via
+    ``ptrtoint`` → ``sitofp``.  When the double later needs to be used as
+    ``i8*``, the compiler emits ``number_to_string(double)`` which produces
+    the *decimal representation of the pointer address* rather than the
+    original string content.
+
+    This pass detects the chain::
+
+        %X_str  = <some i8* value>
+        %X_i64  = ptrtoint i8* %X_str to i64
+        %X      = sitofp i64 %X_i64 to double
+        ...
+        %Y      = call i8* @sailfin_runtime_number_to_string(double %X)
+
+    and replaces the ``number_to_string`` call with a direct use of ``%X_str``.
+    It also handles the indirect case where the double is stored to a local and
+    loaded later, *provided* the store/load pair is within the same function.
+    """
+    if "number_to_string" not in llvm_ir:
+        return llvm_ir, 0
+
+    _ptrtoint_re = re.compile(
+        r"\s*(%\S+)\s*=\s*ptrtoint\s+i8\*\s+(%\S+)\s+to\s+i64"
+    )
+    _sitofp_re = re.compile(
+        r"\s*(%\S+)\s*=\s*sitofp\s+i64\s+(%\S+)\s+to\s+double"
+    )
+    _store_dbl_re = re.compile(
+        r"\s*store\s+double\s+(%\S+),\s*double\*\s+(%\S+)"
+    )
+    _load_dbl_re = re.compile(
+        r"\s*(%\S+)\s*=\s*load\s+double,\s*double\*\s+(%\S+)"
+    )
+    _nts_re = re.compile(
+        r"(\s*)(%\S+)\s*=\s*call\s+i8\*\s+@(?:sailfin_runtime_number_to_string|number_to_string__llvm__utils)\(double\s+(%\S+)\)"
+    )
+    _define_re = re.compile(r"^define\s+")
+
+    lines = llvm_ir.split("\n")
+    changed = 0
+
+    # Process per-function.
+    func_start: int | None = None
+    new_lines: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if _define_re.match(stripped):
+            func_start = len(new_lines)
+            new_lines.append(line)
+            i += 1
+            continue
+
+        if stripped == "}" and func_start is not None:
+            new_lines.append(line)
+            func_start = None
+            i += 1
+            continue
+
+        if func_start is None:
+            new_lines.append(line)
+            i += 1
+            continue
+
+        new_lines.append(line)
+
+        # Track ptrtoint: i64_reg -> str_reg
+        m = _ptrtoint_re.fullmatch(line)
+        if m and not hasattr(_fix_number_to_string_of_ptr, '_ctx'):
+            pass  # handled below
+
+        i += 1
+
+    # Second pass: process function by function with full context.
+    lines = llvm_ir.split("\n")
+    new_lines = []
+    func_start_idx: int | None = None
+    func_lines: list[str] = []
+
+    def _process_function(flines: list[str]) -> tuple[list[str], int]:
+        """Process a single function's lines."""
+        local_changed = 0
+
+        # Phase 1: Build double_ssa -> str_ssa mapping.
+        i64_to_str: dict[str, str] = {}
+        dbl_to_str: dict[str, str] = {}
+        local_to_str: dict[str, str] = {}
+
+        for fl in flines:
+            m_pt = _ptrtoint_re.fullmatch(fl)
+            if m_pt:
+                i64_to_str[m_pt.group(1)] = m_pt.group(2)
+
+            m_sf = _sitofp_re.fullmatch(fl)
+            if m_sf:
+                dbl_reg, i64_reg = m_sf.group(1), m_sf.group(2)
+                if i64_reg in i64_to_str:
+                    dbl_to_str[dbl_reg] = i64_to_str[i64_reg]
+
+            m_st = _store_dbl_re.fullmatch(fl)
+            if m_st:
+                dbl_reg, local = m_st.group(1), m_st.group(2)
+                if dbl_reg in dbl_to_str:
+                    local_to_str[local] = dbl_to_str[dbl_reg]
+
+        if not dbl_to_str:
+            return flines, 0
+
+        # Phase 2: Process lines, tracking loads and replacing nts calls.
+        loaded_to_str: dict[str, str] = {}
+        result: list[str] = []
+
+        for fl in flines:
+            m_ld = _load_dbl_re.fullmatch(fl)
+            if m_ld:
+                loaded_reg, local = m_ld.group(1), m_ld.group(2)
+                if local in local_to_str:
+                    loaded_to_str[loaded_reg] = local_to_str[local]
+
+            m_nts = _nts_re.fullmatch(fl)
+            if m_nts:
+                indent, result_reg, arg_reg = m_nts.group(1), m_nts.group(2), m_nts.group(3)
+                original_str = dbl_to_str.get(arg_reg) or loaded_to_str.get(arg_reg)
+                if original_str:
+                    result.append(f"{indent}; [fix] nts-of-ptr: replaced number_to_string with original string")
+                    result.append(f"{indent}{result_reg} = bitcast i8* {original_str} to i8*")
+                    local_changed += 1
+                    continue
+
+            result.append(fl)
+
+        return result, local_changed
+
+    i = 0
+    func_start_idx = None
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if _define_re.match(stripped):
+            func_start_idx = i
+            func_lines = [line]
+            i += 1
+            continue
+
+        if func_start_idx is not None:
+            func_lines.append(line)
+            if stripped == "}":
+                processed, fc = _process_function(func_lines)
+                new_lines.extend(processed)
+                changed += fc
+                func_start_idx = None
+                func_lines = []
+                i += 1
+                continue
+            i += 1
+            continue
+
+        new_lines.append(line)
+        i += 1
+
+    # If we ended inside a function (shouldn't happen), flush remaining.
+    if func_lines:
+        new_lines.extend(func_lines)
+
+    return "\n".join(new_lines), changed
+
+
+# ---------------------------------------------------------------------------
+# Cross-module parameter type mismatch fix
+# ---------------------------------------------------------------------------
+
+def _collect_define_param_types(
+    ll_texts: list[str],
+) -> dict[str, list[str]]:
+    """Scan all module texts and collect function_name → [param_types] from ``define`` lines."""
+    import re as _re
+    param_types: dict[str, list[str]] = {}
+    _def_re = _re.compile(
+        r"^define\s+(?:internal\s+)?\S+\s+(@\S+)\s*\(([^)]*)\)",
+        _re.MULTILINE,
+    )
+    _param_type_re = _re.compile(r"([^%,]+?)(?:\s+%\S+)?(?:,|$)")
+    for text in ll_texts:
+        for m in _def_re.finditer(text):
+            fn_name = m.group(1)
+            params_str = m.group(2).strip()
+            if not params_str:
+                param_types[fn_name] = []
+                continue
+            # Parse individual parameter types.
+            types: list[str] = []
+            for part in params_str.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                # The type is everything before the last %name token.
+                # E.g. "i8* %value" → "i8*", "double %x" → "double",
+                #       "{ i8**, i64 }* %p" → "{ i8**, i64 }*"
+                idx = part.rfind("%")
+                if idx > 0:
+                    types.append(part[:idx].strip())
+                else:
+                    types.append(part.strip())
+            param_types[fn_name] = types
+    return param_types
+
+
+def _fix_cross_module_param_types(
+    llvm_ir: str,
+    global_param_types: dict[str, list[str]],
+) -> tuple[str, int]:
+    """Fix cross-module function declarations and call sites with wrong parameter types.
+
+    The seed compiler sometimes emits ``double`` for parameters that should be
+    ``i8*`` in cross-module function declarations.  On ARM64, this causes an ABI
+    mismatch: ``double`` is passed in a floating-point register (d0) while ``i8*``
+    is expected in a general-purpose register (x0), leading to crashes.
+
+    This pass fixes:
+    1. ``declare`` lines: correct mismatched parameter types.
+    2. ``call`` sites: convert ``double`` arguments to ``i8*`` using shadow locals
+       (from ``_fix_string_double_shadow``) or via ``fptosi``/``inttoptr`` fallback.
+    """
+    import re as _re
+
+    changed = 0
+
+    # Find all mismatched declares in this module.
+    _decl_re = _re.compile(
+        r"^declare\s+(\S+)\s+(@\S+)\s*\(([^)]*)\)\s*$",
+        _re.MULTILINE,
+    )
+
+    # Map fn_name → list of (param_index, wrong_type, correct_type)
+    mismatches: dict[str, list[tuple[int, str, str]]] = {}
+
+    for m in _decl_re.finditer(llvm_ir):
+        fn_name = m.group(2)
+        correct_params = global_param_types.get(fn_name)
+        if not correct_params:
+            continue
+        params_str = m.group(3).strip()
+        if not params_str:
+            continue
+        # Parse declared param types.
+        decl_types: list[str] = []
+        for part in params_str.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            # Declarations don't have %names, just types: "double, i8*"
+            # But some may have names.
+            idx = part.rfind("%")
+            if idx > 0:
+                decl_types.append(part[:idx].strip())
+            else:
+                decl_types.append(part.strip())
+
+        if len(decl_types) != len(correct_params):
+            continue  # Different arity — skip.
+
+        fn_mismatches: list[tuple[int, str, str]] = []
+        for pi, (decl_t, correct_t) in enumerate(zip(decl_types, correct_params)):
+            if decl_t != correct_t and decl_t == "double" and correct_t == "i8*":
+                fn_mismatches.append((pi, decl_t, correct_t))
+
+        if fn_mismatches:
+            mismatches[fn_name] = fn_mismatches
+
+    if not mismatches:
+        return llvm_ir, 0
+
+    lines = llvm_ir.split("\n")
+    new_lines: list[str] = []
+
+    # Track which double locals have shadow i8* stores.
+    # Map %lN → %lN_shadow_str for the current function.
+    _shadow_store_re = _re.compile(
+        r"store i8\* (%\S+), i8\*\* (%l\d+_shadow_str)"
+    )
+    _load_double_re = _re.compile(
+        r"\s*(%\S+) = load double, double\* (%l\d+)"
+    )
+
+    # Collect function boundaries and shadow info.
+    _define_re = _re.compile(r"^define\s+")
+    func_ranges: list[tuple[int, int]] = []
+    func_start: int | None = None
+    for i, line in enumerate(lines):
+        if _define_re.match(line.strip()):
+            func_start = i
+        elif line.strip() == "}" and func_start is not None:
+            func_ranges.append((func_start, i))
+            func_start = None
+
+    # Build per-function shadow maps.
+    func_shadow_map: dict[int, dict[str, str]] = {}  # func_start → {%lN: %lN_shadow_str}
+    func_load_map: dict[int, dict[str, str]] = {}    # func_start → {%tN: %lN}
+    for fstart, fend in func_ranges:
+        shadows: dict[str, str] = {}
+        loads: dict[str, str] = {}
+        for j in range(fstart, fend + 1):
+            m_shadow = _shadow_store_re.search(lines[j])
+            if m_shadow:
+                shadow_name = m_shadow.group(2)
+                base = shadow_name.replace("_shadow_str", "")
+                shadows[base] = shadow_name
+            m_load = _load_double_re.match(lines[j])
+            if m_load:
+                ssa = m_load.group(1)
+                local = m_load.group(2)
+                loads[ssa] = local
+        if shadows:
+            func_shadow_map[fstart] = shadows
+            func_load_map[fstart] = loads
+
+    # Fix declare lines.
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("declare "):
+            for fn_name, fn_mismatches in mismatches.items():
+                if fn_name not in line:
+                    continue
+                for _pi, wrong_t, correct_t in fn_mismatches:
+                    # Replace parameter types in the declare.
+                    # We need to be careful to replace only in the parameter list.
+                    m_decl = _decl_re.match(stripped)
+                    if m_decl and m_decl.group(2) == fn_name:
+                        params_str = m_decl.group(3)
+                        parts = params_str.split(",")
+                        if _pi < len(parts):
+                            parts[_pi] = parts[_pi].replace(wrong_t, correct_t, 1)
+                        new_params = ",".join(parts)
+                        new_decl = f"declare {m_decl.group(1)} {fn_name}({new_params})"
+                        lines[i] = new_decl
+                        changed += 1
+                break
+
+    # Fix call sites.
+    _counter = 0
+    for i, line in enumerate(lines):
+        for fn_name, fn_mismatches in mismatches.items():
+            if fn_name + "(" not in line or "call " not in line:
+                continue
+
+            # Find which function this line is in.
+            cur_func_start: int | None = None
+            for fstart, fend in func_ranges:
+                if fstart <= i <= fend:
+                    cur_func_start = fstart
+                    break
+
+            shadows = func_shadow_map.get(cur_func_start, {}) if cur_func_start is not None else {}
+            loads = func_load_map.get(cur_func_start, {}) if cur_func_start is not None else {}
+
+            # Parse the call arguments and fix the mismatched ones.
+            # Find the argument list after fn_name(
+            call_idx = line.index(fn_name + "(")
+            prefix = line[:call_idx]
+            rest = line[call_idx + len(fn_name) + 1:]  # after "("
+            # Find matching ")"
+            paren_depth = 1
+            end_idx = 0
+            for ci, ch in enumerate(rest):
+                if ch == "(":
+                    paren_depth += 1
+                elif ch == ")":
+                    paren_depth -= 1
+                    if paren_depth == 0:
+                        end_idx = ci
+                        break
+            args_str = rest[:end_idx]
+            suffix = rest[end_idx:]  # includes ")" and anything after
+
+            # Split args carefully (respecting nested braces/parens).
+            args: list[str] = []
+            depth = 0
+            current = ""
+            for ch in args_str:
+                if ch in "({":
+                    depth += 1
+                    current += ch
+                elif ch in ")}":
+                    depth -= 1
+                    current += ch
+                elif ch == "," and depth == 0:
+                    args.append(current)
+                    current = ""
+                else:
+                    current += ch
+            if current.strip():
+                args.append(current)
+
+            insert_before: list[str] = []
+            modified = False
+            for pi, wrong_t, correct_t in fn_mismatches:
+                if pi >= len(args):
+                    continue
+                arg = args[pi].strip()
+                if not arg.startswith("double "):
+                    continue
+
+                # Extract the SSA value.
+                ssa_val = arg[len("double "):].strip()
+
+                # Check if this SSA was loaded from a local with a shadow.
+                source_local = loads.get(ssa_val)
+                if source_local and source_local in shadows:
+                    shadow_name = shadows[source_local]
+                    load_ssa = f"%_param_fix_{_counter}"
+                    _counter += 1
+                    insert_before.append(
+                        f"  {load_ssa} = load i8*, i8** {shadow_name}"
+                    )
+                    args[pi] = f" i8* {load_ssa}"
+                    modified = True
+                else:
+                    # Fallback: convert double → i8* via fptosi + inttoptr.
+                    tmp_i64 = f"%_param_fix_i64_{_counter}"
+                    tmp_ptr = f"%_param_fix_ptr_{_counter}"
+                    _counter += 1
+                    insert_before.append(
+                        f"  {tmp_i64} = fptosi double {ssa_val} to i64"
+                    )
+                    insert_before.append(
+                        f"  {tmp_ptr} = inttoptr i64 {tmp_i64} to i8*"
+                    )
+                    args[pi] = f" i8* {tmp_ptr}"
+                    modified = True
+
+            if modified:
+                new_call = prefix + fn_name + "(" + ",".join(args) + suffix
+                # Replace the line and insert conversion instructions before it.
+                lines[i] = new_call
+                if insert_before:
+                    lines[i] = "\n".join(insert_before) + "\n" + lines[i]
+                changed += 1
+            break  # Only one fn_name can match per line.
+
+    return "\n".join(lines), changed
+
+
 def _fix_cross_module_abi_for_instructions(llvm_ir: str) -> tuple[str, int]:
     """Fix ABI mismatches for cross-module calls from instructions.sfn to statement.sfn.
 
@@ -1199,6 +2319,268 @@ def _fix_cross_module_abi_for_instructions(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
+def _fix_byvalue_struct_call_mismatches(llvm_ir: str) -> tuple[str, int]:
+    """Fix cross-module calls where i8* is passed for struct-by-value params.
+
+    The seed compiler bitcasts struct pointers to i8* for cross-module calls,
+    but some actual definitions take the struct by value.  This fixes the call
+    sites to load the struct and pass by value, and updates the declares.
+
+    Uses the actual definitions from .ll files on disk to determine which
+    parameters should be struct-by-value vs genuine i8*.
+    """
+    import re as _re
+    from pathlib import Path as _Path
+
+    # ── 0. Build cross-module definition map (cached) ──
+    if not hasattr(_fix_byvalue_struct_call_mismatches, "_defmap"):
+        defmap: dict[str, list[str]] = {}  # func_name → [param_types]
+        raw_dir = _Path("build/selfhost/native/raw")
+        if raw_dir.is_dir():
+            for ll_file in raw_dir.glob("*.ll"):
+                if "attempt" in ll_file.name:
+                    continue
+                try:
+                    text = ll_file.read_text(errors="replace")
+                except Exception:
+                    continue
+                for m in _re.finditer(
+                    r"^define\s+.*?(@\S+)\s*\(([^)]*)\)",
+                    text,
+                    _re.MULTILINE,
+                ):
+                    fn_name = m.group(1)
+                    params_str = m.group(2)
+                    # Parse parameter types
+                    ptypes: list[str] = []
+                    cur: list[str] = []
+                    nest = 0
+                    for ch in params_str:
+                        if ch in "({":
+                            nest += 1
+                            cur.append(ch)
+                        elif ch in ")}":
+                            nest -= 1
+                            cur.append(ch)
+                        elif ch == "," and nest == 0:
+                            part = "".join(cur).strip()
+                            # Extract type (everything before the last %name)
+                            tm = _re.match(r"(.+?)\s+%\w+\s*$", part)
+                            ptypes.append(tm.group(1).strip() if tm else part)
+                            cur = []
+                        else:
+                            cur.append(ch)
+                    if cur:
+                        part = "".join(cur).strip()
+                        tm = _re.match(r"(.+?)\s+%\w+\s*$", part)
+                        ptypes.append(tm.group(1).strip() if tm else part)
+                    if ptypes:
+                        defmap[fn_name] = ptypes
+        _fix_byvalue_struct_call_mismatches._defmap = defmap  # type: ignore[attr-defined]
+
+    defmap = _fix_byvalue_struct_call_mismatches._defmap  # type: ignore[attr-defined]
+
+    lines = llvm_ir.splitlines()
+    changes = 0
+
+    # ── 1. Build bitcast map: ssa_name → (struct_type, source_ptr, line_idx) ──
+    bitcast_re = _re.compile(
+        r"(\s*)(%.+?)\s*=\s*bitcast\s+(%[A-Z]\w*)\*\s+(%.+?)\s+to\s+i8\*"
+    )
+    bitcast_map: dict[str, tuple[str, str, int]] = {}
+    for i, line in enumerate(lines):
+        m = bitcast_re.match(line)
+        if m:
+            _indent, ssa, struct_type, src_ptr = m.groups()
+            bitcast_map[ssa] = (struct_type, src_ptr, i)
+
+    if not bitcast_map:
+        return llvm_ir, 0
+
+    # ── 2. Collect declared (extern) Sailfin functions ──
+    declared_funcs: set[str] = set()
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("declare"):
+            m = _re.search(r"(@\S+)\s*\(", stripped)
+            if m:
+                fn = m.group(1)
+                bare = fn.lstrip("@")
+                if "__" in bare and not bare.startswith("sailfin_runtime"):
+                    declared_funcs.add(fn)
+
+    if not declared_funcs:
+        return llvm_ir, 0
+
+    # ── 3. Find calls with i8* args that should be struct-by-value ──
+    def _split_args(s: str) -> list[str]:
+        parts: list[str] = []
+        cur: list[str] = []
+        nest = 0
+        for ch in s:
+            if ch in "({":
+                nest += 1
+                cur.append(ch)
+            elif ch in ")}":
+                nest -= 1
+                cur.append(ch)
+            elif ch == "," and nest == 0:
+                parts.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(ch)
+        if cur:
+            parts.append("".join(cur).strip())
+        return parts
+
+    def _find_args_span(line: str, fn: str) -> tuple[int, int, str]:
+        ci = line.index(fn + "(")
+        astart = ci + len(fn) + 1
+        depth = 1
+        pos = astart
+        while pos < len(line) and depth > 0:
+            ch = line[pos]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            pos += 1
+        return astart, pos, line[astart : pos - 1]
+
+    fixups: list[tuple[int, str, list[tuple[int, str, str]]]] = []
+
+    for i, line in enumerate(lines):
+        if "call" not in line:
+            continue
+        func_match = None
+        for fn in declared_funcs:
+            if fn + "(" in line:
+                func_match = fn
+                break
+        if func_match is None:
+            continue
+
+        # Check actual definition — only fix if definition takes struct by value
+        def_ptypes = defmap.get(func_match)
+        if not def_ptypes:
+            continue
+
+        _astart, _aend, args_str = _find_args_span(line, func_match)
+        arg_parts = _split_args(args_str)
+
+        mismatched_args: list[tuple[int, str, str]] = []
+        for arg_idx, arg in enumerate(arg_parts):
+            arg = arg.strip()
+            m = _re.match(r"i8\*\s+(%.+)", arg)
+            if not m:
+                continue
+            ssa = m.group(1).strip()
+            if ssa not in bitcast_map:
+                continue
+            # Check if definition at this position takes a struct by value
+            if arg_idx >= len(def_ptypes):
+                continue
+            def_type = def_ptypes[arg_idx]
+            # Only fix if definition takes a named struct type (not i8*, not ptr)
+            if def_type.startswith("%") and def_type[1:2].isupper() and "*" not in def_type:
+                struct_type_from_def = def_type
+                struct_type_from_bc, _src_ptr, _bc_line = bitcast_map[ssa]
+                # Sanity: bitcast type should match def type
+                if struct_type_from_bc == struct_type_from_def:
+                    mismatched_args.append((arg_idx, ssa, struct_type_from_def))
+
+        if mismatched_args:
+            fixups.append((i, func_match, mismatched_args))
+
+    if not fixups:
+        return llvm_ir, 0
+
+    # ── 4. Apply fixups ──
+    # 4a. Fix bitcasts → loads
+    bitcasts_to_fix: set[str] = set()
+    for _call_idx, _fn, args in fixups:
+        for _arg_idx, ssa, _struct in args:
+            bitcasts_to_fix.add(ssa)
+
+    for ssa in bitcasts_to_fix:
+        struct_type, src_ptr, line_idx = bitcast_map[ssa]
+        m = bitcast_re.match(lines[line_idx])
+        if m:
+            indent = m.group(1)
+            lines[line_idx] = f"{indent}{ssa} = load {struct_type}, {struct_type}* {src_ptr}"
+            changes += 1
+
+    # 4b. Fix call arguments: i8* %tA → %StructType %tA
+    for call_idx, _fn, mismatched_args in fixups:
+        line = lines[call_idx]
+        for _arg_idx, ssa, struct_type in mismatched_args:
+            old_arg = f"i8* {ssa}"
+            new_arg = f"{struct_type} {ssa}"
+            if old_arg in line:
+                line = line.replace(old_arg, new_arg, 1)
+                changes += 1
+        lines[call_idx] = line
+
+    # 4c. Fix declares
+    declare_fixes: dict[str, dict[int, str]] = {}
+    for _call_idx, fn, mismatched_args in fixups:
+        if fn not in declare_fixes:
+            declare_fixes[fn] = {}
+        for arg_idx, _ssa, struct_type in mismatched_args:
+            declare_fixes[fn][arg_idx] = struct_type
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("declare"):
+            continue
+        for fn, pos_map in declare_fixes.items():
+            if fn + "(" not in line:
+                continue
+            decl_start, decl_end, decl_args_str = _find_args_span(line, fn)
+            d_parts = _split_args(decl_args_str)
+            fixed = False
+            for arg_pos, struct_type in pos_map.items():
+                if arg_pos < len(d_parts) and d_parts[arg_pos].strip() == "i8*":
+                    d_parts[arg_pos] = d_parts[arg_pos].replace("i8*", struct_type, 1)
+                    fixed = True
+            if fixed:
+                lines[i] = line[:decl_start] + ", ".join(d_parts) + line[decl_end - 1:]
+                changes += 1
+            break
+
+    # ── 5. Fix remaining calls (wrapper functions with i8* params) ──
+    _bvfix_counter = 0
+    for i, line in enumerate(lines):
+        if "call" not in line:
+            continue
+        for fn, pos_map in declare_fixes.items():
+            if fn + "(" not in line:
+                continue
+            _astart, _aend, a_str = _find_args_span(line, fn)
+            a_parts = _split_args(a_str)
+            insert_lines: list[str] = []
+            for arg_pos, struct_type in pos_map.items():
+                if arg_pos >= len(a_parts):
+                    continue
+                arg = a_parts[arg_pos].strip()
+                m2 = _re.match(r"i8\*\s+(%.+)", arg)
+                if not m2:
+                    continue
+                ssa_arg = m2.group(1).strip()
+                cast_name = f"%_bvfix{_bvfix_counter}_ptr"
+                load_name = f"%_bvfix{_bvfix_counter}_val"
+                _bvfix_counter += 1
+                insert_lines.append(f"  {cast_name} = bitcast i8* {ssa_arg} to {struct_type}*")
+                insert_lines.append(f"  {load_name} = load {struct_type}, {struct_type}* {cast_name}")
+                line = line.replace(f"i8* {ssa_arg}", f"{struct_type} {load_name}", 1)
+            if insert_lines:
+                lines[i] = "\n".join(insert_lines) + "\n" + line
+                changes += len(insert_lines) // 2
+            break
+
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changes
+
+
 def _fix_statement_struct_params(llvm_ir: str) -> tuple[str, int]:
     """Fix by-value struct parameters in statement module defines.
 
@@ -1339,6 +2721,184 @@ def _fix_native_ir_return_types(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
+def _fix_double_encoded_pointer_calls(llvm_ir: str) -> tuple[str, int]:
+    """Fix calls where array-returning cross-module functions return ``double``.
+
+    The seed v0.1.1 generates ``call double @parse_native_*_for_import(...)``
+    for functions that actually return array descriptors (``{T*, i64}*``).  The
+    double return is stored to a local alloca, but when the value is later
+    passed as a pointer argument (e.g. to ``apply_layout_manifest_to_module``),
+    the seed generates ``i8* null`` instead of the encoded pointer.
+
+    Fix: keep the double calling convention (via the C shim), but at call
+    sites that need pointers, convert double → i64 → inttoptr → typed pointer.
+    Also fix ``apply_layout_manifest_to_module(i8* null, ...)`` calls to
+    use the double-encoded pointer values.
+    """
+    import re as _re
+
+    if not llvm_ir:
+        return llvm_ir, 0
+
+    # Functions whose double return encodes an array descriptor pointer.
+    _DOUBLE_ARRAY_FUNS: dict[str, str] = {
+        # unmangled_name: actual_return_type
+        "parse_native_structs_for_import": "{ %NativeStruct*, i64 }*",
+        "parse_native_enums_for_import": "{ %NativeEnum*, i64 }*",
+        "parse_native_interfaces_for_import": "{ %NativeInterface*, i64 }*",
+        "parse_native_functions_for_import": "{ %NativeFunction*, i64 }*",
+        "parse_native_structs_from_text": "{ %NativeStruct*, i64 }*",
+        "parse_native_enums_from_text": "{ %NativeEnum*, i64 }*",
+        "parse_native_interfaces_from_text": "{ %NativeInterface*, i64 }*",
+        "parse_native_imports_from_text": "{ %NativeImport*, i64 }*",
+        "parse_native_functions_from_text": "{ %NativeFunction*, i64 }*",
+        "parse_native_bindings_from_text": "{ %NativeBinding*, i64 }*",
+        "parse_native_diagnostics_from_text": "{ i8**, i64 }*",
+        "split_lines": "{ i8**, i64 }*",
+    }
+
+    lines = llvm_ir.splitlines()
+    changed = 0
+
+    # Phase 1: Identify which locals (%lN) store double-encoded pointers.
+    call_double_re = _re.compile(
+        r"^\s+(%t\d+)\s*=\s*call\s+double\s+@(\w+)\("
+    )
+    store_double_re = _re.compile(
+        r"^\s+store\s+double\s+(%t\d+),\s+double\*\s+(%l\d+)"
+    )
+    local_to_ptr_type: dict[str, str] = {}  # %lN -> actual ptr type
+
+    for i, line in enumerate(lines):
+        m = call_double_re.match(line)
+        if not m:
+            continue
+        result_reg = m.group(1)
+        fn_name = m.group(2)
+        if fn_name not in _DOUBLE_ARRAY_FUNS:
+            continue
+        ptr_type = _DOUBLE_ARRAY_FUNS[fn_name]
+        for j in range(i + 1, min(i + 5, len(lines))):
+            sm = store_double_re.match(lines[j])
+            if sm and sm.group(1) == result_reg:
+                local_to_ptr_type[sm.group(2)] = ptr_type
+                break
+
+    if not local_to_ptr_type:
+        return llvm_ir, 0
+
+    # Phase 2: Fix call sites that pass ``i8* null`` where a double-encoded
+    # pointer should be used.  Insert double→i64→inttoptr conversions.
+    new_lines: list[str] = []
+    _unique = [0]
+
+    def _gen_id() -> int:
+        _unique[0] += 1
+        return _unique[0]
+
+    for i, line in enumerate(lines):
+        # Fix apply_layout_manifest_to_module calls with null args.
+        if ("apply_layout_manifest_to_module" in line and "call" in line
+                and "i8* null" in line):
+            # Find recently loaded doubles from tracked locals.
+            structs_info = None  # (reg, ptr_type)
+            enums_info = None
+            load_dbl_re = _re.compile(
+                r"^\s+(%t\d+)\s*=\s*load\s+double,\s+double\*\s+(%l\d+)\s*$"
+            )
+            for j in range(i - 1, max(i - 40, -1), -1):
+                lm = load_dbl_re.match(lines[j])
+                if not lm:
+                    continue
+                local = lm.group(2)
+                if local not in local_to_ptr_type:
+                    continue
+                pt = local_to_ptr_type[local]
+                if "NativeStruct" in pt and structs_info is None:
+                    structs_info = (lm.group(1), pt)
+                elif "NativeEnum" in pt and enums_info is None:
+                    enums_info = (lm.group(1), pt)
+                if structs_info and enums_info:
+                    break
+
+            indent = line[: len(line) - len(line.lstrip())]
+            new_line = line
+
+            if structs_info:
+                reg, pt = structs_info
+                uid = _gen_id()
+                i64_reg = f"%_dep_i64_{uid}"
+                ptr_reg = f"%_dep_ptr_{uid}"
+                new_lines.append(f"{indent}{i64_reg} = bitcast double {reg} to i64")
+                new_lines.append(f"{indent}{ptr_reg} = inttoptr i64 {i64_reg} to {pt}")
+                new_line = new_line.replace("i8* null", f"{pt} {ptr_reg}", 1)
+                changed += 1
+
+            if enums_info:
+                reg, pt = enums_info
+                uid = _gen_id()
+                i64_reg = f"%_dep_i64_{uid}"
+                ptr_reg = f"%_dep_ptr_{uid}"
+                new_lines.append(f"{indent}{i64_reg} = bitcast double {reg} to i64")
+                new_lines.append(f"{indent}{ptr_reg} = inttoptr i64 {i64_reg} to {pt}")
+                new_line = new_line.replace("i8* null", f"{pt} {ptr_reg}", 1)
+                changed += 1
+
+            new_lines.append(new_line)
+            continue
+
+        # Also fix extend_native_structs/enums/interfaces/functions calls
+        # that pass i8* null where a double-encoded pointer should go.
+        extend_m = _re.match(
+            r"^(\s+)(%t\d+)\s*=\s*call\s+\{[^}]+\}\*\s+@(extend_native_\w+)\(.*i8\*\s+null",
+            line,
+        )
+        if extend_m:
+            fn_name = extend_m.group(3)
+            # Determine which ptr type based on function name.
+            ptr_type_for_extend = None
+            if "structs" in fn_name:
+                ptr_type_for_extend = "{ %NativeStruct*, i64 }*"
+            elif "enums" in fn_name:
+                ptr_type_for_extend = "{ %NativeEnum*, i64 }*"
+            elif "interfaces" in fn_name:
+                ptr_type_for_extend = "{ %NativeInterface*, i64 }*"
+            elif "functions" in fn_name:
+                ptr_type_for_extend = "{ %NativeFunction*, i64 }*"
+
+            if ptr_type_for_extend:
+                load_dbl_re2 = _re.compile(
+                    r"^\s+(%t\d+)\s*=\s*load\s+double,\s+double\*\s+(%l\d+)\s*$"
+                )
+                found_reg = None
+                for j in range(i - 1, max(i - 20, -1), -1):
+                    lm = load_dbl_re2.match(lines[j])
+                    if lm and lm.group(2) in local_to_ptr_type:
+                        pt = local_to_ptr_type[lm.group(2)]
+                        if pt == ptr_type_for_extend:
+                            found_reg = lm.group(1)
+                            break
+
+                if found_reg:
+                    indent = extend_m.group(1)
+                    uid = _gen_id()
+                    i64_reg = f"%_dep_i64_{uid}"
+                    ptr_reg = f"%_dep_ptr_{uid}"
+                    new_lines.append(f"{indent}{i64_reg} = bitcast double {found_reg} to i64")
+                    new_lines.append(f"{indent}{ptr_reg} = inttoptr i64 {i64_reg} to {ptr_type_for_extend}")
+                    new_line = line.replace("i8* null", f"{ptr_type_for_extend} {ptr_reg}", 1)
+                    new_lines.append(new_line)
+                    changed += 1
+                    continue
+
+        new_lines.append(line)
+
+    result = "\n".join(new_lines)
+    if llvm_ir.endswith("\n") and not result.endswith("\n"):
+        result += "\n"
+    return result, changed
+
+
 def _fix_store_type_mismatches(llvm_ir: str) -> tuple[str, int]:
     """Fix store instructions where the value type doesn't match the stored type.
 
@@ -1471,6 +3031,343 @@ def _fix_mangled_method_calls(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
+def _fix_duplicate_param_names(llvm_ir: str) -> tuple[str, int]:
+    """Rename duplicate LLVM parameter names in function definitions.
+
+    The seed sometimes emits ``define ... @fn(%T1 %entry, %T2 %entry)``
+    where two parameters share the same name.  LLVM rejects this.
+    Fix by appending a numeric suffix to duplicates.
+
+    Also fixes empty-type parameters (`` %_``) where the seed omits
+    the type entirely.  Replace with ``i8* %_N`` so the IR is parseable.
+    """
+
+    _define_re = re.compile(
+        r"^(define\s+(?:internal\s+)?[^(]+\()([^)]*)\)(.*)$"
+    )
+    changed = 0
+    out_lines: list[str] = []
+    for line in llvm_ir.splitlines():
+        m = _define_re.match(line)
+        if m:
+            prefix = m.group(1)
+            params_str = m.group(2)
+            suffix = m.group(3)
+            # Parse individual parameters (brace-aware to handle types like { i8**, i64 }*).
+            params: list[str] = []
+            depth = 0
+            current = ""
+            for ch in params_str:
+                if ch in "({":
+                    depth += 1
+                    current += ch
+                elif ch in ")}":
+                    depth -= 1
+                    current += ch
+                elif ch == "," and depth == 0:
+                    if current.strip():
+                        params.append(current.strip())
+                    current = ""
+                else:
+                    current += ch
+            if current.strip():
+                params.append(current.strip())
+            seen_names: dict[str, int] = {}
+            new_params: list[str] = []
+            any_changed = False
+            empty_idx = 0
+            for param in params:
+                # Detect empty-type parameter: just "%_" with no type prefix.
+                if param == "%_" or param.startswith("%_") and " " not in param:
+                    empty_idx += 1
+                    new_params.append(f"i8* %_empty_{empty_idx}")
+                    any_changed = True
+                    continue
+                # Extract the %name part (last word starting with %).
+                parts = param.rsplit(None, 1)
+                if len(parts) == 2 and parts[1].startswith("%"):
+                    ptype = parts[0]
+                    pname = parts[1]
+                    if pname in seen_names:
+                        seen_names[pname] += 1
+                        new_name = f"{pname}_{seen_names[pname]}"
+                        new_params.append(f"{ptype} {new_name}")
+                        any_changed = True
+                    else:
+                        seen_names[pname] = 0
+                        new_params.append(param)
+                else:
+                    new_params.append(param)
+            if any_changed:
+                line = prefix + ", ".join(new_params) + ")" + suffix
+                changed += 1
+        out_lines.append(line)
+    return "\n".join(out_lines), changed
+
+
+def _collect_declare_signatures(ll_texts: list[str]) -> dict[str, tuple[str, list[str]]]:
+    """Collect function signatures from ``declare`` statements across all modules.
+
+    Returns a mapping from function name to (return_type, [param_types]).
+    These signatures are correct even when the corresponding ``define`` has
+    broken ``%_`` parameters, because the seed emits correct cross-module
+    ``declare`` prototypes.
+    """
+    _declare_re = re.compile(
+        r"^declare\s+(\S+)\s+@(\w+)\(([^)]*)\)\s*(?:;.*)?$"
+    )
+    sigs: dict[str, tuple[str, list[str]]] = {}
+    for text in ll_texts:
+        for line in text.splitlines():
+            m = _declare_re.match(line.strip())
+            if not m:
+                continue
+            ret_type = m.group(1)
+            fn_name = m.group(2)
+            params_str = m.group(3).strip()
+            if not params_str:
+                param_types: list[str] = []
+            else:
+                # Parse parameter types (strip names if present).
+                raw_params = []
+                depth = 0
+                current = ""
+                for ch in params_str:
+                    if ch in "({":
+                        depth += 1
+                        current += ch
+                    elif ch in ")}":
+                        depth -= 1
+                        current += ch
+                    elif ch == "," and depth == 0:
+                        raw_params.append(current.strip())
+                        current = ""
+                    else:
+                        current += ch
+                if current.strip():
+                    raw_params.append(current.strip())
+
+                param_types = []
+                for p in raw_params:
+                    # If the param has a name (e.g. "i8* %foo"), strip the name.
+                    # The name starts with % and is the last whitespace-separated token.
+                    parts = p.rsplit(None, 1)
+                    if len(parts) == 2 and parts[1].startswith("%"):
+                        param_types.append(parts[0])
+                    else:
+                        param_types.append(p)
+
+            # Only store if we haven't seen this function or if the current
+            # declaration has more params (some declares may be partial).
+            if fn_name not in sigs or len(param_types) > len(sigs[fn_name][1]):
+                sigs[fn_name] = (ret_type, param_types)
+    return sigs
+
+
+def _fix_empty_params_from_declares(
+    ll_texts: list[str],
+    module_names: list[str],
+) -> tuple[list[str], int]:
+    """Fix ``define`` functions with ``%_empty`` params using cross-module ``declare`` signatures.
+
+    The seed v0.1.1 sometimes drops parameter types for functions with many
+    parameters, emitting ``define %Ret @fn( %_, %_, ...)`` which gets converted
+    to ``i8* %_empty_N`` by ``_fix_duplicate_param_names``.  However, other
+    modules that import the function have correct ``declare`` prototypes.
+
+    This pass collects all declare signatures, then rewrites broken define
+    parameter lists to match the correct types.  The function body references
+    to ``%_empty_N`` are also rewritten to the correct parameter names.
+    """
+    sigs = _collect_declare_signatures(ll_texts)
+    if not sigs:
+        return ll_texts, 0
+
+    _define_re = re.compile(
+        r"^(define\s+(?:internal\s+)?[^(]+@)(\w+)\(([^)]*)\)(.*)$"
+    )
+
+    total_changed = 0
+    for idx in range(len(ll_texts)):
+        text = ll_texts[idx]
+        lines = text.split("\n")
+        changed = 0
+        new_lines: list[str] = []
+        # Track param renames so we can fix references in the function body.
+        active_renames: dict[str, str] = {}
+        in_function = False
+
+        for li, line in enumerate(lines):
+            # When we exit a function body, clear active renames.
+            if line.strip() == "}" and in_function:
+                in_function = False
+                active_renames = {}
+                new_lines.append(line)
+                continue
+
+            # Apply renames inside function body.
+            if in_function and active_renames:
+                for old_name, new_name in active_renames.items():
+                    if old_name in line:
+                        line = line.replace(old_name, new_name)
+                new_lines.append(line)
+                continue
+
+            m = _define_re.match(line)
+            if not m:
+                new_lines.append(line)
+                continue
+
+            prefix = m.group(1)  # "define internal %Ret @" or "define %Ret @"
+            fn_name = m.group(2)
+            params_str = m.group(3)
+            suffix = m.group(4)
+
+            # Check if this define has broken params.
+            if "%_empty" not in params_str:
+                new_lines.append(line)
+                continue
+
+            # Look up correct signature from declares.
+            if fn_name not in sigs:
+                # Try module-mangled name: strip the module suffix.
+                # e.g. "lower_loop_instruction__llvm__lowering__instructions_loops"
+                # → "lower_loop_instruction"
+                base_name = fn_name
+                for mname in module_names:
+                    mangled_suffix = "__" + mname
+                    if fn_name.endswith(mangled_suffix):
+                        base_name = fn_name[:-len(mangled_suffix)]
+                        break
+                if base_name in sigs:
+                    sig = sigs[base_name]
+                else:
+                    new_lines.append(line)
+                    continue
+            else:
+                sig = sigs[fn_name]
+
+            correct_ret, correct_param_types = sig
+
+            # Parse current params.
+            current_params = [p.strip() for p in params_str.split(",") if p.strip()]
+            if len(current_params) != len(correct_param_types):
+                # Param count mismatch — don't touch.
+                new_lines.append(line)
+                continue
+
+            # Build new param list with correct types and track renames.
+            new_params: list[str] = []
+            renames: dict[str, str] = {}
+            for pi, (current_p, correct_type) in enumerate(
+                zip(current_params, correct_param_types)
+            ):
+                parts = current_p.rsplit(None, 1)
+                if len(parts) == 2 and parts[1].startswith("%"):
+                    old_type = parts[0]
+                    old_name = parts[1]
+                else:
+                    old_name = f"%p{pi}"
+                    old_type = current_p
+
+                # If the old name is %_empty_N, give it a meaningful name.
+                if old_name.startswith("%_empty"):
+                    new_name = f"%_p{pi}"
+                    renames[old_name] = new_name
+                else:
+                    new_name = old_name
+
+                new_params.append(f"{correct_type} {new_name}")
+
+            new_line = prefix + fn_name + "(" + ", ".join(new_params) + ")" + suffix
+            new_lines.append(new_line)
+            active_renames = renames
+            in_function = True
+            changed += 1
+
+        if changed:
+            ll_texts[idx] = "\n".join(new_lines)
+            total_changed += changed
+
+    return ll_texts, total_changed
+
+
+def _eliminate_dead_conditional_branches(llvm_ir: str) -> tuple[str, int]:
+    """Replace ``br i1 false, label %X, label %Y`` with ``br label %Y``.
+
+    The seed sometimes emits ``br i1 false`` for logical-and short-circuit
+    results, which makes the true-branch unreachable dead code.  This pass
+    simplifies them so downstream passes (like _fix_degenerate_loops) can
+    correctly detect loops that have no reachable exit.
+
+    After eliminating the branches, dead blocks (whose labels are no longer
+    referenced by any branch) are commented out so their ``ret`` instructions
+    don't confuse degenerate-loop detection.
+    """
+    import re as _re
+    lines = llvm_ir.split("\n")
+    changed = 0
+
+    # Collect labels that become dead (were only reachable via br i1 false).
+    newly_dead_labels: set[str] = set()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        m = _re.match(r"br i1 false, label %(\S+), label %(\S+)", stripped)
+        if m:
+            dead_label = m.group(1)
+            false_target = m.group(2)
+            indent = line[:len(line) - len(line.lstrip())]
+            lines[i] = f"{indent}br label %{false_target}"
+            newly_dead_labels.add(dead_label)
+            changed += 1
+        m2 = _re.match(r"br i1 true, label %(\S+), label %(\S+)", stripped)
+        if m2:
+            dead_label = m2.group(2)
+            true_target = m2.group(1)
+            indent = line[:len(line) - len(line.lstrip())]
+            lines[i] = f"{indent}br label %{true_target}"
+            newly_dead_labels.add(dead_label)
+            changed += 1
+
+    if not newly_dead_labels:
+        return llvm_ir, 0
+
+    # Check which newly-dead labels are still referenced by other branches.
+    text_after = "\n".join(lines)
+    still_live: set[str] = set()
+    for label in newly_dead_labels:
+        # Check for any remaining reference as a branch target.
+        if _re.search(r"label %" + _re.escape(label) + r"(?:\s|,|\))", text_after):
+            still_live.add(label)
+    truly_dead = newly_dead_labels - still_live
+
+    if truly_dead:
+        # Comment out dead blocks: from label definition to next label or }.
+        i = 0
+        while i < len(lines):
+            stripped = lines[i].strip()
+            # Check if this line is a dead label
+            if stripped.endswith(":"):
+                lbl = stripped[:-1]
+                if lbl in truly_dead:
+                    # Comment out this block until next label or closing brace.
+                    lines[i] = f"; dead block {lbl}:"
+                    j = i + 1
+                    while j < len(lines):
+                        s = lines[j].strip()
+                        if s == "}" or (s.endswith(":") and not s.startswith(";")):
+                            break
+                        # If this line branches to a block, that block might
+                        # also be dead (cascade).  Track for next iteration.
+                        lines[j] = f"; dead: {lines[j].strip()}"
+                        j += 1
+                    i = j
+                    continue
+            i += 1
+
+    return "\n".join(lines), changed
+
+
 def _fix_degenerate_loops(llvm_ir: str) -> tuple[str, int]:
     """Break degenerate infinite loops that have no exit condition.
 
@@ -1543,16 +3440,40 @@ def _fix_degenerate_loops(llvm_ir: str) -> tuple[str, int]:
                 for k in range(i - 1, -1, -1):
                     if lines[k].strip() == f"{header_label}:":
                         header_line_idx = k
-                        # Scan forward from header to latch.
+                        # Collect all block labels and their content in the body.
+                        # A block is reachable if a `br` in the body targets it.
+                        body_labels: dict[str, list[str]] = {}
+                        body_branches: set[str] = set()
+                        current_block_label: str | None = None
                         for m in range(k + 1, i):
                             stripped_m = lines[m].strip()
+                            if stripped_m.startswith(";"):
+                                continue
+                            if stripped_m.endswith(":") and not "=" in stripped_m:
+                                current_block_label = stripped_m[:-1]
+                                body_labels[current_block_label] = []
+                                continue
+                            if current_block_label:
+                                body_labels[current_block_label].append(stripped_m)
+                            # Track branch targets within the body.
+                            for br_m in _re.finditer(r"label %(\S+)", stripped_m):
+                                body_branches.add(br_m.group(1))
+                            # Direct afterloop reference is always a valid exit.
                             if f"%{after_label}" in stripped_m:
                                 body_has_exit = True
-                                break
-                            # A ret instruction is also a valid loop exit
-                            if stripped_m.startswith("ret "):
-                                body_has_exit = True
-                                break
+                        if not body_has_exit:
+                            # Check for ret instructions in REACHABLE blocks only.
+                            # A block is reachable if it's in body_branches or if
+                            # it's the first block after the header (loop.bodyN).
+                            for blk_label, blk_lines in body_labels.items():
+                                if blk_label not in body_branches and not blk_label.startswith("loop.body"):
+                                    continue  # unreachable block
+                                for bl in blk_lines:
+                                    if bl.startswith("ret "):
+                                        body_has_exit = True
+                                        break
+                                if body_has_exit:
+                                    break
                         break
 
                 if not body_has_exit:
@@ -1636,14 +3557,17 @@ def _stub_missing_entrypoint_helpers(llvm_ir: str) -> tuple[str, int]:
             continue
 
         # Generate return value based on return type.
-        if ret_type in ("i8*", "ptr"):
+        if ret_type in ("i8*", "ptr") or ret_type.endswith("*"):
             ret_val = "null"
         elif ret_type == "double":
             ret_val = "0.0"
         elif ret_type in ("i32", "i64", "i1"):
             ret_val = "0"
+        elif ret_type == "void":
+            ret_val = ""
         else:
-            ret_val = "null"
+            # Struct or other aggregate type.
+            ret_val = "zeroinitializer"
 
         # Build parameter list with names for the define.
         param_parts = [p.strip() for p in params.split(",") if p.strip()]
@@ -1655,12 +3579,20 @@ def _stub_missing_entrypoint_helpers(llvm_ir: str) -> tuple[str, int]:
                 named_params.append(f"{part} %_p{idx}")
         param_str = ", ".join(named_params)
 
-        stub = (
-            f"define {ret_type} @{fn_name}({param_str}) {{\n"
-            f"entry:\n"
-            f"  ret {ret_type} {ret_val}\n"
-            f"}}"
-        )
+        if ret_type == "void":
+            stub = (
+                f"define void @{fn_name}({param_str}) {{\n"
+                f"entry:\n"
+                f"  ret void\n"
+                f"}}"
+            )
+        else:
+            stub = (
+                f"define {ret_type} @{fn_name}({param_str}) {{\n"
+                f"entry:\n"
+                f"  ret {ret_type} {ret_val}\n"
+                f"}}"
+            )
         lines[i] = stub
         changed += 1
 
@@ -1797,11 +3729,49 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _HELPERS["make_native_function_method"] = _gen_make_native_function_method()
 
     def _gen_update_function_field(field_idx, field_type, param_name):
-        """Generate updater: copy all fields, replace one."""
+        """Generate updater: copy all fields, replace one.
+
+        The first param (%fn_val) may be ``i8*`` (emit-llvm-file path) or
+        ``%NativeFunction`` (streaming emit llvm path).  We generate two
+        variants and pick the right one at replacement time based on the
+        actual define line's parameter type.
+        """
         NF = "%NativeFunction"
-        lines = []
-        ptr = _alloc_struct(lines, "s", NF)
-        lines.append(f"  %src = bitcast i8* %fn_val to {NF}*")
+
+        def _gen_variant(*, by_value: bool):
+            vlines: list[str] = []
+            vptr = _alloc_struct(vlines, "s", NF)
+            if by_value:
+                # %fn_val is %NativeFunction (by value) → alloca + store to get a ptr.
+                vlines.append(f"  %src = alloca {NF}")
+                vlines.append(f"  store {NF} %fn_val, {NF}* %src")
+            else:
+                vlines.append(f"  %src = bitcast i8* %fn_val to {NF}*")
+            field_types_local = [
+                ("i8*", 0), ("i1", 1),
+                ("{ %NativeParameter*, i64 }*", 2), ("i8*", 3),
+                ("{ i8**, i64 }*", 4), ("{ i8**, i64 }*", 5),
+                ("i1", 6), ("{ %NativeInstruction*, i64 }*", 7),
+            ]
+            for ft, fi in field_types_local:
+                src_gep = f"  %sg{fi} = getelementptr {NF}, {NF}* %src, i32 0, i32 {fi}"
+                src_load = f"  %sv{fi} = load {ft}, {ft}* %sg{fi}"
+                vlines.append(src_gep)
+                vlines.append(src_load)
+                if fi == field_idx:
+                    val = param_name
+                else:
+                    val = f"%sv{fi}"
+                _set_field(vlines, f"u{fi}", vptr, NF, fi, ft, val)
+            if by_value:
+                vlines.append(f"  %retval = load {NF}, {NF}* {vptr}")
+                vlines.append(f"  ret {NF} %retval")
+            else:
+                vlines.append(f"  %ret = bitcast {NF}* {vptr} to i8*")
+                vlines.append("  ret i8* %ret")
+            return "\n".join(vlines)
+
+        return (_gen_variant(by_value=False), _gen_variant(by_value=True))
         field_types = [
             ("i8*", 0), ("i1", 1),
             ("{ %NativeParameter*, i64 }*", 2), ("i8*", 3),
@@ -1918,110 +3888,177 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _HELPERS["make_native_parameter"] = _gen_make_native_parameter()
 
     def _gen_append_param_to_function():
-        """append_param_to_function(func: i8*, param: i8*) -> i8*
-        Reads func.parameters array, appends param, returns new NativeFunction."""
+        """append_param_to_function(func, param) -> NativeFunction.
+        Reads func.parameters array, appends param, returns new NativeFunction.
+        Returns (ptr_variant, by_value_variant) tuple."""
         NF = "%NativeFunction"
         NP = "%NativeParameter"
         ARR = "{ %NativeParameter*, i64 }"
-        lines = []
-        # Cast func
-        lines.append(f"  %src = bitcast i8* %func to {NF}*")
-        # Read parameters field (index 2)
-        lines.append(f"  %pg = getelementptr {NF}, {NF}* %src, i32 0, i32 2")
-        lines.append(f"  %arr = load {ARR}*, {ARR}** %pg")
-        # Read data ptr and length
-        lines.append(f"  %dp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 0")
-        lines.append(f"  %old_data = load {NP}*, {NP}** %dp")
-        lines.append(f"  %lp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 1")
-        lines.append(f"  %old_len = load i64, i64* %lp")
-        # Element size
-        lines.append(f"  %esz_p = getelementptr {NP}, {NP}* null, i32 1")
-        lines.append(f"  %esz = ptrtoint {NP}* %esz_p to i64")
-        # New length and allocation
-        lines.append(f"  %new_len = add i64 %old_len, 1")
-        lines.append(f"  %new_bytes = mul i64 %new_len, %esz")
-        lines.append(f"  %new_raw = call i8* @malloc(i64 %new_bytes)")
-        lines.append(f"  %new_data = bitcast i8* %new_raw to {NP}*")
-        # Copy old data via memcpy
-        lines.append(f"  %old_bytes = mul i64 %old_len, %esz")
-        lines.append(f"  %old_raw = bitcast {NP}* %old_data to i8*")
-        lines.append(f"  call void @memcpy(i8* %new_raw, i8* %old_raw, i64 %old_bytes)")
-        # Copy new param struct to last slot
-        lines.append(f"  %slot = getelementptr {NP}, {NP}* %new_data, i64 %old_len")
-        lines.append(f"  %param_ptr = bitcast i8* %param to {NP}*")
-        # Copy field by field (5 fields in NativeParameter)
-        for fi, ft in [(0, "i8*"), (1, "i8*"), (2, "i1"), (3, "i8*"), (4, "%NativeSourceSpan*")]:
-            lines.append(f"  %pf{fi}g = getelementptr {NP}, {NP}* %param_ptr, i32 0, i32 {fi}")
-            lines.append(f"  %pf{fi}v = load {ft}, {ft}* %pf{fi}g")
-            lines.append(f"  %sf{fi}g = getelementptr {NP}, {NP}* %slot, i32 0, i32 {fi}")
-            lines.append(f"  store {ft} %pf{fi}v, {ft}* %sf{fi}g")
-        # Build new array header
-        lines.append(f"  %narr_sz = getelementptr {ARR}, {ARR}* null, i32 1")
-        lines.append(f"  %narr_szi = ptrtoint {ARR}* %narr_sz to i64")
-        lines.append(f"  %narr_raw = call i8* @malloc(i64 %narr_szi)")
-        lines.append(f"  %narr = bitcast i8* %narr_raw to {ARR}*")
-        lines.append(f"  %ndp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 0")
-        lines.append(f"  store {NP}* %new_data, {NP}** %ndp")
-        lines.append(f"  %nlp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 1")
-        lines.append(f"  store i64 %new_len, i64* %nlp")
-        # Call update_function_params to build new NativeFunction
-        lines.append(f"  %narr_i8 = bitcast {ARR}* %narr to i8*")
-        lines.append(f"  %result = call i8* @update_function_params__llvm__lowering__lowering_core(i8* %func, i8* %narr_i8)")
-        lines.append(f"  ret i8* %result")
-        return "\n".join(lines)
+
+        def _gen_variant(*, by_value: bool):
+            lines: list[str] = []
+            if by_value:
+                lines.append(f"  %src = alloca {NF}")
+                lines.append(f"  store {NF} %func, {NF}* %src")
+            else:
+                lines.append(f"  %src = bitcast i8* %func to {NF}*")
+            # Read parameters field (index 2)
+            lines.append(f"  %pg = getelementptr {NF}, {NF}* %src, i32 0, i32 2")
+            lines.append(f"  %arr = load {ARR}*, {ARR}** %pg")
+            # Read data ptr and length
+            lines.append(f"  %dp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 0")
+            lines.append(f"  %old_data = load {NP}*, {NP}** %dp")
+            lines.append(f"  %lp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 1")
+            lines.append(f"  %old_len = load i64, i64* %lp")
+            # Element size
+            lines.append(f"  %esz_p = getelementptr {NP}, {NP}* null, i32 1")
+            lines.append(f"  %esz = ptrtoint {NP}* %esz_p to i64")
+            # New length and allocation
+            lines.append(f"  %new_len = add i64 %old_len, 1")
+            lines.append(f"  %new_bytes = mul i64 %new_len, %esz")
+            lines.append(f"  %new_raw = call i8* @malloc(i64 %new_bytes)")
+            lines.append(f"  %new_data = bitcast i8* %new_raw to {NP}*")
+            # Copy old data via memcpy
+            lines.append(f"  %old_bytes = mul i64 %old_len, %esz")
+            lines.append(f"  %old_raw = bitcast {NP}* %old_data to i8*")
+            lines.append(f"  call void @memcpy(i8* %new_raw, i8* %old_raw, i64 %old_bytes)")
+            # Copy new param struct to last slot
+            lines.append(f"  %slot = getelementptr {NP}, {NP}* %new_data, i64 %old_len")
+            if by_value:
+                lines.append(f"  %param_alloca = alloca {NP}")
+                lines.append(f"  store {NP} %param, {NP}* %param_alloca")
+                lines.append(f"  %param_ptr = bitcast {NP}* %param_alloca to {NP}*")
+            else:
+                lines.append(f"  %param_ptr = bitcast i8* %param to {NP}*")
+            # Copy field by field (5 fields in NativeParameter)
+            for fi, ft in [(0, "i8*"), (1, "i8*"), (2, "i1"), (3, "i8*"), (4, "%NativeSourceSpan*")]:
+                lines.append(f"  %pf{fi}g = getelementptr {NP}, {NP}* %param_ptr, i32 0, i32 {fi}")
+                lines.append(f"  %pf{fi}v = load {ft}, {ft}* %pf{fi}g")
+                lines.append(f"  %sf{fi}g = getelementptr {NP}, {NP}* %slot, i32 0, i32 {fi}")
+                lines.append(f"  store {ft} %pf{fi}v, {ft}* %sf{fi}g")
+            # Build new array header
+            lines.append(f"  %narr_sz = getelementptr {ARR}, {ARR}* null, i32 1")
+            lines.append(f"  %narr_szi = ptrtoint {ARR}* %narr_sz to i64")
+            lines.append(f"  %narr_raw = call i8* @malloc(i64 %narr_szi)")
+            lines.append(f"  %narr = bitcast i8* %narr_raw to {ARR}*")
+            lines.append(f"  %ndp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 0")
+            lines.append(f"  store {NP}* %new_data, {NP}** %ndp")
+            lines.append(f"  %nlp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 1")
+            lines.append(f"  store i64 %new_len, i64* %nlp")
+            # Build new NativeFunction with updated params field (index 2)
+            if by_value:
+                # Inline the update: copy all 8 fields, replace field 2 with new array
+                # %NativeFunction = { i8*, i1, { %NativeParameter*, i64 }*, i8*, { i8**, i64 }*, { i8**, i64 }*, i1, { %NativeInstruction*, i64 }* }
+                _nf_fields = [
+                    ("i8*", 0), ("i1", 1),
+                    ("{ %NativeParameter*, i64 }*", 2), ("i8*", 3),
+                    ("{ i8**, i64 }*", 4), ("{ i8**, i64 }*", 5),
+                    ("i1", 6), ("{ %NativeInstruction*, i64 }*", 7),
+                ]
+                # Allocate new struct
+                lines.append(f"  %out_sz = getelementptr {NF}, {NF}* null, i32 1")
+                lines.append(f"  %out_szi = ptrtoint {NF}* %out_sz to i64")
+                lines.append(f"  %out_raw = call i8* @malloc(i64 %out_szi)")
+                lines.append(f"  %out_ptr = bitcast i8* %out_raw to {NF}*")
+                for ft, fi in _nf_fields:
+                    lines.append(f"  %csg{fi} = getelementptr {NF}, {NF}* %src, i32 0, i32 {fi}")
+                    lines.append(f"  %csv{fi} = load {ft}, {ft}* %csg{fi}")
+                    val = f"%csv{fi}" if fi != 2 else "%narr"
+                    lines.append(f"  %cdg{fi} = getelementptr {NF}, {NF}* %out_ptr, i32 0, i32 {fi}")
+                    lines.append(f"  store {ft} {val}, {ft}* %cdg{fi}")
+                lines.append(f"  %retval = load {NF}, {NF}* %out_ptr")
+                lines.append(f"  ret {NF} %retval")
+            else:
+                lines.append(f"  %narr_i8 = bitcast {ARR}* %narr to i8*")
+                lines.append(f"  %result = call i8* @update_function_params__llvm__lowering__lowering_core(i8* %func, i8* %narr_i8)")
+                lines.append(f"  ret i8* %result")
+            return "\n".join(lines)
+
+        return (_gen_variant(by_value=False), _gen_variant(by_value=True))
 
     _HELPERS["append_param_to_function"] = _gen_append_param_to_function()
 
     def _gen_append_instruction_to_function():
-        """append_instruction_to_function(func: i8*, instr: i8*) -> i8*
-        Reads func.instructions array, appends instr, returns new NativeFunction."""
+        """append_instruction_to_function(func, instr) -> NativeFunction.
+        Reads func.instructions array, appends instr, returns new NativeFunction.
+        Returns (ptr_variant, by_value_variant) tuple."""
         NF = "%NativeFunction"
         NI = "%NativeInstruction"
         ARR = "{ %NativeInstruction*, i64 }"
-        lines = []
-        # Cast func
-        lines.append(f"  %src = bitcast i8* %func to {NF}*")
-        # Read instructions field (index 7)
-        lines.append(f"  %ig = getelementptr {NF}, {NF}* %src, i32 0, i32 7")
-        lines.append(f"  %arr = load {ARR}*, {ARR}** %ig")
-        # Read data ptr and length
-        lines.append(f"  %dp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 0")
-        lines.append(f"  %old_data = load {NI}*, {NI}** %dp")
-        lines.append(f"  %lp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 1")
-        lines.append(f"  %old_len = load i64, i64* %lp")
-        # Element size
-        lines.append(f"  %esz_p = getelementptr {NI}, {NI}* null, i32 1")
-        lines.append(f"  %esz = ptrtoint {NI}* %esz_p to i64")
-        # New length and allocation
-        lines.append(f"  %new_len = add i64 %old_len, 1")
-        lines.append(f"  %new_bytes = mul i64 %new_len, %esz")
-        lines.append(f"  %new_raw = call i8* @malloc(i64 %new_bytes)")
-        lines.append(f"  %new_data = bitcast i8* %new_raw to {NI}*")
-        # Copy old data via memcpy
-        lines.append(f"  %old_bytes = mul i64 %old_len, %esz")
-        lines.append(f"  %old_raw = bitcast {NI}* %old_data to i8*")
-        lines.append(f"  call void @memcpy(i8* %new_raw, i8* %old_raw, i64 %old_bytes)")
-        # Copy new instruction to last slot
-        # %NativeInstruction = type { i32, [4 x i8], [6 x i64] }
-        # Load and store the whole struct (it's a value type)
-        lines.append(f"  %slot = getelementptr {NI}, {NI}* %new_data, i64 %old_len")
-        lines.append(f"  %instr_ptr = bitcast i8* %instr to {NI}*")
-        lines.append(f"  %ival = load {NI}, {NI}* %instr_ptr")
-        lines.append(f"  store {NI} %ival, {NI}* %slot")
-        # Build new array header
-        lines.append(f"  %narr_sz = getelementptr {ARR}, {ARR}* null, i32 1")
-        lines.append(f"  %narr_szi = ptrtoint {ARR}* %narr_sz to i64")
-        lines.append(f"  %narr_raw = call i8* @malloc(i64 %narr_szi)")
-        lines.append(f"  %narr = bitcast i8* %narr_raw to {ARR}*")
-        lines.append(f"  %ndp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 0")
-        lines.append(f"  store {NI}* %new_data, {NI}** %ndp")
-        lines.append(f"  %nlp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 1")
-        lines.append(f"  store i64 %new_len, i64* %nlp")
-        # Call update_function_instructions to build new NativeFunction
-        lines.append(f"  %narr_i8 = bitcast {ARR}* %narr to i8*")
-        lines.append(f"  %result = call i8* @update_function_instructions__llvm__lowering__lowering_core(i8* %func, i8* %narr_i8)")
-        lines.append(f"  ret i8* %result")
-        return "\n".join(lines)
+
+        def _gen_variant(*, by_value: bool):
+            lines: list[str] = []
+            if by_value:
+                lines.append(f"  %src = alloca {NF}")
+                lines.append(f"  store {NF} %func, {NF}* %src")
+            else:
+                lines.append(f"  %src = bitcast i8* %func to {NF}*")
+            # Read instructions field (index 7)
+            lines.append(f"  %ig = getelementptr {NF}, {NF}* %src, i32 0, i32 7")
+            lines.append(f"  %arr = load {ARR}*, {ARR}** %ig")
+            # Read data ptr and length
+            lines.append(f"  %dp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 0")
+            lines.append(f"  %old_data = load {NI}*, {NI}** %dp")
+            lines.append(f"  %lp = getelementptr {ARR}, {ARR}* %arr, i32 0, i32 1")
+            lines.append(f"  %old_len = load i64, i64* %lp")
+            # Element size
+            lines.append(f"  %esz_p = getelementptr {NI}, {NI}* null, i32 1")
+            lines.append(f"  %esz = ptrtoint {NI}* %esz_p to i64")
+            # New length and allocation
+            lines.append(f"  %new_len = add i64 %old_len, 1")
+            lines.append(f"  %new_bytes = mul i64 %new_len, %esz")
+            lines.append(f"  %new_raw = call i8* @malloc(i64 %new_bytes)")
+            lines.append(f"  %new_data = bitcast i8* %new_raw to {NI}*")
+            # Copy old data via memcpy
+            lines.append(f"  %old_bytes = mul i64 %old_len, %esz")
+            lines.append(f"  %old_raw = bitcast {NI}* %old_data to i8*")
+            lines.append(f"  call void @memcpy(i8* %new_raw, i8* %old_raw, i64 %old_bytes)")
+            # Copy new instruction to last slot
+            lines.append(f"  %slot = getelementptr {NI}, {NI}* %new_data, i64 %old_len")
+            if by_value:
+                # %instr is %NativeInstruction by value — store directly
+                lines.append(f"  store {NI} %instr, {NI}* %slot")
+            else:
+                lines.append(f"  %instr_ptr = bitcast i8* %instr to {NI}*")
+                lines.append(f"  %ival = load {NI}, {NI}* %instr_ptr")
+                lines.append(f"  store {NI} %ival, {NI}* %slot")
+            # Build new array header
+            lines.append(f"  %narr_sz = getelementptr {ARR}, {ARR}* null, i32 1")
+            lines.append(f"  %narr_szi = ptrtoint {ARR}* %narr_sz to i64")
+            lines.append(f"  %narr_raw = call i8* @malloc(i64 %narr_szi)")
+            lines.append(f"  %narr = bitcast i8* %narr_raw to {ARR}*")
+            lines.append(f"  %ndp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 0")
+            lines.append(f"  store {NI}* %new_data, {NI}** %ndp")
+            lines.append(f"  %nlp = getelementptr {ARR}, {ARR}* %narr, i32 0, i32 1")
+            lines.append(f"  store i64 %new_len, i64* %nlp")
+            # Build new NativeFunction with updated instructions field (index 7)
+            if by_value:
+                # Inline the update: copy all 8 fields, replace field 7 with new array
+                _nf_fields = [
+                    ("i8*", 0), ("i1", 1),
+                    ("{ %NativeParameter*, i64 }*", 2), ("i8*", 3),
+                    ("{ i8**, i64 }*", 4), ("{ i8**, i64 }*", 5),
+                    ("i1", 6), ("{ %NativeInstruction*, i64 }*", 7),
+                ]
+                lines.append(f"  %out_sz = getelementptr {NF}, {NF}* null, i32 1")
+                lines.append(f"  %out_szi = ptrtoint {NF}* %out_sz to i64")
+                lines.append(f"  %out_raw = call i8* @malloc(i64 %out_szi)")
+                lines.append(f"  %out_ptr = bitcast i8* %out_raw to {NF}*")
+                for ft, fi in _nf_fields:
+                    lines.append(f"  %isg{fi} = getelementptr {NF}, {NF}* %src, i32 0, i32 {fi}")
+                    lines.append(f"  %isv{fi} = load {ft}, {ft}* %isg{fi}")
+                    val = f"%isv{fi}" if fi != 7 else "%narr"
+                    lines.append(f"  %idg{fi} = getelementptr {NF}, {NF}* %out_ptr, i32 0, i32 {fi}")
+                    lines.append(f"  store {ft} {val}, {ft}* %idg{fi}")
+                lines.append(f"  %retval = load {NF}, {NF}* %out_ptr")
+                lines.append(f"  ret {NF} %retval")
+            else:
+                lines.append(f"  %narr_i8 = bitcast {ARR}* %narr to i8*")
+                lines.append(f"  %result = call i8* @update_function_instructions__llvm__lowering__lowering_core(i8* %func, i8* %narr_i8)")
+                lines.append(f"  ret i8* %result")
+            return "\n".join(lines)
+
+        return (_gen_variant(by_value=False), _gen_variant(by_value=True))
 
     _HELPERS["append_instruction_to_function"] = _gen_append_instruction_to_function()
 
@@ -2186,6 +4223,19 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _HELPERS["get_function_effects_at"] = _gen_fn_field_accessor(4, "i8*", "{ i8**, i64 }*")
     _HELPERS["get_function_decorators_at"] = _gen_fn_field_accessor(5, "i8*", "{ i8**, i64 }*")
 
+    # Expected function signatures (params, ret_type) for helpers that may
+    # lose parameters when compiled by the first-pass binary (seed ABI bug).
+    _FN_SIGS: dict[str, tuple[str, str]] = {}
+    _fn_sig_base = f"{{ {NF}*, i64 }}* %functions, double %idx"
+    _FN_SIGS["get_function_name_at"] = (_fn_sig_base, "i8*")
+    _FN_SIGS["get_function_return_type_at"] = (_fn_sig_base, "i8*")
+    _FN_SIGS["get_function_is_async_at"] = (_fn_sig_base, "i1")
+    _FN_SIGS["get_function_is_extern_at"] = (_fn_sig_base, "i1")
+    _FN_SIGS["get_function_parameters_at"] = (_fn_sig_base, "i8*")
+    _FN_SIGS["get_function_instructions_at"] = (_fn_sig_base, "i8*")
+    _FN_SIGS["get_function_effects_at"] = (_fn_sig_base, "i8*")
+    _FN_SIGS["get_function_decorators_at"] = (_fn_sig_base, "i8*")
+
     # --- NativeStruct field accessor helpers ---
     # NativeStruct = { i8* name[0], {NativeStructField*,i64}* fields[1],
     #                   {NativeFunction*,i64}* methods[2], {i8**,i64}* implements[3],
@@ -2235,22 +4285,45 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _HELPERS["get_struct_field_name_at"] = _gen_struct_field_field_accessor(0, "i8*", "i8*")
     _HELPERS["get_struct_field_type_at"] = _gen_struct_field_field_accessor(1, "i8*", "i8*")
 
+    _ns_sig_base = f"{{ {NS}*, i64 }}* %structs, double %idx"
+    _FN_SIGS["get_struct_name_at"] = (_ns_sig_base, "i8*")
+    _FN_SIGS["get_struct_fields_at"] = (_ns_sig_base, f"{{ {NSF}*, i64 }}*")
+    _nsf_sig_base = f"{{ {NSF}*, i64 }}* %fields, double %idx"
+    _FN_SIGS["get_struct_field_name_at"] = (_nsf_sig_base, "i8*")
+    _FN_SIGS["get_struct_field_type_at"] = (_nsf_sig_base, "i8*")
+
     # Scan the LLVM IR for known helper functions and replace their bodies.
-    # Match any return type (i8*, i1, etc.) to handle all accessor helpers.
-    fn_re = _re.compile(
-        r"^define\s+(?:internal\s+)?(?:i8\*|i1|double)\s+@(\w+?)__llvm__lowering__lowering_core\("
+    # Two patterns: mangled (seed-compiled) and unmangled (first-pass-compiled).
+    _MODULE_SUFFIX = "__llvm__lowering__lowering_core"
+    # Build a regex that matches known helper names with the module suffix.
+    _helper_names_pattern = "|".join(_re.escape(k) for k in _HELPERS.keys())
+    fn_re_suffixed = _re.compile(
+        r"^define\s+(?:internal\s+)?.+?\s+@(" + _helper_names_pattern + r")" + _re.escape(_MODULE_SUFFIX) + r"\("
+    )
+    # For accessor helpers that may appear without the module suffix.
+    _ACCESSOR_HELPERS = set(_FN_SIGS.keys())
+    fn_re_any = _re.compile(
+        r"^define\s+(?:internal\s+)?.+?\s+@(\w+)\("
     )
     ir_lines = llvm_ir.split("\n")
     changed = 0
 
     i = 0
     while i < len(ir_lines):
-        m = fn_re.match(ir_lines[i].strip())
-        if not m:
-            i += 1
-            continue
-        fn_name = m.group(1)
-        if fn_name not in _HELPERS:
+        stripped = ir_lines[i].strip()
+        # Try suffixed match first (for seed-compiled modules).
+        m = fn_re_suffixed.match(stripped)
+        fn_name = None
+        if m:
+            fn_name = m.group(1)
+        else:
+            # Try unsuffixed match, but only for accessor helpers.
+            m2 = fn_re_any.match(stripped)
+            if m2:
+                candidate = m2.group(1)
+                if candidate in _ACCESSOR_HELPERS:
+                    fn_name = candidate
+        if fn_name is None or fn_name not in _HELPERS:
             i += 1
             continue
 
@@ -2271,8 +4344,64 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
         # Replace the function body.  Strip 'internal' linkage so the
         # cross-module shim can reference these symbols.
         fn_header = ir_lines[fn_start].replace("define internal ", "define ")
+        # If the compiled function has empty params (seed ABI bug), inject
+        # the correct parameter list and return type.
+        if fn_name in _FN_SIGS:
+            # Fix params when they are empty "()" or contain the
+            # placeholder names from _fix_duplicate_param_names.
+            _needs_sig_fix = "()" in fn_header or "%_empty" in fn_header or " %_," in fn_header or " %_)" in fn_header
+            if _needs_sig_fix:
+                sig_params, sig_ret = _FN_SIGS[fn_name]
+                at_idx = fn_header.index("@")
+                paren_idx = fn_header.index("(", at_idx)
+                mangled_name = fn_header[at_idx:paren_idx]
+                fn_header = f"define {sig_ret} {mangled_name}({sig_params}) {{"
+        _helper_val = _HELPERS[fn_name]
+        if isinstance(_helper_val, tuple):
+            # Tuple: (ptr_variant, by_value_variant).
+            # Pick based on whether the define has %NativeFunction (by value) or i8* param.
+            _has_nf_by_value = "%NativeFunction " in fn_header and "i8* %fn_val" not in fn_header and "i8* %func" not in fn_header
+            if _has_nf_by_value:
+                helper_body = _helper_val[1]  # by-value variant
+            else:
+                helper_body = _helper_val[0]  # pointer variant
+        else:
+            helper_body = _helper_val
+
+        # If the helper body returns i8* but the function header declares a
+        # different return type (e.g. %ParseNativeResult), fix the body to
+        # return the correct type by bitcasting.
+        hdr_match = _re.match(r"^define\s+(.+?)\s+@", fn_header)
+        if hdr_match:
+            hdr_ret = hdr_match.group(1).strip()
+            body_lines = helper_body.strip().split("\n")
+            last_line = body_lines[-1].strip() if body_lines else ""
+            if last_line.startswith("ret i8* ") and hdr_ret != "i8*":
+                # The helper returns i8* but the function declares a named/structural type.
+                ret_val = last_line[len("ret i8* "):]
+                # If the named type is structurally an i8* (pointer), just change the ret.
+                if hdr_ret.startswith("%") or hdr_ret.startswith("{"):
+                    if hdr_ret.rstrip().endswith("*"):
+                        # hdr_ret is already a pointer type — just bitcast i8* to it directly.
+                        body_lines[-1] = f"  %_typed_ptr = bitcast i8* {ret_val} to {hdr_ret}"
+                        body_lines.append(f"  ret {hdr_ret} %_typed_ptr")
+                    else:
+                        # hdr_ret is a value type — cast to pointer-to-type and load.
+                        body_lines[-1] = f"  %_typed_ptr = bitcast i8* {ret_val} to {hdr_ret}*"
+                        body_lines.append(f"  %_ret_loaded = load {hdr_ret}, {hdr_ret}* %_typed_ptr")
+                        body_lines.append(f"  ret {hdr_ret} %_ret_loaded")
+                    helper_body = "\n".join(body_lines)
+            elif last_line.startswith("ret %NativeFunction ") and hdr_ret == "i8*":
+                # The by-value helper returns %NativeFunction but header says i8*.
+                ret_val = last_line[len("ret %NativeFunction "):]
+                body_lines[-1] = f"  %_tmp_alloca = alloca %NativeFunction"
+                body_lines.append(f"  store %NativeFunction {ret_val}, %NativeFunction* %_tmp_alloca")
+                body_lines.append(f"  %_ret_i8 = bitcast %NativeFunction* %_tmp_alloca to i8*")
+                body_lines.append(f"  ret i8* %_ret_i8")
+                helper_body = "\n".join(body_lines)
+
         replacement = [fn_header, "block.entry:"]
-        replacement.append(_HELPERS[fn_name])
+        replacement.append(helper_body)
         replacement.append("}")
 
         ir_lines[fn_start:j + 1] = replacement
@@ -2485,6 +4614,952 @@ def _remove_degenerate_empty_functions(llvm_ir: str) -> tuple[str, int]:
             i = j + 1
             continue
         i += 1
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+# ── Global sailfin_runtime_get_field → GEP replacement ─────────────────────
+#
+# The seed v0.1.1 compiles ``obj.field`` as
+#   ``sailfin_runtime_get_field(obj, "field")``
+# which always returns NULL (the C runtime stub is unimplemented).
+# This pass replaces those calls with raw byte-offset GEP+load sequences
+# using known struct field layouts.  The raw byte-offset approach does NOT
+# require the target struct type to be defined in the module — it uses
+#   ``getelementptr i8, i8* %obj, i64 BYTE_OFFSET``
+# which works universally.
+#
+# On x86-64 with default LLVM data layout, every field in the Sailfin
+# compiler structs is 8-byte aligned (pointers=8B, double=8B, i1=1B+7B pad,
+# i32=4B+4B pad), so byte_offset = field_index * 8.
+
+# Maps struct name → { field_name: (field_index, load_category) }
+# load_category: "ptr" (any pointer), "i1", "double", "i32"
+_GF_STRUCTS: dict[str, dict[str, tuple[int, str]]] = {
+    # ── Native IR types ──
+    "ParseNativeResult": {
+        "functions": (0, "ptr"), "imports": (1, "ptr"), "structs": (2, "ptr"),
+        "interfaces": (3, "ptr"), "enums": (4, "ptr"), "bindings": (5, "ptr"),
+        "diagnostics": (6, "ptr"),
+    },
+    # NativeInstruction is an enum: { i32, [4 x i8], [6 x i64] } = 56 bytes.
+    # Fields are not accessed by name, but the size entry is needed so that
+    # _compute_struct_size returns 56 for array element sizing.
+    "NativeInstruction": {
+        "_tag": (0, "i32"), "_d0": (1, "i64"), "_d1": (2, "i64"),
+        "_d2": (3, "i64"), "_d3": (4, "i64"), "_d4": (5, "i64"),
+        "_d5": (6, "i64"),
+    },
+    "NativeFunction": {
+        "name": (0, "ptr"), "is_async": (1, "i1"),
+        "parameters": (2, "ptr"), "return_type": (3, "ptr"),
+        "effects": (4, "ptr"), "decorators": (5, "ptr"),
+        "is_extern": (6, "i1"), "instructions": (7, "ptr"),
+    },
+    "NativeStruct": {
+        "name": (0, "ptr"), "fields": (1, "ptr"), "methods": (2, "ptr"),
+        "implements": (3, "ptr"), "layout": (4, "ptr"),
+    },
+    "NativeStructField": {
+        "name": (0, "ptr"), "type_annotation": (1, "ptr"), "mutable": (2, "i1"),
+    },
+    "NativeParameter": {
+        "name": (0, "ptr"), "type_annotation": (1, "ptr"),
+    },
+    "NativeEnum": {
+        "name": (0, "ptr"), "variants": (1, "ptr"), "layout": (2, "ptr"),
+    },
+    "NativeEnumVariant": {
+        "name": (0, "ptr"), "fields": (1, "ptr"),
+    },
+    "NativeEnumVariantField": {
+        "name": (0, "ptr"), "type_annotation": (1, "ptr"), "mutable": (2, "i1"),
+    },
+    "NativeModule": {
+        "name": (0, "ptr"), "artifacts": (1, "ptr"),
+        "string_constants": (2, "ptr"), "symbol_count": (3, "double"),
+    },
+    "NativeImport": {
+        "name": (0, "ptr"), "specifiers": (2, "ptr"),
+    },
+    "NativeInterface": {
+        "name": (0, "ptr"), "signatures": (2, "ptr"),
+    },
+    "NativeBinding": {
+        "name": (0, "ptr"), "mutable": (1, "i1"),
+        "type_annotation": (2, "ptr"), "value": (3, "ptr"),
+    },
+    "NativeArtifact": {
+        "name": (0, "ptr"), "kind": (1, "ptr"), "contents": (2, "ptr"),
+    },
+    "NativeImportSpecifier": {
+        "name": (0, "ptr"), "alias": (1, "ptr"),
+    },
+    "NativeInterfaceSignature": {
+        "name": (0, "ptr"), "is_async": (1, "i1"), "type_parameters": (2, "ptr"),
+        "parameters": (3, "ptr"), "return_type": (4, "ptr"), "effects": (5, "ptr"),
+    },
+    "NativeSourceSpan": {
+        "start": (0, "double"), "end": (1, "double"),
+        "start_index": (2, "double"), "next_index": (3, "double"),
+    },
+    "NativeStructLayout": {
+        "size": (0, "double"), "align": (1, "double"), "fields": (2, "ptr"),
+    },
+    "NativeStructLayoutField": {
+        "name": (0, "ptr"), "llvm_type": (1, "ptr"),
+        "offset": (2, "double"), "size": (3, "double"), "align": (4, "double"),
+    },
+    "NativeEnumLayout": {
+        "tag_size": (0, "double"), "tag_align": (1, "double"), "tag_type": (2, "ptr"),
+        "size": (3, "double"), "align": (4, "double"), "variants": (5, "ptr"),
+    },
+    "NativeEnumVariantLayout": {
+        "name": (0, "ptr"), "size": (1, "double"), "align": (2, "double"),
+        "offset": (3, "double"), "tag_value": (4, "double"), "fields": (5, "ptr"),
+    },
+    # ── Type context / layout types ──
+    "StructTypeInfo": {
+        "name": (0, "ptr"), "llvm_name": (1, "ptr"), "fields": (2, "ptr"),
+        "size": (3, "double"), "align": (4, "double"),
+    },
+    "EnumTypeInfo": {
+        "name": (0, "ptr"), "llvm_name": (1, "ptr"), "tag_type": (2, "ptr"),
+        "tag_size": (3, "double"), "tag_align": (4, "double"),
+        "size": (5, "double"), "align": (6, "double"),
+        "variants": (8, "ptr"),
+    },
+    "TypeContext": {
+        "structs": (0, "ptr"), "enums": (1, "ptr"),
+        "interfaces": (2, "ptr"), "vtables": (3, "ptr"),
+    },
+    "StructFieldInfo": {
+        "name": (0, "ptr"), "llvm_type": (1, "ptr"),
+        "type_annotation": (2, "ptr"), "index": (3, "double"), "offset": (4, "double"),
+    },
+    "EnumVariantInfo": {
+        "name": (0, "ptr"), "tag": (1, "double"), "offset": (2, "double"),
+        "size": (3, "double"), "align": (4, "double"), "fields": (5, "ptr"),
+    },
+    "InterfaceTypeInfo": {
+        "name": (0, "ptr"), "llvm_name": (1, "ptr"),
+        "type_parameters": (2, "ptr"), "signatures": (3, "ptr"),
+    },
+    "VTableInfo": {
+        "struct_name": (0, "ptr"), "interface_name": (1, "ptr"),
+        "llvm_type_name": (2, "ptr"), "llvm_global_name": (3, "ptr"),
+        "entries": (4, "ptr"),
+    },
+    "LayoutManifest": {
+        "structs": (0, "ptr"), "enums": (1, "ptr"),
+    },
+    "LayoutFieldInput": {
+        "name": (0, "ptr"), "type_annotation": (1, "ptr"),
+    },
+    "LayoutStructDefinition": {
+        "name": (0, "ptr"), "fields": (1, "ptr"),
+    },
+    "LayoutEnumDefinition": {
+        "name": (0, "ptr"), "variants": (1, "ptr"),
+    },
+    "LayoutEnumVariantDefinition": {
+        "name": (0, "ptr"), "fields": (1, "ptr"),
+    },
+    "CanonicalTypeLayout": {
+        "name": (0, "ptr"), "size": (1, "double"), "align": (2, "double"),
+    },
+    "LayoutContext": {
+        "structs": (0, "ptr"), "enums": (1, "ptr"),
+    },
+    # ── Compiler internal result types ──
+    "ExpressionResult": {
+        "lines": (0, "ptr"), "temp_index": (1, "double"),
+        "operand": (2, "ptr"), "diagnostics": (3, "ptr"),
+        "string_constants": (4, "ptr"),
+    },
+    "BodyResult": {
+        "lines": (0, "ptr"), "diagnostics": (1, "ptr"),
+        "lifetime_regions": (2, "ptr"), "string_constants": (3, "ptr"),
+    },
+    "BlockLoweringResult": {
+        "lines": (0, "ptr"), "allocas": (1, "ptr"),
+        "locals": (2, "ptr"), "bindings": (3, "ptr"),
+        "temp_index": (4, "double"), "block_counter": (5, "double"),
+        "diagnostics": (6, "ptr"), "terminated": (7, "i1"),
+        "next_local_id": (8, "double"), "lifetime_regions": (9, "ptr"),
+        "next_lifetime_region_id": (10, "double"), "next_index": (11, "double"),
+        "mutations": (12, "ptr"), "string_constants": (13, "ptr"),
+    },
+    "LoadLocalResult": {
+        "lines": (0, "ptr"), "temp_index": (1, "double"),
+        "operand": (2, "ptr"), "diagnostics": (3, "ptr"),
+    },
+    "ComparisonEmission": {
+        "lines": (0, "ptr"), "temp_index": (1, "double"),
+        "operand": (2, "ptr"), "diagnostics": (3, "ptr"),
+    },
+    "CoercionResult": {
+        "lines": (0, "ptr"), "temp_index": (1, "double"),
+        "operand": (2, "ptr"), "diagnostics": (3, "ptr"),
+    },
+    "BinaryAlignmentResult": {
+        "lines": (0, "ptr"), "temp_index": (1, "double"),
+        "left": (2, "ptr"), "right": (3, "ptr"),
+        "diagnostics": (4, "ptr"), "result_type": (5, "ptr"),
+    },
+    "MangledModuleResult": {
+        "lines": (0, "ptr"), "diagnostics": (1, "ptr"),
+    },
+    "DeclareSignature": {
+        "return_type": (0, "ptr"), "param_types": (1, "ptr"),
+    },
+    "StringConstant": {
+        "name": (0, "ptr"), "content": (1, "ptr"), "byte_count": (2, "double"),
+    },
+    "StringPointerResult": {
+        "lines": (0, "ptr"), "temp_index": (1, "double"), "pointer": (2, "ptr"),
+    },
+    "ParameterBinding": {
+        "name": (0, "ptr"), "llvm_name": (1, "ptr"), "llvm_type": (2, "ptr"),
+        "type_annotation": (3, "ptr"), "consumed": (4, "i1"), "span": (5, "ptr"),
+    },
+    "ParameterPreparation": {
+        "signature": (0, "ptr"), "bindings": (1, "ptr"), "diagnostics": (2, "ptr"),
+    },
+    "LocalBinding": {
+        "name": (0, "ptr"), "pointer": (1, "ptr"), "llvm_type": (2, "ptr"),
+        "type_annotation": (3, "ptr"), "ownership": (4, "ptr"),
+        "consumed": (5, "i1"), "scope_id": (6, "ptr"), "scope_depth": (7, "double"),
+    },
+    "LocalMutation": {
+        "name": (0, "ptr"), "llvm_type": (1, "ptr"), "value_name": (2, "ptr"),
+        "span": (3, "ptr"), "originating_label": (4, "ptr"),
+    },
+    "LLVMOperand": {
+        "llvm_type": (0, "ptr"), "value": (1, "ptr"),
+    },
+    "OwnershipInfo": {
+        "variant": (0, "ptr"), "base": (1, "ptr"), "mutable": (2, "i1"),
+        "span": (3, "ptr"), "region_id": (4, "double"),
+    },
+    "OwnershipConsumption": {
+        "kind": (0, "ptr"), "name": (1, "ptr"),
+    },
+    "LifetimeRegionMetadata": {
+        "id": (0, "double"), "binding": (1, "ptr"), "base": (2, "ptr"),
+        "mutable": (3, "i1"), "start_span": (4, "ptr"), "scope_id": (5, "ptr"),
+        "scope_depth": (6, "double"), "base_scope_id": (7, "ptr"),
+        "base_scope_depth": (8, "double"), "end_scope_id": (9, "ptr"),
+        "end_scope_depth": (10, "double"), "released": (11, "i1"),
+    },
+    # ── Control flow structures ──
+    "IfStructure": {
+        "then_start": (0, "double"), "then_end": (1, "double"),
+        "else_start": (2, "double"), "else_end": (3, "double"),
+        "has_else": (4, "i1"), "next_index": (5, "double"),
+        "diagnostics": (6, "ptr"),
+    },
+    "LoopContext": {
+        "break_label": (0, "ptr"), "continue_label": (1, "ptr"),
+    },
+    "LoopStructure": {
+        "body_start": (0, "double"), "body_end": (1, "double"),
+        "next_index": (2, "double"), "diagnostics": (3, "ptr"),
+    },
+    "TryStructure": {
+        "try_start": (0, "double"), "try_end": (1, "double"),
+        "catch_index": (2, "double"), "catch_name": (3, "ptr"),
+        "catch_start": (4, "double"), "catch_end": (5, "double"),
+        "finally_index": (6, "double"), "finally_start": (7, "double"),
+        "finally_end": (8, "double"), "end_index": (9, "double"),
+        "next_index": (10, "double"), "diagnostics": (11, "ptr"),
+    },
+    "MatchCaseStructure": {
+        "pattern": (0, "ptr"), "guard": (1, "ptr"),
+        "body_start": (2, "double"), "body_end": (3, "double"),
+        "is_default": (4, "i1"),
+    },
+    "MatchStructure": {
+        "cases": (0, "ptr"), "end_index": (1, "double"), "diagnostics": (2, "ptr"),
+    },
+    # ── Emitter / text builder ──
+    "TextBuilder": {
+        "lines": (0, "ptr"), "indent": (1, "double"),
+    },
+    "NativeState": {
+        # Field 0 is TextBuilder by value (complex), skip
+        # Field 1 at byte offset 16 (TextBuilder is 2 fields = 16 bytes)
+        # Field 2 at byte offset 24 (LayoutContext by value)
+        # Not safe with simple indexing — skip
+    },
+    "EmitNativeResult": {
+        # Field 0 is NativeModule by value (4 fields = 32 bytes)
+        # Field 1 "diagnostics" at byte offset 32 — NOT field_index*8
+        # Skip — complex by-value embedding
+    },
+    # ── AST types ──
+    "FunctionSignature": {
+        "name": (0, "ptr"), "is_async": (1, "i1"), "parameters": (2, "ptr"),
+        "return_type": (3, "ptr"), "effects": (4, "ptr"),
+        "type_parameters": (5, "ptr"), "span": (6, "ptr"),
+    },
+    "Parameter": {
+        "name": (0, "ptr"), "type_annotation": (1, "ptr"),
+        "default_value": (2, "ptr"), "is_rest": (3, "i1"), "span": (4, "ptr"),
+    },
+    "TypeAnnotation": {"text": (0, "ptr")},
+    "FieldDeclaration": {
+        # Field 1 "type_annotation" is TypeAnnotation by value (i8*) — 8 bytes, acts like ptr
+        "name": (0, "ptr"), "type_annotation": (1, "ptr"),
+        "mutable": (2, "i1"), "span": (3, "ptr"),
+    },
+    "EnumVariant": {
+        "name": (0, "ptr"), "fields": (1, "ptr"), "span": (2, "ptr"),
+    },
+    "Decorator": {
+        "name": (0, "ptr"), "arguments": (1, "ptr"),
+    },
+    "SourceSpan": {
+        "start": (0, "double"), "end": (1, "double"),
+        "start_index": (2, "double"), "next_index": (3, "double"),
+    },
+    "Block": {
+        "tokens": (0, "ptr"), "source": (1, "ptr"), "statements": (2, "ptr"),
+    },
+    "ElseBranch": {
+        "statement": (0, "ptr"), "block": (1, "ptr"),
+    },
+    "ObjectField": {
+        # Field 1 "value" is Expression by value — complex, skip
+        "name": (0, "ptr"),
+    },
+    "ModelProperty": {
+        # Field 1 "value" is Expression by value — complex, skip
+        "name": (0, "ptr"), "span": (2, "ptr"),
+    },
+    "Token": {
+        # TokenKind at 0 (i32 + pad = 8 bytes), then i8*, double, double
+        "lexeme": (1, "ptr"), "line": (2, "double"), "column": (3, "double"),
+    },
+    # ── Lowering result types (used in main.sfn) ──
+    "LoweredLLVMResult": {
+        # ir(0,ptr), diagnostics(1,ptr), trait_metadata(2, by-value TraitMetadata),
+        # After trait_metadata the offsets depend on TraitMetadata size.
+        # Only index 0 and 1 are safe with field_index*8.
+        "ir": (0, "ptr"), "diagnostics": (1, "ptr"),
+    },
+    "LoweredLLVMLinesResult": {
+        # Same layout as LoweredLLVMResult but lines instead of ir
+        "lines": (0, "ptr"), "diagnostics": (1, "ptr"),
+    },
+    # ── native_ir parsing result types ──
+    # All parse result types that start with success -> boolean at index 0.
+    # Only safe to access 'success' at (0, i1). Fields after by-value struct
+    # fields have non-trivial offsets that break field_index*8.
+    "InterfaceSignatureParse": {"success": (0, "i1")},
+    "StructLayoutHeaderParse": {
+        "success": (0, "i1"), "name": (1, "ptr"),
+        "size": (2, "double"), "align": (3, "double"),
+    },
+    "StructLayoutFieldParse": {"success": (0, "i1")},
+    "EnumLayoutHeaderParse": {
+        "success": (0, "i1"), "name": (1, "ptr"),
+        "size": (2, "double"), "align": (3, "double"),
+        "tag_type": (4, "ptr"), "tag_size": (5, "double"), "tag_align": (6, "double"),
+    },
+    "EnumLayoutVariantParse": {"success": (0, "i1")},
+    "EnumLayoutPayloadParse": {"success": (0, "i1")},
+    "NumberParseResult": {"success": (0, "i1"), "value": (1, "double")},
+    "HeaderNameParse": {
+        "name": (0, "ptr"), "type_parameters": (1, "ptr"),
+        "remainder": (2, "ptr"), "diagnostics": (3, "ptr"),
+    },
+    # ── Expression lowering parse types ──
+    # These structs have consecutive i1 fields: recognized(byte 0), success(byte 1).
+    # The field_index*8 formula gives byte 8 for success, which is WRONG (real=1).
+    # Only include 'recognized' at (0, "i1") which is safe.
+    "StructLiteralParse": {"recognized": (0, "i1")},
+    "EnumLiteralParse": {"recognized": (0, "i1")},
+    "BorrowParseResult": {"recognized": (0, "i1")},
+    "RawAddressParseResult": {"recognized": (0, "i1")},
+    "CastParseResult": {"recognized": (0, "i1")},
+    "BorrowArgumentParse": {
+        "success": (0, "i1"), "argument": (1, "ptr"),
+    },
+    # ── Parser state types ──
+    "Parser": {
+        "tokens": (0, "ptr"), "index": (1, "double"),
+    },
+    # Parse result types with Parser as first field (by value = 16 bytes).
+    # parser field at offset 0 should return pointer to embedded Parser.
+    # Fields after the by-value Parser are at offset 16, not field_index*8.
+    # Only safe to use for the 'parser' sub-fields via nested access.
+    # ── Emit native internal ──
+    "NativeState": {},  # Complex by-value fields, skip
+    "EmitNativeResult": {},  # Complex by-value NativeModule, skip
+    # ── AST Statement (tagged union, variant-specific fields) ──
+    # Statement fields depend on the variant. The 'variant' field is often
+    # at index 0 but the struct layout is complex. Skip for now.
+}
+
+# Build the global field → candidates mapping (once at import time)
+_GF_FIELD_CANDIDATES: dict[str, list[tuple[str, int, str]]] = {}
+for _sn, _sf in _GF_STRUCTS.items():
+    for _fn, (_fi, _ft) in _sf.items():
+        _GF_FIELD_CANDIDATES.setdefault(_fn, []).append((_sn, _fi, _ft))
+
+# Pre-compute unambiguous fields (unique mapping or same index+type everywhere)
+_GF_RESOLVABLE: dict[str, tuple[int, str]] = {}  # field_name → (index, load_type)
+for _fn, _cands in _GF_FIELD_CANDIDATES.items():
+    if len(_cands) == 1:
+        _GF_RESOLVABLE[_fn] = (_cands[0][1], _cands[0][2])
+    else:
+        _fi0, _ft0 = _cands[0][1], _cands[0][2]
+        if all(_c[1] == _fi0 and _c[2] == _ft0 for _c in _cands):
+            _GF_RESOLVABLE[_fn] = (_fi0, _ft0)
+
+
+def _replace_get_field_calls(llvm_ir: str) -> tuple[str, int]:
+    """Replace ``sailfin_runtime_get_field`` calls with raw byte-offset GEP+load.
+
+    Uses ``getelementptr i8, i8* %obj, i64 OFFSET`` so no struct type defs
+    are needed in the module.  Returns (modified_ir, num_replacements).
+    """
+    import re
+
+    # Quick bail-out if no get_field calls
+    if "sailfin_runtime_get_field" not in llvm_ir:
+        return llvm_ir, 0
+
+    # Check for field constants
+    if "@.runtime.field." not in llvm_ir:
+        return llvm_ir, 0
+
+    lines = llvm_ir.split("\n")
+
+    # Regex for GEP on field constants
+    gep_re = re.compile(
+        r'(%.+?)\s*=\s*getelementptr\s+inbounds\s+\[\d+\s+x\s+i8\]'
+        r'.*@\.runtime\.field\.(\w+).*i32\s+0,\s*i32\s+0'
+    )
+    # Regex for get_field call
+    gf_call_re = re.compile(
+        r'(%.+?)\s*=\s*call\s+i8\*\s+@sailfin_runtime_get_field'
+        r'\(\s*i8\*\s+(%.+?)\s*,\s*i8\*\s+(%.+?)\s*\)'
+    )
+
+    # ── Find function boundaries ─────────────────────────────────────
+    func_boundaries: list[tuple[int, int]] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip().startswith("define "):
+            start = i
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != "}":
+                j += 1
+            func_boundaries.append((start, min(j + 1, len(lines))))
+            i = j + 1
+        else:
+            i += 1
+
+    changed = 0
+    _gf_ctr = 0
+
+    for fn_start, fn_end in func_boundaries:
+        # ── Pass 1: scan for GEPs and get_field calls ────────────────
+        local_gep: dict[str, str] = {}       # %var → field_name
+        local_obj_fields: dict[str, set[str]] = {}  # obj_var → {field_names}
+
+        for li in range(fn_start, fn_end):
+            stripped = lines[li].strip()
+            m = gep_re.match(stripped)
+            if m:
+                local_gep[m.group(1)] = m.group(2)
+                continue
+            m = gf_call_re.match(stripped)
+            if m:
+                obj_var = m.group(2)
+                field_ptr = m.group(3)
+                fname = local_gep.get(field_ptr)
+                if fname:
+                    local_obj_fields.setdefault(obj_var, set()).add(fname)
+
+        # ── Infer types for ambiguous obj_vars using co-occurrence ───
+        obj_type_cache: dict[str, str] = {}
+        for obj_var, fnames in local_obj_fields.items():
+            best_struct = None
+            best_score = 0
+            # First pass: struct must contain ALL accessed fields
+            for sname, sfields in _GF_STRUCTS.items():
+                sfield_names = set(sfields.keys())
+                overlap = len(fnames & sfield_names)
+                if overlap > best_score and fnames <= sfield_names:
+                    best_score = overlap
+                    best_struct = sname
+            # Fallback: pick best overlap
+            if best_struct is None:
+                for sname, sfields in _GF_STRUCTS.items():
+                    sfield_names = set(sfields.keys())
+                    overlap = len(fnames & sfield_names)
+                    if overlap > best_score:
+                        best_score = overlap
+                        best_struct = sname
+            if best_struct:
+                obj_type_cache[obj_var] = best_struct
+
+        # ── Pass 2: replace get_field calls ──────────────────────────
+        local_gep.clear()
+        for li in range(fn_start, fn_end):
+            stripped = lines[li].strip()
+            m = gep_re.match(stripped)
+            if m:
+                local_gep[m.group(1)] = m.group(2)
+                continue
+            m = gf_call_re.match(stripped)
+            if not m:
+                continue
+
+            result_var = m.group(1)
+            obj_var = m.group(2)
+            field_ptr = m.group(3)
+            fname = local_gep.get(field_ptr)
+            if not fname:
+                continue
+
+            # Resolve field index and load type
+            field_idx = None
+            load_type = None
+
+            if fname in _GF_RESOLVABLE:
+                field_idx, load_type = _GF_RESOLVABLE[fname]
+            elif obj_var in obj_type_cache:
+                st = obj_type_cache[obj_var]
+                info = _GF_STRUCTS.get(st, {}).get(fname)
+                if info:
+                    field_idx, load_type = info
+
+            if field_idx is None:
+                continue
+
+            byte_offset = field_idx * 8
+
+            # Generate replacement using raw byte-offset GEP
+            _gf_ctr += 1
+            tag = f"_gf{_gf_ctr}"
+            indent = "  "
+            rep = []
+
+            gep_var = f"%{tag}_p"
+            rep.append(
+                f"{indent}{gep_var} = getelementptr i8, i8* {obj_var}, i64 {byte_offset}"
+            )
+
+            if load_type == "ptr":
+                # Load pointer field as i8*
+                typed_var = f"%{tag}_pp"
+                rep.append(f"{indent}{typed_var} = bitcast i8* {gep_var} to i8**")
+                rep.append(f"{indent}{result_var} = load i8*, i8** {typed_var}")
+            elif load_type == "i1":
+                typed_var = f"%{tag}_bp"
+                val_var = f"%{tag}_bv"
+                ext_var = f"%{tag}_bx"
+                rep.append(f"{indent}{typed_var} = bitcast i8* {gep_var} to i1*")
+                rep.append(f"{indent}{val_var} = load i1, i1* {typed_var}")
+                rep.append(f"{indent}{ext_var} = zext i1 {val_var} to i64")
+                rep.append(f"{indent}{result_var} = inttoptr i64 {ext_var} to i8*")
+            elif load_type == "double":
+                typed_var = f"%{tag}_dp"
+                val_var = f"%{tag}_dv"
+                bits_var = f"%{tag}_db"
+                rep.append(f"{indent}{typed_var} = bitcast i8* {gep_var} to double*")
+                rep.append(f"{indent}{val_var} = load double, double* {typed_var}")
+                rep.append(f"{indent}{bits_var} = bitcast double {val_var} to i64")
+                rep.append(f"{indent}{result_var} = inttoptr i64 {bits_var} to i8*")
+            elif load_type == "i32":
+                typed_var = f"%{tag}_ip"
+                val_var = f"%{tag}_iv"
+                ext_var = f"%{tag}_ix"
+                rep.append(f"{indent}{typed_var} = bitcast i8* {gep_var} to i32*")
+                rep.append(f"{indent}{val_var} = load i32, i32* {typed_var}")
+                rep.append(f"{indent}{ext_var} = zext i32 {val_var} to i64")
+                rep.append(f"{indent}{result_var} = inttoptr i64 {ext_var} to i8*")
+            else:
+                continue
+
+            lines[li] = "\n".join(rep)
+            changed += 1
+
+    if changed == 0:
+        return llvm_ir, 0
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+# ── Array field metadata ──────────────────────────────────────────────────
+# Maps (parent_struct, field_name) → (element_struct_name_or_None, element_size).
+# element_size = (max_field_index + 1) * 8 for struct elements.
+# For string arrays (diagnostics etc.), element_size = 8 (pointer).
+_GF_ARRAY_FIELDS: dict[tuple[str, str], tuple[str | None, int]] = {}
+
+def _compute_struct_size(sname: str) -> int:
+    """Compute struct size as (max_field_index + 1) * 8."""
+    fields = _GF_STRUCTS.get(sname, {})
+    if not fields:
+        return 8  # fallback: treat as single pointer
+    max_idx = max(fi for fi, _ in fields.values())
+    return (max_idx + 1) * 8
+
+# Known array fields and their element types.
+_GF_ARRAY_FIELD_DEFS: list[tuple[str, str, str | None]] = [
+    # (parent_struct, field_name, element_struct_or_None)
+    ("ParseNativeResult", "functions", "NativeFunction"),
+    ("ParseNativeResult", "imports", "NativeImport"),
+    ("ParseNativeResult", "structs", "NativeStruct"),
+    ("ParseNativeResult", "interfaces", "NativeInterface"),
+    ("ParseNativeResult", "enums", "NativeEnum"),
+    ("ParseNativeResult", "bindings", "NativeBinding"),
+    ("ParseNativeResult", "diagnostics", None),  # string array, elem = i8* = 8
+    ("NativeFunction", "parameters", "NativeParameter"),
+    ("NativeFunction", "effects", None),  # string array
+    ("NativeFunction", "decorators", "Decorator"),
+    ("NativeFunction", "instructions", "NativeInstruction"),
+    ("NativeStruct", "fields", "NativeStructField"),
+    ("NativeStruct", "methods", "NativeFunction"),
+    ("NativeStruct", "implements", None),  # string array
+    ("NativeStruct", "layout", None),  # single struct pointer, not array — skip
+    ("NativeEnum", "variants", "NativeEnumVariant"),
+    ("NativeEnumVariant", "fields", "NativeEnumVariantField"),
+    ("NativeInterface", "signatures", "NativeInterfaceSignature"),
+    ("NativeImport", "specifiers", "NativeImportSpecifier"),
+    ("NativeInterfaceSignature", "parameters", "NativeParameter"),
+    ("NativeInterfaceSignature", "effects", None),
+    ("NativeInterfaceSignature", "type_parameters", None),
+    ("TypeContext", "structs", "StructTypeInfo"),
+    ("TypeContext", "enums", "EnumTypeInfo"),
+    ("TypeContext", "interfaces", "InterfaceTypeInfo"),
+    ("TypeContext", "vtables", "VTableInfo"),
+    ("StructTypeInfo", "fields", "StructFieldInfo"),
+    ("EnumTypeInfo", "variants", "EnumVariantInfo"),
+    ("EnumVariantInfo", "fields", "StructFieldInfo"),
+    ("InterfaceTypeInfo", "signatures", "NativeInterfaceSignature"),
+    ("InterfaceTypeInfo", "type_parameters", None),
+    ("VTableInfo", "entries", None),
+    ("LayoutManifest", "structs", None),
+    ("LayoutManifest", "enums", None),
+    ("NativeStructLayout", "fields", "NativeStructLayoutField"),
+    ("NativeEnumLayout", "variants", "NativeEnumVariantLayout"),
+    ("NativeEnumVariantLayout", "fields", "NativeStructLayoutField"),
+    ("NativeModule", "artifacts", "NativeArtifact"),
+    ("NativeModule", "string_constants", "StringConstant"),
+    ("ParameterPreparation", "bindings", "ParameterBinding"),
+    ("ParameterPreparation", "diagnostics", None),
+    ("HeaderNameParse", "type_parameters", None),
+    ("HeaderNameParse", "diagnostics", None),
+    ("MatchStructure", "cases", "MatchCaseStructure"),
+    ("FunctionSignature", "parameters", "Parameter"),
+    ("FunctionSignature", "effects", None),
+    ("FunctionSignature", "type_parameters", None),
+    # Result types with array fields
+    ("ExpressionResult", "lines", None),
+    ("ExpressionResult", "diagnostics", None),
+    ("ExpressionResult", "string_constants", "StringConstant"),
+    ("BodyResult", "lines", None),
+    ("BodyResult", "diagnostics", None),
+    ("BodyResult", "lifetime_regions", "LifetimeRegionMetadata"),
+    ("BodyResult", "string_constants", "StringConstant"),
+    ("BlockLoweringResult", "lines", None),
+    ("BlockLoweringResult", "allocas", None),
+    ("BlockLoweringResult", "locals", "LocalBinding"),
+    ("BlockLoweringResult", "bindings", "ParameterBinding"),
+    ("BlockLoweringResult", "diagnostics", None),
+    ("BlockLoweringResult", "lifetime_regions", "LifetimeRegionMetadata"),
+    ("BlockLoweringResult", "mutations", "LocalMutation"),
+    ("BlockLoweringResult", "string_constants", "StringConstant"),
+    ("LoadLocalResult", "lines", None),
+    ("LoadLocalResult", "diagnostics", None),
+    ("ComparisonEmission", "lines", None),
+    ("ComparisonEmission", "diagnostics", None),
+    ("CoercionResult", "lines", None),
+    ("CoercionResult", "diagnostics", None),
+    ("BinaryAlignmentResult", "lines", None),
+    ("BinaryAlignmentResult", "diagnostics", None),
+    ("MangledModuleResult", "lines", None),
+    ("MangledModuleResult", "diagnostics", None),
+    ("LoweredLLVMResult", "diagnostics", None),
+    ("LoweredLLVMLinesResult", "lines", None),
+    ("LoweredLLVMLinesResult", "diagnostics", None),
+    ("DeclareSignature", "param_types", None),
+    ("IfStructure", "diagnostics", None),
+    ("LoopStructure", "diagnostics", None),
+    ("TryStructure", "diagnostics", None),
+    ("MatchStructure", "diagnostics", None),
+    ("TextBuilder", "lines", None),
+    ("LayoutStructDefinition", "fields", "LayoutFieldInput"),
+    ("LayoutEnumDefinition", "variants", "LayoutEnumVariantDefinition"),
+    ("LayoutEnumVariantDefinition", "fields", "LayoutFieldInput"),
+    ("Decorator", "arguments", None),
+    ("EnumVariant", "fields", "FieldDeclaration"),
+    ("Block", "statements", None),
+]
+
+for _ps, _fn, _elem_sn in _GF_ARRAY_FIELD_DEFS:
+    if _elem_sn is not None:
+        _esz = _compute_struct_size(_elem_sn)
+    else:
+        _esz = 8  # string array: each element is i8* = 8 bytes
+    _GF_ARRAY_FIELDS[(_ps, _fn)] = (_elem_sn, _esz)
+
+
+def _replace_array_ops(llvm_ir: str) -> tuple[str, int]:
+    """Replace string_length / grapheme_at on array descriptors with proper ops.
+
+    After ``_replace_get_field_calls`` turns ``get_field(obj, "array_field")``
+    into a raw GEP+load that returns the array descriptor pointer, the seed
+    compiler's string-based array iteration (``string_length`` for length,
+    ``grapheme_at`` for element access) produces nonsense.  This pass replaces
+    those calls with correct array operations.
+
+    Returns (modified_ir, num_replacements).
+    """
+    import re
+
+    if "sailfin_runtime_grapheme_at" not in llvm_ir and "sailfin_runtime_string_length" not in llvm_ir:
+        return llvm_ir, 0
+    if "_gf" not in llvm_ir:
+        # No GEP replacements happened → no array vars to fix
+        return llvm_ir, 0
+
+    lines = llvm_ir.split("\n")
+
+    # Regex patterns
+    # Match GEP replacement load: %result = load i8*, i8** %_gfN_pp
+    gf_load_re = re.compile(
+        r'\s*(%.+?)\s*=\s*load\s+i8\*\s*,\s*i8\*\*\s*(%_gf\d+_pp)\b'
+    )
+    # Match store: store i8* %src, i8** %dst
+    store_re = re.compile(
+        r'\s*store\s+i8\*\s+(%.+?)\s*,\s*i8\*\*\s*(%.+)'
+    )
+    # Match load: %dst = load i8*, i8** %src
+    load_re = re.compile(
+        r'\s*(%.+?)\s*=\s*load\s+i8\*\s*,\s*i8\*\*\s*(%.+)'
+    )
+    # Match string_length call
+    strlen_re = re.compile(
+        r'\s*(%.+?)\s*=\s*call\s+i64\s+@sailfin_runtime_string_length\s*\(\s*i8\*\s+(%.+?)\s*\)'
+    )
+    # Match grapheme_at call
+    grapheme_re = re.compile(
+        r'\s*(%.+?)\s*=\s*call\s+i8\*\s+@sailfin_runtime_grapheme_at\s*\(\s*i8\*\s+(%.+?)\s*,\s*double\s+(%.+?|[\d.e+-]+)\s*\)'
+    )
+    # Match GEP field replacement comment or the GEP itself to get field name
+    # Pattern: %_gfN_p = getelementptr i8, i8* %obj, i64 OFFSET
+    gf_gep_re = re.compile(
+        r'\s*(%_gf\d+_p)\s*=\s*getelementptr\s+i8\s*,\s*i8\*\s+(%.+?)\s*,\s*i64\s+(\d+)'
+    )
+    # The GEP line for field name is RIGHT BEFORE: %tNN = getelementptr inbounds [N x i8] ... @.runtime.field.FNAME
+    gep_field_re = re.compile(
+        r'(%.+?)\s*=\s*getelementptr\s+inbounds\s+\[\d+\s+x\s+i8\]'
+        r'.*@\.runtime\.field\.(\w+).*i32\s+0,\s*i32\s+0'
+    )
+
+    # ── Find function boundaries ─────────────────────────────────────
+    func_boundaries: list[tuple[int, int]] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip().startswith("define "):
+            start = i
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != "}":
+                j += 1
+            func_boundaries.append((start, min(j + 1, len(lines))))
+            i = j + 1
+        else:
+            i += 1
+
+    changed = 0
+    _ao_ctr = 0
+
+    for fn_start, fn_end in func_boundaries:
+        # ── Pass 1: identify array descriptor variables ──────────────
+        # Track: GEP replacement var → field_name
+        # Then figure out which field_name is an array and what its elem size is.
+
+        # Map: _gfN_pp → (obj_var from the GEP, byte_offset)
+        gf_info: dict[str, tuple[str, int]] = {}
+        # Map: _gfN_pp → field_name (from the GEP field name line preceding the replacement)
+        gf_field_name: dict[str, str] = {}
+        # Map: result_var → (element_struct, element_size) for known array results
+        array_vars: dict[str, tuple[str | None, int]] = {}
+
+        last_field_name: str | None = None
+        last_gf_gep_obj: str | None = None
+        last_gf_gep_offset: int | None = None
+        last_gf_pp: str | None = None
+
+        for li in range(fn_start, fn_end):
+            stripped = lines[li].strip()
+
+            # Track field name GEPs (these precede the replacement)
+            m = gep_field_re.match(stripped)
+            if m:
+                last_field_name = m.group(2)
+                continue
+
+            # Track GEP replacement patterns
+            m = gf_gep_re.match(stripped)
+            if m:
+                gf_tag = m.group(1)
+                last_gf_gep_obj = m.group(2)
+                last_gf_gep_offset = int(m.group(3))
+                last_gf_pp = gf_tag.replace("_p", "_pp")  # _gfN_p → _gfN_pp
+                if last_field_name:
+                    gf_field_name[last_gf_pp] = last_field_name
+                gf_info[last_gf_pp] = (last_gf_gep_obj, last_gf_gep_offset)
+                continue
+
+            # Track load from GEP replacement: %result = load i8*, i8** %_gfN_pp
+            m = gf_load_re.match(stripped)
+            if m:
+                result_var = m.group(1)
+                pp_var = m.group(2)
+                fname = gf_field_name.get(pp_var)
+                if fname and pp_var in gf_info:
+                    obj_var, byte_off = gf_info[pp_var]
+                    # Try to identify the parent struct from co-occurrence
+                    field_idx = byte_off // 8
+                    # Check all structs that have this field at this index
+                    for (ps, fn_), (elem_sn, esz) in _GF_ARRAY_FIELDS.items():
+                        ps_fields = _GF_STRUCTS.get(ps, {})
+                        info = ps_fields.get(fname)
+                        if info and info[0] == field_idx:
+                            array_vars[result_var] = (elem_sn, esz)
+                            break
+                continue
+
+            # Track store/load aliases: if array_var is stored to a local, the
+            # load from that local is also an array var.
+            m = store_re.match(stripped)
+            if m:
+                src = m.group(1)
+                dst = m.group(2)
+                if src in array_vars:
+                    # Track the alloca as an "array alloca"
+                    array_vars[f"alloca:{dst}"] = array_vars[src]
+                continue
+            m = load_re.match(stripped)
+            if m:
+                dst = m.group(1)
+                src = m.group(2)
+                if f"alloca:{src}" in array_vars:
+                    array_vars[dst] = array_vars[f"alloca:{src}"]
+                continue
+
+        if not array_vars:
+            continue
+
+        # ── Pass 2: replace string_length and grapheme_at on array vars ──
+        for li in range(fn_start, fn_end):
+            stripped = lines[li].strip()
+
+            # Replace string_length(array_var) with array length load
+            m = strlen_re.match(stripped)
+            if m:
+                result_var = m.group(1)
+                arg_var = m.group(2)
+                arr_info = array_vars.get(arg_var)
+                if arr_info is not None:
+                    _ao_ctr += 1
+                    tag = f"_ao{_ao_ctr}"
+                    indent = "  "
+                    # Load i64 from offset +8 of the array descriptor
+                    rep = [
+                        f"{indent}%{tag}_lp = getelementptr i8, i8* {arg_var}, i64 8",
+                        f"{indent}%{tag}_lpp = bitcast i8* %{tag}_lp to i64*",
+                        f"{indent}{result_var} = load i64, i64* %{tag}_lpp",
+                    ]
+                    lines[li] = "\n".join(rep)
+                    changed += 1
+                continue
+
+            # Replace grapheme_at(array_var, idx) with element pointer
+            m = grapheme_re.match(stripped)
+            if m:
+                result_var = m.group(1)
+                arg_var = m.group(2)
+                idx_arg = m.group(3)
+                arr_info = array_vars.get(arg_var)
+                if arr_info is not None:
+                    elem_sn, elem_size = arr_info
+                    _ao_ctr += 1
+                    tag = f"_ao{_ao_ctr}"
+                    indent = "  "
+                    # Load T* from offset +0 (data pointer)
+                    # Compute element offset = index * elem_size
+                    rep = [
+                        f"{indent}%{tag}_dp = bitcast i8* {arg_var} to i8**",
+                        f"{indent}%{tag}_data = load i8*, i8** %{tag}_dp",
+                        f"{indent}%{tag}_idx = fptosi double {idx_arg} to i64",
+                        f"{indent}%{tag}_off = mul i64 %{tag}_idx, {elem_size}",
+                        f"{indent}{result_var} = getelementptr i8, i8* %{tag}_data, i64 %{tag}_off",
+                    ]
+                    lines[li] = "\n".join(rep)
+                    changed += 1
+                    # The result_var now points to a struct element.
+                    # Track it as the element struct type for downstream get_field.
+                    if elem_sn:
+                        array_vars[result_var] = (None, 0)  # Not an array itself
+                continue
+
+    if changed == 0:
+        return llvm_ir, 0
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _replace_malloc_with_calloc(llvm_ir: str) -> tuple[str, int]:
+    """Replace ``@malloc(i64 %sz)`` calls with ``@calloc(i64 1, i64 %sz)``.
+
+    The seed compiler allocates structs via ``malloc`` without zeroing fields
+    that aren't explicitly set.  After GEP-replacement of ``get_field``, those
+    uninitialized fields (e.g. decorators, effects) contain heap garbage and
+    cause SIGSEGV when dereferenced.  Using ``calloc`` ensures all struct memory
+    is zeroed.
+    """
+    import re
+
+    if "@malloc(" not in llvm_ir:
+        return llvm_ir, 0
+
+    # Ensure calloc is declared
+    has_calloc_decl = "declare noalias i8* @calloc(i64, i64)" in llvm_ir
+    lines = llvm_ir.split("\n")
+    changed = 0
+
+    # Pattern: %result = call ... @malloc(i64 %size)
+    malloc_re = re.compile(
+        r'(\s*)(%.+?)\s*=\s*(?:tail\s+)?call\s+(?:noalias\s+)?i8\*\s+@malloc\s*\(\s*i64\s+(.+?)\s*\)'
+    )
+
+    for i, line in enumerate(lines):
+        m = malloc_re.match(line)
+        if m:
+            indent = m.group(1)
+            result = m.group(2)
+            size_arg = m.group(3)
+            lines[i] = f"{indent}{result} = call noalias i8* @calloc(i64 1, i64 {size_arg})"
+            changed += 1
+
+    if changed == 0:
+        return llvm_ir, 0
+
+    # Add calloc declaration if missing
+    if not has_calloc_decl:
+        for i, line in enumerate(lines):
+            if "declare noalias i8* @malloc(i64)" in line:
+                lines.insert(i + 1, "declare noalias i8* @calloc(i64, i64)")
+                break
+            elif "declare" in line.lower() and "@malloc" in line:
+                lines.insert(i + 1, "declare noalias i8* @calloc(i64, i64)")
+                break
+
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
@@ -3095,6 +6170,910 @@ def _fix_duplicate_ssa_names(llvm_ir: str) -> tuple[str, int]:
 
     if not changed:
         return llvm_ir, 0
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _fix_missing_parameter_stores(llvm_ir: str) -> tuple[str, int]:
+    """Insert missing ``store`` instructions that copy LLVM function parameters
+    into their corresponding alloca slots.
+
+    The Sailfin compiler sometimes emits function bodies that load from allocas
+    without ever storing the function parameter values into them.  At ``-O1+``
+    LLVM infers that these loads read ``undef``, marks the function as
+    ``unreachable``, and compiles it to a trap (``brk #0x1``).
+
+    Strategy: for each function, find parameters that never appear in the body.
+    Then match each such parameter to the first alloca of the same type that is
+    loaded but never stored.  Insert a ``store`` right after the alloca block.
+    """
+    import re as _re_ps
+
+    lines = llvm_ir.split("\n")
+
+    _define_re = _re_ps.compile(
+        r"^define\s+(\S+(?:\s+\{[^}]*\}\*?)?)\s+@(\w+)\(([^)]*)\)\s*\{")
+    _alloca_re = _re_ps.compile(r"^\s+(%l\d+)\s*=\s*alloca\s+(.+?)\s*$")
+    _store_to_re = _re_ps.compile(r"store\s+.+?,\s+.+?\*\s+(%l\d+)")
+    _load_from_re = _re_ps.compile(r"load\s+.+?,\s+.+?\*\s+(%l\d+)")
+
+    def _parse_params(sig: str) -> list[tuple[str, str]]:
+        """Return [(type, name), ...] from a comma-separated LLVM param list.
+
+        Handles types containing commas such as ``{ i8**, i64 }*``.
+        """
+        params: list[tuple[str, str]] = []
+        if not sig.strip():
+            return params
+        # Split respecting brace nesting.
+        parts: list[str] = []
+        depth = 0
+        current: list[str] = []
+        for ch in sig:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            if ch == "," and depth == 0:
+                parts.append("".join(current))
+                current = []
+            else:
+                current.append(ch)
+        if current:
+            parts.append("".join(current))
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Pattern: <type> %<name>
+            m = _re_ps.match(r"(.+?)\s+(%\w+)\s*$", part)
+            if m:
+                params.append((m.group(1).strip(), m.group(2).strip()))
+        return params
+
+    fixes = 0
+    i = 0
+    while i < len(lines):
+        m = _define_re.match(lines[i])
+        if not m:
+            i += 1
+            continue
+
+        func_name = m.group(2)
+        params = _parse_params(m.group(3))
+        if not params:
+            i += 1
+            continue
+
+        # Find function end.
+        func_start = i
+        func_end = func_start + 1
+        while func_end < len(lines) and lines[func_end].strip() != "}":
+            func_end += 1
+
+        body = "\n".join(lines[func_start + 1 : func_end])
+
+        # Find parameters that never appear in the body.
+        unused_params: list[tuple[str, str]] = []  # (type, name)
+        for ptype, pname in params:
+            # Check if %name appears anywhere in the body (not just in store/load).
+            if pname not in body:
+                unused_params.append((ptype, pname))
+
+        if not unused_params:
+            i = func_end + 1
+            continue
+
+        # Collect allocas: (line_index, alloca_name, alloca_type).
+        allocas: list[tuple[int, str, str]] = []
+        last_alloca_line = func_start
+        for j in range(func_start + 1, func_end):
+            ma = _alloca_re.match(lines[j])
+            if ma:
+                allocas.append((j, ma.group(1), ma.group(2).rstrip(",")))
+                last_alloca_line = j
+
+        if not allocas:
+            i = func_end + 1
+            continue
+
+        # Find allocas whose first use is a load (not a store).
+        # This catches both "never stored" and "loaded before first store".
+        first_use_is_load: set[str] = set()
+        seen_allocas: set[str] = set()
+        for j in range(func_start + 1, func_end):
+            line = lines[j]
+            # Check stores first (they "initialize").
+            for sm in _store_to_re.finditer(line):
+                aname = sm.group(1)
+                if aname not in seen_allocas:
+                    seen_allocas.add(aname)
+                    # First use is a store — properly initialized.
+            for lm in _load_from_re.finditer(line):
+                aname = lm.group(1)
+                if aname not in seen_allocas:
+                    seen_allocas.add(aname)
+                    first_use_is_load.add(aname)
+
+        uninitialized = first_use_is_load
+
+        # Match unused params to uninitialized allocas by type.
+        # Normalise types for comparison (strip surrounding spaces).
+        inserts: list[str] = []
+        used_allocas: set[str] = set()
+        for ptype, pname in unused_params:
+            ptype_norm = ptype.strip()
+            for _, aname, atype in allocas:
+                atype_norm = atype.strip()
+                if aname in used_allocas:
+                    continue
+                if aname not in uninitialized:
+                    continue
+                if atype_norm == ptype_norm:
+                    # Match! Insert store.
+                    inserts.append(
+                        f"  store {ptype_norm} {pname}, {ptype_norm}* {aname}"
+                    )
+                    used_allocas.add(aname)
+                    break
+
+        if inserts:
+            # Insert stores right after the last alloca line.
+            for idx, store_line in enumerate(inserts):
+                lines.insert(last_alloca_line + 1 + idx, store_line)
+            fixes += len(inserts)
+            # Adjust func_end for the inserted lines.
+            func_end += len(inserts)
+
+        i = func_end + 1
+
+    if not fixes:
+        return llvm_ir, 0
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), fixes
+
+
+def _fix_misplaced_continue_targets(llvm_ir: str) -> tuple[str, int]:
+    """Fix ``continue`` statements that target inner loop latches instead of
+    the enclosing (outer) loop latch.
+
+    The Sailfin compiler tracks a single ``continue_target`` that gets set to
+    the most recently entered loop's latch label.  When a nested loop ends,
+    the target is never restored to the outer loop.  Consequently, any
+    ``continue`` appearing after a nested loop jumps back into the inner loop
+    rather than the outer one.
+
+    Detection: a ``br label %loop.latch<L>`` that appears textually *after*
+    the ``afterloop`` label for the loop whose latch is L is a misplaced
+    continue.  We redirect it to the innermost enclosing loop's latch.
+    """
+    import re as _re_ct
+
+    lines = llvm_ir.split("\n")
+
+    # ------------------------------------------------------------------
+    # Step 1: collect all loop labels and their line numbers.
+    # ------------------------------------------------------------------
+    _hdr_re = _re_ct.compile(r"^(loop\.header(\d+)):$")
+    _latch_label_re = _re_ct.compile(r"^(loop\.latch(\d+)):$")
+    _afterloop_re = _re_ct.compile(r"^(afterloop(\d+)):$")
+    _latch_br_re = _re_ct.compile(r"^\s*br label %loop\.header(\d+)$")
+    _br_latch_re = _re_ct.compile(r"^(\s*)br label %loop\.latch(\d+)$")
+
+    # header_suffix → line number
+    header_lines: dict[str, int] = {}
+    # latch_suffix → (line_number, header_suffix)
+    latch_info: dict[str, tuple[int, str]] = {}
+    # afterloop_suffix → line number
+    afterloop_lines: dict[str, int] = {}
+    # header_suffix → afterloop line number
+    header_to_afterloop: dict[str, int] = {}
+    # header_suffix → latch_suffix
+    header_to_latch: dict[str, str] = {}
+
+    for i, line in enumerate(lines):
+        m = _hdr_re.match(line)
+        if m:
+            header_lines[m.group(2)] = i
+            continue
+
+        m = _latch_label_re.match(line)
+        if m:
+            latch_suffix = m.group(2)
+            # The next non-phi/store line should be ``br label %loop.header<H>``
+            for j in range(i + 1, min(i + 10, len(lines))):
+                m2 = _latch_br_re.match(lines[j])
+                if m2:
+                    hsuffix = m2.group(1)
+                    latch_info[latch_suffix] = (i, hsuffix)
+                    header_to_latch[hsuffix] = latch_suffix
+                    break
+            continue
+
+        m = _afterloop_re.match(line)
+        if m:
+            afterloop_lines[m.group(2)] = i
+            continue
+
+    # Map each afterloop to its header by scanning backwards from the
+    # afterloop label to find the closest loop.latch → loop.header jump.
+    for asuffix, aline in afterloop_lines.items():
+        for j in range(aline - 1, max(aline - 15, -1), -1):
+            m = _latch_label_re.match(lines[j])
+            if m:
+                lsuffix = m.group(2)
+                info = latch_info.get(lsuffix)
+                if info:
+                    _, hsuffix = info
+                    header_to_afterloop[hsuffix] = aline
+                break
+
+    # ------------------------------------------------------------------
+    # Step 2: for each ``br label %loop.latch<L>``, check placement.
+    # ------------------------------------------------------------------
+    fixes = 0
+    for i, line in enumerate(lines):
+        m = _br_latch_re.match(line)
+        if not m:
+            continue
+        indent = m.group(1)
+        target_latch_suffix = m.group(2)
+
+        # Find which header this latch belongs to.
+        info = latch_info.get(target_latch_suffix)
+        if not info:
+            continue
+        _, target_header = info
+
+        # Find the afterloop line for that header.
+        al = header_to_afterloop.get(target_header)
+        if al is None:
+            continue
+
+        # If the branch is BEFORE or AT the afterloop, it's inside the loop — OK.
+        if i <= al:
+            continue
+
+        # The branch is AFTER the loop's afterloop — misplaced continue.
+        # Find the innermost enclosing loop at this line.
+        best_header: str | None = None
+        best_header_line = -1
+        for hsuffix, hline in header_lines.items():
+            al2 = header_to_afterloop.get(hsuffix)
+            if al2 is None:
+                continue
+            if hline < i < al2 and hline > best_header_line:
+                best_header = hsuffix
+                best_header_line = hline
+
+        if best_header is None:
+            continue
+
+        correct_latch = header_to_latch.get(best_header)
+        if correct_latch is None or correct_latch == target_latch_suffix:
+            continue
+
+        lines[i] = f"{indent}br label %loop.latch{correct_latch}"
+        fixes += 1
+
+    if not fixes:
+        return llvm_ir, 0
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), fixes
+
+
+def _fix_unconditional_loop_headers(llvm_ir: str) -> tuple[str, int]:
+    """Convert do-while loops to while loops by adding a zero-trip guard.
+
+    The Sailfin native compiler emits loops as do-while: the header block
+    unconditionally branches to the body (``br label %loop.bodyM``), so the
+    body always executes at least once.  For collections with zero elements
+    this causes incorrect behaviour (the body runs once on an empty input and
+    typically crashes or produces garbage).
+
+    This pass adds a conditional pre-check at the loop header so that zero-
+    trip loops skip directly to ``%afterloopK``.
+
+    Algorithm
+    ---------
+    For each ``loop.headerN:`` block that ends with ``br label %loop.bodyM``:
+
+    1. Parse ``loop.bodyM:`` up to its first ``br i1 %cond, label %A, label %B``.
+    2. Determine which branch direction exits to ``afterloop``.
+    3. Trace the "definition chain" of ``%cond``: walk backwards through the
+       body instructions, collecting every instruction needed to compute
+       ``%cond``.  Instructions that reference allocas are re-routed to load
+       from those same allocas (which the header has already stored into), so
+       the duplicated instructions see the phi values.
+    4. Duplicate the definition chain at the end of the header block, using
+       ``%_lfix_<origname>_<uid>`` SSA names to avoid collisions.
+    5. Replace ``br label %loop.bodyM`` with
+       ``br i1 %_lfix_cond_<uid>, label %loop.bodyM, label %afterloopK``
+       (or the inverted form, depending on which branch direction is the exit).
+
+    Loops that genuinely have no exit (no ``afterloop`` reference anywhere in
+    the body) are left alone — ``_fix_degenerate_loops`` handles those.
+
+    Label lookups are scoped to the current function to avoid cross-function
+    confusion when the same label name (e.g. ``loop.header0``) appears in
+    multiple functions.
+
+    Side-effect instructions (``store``, ``call`` with side effects) in the
+    condition chain are safe to duplicate: the body will re-execute them on
+    every iteration anyway, and on the zero-trip path the header check skips
+    the body entirely.  Pure ``call`` instructions used only as values in the
+    condition (e.g. ``call i1 @symbol_matches``, ``call i64 @...length``) are
+    also fine to duplicate.
+    """
+    import re as _re
+
+    lines = llvm_ir.split("\n")
+    changed = 0
+
+    # We'll collect edits as (line_idx, new_line) and apply at the end to
+    # avoid index drift.  We also collect "insert after line_idx" items.
+    replacements: dict[int, str] = {}      # line_idx -> replacement line
+    insertions: dict[int, list[str]] = {}  # line_idx -> lines to insert AFTER
+
+    uid_counter = [0]
+
+    def _fresh_uid() -> int:
+        uid_counter[0] += 1
+        return uid_counter[0]
+
+    # Helper: given a list of body lines (stripped), find the first
+    # ``br i1 %cond, label %A, label %B`` and return
+    # (cond_name, label_A, label_B, line_index_within_body_lines).
+    _br_i1_pat = _re.compile(
+        r"br\s+i1\s+(%[\w.]+),\s*label\s+%(\S+),\s*label\s+%(\S+)"
+    )
+
+    def _find_exit_cond(body_lines: list[str]) -> "tuple[str, str, str, int] | None":
+        for bi, bl in enumerate(body_lines):
+            m = _br_i1_pat.search(bl)
+            if m:
+                return m.group(1), m.group(2), m.group(3), bi
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Patterns for instructions we might need to duplicate               #
+    # ------------------------------------------------------------------ #
+    _assign_pat = _re.compile(r"^\s*(%[\w.]+)\s*=\s*(.+)$")
+
+    def _collect_def_chain(
+        cond_name: str,
+        body_lines: list[str],
+        cond_line_idx: int,
+        func_entry_lines: "list[str] | None" = None,
+    ) -> "list[str] | None":
+        """Return a list of (original) body instruction strings that form the
+        definition chain for ``cond_name``, in dependency order (earliest first).
+
+        Traces SSA assignments (``%x = ...``) AND load→alloca→store chains:
+        when the chain includes ``%x = load T, T* %alloca`` and %alloca is
+        defined by ``alloca`` (either in the body or the function entry block),
+        we find the last ``store T %val, T* %alloca`` before the condition line
+        and include it + the transitive deps of %val.
+
+        ``func_entry_lines`` are the function lines from define to the loop
+        header; used to find alloca defs that are outside the body block.
+
+        Returns ``None`` if the chain contains instructions we can't safely
+        duplicate (e.g. phi nodes, or the chain is longer than 50 steps).
+        """
+        # Build a map: varname -> (instruction_line_string, position_in_body)
+        defn_map: "dict[str, tuple[str, int]]" = {}
+        for bi, bl in enumerate(body_lines[:cond_line_idx + 1]):
+            m = _assign_pat.match(bl)
+            if m:
+                varname = m.group(1)
+                defn_map[varname] = (bl.strip(), bi)
+
+        # Identify allocas from BOTH the function entry block and the body.
+        # Allocas are typically in the entry block (before the loop), not the body.
+        _alloca_pat = _re.compile(r"^\s*(%[\w.]+)\s*=\s*alloca\s+")
+        _store_to_ptr_pat = _re.compile(
+            r"^\s*store\s+\S+\s+(%[\w.]+),\s*\S+\s+(%[\w.]+)"
+        )
+        alloca_set: "set[str]" = set()
+        # Scan function entry lines for allocas.
+        if func_entry_lines:
+            for fl in func_entry_lines:
+                am = _alloca_pat.match(fl.strip())
+                if am:
+                    alloca_set.add(am.group(1))
+        # Also scan body lines for allocas (rare but possible).
+        for bi, bl in enumerate(body_lines[:cond_line_idx + 1]):
+            am = _alloca_pat.match(bl.strip())
+            if am:
+                alloca_set.add(am.group(1))
+
+        # Build store map from body lines: alloca %var -> last (stored_val, instr, pos)
+        store_to_alloca: "dict[str, tuple[str | None, str, int]]" = {}
+        for bi, bl in enumerate(body_lines[:cond_line_idx + 1]):
+            bl_s = bl.strip()
+            if bl_s.startswith("store "):
+                sm = _store_to_ptr_pat.match(bl_s)
+                if sm:
+                    stored_val = sm.group(1)
+                    target_ptr = sm.group(2)
+                    if target_ptr in alloca_set:
+                        store_to_alloca[target_ptr] = (stored_val, bl_s, bi)
+
+        # BFS from cond_name, extended to trace through alloca load/store chains.
+        visited: "set[str]" = set()
+        order: "list[tuple[int, str]]" = []  # (position, instruction)
+        store_instrs_added: "set[int]" = set()  # positions of stores already added
+        queue = [cond_name]
+        depth = 0
+        while queue:
+            depth += 1
+            if depth > 50:
+                return None  # too deep, bail
+            next_queue: "list[str]" = []
+            for vname in queue:
+                if vname in visited:
+                    continue
+                visited.add(vname)
+                if vname not in defn_map:
+                    continue  # it's a function arg or global — no def needed
+                instr, pos = defn_map[vname]
+                if "phi " in instr:
+                    return None  # phi in body = we can't duplicate
+                order.append((pos, instr))
+                # Find all %var references in this instruction (skip LHS).
+                rhs = instr.split("=", 1)[1] if "=" in instr else instr
+                refs = _re.findall(r"%[\w.]+", rhs)
+                for ref in refs:
+                    if ref not in visited:
+                        next_queue.append(ref)
+
+                # If this instruction reads from an alloca (load) or IS an alloca
+                # that is accessed via GEP, trace through the store chain to
+                # include the initialization store + its deps.
+                #
+                # Case 1: %x = load T, T* %alloca  → need store to %alloca
+                # Case 2: %x = alloca T  → accessed by GEP; need store T %val, T* %x
+                if " load " in instr or " alloca " in instr:
+                    # For loads: check if any operand is an alloca with a store
+                    check_vars = refs if " load " in instr else []
+                    # For allocas: the variable itself may need initialization
+                    if " alloca " in instr and vname in store_to_alloca:
+                        check_vars = [vname]
+                    for ref in check_vars:
+                        if ref in alloca_set and ref in store_to_alloca:
+                            stored_val, store_instr, store_pos = store_to_alloca[ref]
+                            if store_pos not in store_instrs_added:
+                                store_instrs_added.add(store_pos)
+                                order.append((store_pos, store_instr))
+                                # Add stored value's deps to the BFS queue
+                                if stored_val and stored_val not in visited:
+                                    next_queue.append(stored_val)
+            queue = next_queue
+
+        # Also collect ``bitcast`` + ``store`` pairs that initialize calloc'd
+        # buffers with constant values.  The chain often includes a ``calloc``
+        # but NOT its paired ``bitcast`` + ``store``:
+        #
+        #   %t47 = call i8* @calloc(i64 1, i64 10)        ; IN chain
+        #   %t48 = bitcast i8* %t47 to [10 x i8]*         ; NOT in chain
+        #   store [10 x i8] c"EndOfFile\00", %t48          ; NOT in chain
+        #   %t49 = call i1 @strings_equal(i8* %t46, %t47)  ; IN chain
+        #
+        # Without the bitcast+store, the duplicated calloc produces a zeroed
+        # buffer and string comparisons check against "" instead of the
+        # intended value (e.g. "EndOfFile").
+        chain_vars = visited  # all %vars that are part of the chain
+        _bitcast_pat = _re.compile(
+            r"^\s*(%[\w.]+)\s*=\s*bitcast\s+i8\*\s+(%[\w.]+)\s+to\s+"
+        )
+        _store_const_pat = _re.compile(
+            r"^\s*store\s+(\[[^\]]+\]\s+c\"[^\"]*\")"   # constant array value
+            r",\s*\[[^\]]+\]\*\s+(%[\w.]+)"              # target pointer
+        )
+        # First pass: find bitcasts of chain variables and add them to chain.
+        bitcast_vars: "set[str]" = set()
+        for bi, bl in enumerate(body_lines[:cond_line_idx + 1]):
+            bl_s = bl.strip()
+            bm = _bitcast_pat.match(bl_s)
+            if bm and bm.group(2) in chain_vars:
+                lhs_var = bm.group(1)
+                if lhs_var not in chain_vars:
+                    bitcast_vars.add(lhs_var)
+                    order.append((bi, bl_s))
+        # Second pass: find stores to chain vars or bitcast vars (constant stores).
+        all_target_vars = chain_vars | bitcast_vars
+        for bi, bl in enumerate(body_lines[:cond_line_idx + 1]):
+            bl_s = bl.strip()
+            if not bl_s.startswith("store "):
+                continue
+            if bi in store_instrs_added:
+                continue  # already added during alloca chain tracing
+            sm = _store_const_pat.match(bl_s)
+            if sm and sm.group(2) in all_target_vars:
+                order.append((bi, bl_s))
+
+        # Sort by original position to emit in dependency order.
+        order.sort(key=lambda x: x[0])
+        return [instr for _, instr in order]
+
+    # ------------------------------------------------------------------ #
+    # Build a per-function label-to-line map to avoid cross-function     #
+    # collisions (label names like loop.header0 repeat across functions). #
+    # ------------------------------------------------------------------ #
+    # Parse function boundaries: (func_start_line, func_end_line)
+    func_ranges: "list[tuple[int, int]]" = []
+    define_pat = _re.compile(r"^define\s+")
+    func_start_i: "int | None" = None
+    for fidx, fline in enumerate(lines):
+        if define_pat.match(fline.strip()):
+            func_start_i = fidx
+        elif func_start_i is not None and fline.strip() == "}":
+            func_ranges.append((func_start_i, fidx))
+            func_start_i = None
+
+    # Build per-function label map: func_range_index -> {label: line_idx}
+    func_label_maps: "list[dict[str, int]]" = []
+    for fstart, fend in func_ranges:
+        lmap: "dict[str, int]" = {}
+        for idx in range(fstart, fend + 1):
+            s = lines[idx].strip()
+            if s.endswith(":") and not s.startswith(";") and "=" not in s:
+                lbl = s[:-1]
+                # Keep first occurrence within the function.
+                lmap.setdefault(lbl, idx)
+        func_label_maps.append(lmap)
+
+    def _func_label_map_for(line_idx: int) -> "dict[str, int]":
+        """Return the label map for the function containing line_idx."""
+        for fi, (fstart, fend) in enumerate(func_ranges):
+            if fstart <= line_idx <= fend:
+                return func_label_maps[fi]
+        return {}
+
+    # ------------------------------------------------------------------ #
+    # Helper: resolve a label to a line index within the same function.  #
+    # ------------------------------------------------------------------ #
+    def _resolve_label(lbl: str, lmap: "dict[str, int]") -> "int | None":
+        return lmap.get(lbl)
+
+    def _is_exit_label(lbl: str, lmap: "dict[str, int]") -> bool:
+        """Return True if ``lbl`` is or leads directly to an afterloop block.
+
+        Handles both immediate trampolines (first instruction is a branch to
+        afterloop) and blocks that do a small amount of work before exiting
+        (e.g., ``store ...; br label %afterloopN``).  Crucially, the block
+        must NOT loop back to any ``loop.`` label, otherwise it is the
+        continuation path, not the exit.
+        """
+        if lbl.startswith("afterloop"):
+            return True
+        # loop-back labels are never exit paths from the body.
+        if lbl.startswith("loop."):
+            return False
+        target_idx = _resolve_label(lbl, lmap)
+        if target_idx is None:
+            return False
+        # Scan the block; find its terminator branch.  If that branch goes to
+        # afterloop (or to another exit block), it's an exit.  If it loops
+        # back (loop.header, loop.latch, loop.body), it's not.
+        for j in range(target_idx + 1, min(target_idx + 40, len(lines))):
+            s = lines[j].strip()
+            if not s or s.startswith(";"):
+                continue
+            if s.endswith(":") and "=" not in s:
+                break  # entered a new block
+            # Unconditional branch — check destination.
+            ub = _re.match(r"br\s+label\s+%(\S+)", s)
+            if ub:
+                dest = ub.group(1)
+                if dest.startswith("afterloop"):
+                    return True
+                if dest.startswith("loop."):
+                    return False  # loops back
+                # Follow one more level.
+                return _is_exit_label(dest, lmap)
+            # Conditional branch — this block itself is a branch point, not
+            # a simple exit block.
+            if _br_i1_pat.match(s):
+                return False
+        return False
+
+    def _afterloop_for_exit(exit_lbl: str, lmap: "dict[str, int]") -> "str | None":
+        """Return the afterloop label that ``exit_lbl`` ultimately reaches.
+
+        Follows unconditional branches through exit-path blocks.  Returns
+        None if the path loops back or if no afterloop is found within a
+        small scan window.
+        """
+        if exit_lbl.startswith("afterloop"):
+            return exit_lbl
+        if exit_lbl.startswith("loop."):
+            return None
+        el_idx = _resolve_label(exit_lbl, lmap)
+        if el_idx is None:
+            return None
+        for jj in range(el_idx + 1, min(el_idx + 40, len(lines))):
+            s2 = lines[jj].strip()
+            if not s2 or s2.startswith(";"):
+                continue
+            if s2.endswith(":") and "=" not in s2:
+                break
+            ub = _re.match(r"br\s+label\s+%(\S+)", s2)
+            if ub:
+                dest = ub.group(1)
+                if dest.startswith("afterloop"):
+                    return dest
+                if dest.startswith("loop."):
+                    return None
+                return _afterloop_for_exit(dest, lmap)
+            # If there's a conditional branch before the terminal, give up.
+            if _br_i1_pat.match(s2):
+                break
+        return None
+
+    def _reaches_afterloop_bfs(
+        start_lbl: str,
+        lmap: "dict[str, int]",
+        excluded_labels: "set[str] | None" = None,
+    ) -> "str | None":
+        """BFS to find an afterloopN label reachable from start_lbl.
+
+        ``excluded_labels`` should contain the loop header and latch labels
+        so that the BFS does not follow loop back-edges.  Without exclusions,
+        the BFS can reach afterloop via the CONTINUATION path (by going
+        header→body→then→afterloop), falsely marking the continuation as an
+        exit.
+        """
+        if excluded_labels is None:
+            excluded_labels = set()
+        visited_lbls: "set[str]" = set(excluded_labels)
+        queue = [start_lbl]
+        while queue:
+            lbl = queue.pop(0)
+            if lbl in visited_lbls:
+                continue
+            visited_lbls.add(lbl)
+            if lbl.startswith("afterloop"):
+                return lbl
+            sl = _resolve_label(lbl, lmap)
+            if sl is None:
+                continue
+            for jj in range(sl + 1, min(sl + 60, len(lines))):
+                ss = lines[jj].strip()
+                if not ss or ss.startswith(";"):
+                    continue
+                if ss.endswith(":") and "=" not in ss and not ss.startswith("%"):
+                    break
+                ub = _re.match(r"br\s+label\s+%(\S+)", ss)
+                if ub:
+                    queue.append(ub.group(1))
+                    break
+                cb = _br_i1_pat.match(ss)
+                if cb:
+                    queue.append(cb.group(2))
+                    queue.append(cb.group(3))
+                    break
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Main scan: find loop.headerN blocks                                 #
+    # ------------------------------------------------------------------ #
+    header_pat = _re.compile(r"^loop\.header(\d+):$")
+    br_body_pat = _re.compile(r"^\s*br\s+label\s+%(loop\.body\d+)\s*$")
+
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        hm = header_pat.match(stripped)
+        if not hm:
+            i += 1
+            continue
+
+        header_line_idx = i
+
+        # Get the function-local label map for this loop.
+        lmap = _func_label_map_for(header_line_idx)
+        if not lmap:
+            i += 1
+            continue
+
+        # Scan ahead to find the terminating ``br label %loop.bodyM``.
+        # The header should only contain phi nodes, stores, and the branch.
+        br_line_idx = None
+        body_label = None
+        for j in range(i + 1, min(i + 40, len(lines))):
+            s = lines[j].strip()
+            if not s or s.startswith(";"):
+                continue
+            # Stop at a new block label.
+            if s.endswith(":") and "=" not in s and not s.startswith("%") and not s.startswith("br "):
+                break
+            bm = br_body_pat.match(lines[j])
+            if bm:
+                br_line_idx = j
+                body_label = bm.group(1)
+                break
+
+        if br_line_idx is None or body_label is None:
+            i += 1
+            continue
+
+        # Find the body block — use the function-local label map so we don't
+        # accidentally land in a body block from a different function.
+        body_start = _resolve_label(body_label, lmap)
+        if body_start is None:
+            i += 1
+            continue
+
+        # Collect body lines up to the next label (a new block).
+        body_lines_raw: "list[str]" = []
+        for j in range(body_start + 1, min(body_start + 80, len(lines))):
+            s = lines[j].strip()
+            if s.endswith(":") and "=" not in s and not s.startswith("%") and not s.startswith("br ") and not s.startswith(";"):
+                break
+            body_lines_raw.append(lines[j])
+
+        body_lines_stripped = [bl.strip() for bl in body_lines_raw]
+
+        # Find the exit condition in the body.
+        ec = _find_exit_cond(body_lines_stripped)
+        if ec is None:
+            i += 1
+            continue
+        cond_name, label_a, label_b, cond_line_idx = ec
+
+        # Determine which branch direction exits the loop.
+        a_exits = _is_exit_label(label_a, lmap)
+        b_exits = _is_exit_label(label_b, lmap)
+
+        if not a_exits and not b_exits:
+            # Neither branch immediately exits — try BFS with loop back-edges
+            # excluded so that the continuation path cannot masquerade as exit.
+            # Exclude all loop-structural labels to prevent following back-edges.
+            loop_lbls: "set[str]" = {
+                lbl for lbl in lmap
+                if lbl.startswith("loop.header")
+                or lbl.startswith("loop.latch")
+                or lbl.startswith("loop.body")
+            }
+            after_a = _reaches_afterloop_bfs(label_a, lmap, loop_lbls)
+            after_b = _reaches_afterloop_bfs(label_b, lmap, loop_lbls)
+            if after_a and not after_b:
+                a_exits = True
+            elif after_b and not after_a:
+                b_exits = True
+            else:
+                i += 1
+                continue
+
+        # If both branches exit (weird), skip.
+        if a_exits and b_exits:
+            i += 1
+            continue
+
+        # Determine the afterloop label.
+        exit_lbl = label_a if a_exits else label_b
+        afterloop_label = _afterloop_for_exit(exit_lbl, lmap)
+        if afterloop_label is None:
+            # Try BFS as a fallback.
+            afterloop_label = _reaches_afterloop_bfs(exit_lbl, lmap)
+        if afterloop_label is None:
+            i += 1
+            continue
+
+        # Collect function entry lines (from function define to loop header)
+        # so that _collect_def_chain can find alloca defs in the entry block.
+        func_entry_lines: "list[str]" = []
+        for fstart, fend in func_ranges:
+            if fstart <= header_line_idx <= fend:
+                func_entry_lines = [
+                    lines[k].strip()
+                    for k in range(fstart, header_line_idx)
+                ]
+                break
+
+        # Collect the definition chain for cond_name.
+        chain = _collect_def_chain(cond_name, body_lines_stripped, cond_line_idx, func_entry_lines)
+        if chain is None:
+            i += 1
+            continue
+
+        # ------------------------------------------------------------ #
+        # Detect do-while loops: if the body has function calls before  #
+        # the condition that are NOT part of the condition's def chain, #
+        # the condition depends on body work and duplicating it in the  #
+        # header would operate on stale state → infinite loop.          #
+        # ------------------------------------------------------------ #
+        chain_instrs_set = {instr.strip() for instr in chain}
+        non_chain_calls = 0
+        for _bi in range(cond_line_idx):
+            _bl = body_lines_stripped[_bi].strip()
+            if ("= call " in _bl or _bl.startswith("call ")) and _bl not in chain_instrs_set:
+                # Exclude allocation/deallocation calls that don't modify
+                # semantic state (calloc, malloc, free, memset).
+                if not any(fn in _bl for fn in ("@calloc", "@malloc", "@free", "@memset", "@llvm.memset")):
+                    non_chain_calls += 1
+        if non_chain_calls > 0:
+            # Do-while loop: the condition depends on work done earlier
+            # in the body.  Duplicating it in the header would check
+            # stale state, likely causing an infinite loop.  Leave the
+            # header as unconditional ``br label %loop.body``.
+            i += 1
+            continue
+
+        # ------------------------------------------------------------ #
+        # Build duplicated instructions with fresh SSA names.           #
+        # ------------------------------------------------------------ #
+        uid = _fresh_uid()
+
+        # Map from original SSA name -> new SSA name.
+        name_map: "dict[str, str]" = {}
+
+        def _remap_name(orig: str, _nm: "dict[str, str]" = name_map, _u: int = uid) -> str:
+            if orig in _nm:
+                return _nm[orig]
+            base = orig.lstrip("%")
+            new = f"%_lfix_{base}_{_u}"
+            _nm[orig] = new
+            return new
+
+        def _remap_instruction(instr: str, _nm: "dict[str, str]" = name_map) -> str:
+            """Remap all SSA names in an instruction.
+
+            LHS gets a new name; RHS references that are part of the chain get
+            remapped; alloca references (%lN, %lNN, etc.) stay unchanged so we
+            load from the same allocas the header already stored into.
+            """
+            if "=" in instr:
+                lhs, rhs = instr.split("=", 1)
+                lhs = lhs.strip()
+                rhs = rhs.strip()
+                new_lhs = _remap_name(lhs, _nm, uid)
+                def _sub_rhs(m2: "_re.Match") -> str:  # type: ignore[type-arg]
+                    return _nm.get(m2.group(0), m2.group(0))
+                new_rhs = _re.sub(r"%[\w.]+", _sub_rhs, rhs)
+                return f"  {new_lhs} = {new_rhs}"
+            else:
+                def _sub_no_lhs(m2: "_re.Match") -> str:  # type: ignore[type-arg]
+                    return _nm.get(m2.group(0), m2.group(0))
+                return "  " + _re.sub(r"%[\w.]+", _sub_no_lhs, instr)
+
+        dup_instrs: "list[str]" = [_remap_instruction(instr) for instr in chain]
+        new_cond_name = name_map.get(cond_name, cond_name)
+
+        # Build the new conditional branch.
+        # Use exit_lbl (the intermediate block) rather than afterloop_label
+        # so that any cleanup code between the condition check and break
+        # (e.g., parser_advance_raw) still executes.
+        header_exit_target = exit_lbl
+        if a_exits:
+            new_br = f"  br i1 {new_cond_name}, label %{header_exit_target}, label %{body_label}"
+        else:
+            new_br = f"  br i1 {new_cond_name}, label %{body_label}, label %{header_exit_target}"
+
+        # Record the replacement: swap the header's ``br label %loop.bodyM``
+        # with: (dup_instrs) + (new conditional br).
+        replacements[br_line_idx] = new_br
+        insertions[br_line_idx - 1] = insertions.get(br_line_idx - 1, []) + dup_instrs
+
+        changed += 1
+        i += 1
+
+    if not changed:
+        return llvm_ir, 0
+
+    # ------------------------------------------------------------------ #
+    # Apply edits in reverse order to preserve indices.                   #
+    # ------------------------------------------------------------------ #
+    all_touch = sorted(
+        set(replacements.keys()) | set(insertions.keys()), reverse=True
+    )
+    for idx in all_touch:
+        if idx in replacements:
+            lines[idx] = replacements[idx]
+        if idx in insertions:
+            # Insert AFTER line idx: insert in forward order at idx+1.
+            for offset, extra_line in enumerate(insertions[idx]):
+                lines.insert(idx + 1 + offset, extra_line)
+
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
@@ -5863,6 +9842,9 @@ def main(argv: list[str]) -> int:
         known_named_type_defs: dict[str, str] = {}
         known_named_type_defs_lock = threading.Lock()
 
+        # (Pre-seeding of known_named_type_defs happens after import-context
+        # is prepared — see below.)
+
         use_emit_llvm_file = prefer_emit_llvm_file and seed_supports_emit_llvm_file
         disable_emit_llvm_file_after_failure = False
         seed_env = os.environ.copy()
@@ -6004,6 +9986,31 @@ def main(argv: list[str]) -> int:
         if _repaired_count:
             print(
                 f"[selfhost] ({pass_name}) repaired {_repaired_count} truncated import-context artifact(s)",
+                flush=True,
+            )
+
+        # Pre-seed known enum types from layout manifests in the import-context.
+        # This ensures types like %TokenKind (simple enum = { i32 }) are
+        # available before their defining module compiles (the seed emits
+        # opaque for these). Only enums are safe to pre-seed; struct types
+        # have complex field types (optionals, arrays) that don't map
+        # directly to LLVM and are better collected from compiled modules.
+        for _manifest_path in sorted(_import_cache_for_validation.glob("*.layout-manifest")):
+            try:
+                _manifest_text = _manifest_path.read_text(encoding="utf-8", errors="replace")
+                for _em in re.finditer(
+                    r"^\.layout\s+enum\s+name=(\S+)\s+.*?tag_type=(\S+)",
+                    _manifest_text, re.MULTILINE,
+                ):
+                    _ename = "%" + _em.group(1)
+                    _tag = _em.group(2)
+                    known_named_type_defs.setdefault(
+                        _ename, f"{_ename} = type {{ {_tag} }}")
+            except Exception:
+                pass
+        if known_named_type_defs:
+            print(
+                f"[selfhost] ({pass_name}) pre-seeded {len(known_named_type_defs)} enum type(s) from layout manifests",
                 flush=True,
             )
 
@@ -6566,6 +10573,18 @@ def main(argv: list[str]) -> int:
                                 known_named_type_defs.setdefault(
                                     name, definition)
 
+                    # Infer concrete types from insertvalue usage for types
+                    # that this module declares as opaque but uses concretely.
+                    # This handles the case where the seed emits
+                    # `%TokenKind = type opaque` for token.sfn even though
+                    # it uses `insertvalue %TokenKind undef, i32 7, 0`.
+                    inferred = _infer_opaque_types_from_usage(candidate)
+                    if inferred:
+                        with known_named_type_defs_lock:
+                            for name, definition in inferred.items():
+                                known_named_type_defs.setdefault(
+                                    name, definition)
+
                     # Some seeds reference named types without declaring them.
                     # Insert `type opaque` stubs so clang can parse the module,
                     # then immediately replace any stubs with concrete
@@ -6684,6 +10703,16 @@ def main(argv: list[str]) -> int:
                     candidate, _ = _reorder_phi_nodes_to_block_start(candidate)
                     candidate, _ = _fix_invalid_null_stores(candidate)
 
+                    # Eliminate unreachable branches (br i1 false/true) so
+                    # degenerate-loop detection can see real exit conditions.
+                    candidate, dead_br_changes = _eliminate_dead_conditional_branches(candidate)
+                    if dead_br_changes:
+                        print(
+                            f"[selfhost] eliminated {dead_br_changes} dead conditional branch(es) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
                     # Break degenerate infinite loops (missing exit conditions).
                     candidate, loop_changes = _fix_degenerate_loops(candidate)
                     if loop_changes:
@@ -6693,11 +10722,29 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
+                    # Fix duplicate parameter names in function definitions.
+                    candidate, dup_param_changes = _fix_duplicate_param_names(candidate)
+                    if dup_param_changes:
+                        print(
+                            f"[selfhost] fixed {dup_param_changes} duplicate param name(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
                     # Fix native_ir function return types (double → pointer).
                     candidate, nirt_changes = _fix_native_ir_return_types(candidate)
                     if nirt_changes:
                         print(
                             f"[selfhost] fixed {nirt_changes} native_ir return type(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Fix double-encoded pointer calls (redirect to __native_ir).
+                    candidate, dep_changes = _fix_double_encoded_pointer_calls(candidate)
+                    if dep_changes:
+                        print(
+                            f"[selfhost] fixed {dep_changes} double-encoded pointer call(s) in {module_name}",
                             file=sys.stderr,
                             flush=True,
                         )
@@ -6761,15 +10808,27 @@ def main(argv: list[str]) -> int:
                         }
                         intra_count = 0
                         for old_call, new_call in _INTRA_REDIRECTS.items():
-                            # Only replace call sites, not define/declare lines.
+                            # Replace call sites (not define/declare lines).
+                            # Also rename define lines so the mangled name
+                            # has a definition.
+                            old_name = old_call.rstrip("(")
+                            new_name = new_call.rstrip("(")
                             new_lines = []
                             for cline in candidate.splitlines():
                                 stripped = cline.strip()
-                                if (old_call in cline
-                                    and not stripped.startswith("define ")
-                                    and not stripped.startswith("declare ")):
-                                    cline = cline.replace(old_call, new_call)
-                                    intra_count += 1
+                                if old_call in cline:
+                                    if stripped.startswith("define "):
+                                        # Rename the define to use the mangled name.
+                                        cline = cline.replace(old_name + "(", new_name + "(")
+                                        intra_count += 1
+                                    elif stripped.startswith("declare "):
+                                        # Drop redundant declare — the define provides it.
+                                        pass
+                                    else:
+                                        cline = cline.replace(old_call, new_call)
+                                        intra_count += 1
+                                # Also fix declares for the mangled name to match
+                                # the renamed define.
                                 new_lines.append(cline)
                             candidate = "\n".join(new_lines)
                         if intra_count:
@@ -6802,6 +10861,33 @@ def main(argv: list[str]) -> int:
                     if degen_changes:
                         print(
                             f"[selfhost] removed {degen_changes} degenerate @_0() function(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Replace malloc with calloc to zero-initialize all allocations.
+                    candidate, calloc_changes = _replace_malloc_with_calloc(candidate)
+                    if calloc_changes:
+                        print(
+                            f"[selfhost] replaced {calloc_changes} malloc→calloc in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Replace sailfin_runtime_get_field calls with proper GEP+load.
+                    candidate, gf_changes = _replace_get_field_calls(candidate)
+                    if gf_changes:
+                        print(
+                            f"[selfhost] replaced {gf_changes} get_field call(s) with GEP in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Replace string_length/grapheme_at on array descriptor vars.
+                    candidate, ao_changes = _replace_array_ops(candidate)
+                    if ao_changes:
+                        print(
+                            f"[selfhost] replaced {ao_changes} array op(s) in {module_name}",
                             file=sys.stderr,
                             flush=True,
                         )
@@ -6945,6 +11031,15 @@ def main(argv: list[str]) -> int:
                                 file=sys.stderr,
                                 flush=True,
                             )
+
+                    # Fix cross-module calls passing i8* for struct-by-value params.
+                    candidate, byval_changes = _fix_byvalue_struct_call_mismatches(candidate)
+                    if byval_changes:
+                        print(
+                            f"[selfhost] fixed {byval_changes} struct-by-value call mismatch(es) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
 
                     # Fix infinite loops in type_context (broken struct field iteration).
                     if "type_context" in module_name:
@@ -7292,6 +11387,19 @@ def main(argv: list[str]) -> int:
             ll_paths.append(p)
             ll_texts.append(p.read_text(encoding="utf-8", errors="replace"))
 
+        # Cross-module parameter recovery pass.
+        # The seed sometimes drops parameter types for functions with many
+        # parameters (" %_" → "i8* %_empty_N").  Other modules that import
+        # these functions have correct declare prototypes.  Use those to
+        # reconstruct the correct define parameter types.
+        ll_texts, param_recovery_changes = _fix_empty_params_from_declares(
+            ll_texts, module_names)
+        if param_recovery_changes:
+            print(
+                f"[selfhost] ({pass_name}) recovered {param_recovery_changes} function signature(s) from cross-module declares",
+                flush=True,
+            )
+
         canonical_defs, canonical_warnings = _build_canonical_named_type_defs(
             ll_texts)
         if canonical_warnings:
@@ -7401,6 +11509,315 @@ def main(argv: list[str]) -> int:
                     f"[selfhost][warn] ({pass_name}) synthesized @sailfin_cli_main__cli_main shim in cli_main.ll",
                     flush=True,
                 )
+
+        # --- Cross-module return type mismatch fix ---
+        # Collect correct return types from all define lines, then fix
+        # mismatched declares and call sites in each module.
+        global_ret_types = _collect_define_return_types(ll_texts)
+        total_xmod_changes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], xmod_changes = _fix_cross_module_return_types(
+                ll_texts[idx], global_ret_types,
+            )
+            if xmod_changes:
+                total_xmod_changes += xmod_changes
+                print(
+                    f"[selfhost] fixed {xmod_changes} cross-module return type mismatch(es) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_xmod_changes:
+            print(
+                f"[selfhost] total cross-module return type fixes: {total_xmod_changes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix i8*-as-double shadow patterns ---
+        # After fixing cross-module return types for i8*-returning functions,
+        # replace number_to_string(double) calls with direct loads from shadow
+        # i8* locals.
+        total_shadow_changes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], shadow_changes = _fix_string_double_shadow(ll_texts[idx])
+            if shadow_changes:
+                total_shadow_changes += shadow_changes
+                print(
+                    f"[selfhost] fixed {shadow_changes} string-double shadow(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_shadow_changes:
+            print(
+                f"[selfhost] total string-double shadow fixes: {total_shadow_changes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix number_to_string of double-encoded string pointers ---
+        # The seed compiler encodes i8* as double via ptrtoint→sitofp, then
+        # calls number_to_string() to convert back to i8*.  This produces the
+        # decimal representation of the pointer instead of the original string.
+        total_nts_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], nts_fixes = _fix_number_to_string_of_ptr(ll_texts[idx])
+            if nts_fixes:
+                total_nts_fixes += nts_fixes
+                print(
+                    f"[selfhost] fixed {nts_fixes} number-to-string-of-ptr(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_nts_fixes:
+            print(
+                f"[selfhost] total number-to-string-of-ptr fixes: {total_nts_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix cross-module parameter type mismatches ---
+        # The seed compiler sometimes emits ``double`` for parameters that should
+        # be ``i8*`` in cross-module function declarations.  This causes ABI
+        # mismatches on ARM64.  This pass must run after _fix_string_double_shadow
+        # so shadow locals are available.
+        global_param_types = _collect_define_param_types(ll_texts)
+        total_param_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], param_fixes = _fix_cross_module_param_types(
+                ll_texts[idx], global_param_types,
+            )
+            if param_fixes:
+                total_param_fixes += param_fixes
+                print(
+                    f"[selfhost] fixed {param_fixes} cross-module param type mismatch(es) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_param_fixes:
+            print(
+                f"[selfhost] total cross-module param type fixes: {total_param_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix string concat emitted as ptrtoint→sitofp→GEP ---
+        # The compiler emits string concat as ptrtoint→double→GEP (string-as-number bug).
+        # This general pass detects the chain: ptrtoint→sitofp→round→fptosi→GEP
+        # and replaces it with string_concat.
+        total_gep_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], gep_changes = _fix_string_concat_as_gep(ll_texts[idx])
+            if gep_changes:
+                total_gep_fixes += gep_changes
+                print(
+                    f"[selfhost] fixed {gep_changes} string-concat-as-GEP(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_gep_fixes:
+            print(
+                f"[selfhost] total string-concat-as-GEP fixes: {total_gep_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix variable-prepended function names ---
+        # The first-pass binary sometimes emits `var = func(args)` as a call to
+        # `@varfunc` instead of `@func`.  Detect and rename these.
+        _varfunc_renames = {
+            "descriptorsappend_runtime_helper": "append_runtime_helper",
+        }
+        for idx, name in enumerate(module_names):
+            for bad, good in _varfunc_renames.items():
+                if f"@{bad}" in ll_texts[idx]:
+                    count_before = ll_texts[idx].count(f"@{bad}")
+                    ll_texts[idx] = ll_texts[idx].replace(f"@{bad}", f"@{good}")
+                    print(
+                        f"[selfhost] renamed @{bad} → @{good} ({count_before}x) in {name}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+        # --- Replace void stubs with real implementations for renamed functions ---
+        # The `append_runtime_helper` function needs a real body that appends a
+        # RuntimeHelperDescriptor to a fat-pointer array.
+        _append_runtime_helper_impl = (
+            "define i8* @append_runtime_helper("
+            "{ %RuntimeHelperDescriptor*, i64 }* %arr, %RuntimeHelperDescriptor %val) {\n"
+            "entry:\n"
+            "  ; Load current length and data pointer\n"
+            "  %len_ptr = getelementptr { %RuntimeHelperDescriptor*, i64 }, "
+            "{ %RuntimeHelperDescriptor*, i64 }* %arr, i32 0, i32 1\n"
+            "  %len = load i64, i64* %len_ptr\n"
+            "  %data_ptr = getelementptr { %RuntimeHelperDescriptor*, i64 }, "
+            "{ %RuntimeHelperDescriptor*, i64 }* %arr, i32 0, i32 0\n"
+            "  %data = load %RuntimeHelperDescriptor*, %RuntimeHelperDescriptor** %data_ptr\n"
+            "  ; Compute element size and new size\n"
+            "  %elem_size_ptr = getelementptr %RuntimeHelperDescriptor, %RuntimeHelperDescriptor* null, i32 1\n"
+            "  %elem_size = ptrtoint %RuntimeHelperDescriptor* %elem_size_ptr to i64\n"
+            "  %new_len = add i64 %len, 1\n"
+            "  %new_byte_size = mul i64 %new_len, %elem_size\n"
+            "  ; Realloc\n"
+            "  %old_bytes = bitcast %RuntimeHelperDescriptor* %data to i8*\n"
+            "  %new_bytes = call i8* @realloc(i8* %old_bytes, i64 %new_byte_size)\n"
+            "  %new_data = bitcast i8* %new_bytes to %RuntimeHelperDescriptor*\n"
+            "  ; Store the new element\n"
+            "  %slot = getelementptr %RuntimeHelperDescriptor, %RuntimeHelperDescriptor* %new_data, i64 %len\n"
+            "  store %RuntimeHelperDescriptor %val, %RuntimeHelperDescriptor* %slot\n"
+            "  ; Update the fat pointer\n"
+            "  store %RuntimeHelperDescriptor* %new_data, %RuntimeHelperDescriptor** %data_ptr\n"
+            "  store i64 %new_len, i64* %len_ptr\n"
+            "  ; Return as i8* to match declare/call site signatures\n"
+            "  %ret = bitcast { %RuntimeHelperDescriptor*, i64 }* %arr to i8*\n"
+            "  ret i8* %ret\n"
+            "}\n"
+        )
+        for idx, name in enumerate(module_names):
+            if name == "llvm__runtime_helpers":
+                # Replace void stub with real implementation
+                _void_stub = "define void @append_runtime_helper() {\nblock.entry:\n  ret void\n}\n"
+                if _void_stub in ll_texts[idx]:
+                    ll_texts[idx] = ll_texts[idx].replace(_void_stub, _append_runtime_helper_impl)
+                    # Remove the declare — LLVM rejects declare+define for same function
+                    _decl_line = "declare i8* @append_runtime_helper({ %RuntimeHelperDescriptor*, i64 }*, %RuntimeHelperDescriptor)\n"
+                    ll_texts[idx] = ll_texts[idx].replace(_decl_line, "")
+                    # Also need to declare realloc if not present
+                    if "declare i8* @realloc" not in ll_texts[idx]:
+                        if "declare void @free(i8*)" in ll_texts[idx]:
+                            ll_texts[idx] = ll_texts[idx].replace(
+                                "declare void @free(i8*)",
+                                "declare void @free(i8*)\ndeclare i8* @realloc(i8*, i64)",
+                            )
+                        elif "declare noalias i8* @malloc(i64)" in ll_texts[idx]:
+                            ll_texts[idx] = ll_texts[idx].replace(
+                                "declare noalias i8* @malloc(i64)",
+                                "declare noalias i8* @malloc(i64)\ndeclare i8* @realloc(i8*, i64)",
+                            )
+                        else:
+                            # Fallback: insert before first define
+                            ll_texts[idx] = ll_texts[idx].replace(
+                                "\ndefine ",
+                                "\ndeclare i8* @realloc(i8*, i64)\n\ndefine ",
+                                1,
+                            )
+                    print(
+                        f"[selfhost] synthesized @append_runtime_helper body in {name}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+        # --- Fix missing parameter stores ---
+        # The compiler sometimes emits functions where LLVM IR parameters are
+        # never stored to their corresponding allocas.  LLVM infers the loads
+        # return undef and compiles the function to a trap.
+        total_param_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], ps_fixes = _fix_missing_parameter_stores(ll_texts[idx])
+            if ps_fixes:
+                total_param_fixes += ps_fixes
+                print(
+                    f"[selfhost] fixed {ps_fixes} missing parameter store(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_param_fixes:
+            print(
+                f"[selfhost] total missing parameter store fixes: {total_param_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix unconditional loop headers (do-while → while) ---
+        # Every loop header unconditionally branches to the body, making all loops
+        # do-while. This pass adds the exit condition check to the header so
+        # zero-trip loops are handled correctly.
+        total_loop_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], loop_changes = _fix_unconditional_loop_headers(ll_texts[idx])
+            if loop_changes:
+                total_loop_fixes += loop_changes
+                print(
+                    f"[selfhost] fixed {loop_changes} unconditional loop header(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_loop_fixes:
+            print(
+                f"[selfhost] total unconditional loop header fixes: {total_loop_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # ------------------------------------------------------------- #
+        # Fix: `continue` in outer loops targets inner loop latches.    #
+        # The compiler sets the continue target to the most-recently    #
+        # encountered loop's latch and never restores it when exiting   #
+        # a nested loop.  Result: `continue` after a nested loop jumps #
+        # back into the inner loop instead of the outer one, causing    #
+        # infinite loops.                                               #
+        #                                                               #
+        # Strategy: for each `br label %loop.latch<L>`, if the branch  #
+        # is textually AFTER the afterloop for loop-with-latch-L, it   #
+        # is a misplaced continue.  Redirect it to the enclosing       #
+        # loop's latch.                                                 #
+        # ------------------------------------------------------------- #
+        total_continue_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], cont_fixes = _fix_misplaced_continue_targets(ll_texts[idx])
+            if cont_fixes:
+                total_continue_fixes += cont_fixes
+                print(
+                    f"[selfhost] fixed {cont_fixes} misplaced continue target(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_continue_fixes:
+            print(
+                f"[selfhost] total misplaced continue target fixes: {total_continue_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # ------------------------------------------------------------- #
+        # Fix: inject missing progress guard in parse_tokens loop.      #
+        # The LLVM lowering drops the `if parser.index == prev_index`   #
+        # check, causing the parser to loop forever when parse_statement#
+        # fails to advance.  We inject the check before the latch.     #
+        # ------------------------------------------------------------- #
+        for idx, name in enumerate(module_names):
+            if name != "parser__mod":
+                continue
+            ll = ll_texts[idx]
+            # Find the parse_tokens function's loop body. The pattern is:
+            #   call %Parser @skip_trivia(...)
+            #   store %Parser %tN, %Parser* %l0
+            #   br label %loop.latch2
+            # We replace the br with a progress check.
+            import re as _re_pg
+            # Match the pattern: skip_trivia result stored to %l0, then br to latch
+            _pg_pat = _re_pg.compile(
+                r"(  %t(\d+) = call %Parser @skip_trivia\(%Parser %t\d+\)\n"
+                r"  store %Parser %t\2, %Parser\* %l0\n)"
+                r"  br label %loop\.latch2"
+            )
+            def _pg_replace(m: "_re_pg.Match") -> str:
+                return (
+                    m.group(1)
+                    + "  %_guard_parser = load %Parser, %Parser* %l0\n"
+                    + "  %_guard_cur_idx = extractvalue %Parser %_guard_parser, 1\n"
+                    + "  %_guard_prev_idx = load double, double* %l3\n"
+                    + "  %_guard_no_progress = fcmp oeq double %_guard_cur_idx, %_guard_prev_idx\n"
+                    + "  br i1 %_guard_no_progress, label %afterloop3, label %loop.latch2"
+                )
+            new_ll, count = _pg_pat.subn(_pg_replace, ll)
+            if count > 0:
+                ll_texts[idx] = new_ll
+                print(
+                    f"[selfhost] injected progress guard in parse_tokens loop ({count} fix(es))",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            break
 
         for idx, p in enumerate(ll_paths):
             p.write_text(ll_texts[idx], encoding="utf-8")

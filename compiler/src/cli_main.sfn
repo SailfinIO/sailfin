@@ -74,7 +74,7 @@ fn _path_pop_last(parts -> string[]) -> string[] {
         if index >= _last_index {
             break;
         }
-        out = out.concat([parts[index]]);
+        out.push(parts[index]);
         index += 1;
     }
     return out;
@@ -94,7 +94,7 @@ fn _read_non_empty_lines(path -> string) -> string[] ![io] {
         }
         let line = lines[index];
         if line.length > 0 {
-            out = out.concat([line]);
+            out.push(line);
         }
         index += 1;
     }
@@ -140,10 +140,10 @@ fn _path_normalize(path -> string) -> string {
                 if parts.length > 0 && parts[parts.length - 1] != ".." {
                     parts = _path_pop_last(parts);
                 } else if !is_abs {
-                    parts = parts.concat([".."]); 
+                    parts.push("..");
                 }
             } else {
-                parts = parts.concat([seg]);
+                parts.push(seg);
             }
             seg_start = i + 1;
         }
@@ -159,10 +159,10 @@ fn _path_normalize(path -> string) -> string {
             if parts.length > 0 && parts[parts.length - 1] != ".." {
                 parts = _path_pop_last(parts);
             } else if !is_abs {
-                parts = parts.concat([".."]); 
+                parts.push("..");
             }
         } else {
-            parts = parts.concat([seg]);
+            parts.push(seg);
         }
     }
 
@@ -539,7 +539,7 @@ fn _extract_relative_import_specs(source -> string) -> string[] {
         if index >= spans.length {
             break;
         }
-        specs = specs.concat([spans[index].spec]);
+        specs.push(spans[index].spec);
         index += 1;
     }
     return specs;
@@ -686,7 +686,7 @@ fn _inline_relative_imports(source -> string, base_dir -> string, depth -> numbe
                 if dep_source.length == 0 {
                     print.warn("test import inlining: empty dependency source: " + dep_path);
                 }
-                next_visited = next_visited.concat([dep_path]);
+                next_visited.push(dep_path);
                 let dep_base = _dirname(dep_path);
                 let inlined_dep = _inline_relative_imports(dep_source, dep_base, depth - 1, next_visited);
                 combined = combined + inlined_dep + "\n";
@@ -747,13 +747,19 @@ fn _collect_test_files(root -> string, max_depth -> number) -> string[] ![io] {
         let entry = entries[index];
         let full = _path_join(root, entry);
         if _looks_like_test_file(entry) {
-            results = results.concat([full]);
+            results.push(full);
         }
 
         // Recurse when it looks like a directory (has entries).
         let child_entries = fs.listDirectory(full);
         if child_entries.length > 0 {
-            results = results.concat(_collect_test_files(full, max_depth - 1));
+            let _sub_results = _collect_test_files(full, max_depth - 1);
+            let mut _sr_i -> number = 0;
+            loop {
+                if _sr_i >= _sub_results.length { break; }
+                results.push(_sub_results[_sr_i]);
+                _sr_i += 1;
+            }
         }
         index += 1;
     }
@@ -1066,13 +1072,16 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
         globals_obj,
         prelude_obj,
     ];
-    args = args.concat(link_objs);
-    args = args.concat([
-        ll_path,
-        "-o",
-        out_path,
-        "-lm",
-    ]);
+    let mut _lo_i -> number = 0;
+    loop {
+        if _lo_i >= link_objs.length { break; }
+        args.push(link_objs[_lo_i]);
+        _lo_i += 1;
+    }
+    args.push(ll_path);
+    args.push("-o");
+    args.push(out_path);
+    args.push("-lm");
     return process.run(args);
 }
 
@@ -1114,7 +1123,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         if arg_index >= argv.length {
             break;
         }
-        args = args.concat([argv[arg_index]]);
+        args.push(argv[arg_index]);
         arg_index += 1;
     }
     if args.length == 0 {
@@ -1520,11 +1529,11 @@ fn _join_with_separator_cli(values -> string[], separator -> string) -> string {
             let _jn_next = index + 1;
             if _jn_next < parts.length {
                 let combined = parts[index] + separator + parts[_jn_next];
-                next = next.concat([combined]);
+                next.push(combined);
                 index += 2;
                 continue;
             }
-            next = next.concat([parts[index]]);
+            next.push(parts[index]);
             index += 1;
         }
         parts = next;

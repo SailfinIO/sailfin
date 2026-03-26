@@ -176,10 +176,8 @@ fn is_test_module_slug(module_name -> string) -> boolean {
 
 fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug -> string, mangle_symbols -> boolean) -> string[] {
     let mut lines -> string[] = [];
-    lines = lines.concat([
-        "define i32 @main(i32 %argc, i8** %argv) {",
-        "entry:",
-    ]);
+    lines.push("define i32 @main(i32 %argc, i8** %argv) {");
+    lines.push("entry:");
 
     let should_mangle = mangle_symbols && !starts_with(module_slug, "runtime/");
     let module_suffix = sanitize_module_suffix(module_slug);
@@ -198,10 +196,8 @@ fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug ->
         lines = append_string(lines, "  call void @" + sym + "()");
         index += 1;
     }
-    lines = lines.concat([
-        "  ret i32 0",
-        "}",
-    ]);
+    lines.push("  ret i32 0");
+    lines.push("}");
     return lines;
 }
 

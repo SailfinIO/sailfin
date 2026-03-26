@@ -84,7 +84,13 @@ fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
 
     if remainder.length > 0 && substring(remainder, 0, 1) == "(" {
         let argument_parse = extract_borrow_argument(remainder);
-        let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
+        let mut messages -> string[] = diagnostics;
+        let mut _ci0 -> number = 0;
+        loop {
+            if _ci0 >= argument_parse.diagnostics.length { break; }
+            messages.push(argument_parse.diagnostics[_ci0]);
+            _ci0 += 1;
+        }
         if !argument_parse.success {
             return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
         }

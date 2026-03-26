@@ -1153,7 +1153,14 @@ fn infer_enum_aggregate_layout(context -> LayoutContext, enum_name -> string, va
         let variant = variants[index];
         let container_name = enum_name + "." + variant.name;
         let record = calculate_record_layout(context, variant.fields, "variant", container_name, visiting);
-        diagnostics = diagnostics.concat(record.diagnostics);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= record.diagnostics.length {
+                break;
+            }
+            diagnostics.push(record.diagnostics[_ci]);
+            _ci += 1;
+        }
         let mut variant_align -> number = record.align;
         if variant_align <= 0 {
             variant_align = 1;
@@ -1227,7 +1234,14 @@ fn calculate_record_layout(context -> LayoutContext, inputs -> LayoutFieldInput[
         }
         let input = inputs[index];
         let layout = analyze_type_layout(context, visiting, input.type_annotation, container_kind, container_name, input.name);
-        diagnostics = diagnostics.concat(layout.diagnostics);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= layout.diagnostics.length {
+                break;
+            }
+            diagnostics.push(layout.diagnostics[_ci]);
+            _ci += 1;
+        }
         let mut field_align -> number = layout.align;
         if field_align <= 0 {
             field_align = 1;
@@ -1313,14 +1327,28 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
     if struct_definition != null {
         let nested_visiting = append_string(visiting, trimmed);
         let record = calculate_record_layout(context, struct_definition.fields, "struct", trimmed, nested_visiting);
-        diagnostics = diagnostics.concat(record.diagnostics);
+        let mut _ci0 -> number = 0;
+        loop {
+            if _ci0 >= record.diagnostics.length {
+                break;
+            }
+            diagnostics.push(record.diagnostics[_ci0]);
+            _ci0 += 1;
+        }
         return TypeLayoutInfo { size: record.size, align: record.align, diagnostics: diagnostics };
     }
     let enum_definition = find_layout_enum_definition(context, trimmed);
     if enum_definition != null {
         let nested_visiting = append_string(visiting, trimmed);
         let aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting);
-        diagnostics = diagnostics.concat(aggregate.diagnostics);
+        let mut _ci1 -> number = 0;
+        loop {
+            if _ci1 >= aggregate.diagnostics.length {
+                break;
+            }
+            diagnostics.push(aggregate.diagnostics[_ci1]);
+            _ci1 += 1;
+        }
         return TypeLayoutInfo { size: aggregate.size, align: aggregate.align, diagnostics: diagnostics };
     }
     diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout");
@@ -1347,31 +1375,38 @@ fn convert_variant_fields(variant -> EnumVariant) -> LayoutFieldInput[] {
 }
 
 fn append_struct_field_layout(values -> StructFieldLayoutDescriptor[], value -> StructFieldLayoutDescriptor) -> StructFieldLayoutDescriptor[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn append_enum_variant_layout(values -> EnumVariantLayoutDescriptor[], value -> EnumVariantLayoutDescriptor) -> EnumVariantLayoutDescriptor[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn append_layout_field_input(values -> LayoutFieldInput[], value -> LayoutFieldInput) -> LayoutFieldInput[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn append_layout_struct_definition(values -> LayoutStructDefinition[], value -> LayoutStructDefinition) -> LayoutStructDefinition[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn append_layout_enum_definition(values -> LayoutEnumDefinition[], value -> LayoutEnumDefinition) -> LayoutEnumDefinition[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn append_layout_enum_variant_definition(values -> LayoutEnumVariantDefinition[], value -> LayoutEnumVariantDefinition) -> LayoutEnumVariantDefinition[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn append_canonical_type_layout(values -> CanonicalTypeLayout[], value -> CanonicalTypeLayout) -> CanonicalTypeLayout[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn find_layout_struct_definition(context -> LayoutContext, name -> string) -> LayoutStructDefinition? {

@@ -41,7 +41,8 @@ fn infer_effects(existing -> string[], decorator_names -> string[]) -> string[] 
 }
 
 fn append_string(collection -> string[], item -> string) -> string[] {
-    return collection.concat([item]);
+    collection.push(item);
+    return collection;
 }
 
 fn clone_effects(effects -> string[]) -> string[] {

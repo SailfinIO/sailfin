@@ -188,14 +188,19 @@ extern bool strings_equal(char *a, char *b);
 // The stage2 build links in a Sailfin-level `char_at` helper with that name;
 // calling it from here would recurse back into `sailfin_runtime_grapheme_at`.
 
+/* Global safe buffer for unresolved get_field calls.  Zeroed memory acts as:
+   - empty string (first byte NUL)
+   - array with length 0 ({NULL, 0})
+   - false boolean / 0.0 number
+   This prevents SIGSEGV while the LLVM IR fixup pass handles known fields. */
+static char _get_field_safe_buf[4096] __attribute__((aligned(16)));
+
 char *sailfin_runtime_get_field(char *base, char *field)
 {
-    /* The v0.1.1 seed compiler sometimes compiles struct field access as
-       get_field(i8*, "field_name") when it cannot resolve the struct type.
-       Returning NULL ensures that null-guard checks in the compiled code
-       (e.g. `if layout == null { skip; }`) work correctly, preventing
-       infinite loops or crashes from dereferencing garbage pointers. */
-    return NULL;
+    /* For remaining calls not handled by the GEP replacement pass,
+       return a pointer to zeroed memory instead of NULL to avoid SIGSEGV.
+       The zeroed buffer reads as empty string / zero array / false / 0.0. */
+    return _get_field_safe_buf;
 }
 
 static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codepoint)
@@ -1256,9 +1261,9 @@ static int _env_int(const char *name, int fallback)
     {
         return 0;
     }
-    if (parsed > 1000)
+    if (parsed > 100000000)
     {
-        return 1000;
+        return 100000000;
     }
     return (int)parsed;
 }
@@ -1617,6 +1622,19 @@ void sailfin_runtime_string_drop(char *text)
 void sailfin_runtime_print_info(char *msg) { _print_line(stdout, "[info] ", msg); }
 void sailfin_runtime_print_warn(char *msg) { _print_line(stderr, "[warn] ", msg); }
 void sailfin_runtime_print_error(char *msg) { _print_line(stderr, "[error] ", msg); }
+
+// Debug: print a pointer value as hex to stderr
+void sailfin_runtime_debug_ptr(const char *label, const void *ptr) {
+    fprintf(stderr, "[dbg] %s = %p", label ? label : "ptr", ptr);
+    if (ptr && (uintptr_t)ptr >= 4096u) {
+        // Try to read first 8 bytes
+        const unsigned char *p = (const unsigned char *)ptr;
+        fprintf(stderr, " bytes=[%02x %02x %02x %02x %02x %02x %02x %02x]",
+                p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+    }
+    fprintf(stderr, "\n");
+    fflush(stderr);
+}
 
 // -----------------------------------------------------------------------------
 // Debug helpers (best-effort; used by selfhost crash instrumentation)

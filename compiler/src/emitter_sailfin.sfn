@@ -1163,7 +1163,8 @@ fn trim_right(value -> string) -> string {
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn join_with_separator(values -> string[], separator -> string) -> string {

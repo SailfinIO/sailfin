@@ -75,11 +75,21 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
 
     let mut lines -> string[] = [];
     lines = append_string(lines, "; -- Trait Metadata --------------------------------");
-    lines = lines.concat(interface_lines);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= interface_lines.length { break; }
+        lines.push(interface_lines[_ci0]);
+        _ci0 += 1;
+    }
     if interface_lines.length > 0 && struct_lines.length > 0 {
         lines = append_string(lines, ";");
     }
-    lines = lines.concat(struct_lines);
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= struct_lines.length { break; }
+        lines.push(struct_lines[_ci1]);
+        _ci1 += 1;
+    }
     lines = append_string(lines, "; -----------------------------------------------");
     return lines;
 }
@@ -621,10 +631,8 @@ fn render_vtable_constants(context -> TypeContext) -> string[] {
 
 fn render_test_harness_main(tests -> NativeFunction[]) -> string[] {
     let mut lines -> string[] = [];
-    lines = lines.concat([
-        "define i32 @main(i32 %argc, i8** %argv) {",
-        "entry:",
-    ]);
+    lines.push("define i32 @main(i32 %argc, i8** %argv) {");
+    lines.push("entry:");
 
     let mut index -> number = 0;
     loop {
@@ -635,10 +643,8 @@ fn render_test_harness_main(tests -> NativeFunction[]) -> string[] {
         lines = append_string(lines, "  call void @" + sym + "()");
         index += 1;
     }
-    lines = lines.concat([
-        "  ret i32 0",
-        "}",
-    ]);
+    lines.push("  ret i32 0");
+    lines.push("}");
     return lines;
 }
 

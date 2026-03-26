@@ -415,15 +415,20 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
                 return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
             }
             let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
-            let combined = diagnostics.concat(lowered.diagnostics);
+            let mut _ci0 -> number = 0;
+            loop {
+                if _ci0 >= lowered.diagnostics.length { break; }
+                diagnostics.push(lowered.diagnostics[_ci0]);
+                _ci0 += 1;
+            }
             if lowered.operand == null {
-                return ExpressionResult { lines: lowered.lines, temp_index: lowered.temp_index, operand: null, diagnostics: combined, string_constants: lowered.string_constants };
+                return ExpressionResult { lines: lowered.lines, temp_index: lowered.temp_index, operand: null, diagnostics: diagnostics, string_constants: lowered.string_constants };
             }
 
             let future_operand = lowered.operand;
             let await_symbol = await_symbol_for_future_pointer_type(future_operand.llvm_type);
             if await_symbol.length == 0 {
-                let with_issue = append_string(combined, "llvm lowering: await expects a Future pointer, got `" + future_operand.llvm_type + "`");
+                let with_issue = append_string(diagnostics, "llvm lowering: await expects a Future pointer, got `" + future_operand.llvm_type + "`");
                 return ExpressionResult { lines: lowered.lines, temp_index: lowered.temp_index, operand: null, diagnostics: with_issue, string_constants: lowered.string_constants };
             }
 

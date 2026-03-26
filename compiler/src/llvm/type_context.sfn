@@ -142,7 +142,7 @@ fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
         if enum_def.layout == null {
             if is_unit_enum(enum_def) {
                 fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
-                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout"]);
+                diagnostics.push("llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout");
             }
             updated.push(fixed);
             index += 1;
@@ -153,9 +153,9 @@ fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
         if !enum_layout_matches_variants(enum_def, layout) {
             if is_unit_enum(enum_def) {
                 fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
-                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout"]);
+                diagnostics.push("llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout");
             } else {
-                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata"]);
+                diagnostics.push("llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata");
             }
         }
 

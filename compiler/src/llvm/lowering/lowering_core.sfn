@@ -460,6 +460,45 @@ fn split_lines_local(value -> string) -> string[] {
     return lines;
 }
 
+// Parse the tab-separated string constants file written by _write_lowered_function_files.
+// Format: one constant per line as "name\tcontent\tbyte_count".
+fn _parse_lowered_fn_string_constants(raw -> string) -> StringConstant[] {
+    let mut result -> StringConstant[] = [];
+    if raw.length == 0 {
+        return result;
+    }
+    let file_lines = split_lines_local(raw);
+    let mut i -> number = 0;
+    loop {
+        if i >= file_lines.length {
+            break;
+        }
+        let line = file_lines[i];
+        if line.length == 0 {
+            i += 1;
+            continue;
+        }
+        let tab1 = index_of_char_local(line, "\t");
+        if tab1 < 0 {
+            i += 1;
+            continue;
+        }
+        let name = substring(line, 0, tab1);
+        let rest = substring(line, tab1 + 1, line.length);
+        let tab2 = index_of_char_local(rest, "\t");
+        if tab2 < 0 {
+            i += 1;
+            continue;
+        }
+        let content = substring(rest, 0, tab2);
+        let byte_text = substring(rest, tab2 + 1, rest.length);
+        let byte_count = parse_number_local(byte_text);
+        result = result.push(StringConstant { name: name, content: content, byte_count: byte_count });
+        i += 1;
+    }
+    return result;
+}
+
 fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     // FLAT: no nested ifs, no else-if chains.
     // Seed degenerate-if bug drops ALL nested conditions and else-if branches.
@@ -1123,9 +1162,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
 
     if has_main {
         let mut updated = base;
-        updated.diagnostics = updated.diagnostics.concat([
-            "llvm lowering (test): module defines `main`; skipping synthesized test harness",
-        ]);
+        updated.diagnostics.push("llvm lowering (test): module defines `main`; skipping synthesized test harness");
         return updated;
     }
 
@@ -1634,6 +1671,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let mut imported_interfaces -> NativeInterface[] = [];
     let mut imported_functions -> NativeFunction[] = [];
     let mut imported_struct_methods -> NativeFunction[] = [];
+    if debug_lowering {
+        print.warn("emit-llvm: dbg-M1 manifests=" + number_to_string(safe_imported_manifests.length) + " texts=" + number_to_string(safe_imported_native_texts.length));
+    }
 
     let manifest_count = safe_imported_manifests.length;
     let mut text_index -> number = 0;
@@ -2401,6 +2441,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         fs.writeFile("build/sailfin/.fn_is_extern", is_extern_flag);
         fs.writeFile("build/sailfin/.fn_param_count", number_to_string(safe_parameters.length));
         fs.writeFile("build/sailfin/.fn_instr_count", number_to_string(safe_instructions.length));
+        fs.writeFile("build/sailfin/.fn_index", number_to_string(index));
         fs.writeFile("build/sailfin/.fn_decorator_count", number_to_string(safe_decorators.length));
         // Write individual parameter names and types so emission.sfn can build
         // ParameterPreparation from files instead of calling prepare_parameters
@@ -2436,21 +2477,30 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             module_globals.init_function_symbol,
             module_globals.needs_init_call
         );
+        // The v0.1.1 seed corrupts cross-module struct returns. Read the
+        // LoweredLLVMFunction result from files written by emit_llvm_function
+        // instead of accessing the (possibly garbage) struct fields.
+        let _lfn_lines_raw = fs.readFile("build/sailfin/.lowered_fn_lines");
+        let _lfn_lines = split_lines_local(_lfn_lines_raw);
+        let _lfn_diags_raw = fs.readFile("build/sailfin/.lowered_fn_diagnostics");
+        let _lfn_diags = split_lines_local(_lfn_diags_raw);
+        let _lfn_sc_raw = fs.readFile("build/sailfin/.lowered_fn_string_constants");
+        let _lfn_string_constants = _parse_lowered_fn_string_constants(_lfn_sc_raw);
         if debug_lowering {
-            print.warn("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(lowered.lines.length));
+            print.warn("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
         }
         if trace {
-            print.info("test llvm: function lowered " + safe_function_name + " lines=" + number_to_string(lowered.lines.length) + " diagnostics=" + number_to_string(lowered.diagnostics.length));
-            if lowered.lines.length > 0 {
-                print.info("test llvm: function first line " + lowered.lines[0]);
-                print.info("test llvm: function last line " + lowered.lines[lowered.lines.length - 1]);
+            print.info("test llvm: function lowered " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length) + " diagnostics=" + number_to_string(_lfn_diags.length));
+            if _lfn_lines.length > 0 {
+                print.info("test llvm: function first line " + _lfn_lines[0]);
+                print.info("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
                 let mut ret_lines -> number = 0;
                 let mut scan_index -> number = 0;
                 loop {
-                    if scan_index >= lowered.lines.length {
+                    if scan_index >= _lfn_lines.length {
                         break;
                     }
-                    let line = lowered.lines[scan_index];
+                    let line = _lfn_lines[scan_index];
                     if starts_with(trim_text(line), "ret ") || trim_text(line) == "ret void" {
                         ret_lines += 1;
                     }
@@ -2462,11 +2512,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         if sanitize_symbol(current_function.name) == "add" {
             has_add_function = true;
         }
-        diagnostics = extend_string_lines_checked(diagnostics, lowered.diagnostics, "function lowering");
+        diagnostics = extend_string_lines_checked(diagnostics, _lfn_diags, "function lowering");
         if trace {
             print.info("test llvm: function diagnostics merged " + safe_function_name);
         }
-        let normalized_lowered_lines = lowered.lines;
+        let normalized_lowered_lines = _lfn_lines;
         // TODO: Re-enable lifetime region aggregation once native array ABI is fully stable.
         if normalized_lowered_lines != null {
             if normalized_lowered_lines.length > 0 {
@@ -2489,13 +2539,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             }
             }
         }
-        if lowered.string_constants != null {
-            if lowered.string_constants.length > 0 {
+        if _lfn_string_constants != null {
+            if _lfn_string_constants.length > 0 {
                 if trace {
-                    print.info("test llvm: merging string constants " + safe_function_name + " count=" + number_to_string(lowered.string_constants.length));
+                    print.info("test llvm: merging string constants " + safe_function_name + " count=" + number_to_string(_lfn_string_constants.length));
                 }
                 let existing_constants = all_string_constants;
-                all_string_constants = merge_string_constants(existing_constants, lowered.string_constants);
+                all_string_constants = merge_string_constants(existing_constants, _lfn_string_constants);
                 if trace {
                     print.info("test llvm: merged string constants " + safe_function_name);
                 }
@@ -2557,7 +2607,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     if effective_mangle_symbols {
         let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts);
-        diagnostics = diagnostics.concat(mangled.diagnostics);
+        let mut _ci0 -> number = 0;
+        loop {
+            if _ci0 >= mangled.diagnostics.length { break; }
+            diagnostics.push(mangled.diagnostics[_ci0]);
+            _ci0 += 1;
+        }
         lines = mangled.lines;
     }
     if debug_lowering {

@@ -582,21 +582,23 @@ fn append_violations(violations -> EffectViolation[], new_violations -> EffectVi
         if index >= new_violations.length {
             break;
         }
-        result = result.concat([new_violations[index]]);
+        result.push(new_violations[index]);
         index += 1;
     }
     return result;
 }
 
 fn append_violation(collection -> EffectViolation[], item -> EffectViolation) -> EffectViolation[] {
-    return collection.concat([item]);
+    collection.push(item);
+    return collection;
 }
 
 fn append_unique_effect(effects -> string[], effect -> string) -> string[] {
     if contains_effect(effects, effect) {
         return effects;
     }
-    return effects.concat([effect]);
+    effects.push(effect);
+    return effects;
 }
 
 fn contains_effect(effects -> string[], effect -> string) -> boolean {
@@ -614,7 +616,8 @@ fn contains_effect(effects -> string[], effect -> string) -> boolean {
 }
 
 fn append_requirement(collection -> EffectRequirement[], item -> EffectRequirement) -> EffectRequirement[] {
-    return collection.concat([item]);
+    collection.push(item);
+    return collection;
 }
 
 fn merge_requirements(base -> EffectRequirement[], additions -> EffectRequirement[]) -> EffectRequirement[] {
@@ -624,7 +627,7 @@ fn merge_requirements(base -> EffectRequirement[], additions -> EffectRequiremen
         if index >= additions.length {
             break;
         }
-        result = result.concat([additions[index]]);
+        result.push(additions[index]);
         index += 1;
     }
     return result;

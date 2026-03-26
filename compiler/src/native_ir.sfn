@@ -552,7 +552,12 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
                 pending_decorators = [];
             }
             let struct_result = parse_struct_definition(lines, index, include_instructions);
-            diagnostics = diagnostics.concat(struct_result.diagnostics);
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= struct_result.diagnostics.length { break; }
+                diagnostics.push(struct_result.diagnostics[_ci]);
+                _ci += 1;
+            }
             if struct_result.definition != null {
                 structs = append_struct(structs, struct_result.definition);
             }
@@ -565,7 +570,12 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
                 pending_decorators = [];
             }
             let interface_result = parse_interface_definition(lines, index);
-            diagnostics = diagnostics.concat(interface_result.diagnostics);
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= interface_result.diagnostics.length { break; }
+                diagnostics.push(interface_result.diagnostics[_ci]);
+                _ci += 1;
+            }
             if interface_result.definition != null {
                 interfaces = append_interface(interfaces, interface_result.definition);
             }
@@ -578,7 +588,12 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
                 pending_decorators = [];
             }
             let enum_result = parse_enum_definition(lines, index);
-            diagnostics = diagnostics.concat(enum_result.diagnostics);
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= enum_result.diagnostics.length { break; }
+                diagnostics.push(enum_result.diagnostics[_ci]);
+                _ci += 1;
+            }
             if enum_result.definition != null {
                 enums = append_enum(enums, enum_result.definition);
             }
@@ -1431,13 +1446,13 @@ fn parse_inline_case_instruction(line -> string) -> NativeInstruction[] {
     let remainder = trim_trailing_delimiters(trim_text(substring(trimmed, arrow_index + 2, trimmed.length)));
     let split = split_case_components(head);
     let mut instructions -> NativeInstruction[] = [];
-    instructions = instructions.concat([NativeInstruction.Case { pattern: split.pattern, guard: split.guard }]);
+    instructions.push(NativeInstruction.Case { pattern: split.pattern, guard: split.guard });
     if remainder.length == 0 {
-        instructions = instructions.concat([NativeInstruction.Noop()]);
+        instructions.push(NativeInstruction.Noop());
         return instructions;
     }
     let body_instruction = parse_inline_case_body_instruction(remainder);
-    instructions = instructions.concat([body_instruction]);
+    instructions.push(body_instruction);
     return instructions;
 }
 
@@ -1506,7 +1521,7 @@ fn parse_import_specifiers(text -> string) -> NativeImportSpecifier[] {
         }
         let parsed = parse_single_specifier(entries[index]);
         if parsed.name.length > 0 {
-            specifiers = specifiers.concat([parsed]);
+            specifiers.push(parsed);
         }
         index += 1;
     }
@@ -1536,7 +1551,12 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".struct "));
     let header_parse = parse_struct_header(name_text);
-    diagnostics = diagnostics.concat(header_parse.diagnostics);
+    let mut _ci -> number = 0;
+    loop {
+        if _ci >= header_parse.diagnostics.length { break; }
+        diagnostics.push(header_parse.diagnostics[_ci]);
+        _ci += 1;
+    }
     let struct_name = header_parse.name;
     let mut implements = header_parse.implements;
     if struct_name.length == 0 {
@@ -1682,7 +1702,12 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             let body = strip_prefix(raw_line, ".layout ");
             if starts_with(body, "struct ") {
                 let header_result = parse_struct_layout_header(strip_prefix(body, "struct "));
-                diagnostics = diagnostics.concat(header_result.diagnostics);
+                let mut _ci -> number = 0;
+                loop {
+                    if _ci >= header_result.diagnostics.length { break; }
+                    diagnostics.push(header_result.diagnostics[_ci]);
+                    _ci += 1;
+                }
                 if header_result.success {
                     if struct_layout_header_success {
                         diagnostics = append_string(diagnostics, "duplicate struct layout header in " + struct_name);
@@ -1711,7 +1736,12 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                 if is_struct_header {
                     let header_text = trim_text(strip_prefix(tail, "struct"));
                     let header_result = parse_struct_layout_header(header_text);
-                    diagnostics = diagnostics.concat(header_result.diagnostics);
+                    let mut _ci -> number = 0;
+                    loop {
+                        if _ci >= header_result.diagnostics.length { break; }
+                        diagnostics.push(header_result.diagnostics[_ci]);
+                        _ci += 1;
+                    }
                     if header_result.success {
                         if struct_layout_header_success {
                             diagnostics = append_string(diagnostics, "duplicate struct layout header in " + struct_name);
@@ -1726,7 +1756,12 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                 }
 
                 let field_result = parse_struct_layout_field(tail, struct_name);
-                diagnostics = diagnostics.concat(field_result.diagnostics);
+                let mut _ci -> number = 0;
+                loop {
+                    if _ci >= field_result.diagnostics.length { break; }
+                    diagnostics.push(field_result.diagnostics[_ci]);
+                    _ci += 1;
+                }
                 if field_result.success {
                     struct_layout_fields = append_struct_layout_field(struct_layout_fields, field_result.field);
                     if !struct_layout_header_success {
@@ -1852,7 +1887,12 @@ fn parse_interface_definition(lines -> string[], start_index -> number) -> Inter
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".interface "));
     let header_parse = parse_interface_header(name_text);
-    diagnostics = diagnostics.concat(header_parse.diagnostics);
+    let mut _ci -> number = 0;
+    loop {
+        if _ci >= header_parse.diagnostics.length { break; }
+        diagnostics.push(header_parse.diagnostics[_ci]);
+        _ci += 1;
+    }
     let interface_name = header_parse.name;
     if interface_name.length == 0 {
         diagnostics = append_string(diagnostics, "unable to parse interface header: " + header);
@@ -1885,9 +1925,14 @@ fn parse_interface_definition(lines -> string[], start_index -> number) -> Inter
         }
         if starts_with(raw_line, ".sig ") {
             let signature_parse = parse_interface_signature(strip_prefix(raw_line, ".sig "), interface_name);
-            diagnostics = diagnostics.concat(signature_parse.diagnostics);
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= signature_parse.diagnostics.length { break; }
+                diagnostics.push(signature_parse.diagnostics[_ci]);
+                _ci += 1;
+            }
             if signature_parse.success {
-                signatures = signatures.concat([signature_parse.signature]);
+                signatures.push(signature_parse.signature);
             }
             index += 1;
             continue;
@@ -1969,7 +2014,12 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
 
     let head = trim_text(substring(remainder, 0, paren_index));
     let name_parse = parse_header_name_and_remainder(head);
-    diagnostics = diagnostics.concat(name_parse.diagnostics);
+    let mut _ci -> number = 0;
+    loop {
+        if _ci >= name_parse.diagnostics.length { break; }
+        diagnostics.push(name_parse.diagnostics[_ci]);
+        _ci += 1;
+    }
     if name_parse.remainder.length > 0 {
         diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + trimmed + "` has unsupported segment `" + name_parse.remainder + "`");
     }
@@ -2326,7 +2376,12 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
             let body = strip_prefix(raw_line, ".layout ");
             if starts_with(body, "enum ") {
                 let header_result = parse_enum_layout_header(strip_prefix(body, "enum "));
-                diagnostics = diagnostics.concat(header_result.diagnostics);
+                let mut _ci -> number = 0;
+                loop {
+                    if _ci >= header_result.diagnostics.length { break; }
+                    diagnostics.push(header_result.diagnostics[_ci]);
+                    _ci += 1;
+                }
                 if header_result.success {
                     if enum_layout_header_success {
                         diagnostics = append_string(diagnostics, "duplicate enum layout header in " + enum_name);
@@ -2364,7 +2419,12 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
                 }
 
                 let variant_result = parse_enum_variant_layout(variant_text, enum_name);
-                diagnostics = diagnostics.concat(variant_result.diagnostics);
+                let mut _ci -> number = 0;
+                loop {
+                    if _ci >= variant_result.diagnostics.length { break; }
+                    diagnostics.push(variant_result.diagnostics[_ci]);
+                    _ci += 1;
+                }
                 if variant_result.success {
                     let existing_index = find_enum_variant_layout(enum_layout_variants, variant_result.variant.name);
                     if existing_index >= 0 {
@@ -2384,7 +2444,12 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
             }
             if starts_with(body, "payload ") {
                 let payload_result = parse_enum_payload_layout(strip_prefix(body, "payload "), enum_name);
-                diagnostics = diagnostics.concat(payload_result.diagnostics);
+                let mut _ci -> number = 0;
+                loop {
+                    if _ci >= payload_result.diagnostics.length { break; }
+                    diagnostics.push(payload_result.diagnostics[_ci]);
+                    _ci += 1;
+                }
                 if payload_result.success {
                     let target_index = find_enum_variant_layout(enum_layout_variants, payload_result.variant_name);
                     if target_index < 0 {
@@ -3523,8 +3588,13 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
             let body = strip_prefix(line, ".layout ");
             let struct_header = strip_prefix(body, "struct ");
             let header_result = parse_struct_layout_header(struct_header);
-            diagnostics = diagnostics.concat(header_result.diagnostics);
-            
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= header_result.diagnostics.length { break; }
+                diagnostics.push(header_result.diagnostics[_ci]);
+                _ci += 1;
+            }
+
             if header_result.success {
                 let mut fields -> NativeStructLayoutField[] = [];
                 let struct_name = header_result.name;
@@ -3571,7 +3641,12 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                     }
 
                     let field_result = parse_struct_layout_field(tail, struct_name);
-                    diagnostics = diagnostics.concat(field_result.diagnostics);
+                    let mut _ci -> number = 0;
+                    loop {
+                        if _ci >= field_result.diagnostics.length { break; }
+                        diagnostics.push(field_result.diagnostics[_ci]);
+                        _ci += 1;
+                    }
 
                     if field_result.success {
                         fields = append_struct_layout_field(fields, field_result.field);
@@ -3601,8 +3676,13 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
             let body = strip_prefix(line, ".layout ");
             let enum_header = strip_prefix(body, "enum ");
             let header_result = parse_enum_layout_header(enum_header);
-            diagnostics = diagnostics.concat(header_result.diagnostics);
-            
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= header_result.diagnostics.length { break; }
+                diagnostics.push(header_result.diagnostics[_ci]);
+                _ci += 1;
+            }
+
             if header_result.success {
                 let mut variants -> NativeEnumVariantLayout[] = [];
                 let enum_name = header_result.name;
@@ -3632,8 +3712,13 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                             continue;
                         }
                         let variant_result = parse_enum_variant_layout(variant_text, enum_name);
-                        diagnostics = diagnostics.concat(variant_result.diagnostics);
-                        
+                        let mut _ci -> number = 0;
+                        loop {
+                            if _ci >= variant_result.diagnostics.length { break; }
+                            diagnostics.push(variant_result.diagnostics[_ci]);
+                            _ci += 1;
+                        }
+
                         if variant_result.success {
                             variants = append_enum_variant_layout(variants, variant_result.variant);
                         }
@@ -3641,8 +3726,13 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                         let body = strip_prefix(variant_line, ".layout ");
                         let payload_text = strip_prefix(body, "payload ");
                         let payload_result = parse_enum_payload_layout(payload_text, enum_name);
-                        diagnostics = diagnostics.concat(payload_result.diagnostics);
-                        
+                        let mut _ci -> number = 0;
+                        loop {
+                            if _ci >= payload_result.diagnostics.length { break; }
+                            diagnostics.push(payload_result.diagnostics[_ci]);
+                            _ci += 1;
+                        }
+
                         if payload_result.success && variants.length > 0 {
                             // Add payload field to last variant
                             let last_index = variants.length - 1;

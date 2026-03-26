@@ -54,7 +54,13 @@ import { lower_expression } from "./core";
 
 fn lower_logical_not_with_operand(operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines);
-    let mut current_diagnostics = diagnostics.concat(coerced.diagnostics);
+    let mut current_diagnostics -> string[] = diagnostics;
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= coerced.diagnostics.length { break; }
+        current_diagnostics.push(coerced.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
     let mut current_lines = coerced.lines;
     let mut current_temp = coerced.temp_index;
     if coerced.operand != null {
@@ -69,7 +75,13 @@ fn lower_logical_not_with_operand(operand -> LLVMOperand, temp_index -> number, 
 }
 
 fn lower_logical_not_result(result -> ExpressionResult, base_diagnostics -> string[]) -> ExpressionResult {
-    let combined = base_diagnostics.concat(result.diagnostics);
+    let mut combined -> string[] = base_diagnostics;
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= result.diagnostics.length { break; }
+        combined.push(result.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
     if result.operand == null {
         return ExpressionResult { lines: result.lines, temp_index: result.temp_index, operand: null, diagnostics: combined, string_constants: result.string_constants };
     }

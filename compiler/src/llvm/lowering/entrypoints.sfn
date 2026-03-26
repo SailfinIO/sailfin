@@ -1059,9 +1059,7 @@ fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_
     // For now we only synthesize `main` when no user-provided `main` exists.
     if has_main {
         let mut updated = base;
-        updated.diagnostics = updated.diagnostics.concat([
-            "llvm lowering (test): module defines `main`; skipping synthesized test harness",
-        ]);
+        updated.diagnostics.push("llvm lowering (test): module defines `main`; skipping synthesized test harness");
         return updated;
     }
 
@@ -1144,9 +1142,7 @@ fn lower_to_llvm_with_parsed_context_for_tests(native_module -> NativeModule, pa
     // For now we only synthesize `main` when no user-provided `main` exists.
     if has_main {
         let mut updated = base;
-        updated.diagnostics = updated.diagnostics.concat([
-            "llvm lowering (test): module defines `main`; skipping synthesized test harness",
-        ]);
+        updated.diagnostics.push("llvm lowering (test): module defines `main`; skipping synthesized test harness");
         return updated;
     }
 
@@ -1182,7 +1178,12 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
 fn lower_to_llvm_lines_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMLinesResult {
     let mut diagnostics -> string[] = [];
     if imported_diagnostics.length > 0 {
-        diagnostics = diagnostics.concat(imported_diagnostics);
+        let mut _ci0 -> number = 0;
+        loop {
+            if _ci0 >= imported_diagnostics.length { break; }
+            diagnostics.push(imported_diagnostics[_ci0]);
+            _ci0 += 1;
+        }
     }
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {

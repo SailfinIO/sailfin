@@ -208,8 +208,18 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResultAny ![io] {
     let native_result = compile_to_native(source);
     let lowered = lower_to_llvm(native_result.module);
     let mut combined -> string[] = [];
-    combined = combined.concat(native_result.diagnostics);
-    combined = combined.concat(lowered.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= native_result.diagnostics.length { break; }
+        combined.push(native_result.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= lowered.diagnostics.length { break; }
+        combined.push(lowered.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if combined.length > 0 {
         let mut index -> number = 0;
         loop {
@@ -251,8 +261,18 @@ fn compile_to_native_llvm_with_module(source -> string, module_name -> string) -
     let native_result = emit_native_with_module_name(program, module_name);
     let lowered = lower_to_llvm(native_result.module);
     let mut combined -> string[] = [];
-    combined = combined.concat(native_result.diagnostics);
-    combined = combined.concat(lowered.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= native_result.diagnostics.length { break; }
+        combined.push(native_result.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= lowered.diagnostics.length { break; }
+        combined.push(lowered.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if combined.length > 0 {
         let mut index -> number = 0;
         loop {
@@ -820,8 +840,18 @@ fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] 
     let native_result = compile_to_native(source);
     let lowered = lower_to_llvm(native_result.module);
     let mut combined -> string[] = [];
-    combined = combined.concat(native_result.diagnostics);
-    combined = combined.concat(lowered.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= native_result.diagnostics.length { break; }
+        combined.push(native_result.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= lowered.diagnostics.length { break; }
+        combined.push(lowered.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if combined.length > 0 {
         let mut index -> number = 0;
         loop {
@@ -869,8 +899,18 @@ fn compile_to_native_llvm_full_with_module(source -> string, module_name -> stri
     let native_result = emit_native_with_module_name(program, module_name);
     let lowered = lower_to_llvm(native_result.module);
     let mut combined -> string[] = [];
-    combined = combined.concat(native_result.diagnostics);
-    combined = combined.concat(lowered.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= native_result.diagnostics.length { break; }
+        combined.push(native_result.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= lowered.diagnostics.length { break; }
+        combined.push(lowered.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if combined.length > 0 {
         let mut index -> number = 0;
         loop {
@@ -908,22 +948,32 @@ fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> st
         }
         let manifest_text = manifest_contents[manifest_index];
         if manifest_text.length == 0 {
-            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+            manifests.push(LayoutManifest { structs: [], enums: [], diagnostics: [] });
         } else {
             let parsed = parse_layout_manifest(manifest_text);
-            manifests = manifests.concat([LayoutManifest {
+            manifests.push(LayoutManifest {
                 structs: parsed.structs,
                 enums: parsed.enums,
                 diagnostics: [],
-            }]);
+            });
         }
         manifest_index += 1;
     }
 
     let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts, []);
     let mut combined -> string[] = [];
-    combined = combined.concat(native_result.diagnostics);
-    combined = combined.concat(lowered.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= native_result.diagnostics.length { break; }
+        combined.push(native_result.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= lowered.diagnostics.length { break; }
+        combined.push(lowered.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if combined.length > 0 {
         let mut index -> number = 0;
         loop {
@@ -972,22 +1022,32 @@ fn compile_to_native_llvm_with_context_with_module(source -> string, module_name
         }
         let manifest_text = manifest_contents[manifest_index];
         if manifest_text.length == 0 {
-            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+            manifests.push(LayoutManifest { structs: [], enums: [], diagnostics: [] });
         } else {
             let parsed = parse_layout_manifest(manifest_text);
-            manifests = manifests.concat([LayoutManifest {
+            manifests.push(LayoutManifest {
                 structs: parsed.structs,
                 enums: parsed.enums,
                 diagnostics: [],
-            }]);
+            });
         }
         manifest_index += 1;
     }
 
     let lowered = lower_to_llvm_with_context(native_result.module, manifests, native_artifacts, []);
     let mut combined -> string[] = [];
-    combined = combined.concat(native_result.diagnostics);
-    combined = combined.concat(lowered.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= native_result.diagnostics.length { break; }
+        combined.push(native_result.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= lowered.diagnostics.length { break; }
+        combined.push(lowered.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if combined.length > 0 {
         let mut index -> number = 0;
         loop {
@@ -1048,22 +1108,32 @@ fn compile_to_native_llvm_with_context_with_module_and_entry_points(
         }
         let manifest_text = manifest_contents[manifest_index];
         if manifest_text.length == 0 {
-            manifests = manifests.concat([LayoutManifest { structs: [], enums: [], diagnostics: [] }]);
+            manifests.push(LayoutManifest { structs: [], enums: [], diagnostics: [] });
         } else {
             let parsed = parse_layout_manifest(manifest_text);
-            manifests = manifests.concat([LayoutManifest {
+            manifests.push(LayoutManifest {
                 structs: parsed.structs,
                 enums: parsed.enums,
                 diagnostics: [],
-            }]);
+            });
         }
         manifest_index += 1;
     }
 
     let lowered = lower_to_llvm_with_context(overridden_module, manifests, native_artifacts, []);
     let mut combined -> string[] = [];
-    combined = combined.concat(native_result.diagnostics);
-    combined = combined.concat(lowered.diagnostics);
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= native_result.diagnostics.length { break; }
+        combined.push(native_result.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= lowered.diagnostics.length { break; }
+        combined.push(lowered.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if combined.length > 0 {
         let mut index -> number = 0;
         loop {
@@ -1283,7 +1353,8 @@ fn join_lines(lines -> string[]) -> string {
 }
 
 fn append_string(values -> string[], value -> string) -> string[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 fn number_to_string(value -> number) -> string {
