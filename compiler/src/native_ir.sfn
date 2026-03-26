@@ -509,7 +509,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         if starts_with(line, ".import ") {
             let parsed_import = parse_import_entry("import", strip_prefix(line, ".import "));
             if parsed_import == null {
-                diagnostics = append_string(diagnostics, "unable to parse import: " + line);
+                diagnostics.push("unable to parse import: " + line);
             } else {
                 imports = append_import(imports, parsed_import);
             }
@@ -519,7 +519,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         if starts_with(line, ".export ") {
             let parsed_export = parse_import_entry("export", strip_prefix(line, ".export "));
             if parsed_export == null {
-                diagnostics = append_string(diagnostics, "unable to parse export: " + line);
+                diagnostics.push("unable to parse export: " + line);
             } else {
                 imports = append_import(imports, parsed_export);
             }
@@ -529,7 +529,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         if starts_with(line, ".span ") {
             let parsed_span = parse_source_span(strip_prefix(line, ".span "));
             if parsed_span == null {
-                diagnostics = append_string(diagnostics, "unable to parse span metadata: " + line);
+                diagnostics.push("unable to parse span metadata: " + line);
             } else {
                 pending_span = parsed_span;
             }
@@ -539,7 +539,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         if starts_with(line, ".init-span ") {
             let parsed_init_span = parse_source_span(strip_prefix(line, ".init-span "));
             if parsed_init_span == null {
-                diagnostics = append_string(diagnostics, "unable to parse initializer span metadata: " + line);
+                diagnostics.push("unable to parse initializer span metadata: " + line);
             } else {
                 pending_value_span = parsed_init_span;
             }
@@ -548,7 +548,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         }
         if starts_with(line, ".struct ") {
             if pending_decorators.length > 0 {
-                diagnostics = append_string(diagnostics, "dangling decorator directives before struct definition");
+                diagnostics.push("dangling decorator directives before struct definition");
                 pending_decorators = [];
             }
             let struct_result = parse_struct_definition(lines, index, include_instructions);
@@ -566,7 +566,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         }
         if starts_with(line, ".interface ") {
             if pending_decorators.length > 0 {
-                diagnostics = append_string(diagnostics, "dangling decorator directives before interface definition");
+                diagnostics.push("dangling decorator directives before interface definition");
                 pending_decorators = [];
             }
             let interface_result = parse_interface_definition(lines, index);
@@ -584,7 +584,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         }
         if starts_with(line, ".enum ") {
             if pending_decorators.length > 0 {
-                diagnostics = append_string(diagnostics, "dangling decorator directives before enum definition");
+                diagnostics.push("dangling decorator directives before enum definition");
                 pending_decorators = [];
             }
             let enum_result = parse_enum_definition(lines, index);
@@ -602,13 +602,13 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         }
         if starts_with(line, ".decorator") {
             if current != null {
-                diagnostics = append_string(diagnostics, "decorator directive encountered inside function body: " + line);
+                diagnostics.push("decorator directive encountered inside function body: " + line);
             } else {
                 let decorator_name = parse_decorator_name(line);
                 if decorator_name == null {
-                    diagnostics = append_string(diagnostics, "unable to parse decorator directive: " + line);
+                    diagnostics.push("unable to parse decorator directive: " + line);
                 } else {
-                    pending_decorators = append_string(pending_decorators, decorator_name);
+                    pending_decorators.push(decorator_name);
                 }
             }
             index += 1;
@@ -616,7 +616,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         }
         if starts_with(line, ".fn ") {
             if current != null {
-                diagnostics = append_string(diagnostics, "encountered nested .fn while previous function still open");
+                diagnostics.push("encountered nested .fn while previous function still open");
             }
             let header = strip_prefix(line, ".fn ");
             let mut is_async -> boolean = false;
@@ -640,18 +640,18 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         }
         if starts_with(line, ".test ") {
             if current != null {
-                diagnostics = append_string(diagnostics, "encountered nested .test while previous function still open");
+                diagnostics.push("encountered nested .test while previous function still open");
             }
 
             if pending_decorators.length > 0 {
-                diagnostics = append_string(diagnostics, "dangling decorator directives before test declaration");
+                diagnostics.push("dangling decorator directives before test declaration");
                 pending_decorators = [];
             }
 
             let header = strip_prefix(line, ".test ");
             let trimmed = trim_text(header);
             if trimmed.length == 0 {
-                diagnostics = append_string(diagnostics, "unable to parse test header: " + line);
+                diagnostics.push("unable to parse test header: " + line);
                 index += 1;
                 continue;
             }
@@ -693,7 +693,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
 
             let name = strip_quotes(trim_text(raw_name));
             if name.length == 0 {
-                diagnostics = append_string(diagnostics, "unable to parse test header: " + line);
+                diagnostics.push("unable to parse test header: " + line);
                 index += 1;
                 continue;
             }
@@ -713,7 +713,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         }
         if starts_with(line, ".endfn") {
             if current == null {
-                diagnostics = append_string(diagnostics, "encountered .endfn without active function");
+                diagnostics.push("encountered .endfn without active function");
             } else {
                 functions = append_function(functions, current);
                 current = null;
@@ -723,7 +723,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         }
         if starts_with(line, ".endtest") {
             if current == null {
-                diagnostics = append_string(diagnostics, "encountered .endtest without active test");
+                diagnostics.push("encountered .endtest without active test");
             } else {
                 functions = append_function(functions, current);
                 current = null;
@@ -735,7 +735,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
             if current != null {
                 current = apply_meta(current, strip_prefix(line, ".meta "));
             } else {
-                diagnostics = append_string(diagnostics, "metadata outside function body: " + line);
+                diagnostics.push("metadata outside function body: " + line);
             }
             index += 1;
             continue;
@@ -766,7 +766,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
 
                 let entries = split_parameter_entries(combined);
                 if entries.length == 0 {
-                    diagnostics = append_string(diagnostics, "unable to parse parameter line: " + line);
+                    diagnostics.push("unable to parse parameter line: " + line);
                     pending_span = null;
                 } else {
                     let mut entry_index -> number = 0;
@@ -782,7 +782,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
                         }
                         let parameter = parse_parameter_entry(entry, parameter_span);
                         if parameter == null {
-                            diagnostics = append_string(diagnostics, "unable to parse parameter entry: " + entry);
+                            diagnostics.push("unable to parse parameter entry: " + entry);
                         } else {
                             current = append_parameter(current, parameter);
                             if parameter.span != null {
@@ -795,7 +795,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
                 }
                 index = lookahead - 1;
             } else {
-                diagnostics = append_string(diagnostics, "parameter outside function body: " + line);
+                diagnostics.push("parameter outside function body: " + line);
             }
             index += 1;
             continue;
@@ -835,13 +835,13 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         if instruction_result.span_consumed {
             pending_span = null;
         } else if pending_span != null {
-            diagnostics = append_string(diagnostics, "unused span metadata before: " + gathered_line);
+            diagnostics.push("unused span metadata before: " + gathered_line);
             pending_span = null;
         }
         if instruction_result.value_span_consumed {
             pending_value_span = null;
         } else if pending_value_span != null {
-            diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + gathered_line);
+            diagnostics.push("unused initializer span metadata before: " + gathered_line);
             pending_value_span = null;
         }
 
@@ -850,7 +850,7 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
                 if instructions.length == 1 && instructions[0].variant == "Let" {
                     bindings = append_binding(bindings, binding_from_instruction(instructions[0]));
                 } else {
-                    diagnostics = append_string(diagnostics, "top-level directive not supported in lowering: " + gathered_line);
+                    diagnostics.push("top-level directive not supported in lowering: " + gathered_line);
                 }
             }
             continue;
@@ -866,13 +866,13 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
     }
 
     if current != null {
-        diagnostics = append_string(diagnostics, "unterminated function at end of artifact");
+        diagnostics.push("unterminated function at end of artifact");
         functions = append_function(functions, current);
         current = null;
     }
 
     if pending_decorators.length > 0 {
-        diagnostics = append_string(diagnostics, "dangling decorator directives at end of artifact");
+        diagnostics.push("dangling decorator directives at end of artifact");
     }
 
     return ParseNativeResult { functions: functions, imports: imports, structs: structs, interfaces: interfaces, enums: enums, bindings: bindings, diagnostics: diagnostics };
@@ -1560,7 +1560,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
     let struct_name = header_parse.name;
     let mut implements = header_parse.implements;
     if struct_name.length == 0 {
-        diagnostics = append_string(diagnostics, "unable to parse struct header: " + header);
+        diagnostics.push("unable to parse struct header: " + header);
         return StructParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics };
     }
 
@@ -1578,7 +1578,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
     let mut index = start_index + 1;
     loop {
         if index >= lines.length {
-            diagnostics = append_string(diagnostics, "unterminated struct " + struct_name);
+            diagnostics.push("unterminated struct " + struct_name);
             let mut struct_layout_value -> NativeStructLayout? = null;
             if struct_layout_header_success {
                 struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields };
@@ -1596,7 +1596,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
         }
         if raw_line == ".endstruct" {
             if current_method != null {
-                diagnostics = append_string(diagnostics, "unterminated method in struct " + struct_name);
+                diagnostics.push("unterminated method in struct " + struct_name);
                 methods = append_function(methods, current_method);
                 current_method = null;
                 method_pending_span = null;
@@ -1622,7 +1622,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             if starts_with(raw_line, ".param ") {
                 let parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "), method_pending_span);
                 if parameter == null {
-                    diagnostics = append_string(diagnostics, "unable to parse method parameter: " + raw_line);
+                    diagnostics.push("unable to parse method parameter: " + raw_line);
                 } else {
                     current_method = append_parameter(current_method, parameter);
                 }
@@ -1631,14 +1631,14 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                 continue;
             }
             if starts_with(raw_line, ".method ") {
-                diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name);
+                diagnostics.push("nested method declaration in struct " + struct_name);
                 index += 1;
                 continue;
             }
             if starts_with(raw_line, ".span ") {
                 let parsed_method_span = parse_source_span(strip_prefix(raw_line, ".span "));
                 if parsed_method_span == null {
-                    diagnostics = append_string(diagnostics, "unable to parse span metadata: " + raw_line);
+                    diagnostics.push("unable to parse span metadata: " + raw_line);
                 } else {
                     method_pending_span = parsed_method_span;
                 }
@@ -1648,7 +1648,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             if starts_with(raw_line, ".init-span ") {
                 let parsed_method_init_span = parse_source_span(strip_prefix(raw_line, ".init-span "));
                 if parsed_method_init_span == null {
-                    diagnostics = append_string(diagnostics, "unable to parse initializer span metadata: " + raw_line);
+                    diagnostics.push("unable to parse initializer span metadata: " + raw_line);
                 } else {
                     method_pending_value_span = parsed_method_init_span;
                 }
@@ -1678,13 +1678,13 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             if method_instruction_result.span_consumed {
                 method_pending_span = null;
             } else if method_pending_span != null {
-                diagnostics = append_string(diagnostics, "unused span metadata before: " + raw_line);
+                diagnostics.push("unused span metadata before: " + raw_line);
                 method_pending_span = null;
             }
             if method_instruction_result.value_span_consumed {
                 method_pending_value_span = null;
             } else if method_pending_value_span != null {
-                diagnostics = append_string(diagnostics, "unused initializer span metadata before: " + raw_line);
+                diagnostics.push("unused initializer span metadata before: " + raw_line);
                 method_pending_value_span = null;
             }
             let mut instruction_index -> number = 0;
@@ -1710,7 +1710,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                 }
                 if header_result.success {
                     if struct_layout_header_success {
-                        diagnostics = append_string(diagnostics, "duplicate struct layout header in " + struct_name);
+                        diagnostics.push("duplicate struct layout header in " + struct_name);
                     } else {
                         struct_layout_size = header_result.size;
                         struct_layout_align = header_result.align;
@@ -1744,7 +1744,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                     }
                     if header_result.success {
                         if struct_layout_header_success {
-                            diagnostics = append_string(diagnostics, "duplicate struct layout header in " + struct_name);
+                            diagnostics.push("duplicate struct layout header in " + struct_name);
                         } else {
                             struct_layout_size = header_result.size;
                             struct_layout_align = header_result.align;
@@ -1766,7 +1766,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                     struct_layout_fields = append_struct_layout_field(struct_layout_fields, field_result.field);
                     if !struct_layout_header_success {
                         if !struct_layout_reported_missing_header {
-                            diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field encountered before layout header");
+                            diagnostics.push("struct " + struct_name + " layout field encountered before layout header");
                             struct_layout_reported_missing_header = true;
                         }
                     }
@@ -1774,7 +1774,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                 index += 1;
                 continue;
             }
-            diagnostics = append_string(diagnostics, "unsupported struct layout directive: " + raw_line);
+            diagnostics.push("unsupported struct layout directive: " + raw_line);
             index += 1;
             continue;
         }
@@ -1785,7 +1785,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
         if starts_with(raw_line, ".field ") {
             let parsed_field = parse_struct_field_line(strip_prefix(raw_line, ".field "));
             if parsed_field == null {
-                diagnostics = append_string(diagnostics, "unable to parse struct field: " + raw_line);
+                diagnostics.push("unable to parse struct field: " + raw_line);
             } else {
                 fields = append_struct_field(fields, parsed_field);
             }
@@ -1794,13 +1794,13 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
         }
         if starts_with(raw_line, ".decorator") {
             if current_method != null {
-                diagnostics = append_string(diagnostics, "decorator directive encountered inside method body: " + raw_line);
+                diagnostics.push("decorator directive encountered inside method body: " + raw_line);
             } else {
                 let decorator_name = parse_decorator_name(raw_line);
                 if decorator_name == null {
-                    diagnostics = append_string(diagnostics, "unable to parse decorator directive: " + raw_line);
+                    diagnostics.push("unable to parse decorator directive: " + raw_line);
                 } else {
-                    method_pending_decorators = append_string(method_pending_decorators, decorator_name);
+                    method_pending_decorators.push(decorator_name);
                 }
             }
             index += 1;
@@ -1808,7 +1808,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
         }
         if starts_with(raw_line, ".method ") {
             if current_method != null {
-                diagnostics = append_string(diagnostics, "nested method declaration in struct " + struct_name);
+                diagnostics.push("nested method declaration in struct " + struct_name);
             }
             let header = strip_prefix(raw_line, ".method ");
             let trimmed = trim_text(header);
@@ -1833,7 +1833,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             index += 1;
             continue;
         }
-        diagnostics = append_string(diagnostics, "unsupported struct directive: " + raw_line);
+        diagnostics.push("unsupported struct directive: " + raw_line);
         index += 1;
     }
 
@@ -1895,7 +1895,7 @@ fn parse_interface_definition(lines -> string[], start_index -> number) -> Inter
     }
     let interface_name = header_parse.name;
     if interface_name.length == 0 {
-        diagnostics = append_string(diagnostics, "unable to parse interface header: " + header);
+        diagnostics.push("unable to parse interface header: " + header);
         return InterfaceParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics };
     }
 
@@ -1903,7 +1903,7 @@ fn parse_interface_definition(lines -> string[], start_index -> number) -> Inter
     let mut index = start_index + 1;
     loop {
         if index >= lines.length {
-            diagnostics = append_string(diagnostics, "unterminated interface " + interface_name);
+            diagnostics.push("unterminated interface " + interface_name);
             return InterfaceParseResult {
                 definition: NativeInterface { name: interface_name, type_parameters: header_parse.type_parameters, signatures: signatures },
                 next_index: index,
@@ -1937,7 +1937,7 @@ fn parse_interface_definition(lines -> string[], start_index -> number) -> Inter
             index += 1;
             continue;
         }
-        diagnostics = append_string(diagnostics, "unsupported interface directive: " + raw_line);
+        diagnostics.push("unsupported interface directive: " + raw_line);
         index += 1;
     }
 
@@ -1956,12 +1956,12 @@ fn parse_struct_header(text -> string) -> StructHeaderParse {
         if starts_with(base.remainder, "implements ") {
             let list_text = trim_text(strip_prefix(base.remainder, "implements "));
             if list_text.length == 0 {
-                diagnostics = append_string(diagnostics, "struct " + base.name + " header missing implements list");
+                diagnostics.push("struct " + base.name + " header missing implements list");
             } else {
                 implements = parse_implements_list(list_text);
             }
         } else {
-            diagnostics = append_string(diagnostics, "struct " + base.name + " header has unsupported segment `" + base.remainder + "`");
+            diagnostics.push("struct " + base.name + " header has unsupported segment `" + base.remainder + "`");
         }
     }
     return StructHeaderParse { name: base.name, implements: implements, diagnostics: diagnostics };
@@ -1971,7 +1971,7 @@ fn parse_interface_header(text -> string) -> InterfaceHeaderParse {
     let base = parse_header_name_and_remainder(text);
     let mut diagnostics -> string[] = base.diagnostics;
     if base.remainder.length > 0 {
-        diagnostics = append_string(diagnostics, "interface " + base.name + " header has unsupported segment `" + base.remainder + "`");
+        diagnostics.push("interface " + base.name + " header has unsupported segment `" + base.remainder + "`");
     }
     return InterfaceHeaderParse { name: base.name, type_parameters: base.type_parameters, diagnostics: diagnostics };
 }
@@ -1989,7 +1989,7 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
 
     let trimmed = trim_trailing_delimiters(trim_text(text));
     if trimmed.length == 0 {
-        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature missing content");
+        diagnostics.push("interface " + interface_name + " signature missing content");
         return InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics };
     }
 
@@ -2002,13 +2002,13 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
 
     let paren_index = index_of(remainder, "(");
     if paren_index < 0 {
-        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature missing parameter list: " + trimmed);
+        diagnostics.push("interface " + interface_name + " signature missing parameter list: " + trimmed);
         return InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics };
     }
 
     let close_index = find_matching_paren(remainder, paren_index);
     if close_index < 0 {
-        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature has unterminated parameter list: " + trimmed);
+        diagnostics.push("interface " + interface_name + " signature has unterminated parameter list: " + trimmed);
         return InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics };
     }
 
@@ -2021,11 +2021,11 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
         _ci += 1;
     }
     if name_parse.remainder.length > 0 {
-        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + trimmed + "` has unsupported segment `" + name_parse.remainder + "`");
+        diagnostics.push("interface " + interface_name + " signature `" + trimmed + "` has unsupported segment `" + name_parse.remainder + "`");
     }
     let method_name = name_parse.name;
     if method_name.length == 0 {
-        diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + trimmed + "` missing name");
+        diagnostics.push("interface " + interface_name + " signature `" + trimmed + "` missing name");
     }
 
     let parameters_section = substring(remainder, paren_index + 1, close_index);
@@ -2040,7 +2040,7 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
             }
             let parsed = parse_parameter_entry(entries[entry_index], null);
             if parsed == null {
-                diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid parameter `" + entries[entry_index] + "`");
+                diagnostics.push("interface " + interface_name + " signature `" + method_name + "` has invalid parameter `" + entries[entry_index] + "`");
             } else {
                 parameters = append_parameter_array(parameters, parsed);
             }
@@ -2065,7 +2065,7 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
                     return_type = type_text;
                 }
             } else {
-                diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has unsupported suffix `" + suffix + "`");
+                diagnostics.push("interface " + interface_name + " signature `" + method_name + "` has unsupported suffix `" + suffix + "`");
             }
         }
         if effect_segment.length > 0 {
@@ -2073,7 +2073,7 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
                 let body = substring(effect_segment, 2, effect_segment.length - 1);
                 effects = parse_effect_list(body);
             } else {
-                diagnostics = append_string(diagnostics, "interface " + interface_name + " signature `" + method_name + "` has invalid effects annotation `" + effect_segment + "`");
+                diagnostics.push("interface " + interface_name + " signature `" + method_name + "` has invalid effects annotation `" + effect_segment + "`");
             }
         }
     }
@@ -2103,7 +2103,7 @@ fn parse_header_name_and_remainder(text -> string) -> HeaderNameParse {
     if generics_index >= 0 {
         let close_index = find_matching_angle(trimmed, generics_index);
         if close_index < 0 {
-            diagnostics = append_string(diagnostics, "header `" + text + "` missing closing `>`");
+            diagnostics.push("header `" + text + "` missing closing `>`");
             name = strip_generics(trimmed);
             return HeaderNameParse { name: name, type_parameters: type_parameters, remainder: remainder, diagnostics: diagnostics };
         }
@@ -2234,7 +2234,7 @@ fn split_top_level_commas(text -> string) -> string[] {
             if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
                 let segment = trim_text(current);
                 if segment.length > 0 {
-                    entries = append_string(entries, segment);
+                    entries.push(segment);
                 }
                 current = "";
                 index += 1;
@@ -2246,7 +2246,7 @@ fn split_top_level_commas(text -> string) -> string[] {
     }
     let segment = trim_text(current);
     if segment.length > 0 {
-        entries = append_string(entries, segment);
+        entries.push(segment);
     }
     return entries;
 }
@@ -2329,7 +2329,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
     }
     enum_name = strip_generics(enum_name);
     if enum_name.length == 0 {
-        diagnostics = append_string(diagnostics, "unable to parse enum header: " + header);
+        diagnostics.push("unable to parse enum header: " + header);
         return EnumParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics };
     }
 
@@ -2345,7 +2345,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
     let mut index = start_index + 1;
     loop {
         if index >= lines.length {
-            diagnostics = append_string(diagnostics, "unterminated enum " + enum_name);
+            diagnostics.push("unterminated enum " + enum_name);
             let mut enum_layout_value -> NativeEnumLayout? = null;
             if enum_layout_header_success {
                 enum_layout_value = NativeEnumLayout {
@@ -2384,7 +2384,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
                 }
                 if header_result.success {
                     if enum_layout_header_success {
-                        diagnostics = append_string(diagnostics, "duplicate enum layout header in " + enum_name);
+                        diagnostics.push("duplicate enum layout header in " + enum_name);
                     } else {
                         enum_layout_size = header_result.size;
                         enum_layout_align = header_result.align;
@@ -2428,13 +2428,13 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
                 if variant_result.success {
                     let existing_index = find_enum_variant_layout(enum_layout_variants, variant_result.variant.name);
                     if existing_index >= 0 {
-                        diagnostics = append_string(diagnostics, "duplicate enum layout variant `" + variant_result.variant.name + "` in " + enum_name);
+                        diagnostics.push("duplicate enum layout variant `" + variant_result.variant.name + "` in " + enum_name);
                     } else {
                         enum_layout_variants = append_enum_variant_layout(enum_layout_variants, variant_result.variant);
                     }
                     if !enum_layout_header_success {
                         if !enum_layout_reported_missing_header {
-                            diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant encountered before layout header");
+                            diagnostics.push("enum " + enum_name + " layout variant encountered before layout header");
                             enum_layout_reported_missing_header = true;
                         }
                     }
@@ -2453,13 +2453,13 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
                 if payload_result.success {
                     let target_index = find_enum_variant_layout(enum_layout_variants, payload_result.variant_name);
                     if target_index < 0 {
-                        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload references unknown variant `" + payload_result.variant_name + "`");
+                        diagnostics.push("enum " + enum_name + " layout payload references unknown variant `" + payload_result.variant_name + "`");
                     } else {
                         enum_layout_variants = update_enum_variant_fields(enum_layout_variants, target_index, payload_result.field);
                     }
                     if !enum_layout_header_success {
                         if !enum_layout_reported_missing_header {
-                            diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload encountered before layout header");
+                            diagnostics.push("enum " + enum_name + " layout payload encountered before layout header");
                             enum_layout_reported_missing_header = true;
                         }
                     }
@@ -2467,7 +2467,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
                 index += 1;
                 continue;
             }
-            diagnostics = append_string(diagnostics, "unsupported enum layout directive: " + raw_line);
+            diagnostics.push("unsupported enum layout directive: " + raw_line);
             index += 1;
             continue;
         }
@@ -2478,14 +2478,14 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
         if starts_with(raw_line, ".variant ") {
             let parsed_variant = parse_enum_variant_line(strip_prefix(raw_line, ".variant "));
             if parsed_variant == null {
-                diagnostics = append_string(diagnostics, "unable to parse enum variant: " + raw_line);
+                diagnostics.push("unable to parse enum variant: " + raw_line);
             } else {
                 variants = append_enum_variant(variants, parsed_variant);
             }
             index += 1;
             continue;
         }
-        diagnostics = append_string(diagnostics, "unsupported enum directive: " + raw_line);
+        diagnostics.push("unsupported enum directive: " + raw_line);
         index += 1;
     }
 
@@ -2566,7 +2566,7 @@ fn split_enum_field_entries(text -> string) -> string[] {
             }
         }
         if ch == ";" && depth == 0 {
-            entries = append_string(entries, current);
+            entries.push(current);
             current = "";
         } else {
             current = current + ch;
@@ -2574,7 +2574,7 @@ fn split_enum_field_entries(text -> string) -> string[] {
         index += 1;
     }
     if current.length > 0 {
-        entries = append_string(entries, current);
+        entries.push(current);
     }
     return entries;
 }
@@ -2664,7 +2664,7 @@ fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
     let tokens = split_whitespace(trim_text(text));
     let mut diagnostics -> string[] = [];
     if tokens.length == 0 {
-        diagnostics = append_string(diagnostics, "struct layout header missing entries");
+        diagnostics.push("struct layout header missing entries");
         return StructLayoutHeaderParse { success: false, name: "", size: 0, align: 0, diagnostics: diagnostics };
     }
     let mut name_found -> boolean = false;
@@ -2689,7 +2689,7 @@ fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "struct layout header has invalid size `" + value_text + "`");
+                diagnostics.push("struct layout header has invalid size `" + value_text + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -2698,18 +2698,18 @@ fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "struct layout header has invalid align `" + value_text + "`");
+                diagnostics.push("struct layout header has invalid align `" + value_text + "`");
             }
         } else {
-            diagnostics = append_string(diagnostics, "struct layout header unrecognized token `" + token + "`");
+            diagnostics.push("struct layout header unrecognized token `" + token + "`");
         }
         index += 1;
     }
     if !size_found {
-        diagnostics = append_string(diagnostics, "struct layout header missing size entry");
+        diagnostics.push("struct layout header missing size entry");
     }
     if !align_found {
-        diagnostics = append_string(diagnostics, "struct layout header missing align entry");
+        diagnostics.push("struct layout header missing align entry");
     }
     let success = size_found && align_found && diagnostics.length == 0;
     return StructLayoutHeaderParse { success: success, name: name_value, size: size_value, align: align_value, diagnostics: diagnostics };
@@ -2720,17 +2720,17 @@ fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLay
     let mut diagnostics -> string[] = [];
     let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 };
     if trimmed.length == 0 {
-        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing content");
+        diagnostics.push("struct " + struct_name + " layout field missing content");
         return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
     }
     let tokens = split_whitespace(trimmed);
     if tokens.length == 0 {
-        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing entries");
+        diagnostics.push("struct " + struct_name + " layout field missing entries");
         return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
     }
     let field_name = tokens[0];
     if field_name.length == 0 {
-        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field missing name");
+        diagnostics.push("struct " + struct_name + " layout field missing name");
         return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
     }
     let mut type_text -> string = "";
@@ -2755,7 +2755,7 @@ fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLay
                 offset_found = true;
                 offset_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid offset `" + value_text + "`");
+                diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` has invalid offset `" + value_text + "`");
             }
         } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
@@ -2764,7 +2764,7 @@ fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLay
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid size `" + value_text + "`");
+                diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` has invalid size `" + value_text + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -2773,24 +2773,24 @@ fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLay
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` has invalid align `" + value_text + "`");
+                diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` has invalid align `" + value_text + "`");
             }
         } else {
-            diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` unrecognized token `" + token + "`");
+            diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` unrecognized token `" + token + "`");
         }
         index += 1;
     }
     if type_text.length == 0 {
-        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing type entry");
+        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing type entry");
     }
     if !offset_found {
-        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing offset entry");
+        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing offset entry");
     }
     if !size_found {
-        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing size entry");
+        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing size entry");
     }
     if !align_found {
-        diagnostics = append_string(diagnostics, "struct " + struct_name + " layout field `" + field_name + "` missing align entry");
+        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing align entry");
     }
     let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0;
     let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value };
@@ -2801,7 +2801,7 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
     let tokens = split_whitespace(trim_text(text));
     let mut diagnostics -> string[] = [];
     if tokens.length == 0 {
-        diagnostics = append_string(diagnostics, "enum layout header missing entries");
+        diagnostics.push("enum layout header missing entries");
         return EnumLayoutHeaderParse { success: false, name: "", size: 0, align: 0, tag_type: "", tag_size: 0, tag_align: 0, diagnostics: diagnostics };
     }
     let mut name_found -> boolean = false;
@@ -2831,7 +2831,7 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum layout header has invalid size `" + value_text + "`");
+                diagnostics.push("enum layout header has invalid size `" + value_text + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -2840,7 +2840,7 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum layout header has invalid align `" + value_text + "`");
+                diagnostics.push("enum layout header has invalid align `" + value_text + "`");
             }
         } else if starts_with(token, "tag_type=") {
             tag_type = substring(token, 9, token.length);
@@ -2851,7 +2851,7 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
                 tag_size_found = true;
                 tag_size_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum layout header has invalid tag_size `" + value_text + "`");
+                diagnostics.push("enum layout header has invalid tag_size `" + value_text + "`");
             }
         } else if starts_with(token, "tag_align=") {
             let value_text = substring(token, 10, token.length);
@@ -2860,27 +2860,27 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
                 tag_align_found = true;
                 tag_align_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum layout header has invalid tag_align `" + value_text + "`");
+                diagnostics.push("enum layout header has invalid tag_align `" + value_text + "`");
             }
         } else {
-            diagnostics = append_string(diagnostics, "enum layout header unrecognized token `" + token + "`");
+            diagnostics.push("enum layout header unrecognized token `" + token + "`");
         }
         index += 1;
     }
     if !size_found {
-        diagnostics = append_string(diagnostics, "enum layout header missing size entry");
+        diagnostics.push("enum layout header missing size entry");
     }
     if !align_found {
-        diagnostics = append_string(diagnostics, "enum layout header missing align entry");
+        diagnostics.push("enum layout header missing align entry");
     }
     if tag_type.length == 0 {
-        diagnostics = append_string(diagnostics, "enum layout header missing tag_type entry");
+        diagnostics.push("enum layout header missing tag_type entry");
     }
     if !tag_size_found {
-        diagnostics = append_string(diagnostics, "enum layout header missing tag_size entry");
+        diagnostics.push("enum layout header missing tag_size entry");
     }
     if !tag_align_found {
-        diagnostics = append_string(diagnostics, "enum layout header missing tag_align entry");
+        diagnostics.push("enum layout header missing tag_align entry");
     }
     let success = size_found && align_found && tag_type.length > 0 && tag_size_found && tag_align_found && diagnostics.length == 0;
     return EnumLayoutHeaderParse {
@@ -2900,17 +2900,17 @@ fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutV
     let mut diagnostics -> string[] = [];
     let default_variant = NativeEnumVariantLayout { name: "", tag: 0, offset: 0, size: 0, align: 0, fields: [] };
     if trimmed.length == 0 {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing content");
+        diagnostics.push("enum " + enum_name + " layout variant missing content");
         return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
     }
     let tokens = split_whitespace(trimmed);
     if tokens.length == 0 {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing entries");
+        diagnostics.push("enum " + enum_name + " layout variant missing entries");
         return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
     }
     let variant_name = tokens[0];
     if variant_name.length == 0 {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant missing name");
+        diagnostics.push("enum " + enum_name + " layout variant missing name");
         return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
     }
     let mut tag_found -> boolean = false;
@@ -2934,7 +2934,7 @@ fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutV
                 tag_found = true;
                 tag_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid tag `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid tag `" + value_text + "`");
             }
         } else if starts_with(token, "offset=") {
             let value_text = substring(token, 7, token.length);
@@ -2943,7 +2943,7 @@ fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutV
                 offset_found = true;
                 offset_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid offset `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid offset `" + value_text + "`");
             }
         } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
@@ -2952,7 +2952,7 @@ fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutV
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid size `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid size `" + value_text + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -2961,24 +2961,24 @@ fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutV
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` has invalid align `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid align `" + value_text + "`");
             }
         } else {
-            diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` unrecognized token `" + token + "`");
+            diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` unrecognized token `" + token + "`");
         }
         index += 1;
     }
     if !tag_found {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing tag entry");
+        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing tag entry");
     }
     if !offset_found {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing offset entry");
+        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing offset entry");
     }
     if !size_found {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing size entry");
+        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing size entry");
     }
     if !align_found {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout variant `" + variant_name + "` missing align entry");
+        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing align entry");
     }
     let success = tag_found && offset_found && size_found && align_found && diagnostics.length == 0;
     let variant = NativeEnumVariantLayout { name: variant_name, tag: tag_value, offset: offset_value, size: size_value, align: align_value, fields: [] };
@@ -2990,19 +2990,19 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
     let mut diagnostics -> string[] = [];
     let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 };
     if trimmed.length == 0 {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload missing content");
+        diagnostics.push("enum " + enum_name + " layout payload missing content");
         return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
     }
     let tokens = split_whitespace(trimmed);
     if tokens.length == 0 {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload missing entries");
+        diagnostics.push("enum " + enum_name + " layout payload missing entries");
         return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
     }
     let identifier = tokens[0];
     let dot_index = index_of(identifier, ".");
     let _dot_next = dot_index + 1;
     if dot_index <= 0 || _dot_next >= identifier.length {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload identifier `" + identifier + "` invalid");
+        diagnostics.push("enum " + enum_name + " layout payload identifier `" + identifier + "` invalid");
         return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
     }
     let variant_name = substring(identifier, 0, dot_index);
@@ -3029,7 +3029,7 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
                 offset_found = true;
                 offset_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid offset `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` has invalid offset `" + value_text + "`");
             }
         } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
@@ -3038,7 +3038,7 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid size `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` has invalid size `" + value_text + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -3047,24 +3047,24 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` has invalid align `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` has invalid align `" + value_text + "`");
             }
         } else {
-            diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` unrecognized token `" + token + "`");
+            diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` unrecognized token `" + token + "`");
         }
         index += 1;
     }
     if type_text.length == 0 {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing type entry");
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing type entry");
     }
     if !offset_found {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing offset entry");
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing offset entry");
     }
     if !size_found {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing size entry");
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing size entry");
     }
     if !align_found {
-        diagnostics = append_string(diagnostics, "enum " + enum_name + " layout payload `" + identifier + "` missing align entry");
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing align entry");
     }
     let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0;
     let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value };
@@ -3339,7 +3339,7 @@ fn split_parameter_entries(body -> string) -> string[] {
             if depth == 0 {
                 let segment = trim_text(current);
                 if segment.length > 0 {
-                    entries = append_string(entries, segment);
+                    entries.push(segment);
                 }
                 current = "";
                 index += 1;
@@ -3353,7 +3353,7 @@ fn split_parameter_entries(body -> string) -> string[] {
 
     let segment = trim_text(current);
     if segment.length > 0 {
-        entries = append_string(entries, segment);
+        entries.push(segment);
     }
 
     return entries;
@@ -3382,7 +3382,7 @@ fn split_whitespace(value -> string) -> string[] {
         let is_space = ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
         if is_space {
             if start >= 0 {
-                parts = append_string(parts, substring(value, start, index));
+                parts.push(substring(value, start, index));
                 start = -1;
             }
         } else if start < 0 {
@@ -3391,7 +3391,7 @@ fn split_whitespace(value -> string) -> string[] {
         index += 1;
     }
     if start >= 0 {
-        parts = append_string(parts, substring(value, start, value.length));
+        parts.push(substring(value, start, value.length));
     }
     return parts;
 }
@@ -3432,12 +3432,12 @@ fn split_lines(value -> string) -> string[] {
         }
         let ch = value[index];
         if ch == "\n" {
-            lines = append_string(lines, substring_unchecked(value, start, index));
+            lines.push(substring_unchecked(value, start, index));
             start = index + 1;
         }
         index += 1;
     }
-    lines = append_string(lines, substring_unchecked(value, start, value_len));
+    lines.push(substring_unchecked(value, start, value_len));
     return lines;
 }
 
@@ -3452,7 +3452,7 @@ fn split_comma_separated(value -> string) -> string[] {
         }
         let ch = value[index];
         if ch == "," {
-            results = append_string(results, trim_text(current));
+            results.push(trim_text(current));
             current = "";
         } else {
             current = current + ch;
@@ -3460,7 +3460,7 @@ fn split_comma_separated(value -> string) -> string[] {
         index += 1;
     }
     if current.length > 0 {
-        results = append_string(results, trim_text(current));
+        results.push(trim_text(current));
     }
     let mut filtered -> string[] = [];
     index = 0;
@@ -3470,7 +3470,7 @@ fn split_comma_separated(value -> string) -> string[] {
         }
         let entry = results[index];
         if entry.length > 0 {
-            filtered = append_string(filtered, entry);
+            filtered.push(entry);
         }
         index += 1;
     }
@@ -3908,15 +3908,15 @@ fn split_text(value -> string, delimiter -> string) -> string[] {
             break;
         }
         let actual_pos = index + pos;
-        parts = append_string(parts, substring(value, start, actual_pos));
+        parts.push(substring(value, start, actual_pos));
         start = actual_pos + delimiter.length;
         index = start;
     }
     
     if start < value.length {
-        parts = append_string(parts, substring(value, start, value.length));
+        parts.push(substring(value, start, value.length));
     } else if start == value.length {
-        parts = append_string(parts, "");
+        parts.push("");
     }
     
     return parts;

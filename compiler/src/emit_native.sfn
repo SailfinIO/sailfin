@@ -427,7 +427,7 @@ fn render_native_specifiers(specifiers -> ImportSpecifier[]) -> string {
         if index >= specifiers.length {
             break;
         }
-        parts = append_string(parts, format_native_specifier(specifiers[index].name, specifiers[index].alias));
+        parts.push(format_native_specifier(specifiers[index].name, specifiers[index].alias));
         index += 1;
     }
     return join_with_separator(parts, ", ");
@@ -440,7 +440,7 @@ fn render_export_specifiers(specifiers -> ExportSpecifier[]) -> string {
         if index >= specifiers.length {
             break;
         }
-        parts = append_string(parts, format_native_specifier(specifiers[index].name, specifiers[index].alias));
+        parts.push(format_native_specifier(specifiers[index].name, specifiers[index].alias));
         index += 1;
     }
     return join_with_separator(parts, ", ");
@@ -967,9 +967,9 @@ fn format_decorator(decorator -> Decorator) -> string {
         let argument = decorator.arguments[index];
         let value = format_expression(argument.expression);
         if argument.name != null {
-            parts = append_string(parts, argument.name + "=" + value);
+            parts.push(argument.name + "=" + value);
         } else {
-            parts = append_string(parts, value);
+            parts.push(value);
         }
         index += 1;
     }
@@ -1016,7 +1016,7 @@ fn format_parameters(parameters -> Parameter[]) -> string {
         if parameter.default_value != null {
             entry = entry + " = " + format_optional_expression(parameter.default_value);
         }
-        parts = append_string(parts, entry);
+        parts.push(entry);
         index += 1;
     }
     return join_with_separator(parts, ", ");
@@ -1037,7 +1037,7 @@ fn format_type_parameters(parameters -> TypeParameter[]) -> string {
         if parameter.bound != null {
             entry = entry + " : " + parameter.bound.text;
         }
-        parts = append_string(parts, entry);
+        parts.push(entry);
         index += 1;
     }
     return "<" + join_with_separator(parts, ", ") + ">";
@@ -1062,7 +1062,7 @@ fn format_enum_variant(variant -> EnumVariant) -> string {
         if index >= variant.fields.length {
             break;
         }
-        parts = append_string(parts, format_field(variant.fields[index]));
+        parts.push(format_field(variant.fields[index]));
         index += 1;
     }
     return variant.name + " { " + join_with_separator(parts, "; ") + " }";
@@ -1072,7 +1072,7 @@ fn compute_struct_layout_lines(context -> LayoutContext, struct_name -> string, 
     let inputs = convert_struct_fields(fields);
     let layout = calculate_record_layout(context, inputs, "struct", struct_name, append_string([], struct_name));
     let mut lines -> string[] = [];
-    lines = append_string(lines, ".layout struct name=" + struct_name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align));
+    lines.push(".layout struct name=" + struct_name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align));
     let mut index -> number = 0;
     loop {
         if index >= layout.fields.length {
@@ -1084,7 +1084,7 @@ fn compute_struct_layout_lines(context -> LayoutContext, struct_name -> string, 
         line = line + " offset=" + number_to_string(field.offset);
         line = line + " size=" + number_to_string(field.size);
         line = line + " align=" + number_to_string(field.align);
-        lines = append_string(lines, line);
+        lines.push(line);
         index += 1;
     }
     return LayoutEmitResult { lines: lines, diagnostics: layout.diagnostics };
@@ -1106,7 +1106,7 @@ fn compute_enum_layout_lines(context -> LayoutContext, statement -> Statement) -
     let mut lines -> string[] = [];
     let mut header -> string = ".layout enum name=" + statement.name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align);
     header = header + " tag_type=i32 tag_size=" + number_to_string(layout.tag_size) + " tag_align=" + number_to_string(layout.tag_align);
-    lines = append_string(lines, header);
+    lines.push(header);
     let mut variant_index -> number = 0;
     loop {
         if variant_index >= layout.variants.length {
@@ -1118,7 +1118,7 @@ fn compute_enum_layout_lines(context -> LayoutContext, statement -> Statement) -
         line = line + " offset=" + number_to_string(descriptor.offset);
         line = line + " size=" + number_to_string(descriptor.size);
         line = line + " align=" + number_to_string(descriptor.align);
-        lines = append_string(lines, line);
+        lines.push(line);
         let mut payload_index -> number = 0;
         loop {
             if payload_index >= descriptor.fields.length {
@@ -1130,7 +1130,7 @@ fn compute_enum_layout_lines(context -> LayoutContext, statement -> Statement) -
             payload_line = payload_line + " offset=" + number_to_string(payload.offset);
             payload_line = payload_line + " size=" + number_to_string(payload.size);
             payload_line = payload_line + " align=" + number_to_string(payload.align);
-            lines = append_string(lines, payload_line);
+            lines.push(payload_line);
             payload_index += 1;
         }
         variant_index += 1;
@@ -1279,7 +1279,7 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
     let trimmed = trim_text(type_annotation);
     let mut diagnostics -> string[] = [];
     if trimmed.length == 0 {
-        diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` missing type annotation; defaulting to pointer layout");
+        diagnostics.push("native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` missing type annotation; defaulting to pointer layout");
         return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
     }
     if trimmed == "number" {
@@ -1306,7 +1306,7 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
     if is_optional_annotation(trimmed) {
         let inner = trim_text(strip_optional_suffix(trimmed));
         if inner.length == 0 {
-            diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` optional type missing inner annotation; defaulting to pointer layout");
+            diagnostics.push("native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` optional type missing inner annotation; defaulting to pointer layout");
         }
         return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
     }
@@ -1351,7 +1351,7 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
         }
         return TypeLayoutInfo { size: aggregate.size, align: aggregate.align, diagnostics: diagnostics };
     }
-    diagnostics = append_string(diagnostics, "native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout");
+    diagnostics.push("native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout");
     return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
 }
 
@@ -1613,7 +1613,7 @@ fn format_expression(expression -> Expression) -> string {
             if index >= expression.arguments.length {
                 break;
             }
-            rendered = append_string(rendered, format_expression(expression.arguments[index]));
+            rendered.push(format_expression(expression.arguments[index]));
             index += 1;
         }
         let args = join_with_separator(rendered, ", ");
@@ -1633,7 +1633,7 @@ fn format_expression(expression -> Expression) -> string {
                 break;
             }
             let field = expression.fields[index];
-            rendered = append_string(rendered, field.name + ": " + format_expression(field.value));
+            rendered.push(field.name + ": " + format_expression(field.value));
             index += 1;
         }
         return "{ " + join_with_separator(rendered, ", ") + " }";
@@ -1646,7 +1646,7 @@ fn format_expression(expression -> Expression) -> string {
                 break;
             }
             let field = expression.fields[index];
-            rendered = append_string(rendered, field.name + ": " + format_expression(field.value));
+            rendered.push(field.name + ": " + format_expression(field.value));
             index += 1;
         }
         let type_name = join_with_separator(expression.type_name, ".");
@@ -1672,7 +1672,7 @@ fn format_array_expression(elements -> Expression[]) -> string {
         if index >= elements.length {
             break;
         }
-        rendered = append_string(rendered, format_expression(elements[index]));
+        rendered.push(format_expression(elements[index]));
         index += 1;
     }
     if rendered.length == 0 {
@@ -2008,7 +2008,7 @@ fn state_merge_diagnostics(state -> NativeState, entries -> string[]) -> NativeS
         if index >= entries.length {
             break;
         }
-        combined = append_string(combined, entries[index]);
+        combined.push(entries[index]);
         index += 1;
     }
     return NativeState { builder: state.builder, diagnostics: combined, layout_context: state.layout_context };
@@ -2191,7 +2191,7 @@ fn join_type_annotations(values -> TypeAnnotation[]) -> string {
         if index >= values.length {
             break;
         }
-        parts = append_string(parts, values[index].text);
+        parts.push(values[index].text);
         index += 1;
     }
     return join_with_separator(parts, ", ");

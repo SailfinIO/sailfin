@@ -1262,7 +1262,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
     // Find the = sign
     let assignment = parse_assignment_expression(after_mut);
     if !assignment.success {
-        diagnostics = append_string(diagnostics, "llvm lowering: inline let expression missing initializer");
+        diagnostics.push("llvm lowering: inline let expression missing initializer");
         return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: "", diagnostics: diagnostics };
     }
 
@@ -1282,7 +1282,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
     }
 
     if name.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: inline let expression missing variable name");
+        diagnostics.push("llvm lowering: inline let expression missing variable name");
         return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: type_annotation, initializer: initializer, diagnostics: diagnostics };
     }
 
@@ -1549,7 +1549,7 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
     let value = trim_text(substring(trimmed, 0, match_index));
     let annotation = trim_text(substring(trimmed, match_index + 4, trimmed.length));
     if value.length == 0 || annotation.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: malformed cast expression `" + text + "`");
+        diagnostics.push("llvm lowering: malformed cast expression `" + text + "`");
         return CastParseResult { recognized: true, success: false, value: value, type_annotation: annotation, diagnostics: diagnostics };
     }
     return CastParseResult { recognized: true, success: true, value: value, type_annotation: annotation, diagnostics: diagnostics };

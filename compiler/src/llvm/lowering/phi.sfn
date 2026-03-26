@@ -58,7 +58,7 @@ fn collect_mutation_names(mutations -> LocalMutation[]) -> string[] {
             check_index += 1;
         }
         if !already_added {
-            names = append_string(names, mutation.name);
+            names.push(mutation.name);
         }
         index += 1;
     }
@@ -184,7 +184,7 @@ fn insert_lines_before_index(lines -> string[], index -> number, insert_lines ->
             result = extend_string_array(result, insert_lines);
             inserted = true;
         }
-        result = append_string(result, lines[line_idx]);
+        result.push(lines[line_idx]);
         line_idx += 1;
     }
 
@@ -273,7 +273,7 @@ fn materialize_mutation_values_at_exit(
             let load_temp = format_temp_name(current_temp);
             current_temp += 1;
             let load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
-            load_lines = append_string(load_lines, load_line);
+            load_lines.push(load_line);
 
             let updated = LocalMutation {
                 name: mutation.name,
@@ -301,7 +301,7 @@ fn materialize_mutation_values_at_exit(
                 if append_idx >= load_lines.length {
                     break;
                 }
-                updated_lines = append_string(updated_lines, load_lines[append_idx]);
+                updated_lines.push(load_lines[append_idx]);
                 append_idx += 1;
             }
         }
@@ -338,7 +338,7 @@ fn materialize_mutation_values_at_label(
             let load_temp = format_temp_name(current_temp);
             current_temp += 1;
             let load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
-            updated_lines = append_string(updated_lines, load_line);
+            updated_lines.push(load_line);
 
             let updated = LocalMutation {
                 name: mutation.name,
@@ -410,8 +410,8 @@ fn emit_phi_merges_for_straight_if(
                     "[ " + preloaded_value + ", %" + base_label + " ]",
                 ];
                 let entry = build_phi_and_store(local, mutation.llvm_type, phi_inputs, current_temp);
-                phi_lines = append_string(phi_lines, entry.phi_line);
-                store_lines = append_string(store_lines, entry.store_line);
+                phi_lines.push(entry.phi_line);
+                store_lines.push(entry.store_line);
                 current_temp += 1;
             }
         }
@@ -468,7 +468,7 @@ fn emit_phi_merges_for_if_else(
             check_idx += 1;
         }
         if !already_added {
-            mutated_names = append_string(mutated_names, else_name);
+            mutated_names.push(else_name);
         }
         else_idx += 1;
     }
@@ -515,13 +515,13 @@ fn emit_phi_merges_for_if_else(
                             then_source_label = then_label;
                         }
                     }
-                    phi_inputs = append_string(phi_inputs, "[ " + then_mutation.value_name + ", %" + then_source_label + " ]");
+                    phi_inputs.push("[ " + then_mutation.value_name + ", %" + then_source_label + " ]");
                 } else if preloaded_value != null && allow_preloaded_fallback {
                     let mut fallback_label -> string = then_exit_label;
                     if fallback_label.length == 0 {
                         fallback_label = then_label;
                     }
-                    phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + fallback_label + " ]");
+                    phi_inputs.push("[ " + preloaded_value + ", %" + fallback_label + " ]");
                 }
             }
 
@@ -535,21 +535,21 @@ fn emit_phi_merges_for_if_else(
                             else_source_label = else_label;
                         }
                     }
-                    phi_inputs = append_string(phi_inputs, "[ " + else_mutation.value_name + ", %" + else_source_label + " ]");
+                    phi_inputs.push("[ " + else_mutation.value_name + ", %" + else_source_label + " ]");
                 } else if preloaded_value != null && allow_preloaded_fallback {
                     let mut fallback_label -> string = else_exit_label;
                     if fallback_label.length == 0 {
                         fallback_label = else_label;
                     }
-                    phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + fallback_label + " ]");
+                    phi_inputs.push("[ " + preloaded_value + ", %" + fallback_label + " ]");
                 }
             }
 
             // Only emit phi if we have at least 2 inputs
             if phi_inputs.length >= 2 {
                 let entry = build_phi_and_store(local, llvm_type, phi_inputs, current_temp);
-                phi_lines = append_string(phi_lines, entry.phi_line);
-                store_lines = append_string(store_lines, entry.store_line);
+                phi_lines.push(entry.phi_line);
+                store_lines.push(entry.store_line);
                 current_temp += 1;
             }
         }
@@ -605,7 +605,7 @@ fn emit_phi_merges_for_match(
                 check_idx += 1;
             }
             if !already_added {
-                mutated_names = append_string(mutated_names, arm_name);
+                mutated_names.push(arm_name);
             }
             name_idx += 1;
         }
@@ -646,9 +646,9 @@ fn emit_phi_merges_for_match(
                         if arm_mutation.llvm_type.length > 0 {
                             llvm_type = arm_mutation.llvm_type;
                         }
-                        phi_inputs = append_string(phi_inputs, "[ " + arm_mutation.value_name + ", %" + arm.label + " ]");
+                        phi_inputs.push("[ " + arm_mutation.value_name + ", %" + arm.label + " ]");
                     } else if preloaded_value != null && allow_preloaded_fallback {
-                        phi_inputs = append_string(phi_inputs, "[ " + preloaded_value + ", %" + arm.label + " ]");
+                        phi_inputs.push("[ " + preloaded_value + ", %" + arm.label + " ]");
                     }
                 }
 
@@ -658,8 +658,8 @@ fn emit_phi_merges_for_match(
             // Only emit phi if we have at least 2 inputs
             if phi_inputs.length >= 2 {
                 let entry = build_phi_and_store(local, llvm_type, phi_inputs, current_temp);
-                phi_lines = append_string(phi_lines, entry.phi_line);
-                store_lines = append_string(store_lines, entry.store_line);
+                phi_lines.push(entry.phi_line);
+                store_lines.push(entry.store_line);
                 current_temp += 1;
             }
         }

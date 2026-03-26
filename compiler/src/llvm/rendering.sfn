@@ -39,7 +39,7 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
         if interface.type_parameters.length > 0 {
             header = header + "<" + join_with_separator(interface.type_parameters, ", ") + ">";
         }
-        interface_lines = append_string(interface_lines, header);
+        interface_lines.push(header);
 
         let mut signature_index -> number = 0;
         loop {
@@ -48,11 +48,11 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
             }
             let signature = interface.signatures[signature_index];
             let rendered = render_interface_signature(signature);
-            interface_lines = append_string(interface_lines, ";   " + rendered);
+            interface_lines.push(";   " + rendered);
             signature_index += 1;
         }
         if interface.signatures.length == 0 {
-            interface_lines = append_string(interface_lines, ";   ; no signatures recorded");
+            interface_lines.push(";   ; no signatures recorded");
         }
         index += 1;
     }
@@ -65,7 +65,7 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
         }
         let implementation = metadata.implementations[index];
         let mut line -> string = "; struct " + implementation.struct_name + " implements " + join_with_separator(implementation.interfaces, ", ");
-        struct_lines = append_string(struct_lines, line);
+        struct_lines.push(line);
         index += 1;
     }
 
@@ -74,7 +74,7 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
     }
 
     let mut lines -> string[] = [];
-    lines = append_string(lines, "; -- Trait Metadata --------------------------------");
+    lines.push("; -- Trait Metadata --------------------------------");
     let mut _ci0 -> number = 0;
     loop {
         if _ci0 >= interface_lines.length { break; }
@@ -82,7 +82,7 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
         _ci0 += 1;
     }
     if interface_lines.length > 0 && struct_lines.length > 0 {
-        lines = append_string(lines, ";");
+        lines.push(";");
     }
     let mut _ci1 -> number = 0;
     loop {
@@ -90,7 +90,7 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
         lines.push(struct_lines[_ci1]);
         _ci1 += 1;
     }
-    lines = append_string(lines, "; -----------------------------------------------");
+    lines.push("; -----------------------------------------------");
     return lines;
 }
 
@@ -109,7 +109,7 @@ fn render_runtime_helper_declarations(used_targets -> string[], local_functions 
         if local_index >= local_functions.length {
             break;
         }
-        local_symbols = append_string(local_symbols, sanitize_symbol(local_functions[local_index].name));
+        local_symbols.push(sanitize_symbol(local_functions[local_index].name));
         local_index += 1;
     }
 
@@ -137,15 +137,15 @@ fn render_runtime_helper_declarations(used_targets -> string[], local_functions 
             // Emit capability metadata comment if the intrinsic has effects
             if descriptor.effects.length > 0 {
                 let effects_text = join_with_separator(descriptor.effects, ", ");
-                lines = append_string(lines, "; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]");
+                lines.push("; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]");
             }
             let mut parameter_text -> string = "";
             if descriptor.parameter_types.length > 0 {
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ");
             }
             let line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")";
-            lines = append_string(lines, line);
-            declared_symbols = append_string(declared_symbols, descriptor.symbol);
+            lines.push(line);
+            declared_symbols.push(descriptor.symbol);
         }
         index += 1;
     }
@@ -168,7 +168,7 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
         if helper_index >= helper_descriptors.length {
             break;
         }
-        helper_symbols = append_string(helper_symbols, helper_descriptors[helper_index].symbol);
+        helper_symbols.push(helper_descriptors[helper_index].symbol);
         helper_index += 1;
     }
 
@@ -179,7 +179,7 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
         if local_index >= local_functions.length {
             break;
         }
-        local_symbols = append_string(local_symbols, sanitize_symbol(local_functions[local_index].name));
+        local_symbols.push(sanitize_symbol(local_functions[local_index].name));
         local_index += 1;
     }
 
@@ -202,7 +202,7 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
             index += 1;
             continue;
         }
-        emitted_declarations = append_string(emitted_declarations, sanitized_name);
+        emitted_declarations.push(sanitized_name);
         let mut return_type = map_return_type(context, function.return_type);
         if index_of(sanitized_name, "parse_native_artifact") >= 0 {
             return_type = "i8*";
@@ -210,7 +210,7 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
         let param_types = collect_parameter_types(context, function.parameters, function.name);
         let param_text = join_with_separator(param_types, ", ");
         let line = "declare " + return_type + " @" + sanitized_name + "(" + param_text + ")";
-        lines = append_string(lines, line);
+        lines.push(line);
         index += 1;
     }
     return lines;
@@ -254,7 +254,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
             let field_type = info.fields[field_index].llvm_type;
             let extracted = extract_struct_type_from_llvm(field_type);
             if extracted.length > 0 && !string_array_contains(referenced_types, extracted) {
-                referenced_types = append_string(referenced_types, extracted);
+                referenced_types.push(extracted);
             }
             field_index += 1;
         }
@@ -286,7 +286,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
                 let field_type = variant.fields[variant_field_index].llvm_type;
                 let extracted = extract_struct_type_from_llvm(field_type);
                 if extracted.length > 0 && !string_array_contains(referenced_types, extracted) {
-                    referenced_types = append_string(referenced_types, extracted);
+                    referenced_types.push(extracted);
                 }
                 variant_field_index += 1;
             }
@@ -319,7 +319,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
         let return_llvm_type = map_return_type(context, safe_return_type);
         let extracted_return = extract_struct_type_from_llvm(return_llvm_type);
         if extracted_return.length > 0 && !string_array_contains(referenced_types, extracted_return) {
-            referenced_types = append_string(referenced_types, extracted_return);
+            referenced_types.push(extracted_return);
         }
         // Check each parameter type
         let mut param_index -> number = 0;
@@ -330,7 +330,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
             let param_llvm_type = map_parameter_type(context, safe_params[param_index].type_annotation);
             let extracted_param = extract_struct_type_from_llvm(param_llvm_type);
             if extracted_param.length > 0 && !string_array_contains(referenced_types, extracted_param) {
-                referenced_types = append_string(referenced_types, extracted_param);
+                referenced_types.push(extracted_param);
             }
             param_index += 1;
         }
@@ -375,7 +375,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
         }
         if !is_defined {
             // Emit opaque declaration
-            lines = append_string(lines, ref_type + " = type opaque");
+            lines.push(ref_type + " = type opaque");
         }
         ref_index += 1;
     }
@@ -393,7 +393,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
             index += 1;
             continue;
         }
-        emitted_types = append_string(emitted_types, info.llvm_name);
+        emitted_types.push(info.llvm_name);
 
         let mut field_types -> string[] = [];
         let mut field_index -> number = 0;
@@ -402,7 +402,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
             if field_index >= safe_field_count {
                 break;
             }
-            field_types = append_string(field_types, info.fields[field_index].llvm_type);
+            field_types.push(info.fields[field_index].llvm_type);
             field_index += 1;
         }
         let mut body -> string = "";
@@ -411,7 +411,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
         } else {
             body = "{ " + join_with_separator(field_types, ", ") + " }";
         }
-        lines = append_string(lines, info.llvm_name + " = type " + body);
+        lines.push(info.llvm_name + " = type " + body);
         index += 1;
     }
     return lines;
@@ -438,7 +438,7 @@ fn render_enum_type_definitions(context -> TypeContext) -> string[] {
             index += 1;
             continue;
         }
-        emitted_types = append_string(emitted_types, enum_llvm_name);
+        emitted_types.push(enum_llvm_name);
 
         // Map tag type to LLVM type
         let mut llvm_tag_type -> string = "i32";
@@ -528,7 +528,7 @@ fn render_enum_type_definitions(context -> TypeContext) -> string[] {
         }
 
         let body = "{ " + llvm_tag_type + pad_repr + payload_repr + " }";
-        lines = append_string(lines, enum_info.llvm_name + " = type " + body);
+        lines.push(enum_info.llvm_name + " = type " + body);
         index += 1;
     }
     return lines;
@@ -549,7 +549,7 @@ fn render_interface_type_definitions(context -> TypeContext) -> string[] {
         let interface_info = context.interfaces[index];
         // Trait object layout: { data_ptr, vtable_ptr }
         let body = "{ i8*, i8* }";
-        lines = append_string(lines, interface_info.llvm_name + " = type " + body);
+        lines.push(interface_info.llvm_name + " = type " + body);
         index += 1;
     }
     return lines;
@@ -573,7 +573,7 @@ fn render_vtable_type_definitions(context -> TypeContext) -> string[] {
             if entry_index >= vtable.entries.length {
                 break;
             }
-            entry_types = append_string(entry_types, vtable.entries[entry_index].function_pointer_type);
+            entry_types.push(vtable.entries[entry_index].function_pointer_type);
             entry_index += 1;
         }
         let mut body -> string = "";
@@ -582,7 +582,7 @@ fn render_vtable_type_definitions(context -> TypeContext) -> string[] {
         } else {
             body = "{ " + join_with_separator(entry_types, ", ") + " }";
         }
-        lines = append_string(lines, vtable.llvm_type_name + " = type " + body);
+        lines.push(vtable.llvm_type_name + " = type " + body);
         index += 1;
     }
     return lines;
@@ -607,7 +607,7 @@ fn render_vtable_constants(context -> TypeContext) -> string[] {
             // Cast the method to i8* function pointer type
             let cast_value = "bitcast (" + entry.function_pointer_type + " @" + sanitized_method + " to " + entry.function_pointer_type + ")";
             let typed_value = entry.function_pointer_type + " " + cast_value;
-            entry_values = append_string(entry_values, typed_value);
+            entry_values.push(typed_value);
             entry_index += 1;
         }
         let mut body -> string = "";
@@ -619,7 +619,7 @@ fn render_vtable_constants(context -> TypeContext) -> string[] {
         // Vtable globals are safe to keep module-local.
         // Marking them internal avoids duplicate symbol collisions when linking
         // multiple LLVM modules that share the same type context.
-        lines = append_string(lines, vtable.llvm_global_name + " = internal constant " + vtable.llvm_type_name + " " + body);
+        lines.push(vtable.llvm_global_name + " = internal constant " + vtable.llvm_type_name + " " + body);
         index += 1;
     }
     return lines;
@@ -640,7 +640,7 @@ fn render_test_harness_main(tests -> NativeFunction[]) -> string[] {
             break;
         }
         let sym = sanitize_symbol(tests[index].name);
-        lines = append_string(lines, "  call void @" + sym + "()");
+        lines.push("  call void @" + sym + "()");
         index += 1;
     }
     lines.push("  ret i32 0");
@@ -691,7 +691,7 @@ fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
         if parameter.default_value != null {
             entry = entry + " = " + parameter.default_value;
         }
-        rendered = append_string(rendered, entry);
+        rendered.push(entry);
         index += 1;
     }
     return join_with_separator(rendered, ", ");
@@ -761,9 +761,9 @@ fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter
             }
         }
         if llvm_type.length == 0 {
-            types = append_string(types, "double");
+            types.push("double");
         } else {
-            types = append_string(types, llvm_type);
+            types.push(llvm_type);
         }
         index += 1;
     }
@@ -838,7 +838,7 @@ fn collect_exported_symbol_names(imports -> NativeImport[]) -> string[] {
                 if spec != null {
                     let exported = spec.name;
                     if exported != null && exported.length > 0 && !string_array_contains(names, exported) {
-                        names = append_string(names, exported);
+                        names.push(exported);
                     }
                 }
                 spec_index += 1;

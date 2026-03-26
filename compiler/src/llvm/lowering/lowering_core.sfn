@@ -656,7 +656,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         // --- .meta effects (FLAT — combined condition) ---
         if is_meta_effects && effects_text_raw != "none" && effects_text_raw.length > 0 {
             let mut parsed_effects -> string[] = [];
-            parsed_effects = append_string(parsed_effects, effects_text_raw);
+            parsed_effects.push(effects_text_raw);
             current = update_function_effects(current, parsed_effects);
             index += 1;
             continue;
@@ -1169,7 +1169,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
     let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
     let mut updated = base;
     if updated.lines.length > 0 {
-        updated.lines = append_string(updated.lines, "");
+        updated.lines.push("");
     }
     updated.lines = extend_string_lines(updated.lines, harness);
     return updated;
@@ -1402,7 +1402,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_structs = [];
     }
     if safe_structs.length > 100000 {
-        diagnostics = append_string(diagnostics, "llvm lowering: struct list too large (" + number_to_string(safe_structs.length) + "); dropping");
+        diagnostics.push("llvm lowering: struct list too large (" + number_to_string(safe_structs.length) + "); dropping");
         safe_structs = [];
     }
     let mut safe_enums = parse.enums;
@@ -1424,7 +1424,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_enums = [];
     }
     if safe_enums.length > 100000 {
-        diagnostics = append_string(diagnostics, "llvm lowering: enum list too large (" + number_to_string(safe_enums.length) + "); dropping");
+        diagnostics.push("llvm lowering: enum list too large (" + number_to_string(safe_enums.length) + "); dropping");
         safe_enums = [];
     }
     if _trace_enums {
@@ -1438,7 +1438,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_interfaces = [];
     }
     if safe_interfaces.length > 100000 {
-        diagnostics = append_string(diagnostics, "llvm lowering: interface list too large (" + number_to_string(safe_interfaces.length) + "); dropping");
+        diagnostics.push("llvm lowering: interface list too large (" + number_to_string(safe_interfaces.length) + "); dropping");
         safe_interfaces = [];
     }
     if debug_lowering {
@@ -1540,7 +1540,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
     }
     if safe_functions.length > 200000 {
-        diagnostics = append_string(diagnostics, "llvm lowering: function list too large (" + number_to_string(safe_functions.length) + "); dropping");
+        diagnostics.push("llvm lowering: function list too large (" + number_to_string(safe_functions.length) + "); dropping");
         safe_functions = [];
     }
     if debug_lowering {
@@ -1612,7 +1612,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_bindings = [];
     }
     if safe_bindings.length > 200000 {
-        diagnostics = append_string(diagnostics, "llvm lowering: binding list too large (" + number_to_string(safe_bindings.length) + "); dropping");
+        diagnostics.push("llvm lowering: binding list too large (" + number_to_string(safe_bindings.length) + "); dropping");
         safe_bindings = [];
     }
     let mut safe_parse_diagnostics = parse.diagnostics;
@@ -2008,17 +2008,17 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     // `@sailfin_runtime_copy_bytes` that do not appear in Native IR call targets.
     // Ensure the declaration is always present to keep per-module clang compiles valid.
     if !string_array_contains(runtime_helpers, "copy_bytes") {
-        runtime_helpers = append_string(runtime_helpers, "copy_bytes");
+        runtime_helpers.push("copy_bytes");
     }
     // `lower_array_push_in_place` emits a direct call to `@sailfin_runtime_array_push_slot`.
     // This helper target must be present so we emit the corresponding declaration.
     if !string_array_contains(runtime_helpers, "array_push_slot") {
-        runtime_helpers = append_string(runtime_helpers, "array_push_slot");
+        runtime_helpers.push("array_push_slot");
     }
     // `lower_array_push_in_place` uses `@sailfin_runtime_append_string` for `i8*` arrays.
     // This helper target must be present so we emit the corresponding declaration.
     if !string_array_contains(runtime_helpers, "append_string") {
-        runtime_helpers = append_string(runtime_helpers, "append_string");
+        runtime_helpers.push("append_string");
     }
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     runtime_helpers = append_unique_effect(runtime_helpers, "print.info");
@@ -2062,8 +2062,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let mut function_effects -> FunctionEffectEntry[] = [];
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut lines -> string[] = [];
-    lines = append_string(lines, "source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
-    lines = append_string(lines, "");
+    lines.push("source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
+    lines.push("");
 
     if debug_lowering {
         print.warn("emit-llvm: phase=render_traits");
@@ -2071,7 +2071,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let trait_lines = render_trait_metadata_comments(trait_metadata);
     if trait_lines.length > 0 {
         lines = extend_string_lines(lines, trait_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     if debug_lowering {
@@ -2101,7 +2101,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     if _stl_valid {
         lines = extend_string_lines(lines, struct_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
     // Supplement struct type definitions from .struct_info file when the cross-module
     // render_struct_type_definitions produced nothing or corrupted output.
@@ -2155,9 +2155,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                         _std_first = false;
                     }
                 }
-                lines = append_string(lines, _std_llvm + " = type { " + _std_ftypes + " }");
+                lines.push(_std_llvm + " = type { " + _std_ftypes + " }");
             }
-            lines = append_string(lines, "");
+            lines.push("");
         }
     }
 
@@ -2167,7 +2167,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let enum_type_lines = render_enum_type_definitions(type_context);
     if enum_type_lines.length > 0 {
         lines = extend_string_lines(lines, enum_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     if debug_lowering {
@@ -2176,7 +2176,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let interface_type_lines = render_interface_type_definitions(type_context);
     if interface_type_lines.length > 0 {
         lines = extend_string_lines(lines, interface_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     // Async/future runtime types (opaque in LLVM; implemented by the native runtime).
@@ -2209,7 +2209,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if vtable_type_lines != null {
         if vtable_type_lines.length > 0 {
         lines = extend_string_lines(lines, vtable_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
         }
     }
 
@@ -2217,7 +2217,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if vtable_const_lines != null {
         if vtable_const_lines.length > 0 {
         lines = extend_string_lines(lines, vtable_const_lines);
-        lines = append_string(lines, "");
+        lines.push("");
         }
     }
 
@@ -2228,7 +2228,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if helper_declarations != null {
         if helper_declarations.length > 0 {
         lines = extend_string_lines(lines, helper_declarations);
-        lines = append_string(lines, "");
+        lines.push("");
         }
     }
 
@@ -2240,22 +2240,22 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if imported_declarations != null {
         if imported_declarations.length > 0 {
         lines = extend_string_lines(lines, imported_declarations);
-        lines = append_string(lines, "");
+        lines.push("");
         }
     }
 
     // Provide libc declarations for common helpers when not declared in the module.
     if find_function_by_name(context_functions, "malloc") == null {
-        lines = append_string(lines, "declare noalias i8* @malloc(i64)");
+        lines.push("declare noalias i8* @malloc(i64)");
     }
     if find_function_by_name(context_functions, "free") == null {
-        lines = append_string(lines, "declare void @free(i8*)");
+        lines.push("declare void @free(i8*)");
     }
-    lines = append_string(lines, "");
+    lines.push("");
 
     // Declare the runtime global (provided by the Python bootstrap runtime)
-    lines = append_string(lines, "@runtime = external global i8**");
-    lines = append_string(lines, "");
+    lines.push("@runtime = external global i8**");
+    lines.push("");
 
     // Lower module-level `let` bindings into LLVM globals (and an optional init function).
     if debug_lowering {
@@ -2284,7 +2284,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     } else {
         module_globals = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
         if module_globals == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: module globals returned null; using empty defaults");
+            diagnostics.push("llvm lowering: module globals returned null; using empty defaults");
             module_globals = ModuleGlobalLoweringResult {
                 preamble_lines: [],
                 init_function_lines: [],
@@ -2315,12 +2315,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     diagnostics = extend_string_lines_checked(diagnostics, module_globals.diagnostics, "module globals");
     if module_preamble_lines.length > 0 {
         lines = extend_string_lines(lines, module_preamble_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     if module_init_lines.length > 0 {
         lines = extend_string_lines(lines, module_init_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
     if trace {
         print.info("test llvm: module globals lowered");
@@ -2532,7 +2532,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             }
             let _ep_next = index + 1;
             if _ep_next < local_functions.length {
-                lines = append_string(lines, "");
+                lines.push("");
             }
             if trace {
                 print.info("test llvm: function post-merge blank " + safe_function_name);
@@ -2568,7 +2568,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
 
     if !has_add_function {
         // Keep the generated helper separated from prior output.
-        lines = append_string(lines, "");
+        lines.push("");
         lines = extend_string_lines(lines, [
             "define internal double @add(double %a, double %b) {",
             "entry:",
@@ -2581,9 +2581,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let string_constant_lines = render_string_constants(all_string_constants);
     if string_constant_lines != null {
         if string_constant_lines.length > 0 {
-        lines = append_string(lines, "");
+        lines.push("");
         lines = append_string_lines(lines, string_constant_lines);
-        lines = append_string(lines, "");
+        lines.push("");
         }
     }
     if trace {
@@ -2703,7 +2703,7 @@ fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
         if index >= safe_values.length {
             break;
         }
-        out = append_string(out, safe_values[index]);
+        out.push(safe_values[index]);
         index += 1;
     }
     index = 0;
@@ -2711,7 +2711,7 @@ fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
         if index >= safe_extras.length {
             break;
         }
-        out = append_string(out, safe_extras[index]);
+        out.push(safe_extras[index]);
         index += 1;
     }
     return out;
@@ -2774,7 +2774,7 @@ fn append_string_lines(values -> string[], extras -> string[]) -> string[] {
         if index >= safe_extras.length {
             break;
         }
-        out = out.push(safe_extras[index]);
+        out.push(safe_extras[index]);
         index += 1;
     }
     return out;
@@ -2794,7 +2794,7 @@ fn extend_string_lines_checked(values -> string[], extras -> string[], label -> 
     }
     if safe_extras.length > 1000000 {
         let mut out = safe_values;
-        out = append_string(out, "llvm lowering: skipped oversized " + label + " diagnostics (len=" + number_to_string(extras.length) + ")");
+        out.push("llvm lowering: skipped oversized " + label + " diagnostics (len=" + number_to_string(extras.length) + ")");
         return out;
     }
     return extend_string_lines(safe_values, safe_extras);
@@ -2860,8 +2860,8 @@ fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
     // instead of inserting near the header to avoid rebuilding large `string[]`
     // buffers, which has exhibited stage2-native corruption in some modules.
     let mut out = lines;
-    out = append_string(out, "");
-    out = append_string(out, "declare double @round(double)");
+    out.push("");
+    out.push("declare double @round(double)");
     return out;
 }
 
@@ -2873,13 +2873,13 @@ fn insert_string_at(values -> string[], insert_index -> number, value -> string)
             break;
         }
         if index == insert_index {
-            out = append_string(out, value);
+            out.push(value);
         }
-        out = append_string(out, values[index]);
+        out.push(values[index]);
         index += 1;
     }
     if insert_index >= values.length {
-        out = append_string(out, value);
+        out.push(value);
     }
     return out;
 }

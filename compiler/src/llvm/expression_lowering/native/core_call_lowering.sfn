@@ -127,7 +127,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let empty_constants = empty_string_constant_set();
     let mut trimmed_target = trim_text(target);
     if trimmed_target.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: call target missing");
+        diagnostics.push("llvm lowering: call target missing");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
@@ -328,7 +328,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             current_lines = lowered_self.lines;
             current_temp = lowered_self.temp_index;
             if lowered_self.operand == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
             }
 
@@ -396,7 +396,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                         trimmed_target = method_info.name + "::" + method_parse.field;
                         injected_argument_count = 1;
                     } else {
-                        diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                        diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
                         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
                     }
                 }
@@ -416,13 +416,18 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                     trimmed_target = method_info.name + "::" + method_parse.field;
                     injected_argument_count = 1;
                 } else {
-                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
                 }
             }
         } else if interface_info != null {
             let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
-            diagnostics = diagnostics.concat(lowered_self.diagnostics);
+            let mut _ci5 -> number = 0;
+            loop {
+                if _ci5 >= lowered_self.diagnostics.length { break; }
+                diagnostics.push(lowered_self.diagnostics[_ci5]);
+                _ci5 += 1;
+            }
             collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
             current_lines = lowered_self.lines;
             current_temp = lowered_self.temp_index;
@@ -431,7 +436,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                 trimmed_target = "trait_dispatch::" + interface_info.name + "::" + method_parse.field;
                 injected_argument_count = 1;
             } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
             }
         } else {
@@ -441,12 +446,17 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             } else {
                 let field_helper = find_runtime_helper(method_parse.field);
                 let lowered_self = lower_expression(method_parse.base, bindings, locals, current_temp, current_lines, functions, context, "");
-                diagnostics = diagnostics.concat(lowered_self.diagnostics);
+                let mut _ci6 -> number = 0;
+                loop {
+                    if _ci6 >= lowered_self.diagnostics.length { break; }
+                    diagnostics.push(lowered_self.diagnostics[_ci6]);
+                    _ci6 += 1;
+                }
                 collected_string_constants = merge_string_constants(collected_string_constants, lowered_self.string_constants);
                 current_lines = lowered_self.lines;
                 current_temp = lowered_self.temp_index;
                 if lowered_self.operand == null {
-                    diagnostics = append_string(diagnostics, "llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
                 }
 
@@ -544,7 +554,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             if function_entry.is_async {
                 let future_return = future_pointer_type_for_return_type(function_entry.return_type);
                 if future_return.length == 0 {
-                    diagnostics = append_string(diagnostics, "llvm lowering: async function `" + trimmed_target + "` has unsupported return type `" + function_entry.return_type + "`");
+                    diagnostics.push("llvm lowering: async function `" + trimmed_target + "` has unsupported return type `" + function_entry.return_type + "`");
                     llvm_return = "i8*";
                 } else {
                     llvm_return = future_return;
@@ -553,13 +563,13 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             } else {
                 llvm_return = map_return_type(context, function_entry.return_type);
                 if llvm_return.length == 0 {
-                    diagnostics = append_string(diagnostics, "llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
+                    diagnostics.push("llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
                     llvm_return = "i8*";
                 }
                 expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target);
             }
         } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: call to unknown function `" + trimmed_target + "`");
+            diagnostics.push("llvm lowering: call to unknown function `" + trimmed_target + "`");
         }
     }
 
@@ -592,7 +602,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
         let argument_text = trim_text(get_string_at(arguments, index));
         if argument_text.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: empty argument in call to `" + trimmed_target + "`");
+            diagnostics.push("llvm lowering: empty argument in call to `" + trimmed_target + "`");
         }
         let mut argument_expected_type -> string = "";
         let parameter_index = index + injected_argument_count;
@@ -607,7 +617,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         if lowered.operand != null {
             operands.push(lowered.operand);
         } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
+            diagnostics.push("llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
         }
         index += 1;
     }
@@ -629,7 +639,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
 
     let expected_operand_count = arguments.length + injected_argument_count;
     if operands.length != expected_operand_count {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors");
+        diagnostics.push("llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
@@ -673,7 +683,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             current_lines = lowered_default.lines;
             current_temp = lowered_default.temp_index;
             if lowered_default.operand == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower default argument for parameter `" + param.name + "` in call to `" + trimmed_target + "`");
+                diagnostics.push("llvm lowering: failed to lower default argument for parameter `" + param.name + "` in call to `" + trimmed_target + "`");
                 break;
             }
             operands.push(lowered_default.operand);
@@ -690,12 +700,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                     let stripped = strip_pointer_suffix(self_operand.llvm_type);
                     if stripped == expected_self_type {
                         let load_name = format_temp_name(current_temp);
-                        current_lines = append_string(current_lines, "  " + load_name + " = load " + expected_self_type + ", " + expected_self_type + "* " + self_operand.value);
+                        current_lines.push("  " + load_name + " = load " + expected_self_type + ", " + expected_self_type + "* " + self_operand.value);
                         current_temp += 1;
                         let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: load_name };
                         operands = replace_llvm_operand(operands, 0, updated_operand);
                     } else {
-                        diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                        diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
                     }
                 } else if ends_with_pointer_suffix(expected_self_type) {
                     let base_name = trim_text(method_parse.base);
@@ -712,7 +722,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                             } else if parameter_pointer != null && parameter_pointer.llvm_type == strip_pointer_suffix(expected_self_type) {
                                 // avoid warning
                             } else {
-                                diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                                diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
                             }
                         }
                     } else {
@@ -720,11 +730,11 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                         if self_operand.llvm_type == receiver_base && (starts_with(receiver_base, "%") || starts_with(receiver_base, "{")) {
                             // ok
                         } else {
-                            diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                            diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
                         }
                     }
                 } else {
-                    diagnostics = append_string(diagnostics, "llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                    diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
                 }
             }
         }
@@ -751,7 +761,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             current_lines = coerced.lines;
             current_temp = coerced.temp_index;
             if coerced.operand == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
+                diagnostics.push("llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
                 let placeholder = LLVMOperand { llvm_type: "i8*", value: "null" };
                 coerced_operands.push(placeholder);
             } else {
@@ -765,7 +775,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     if is_array_concat && array_concat_element_type.length > 0 && !ends_with_pointer_suffix(array_concat_element_type) {
         if operands.length >= 2 {
             let concat_result = lower_struct_array_concat(operands[0], operands[1], array_concat_element_type, current_lines, current_temp);
-            diagnostics = diagnostics.concat(concat_result.diagnostics);
+            let mut _ci7 -> number = 0;
+            loop {
+                if _ci7 >= concat_result.diagnostics.length { break; }
+                diagnostics.push(concat_result.diagnostics[_ci7]);
+                _ci7 += 1;
+            }
             current_lines = concat_result.lines;
             current_temp = concat_result.temp_index;
             if concat_result.operand == null {
@@ -773,7 +788,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             }
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: concat_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
         } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: concat requires two operands");
+            diagnostics.push("llvm lowering: concat requires two operands");
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
     }
@@ -781,7 +796,12 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     if is_array_push && array_push_element_type.length > 0 {
         if operands.length >= 2 {
             let push_result = lower_array_push_in_place(operands[0], operands[1], array_push_element_type, current_lines, current_temp);
-            diagnostics = diagnostics.concat(push_result.diagnostics);
+            let mut _ci8 -> number = 0;
+            loop {
+                if _ci8 >= push_result.diagnostics.length { break; }
+                diagnostics.push(push_result.diagnostics[_ci8]);
+                _ci8 += 1;
+            }
             current_lines = push_result.lines;
             current_temp = push_result.temp_index;
             if push_result.operand == null {
@@ -789,14 +809,14 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             }
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: push_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
         } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: push requires two operands");
+            diagnostics.push("llvm lowering: push requires two operands");
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
     }
 
     if function_entry != null || helper_descriptor != null {
         if expected_params.length != operands.length {
-            diagnostics = append_string(diagnostics, "llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(operands.length));
+            diagnostics.push("llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(operands.length));
         }
     }
 
@@ -806,7 +826,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         if index >= operands.length {
             break;
         }
-        rendered_args = append_string(rendered_args, format_typed_operand(operands[index]));
+        rendered_args.push(format_typed_operand(operands[index]));
         index += 1;
     }
     let argument_text = join_with_separator(rendered_args, ", ");
@@ -823,11 +843,11 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
 
                 let data_ptr_temp = "%t" + number_to_string(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 0");
+                current_lines.push("  " + data_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 0");
 
                 let vtable_ptr_temp = "%t" + number_to_string(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + vtable_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 1");
+                current_lines.push("  " + vtable_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 1");
 
                 let interface_info3 = find_interface_info_by_name(context, interface_name);
                 if interface_info3 != null {
@@ -851,7 +871,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                             if arg_idx >= operands.length {
                                 break;
                             }
-                            fp_param_types = append_string(fp_param_types, operands[arg_idx].llvm_type);
+                            fp_param_types.push(operands[arg_idx].llvm_type);
                             arg_idx += 1;
                         }
                         let fp_params = join_with_separator(fp_param_types, ", ");
@@ -859,19 +879,19 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
 
                         let vtable_slots_temp = "%t" + number_to_string(current_temp);
                         current_temp += 1;
-                        current_lines = append_string(current_lines, "  " + vtable_slots_temp + " = bitcast i8* " + vtable_ptr_temp + " to i8**");
+                        current_lines.push("  " + vtable_slots_temp + " = bitcast i8* " + vtable_ptr_temp + " to i8**");
 
                         let slot_ptr_temp = "%t" + number_to_string(current_temp);
                         current_temp += 1;
-                        current_lines = append_string(current_lines, "  " + slot_ptr_temp + " = getelementptr i8*, i8** " + vtable_slots_temp + ", i64 " + number_to_string(method_index));
+                        current_lines.push("  " + slot_ptr_temp + " = getelementptr i8*, i8** " + vtable_slots_temp + ", i64 " + number_to_string(method_index));
 
                         let raw_ptr_temp = "%t" + number_to_string(current_temp);
                         current_temp += 1;
-                        current_lines = append_string(current_lines, "  " + raw_ptr_temp + " = load i8*, i8** " + slot_ptr_temp);
+                        current_lines.push("  " + raw_ptr_temp + " = load i8*, i8** " + slot_ptr_temp);
 
                         let method_ptr_temp = "%t" + number_to_string(current_temp);
                         current_temp += 1;
-                        current_lines = append_string(current_lines, "  " + method_ptr_temp + " = bitcast i8* " + raw_ptr_temp + " to " + function_type);
+                        current_lines.push("  " + method_ptr_temp + " = bitcast i8* " + raw_ptr_temp + " to " + function_type);
 
                         let mut call_args -> string[] = ["i8* " + data_ptr_temp];
                         arg_idx = 1;
@@ -879,31 +899,31 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                             if arg_idx >= rendered_args.length {
                                 break;
                             }
-                            call_args = append_string(call_args, rendered_args[arg_idx]);
+                            call_args.push(rendered_args[arg_idx]);
                             arg_idx += 1;
                         }
                         let call_arg_text = join_with_separator(call_args, ", ");
 
                         if llvm_return == "void" {
-                            current_lines = append_string(current_lines, "  call void " + method_ptr_temp + "(" + call_arg_text + ")");
+                            current_lines.push("  call void " + method_ptr_temp + "(" + call_arg_text + ")");
                             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
                         } else {
                             let result_temp = format_temp_name(current_temp);
-                            current_lines = append_string(current_lines, "  " + result_temp + " = call " + llvm_return + " " + method_ptr_temp + "(" + call_arg_text + ")");
+                            current_lines.push("  " + result_temp + " = call " + llvm_return + " " + method_ptr_temp + "(" + call_arg_text + ")");
                             let result_operand = LLVMOperand { llvm_type: llvm_return, value: result_temp };
                             return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: result_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
                         }
                     } else {
-                        diagnostics = append_string(diagnostics, "llvm lowering: method `" + method_name + "` not found in interface `" + interface_name + "`");
+                        diagnostics.push("llvm lowering: method `" + method_name + "` not found in interface `" + interface_name + "`");
                     }
                 } else {
-                    diagnostics = append_string(diagnostics, "llvm lowering: interface `" + interface_name + "` not found for trait dispatch");
+                    diagnostics.push("llvm lowering: interface `" + interface_name + "` not found for trait dispatch");
                 }
             } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: trait dispatch requires at least one argument (the trait object)");
+                diagnostics.push("llvm lowering: trait dispatch requires at least one argument (the trait object)");
             }
         } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: malformed trait dispatch target `" + trimmed_target + "`");
+            diagnostics.push("llvm lowering: malformed trait dispatch target `" + trimmed_target + "`");
         }
     }
 
@@ -913,13 +933,13 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     }
     if llvm_return == "void" {
         let call_line = "  call void @" + call_symbol + "(" + argument_text + ")";
-        current_lines = append_string(current_lines, call_line);
+        current_lines.push(call_line);
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let temp_name = format_temp_name(current_temp);
     let call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")";
-    current_lines = append_string(current_lines, call_line);
+    current_lines.push(call_line);
     let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
     return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }

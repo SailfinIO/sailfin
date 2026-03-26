@@ -304,7 +304,7 @@ fn parse_union_payload_types(union_llvm_type -> string) -> string[] {
         if index >= fields.length {
             break;
         }
-        result = append_string(result, trim_text(fields[index]));
+        result.push(trim_text(fields[index]));
         index += 1;
     }
     return result;
@@ -577,10 +577,10 @@ fn parse_interpolated_template(content -> string) -> InterpolatedTemplateParse {
         }
         let start = find_substring_from(content, "{{", index);
         if start < 0 {
-            parts = append_string(parts, substring(content, index, content.length));
+            parts.push(substring(content, index, content.length));
             break;
         }
-        parts = append_string(parts, substring(content, index, start));
+        parts.push(substring(content, index, start));
         let end = find_substring_from(content, "}}", start + 2);
         if end < 0 {
             return InterpolatedTemplateParse { parts: [], expressions: [], success: false };
@@ -589,7 +589,7 @@ fn parse_interpolated_template(content -> string) -> InterpolatedTemplateParse {
         if expr_text.length == 0 {
             return InterpolatedTemplateParse { parts: [], expressions: [], success: false };
         }
-        expressions = append_string(expressions, expr_text);
+        expressions.push(expr_text);
         index = end + 2;
     }
     return InterpolatedTemplateParse { parts: parts, expressions: expressions, success: true };

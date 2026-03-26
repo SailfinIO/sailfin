@@ -195,7 +195,7 @@ fn collect_match_structure(
     }
     loop {
         if index >= limit {
-            diagnostics = append_string(diagnostics, "llvm lowering: unterminated `.match` in `" + function_name + "`");
+            diagnostics.push("llvm lowering: unterminated `.match` in `" + function_name + "`");
             if current_case != null {
                 let finished = finalize_match_case(current_case, limit);
                 cases = append_match_case(cases, finished);
@@ -334,7 +334,7 @@ fn lower_match_instruction(
     collected_string_constants = merge_string_constants(collected_string_constants, subject_result.string_constants);
 
     if subject_result.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match subject in `" + function.name + "`");
+        diagnostics.push("llvm lowering: unable to lower match subject in `" + function.name + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -360,12 +360,12 @@ fn lower_match_instruction(
     let mut matched_enum_tags -> number[] = [];
 
     if structure.cases.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: match without cases in `" + function.name + "`");
+        diagnostics.push("llvm lowering: match without cases in `" + function.name + "`");
         let merge_alloc = allocate_block_label("matchmerge", current_block_counter);
         let merge_label = merge_alloc.label;
         current_block_counter = merge_alloc.next_counter;
-        current_lines = append_string(current_lines, "  br label %" + merge_label);
-        current_lines = append_string(current_lines, merge_label + ":");
+        current_lines.push("  br label %" + merge_label);
+        current_lines.push(merge_label + ":");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -392,8 +392,8 @@ fn lower_match_instruction(
         }
         let test_alloc = allocate_block_label("matchcase", current_block_counter);
         let body_alloc = allocate_block_label("matchbody", test_alloc.next_counter);
-        test_labels = append_string(test_labels, test_alloc.label);
-        body_labels = append_string(body_labels, body_alloc.label);
+        test_labels.push(test_alloc.label);
+        body_labels.push(body_alloc.label);
         current_block_counter = body_alloc.next_counter;
         index += 1;
     }
@@ -413,12 +413,12 @@ fn lower_match_instruction(
         let preload_temp = format_temp_name(current_temp);
         current_temp += 1;
         let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
-        current_lines = append_string(current_lines, preload_line);
-        preloaded_locals = append_string(preloaded_locals, preload_temp);
+        current_lines.push(preload_line);
+        preloaded_locals.push(preload_temp);
         preload_index += 1;
     }
 
-    current_lines = append_string(current_lines, "  br label %" + test_labels[0]);
+    current_lines.push("  br label %" + test_labels[0]);
 
     let mut all_terminated -> boolean = true;
     let mut has_unconditional_default -> boolean = false;
@@ -447,7 +447,7 @@ fn lower_match_instruction(
             failure_target = test_labels[_mc_next];
         }
 
-        current_lines = append_string(current_lines, test_labels[index] + ":");
+        current_lines.push(test_labels[index] + ":");
         let lowered_condition = lower_match_case_condition(
             function.name,
             subject_operand,
@@ -512,14 +512,14 @@ fn lower_match_instruction(
 
         if lowered_condition.is_default {
             has_unconditional_default = true;
-            current_lines = append_string(current_lines, "  br label %" + body_labels[index]);
+            current_lines.push("  br label %" + body_labels[index]);
         } else if lowered_condition.operand != null {
-            current_lines = append_string(current_lines, "  br i1 " + lowered_condition.operand.value + ", label %" + body_labels[index] + ", label %" + failure_target);
+            current_lines.push("  br i1 " + lowered_condition.operand.value + ", label %" + body_labels[index] + ", label %" + failure_target);
         } else {
-            current_lines = append_string(current_lines, "  br label %" + failure_target);
+            current_lines.push("  br label %" + failure_target);
         }
 
-        current_lines = append_string(current_lines, body_labels[index] + ":");
+        current_lines.push(body_labels[index] + ":");
 
         let mut base_locals -> LocalBinding[] = clone_local_bindings(current_locals);
         let mut base_allocas -> string[] = current_allocas;
@@ -533,8 +533,8 @@ fn lower_match_instruction(
             // Allocate subject on stack for field extraction
             let subject_alloca_temp = format_temp_name(current_temp);
             current_temp += 1;
-            current_lines = append_string(current_lines, "  " + subject_alloca_temp + " = alloca " + subject_operand.llvm_type);
-            current_lines = append_string(current_lines, "  store " + subject_operand.llvm_type + " " + subject_operand.value + ", " + subject_operand.llvm_type + "* " + subject_alloca_temp);
+            current_lines.push("  " + subject_alloca_temp + " = alloca " + subject_operand.llvm_type);
+            current_lines.push("  store " + subject_operand.llvm_type + " " + subject_operand.value + ", " + subject_operand.llvm_type + "* " + subject_alloca_temp);
             // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
 
             let mut binding_idx -> number = 0;
@@ -552,12 +552,12 @@ fn lower_match_instruction(
                 if enum_info_val.max_payload_size > 0 && enum_info_val.align > enum_info_val.tag_size {
                     payload_field_index = 2;
                 }
-                current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 " + number_to_string(payload_field_index));
+                current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 " + number_to_string(payload_field_index));
 
                 // 2. Treat payload as a raw byte pointer (opaque pointers)
                 let byte_ptr_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
+                current_lines.push("  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
 
                 // 3. Offset to field position
                 // Field offset is relative to the enum start, but payload starts at variant offset
@@ -567,28 +567,28 @@ fn lower_match_instruction(
                 if field_offset_in_payload > 0 {
                     let offset_ptr_temp = format_temp_name(current_temp);
                     current_temp += 1;
-                    current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+                    current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
                     field_ptr_temp = offset_ptr_temp;
                 }
 
                 // 4. Cast to field type pointer (opaque pointers)
                 let typed_ptr_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
+                current_lines.push("  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
 
                 // 5. Load the field value
                 let value_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + value_temp + " = load " + field_binding.field_type + ", ptr " + typed_ptr_temp);
+                current_lines.push("  " + value_temp + " = load " + field_binding.field_type + ", ptr " + typed_ptr_temp);
 
                 // 6. Allocate a local for this binding
                 let local_alloca_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + field_binding.field_type);
+                current_lines.push("  " + local_alloca_temp + " = alloca " + field_binding.field_type);
                 // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
 
                 // 7. Store the value into the local
-                current_lines = append_string(current_lines, "  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp);
+                current_lines.push("  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp);
 
                 // 8. Add to locals so the match arm body can reference it
                 base_locals.push(LocalBinding {
@@ -617,7 +617,7 @@ fn lower_match_instruction(
             let payload_temp = format_temp_name(current_temp);
             current_temp += 1;
             let payload_type = union_payload_types[variant_index];
-            current_lines = append_string(current_lines, "  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
+            current_lines.push("  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
 
             let typed_payload_ptr = payload_temp;
             // If the payload is an opaque pointer, try to preserve the expected struct pointer type.
@@ -625,7 +625,7 @@ fn lower_match_instruction(
             if payload_type == "i8*" {
                 let cast_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + payload_temp + " to " + expected_ptr_type);
+                current_lines.push("  " + cast_temp + " = bitcast i8* " + payload_temp + " to " + expected_ptr_type);
                 typed_payload_ptr = cast_temp;
             }
 
@@ -639,16 +639,16 @@ fn lower_match_instruction(
                 // Compute field pointer and load.
                 let gep_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + gep_temp + " = getelementptr " + struct_info_val.llvm_name + ", " + expected_ptr_type + " " + typed_payload_ptr + ", i32 0, i32 " + number_to_string(binding.field_index));
+                current_lines.push("  " + gep_temp + " = getelementptr " + struct_info_val.llvm_name + ", " + expected_ptr_type + " " + typed_payload_ptr + ", i32 0, i32 " + number_to_string(binding.field_index));
                 let load_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + load_temp + " = load " + binding.field_type + ", " + binding.field_type + "* " + gep_temp);
+                current_lines.push("  " + load_temp + " = load " + binding.field_type + ", " + binding.field_type + "* " + gep_temp);
 
                 // Allocate a local for this binding.
                 let local_alloca_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + binding.field_type);
-                current_lines = append_string(current_lines, "  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp);
+                current_lines.push("  " + local_alloca_temp + " = alloca " + binding.field_type);
+                current_lines.push("  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp);
 
                 base_locals.push(LocalBinding {
                     name: binding.field_name,
@@ -698,12 +698,12 @@ fn lower_match_instruction(
                 let payload_type = union_payload_types[remaining_index];
                 let payload_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
+                current_lines.push("  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
 
                 let local_alloca_temp = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines = append_string(current_lines, "  " + local_alloca_temp + " = alloca " + payload_type);
-                current_lines = append_string(current_lines, "  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp);
+                current_lines.push("  " + local_alloca_temp + " = alloca " + payload_type);
+                current_lines.push("  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp);
 
                 base_locals.push(LocalBinding {
                     name: subject_name,
@@ -769,7 +769,7 @@ fn lower_match_instruction(
 
         if !body_result.terminated {
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings);
-            current_lines = append_string(current_lines, "  br label %" + merge_label);
+            current_lines.push("  br label %" + merge_label);
             all_terminated = false;
         } else {
             all_terminated = all_terminated && true;
@@ -790,9 +790,9 @@ fn lower_match_instruction(
     let terminated = all_terminated && match_exhaustive;
 
     // Always emit the merge label so any generated failure branches have a target.
-    current_lines = append_string(current_lines, merge_label + ":");
+    current_lines.push(merge_label + ":");
     if terminated {
-        current_lines = append_string(current_lines, "  unreachable");
+        current_lines.push("  unreachable");
     } else {
         // Emit phi nodes for all mutated locals across all arms
         let phi_result = emit_phi_merges_for_match(
@@ -872,11 +872,11 @@ fn lower_match_case_condition(
             // This is an enum pattern - extract tag and compare
             let enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name);
             if enum_info == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: match pattern references unknown enum `" + enum_parse.enum_name + "`");
+                diagnostics.push("llvm lowering: match pattern references unknown enum `" + enum_parse.enum_name + "`");
             } else {
                 let variant_info = resolve_enum_variant_info(enum_info, enum_parse.variant_name);
                 if variant_info == null {
-                    diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_parse.enum_name + "` has no variant `" + enum_parse.variant_name + "`");
+                    diagnostics.push("llvm lowering: enum `" + enum_parse.enum_name + "` has no variant `" + enum_parse.variant_name + "`");
                 } else {
                     // Map tag type to LLVM integer type
                     let mut tag_llvm_type -> string = "i32";
@@ -896,7 +896,7 @@ fn lower_match_case_condition(
                     // Extract the tag from the subject enum value using extractvalue
                     let tag_temp = format_temp_name(current_temp);
                     current_temp += 1;
-                    current_lines = append_string(current_lines, "  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0");
+                    current_lines.push("  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0");
 
                     // Compare the extracted tag with the variant's tag
                     let tag_operand = LLVMOperand { llvm_type: tag_llvm_type, value: tag_temp };
@@ -960,7 +960,7 @@ fn lower_match_case_condition(
                                 });
                                 field_bindings = updated_fields;
                             } else {
-                                diagnostics = append_string(diagnostics, "llvm lowering: match pattern field `" + pattern_field.name + "` not found in variant `" + enum_parse.enum_name + "." + enum_parse.variant_name + "`");
+                                diagnostics.push("llvm lowering: match pattern field `" + pattern_field.name + "` not found in variant `" + enum_parse.enum_name + "." + enum_parse.variant_name + "`");
                             }
 
                             field_idx += 1;
@@ -998,7 +998,7 @@ fn lower_match_case_condition(
                             // Extract and compare tag.
                             let tag_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines = append_string(current_lines, "  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0");
+                            current_lines.push("  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0");
                             let tag_operand = LLVMOperand { llvm_type: "i32", value: tag_temp };
                             let expected_tag = LLVMOperand { llvm_type: "i32", value: number_to_string(found_index) };
                             let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
@@ -1041,10 +1041,10 @@ fn lower_match_case_condition(
                                         });
                                         union_struct_bindings = updated_structs;
                                     } else {
-                                        diagnostics = append_string(diagnostics, "llvm lowering: match pattern field `" + pattern_field.name + "` not found in struct `" + struct_parse.type_name + "`");
+                                        diagnostics.push("llvm lowering: match pattern field `" + pattern_field.name + "` not found in struct `" + struct_parse.type_name + "`");
                                     }
                                 } else {
-                                    diagnostics = append_string(diagnostics, "llvm lowering: match struct field literal patterns are not supported for `" + pattern_field.name + "`");
+                                    diagnostics.push("llvm lowering: match struct field literal patterns are not supported for `" + pattern_field.name + "`");
                                 }
                                 fidx += 1;
                             }
@@ -1052,10 +1052,10 @@ fn lower_match_case_condition(
                             union_variant_index = found_index;
                             union_struct_info = info;
                         } else {
-                            diagnostics = append_string(diagnostics, "llvm lowering: match struct pattern `" + struct_parse.type_name + "` does not match union type `" + subject_operand.llvm_type + "`");
+                            diagnostics.push("llvm lowering: match struct pattern `" + struct_parse.type_name + "` does not match union type `" + subject_operand.llvm_type + "`");
                         }
                     } else {
-                        diagnostics = append_string(diagnostics, "llvm lowering: match pattern references unknown struct `" + struct_parse.type_name + "`");
+                        diagnostics.push("llvm lowering: match pattern references unknown struct `" + struct_parse.type_name + "`");
                     }
                 }
             }
@@ -1074,12 +1074,22 @@ fn lower_match_case_condition(
                 collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants);
                 if pattern_result.operand != null {
                     let harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines);
-                    diagnostics = diagnostics.concat(harmonised.diagnostics);
+                    let mut _ci7 -> number = 0;
+                    loop {
+                        if _ci7 >= harmonised.diagnostics.length { break; }
+                        diagnostics.push(harmonised.diagnostics[_ci7]);
+                        _ci7 += 1;
+                    }
                     if harmonised.left != null && harmonised.right != null {
                         current_lines = harmonised.lines;
                         current_temp = harmonised.temp_index;
                         let comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines);
-                        diagnostics = diagnostics.concat(comparison.diagnostics);
+                        let mut _ci8 -> number = 0;
+                        loop {
+                            if _ci8 >= comparison.diagnostics.length { break; }
+                            diagnostics.push(comparison.diagnostics[_ci8]);
+                            _ci8 += 1;
+                        }
                         current_lines = comparison.lines;
                         current_temp = comparison.temp_index;
                         condition_operand = comparison.operand;
@@ -1088,7 +1098,7 @@ fn lower_match_case_condition(
                         current_temp = harmonised.temp_index;
                     }
                 } else {
-                    diagnostics = append_string(diagnostics, "llvm lowering: unable to lower match case pattern in `" + function_name + "`");
+                    diagnostics.push("llvm lowering: unable to lower match case pattern in `" + function_name + "`");
                 }
             }
         }
@@ -1098,7 +1108,12 @@ fn lower_match_case_condition(
         let guard_text = trim_text(case.guard);
         if guard_text.length > 0 {
             let guard_condition = lower_condition_to_i1(function_name, guard_text, bindings, locals, current_temp, current_lines, functions, context);
-            diagnostics = diagnostics.concat(guard_condition.diagnostics);
+            let mut _ci9 -> number = 0;
+            loop {
+                if _ci9 >= guard_condition.diagnostics.length { break; }
+                diagnostics.push(guard_condition.diagnostics[_ci9]);
+                _ci9 += 1;
+            }
             current_lines = guard_condition.lines;
             current_temp = guard_condition.temp_index;
             collected_string_constants = merge_string_constants(collected_string_constants, guard_condition.string_constants);
@@ -1107,13 +1122,18 @@ fn lower_match_case_condition(
                     condition_operand = guard_condition.operand;
                 } else {
                     let merged = emit_boolean_and(condition_operand, guard_condition.operand, current_temp, current_lines);
-                    diagnostics = diagnostics.concat(merged.diagnostics);
+                    let mut _ci10 -> number = 0;
+                    loop {
+                        if _ci10 >= merged.diagnostics.length { break; }
+                        diagnostics.push(merged.diagnostics[_ci10]);
+                        _ci10 += 1;
+                    }
                     current_lines = merged.lines;
                     current_temp = merged.temp_index;
                     condition_operand = merged.operand;
                 }
             } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: unable to lower guard in match case for `" + function_name + "`");
+                diagnostics.push("llvm lowering: unable to lower guard in match case for `" + function_name + "`");
             }
         }
     }
@@ -1183,7 +1203,12 @@ fn lower_condition_to_i1(
     }
     fs.writeFile("build/sailfin/.condition_locals", _lta_content);
     let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context, "");
-    diagnostics = diagnostics.concat(lowered.diagnostics);
+    let mut _ci11 -> number = 0;
+    loop {
+        if _ci11 >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[_ci11]);
+        _ci11 += 1;
+    }
     let mut current_lines -> string[] = lowered.lines;
     let mut current_temp -> number = lowered.temp_index;
 
@@ -1192,9 +1217,9 @@ fn lower_condition_to_i1(
     if lowered.operand == null {
         let rendered_condition = trim_text(expression);
         if rendered_condition.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: condition produced no value in `" + function_name + "`");
+            diagnostics.push("llvm lowering: condition produced no value in `" + function_name + "`");
         } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: condition produced no value in `" + function_name + "` for `" + rendered_condition + "`");
+            diagnostics.push("llvm lowering: condition produced no value in `" + function_name + "` for `" + rendered_condition + "`");
         }
         return ConditionConversion { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
@@ -1206,19 +1231,19 @@ fn lower_condition_to_i1(
 
     if operand.llvm_type == "double" {
         let temp_name = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + temp_name + " = fcmp one double " + operand.value + ", 0.0");
+        current_lines.push("  " + temp_name + " = fcmp one double " + operand.value + ", 0.0");
         let converted = LLVMOperand { llvm_type: "i1", value: temp_name };
         return ConditionConversion { lines: current_lines, temp_index: current_temp + 1, operand: converted, diagnostics: diagnostics, string_constants: string_constants };
     }
 
     if operand.llvm_type == "i32" || operand.llvm_type == "i64" {
         let temp_name = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + temp_name + " = icmp ne " + operand.llvm_type + " " + operand.value + ", " + default_return_literal(operand.llvm_type) + "");
+        current_lines.push("  " + temp_name + " = icmp ne " + operand.llvm_type + " " + operand.value + ", " + default_return_literal(operand.llvm_type) + "");
         let converted = LLVMOperand { llvm_type: "i1", value: temp_name };
         return ConditionConversion { lines: current_lines, temp_index: current_temp + 1, operand: converted, diagnostics: diagnostics, string_constants: string_constants };
     }
 
-    diagnostics = append_string(diagnostics, "llvm lowering: unsupported condition type `" + operand.llvm_type + "` in `" + function_name + "`");
+    diagnostics.push("llvm lowering: unsupported condition type `" + operand.llvm_type + "` in `" + function_name + "`");
     return ConditionConversion { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
 }
 
@@ -1258,7 +1283,12 @@ fn lower_if_instruction(
     let mut collected_mutations -> LocalMutation[] = [];
 
     let structure = collect_if_structure(function.instructions, start_index, end, function.name);
-    diagnostics = diagnostics.concat(structure.diagnostics);
+    let mut _ci12 -> number = 0;
+    loop {
+        if _ci12 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci12]);
+        _ci12 += 1;
+    }
 
     // Defensive: If a front-end pass accidentally includes the opening block brace (or
     // even the whole block) in the textual condition, strip the trailing block portion.
@@ -1277,7 +1307,12 @@ fn lower_if_instruction(
         functions,
         context
     );
-    diagnostics = diagnostics.concat(condition.diagnostics);
+    let mut _ci13 -> number = 0;
+    loop {
+        if _ci13 >= condition.diagnostics.length { break; }
+        diagnostics.push(condition.diagnostics[_ci13]);
+        _ci13 += 1;
+    }
     current_lines = condition.lines;
     current_temp = condition.temp_index;
     let mut collected_string_constants -> StringConstant[] = condition.string_constants;
@@ -1285,9 +1320,9 @@ fn lower_if_instruction(
     if condition.operand == null {
         let rendered_condition = sanitized_condition_source;
         if rendered_condition.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "`");
+            diagnostics.push("llvm lowering: unable to lower if condition in `" + function.name + "`");
         } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: unable to lower if condition in `" + function.name + "` for `" + rendered_condition + "`");
+            diagnostics.push("llvm lowering: unable to lower if condition in `" + function.name + "` for `" + rendered_condition + "`");
         }
         return BlockLoweringResult {
             lines: current_lines,
@@ -1338,12 +1373,12 @@ fn lower_if_instruction(
         let preload_temp = format_temp_name(current_temp);
         current_temp += 1;
         let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
-        current_lines = append_string(current_lines, preload_line);
-        preloaded_locals = append_string(preloaded_locals, preload_temp);
+        current_lines.push(preload_line);
+        preloaded_locals.push(preload_temp);
         preload_index += 1;
     }
 
-    current_lines = append_string(current_lines, "  br i1 " + condition.operand.value + ", label %" + then_label + ", label %" + false_target);
+    current_lines.push("  br i1 " + condition.operand.value + ", label %" + then_label + ", label %" + false_target);
 
     // Track the actual source block for the conditional branch so downstream phi nodes
     // reference the correct predecessor even when the condition introduced helper blocks
@@ -1355,7 +1390,7 @@ fn lower_if_instruction(
     let base_local_id = current_next_local;
     let base_block_counter = current_block_counter;
 
-    current_lines = append_string(current_lines, then_label + ":");
+    current_lines.push(then_label + ":");
     let then_scope_id = make_child_scope_id(scope_id, then_label);
     let then_result = lower_instruction_range(
         function,
@@ -1377,7 +1412,12 @@ fn lower_if_instruction(
         scope_depth + 1,
         then_label
     );
-    diagnostics = diagnostics.concat(then_result.diagnostics);
+    let mut _ci14 -> number = 0;
+    loop {
+        if _ci14 >= then_result.diagnostics.length { break; }
+        diagnostics.push(then_result.diagnostics[_ci14]);
+        _ci14 += 1;
+    }
     lifetime_regions = extend_lifetime_regions(lifetime_regions, then_result.lifetime_regions);
     current_allocas = then_result.allocas;
     current_locals = then_result.locals;
@@ -1395,7 +1435,7 @@ fn lower_if_instruction(
     let mut then_merge_insert_index -> number = -1;
     if !then_terminated {
         let merge_branch_index = current_lines.length;
-        current_lines = append_string(current_lines, "  br label %" + merge_label);
+        current_lines.push("  br label %" + merge_label);
         then_merge_insert_index = merge_branch_index;
     }
 
@@ -1404,7 +1444,7 @@ fn lower_if_instruction(
     let mut else_exit_label -> string = else_label;
     let mut else_merge_insert_index -> number = -1;
     if structure.has_else {
-        current_lines = append_string(current_lines, else_label + ":");
+        current_lines.push(else_label + ":");
         let else_scope_id = make_child_scope_id(scope_id, else_label);
         let else_result = lower_instruction_range(
             function,
@@ -1426,7 +1466,12 @@ fn lower_if_instruction(
             scope_depth + 1,
             else_label
         );
-        diagnostics = diagnostics.concat(else_result.diagnostics);
+        let mut _ci15 -> number = 0;
+        loop {
+            if _ci15 >= else_result.diagnostics.length { break; }
+            diagnostics.push(else_result.diagnostics[_ci15]);
+            _ci15 += 1;
+        }
         lifetime_regions = extend_lifetime_regions(lifetime_regions, else_result.lifetime_regions);
         current_allocas = else_result.allocas;
         current_locals = else_result.locals;
@@ -1445,7 +1490,7 @@ fn lower_if_instruction(
         collected_string_constants = merge_string_constants(collected_string_constants, else_result.string_constants);
         if !else_terminated {
             let merge_branch_index = current_lines.length;
-            current_lines = append_string(current_lines, "  br label %" + merge_label);
+            current_lines.push("  br label %" + merge_label);
             else_merge_insert_index = merge_branch_index;
         }
     }
@@ -1473,7 +1518,7 @@ fn lower_if_instruction(
                 check_idx += 1;
             }
             if !already_added {
-                mutated_names = append_string(mutated_names, else_name);
+                mutated_names.push(else_name);
             }
             else_idx += 1;
         }
@@ -1634,7 +1679,7 @@ fn lower_if_instruction(
     }
 
     if !terminated || !structure.has_else {
-        current_lines = append_string(current_lines, merge_label + ":");
+        current_lines.push(merge_label + ":");
 
         // Emit phi nodes for mutated locals
         if structure.has_else {
@@ -1860,7 +1905,12 @@ fn lower_let_instruction(
     }
 
     let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span);
-    diagnostics = diagnostics.concat(suspension_diagnostics);
+    let mut _ci16 -> number = 0;
+    loop {
+        if _ci16 >= suspension_diagnostics.length { break; }
+        diagnostics.push(suspension_diagnostics[_ci16]);
+        _ci16 += 1;
+    }
 
     // If this binding shadows an existing borrowed local, release the prior borrow region.
     let existing_binding = find_local_binding(current_locals, instruction.name);
@@ -1881,18 +1931,28 @@ fn lower_let_instruction(
     if trimmed_annotation.length > 0 {
         llvm_type = map_local_type(context, instruction.type_annotation);
         if llvm_type.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`");
+            diagnostics.push("llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`");
         }
     }
 
     let mut operand -> LLVMOperand? = null;
     let ownership_analysis = analyze_value_ownership(instruction.value, initializer_span, current_locals, current_bindings);
-    diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
+    let mut _ci17 -> number = 0;
+    loop {
+        if _ci17 >= ownership_analysis.diagnostics.length { break; }
+        diagnostics.push(ownership_analysis.diagnostics[_ci17]);
+        _ci17 += 1;
+    }
     ownership = ownership_analysis.ownership;
     consumption = ownership_analysis.consumption;
     if ownership != null {
         let conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name);
-        diagnostics = diagnostics.concat(conflict_diagnostics);
+        let mut _ci18 -> number = 0;
+        loop {
+            if _ci18 >= conflict_diagnostics.length { break; }
+            diagnostics.push(conflict_diagnostics[_ci18]);
+            _ci18 += 1;
+        }
         if ownership.variant == "Borrow" {
             let base_scope = infer_borrow_base_scope(ownership.base, current_locals, current_bindings, function.name);
             let region_id = current_next_region;
@@ -1927,10 +1987,15 @@ fn lower_let_instruction(
 
     let mut string_constants -> StringConstant[] = empty_string_constant_set();
     if instruction.value == null || instruction.value.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
+        diagnostics.push("llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
     let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
-        diagnostics = diagnostics.concat(lowered.diagnostics);
+        let mut _ci19 -> number = 0;
+        loop {
+            if _ci19 >= lowered.diagnostics.length { break; }
+            diagnostics.push(lowered.diagnostics[_ci19]);
+            _ci19 += 1;
+        }
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
         operand = lowered.operand;
@@ -1969,45 +2034,50 @@ fn lower_let_instruction(
                 current_temp += 1;
 
                 // Allocate space for the struct on the stack
-                current_lines = append_string(current_lines, "  " + struct_ptr_temp + " = alloca " + struct_info.llvm_name);
+                current_lines.push("  " + struct_ptr_temp + " = alloca " + struct_info.llvm_name);
                 // Store the struct value
-                current_lines = append_string(current_lines, "  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + struct_ptr_temp);
+                current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + struct_ptr_temp);
                 // Cast struct pointer to i8*
-                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = bitcast " + struct_info.llvm_name + "* " + struct_ptr_temp + " to i8*");
+                current_lines.push("  " + data_ptr_temp + " = bitcast " + struct_info.llvm_name + "* " + struct_ptr_temp + " to i8*");
                 // Get vtable pointer (bitcast global vtable constant to i8*)
-                current_lines = append_string(current_lines, "  " + vtable_ptr_temp + " = bitcast " + vtable.llvm_type_name + "* " + vtable.llvm_global_name + " to i8*");
+                current_lines.push("  " + vtable_ptr_temp + " = bitcast " + vtable.llvm_type_name + "* " + vtable.llvm_global_name + " to i8*");
                 // Build trait object: insert data pointer
-                current_lines = append_string(current_lines, "  " + with_data_temp + " = insertvalue " + interface_info.llvm_name + " undef, i8* " + data_ptr_temp + ", 0");
+                current_lines.push("  " + with_data_temp + " = insertvalue " + interface_info.llvm_name + " undef, i8* " + data_ptr_temp + ", 0");
                 // Insert vtable pointer
-                current_lines = append_string(current_lines, "  " + with_vtable_temp + " = insertvalue " + interface_info.llvm_name + " " + with_data_temp + ", i8* " + vtable_ptr_temp + ", 1");
+                current_lines.push("  " + with_vtable_temp + " = insertvalue " + interface_info.llvm_name + " " + with_data_temp + ", i8* " + vtable_ptr_temp + ", 1");
                 // Update operand to the boxed trait object
                 operand = LLVMOperand { llvm_type: interface_info.llvm_name, value: with_vtable_temp };
                 llvm_type = interface_info.llvm_name;
             } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_info.name + "` does not implement interface `" + interface_info.name + "`");
+                diagnostics.push("llvm lowering: struct `" + struct_info.name + "` does not implement interface `" + interface_info.name + "`");
             }
         }
     }
 
     let pointer = format_local_pointer_name(next_local_id);
-    current_allocas = append_string(current_allocas, "  " + pointer + " = alloca " + llvm_type);
+    current_allocas.push("  " + pointer + " = alloca " + llvm_type);
 
     let mut stored_value -> string = default_return_literal(llvm_type);
     if operand != null {
         let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines);
-        diagnostics = diagnostics.concat(coerced.diagnostics);
+        let mut _ci20 -> number = 0;
+        loop {
+            if _ci20 >= coerced.diagnostics.length { break; }
+            diagnostics.push(coerced.diagnostics[_ci20]);
+            _ci20 += 1;
+        }
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
         if coerced.operand == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce initializer for `" + instruction.name + "` to `" + llvm_type + "`");
-            current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
+            diagnostics.push("llvm lowering: unable to coerce initializer for `" + instruction.name + "` to `" + llvm_type + "`");
+            current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
         } else {
             let stored = coerced.operand;
             stored_value = stored.value;
-            current_lines = append_string(current_lines, "  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer);
+            current_lines.push("  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer);
         }
     } else {
-        current_lines = append_string(current_lines, "  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
+        current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
     }
 
     current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: instruction.type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth });

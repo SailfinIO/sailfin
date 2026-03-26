@@ -49,7 +49,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
             index += 1;
             continue;
         }
-        seen = append_string(seen, slug);
+        seen.push(slug);
 
         let manifest_path = _resolve_layout_manifest_path_for_slug(slug);
         let native_text_path = _resolve_native_text_path_for_slug(slug);
@@ -206,7 +206,7 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
         let ch = substring(normalized, index, index + 1);
         if ch == "/" {
             if segment.length > 0 {
-                parts = append_string(parts, segment);
+                parts.push(segment);
             }
             segment = "";
         } else {
@@ -215,7 +215,7 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
         index += 1;
     }
     if segment.length > 0 {
-        parts = append_string(parts, segment);
+        parts.push(segment);
     }
 
     let mut resolved -> string[] = [];
@@ -238,7 +238,7 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
                     if drop_index >= limit {
                         break;
                     }
-                    shortened = append_string(shortened, resolved[drop_index]);
+                    shortened.push(resolved[drop_index]);
                     drop_index += 1;
                 }
                 resolved = shortened;
@@ -246,7 +246,7 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
             index += 1;
             continue;
         }
-        resolved = append_string(resolved, part);
+        resolved.push(part);
         index += 1;
     }
 
@@ -346,7 +346,7 @@ fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[
         let layout_struct = manifest.structs[struct_index];
         let target_index = find_struct_index(updated_structs, layout_struct.name);
         if target_index < 0 {
-            diagnostics = append_string(diagnostics, "layout manifest: struct `" + layout_struct.name + "` missing from native module");
+            diagnostics.push("layout manifest: struct `" + layout_struct.name + "` missing from native module");
         } else {
             let target = updated_structs[target_index];
             let replaced = NativeStruct {
@@ -370,7 +370,7 @@ fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[
         let layout_enum = manifest.enums[enum_index];
         let target_index = find_enum_index(updated_enums, layout_enum.name);
         if target_index < 0 {
-            diagnostics = append_string(diagnostics, "layout manifest: enum `" + layout_enum.name + "` missing from native module");
+            diagnostics.push("layout manifest: enum `" + layout_enum.name + "` missing from native module");
         } else {
             let target = updated_enums[target_index];
             let replaced = NativeEnum {

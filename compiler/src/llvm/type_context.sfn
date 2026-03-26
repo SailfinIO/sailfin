@@ -203,7 +203,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         }
         let definition = structs[index];
         if definition.layout == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` missing layout metadata; skipping type emission");
+            diagnostics.push("llvm lowering: struct `" + definition.name + "` missing layout metadata; skipping type emission");
             index += 1;
             continue;
         }
@@ -220,7 +220,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             let mapped = map_struct_field_annotation(layout_field.type_annotation);
             let mut llvm_field_type -> string = mapped;
             if llvm_field_type.length == 0 {
-                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
+                diagnostics.push("llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
                 llvm_field_type = "i8*";
             } else if ends_with_pointer_suffix(llvm_field_type) {
                 let layout_base_type = layout_annotation_base_type(layout_field.type_annotation);
@@ -251,7 +251,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         }
         let enum_def = enums[enum_index];
         if enum_def.layout == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` missing layout metadata; skipping type emission");
+            diagnostics.push("llvm lowering: enum `" + enum_def.name + "` missing layout metadata; skipping type emission");
             enum_index += 1;
             continue;
         }
@@ -275,7 +275,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                 let mapped_variant_type = map_struct_field_annotation(variant_field.type_annotation);
                 let mut llvm_variant_field_type -> string = mapped_variant_type;
                 if llvm_variant_field_type.length == 0 {
-                    diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
+                    diagnostics.push("llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
                     llvm_variant_field_type = "i8*";
                 } else if ends_with_pointer_suffix(llvm_variant_field_type) {
                     let variant_base_type = layout_annotation_base_type(variant_field.type_annotation);
@@ -382,7 +382,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             }
 
             if interface_def_opt == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_def.name + "` implements unknown interface `" + interface_name + "`");
+                diagnostics.push("llvm lowering: struct `" + struct_def.name + "` implements unknown interface `" + interface_name + "`");
                 implements_index += 1;
                 continue;
             }
@@ -410,7 +410,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                     }
                     let param = signature.parameters[param_idx];
                     let mapped_type = map_type_annotation(param.type_annotation);
-                    param_types = append_string(param_types, mapped_type);
+                    param_types.push(mapped_type);
                     param_idx += 1;
                 }
                 let return_type = map_type_annotation(signature.return_type);
@@ -465,7 +465,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                             }
                             let param = signature.parameters[param_idx];
                             let mapped_type = map_type_annotation(param.type_annotation);
-                            param_types = append_string(param_types, mapped_type);
+                            param_types.push(mapped_type);
                             param_idx += 1;
                         }
                         let return_type = map_type_annotation(signature.return_type);
@@ -953,7 +953,7 @@ fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) 
         let base = trim_text(substring(trimmed, 0, generic_index));
         if base.length > 0 {
             if !string_array_contains(candidates, base) {
-                candidates = append_string(candidates, base);
+                candidates.push(base);
             }
         }
     }
@@ -963,14 +963,14 @@ fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) 
         let tail_full = trim_text(substring(trimmed, last_dot + 1, trimmed.length));
         if tail_full.length > 0 {
             if !string_array_contains(candidates, tail_full) {
-                candidates = append_string(candidates, tail_full);
+                candidates.push(tail_full);
             }
             let tail_generic_index = index_of(tail_full, "<");
             if tail_generic_index >= 0 {
                 let tail_base = trim_text(substring(tail_full, 0, tail_generic_index));
                 if tail_base.length > 0 {
                     if !string_array_contains(candidates, tail_base) {
-                        candidates = append_string(candidates, tail_base);
+                        candidates.push(tail_base);
                     }
                 }
             }

@@ -517,7 +517,7 @@ fn copy_string_array(values -> string[]) -> string[] {
         if index >= safe_values.length {
             break;
         }
-        result = append_string(result, safe_values[index]);
+        result.push(safe_values[index]);
         index += 1;
     }
     return result;
@@ -589,11 +589,11 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             let _jn_next = index + 1;
             if _jn_next < parts.length {
                 let combined = parts[index] + separator + parts[_jn_next];
-                next = append_string(next, combined);
+                next.push(combined);
                 index += 2;
                 continue;
             }
-            next = append_string(next, parts[index]);
+            next.push(parts[index]);
             index += 1;
         }
         parts = next;

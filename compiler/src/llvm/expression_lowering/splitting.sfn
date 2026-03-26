@@ -89,7 +89,7 @@ fn split_array_elements(text -> string) -> string[] {
         }
 
         if ch == "," && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-            entries = append_string(entries, trim_text(current));
+            entries.push(trim_text(current));
             current = "";
         } else {
             current = current + ch;
@@ -98,7 +98,7 @@ fn split_array_elements(text -> string) -> string[] {
     }
 
     if current.length > 0 {
-        entries = append_string(entries, trim_text(current));
+        entries.push(trim_text(current));
     }
 
     let mut filtered -> string[] = [];
@@ -109,7 +109,7 @@ fn split_array_elements(text -> string) -> string[] {
         }
         let entry = trim_text(entries[index]);
         if entry.length > 0 {
-            filtered = append_string(filtered, entry);
+            filtered.push(entry);
         }
         index += 1;
     }

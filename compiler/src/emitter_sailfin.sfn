@@ -597,7 +597,7 @@ fn format_decorator(decorator -> Decorator) -> string {
         if index >= decorator.arguments.length {
             break;
         }
-        parts = append_string(parts, format_decorator_argument(decorator.arguments[index]));
+        parts.push(format_decorator_argument(decorator.arguments[index]));
         index += 1;
     }
     return line + "(" + join_with_separator(parts, ", ") + ")";
@@ -670,7 +670,7 @@ fn format_enum_variant(variant -> EnumVariant) -> string {
         if index >= variant.fields.length {
             break;
         }
-        parts = append_string(parts, format_field(variant.fields[index]));
+        parts.push(format_field(variant.fields[index]));
         index += 1;
     }
     return variant.name + " { " + join_with_separator(parts, "; ") + " " + "}";
@@ -686,7 +686,7 @@ fn format_parameters(parameters -> Parameter[]) -> string {
         if index >= parameters.length {
             break;
         }
-        parts = append_string(parts, format_parameter(parameters[index]));
+        parts.push(format_parameter(parameters[index]));
         index += 1;
     }
     return join_with_separator(parts, ", ");
@@ -723,7 +723,7 @@ fn format_type_parameters(parameters -> TypeParameter[]) -> string {
         if parameter.bound != null {
             part = part + " : " + parameter.bound.text;
         }
-        names = append_string(names, part);
+        names.push(part);
         index += 1;
     }
     return "<" + join_with_separator(names, ", ") + ">";
@@ -761,7 +761,7 @@ fn join_type_annotations(values -> TypeAnnotation[]) -> string {
         if index >= values.length {
             break;
         }
-        parts = append_string(parts, values[index].text);
+        parts.push(values[index].text);
         index += 1;
     }
     return join_with_separator(parts, ", ");
@@ -807,7 +807,7 @@ fn format_expression(expression -> Expression) -> string {
             if index >= expression.arguments.length {
                 break;
             }
-            rendered = append_string(rendered, format_expression(expression.arguments[index]));
+            rendered.push(format_expression(expression.arguments[index]));
             index += 1;
         }
         let args = join_with_separator(rendered, ", ");
@@ -825,7 +825,7 @@ fn format_expression(expression -> Expression) -> string {
             if index >= expression.elements.length {
                 break;
             }
-            rendered = append_string(rendered, format_expression(expression.elements[index]));
+            rendered.push(format_expression(expression.elements[index]));
             index += 1;
         }
         let contents = join_with_separator(rendered, ", ");
@@ -840,7 +840,7 @@ fn format_expression(expression -> Expression) -> string {
             }
             let field = expression.fields[index];
             let value = format_expression(field.value);
-            rendered = append_string(rendered, field.name + ": " + value);
+            rendered.push(field.name + ": " + value);
             index += 1;
         }
         let body = join_with_separator(rendered, ", ");
@@ -856,7 +856,7 @@ fn format_expression(expression -> Expression) -> string {
             }
             let field = expression.fields[index];
             let value = format_expression(field.value);
-            rendered = append_string(rendered, field.name + ": " + value);
+            rendered.push(field.name + ": " + value);
             index += 1;
         }
         let body = join_with_separator(rendered, ", ");
@@ -896,7 +896,7 @@ fn format_lambda_parameters(parameters -> Parameter[]) -> string {
         let param = parameters[index];
         let mut entry -> string = param.name;
         entry = entry + format_type_annotation(param.type_annotation);
-        rendered = append_string(rendered, entry);
+        rendered.push(entry);
         index += 1;
     }
     let args = join_with_separator(rendered, ", ");
@@ -906,14 +906,14 @@ fn format_lambda_parameters(parameters -> Parameter[]) -> string {
 fn format_lambda_body(body -> Block) -> string {
     let mut lines -> string[] = [];
     if body.statements.length == 0 {
-        lines = append_string(lines, "// empty body");
+        lines.push("// empty body");
     } else {
         let mut index -> number = 0;
         loop {
             if index >= body.statements.length {
                 break;
             }
-            lines = append_string(lines, format_lambda_statement(body.statements[index]));
+            lines.push(format_lambda_statement(body.statements[index]));
             index += 1;
         }
     }
@@ -965,7 +965,7 @@ fn indent_lines(lines -> string[], depth -> number) -> string[] {
             prefix = prefix + "    ";
             count += 1;
         }
-        result = append_string(result, prefix + lines[index]);
+        result.push(prefix + lines[index]);
         index += 1;
     }
     return result;

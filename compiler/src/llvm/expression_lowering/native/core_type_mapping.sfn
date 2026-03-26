@@ -358,13 +358,13 @@ fn split_union_annotations(text -> string) -> string[] {
         if index < 0 {
             let tail = trim_text(remaining);
             if tail.length > 0 {
-                result = append_string(result, tail);
+                result.push(tail);
             }
             break;
         }
         let left = trim_text(substring(remaining, 0, index));
         if left.length > 0 {
-            result = append_string(result, left);
+            result.push(left);
         }
         remaining = trim_text(substring(remaining, index + 1, remaining.length));
     }
@@ -402,7 +402,7 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
         if mapped.length == 0 || mapped == "void" {
             return "";
         }
-        llvm_parts = append_string(llvm_parts, mapped);
+        llvm_parts.push(mapped);
         index += 1;
     }
     // Represent unions as an inline tagged struct: { i32, <variant0>, <variant1>, ... }

@@ -59,7 +59,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     current_temp = index_result.temp_index;
 
     if index_result.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: index expression produced no value");
+        diagnostics.push("llvm lowering: index expression produced no value");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
@@ -75,7 +75,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     current_lines = index_coercion.lines;
     current_temp = index_coercion.temp_index;
     if index_coercion.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce index expression to i64");
+        diagnostics.push("llvm lowering: unable to coerce index expression to i64");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
     let coerced_index = index_coercion.operand;
@@ -149,7 +149,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     }
 
     if element_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to determine element type for array indexing on type `" + array_type + "`");
+        diagnostics.push("llvm lowering: unable to determine element type for array indexing on type `" + array_type + "`");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
@@ -164,7 +164,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
         current_lines = index_as_double.lines;
         current_temp = index_as_double.temp_index;
         if index_as_double.operand == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce string index expression to double");
+            diagnostics.push("llvm lowering: unable to coerce string index expression to double");
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
 
@@ -184,38 +184,38 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
 
         let array_struct_type = strip_pointer_suffix(array_type);
         let loaded_array = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + loaded_array + " = load " + array_struct_type + ", " + array_type + " " + base_operand.value);
+        current_lines.push("  " + loaded_array + " = load " + array_struct_type + ", " + array_type + " " + base_operand.value);
         current_temp += 1;
 
         let data_ptr_extracted = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + data_ptr_extracted + " = extractvalue " + array_struct_type + " " + loaded_array + ", 0");
+        current_lines.push("  " + data_ptr_extracted + " = extractvalue " + array_struct_type + " " + loaded_array + ", 0");
         current_temp += 1;
         data_ptr = data_ptr_extracted;
 
         let length_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + array_struct_type + " " + loaded_array + ", 1");
+        current_lines.push("  " + length_temp + " = extractvalue " + array_struct_type + " " + loaded_array + ", 1");
         current_temp += 1;
         length_value = length_temp;
 
         let bounds_check = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + bounds_check + " = icmp uge i64 " + coerced_index.value + ", " + length_value);
+        current_lines.push("  " + bounds_check + " = icmp uge i64 " + coerced_index.value + ", " + length_value);
         current_temp += 1;
-        current_lines = append_string(current_lines, "  ; bounds check: " + bounds_check + " (if true, out of bounds)");
-        current_lines = append_string(current_lines, "  call void @sailfin_runtime_bounds_check(i64 " + coerced_index.value + ", i64 " + length_value + ")");
+        current_lines.push("  ; bounds check: " + bounds_check + " (if true, out of bounds)");
+        current_lines.push("  call void @sailfin_runtime_bounds_check(i64 " + coerced_index.value + ", i64 " + length_value + ")");
 
         let element_ptr = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + coerced_index.value);
+        current_lines.push("  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + coerced_index.value);
         current_temp += 1;
 
         let element_value = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + element_value + " = load " + element_type + ", " + element_type + "* " + element_ptr);
+        current_lines.push("  " + element_value + " = load " + element_type + ", " + element_type + "* " + element_ptr);
         current_temp += 1;
 
         let operand = LLVMOperand { llvm_type: element_type, value: element_value };
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
-    diagnostics = append_string(diagnostics, "llvm lowering: unsupported array type for indexing: `" + array_type + "`");
+    diagnostics.push("llvm lowering: unsupported array type for indexing: `" + array_type + "`");
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 

@@ -602,13 +602,13 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
         print.info("test llvm: skipping runtime helper collection for inlined tests");
     }
     if !string_array_contains(runtime_helpers, "copy_bytes") {
-        runtime_helpers = append_string(runtime_helpers, "copy_bytes");
+        runtime_helpers.push("copy_bytes");
     }
     if !string_array_contains(runtime_helpers, "array_push_slot") {
-        runtime_helpers = append_string(runtime_helpers, "array_push_slot");
+        runtime_helpers.push("array_push_slot");
     }
     if !string_array_contains(runtime_helpers, "append_string") {
-        runtime_helpers = append_string(runtime_helpers, "append_string");
+        runtime_helpers.push("append_string");
     }
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     runtime_helpers = append_unique_effect(runtime_helpers, "print.info");
@@ -654,14 +654,14 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     let mut function_effects -> FunctionEffectEntry[] = [];
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut lines -> string[] = [];
-    lines = append_string(lines, "source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
-    lines = append_string(lines, "");
+    lines.push("source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
+    lines.push("");
 
     let trait_lines = render_trait_metadata_comments(trait_metadata);
     if trait_lines != null {
         if trait_lines.length > 0 {
         lines = extend_string_lines(lines, trait_lines);
-        lines = append_string(lines, "");
+        lines.push("");
         }
     }
 
@@ -669,7 +669,7 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     if struct_type_lines != null {
         if struct_type_lines.length > 0 {
         lines = extend_string_lines(lines, struct_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
         }
     }
 
@@ -680,7 +680,7 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     if enum_type_lines != null {
         if enum_type_lines.length > 0 {
         lines = extend_string_lines(lines, enum_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
         }
     }
 
@@ -691,7 +691,7 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     if interface_type_lines != null {
         if interface_type_lines.length > 0 {
         lines = extend_string_lines(lines, interface_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
         }
     }
 
@@ -723,48 +723,48 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     let vtable_type_lines = render_vtable_type_definitions(type_context);
     if vtable_type_lines.length > 0 {
         lines = extend_string_lines(lines, vtable_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     let vtable_const_lines = render_vtable_constants(type_context);
     if vtable_const_lines.length > 0 {
         lines = extend_string_lines(lines, vtable_const_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
     if helper_declarations.length > 0 {
         lines = extend_string_lines(lines, helper_declarations);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
     if imported_declarations.length > 0 {
         lines = extend_string_lines(lines, imported_declarations);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     if find_function_by_name(context_functions, "malloc") == null {
-        lines = append_string(lines, "declare noalias i8* @malloc(i64)");
+        lines.push("declare noalias i8* @malloc(i64)");
     }
     if find_function_by_name(context_functions, "free") == null {
-        lines = append_string(lines, "declare void @free(i8*)");
+        lines.push("declare void @free(i8*)");
     }
-    lines = append_string(lines, "");
+    lines.push("");
 
-    lines = append_string(lines, "@runtime = external global i8**");
-    lines = append_string(lines, "");
+    lines.push("@runtime = external global i8**");
+    lines.push("");
 
     let module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name);
     diagnostics = extend_string_lines_checked(diagnostics, module_globals.diagnostics, "module globals");
     if module_globals.preamble_lines.length > 0 {
         lines = extend_string_lines(lines, module_globals.preamble_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     if module_globals.init_function_lines.length > 0 {
         lines = extend_string_lines(lines, module_globals.init_function_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
     if trace {
         print.info("test llvm: module globals lowered");
@@ -814,10 +814,15 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
         }
         diagnostics = extend_string_lines_checked(diagnostics, lowered.diagnostics, "function lowering");
         if lowered.lines.length > 0 {
-            lines = append_string_lines(lines, lowered.lines);
+            let mut _asl_i -> number = 0;
+            loop {
+                if _asl_i >= lowered.lines.length { break; }
+                lines.push(lowered.lines[_asl_i]);
+                _asl_i += 1;
+            }
             let _ep_next = index + 1;
             if _ep_next < local_functions.length {
-                lines = append_string(lines, "");
+                lines.push("");
             }
         }
         if lowered.string_constants.length > 0 {
@@ -828,7 +833,7 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     }
 
     if !has_add_function {
-        lines = append_string(lines, "");
+        lines.push("");
         lines = extend_string_lines(lines, [
             "define internal double @add(double %a, double %b) {",
             "entry:",
@@ -840,9 +845,14 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
 
     let string_constant_lines = render_string_constants(all_string_constants);
     if string_constant_lines.length > 0 {
-        lines = append_string(lines, "");
-        lines = append_string_lines(lines, string_constant_lines);
-        lines = append_string(lines, "");
+        lines.push("");
+        let mut _asl2_i -> number = 0;
+        loop {
+            if _asl2_i >= string_constant_lines.length { break; }
+            lines.push(string_constant_lines[_asl2_i]);
+            _asl2_i += 1;
+        }
+        lines.push("");
     }
 
     lines = ensure_intrinsic_declarations(lines);
@@ -867,7 +877,7 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     if tests.length > 0 && !has_main {
         let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
         if lines.length > 0 {
-            lines = append_string(lines, "");
+            lines.push("");
         }
         lines = extend_string_lines(lines, harness);
     }
@@ -1187,7 +1197,7 @@ fn lower_to_llvm_lines_with_context(native_module -> NativeModule, imported_mani
     }
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
-        diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
+        diagnostics.push("no sailfin-native-text artifact present");
         let empty_constants = empty_string_constant_set();
         return LoweredLLVMLinesResult {
             lines: [],

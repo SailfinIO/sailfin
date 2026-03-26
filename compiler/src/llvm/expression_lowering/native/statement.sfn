@@ -319,7 +319,7 @@ fn lower_expression_statement(
             current_lines = lowered_value.lines;
             current_temp = lowered_value.temp_index;
             if lowered_value.operand == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower assignment value for deref target `" + parsed_assignment.target + "`");
+                diagnostics.push("llvm lowering: failed to lower assignment value for deref target `" + parsed_assignment.target + "`");
                 _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
                 return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
             }
@@ -327,7 +327,7 @@ fn lower_expression_statement(
             // Lower the pointer expression (target without leading '*').
             let pointer_text = trim_text(substring(trimmed_target, 1, trimmed_target.length));
             if pointer_text.length == 0 {
-                diagnostics = append_string(diagnostics, "llvm lowering: deref assignment missing pointer operand");
+                diagnostics.push("llvm lowering: deref assignment missing pointer operand");
                 _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
                 return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
             }
@@ -341,12 +341,12 @@ fn lower_expression_statement(
             current_lines = lowered_ptr.lines;
             current_temp = lowered_ptr.temp_index;
             if lowered_ptr.operand == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: deref assignment pointer `" + pointer_text + "` produced no value");
+                diagnostics.push("llvm lowering: deref assignment pointer `" + pointer_text + "` produced no value");
                 _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
                 return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
             }
             if !ends_with_pointer_suffix(lowered_ptr.operand.llvm_type) {
-                diagnostics = append_string(diagnostics, "llvm lowering: deref assignment target is not a pointer (got `" + lowered_ptr.operand.llvm_type + "`)");
+                diagnostics.push("llvm lowering: deref assignment target is not a pointer (got `" + lowered_ptr.operand.llvm_type + "`)");
                 _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
                 return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
             }
@@ -362,11 +362,11 @@ fn lower_expression_statement(
             current_lines = coerced.lines;
             current_temp = coerced.temp_index;
             if coerced.operand == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce deref assignment value to `" + element_type + "`");
+                diagnostics.push("llvm lowering: unable to coerce deref assignment value to `" + element_type + "`");
                 _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
                 return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
             }
-            current_lines = append_string(current_lines, "  store " + element_type + " " + coerced.operand.value + ", " + element_type + "* " + lowered_ptr.operand.value);
+            current_lines.push("  store " + element_type + " " + coerced.operand.value + ", " + element_type + "* " + lowered_ptr.operand.value);
             _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
                 return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
         }
@@ -394,7 +394,7 @@ fn lower_expression_statement(
             current_temp = lowered.temp_index;
 
             if lowered.operand == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower assignment value for member `" + parsed_assignment.target + "`");
+                diagnostics.push("llvm lowering: failed to lower assignment value for member `" + parsed_assignment.target + "`");
             } else {
                 // Lower the base to get a pointer to the struct
                 let base_result = lower_expression(member_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
@@ -408,7 +408,7 @@ fn lower_expression_statement(
                 current_temp = base_result.temp_index;
                 
                 if base_result.operand == null {
-                    diagnostics = append_string(diagnostics, "llvm lowering: member access assignment base `" + member_parse.base + "` produced no value");
+                    diagnostics.push("llvm lowering: member access assignment base `" + member_parse.base + "` produced no value");
                 } else {
                     // Get pointer to the field using getelementptr
                     let base_operand = base_result.operand;
@@ -429,18 +429,18 @@ fn lower_expression_statement(
                         }
                     }
                     if !ends_with_pointer_suffix(base_pointer_type) {
-                        diagnostics = append_string(diagnostics, "llvm lowering: member access assignment base `" + member_parse.base + "` is not addressable");
+                        diagnostics.push("llvm lowering: member access assignment base `" + member_parse.base + "` is not addressable");
                         _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
                 return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
                     }
                     let struct_llvm_name = strip_pointer_suffix(base_pointer_type);
                     let struct_info = find_struct_info_by_llvm_type(context, struct_llvm_name);
                     if struct_info == null {
-                        diagnostics = append_string(diagnostics, "llvm lowering: member access assignment on non-struct type `" + base_result.operand.llvm_type + "`");
+                        diagnostics.push("llvm lowering: member access assignment on non-struct type `" + base_result.operand.llvm_type + "`");
                     } else {
                         let field_index = find_struct_field_index(struct_info, member_parse.field);
                         if field_index < 0 {
-                            diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_info.name + "` has no field `" + member_parse.field + "`");
+                            diagnostics.push("llvm lowering: struct `" + struct_info.name + "` has no field `" + member_parse.field + "`");
                         } else {
                             let field_info = struct_info.fields[field_index];
                             // Coerce the value to the field's type
@@ -458,8 +458,8 @@ fn lower_expression_statement(
                                 // Emit getelementptr to get field pointer, then store
                                 let field_ptr_temp = format_temp_name(current_temp);
                                 current_temp += 1;
-                                current_lines = append_string(current_lines, "  " + field_ptr_temp + " = getelementptr " + struct_info.llvm_name + ", " + base_pointer_type + " " + base_pointer_value + ", i32 0, i32 " + number_to_string(field_index));
-                                current_lines = append_string(current_lines, "  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + field_ptr_temp);
+                                current_lines.push("  " + field_ptr_temp + " = getelementptr " + struct_info.llvm_name + ", " + base_pointer_type + " " + base_pointer_value + ", i32 0, i32 " + number_to_string(field_index));
+                                current_lines.push("  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + field_ptr_temp);
                             }
                         }
                     }
@@ -492,7 +492,7 @@ fn lower_expression_statement(
             current_temp = lowered.temp_index;
 
             if lowered.operand == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower assignment value for array index `" + parsed_assignment.target + "`");
+                diagnostics.push("llvm lowering: failed to lower assignment value for array index `" + parsed_assignment.target + "`");
             } else {
                 // Lower the base array to get a pointer
                 let base_result = lower_expression(index_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
@@ -506,7 +506,7 @@ fn lower_expression_statement(
                 current_temp = base_result.temp_index;
                 
                 if base_result.operand == null {
-                    diagnostics = append_string(diagnostics, "llvm lowering: array index assignment base `" + index_parse.base + "` produced no value");
+                    diagnostics.push("llvm lowering: array index assignment base `" + index_parse.base + "` produced no value");
                 } else {
                     // Lower the index
                     let index_result = lower_expression(index_parse.index, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
@@ -520,12 +520,12 @@ fn lower_expression_statement(
                     current_temp = index_result.temp_index;
                     
                     if index_result.operand == null {
-                        diagnostics = append_string(diagnostics, "llvm lowering: array index `" + index_parse.index + "` produced no value");
+                        diagnostics.push("llvm lowering: array index `" + index_parse.index + "` produced no value");
                     } else {
                         // Get the element type from the array pointer type
                         let element_type = array_pointer_element_type(base_result.operand.llvm_type);
                         if element_type.length == 0 {
-                            diagnostics = append_string(diagnostics, "llvm lowering: cannot determine element type for array assignment `" + base_result.operand.llvm_type + "`");
+                            diagnostics.push("llvm lowering: cannot determine element type for array assignment `" + base_result.operand.llvm_type + "`");
                         } else {
                             // Coerce the value to the element type
                             let coerced = coerce_operand_to_type(lowered.operand, element_type, current_temp, current_lines);
@@ -551,7 +551,7 @@ fn lower_expression_statement(
                                 current_temp = coerced_index.temp_index;
 
                                 if coerced_index.operand == null {
-                                    diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce array index to i64 for `" + parsed_assignment.target + "`");
+                                    diagnostics.push("llvm lowering: unable to coerce array index to i64 for `" + parsed_assignment.target + "`");
                                     _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
                 return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
                                 }
@@ -563,16 +563,16 @@ fn lower_expression_statement(
                                 current_temp += 1;
                                 
                                 // Load the data pointer from the array struct (first field)
-                                current_lines = append_string(current_lines, "  " + data_ptr_temp + " = getelementptr " + array_struct_type_for_element(element_type) + ", " + base_result.operand.llvm_type + " " + base_result.operand.value + ", i32 0, i32 0");
+                                current_lines.push("  " + data_ptr_temp + " = getelementptr " + array_struct_type_for_element(element_type) + ", " + base_result.operand.llvm_type + " " + base_result.operand.value + ", i32 0, i32 0");
                                 let data_ptr_loaded = format_temp_name(current_temp);
                                 current_temp += 1;
-                                current_lines = append_string(current_lines, "  " + data_ptr_loaded + " = load " + element_type + "*, " + element_type + "** " + data_ptr_temp);
+                                current_lines.push("  " + data_ptr_loaded + " = load " + element_type + "*, " + element_type + "** " + data_ptr_temp);
                                 
                                 // Compute element pointer using getelementptr
-                                current_lines = append_string(current_lines, "  " + elem_ptr_temp + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr_loaded + ", i64 " + coerced_index.operand.value);
+                                current_lines.push("  " + elem_ptr_temp + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr_loaded + ", i64 " + coerced_index.operand.value);
                                 
                                 // Store the value
-                                current_lines = append_string(current_lines, "  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + elem_ptr_temp);
+                                current_lines.push("  store " + coerced.operand.llvm_type + " " + coerced.operand.value + ", " + coerced.operand.llvm_type + "* " + elem_ptr_temp);
                             }
                         }
                     }
@@ -590,7 +590,7 @@ fn lower_expression_statement(
         }
         let binding = find_local_binding(current_locals, trimmed_assign_target);
         if binding == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: assignment to unknown local `" + trimmed_assign_target + "`");
+            diagnostics.push("llvm lowering: assignment to unknown local `" + trimmed_assign_target + "`");
         } else {
             // Desugar compound assignments: "x += y" becomes "x = x + y"
             let mut effective_value -> string = trimmed_assign_value;
@@ -611,24 +611,34 @@ fn lower_expression_statement(
             let mut stored_value -> string = default_return_literal(binding.llvm_type);
 
             let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, binding.llvm_type);
-            diagnostics = diagnostics.concat(lowered.diagnostics);
+            let mut _ci12 -> number = 0;
+            loop {
+                if _ci12 >= lowered.diagnostics.length { break; }
+                diagnostics.push(lowered.diagnostics[_ci12]);
+                _ci12 += 1;
+            }
             string_constants = lowered.string_constants;
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
             if lowered.operand == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: failed to lower assignment expression for `" + trimmed_assign_target + "`");
+                diagnostics.push("llvm lowering: failed to lower assignment expression for `" + trimmed_assign_target + "`");
             } else {
                 let coerced = coerce_operand_to_type(lowered.operand, binding.llvm_type, current_temp, current_lines);
-                diagnostics = diagnostics.concat(coerced.diagnostics);
+                let mut _ci13 -> number = 0;
+                loop {
+                    if _ci13 >= coerced.diagnostics.length { break; }
+                    diagnostics.push(coerced.diagnostics[_ci13]);
+                    _ci13 += 1;
+                }
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
                 if coerced.operand == null {
-                    diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce assignment value for `" + trimmed_assign_target + "`");
-                    current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + default_return_literal(binding.llvm_type) + ", " + binding.llvm_type + "* " + binding.pointer);
+                    diagnostics.push("llvm lowering: unable to coerce assignment value for `" + trimmed_assign_target + "`");
+                    current_lines.push("  store " + binding.llvm_type + " " + default_return_literal(binding.llvm_type) + ", " + binding.llvm_type + "* " + binding.pointer);
                 } else {
                     let operand = coerced.operand;
                     stored_value = operand.value;
-                    current_lines = append_string(current_lines, "  store " + binding.llvm_type + " " + operand.value + ", " + binding.llvm_type + "* " + binding.pointer);
+                    current_lines.push("  store " + binding.llvm_type + " " + operand.value + ", " + binding.llvm_type + "* " + binding.pointer);
                 }
             }
 
@@ -696,11 +706,21 @@ fn lower_expression_statement(
     }
 
     let ownership_analysis = analyze_value_ownership(expression, null, current_locals, current_bindings);
-    diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
+    let mut _ci14 -> number = 0;
+    loop {
+        if _ci14 >= ownership_analysis.diagnostics.length { break; }
+        diagnostics.push(ownership_analysis.diagnostics[_ci14]);
+        _ci14 += 1;
+    }
     let consumption = ownership_analysis.consumption;
 
     let lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-    diagnostics = diagnostics.concat(lowered.diagnostics);
+    let mut _ci15 -> number = 0;
+    loop {
+        if _ci15 >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[_ci15]);
+        _ci15 += 1;
+    }
     let string_constants = lowered.string_constants;
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
@@ -803,7 +823,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
     let mut diagnostics -> string[] = [];
     let trimmed = trim_text(expression);
     if trimmed.length < 4 {
-        diagnostics = append_string(diagnostics, "llvm lowering: malformed let expression `" + expression + "`");
+        diagnostics.push("llvm lowering: malformed let expression `" + expression + "`");
         return InlineLetParseResult { success: false, name: "", mutable: false, type_annotation: "", initializer: null, diagnostics: diagnostics };
     }
     let prefix = substring(trimmed, 0, 4);
@@ -820,7 +840,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
         }
     }
     if remainder.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: let expression missing binding name in `" + expression + "`");
+        diagnostics.push("llvm lowering: let expression missing binding name in `" + expression + "`");
         return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: null, diagnostics: diagnostics };
     }
     let mut name -> string = "";
@@ -838,7 +858,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
     }
     name = trim_text(name);
     if name.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: let expression missing binding name in `" + expression + "`");
+        diagnostics.push("llvm lowering: let expression missing binding name in `" + expression + "`");
         return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: null, diagnostics: diagnostics };
     }
     let mut tail -> string = trim_text(substring(remainder, index, remainder.length));
@@ -897,7 +917,7 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
         }
     }
     if initializer == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: let expression missing initializer for `" + name + "`");
+        diagnostics.push("llvm lowering: let expression missing initializer for `" + name + "`");
         return InlineLetParseResult { success: false, name: name, mutable: is_mutable, type_annotation: type_annotation, initializer: null, diagnostics: diagnostics };
     }
     return InlineLetParseResult { success: true, name: name, mutable: is_mutable, type_annotation: type_annotation, initializer: initializer, diagnostics: diagnostics };
@@ -955,10 +975,10 @@ fn lower_return_instruction(
 
     if instr_expression == null || instr_expression.length == 0 {
         if safe_llvm_return == "void" {
-            current_lines = append_string(current_lines, "  ret void");
+            current_lines.push("  ret void");
         } else {
-            diagnostics = append_string(diagnostics, "llvm lowering: missing return value in `" + fn_name + "`");
-            current_lines = append_string(current_lines, "  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
+            diagnostics.push("llvm lowering: missing return value in `" + fn_name + "`");
+            current_lines.push("  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
         }
         if trace {
             print.info("test llvm: lower_return empty_expr lines_after=" + number_to_string(current_lines.length));
@@ -1017,7 +1037,12 @@ fn lower_return_instruction(
     if debug_lowering {
         print.warn("emit-llvm: lower_return post_suspension fn=" + fn_name);
     }
-    diagnostics = diagnostics.concat(suspension_diagnostics);
+    let mut _ci16 -> number = 0;
+    loop {
+        if _ci16 >= suspension_diagnostics.length { break; }
+        diagnostics.push(suspension_diagnostics[_ci16]);
+        _ci16 += 1;
+    }
 
     if debug_lowering {
         print.warn("emit-llvm: lower_return pre_ownership fn=" + fn_name);
@@ -1026,7 +1051,12 @@ fn lower_return_instruction(
     if debug_lowering {
         print.warn("emit-llvm: lower_return post_ownership fn=" + fn_name);
     }
-    diagnostics = diagnostics.concat(ownership_analysis.diagnostics);
+    let mut _ci17 -> number = 0;
+    loop {
+        if _ci17 >= ownership_analysis.diagnostics.length { break; }
+        diagnostics.push(ownership_analysis.diagnostics[_ci17]);
+        _ci17 += 1;
+    }
     let consumption = ownership_analysis.consumption;
 
     if debug_lowering {
@@ -1131,13 +1161,13 @@ fn lower_return_instruction(
                 if _ret_fidx < 0 { _ret_scan = _ret_end + 1; continue; }
                 // Emit GEP instructions
                 let _ret_ct1 = format_temp_name(current_temp);
-                current_lines = append_string(current_lines, "  " + _ret_ct1 + " = bitcast i8* %self to " + _ret_sllvm + "*");
+                current_lines.push("  " + _ret_ct1 + " = bitcast i8* %self to " + _ret_sllvm + "*");
                 current_temp += 1;
                 let _ret_ct2 = format_temp_name(current_temp);
-                current_lines = append_string(current_lines, "  " + _ret_ct2 + " = getelementptr inbounds " + _ret_sllvm + ", " + _ret_sllvm + "* " + _ret_ct1 + ", i32 0, i32 " + number_to_string(_ret_fidx));
+                current_lines.push("  " + _ret_ct2 + " = getelementptr inbounds " + _ret_sllvm + ", " + _ret_sllvm + "* " + _ret_ct1 + ", i32 0, i32 " + number_to_string(_ret_fidx));
                 current_temp += 1;
                 let _ret_ct3 = format_temp_name(current_temp);
-                current_lines = append_string(current_lines, "  " + _ret_ct3 + " = load " + _ret_ftype + ", " + _ret_ftype + "* " + _ret_ct2);
+                current_lines.push("  " + _ret_ct3 + " = load " + _ret_ftype + ", " + _ret_ftype + "* " + _ret_ct2);
                 current_temp += 1;
                 // Replace self.FIELD in expression with the temp variable
                 let _ret_before = substring(_ret_expr, 0, _ret_abs);
@@ -1151,7 +1181,12 @@ fn lower_return_instruction(
     if debug_lowering {
         print.warn("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
     }
-    diagnostics = diagnostics.concat(lowered.diagnostics);
+    let mut _ci18 -> number = 0;
+    loop {
+        if _ci18 >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[_ci18]);
+        _ci18 += 1;
+    }
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
     let string_constants = lowered.string_constants;
@@ -1164,8 +1199,8 @@ fn lower_return_instruction(
         print.warn("emit-llvm: lower_return operand_check fn=" + fn_name + " has_operand=" + has_operand);
     }
     if lowered.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: unhandled return expression in `" + fn_name + "`");
-        current_lines = append_string(current_lines, "  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
+        diagnostics.push("llvm lowering: unhandled return expression in `" + fn_name + "`");
+        current_lines.push("  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
         if trace {
             print.info("test llvm: lower_return no_operand lines_after=" + number_to_string(current_lines.length));
         }
@@ -1178,8 +1213,8 @@ fn lower_return_instruction(
         print.warn("emit-llvm: lower_return pre_coerce fn=" + fn_name + " type=" + operand.llvm_type + " value=" + operand.value);
     }
     if safe_llvm_return == "void" {
-        diagnostics = append_string(diagnostics, "llvm lowering: void function `" + fn_name + "` returned a value");
-        current_lines = append_string(current_lines, "  ret void");
+        diagnostics.push("llvm lowering: void function `" + fn_name + "` returned a value");
+        current_lines.push("  ret void");
     _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
     return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
     }
@@ -1191,15 +1226,20 @@ fn lower_return_instruction(
     if debug_lowering {
         print.warn("emit-llvm: lower_return post_coerce fn=" + fn_name);
     }
-    diagnostics = diagnostics.concat(coerced.diagnostics);
+    let mut _ci19 -> number = 0;
+    loop {
+        if _ci19 >= coerced.diagnostics.length { break; }
+        diagnostics.push(coerced.diagnostics[_ci19]);
+        _ci19 += 1;
+    }
     current_lines = coerced.lines;
     current_temp = coerced.temp_index;
     if coerced.operand == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: unable to coerce return expression to `" + safe_llvm_return + "` in `" + fn_name + "`");
+        diagnostics.push("llvm lowering: unable to coerce return expression to `" + safe_llvm_return + "` in `" + fn_name + "`");
         if safe_llvm_return == "void" {
-            current_lines = append_string(current_lines, "  ret void");
+            current_lines.push("  ret void");
         } else {
-            current_lines = append_string(current_lines, "  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
+            current_lines.push("  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
         }
         if trace {
             print.info("test llvm: lower_return no_coerce lines_after=" + number_to_string(current_lines.length));
@@ -1211,9 +1251,9 @@ fn lower_return_instruction(
     let coerced_operand = coerced.operand;
     // STAGE2 FIX: Mark string pointers as persistent before returning
     if coerced_operand.llvm_type == "i8*" {
-        current_lines = append_string(current_lines, "  call void @sailfin_runtime_mark_persistent(i8* " + coerced_operand.value + ")");
+        current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + coerced_operand.value + ")");
     }
-    current_lines = append_string(current_lines, "  ret " + coerced_operand.llvm_type + " " + coerced_operand.value);
+    current_lines.push("  ret " + coerced_operand.llvm_type + " " + coerced_operand.value);
     if trace {
         print.info("test llvm: lower_return ok lines_after=" + number_to_string(current_lines.length));
     }
@@ -1254,11 +1294,11 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
             }
         }
         if parameter.type_annotation.length == 0 && !inferred_self_type {
-            diagnostics = append_string(diagnostics, "llvm lowering: parameter `" + parameter.name + "` missing type annotation; defaulting to `" + llvm_type + "`");
+            diagnostics.push("llvm lowering: parameter `" + parameter.name + "` missing type annotation; defaulting to `" + llvm_type + "`");
         }
         let sanitized = sanitize_symbol(parameter.name);
         let llvm_name = "%" + sanitized;
-        signature = append_string(signature, llvm_type + " " + llvm_name);
+        signature.push(llvm_type + " " + llvm_name);
         bindings = append_parameter_binding(bindings, ParameterBinding {
             name: parameter.name,
             llvm_name: llvm_name,
@@ -1585,7 +1625,7 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
             if details.variant == "Borrow" && details.mutable {
                 let base_name = normalise_borrow_base(details.base);
                 let location = format_suspension_location(keyword, details.span, suspension_span);
-                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+                diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
             }
         }
         index += 1;
@@ -1599,7 +1639,7 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
         if !binding.consumed {
             if is_mutable_borrow_annotation(binding.type_annotation) {
                 let location = format_suspension_location(keyword, binding.span, suspension_span);
-                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location);
+                diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location);
             }
         }
         parameter_index += 1;
@@ -1770,13 +1810,13 @@ fn split_union_annotations(text -> string) -> string[] {
         if index < 0 {
             let tail = trim_text(remaining);
             if tail.length > 0 {
-                result = append_string(result, tail);
+                result.push(tail);
             }
             break;
         }
         let left = trim_text(substring(remaining, 0, index));
         if left.length > 0 {
-            result = append_string(result, left);
+            result.push(left);
         }
         remaining = trim_text(substring(remaining, index + 1, remaining.length));
     }
@@ -1814,7 +1854,7 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
         if mapped.length == 0 || mapped == "void" {
             return "";
         }
-        llvm_parts = append_string(llvm_parts, mapped);
+        llvm_parts.push(mapped);
         index += 1;
     }
     // Represent unions as an inline tagged struct: { i32, <variant0>, <variant1>, ... }

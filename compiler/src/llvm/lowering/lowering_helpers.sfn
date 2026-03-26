@@ -193,7 +193,7 @@ fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug ->
                 sym = sym + "__" + module_suffix;
             }
         }
-        lines = append_string(lines, "  call void @" + sym + "()");
+        lines.push("  call void @" + sym + "()");
         index += 1;
     }
     lines.push("  ret i32 0");
@@ -332,7 +332,7 @@ fn collect_available_import_module_names(imported_native_texts -> string[]) -> s
         }
         let name = extract_module_name_from_native_text(text);
         if name.length > 0 && !string_array_contains(names, name) {
-            names = append_string(names, name);
+            names.push(name);
         }
         index += 1;
     }
@@ -383,7 +383,7 @@ fn collect_defined_function_symbols(lines -> string[]) -> string[] {
                 if end > start {
                     let sym = substring(trimmed, start, end);
                     if !string_array_contains(symbols, sym) {
-                        symbols = append_string(symbols, sym);
+                        symbols.push(sym);
                     }
                 }
             }
@@ -556,7 +556,7 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
                             if ch == "," && curly_depth == 0 && angle_depth == 0 {
                                 let part = trim_text(substring(params_text, start_index, scan));
                                 if part.length > 0 {
-                                    parts = append_string(parts, part);
+                                    parts.push(part);
                                 }
                                 start_index = scan + 1;
                             }
@@ -564,7 +564,7 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
                         }
                         let final_part = trim_text(substring(params_text, start_index, params_text.length));
                         if final_part.length > 0 {
-                            parts = append_string(parts, final_part);
+                            parts.push(final_part);
                         }
                         return DeclareSignature { return_type: ret_type, param_types: parts };
                     }
@@ -586,14 +586,14 @@ fn render_function_shim(export_symbol -> string, target_symbol -> string, signat
         }
         let ty = trim_text(signature.param_types[idx]);
         if ty == "..." {
-            param_decls = append_string(param_decls, "...");
+            param_decls.push("...");
             // Varargs shims are not supported; omit forwarding.
             idx += 1;
             continue;
         }
         let name = "%a" + number_to_string(idx);
-        param_decls = append_string(param_decls, ty + " " + name);
-        call_args = append_string(call_args, ty + " " + name);
+        param_decls.push(ty + " " + name);
+        call_args.push(ty + " " + name);
         idx += 1;
     }
 
@@ -645,11 +645,11 @@ fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[
                 if j >= inserted.length {
                     break;
                 }
-                out = append_string(out, inserted[j]);
+                out.push(inserted[j]);
                 j += 1;
             }
         }
-        out = append_string(out, lines[i]);
+        out.push(lines[i]);
         i += 1;
     }
     if footer_index == lines.length {
@@ -658,7 +658,7 @@ fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[
             if j >= inserted.length {
                 break;
             }
-            out = append_string(out, inserted[j]);
+            out.push(inserted[j]);
             j += 1;
         }
     }
@@ -681,7 +681,7 @@ fn apply_module_symbol_mangling(
         safe_imports = [];
     }
     if safe_imports.length > 100000 {
-        diagnostics = append_string(diagnostics, "llvm lowering: import list too large for mangling; dropping");
+        diagnostics.push("llvm lowering: import list too large for mangling; dropping");
         safe_imports = [];
         if debug_lowering {
             print.warn("emit-llvm: mangle import list too large; dropping");
@@ -723,8 +723,8 @@ fn apply_module_symbol_mangling(
             def_index += 1;
             continue;
         }
-        local_olds = append_string(local_olds, sym);
-        local_news = append_string(local_news, sym + "__" + module_suffix);
+        local_olds.push(sym);
+        local_news.push(sym + "__" + module_suffix);
         def_index += 1;
     }
 
@@ -790,7 +790,7 @@ fn apply_module_symbol_mangling(
                 continue;
             }
             if string_array_contains(defined, local_symbol) {
-                diagnostics = append_string(diagnostics, "llvm lowering: import `" + local_symbol + "` shadows local function in module `" + current_module_slug + "`");
+                diagnostics.push("llvm lowering: import `" + local_symbol + "` shadows local function in module `" + current_module_slug + "`");
                 spec_index += 1;
                 continue;
             }
@@ -799,19 +799,19 @@ fn apply_module_symbol_mangling(
                 spec_index += 1;
                 continue;
             }
-            import_olds = append_string(import_olds, local_symbol);
+            import_olds.push(local_symbol);
             let mut target_symbol = imported_name;
             if !provider_is_runtime {
                 target_symbol = imported_name + "__" + provider_suffix;
             }
-            import_news = append_string(import_news, target_symbol);
+            import_news.push(target_symbol);
 
             // Re-export shim: provide `local_symbol__<this_module>` as a thin
             // wrapper forwarding to the provider's symbol.
             let export_sym = local_symbol + "__" + module_suffix;
             if !string_array_contains(shim_exports, export_sym) {
-                shim_exports = append_string(shim_exports, export_sym);
-                shim_targets = append_string(shim_targets, target_symbol);
+                shim_exports.push(export_sym);
+                shim_targets.push(target_symbol);
             }
             spec_index += 1;
         }
@@ -845,7 +845,7 @@ fn apply_module_symbol_mangling(
             shim_lines.push(_shim_result[_ci0]);
             _ci0 += 1;
         }
-        shim_lines = append_string(shim_lines, "");
+        shim_lines.push("");
         shim_index += 1;
     }
     rewritten = insert_before_llvm_footer(rewritten, shim_lines);

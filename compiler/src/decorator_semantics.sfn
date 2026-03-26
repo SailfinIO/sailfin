@@ -33,7 +33,7 @@ fn infer_effects(existing -> string[], decorator_names -> string[]) -> string[] 
 
     if requires_io {
         if !contains_effect(effects, "io") {
-            effects = append_string(effects, "io");
+            effects.push("io");
         }
     }
 
@@ -52,7 +52,7 @@ fn clone_effects(effects -> string[]) -> string[] {
         if index >= effects.length {
             break;
         }
-        clone = append_string(clone, effects[index]);
+        clone.push(effects[index]);
         index += 1;
     }
     return clone;
