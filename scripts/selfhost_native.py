@@ -4368,27 +4368,6 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     #                      i8* default_value[3], %NativeSourceSpan* span[4] }
     NP = "%NativeParameter"
 
-    def _gen_param_field_accessor(field_idx, ret_type, field_llvm_type):
-        """Generate body for get_param_XXX_at(params, idx)."""
-        lines = []
-        lines.append("  %idx_i = fptosi double %idx to i64")
-        lines.append(f"  %hdr = load {{ {NP}*, i64 }}, {{ {NP}*, i64 }}* %params")
-        lines.append(f"  %data = extractvalue {{ {NP}*, i64 }} %hdr, 0")
-        lines.append(f"  %elem_ptr = getelementptr {NP}, {NP}* %data, i64 %idx_i")
-        lines.append(f"  %field_ptr = getelementptr {NP}, {NP}* %elem_ptr, i32 0, i32 {field_idx}")
-        lines.append(f"  %val = load {field_llvm_type}, {field_llvm_type}* %field_ptr")
-        if ret_type == field_llvm_type:
-            lines.append(f"  ret {ret_type} %val")
-        elif ret_type == "i8*":
-            lines.append(f"  %ret = bitcast {field_llvm_type} %val to i8*")
-            lines.append("  ret i8* %ret")
-        else:
-            lines.append(f"  ret {ret_type} %val")
-        return "\n".join(lines)
-
-    _HELPERS["get_param_name_at"] = _gen_param_field_accessor(0, "i8*", "i8*")
-    _HELPERS["get_param_type_at"] = _gen_param_field_accessor(1, "i8*", "i8*")
-
     # Expected function signatures (params, ret_type) for helpers that may
     # lose parameters when compiled by the first-pass binary (seed ABI bug).
     _FN_SIGS: dict[str, tuple[str, str]] = {}
@@ -4401,10 +4380,6 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _FN_SIGS["get_function_instructions_at"] = (_fn_sig_base, "i8*")
     _FN_SIGS["get_function_effects_at"] = (_fn_sig_base, "i8*")
     _FN_SIGS["get_function_decorators_at"] = (_fn_sig_base, "i8*")
-
-    _np_sig_base = f"{{ {NP}*, i64 }}* %params, double %idx"
-    _FN_SIGS["get_param_name_at"] = (_np_sig_base, "i8*")
-    _FN_SIGS["get_param_type_at"] = (_np_sig_base, "i8*")
 
     _ni_sig_base = f"{{ {NI}*, i64 }}* %instructions, double %idx"
     _FN_SIGS["get_instruction_tag"] = (_ni_sig_base, "double")
