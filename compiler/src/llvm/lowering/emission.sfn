@@ -595,7 +595,17 @@ fn emit_llvm_function(
         }
     }
     if debug_lowering {
-        print.warn("emit-llvm: emit_fn phase=body_lir fn_index=" + number_to_string(_eb_fn_index) + " fn_name=" + fn_name);
+        print.warn("emit-llvm: emit_fn phase=body_lir fn_index=" + number_to_string(_eb_fn_index) + " fn_name=" + fn_name + " fn_count=" + number_to_string(functions.length));
+    }
+    // Bounds check: protect against stale .fn_index values or run-away loop
+    if _eb_fn_index >= functions.length {
+        diagnostics.push("llvm lowering: fn_index " + number_to_string(_eb_fn_index) + " out of range (max " + number_to_string(functions.length) + ") for `" + fn_name + "`");
+        lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
+        lines.push("}");
+        let empty_constants = empty_string_constant_set();
+        _write_lowered_function_files(lines, diagnostics, empty_constants);
+        let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
+        return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: empty_constants };
     }
     let _eb_function = functions[_eb_fn_index];
     lower_instruction_range_void(

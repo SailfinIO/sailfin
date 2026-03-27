@@ -311,6 +311,17 @@ fn make_instruction_simple(tag_val -> number) -> NativeInstruction {
     return NativeInstruction.Continue();
 }
 
+// NativeParameter field accessors: same pattern as NativeFunction.
+// NativeParameter = { name[0], type_annotation[1], mutable[2], default_value[3], span[4] }
+fn get_param_name_at(params -> NativeParameter[], idx -> number) -> string {
+    let p = params[idx];
+    return p.name;
+}
+fn get_param_type_at(params -> NativeParameter[], idx -> number) -> string {
+    let p = params[idx];
+    return p.type_annotation;
+}
+
 // NativeInstruction field accessors: the seed v0.1.1 compiles enum field access
 // (.variant, .expression, .condition) as sailfin_runtime_get_field which is a
 // runtime stub returning empty data.  These helpers use explicit array indexing
@@ -2374,14 +2385,30 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let mut index -> number = 0;
     let mut has_add_function -> boolean = false;
     let mut all_string_constants -> StringConstant[] = module_string_constants;
+    // Pre-compute loop bound: the seed's loop compilation bug may skip the
+    // exit condition check, so we use a separate counter as a safety net.
+    let _fn_loop_limit = local_functions.length;
     if trace {
-        print.info("test llvm: lowering functions start (count=" + number_to_string(local_functions.length) + ")");
+        print.info("test llvm: lowering functions start (count=" + number_to_string(_fn_loop_limit) + ")");
     }
     if debug_lowering {
-        print.warn("emit-llvm: phase=functions");
+        print.warn("emit-llvm: phase=functions count=" + number_to_string(_fn_loop_limit));
     }
+    // Write the function count to a file so that emission.sfn can
+    // use it as a secondary bounds check.
+    fs.writeFile("build/sailfin/.fn_total_count", number_to_string(_fn_loop_limit));
     loop {
-        if index >= local_functions.length {
+        if index >= _fn_loop_limit {
+            break;
+        }
+        // Secondary file-based guard: re-read the function count from disk on every
+        // iteration.  The seed's loop compilation bug may skip the `if index >= limit`
+        // check above because of broken loop header control flow.  By reading from a
+        // file, we use a fresh comparison each iteration that doesn't depend on the
+        // loop header's phi/condition logic.
+        let _guard_count_str = fs.readFile("build/sailfin/.fn_total_count");
+        let _guard_count = parse_simple_integer(_guard_count_str);
+        if index >= _guard_count {
             break;
         }
         let current_function = local_functions[index];
@@ -2501,8 +2528,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             if param_write_i >= safe_parameters.length {
                 break;
             }
-            fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_name", safe_parameters[param_write_i].name);
-            fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_type", safe_parameters[param_write_i].type_annotation);
+            let _pw_name = get_param_name_at(safe_parameters, param_write_i);
+            let _pw_type = get_param_type_at(safe_parameters, param_write_i);
+            fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_name", _pw_name);
+            fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_type", _pw_type);
             param_write_i += 1;
         }
         let mut dec_write_i -> number = 0;
