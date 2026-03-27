@@ -176,6 +176,10 @@ import {
     lower_condition_to_i1,
 } from "./instructions_match";
 
+import {
+    get_instruction_tag,
+} from "./lowering_core";
+
 fn collect_if_structure(
     instructions -> NativeInstruction[],
     start_index -> number,
@@ -207,13 +211,13 @@ fn collect_if_structure(
                 diagnostics: diagnostics,
             };
         }
-        let current = instructions[index];
-        if current.variant == "If" {
+        let _cur_tag = get_instruction_tag(instructions, index);
+        if _cur_tag == 3 {  // If
             depth += 1;
             index += 1;
             continue;
         }
-        if current.variant == "EndIf" {
+        if _cur_tag == 5 {  // EndIf
             if depth == 0 {
                 if !has_else {
                     then_end = index;
@@ -234,7 +238,7 @@ fn collect_if_structure(
             index += 1;
             continue;
         }
-        if current.variant == "Else" {
+        if _cur_tag == 4 {  // Else
             if depth == 0 {
                 if has_else {
                     diagnostics.push("llvm lowering: duplicate `.else` in `.if` within `" + function_name + "`");
@@ -342,21 +346,22 @@ fn collect_try_structure(instructions -> NativeInstruction[], start_index -> num
         if index >= end {
             break;
         }
-        let instruction = instructions[index];
-        if instruction.variant == "Try" {
+        let _try_tag = get_instruction_tag(instructions, index);
+        if _try_tag == 15 {  // Try
             depth += 1;
-        } else if instruction.variant == "EndTry" {
+        } else if _try_tag == 18 {  // EndTry
             depth -= 1;
             if depth == 0 {
                 end_index = index;
                 break;
             }
-        } else if instruction.variant == "Catch" {
+        } else if _try_tag == 16 {  // Catch
             if depth == 1 && catch_index == -1 {
                 catch_index = index;
+                let instruction = instructions[index];
                 catch_name = instruction.name;
             }
-        } else if instruction.variant == "Finally" {
+        } else if _try_tag == 17 {  // Finally
             if depth == 1 && finally_index == -1 {
                 finally_index = index;
             }
@@ -716,13 +721,13 @@ fn collect_loop_structure(
                 diagnostics: diagnostics,
             };
         }
-        let current = instructions[index];
-        if current.variant == "Loop" || current.variant == "For" {
+        let _loop_tag = get_instruction_tag(instructions, index);
+        if _loop_tag == 8 || _loop_tag == 6 {  // Loop || For
             depth += 1;
             index += 1;
             continue;
         }
-        if current.variant == "EndLoop" || current.variant == "EndFor" {
+        if _loop_tag == 9 || _loop_tag == 7 {  // EndLoop || EndFor
             if depth == 0 {
                 body_end = index;
                 return LoopStructure {

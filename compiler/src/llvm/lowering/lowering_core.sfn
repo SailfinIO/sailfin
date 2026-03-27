@@ -311,6 +311,13 @@ fn make_instruction_simple(tag_val -> number) -> NativeInstruction {
     return NativeInstruction.Continue();
 }
 
+// NativeEnum field accessors: same get_field stub issue.
+// NativeEnum = { i8* name[0], {NativeEnumVariant*,i64}* variants[1], NativeEnumLayout* layout[2] }
+fn get_enum_name_at(enums -> NativeEnum[], idx -> number) -> string {
+    let e = enums[idx];
+    return e.name;
+}
+
 // NativeInstruction field accessors: the seed v0.1.1 compiles enum field access
 // (.variant, .expression, .condition) as sailfin_runtime_get_field which is a
 // runtime stub returning empty data.  These helpers use explicit array indexing
@@ -1798,10 +1805,16 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if debug_lowering {
         print.warn("emit-llvm: phase=trait_metadata");
     }
+    if debug_lowering {
+        print.warn("emit-llvm: about to fixup_enum_layouts enums=" + number_to_string(combined_enums.length));
+    }
     if trace {
         print.info("test llvm: enum layout fixup start");
     }
-    let fixed_enums = fixup_enum_layouts(combined_enums);
+    // Skip cross-module fixup_enum_layouts call: the seed's struct-returning
+    // cross-module ABI segfaults.  Pass enums through; downstream lowering
+    // already handles missing layout metadata with fallbacks.
+    let fixed_enums = EnumLayoutFixupResult { enums: combined_enums, diagnostics: [] };
     diagnostics = extend_string_lines_checked(diagnostics, fixed_enums.diagnostics, "enum layout");
     if debug_lowering {
         print.warn("emit-llvm: phase=enum_fixup");
@@ -1852,33 +1865,28 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let mut _ei_idx -> number = 0;
     loop {
         if _ei_idx >= fixed_enums.enums.length { break; }
-        let _ei_e = fixed_enums.enums[_ei_idx];
-        if _ei_e.name == null || _ei_e.name.length == 0 {
+        let _ei_name = get_enum_name_at(fixed_enums.enums, _ei_idx);
+        if _ei_name == null || _ei_name.length == 0 {
             _ei_idx += 1;
             continue;
         }
         if _ei_idx > 0 && _ei_content.length > 0 { _ei_content = _ei_content + "\n"; }
-        let mut _ei_tag_type -> string = "i32";
-        let mut _ei_tag_size -> string = "4";
-        let mut _ei_tag_align -> string = "4";
-        let mut _ei_size -> string = "4";
-        let mut _ei_align -> string = "4";
-        if _ei_e.layout != null {
-            _ei_tag_type = _ei_e.layout.tag_type;
-            _ei_tag_size = number_to_string(_ei_e.layout.tag_size);
-            _ei_tag_align = number_to_string(_ei_e.layout.tag_align);
-            _ei_size = number_to_string(_ei_e.layout.size);
-            _ei_align = number_to_string(_ei_e.layout.align);
-        }
-        _ei_content = _ei_content + _ei_e.name + "\t" + _ei_tag_type + "\t" + _ei_tag_size + "\t" + _ei_tag_align + "\t" + _ei_size + "\t" + _ei_align + "\t";
-        let mut _vi -> number = 0;
+        // For now assume unit-enum defaults (the fixup_enum_layouts was skipped).
+        let _ei_tag_type = "i32";
+        let _ei_tag_size = "4";
+        let _ei_tag_align = "4";
+        let _ei_size = "4";
+        let _ei_align = "4";
+        _ei_content = _ei_content + _ei_name + "\t" + _ei_tag_type + "\t" + _ei_tag_size + "\t" + _ei_tag_align + "\t" + _ei_size + "\t" + _ei_align + "\t";
+        // Variant names also go through get_field stub; use numeric fallback.
+        let _ei_e = fixed_enums.enums[_ei_idx];
         let _variants = _ei_e.variants;
+        let mut _vi -> number = 0;
         if _variants != null {
             loop {
                 if _vi >= _variants.length { break; }
-                let _v = _variants[_vi];
                 if _vi > 0 { _ei_content = _ei_content + ","; }
-                _ei_content = _ei_content + _v.name + "=" + number_to_string(_vi);
+                _ei_content = _ei_content + "v" + number_to_string(_vi) + "=" + number_to_string(_vi);
                 _vi += 1;
             }
         }
@@ -1895,7 +1903,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
 
     // Recover enum info from file-based channel if cross-module ABI corruption
     // caused the enums parameter to arrive empty in build_type_context.
-    if type_context.enums.length == 0 && fs.exists("build/sailfin/.enum_info") {
+    // Also recover when enums have empty names (get_field stub returns "").
+    let mut _enum_names_empty -> boolean = false;
+    if type_context.enums.length > 0 {
+        _enum_names_empty = type_context.enums[0].name == null || type_context.enums[0].name.length == 0;
+    }
+    if (type_context.enums.length == 0 || _enum_names_empty) && fs.exists("build/sailfin/.enum_info") {
         let _ei_raw = fs.readFile("build/sailfin/.enum_info");
         if _ei_raw.length > 0 {
             let _ei_lines = split_lines_local(_ei_raw);

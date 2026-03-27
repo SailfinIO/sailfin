@@ -4363,6 +4363,30 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _HELPERS["get_instruction_let_type"] = _gen_instr_payload_ptr_accessor(2)
     _HELPERS["get_instruction_let_value"] = _gen_instr_payload_ptr_accessor(3)
 
+    # --- NativeEnum field accessor helpers ---
+    # NativeEnum = { i8* name[0], {NativeEnumVariant*,i64}* variants[1], NativeEnumLayout* layout[2] }
+    NE = "%NativeEnum"
+
+    def _gen_enum_field_accessor(field_idx, ret_type, field_llvm_type):
+        """Generate body for get_enum_XXX_at(enums, idx)."""
+        lines = []
+        lines.append("  %idx_i = fptosi double %idx to i64")
+        lines.append(f"  %hdr = load {{ {NE}*, i64 }}, {{ {NE}*, i64 }}* %enums")
+        lines.append(f"  %data = extractvalue {{ {NE}*, i64 }} %hdr, 0")
+        lines.append(f"  %elem_ptr = getelementptr {NE}, {NE}* %data, i64 %idx_i")
+        lines.append(f"  %field_ptr = getelementptr {NE}, {NE}* %elem_ptr, i32 0, i32 {field_idx}")
+        lines.append(f"  %val = load {field_llvm_type}, {field_llvm_type}* %field_ptr")
+        if ret_type == field_llvm_type:
+            lines.append(f"  ret {ret_type} %val")
+        elif ret_type == "i8*":
+            lines.append(f"  %ret = bitcast {field_llvm_type} %val to i8*")
+            lines.append("  ret i8* %ret")
+        else:
+            lines.append(f"  ret {ret_type} %val")
+        return "\n".join(lines)
+
+    _HELPERS["get_enum_name_at"] = _gen_enum_field_accessor(0, "i8*", "i8*")
+
     # --- NativeParameter field accessor helpers ---
     # NativeParameter = { i8* name[0], i8* type_annotation[1], i1 mutable[2],
     #                      i8* default_value[3], %NativeSourceSpan* span[4] }
@@ -4380,6 +4404,9 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _FN_SIGS["get_function_instructions_at"] = (_fn_sig_base, "i8*")
     _FN_SIGS["get_function_effects_at"] = (_fn_sig_base, "i8*")
     _FN_SIGS["get_function_decorators_at"] = (_fn_sig_base, "i8*")
+
+    _ne_sig_base = f"{{ {NE}*, i64 }}* %enums, double %idx"
+    _FN_SIGS["get_enum_name_at"] = (_ne_sig_base, "i8*")
 
     _ni_sig_base = f"{{ {NI}*, i64 }}* %instructions, double %idx"
     _FN_SIGS["get_instruction_tag"] = (_ni_sig_base, "double")
@@ -7059,7 +7086,7 @@ def _fix_unconditional_loop_headers(llvm_ir: str) -> tuple[str, int]:
 
         # Collect body lines up to the next label (a new block).
         body_lines_raw: "list[str]" = []
-        for j in range(body_start + 1, min(body_start + 80, len(lines))):
+        for j in range(body_start + 1, min(body_start + 200, len(lines))):
             s = lines[j].strip()
             if s.endswith(":") and "=" not in s and not s.startswith("%") and not s.startswith("br ") and not s.startswith(";"):
                 break
