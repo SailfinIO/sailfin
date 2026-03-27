@@ -491,7 +491,14 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
         let mut value_operand -> LLVMOperand? = null;
         if literal_index >= 0 {
             let literal_field = parse.fields[literal_index];
-            let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
+            // Shorthand syntax: { operand } means { operand: operand }
+            // The parser stores empty string as value for shorthand fields.
+            // Substitute the field name as the expression to resolve.
+            let mut field_value_text = literal_field.value;
+            if field_value_text.length == 0 {
+                field_value_text = literal_field.name;
+            }
+            let lowered = lower_expression(field_value_text, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
             let _ci5 = 0;
             while _ci5 < lowered.diagnostics.length {
                 diagnostics.push(lowered.diagnostics[_ci5]);

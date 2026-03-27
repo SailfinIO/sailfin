@@ -72,29 +72,11 @@ fn typecheck_diagnostics(program -> Program) -> Diagnostic[] {
     let top_level = collect_top_level_symbols(program);
     let interfaces = collect_interface_definitions(program);
     let scoped_diagnostics = check_program_scopes(program, interfaces);
-    // Bootstrap guard: effect diagnostics can explode under stage2 corruption.
-    // Disable for now to keep the selfhosted compiler stable.
-    let effect_diagnostics -> Diagnostic[] = [];
 
-    let mut diagnostics_with_scopes = top_level.diagnostics;
-    let mut _ci -> number = 0;
-    loop {
-        if _ci >= scoped_diagnostics.length {
-            break;
-        }
-        diagnostics_with_scopes.push(scoped_diagnostics[_ci]);
-        _ci += 1;
-    }
-    let mut all_diagnostics = diagnostics_with_scopes;
-    let mut _ci2 -> number = 0;
-    loop {
-        if _ci2 >= effect_diagnostics.length {
-            break;
-        }
-        all_diagnostics.push(effect_diagnostics[_ci2]);
-        _ci2 += 1;
-    }
-    return all_diagnostics;
+    // Merge diagnostics using concat (avoids loop-with-if-break pattern that
+    // the compiler lowers incorrectly — loops emit without exit conditions).
+    let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics);
+    return diagnostics_with_scopes;
 }
 
 fn typecheck_error_count(program -> Program) -> number {

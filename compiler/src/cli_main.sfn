@@ -184,10 +184,14 @@ fn _emit_llvm_text_via_file(source -> string, module_name -> string) -> string !
     if fs.exists(out_path) {
         fs.deleteFile(out_path);
     }
-    let ok = compile_to_llvm_file_with_module(source, module_name, out_path);
-    if ok {
-        if fs.exists(out_path) {
-            return fs.readFile(out_path);
+    // Call file-based emit. The return value may be corrupted across module
+    // boundaries in the seedcheck binary, so we ignore it and just check
+    // whether the output file was created.
+    compile_to_llvm_file_with_module(source, module_name, out_path);
+    if fs.exists(out_path) {
+        let content = fs.readFile(out_path);
+        if content.length > 0 {
+            return content;
         }
     }
     return compile_to_llvm_with_module(source, module_name);
@@ -198,10 +202,14 @@ fn _emit_native_text_via_file(source -> string, module_name -> string) -> string
     if fs.exists(out_path) {
         fs.deleteFile(out_path);
     }
-    let ok = write_native_text_file_with_module(source, module_name, out_path);
-    if ok {
-        if fs.exists(out_path) {
-            return fs.readFile(out_path);
+    // Call file-based emit. The return value may be corrupted across module
+    // boundaries in the seedcheck binary, so we ignore it and just check
+    // whether the output file was created.
+    write_native_text_file_with_module(source, module_name, out_path);
+    if fs.exists(out_path) {
+        let content = fs.readFile(out_path);
+        if content.length > 0 {
+            return content;
         }
     }
     return compile_to_native_text_with_module(source, module_name);
@@ -1160,6 +1168,9 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             }
         }
     }
+
+    // DEBUG: unconditionally print args.length before access
+    print.warn("cli: pre-cmd args.length=" + number_to_string(args.length));
 
     // Pre-compute command checks to avoid patterns the compiler drops
     // (&&-chained .length checks with function calls get dropped from IR)
