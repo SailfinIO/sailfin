@@ -4306,6 +4306,63 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _HELPERS["get_function_effects_at"] = _gen_fn_field_accessor(4, "i8*", "{ i8**, i64 }*")
     _HELPERS["get_function_decorators_at"] = _gen_fn_field_accessor(5, "i8*", "{ i8**, i64 }*")
 
+    # --- NativeInstruction field accessor helpers ---
+    # NativeInstruction = { i32 tag[0], [4 x i8] padding[1], [6 x i64] payload[2] }
+    # Payload layout:
+    #   Expression/Return: [0]=expression(i8*), [1]=span(i8*)
+    #   If: [0]=condition(i8*)
+    #   Let: [0]=name(i8*), [1]=mutable(i1, stored as i64), [2]=type_annotation(i8*), [3]=value(i8*), [4]=span(i8*), [5]=value_span(i8*)
+    NI = "%NativeInstruction"
+
+    def _gen_instr_tag_accessor():
+        """Generate body for get_instruction_tag(instructions, idx) -> double."""
+        lines = []
+        lines.append("  %idx_i = fptosi double %idx to i64")
+        lines.append(f"  %hdr = load {{ {NI}*, i64 }}, {{ {NI}*, i64 }}* %instructions")
+        lines.append(f"  %data = extractvalue {{ {NI}*, i64 }} %hdr, 0")
+        lines.append(f"  %elem_ptr = getelementptr {NI}, {NI}* %data, i64 %idx_i")
+        lines.append(f"  %tag_ptr = getelementptr {NI}, {NI}* %elem_ptr, i32 0, i32 0")
+        lines.append("  %tag_i32 = load i32, i32* %tag_ptr")
+        lines.append("  %tag_dbl = sitofp i32 %tag_i32 to double")
+        lines.append("  ret double %tag_dbl")
+        return "\n".join(lines)
+
+    def _gen_instr_payload_ptr_accessor(payload_idx):
+        """Generate body for get_instruction_XXX(instructions, idx) -> i8* from payload[N]."""
+        lines = []
+        lines.append("  %idx_i = fptosi double %idx to i64")
+        lines.append(f"  %hdr = load {{ {NI}*, i64 }}, {{ {NI}*, i64 }}* %instructions")
+        lines.append(f"  %data = extractvalue {{ {NI}*, i64 }} %hdr, 0")
+        lines.append(f"  %elem_ptr = getelementptr {NI}, {NI}* %data, i64 %idx_i")
+        lines.append(f"  %pay_ptr = getelementptr {NI}, {NI}* %elem_ptr, i32 0, i32 2")
+        lines.append(f"  %slot_ptr = getelementptr [6 x i64], [6 x i64]* %pay_ptr, i32 0, i32 {payload_idx}")
+        lines.append("  %slot_val = load i64, i64* %slot_ptr")
+        lines.append("  %ptr = inttoptr i64 %slot_val to i8*")
+        lines.append("  ret i8* %ptr")
+        return "\n".join(lines)
+
+    def _gen_instr_payload_bool_accessor(payload_idx):
+        """Generate body for get_instruction_let_mutable(instructions, idx) -> i1."""
+        lines = []
+        lines.append("  %idx_i = fptosi double %idx to i64")
+        lines.append(f"  %hdr = load {{ {NI}*, i64 }}, {{ {NI}*, i64 }}* %instructions")
+        lines.append(f"  %data = extractvalue {{ {NI}*, i64 }} %hdr, 0")
+        lines.append(f"  %elem_ptr = getelementptr {NI}, {NI}* %data, i64 %idx_i")
+        lines.append(f"  %pay_ptr = getelementptr {NI}, {NI}* %elem_ptr, i32 0, i32 2")
+        lines.append(f"  %slot_ptr = getelementptr [6 x i64], [6 x i64]* %pay_ptr, i32 0, i32 {payload_idx}")
+        lines.append("  %slot_val = load i64, i64* %slot_ptr")
+        lines.append("  %bool_val = trunc i64 %slot_val to i1")
+        lines.append("  ret i1 %bool_val")
+        return "\n".join(lines)
+
+    _HELPERS["get_instruction_tag"] = _gen_instr_tag_accessor()
+    _HELPERS["get_instruction_text"] = _gen_instr_payload_ptr_accessor(0)
+    _HELPERS["get_instruction_condition"] = _gen_instr_payload_ptr_accessor(0)
+    _HELPERS["get_instruction_let_name"] = _gen_instr_payload_ptr_accessor(0)
+    _HELPERS["get_instruction_let_mutable"] = _gen_instr_payload_bool_accessor(1)
+    _HELPERS["get_instruction_let_type"] = _gen_instr_payload_ptr_accessor(2)
+    _HELPERS["get_instruction_let_value"] = _gen_instr_payload_ptr_accessor(3)
+
     # Expected function signatures (params, ret_type) for helpers that may
     # lose parameters when compiled by the first-pass binary (seed ABI bug).
     _FN_SIGS: dict[str, tuple[str, str]] = {}
@@ -4318,6 +4375,15 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _FN_SIGS["get_function_instructions_at"] = (_fn_sig_base, "i8*")
     _FN_SIGS["get_function_effects_at"] = (_fn_sig_base, "i8*")
     _FN_SIGS["get_function_decorators_at"] = (_fn_sig_base, "i8*")
+
+    _ni_sig_base = f"{{ {NI}*, i64 }}* %instructions, double %idx"
+    _FN_SIGS["get_instruction_tag"] = (_ni_sig_base, "double")
+    _FN_SIGS["get_instruction_text"] = (_ni_sig_base, "i8*")
+    _FN_SIGS["get_instruction_condition"] = (_ni_sig_base, "i8*")
+    _FN_SIGS["get_instruction_let_name"] = (_ni_sig_base, "i8*")
+    _FN_SIGS["get_instruction_let_mutable"] = (_ni_sig_base, "i1")
+    _FN_SIGS["get_instruction_let_type"] = (_ni_sig_base, "i8*")
+    _FN_SIGS["get_instruction_let_value"] = (_ni_sig_base, "i8*")
 
     # --- NativeStruct field accessor helpers ---
     # NativeStruct = { i8* name[0], {NativeStructField*,i64}* fields[1],

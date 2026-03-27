@@ -1169,9 +1169,6 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
     }
 
-    // DEBUG: unconditionally print args.length before access
-    print.warn("cli: pre-cmd args.length=" + number_to_string(args.length));
-
     // Pre-compute command checks to avoid patterns the compiler drops
     // (&&-chained .length checks with function calls get dropped from IR)
     let cmd = args[0];

@@ -370,6 +370,12 @@ import {
     find_mutation_for_name,
 } from "./phi";
 
+import {
+    get_instruction_tag,
+    get_instruction_text,
+    get_instruction_condition,
+} from "./lowering_core";
+
 fn _write_block_result_files(
     lines -> string[],
     allocas -> string[],
@@ -521,11 +527,12 @@ fn lower_instruction_range(
             if preview_index >= preview_limit {
                 break;
             }
+            let _preview_tag = get_instruction_tag(function.instructions, preview_index);
             print.info(
                 "test llvm: instr "
                 + number_to_string(preview_index)
-                + " variant="
-                + function.instructions[preview_index].variant
+                + " tag="
+                + number_to_string(_preview_tag)
             );
             preview_index += 1;
         }
@@ -552,13 +559,19 @@ fn lower_instruction_range(
         guard += 1;
 
         let instruction = function.instructions[index];
+        // Use numeric tag accessor instead of .variant (which returns empty via get_field stub)
+        let _instr_tag = get_instruction_tag(function.instructions, index);
         if debug_lowering {
-            print.warn("emit-llvm: lir guard=" + number_to_string(guard) + " index=" + number_to_string(index) + " variant=" + instruction.variant + " fn=" + function.name + " depth=" + number_to_string(scope_depth));
+            print.warn("emit-llvm: lir guard=" + number_to_string(guard) + " index=" + number_to_string(index) + " tag=" + number_to_string(_instr_tag) + " fn=" + function.name + " depth=" + number_to_string(scope_depth));
         }
         if trace && index == start_index {
-            print.info("test llvm: lower_instruction_range first_variant " + instruction.variant);
+            print.info("test llvm: lower_instruction_range first_tag " + number_to_string(_instr_tag));
         }
-        if instruction.variant == "Let" {
+        // Tag constants: Return=0, Expression=1, Let=2, If=3, Else=4, EndIf=5,
+        //   For=6, EndFor=7, Loop=8, EndLoop=9, Break=10, Continue=11,
+        //   Match=12, Case=13, EndMatch=14, Try=15, Catch=16, Finally=17,
+        //   EndTry=18, Throw=19, Noop=20, Unknown=21
+        if _instr_tag == 2 {
             let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
             diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
             collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
@@ -577,11 +590,12 @@ fn lower_instruction_range(
             if trace && function.name == "infer_effects" {
                 print.info("test llvm: infer_effects after Let lines=" + number_to_string(current_lines.length));
             }
-        } else if instruction.variant == "Expression" {
+        } else if _instr_tag == 1 {
             if debug_lowering {
                 print.warn("emit-llvm: lir Expression pre_trim fn=" + function.name + " depth=" + number_to_string(scope_depth));
             }
-            let trimmed_expression = trim_text(instruction.expression);
+            let _raw_expr = get_instruction_text(function.instructions, index);
+            let trimmed_expression = trim_text(_raw_expr);
             if debug_lowering {
                 print.warn("emit-llvm: lir Expression post_trim fn=" + function.name + " expr=" + trimmed_expression);
             }
@@ -597,8 +611,8 @@ fn lower_instruction_range(
                             mutable: inline_parse.mutable,
                             type_annotation: inline_parse.type_annotation,
                             value: inline_parse.initializer,
-                            span: instruction.span,
-                            value_span: instruction.span,
+                            span: null,
+                            value_span: null,
                         };
                         let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
                         diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
@@ -623,11 +637,9 @@ fn lower_instruction_range(
                     print.warn("emit-llvm: lir Expression pre_call fn=" + function.name + " expr=" + trimmed_expression);
                 }
                 // Write instruction span marker for statement.sfn file-based access.
-                let mut has_span = "0";
-                if instruction.span != null {
-                    has_span = "1";
-                }
-                fs.writeFile("build/sailfin/.instr_has_span", has_span);
+                // instruction.span access goes through get_field stub (returns null-like)
+                // For now, always report no span.
+                fs.writeFile("build/sailfin/.instr_has_span", "0");
                 // Write bindings to files for statement.sfn to read.
                 // The ABI fixup replaces struct params with i8* null, which can
                 // corrupt subsequent array parameters (bindings, locals) on ARM64.
@@ -754,7 +766,7 @@ fn lower_instruction_range(
             if trace && function.name == "infer_effects" {
                 print.info("test llvm: infer_effects after Expression lines=" + number_to_string(current_lines.length));
             }
-        } else if starts_with(instruction.variant, "Return") {
+        } else if _instr_tag == 0 {
             if debug_lowering {
                 print.warn("emit-llvm: lir pre_return fn=" + function.name + " depth=" + number_to_string(scope_depth) + " llvm_return=" + llvm_return);
             }
@@ -764,9 +776,10 @@ fn lower_instruction_range(
             // Write instruction fields to files for statement.sfn to read.
             // The v0.1.1 seed compiles statement.sfn with NativeFunction/NativeInstruction
             // as i8*, using sailfin_runtime_get_field which can't access raw struct fields.
+            let _ret_expr = get_instruction_text(function.instructions, index);
             let mut safe_instr_expr -> string = "";
-            if instruction.expression != null {
-                safe_instr_expr = instruction.expression;
+            if _ret_expr != null {
+                safe_instr_expr = _ret_expr;
             }
             fs.writeFile("build/sailfin/.instr_fn_name", function.name);
             fs.writeFile("build/sailfin/.instr_expression", safe_instr_expr);
@@ -885,7 +898,7 @@ fn lower_instruction_range(
                 diagnostics.push("llvm lowering: instructions after return ignored in `" + function.name + "`");
             }
             break;
-        } else if instruction.variant == "If" {
+        } else if _instr_tag == 3 {
             if debug_lowering {
                 print.warn("emit-llvm: lir pre_if fn=" + function.name + " index=" + number_to_string(index) + " depth=" + number_to_string(scope_depth));
             }
@@ -943,7 +956,7 @@ fn lower_instruction_range(
                 print.info("test llvm: infer_effects after If lines=" + number_to_string(current_lines.length));
             }
             continue;
-        } else if instruction.variant == "Loop" {
+        } else if _instr_tag == 8 {
             if trace && function.name == "infer_effects" {
                 print.info("test llvm: infer_effects before Loop lines=" + number_to_string(current_lines.length));
             }
@@ -995,7 +1008,7 @@ fn lower_instruction_range(
                 print.info("test llvm: infer_effects after Loop lines=" + number_to_string(current_lines.length));
             }
             continue;
-        } else if instruction.variant == "Match" {
+        } else if _instr_tag == 12 {
             let lowered = lower_match_instruction(
                 function,
                 index,
@@ -1044,7 +1057,7 @@ fn lower_instruction_range(
                 print.info("test llvm: infer_effects after Match lines=" + number_to_string(current_lines.length));
             }
             continue;
-        } else if instruction.variant == "Try" {
+        } else if _instr_tag == 15 {
             let lowered = lower_try_instruction(
                 function,
                 index,
@@ -1093,7 +1106,7 @@ fn lower_instruction_range(
                 print.info("test llvm: infer_effects after Try lines=" + number_to_string(current_lines.length));
             }
             continue;
-        } else if instruction.variant == "Throw" {
+        } else if _instr_tag == 19 {
             let lowered = lower_throw_instruction(
                 function.name,
                 instruction,
@@ -1121,11 +1134,11 @@ fn lower_instruction_range(
                 diagnostics.push("llvm lowering: instructions after throw ignored in `" + function.name + "`");
             }
             break;
-        } else if instruction.variant == "Else" || instruction.variant == "EndIf" {
+        } else if _instr_tag == 4 || _instr_tag == 5 {
             break;
-        } else if instruction.variant == "EndLoop" || instruction.variant == "EndMatch" || instruction.variant == "EndFor" {
+        } else if _instr_tag == 9 || _instr_tag == 14 || _instr_tag == 7 {
             break;
-        } else if instruction.variant == "Break" {
+        } else if _instr_tag == 10 {
             if current_loop_stack.length == 0 {
                 diagnostics.push("llvm lowering: `break` outside loop in `" + function.name + "`");
             } else {
@@ -1138,7 +1151,7 @@ fn lower_instruction_range(
                 diagnostics.push("llvm lowering: instructions after break ignored in `" + function.name + "`");
             }
             break;
-        } else if instruction.variant == "Continue" {
+        } else if _instr_tag == 11 {
             if current_loop_stack.length == 0 {
                 diagnostics.push("llvm lowering: `continue` outside loop in `" + function.name + "`");
             } else {
@@ -1151,7 +1164,7 @@ fn lower_instruction_range(
                 diagnostics.push("llvm lowering: instructions after continue ignored in `" + function.name + "`");
             }
             break;
-        } else if instruction.variant == "For" {
+        } else if _instr_tag == 6 {
             let lowered = lower_for_instruction(
                 function,
                 index,
@@ -1197,10 +1210,10 @@ fn lower_instruction_range(
                 break;
             }
             continue;
-        } else if instruction.variant == "Noop" {
-            // ignore placeholder instruction
+        } else if _instr_tag == 20 {
+            // ignore placeholder instruction (Noop)
         } else {
-            diagnostics.push("llvm lowering: unsupported instruction `" + instruction.variant + "` in `" + function.name + "`");
+            diagnostics.push("llvm lowering: unsupported instruction tag=" + number_to_string(_instr_tag) + " in `" + function.name + "`");
         }
 
         index += 1;
@@ -1243,4 +1256,51 @@ fn lower_instruction_range(
         mutations: current_mutations,
         string_constants: collected_string_constants,
     };
+}
+
+// Void wrapper for lower_instruction_range.
+// The v0.1.1 seed cannot handle cross-module struct returns (BlockLoweringResult).
+// This wrapper returns void so that callers in other modules (e.g. emission.sfn)
+// can invoke lower_instruction_range without triggering the struct-return ABI bug.
+// Results are communicated via file IPC (_write_block_result_files).
+fn lower_instruction_range_void(
+    function -> NativeFunction,
+    start_index -> number,
+    end -> number,
+    llvm_return -> string,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    allocas -> string[],
+    lines -> string[],
+    temp_index -> number,
+    block_counter -> number,
+    next_local_id -> number,
+    next_region_id -> number,
+    functions -> NativeFunction[],
+    loop_stack -> LoopContext[],
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number,
+    current_label -> string
+) ![io] {
+    lower_instruction_range(
+        function,
+        start_index,
+        end,
+        llvm_return,
+        bindings,
+        locals,
+        allocas,
+        lines,
+        temp_index,
+        block_counter,
+        next_local_id,
+        next_region_id,
+        functions,
+        loop_stack,
+        context,
+        scope_id,
+        scope_depth,
+        current_label
+    );
 }

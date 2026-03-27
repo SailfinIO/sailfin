@@ -311,6 +311,48 @@ fn make_instruction_simple(tag_val -> number) -> NativeInstruction {
     return NativeInstruction.Continue();
 }
 
+// NativeInstruction field accessors: the seed v0.1.1 compiles enum field access
+// (.variant, .expression, .condition) as sailfin_runtime_get_field which is a
+// runtime stub returning empty data.  These helpers use explicit array indexing
+// and field access; the fixup pass replaces their bodies with correct GEP+load IR.
+// Tags: Return=0, Expression=1, Let=2, If=3, Else=4, EndIf=5, For=6, EndFor=7,
+//        Loop=8, EndLoop=9, Break=10, Continue=11, Match=12, ... Unknown=21
+fn get_instruction_tag(instructions -> NativeInstruction[], idx -> number) -> number {
+    // Seed drops this; fixup pass replaces with tag read
+    let instr = instructions[idx];
+    return 21;  // fallback: Unknown
+}
+fn get_instruction_text(instructions -> NativeInstruction[], idx -> number) -> string {
+    // Seed drops this; fixup pass replaces with payload[0] read
+    let instr = instructions[idx];
+    return instr.expression;
+}
+fn get_instruction_condition(instructions -> NativeInstruction[], idx -> number) -> string {
+    // Seed drops this; fixup pass replaces with payload[0] read
+    let instr = instructions[idx];
+    return instr.condition;
+}
+fn get_instruction_let_name(instructions -> NativeInstruction[], idx -> number) -> string {
+    // Seed drops this; fixup pass replaces with payload[0] (name) read
+    let instr = instructions[idx];
+    return instr.name;
+}
+fn get_instruction_let_mutable(instructions -> NativeInstruction[], idx -> number) -> boolean {
+    // Seed drops this; fixup pass replaces with payload[1] read as i1
+    let instr = instructions[idx];
+    return instr.mutable;
+}
+fn get_instruction_let_type(instructions -> NativeInstruction[], idx -> number) -> string {
+    // Seed drops this; fixup pass replaces with payload[2] read
+    let instr = instructions[idx];
+    return instr.type_annotation;
+}
+fn get_instruction_let_value(instructions -> NativeInstruction[], idx -> number) -> string? {
+    // Seed drops this; fixup pass replaces with payload[3] read
+    let instr = instructions[idx];
+    return instr.value;
+}
+
 // NativeFunction field accessors: the seed v0.1.1 compiles by-value struct
 // field access as 0.0.  These helpers take the functions array + index and
 // return individual fields.  The fixup pass replaces their bodies with correct
@@ -2441,7 +2483,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         fs.writeFile("build/sailfin/.fn_is_extern", is_extern_flag);
         fs.writeFile("build/sailfin/.fn_param_count", number_to_string(safe_parameters.length));
         fs.writeFile("build/sailfin/.fn_instr_count", number_to_string(safe_instructions.length));
-        fs.writeFile("build/sailfin/.fn_index", number_to_string(index));
+        // Write .fn_index via a pre-computed string to avoid seed compilation
+        // issues where number_to_string(index) on a loop-mutated variable is
+        // silently dropped by broken control flow in the compiled binary.
+        let _fn_index_str = number_to_string(index);
+        fs.writeFile("build/sailfin/.fn_index", _fn_index_str);
+        // Redundant write: some seed builds silently skip the above write.
+        // Write the index to a second file as a fallback.
+        fs.writeFile("build/sailfin/.fn_index_backup", _fn_index_str);
         fs.writeFile("build/sailfin/.fn_decorator_count", number_to_string(safe_decorators.length));
         // Write individual parameter names and types so emission.sfn can build
         // ParameterPreparation from files instead of calling prepare_parameters

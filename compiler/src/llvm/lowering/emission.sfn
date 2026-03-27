@@ -76,6 +76,7 @@ import {
 
 import {
     lower_instruction_range,
+    lower_instruction_range_void,
 } from "./instructions";
 
 import {
@@ -568,38 +569,136 @@ fn emit_llvm_function(
     if debug_lowering {
         print.warn("emit-llvm: emit_fn phase=pre_body name=" + fn_name + " instrs=" + number_to_string(fn_instr_count));
     }
-    let body = emit_body(function_name_hint, fn_name, fn_instr_count, llvm_return, preparation.bindings, module_globals, functions, context, entry_label);
-    if debug_lowering {
-        print.warn("emit-llvm: emit_fn phase=body_done name=" + fn_name + " body_lines=" + number_to_string(body.lines.length));
-    }
-    lines = extend_string_array(lines, body.lines);
-    diagnostics = extend_string_array(diagnostics, body.diagnostics);
-    // Skip borrow lifetime validation — the v0.1.1 seed cannot pass
-    // NativeFunction correctly.  validate_borrow_lifetimes needs
-    // function.name which would crash when given a string pointer.
-    let lifetime_diagnostics -> string[] = [];
-    diagnostics = extend_string_array(diagnostics, lifetime_diagnostics);
 
-    let mut function_has_terminator -> boolean = false;
-    let mut function_line_index -> number = 0;
-    loop {
-        if function_line_index >= lines.length {
-            break;
+    // Inline body lowering: the v0.1.1 seed compiles emit_body as unreachable
+    // (it cannot resolve the BlockLoweringResult struct return from lower_instruction_range).
+    // By inlining the logic here and using lower_instruction_range_void (which returns void),
+    // we avoid the cross-module struct-return ABI bug entirely.
+    // Read .fn_index with fallback: the first-pass binary may fail to write it.
+    let mut _eb_fn_index -> number = 0;
+    if fs.exists("build/sailfin/.fn_index") {
+        let _eb_fn_index_text = fs.readFile("build/sailfin/.fn_index");
+        _eb_fn_index = parse_simple_integer(_eb_fn_index_text);
+    } else if fs.exists("build/sailfin/.fn_index_backup") {
+        let _eb_fn_index_text = fs.readFile("build/sailfin/.fn_index_backup");
+        _eb_fn_index = parse_simple_integer(_eb_fn_index_text);
+    } else {
+        // Fallback: find by name
+        let mut _fi -> number = 0;
+        loop {
+            if _fi >= functions.length { break; }
+            if functions[_fi].name == fn_name {
+                _eb_fn_index = _fi;
+                break;
+            }
+            _fi += 1;
         }
-        let trimmed_line = trim_text(lines[function_line_index]);
-        if starts_with(trimmed_line, "ret ")
-            || trimmed_line == "ret void"
-            || starts_with(trimmed_line, "br ")
-            || starts_with(trimmed_line, "switch ")
-            || trimmed_line == "unreachable" {
-            function_has_terminator = true;
-            break;
-        }
-        function_line_index += 1;
     }
-    if !function_has_terminator {
-        diagnostics.push("llvm lowering: function emitted without terminator `" + fn_name + "`");
-        lines.push("  unreachable");
+    if debug_lowering {
+        print.warn("emit-llvm: emit_fn phase=body_lir fn_index=" + number_to_string(_eb_fn_index) + " fn_name=" + fn_name);
+    }
+    let _eb_function = functions[_eb_fn_index];
+    lower_instruction_range_void(
+        _eb_function,
+        0,
+        fn_instr_count,
+        llvm_return,
+        preparation.bindings,
+        module_globals,
+        [],
+        [],
+        0,
+        0,
+        0,
+        0,
+        functions,
+        [],
+        context,
+        format_root_scope_id(fn_name),
+        0,
+        entry_label
+    );
+
+    // Read results from file IPC (written by _write_block_result_files in lower_instruction_range)
+    let _eb_lines_raw = fs.readFile("build/sailfin/.block_result_lines");
+    let _eb_body_lines = _split_by_newline(_eb_lines_raw);
+    let _eb_allocas_raw = fs.readFile("build/sailfin/.block_result_allocas");
+    let _eb_allocas = _split_by_newline(_eb_allocas_raw);
+    let _eb_term_str = fs.readFile("build/sailfin/.block_result_terminated");
+    let _eb_terminated = _eb_term_str == "1";
+    let _eb_diags_raw = fs.readFile("build/sailfin/.block_result_diagnostics");
+    let _eb_body_diagnostics = _split_by_newline(_eb_diags_raw);
+
+    if debug_lowering {
+        print.warn("emit-llvm: emit_fn phase=body_done name=" + fn_name + " body_lines=" + number_to_string(_eb_body_lines.length) + " allocas=" + number_to_string(_eb_allocas.length));
+    }
+
+    let mut _eb_body -> string[] = [];
+    _eb_body = extend_string_array(_eb_body, _eb_allocas);
+    _eb_body = extend_string_array(_eb_body, _eb_body_lines);
+    lines = extend_string_array(lines, _eb_body);
+    diagnostics = extend_string_array(diagnostics, _eb_body_diagnostics);
+
+    let mut _eb_has_terminator -> boolean = false;
+    if _eb_terminated {
+        // Check if the body actually has a terminator instruction
+        let mut _eb_ti -> number = 0;
+        loop {
+            if _eb_ti >= _eb_body.length { break; }
+            let _eb_tl = trim_text(_eb_body[_eb_ti]);
+            if starts_with(_eb_tl, "ret ") || _eb_tl == "ret void"
+                || starts_with(_eb_tl, "br ") || starts_with(_eb_tl, "switch ")
+                || _eb_tl == "unreachable" {
+                _eb_has_terminator = true;
+                break;
+            }
+            _eb_ti += 1;
+        }
+    }
+
+    if !_eb_terminated || !_eb_has_terminator {
+        if llvm_return == "void" {
+            lines.push("  ret void");
+        } else {
+            diagnostics.push("llvm lowering: missing return in function `" + fn_name + "`");
+            lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
+        }
+    }
+
+    // Read string constants from file IPC.
+    // Parse inline to avoid calling _parse_string_constants_from_file which
+    // may be compiled as unreachable by the seed.
+    let mut _eb_string_constants = empty_string_constant_set();
+    if fs.exists("build/sailfin/.block_result_string_constants") {
+        let _sc_raw = fs.readFile("build/sailfin/.block_result_string_constants");
+        if _sc_raw.length > 0 {
+            // Inline tab-delimited parsing: name\tcontent\tbyte_count per line
+            let _sc_lines = _split_by_newline(_sc_raw);
+            let mut _sci -> number = 0;
+            loop {
+                if _sci >= _sc_lines.length { break; }
+                let _sc_line = _sc_lines[_sci];
+                if _sc_line.length > 0 {
+                    let _tab1 = index_of(_sc_line, "\t");
+                    if _tab1 >= 0 {
+                        let _sc_name = substring(_sc_line, 0, _tab1);
+                        let _sc_rest = substring(_sc_line, _tab1 + 1, _sc_line.length);
+                        let _tab2 = index_of(_sc_rest, "\t");
+                        if _tab2 >= 0 {
+                            let _sc_content = substring(_sc_rest, 0, _tab2);
+                            let _sc_bc_text = substring(_sc_rest, _tab2 + 1, _sc_rest.length);
+                            let _sc_bc = parse_simple_integer(_sc_bc_text);
+                            _eb_string_constants = append_string_constant(_eb_string_constants, StringConstant {
+                                name: _sc_name,
+                                content: _sc_content,
+                                byte_count: _sc_bc,
+                            });
+                        }
+                    }
+                }
+                _sci += 1;
+            }
+        }
     }
 
     lines.push("}");
@@ -616,9 +715,10 @@ fn emit_llvm_function(
         ]);
     }
 
-    let merged_constants = merge_string_constants(body.string_constants, decorator_string_constants);
+    let merged_constants = merge_string_constants(_eb_string_constants, decorator_string_constants);
     _write_lowered_function_files(lines, diagnostics, merged_constants);
-    return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: body.lifetime_regions, string_constants: merged_constants };
+    let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
+    return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: merged_constants };
 }
 
 fn emit_body(
