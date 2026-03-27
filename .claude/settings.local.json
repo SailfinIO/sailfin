@@ -74,7 +74,8 @@
       "Bash(timeout 10 /Users/mcereal/dev/github.com/sailfin/sailfin/build/native/sailfin-seedcheck emit native examples/basics/hello-world.sfn 2>&1 | tail -20)",
       "Bash(timeout 10 /Users/mcereal/dev/github.com/sailfin/sailfin/build/native/sailfin-seedcheck emit tokens examples/basics/hello-world.sfn 2>&1 | tail -20)",
       "Bash(rm -f /tmp/llvm_types_test2.ll)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(build/native/sailfin-selfhost --emit llvm compiler/src/decorator_semantics.sfn 2>&1 | head -60)"
     ],
     "deny": [],
     "ask": []

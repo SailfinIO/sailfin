@@ -1436,10 +1436,11 @@ def _fix_string_concat_as_gep(llvm_ir: str) -> tuple[str, int]:
 
     Processes each function independently to avoid cross-function SSA name collisions.
     """
-    if "_str to i64" not in llvm_ir:
-        return llvm_ir, 0
-
     import re as _re
+
+    # Quick check: must have GEP i8 pattern with round→fptosi chain
+    if "getelementptr i8, i8*" not in llvm_ir:
+        return llvm_ir, 0
 
     # Pattern: %var_i64 = ptrtoint i8* %var_str to i64
     ptrtoint_re = _re.compile(
@@ -1506,6 +1507,25 @@ def _fix_string_concat_as_gep(llvm_ir: str) -> tuple[str, int]:
                 fptosi_map[m.group(1)] = m.group(2)
                 continue
 
+        # Build load-from-local map: %temp -> local_name for loads from double* locals
+        load_double_local: dict[str, str] = {}  # %temp -> %lN
+        load_re = _re.compile(r"^\s+(%\S+) = load double, double\* (%l\d+)")
+        for i in range(fstart, fend + 1):
+            ml = load_re.match(lines[i])
+            if ml:
+                load_double_local[ml.group(1)] = ml.group(2)
+
+        # Build shadow alloca set: locals that have a _shadow_str alloca
+        shadow_allocas: set[str] = set()
+        shadow_alloca_re = _re.compile(r"^\s+(%l\d+_shadow_str) = alloca i8\*")
+        for i in range(fstart, fend + 1):
+            ms = shadow_alloca_re.match(lines[i])
+            if ms:
+                # Extract the base local name (e.g., %l5 from %l5_shadow_str)
+                shadow_name = ms.group(1)
+                base_local = shadow_name.replace("_shadow_str", "")
+                shadow_allocas.add(base_local)
+
         # Find GEP lines within this function
         for i in range(fstart, fend + 1):
             m = gep_re.match(lines[i])
@@ -1515,34 +1535,77 @@ def _fix_string_concat_as_gep(llvm_ir: str) -> tuple[str, int]:
             gep_base = m.group(2)
             gep_offset = m.group(3)
 
-            # Trace back the full chain
+            # Must have fptosi → round chain
             if gep_offset not in fptosi_map:
                 continue
             round_var = fptosi_map[gep_offset]
             if round_var not in round_map:
                 continue
+
+            # Try full chain: sitofp → ptrtoint (original case)
             sitofp_var = round_map[round_var]
-            if sitofp_var not in sitofp_map:
-                continue
-            ptrtoint_var = sitofp_map[sitofp_var]
-            if ptrtoint_var not in ptrtoint_map:
-                continue
-            original_str = ptrtoint_map[ptrtoint_var]
+            if sitofp_var in sitofp_map:
+                ptrtoint_var = sitofp_map[sitofp_var]
+                if ptrtoint_var in ptrtoint_map:
+                    original_str = ptrtoint_map[ptrtoint_var]
 
-            # Replace GEP with string_concat
-            replacements[i] = (
-                f"  {gep_dst} = call i8* @sailfin_runtime_string_concat("
-                f"i8* {gep_base}, i8* {original_str})"
-            )
+                    # Replace GEP with string_concat
+                    replacements[i] = (
+                        f"  {gep_dst} = call i8* @sailfin_runtime_string_concat("
+                        f"i8* {gep_base}, i8* {original_str})"
+                    )
 
-            # Mark intermediate lines for removal within this function
-            for j in range(fstart, fend + 1):
-                stripped = lines[j].strip()
-                if (stripped == f"{ptrtoint_var} = ptrtoint i8* {original_str} to i64" or
-                    stripped == f"{sitofp_var} = sitofp i64 {ptrtoint_var} to double" or
-                    stripped == f"{round_var} = call double @round(double {sitofp_var})" or
-                    stripped == f"{gep_offset} = fptosi double {round_var} to i64"):
-                    skip_lines.add(j)
+                    # Mark intermediate lines for removal within this function
+                    for j in range(fstart, fend + 1):
+                        stripped = lines[j].strip()
+                        if (stripped == f"{ptrtoint_var} = ptrtoint i8* {original_str} to i64" or
+                            stripped == f"{sitofp_var} = sitofp i64 {ptrtoint_var} to double" or
+                            stripped == f"{round_var} = call double @round(double {sitofp_var})" or
+                            stripped == f"{gep_offset} = fptosi double {round_var} to i64"):
+                            skip_lines.add(j)
+
+                    total_changed += 1
+                    continue
+
+            # Broken chain: double came from a local variable load.
+            # Pattern: load double %lN → round → fptosi → GEP i8*
+            # The double encodes a string pointer. If a shadow_str local exists,
+            # load from it. Otherwise, convert via fptosi→inttoptr.
+            double_src = round_map[round_var]  # the source of round()
+            local_name = load_double_local.get(double_src)
+
+            if local_name and local_name in shadow_allocas:
+                # Shadow local exists — load the i8* directly
+                shadow_local = local_name + "_shadow_str"
+                load_tmp = gep_dst + "_shadow_load"
+                insert_lines = [
+                    f"  {load_tmp} = load i8*, i8** {shadow_local}",
+                    f"  {gep_dst} = call i8* @sailfin_runtime_string_concat("
+                    f"i8* {gep_base}, i8* {load_tmp})",
+                ]
+                replacements[i] = "\n".join(insert_lines)
+            else:
+                # No shadow — recover pointer from double via fptosi→inttoptr.
+                # The double contains a pointer encoded via ptrtoint→sitofp.
+                # fptosi(round(double)) recovers the i64 (safe for addresses < 2^53).
+                # Reuse the existing fptosi result (gep_offset) as the i64 value.
+                # Keep round and fptosi lines in place (they're still needed).
+                ptr_tmp = gep_dst + "_recovered_ptr"
+                insert_lines = [
+                    f"  {ptr_tmp} = inttoptr i64 {gep_offset} to i8*",
+                    f"  {gep_dst} = call i8* @sailfin_runtime_string_concat("
+                    f"i8* {gep_base}, i8* {ptr_tmp})",
+                ]
+                replacements[i] = "\n".join(insert_lines)
+
+            # Mark round and fptosi for removal only when using shadow path
+            # (not needed when using inttoptr fallback — those lines are still referenced)
+            if local_name and local_name in shadow_allocas:
+                for j in range(fstart, fend + 1):
+                    stripped = lines[j].strip()
+                    if (stripped == f"{round_var} = call double @round(double {double_src})" or
+                        stripped == f"{gep_offset} = fptosi double {round_var} to i64"):
+                        skip_lines.add(j)
 
             total_changed += 1
 
@@ -3029,6 +3092,42 @@ def _fix_mangled_method_calls(llvm_ir: str) -> tuple[str, int]:
                 changed += 1
 
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _fix_duplicate_globals(llvm_ir: str) -> tuple[str, int]:
+    """Deduplicate global variable definitions with identical names.
+
+    The seed compiler's get_field stub returns empty names for globals,
+    so all global definitions are emitted as ``@global._0``.  LLVM
+    rejects duplicate global definitions.  This pass keeps only the
+    first definition of each global name and removes the rest.
+    """
+    import re as _re
+
+    lines = llvm_ir.split("\n")
+    global_def_pat = _re.compile(
+        r"^(@[A-Za-z0-9_.]+)\s*=\s*(internal\s+|private\s+|external\s+)?global\s+"
+    )
+    seen: set[str] = set()
+    changed = 0
+    new_lines = []
+    for line in lines:
+        m = global_def_pat.match(line)
+        if m:
+            gname = m.group(1)
+            if gname in seen:
+                # Duplicate — skip it
+                changed += 1
+                continue
+            seen.add(gname)
+        new_lines.append(line)
+
+    if not changed:
+        return llvm_ir, 0
+    result = "\n".join(new_lines)
+    if llvm_ir.endswith("\n"):
+        result += "\n"
+    return result, changed
 
 
 def _fix_duplicate_param_names(llvm_ir: str) -> tuple[str, int]:
@@ -6277,6 +6376,194 @@ def _fix_phi_predecessor_mismatches(llvm_ir: str) -> tuple[str, int]:
                     else:
                         lines[i] = f"{indent}{result_var} = inttoptr i64 0 to i8*"
                     changed += 1
+
+    if not changed:
+        return llvm_ir, 0
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _fix_phi_type_mismatches(llvm_ir: str) -> tuple[str, int]:
+    """Fix phi nodes whose incoming values have the wrong LLVM type.
+
+    The seed compiler's loop lowering picks preloaded values by name-matching
+    locals, but the get_field stub corrupts names, causing the wrong temp to
+    be selected.  This results in phi nodes like:
+
+        %t10 = phi double [ %t5, %afterloop3 ], ...
+
+    where %t5 was actually loaded as i8* from %l1.  The phi stores to %l4,
+    so the entry value should be the temp that was loaded from %l4 (e.g. %t8).
+
+    Algorithm:
+    1. Build a map of temp → (type, source_local) from all load instructions
+    2. For each phi, check if any incoming value's loaded type mismatches
+    3. Find the target local from the store after the phi
+    4. Replace the wrong incoming value with the correct temp loaded from that local
+    """
+    import re as _re
+
+    lines = llvm_ir.split("\n")
+    changed = 0
+
+    define_pat = _re.compile(r"^define\s+")
+
+    def _parse_load(line: str):
+        """Parse a load instruction, returning (temp, loaded_type, source_local) or None.
+        Handles complex types like { double*, i64 }*.
+        """
+        stripped = line.strip()
+        m = _re.match(r"(%[A-Za-z0-9_.]+)\s*=\s*load\s+", stripped)
+        if not m:
+            return None
+        temp_name = m.group(1)
+        rest = stripped[m.end():]
+        # Find the first comma not inside braces (separates loaded type from pointer type)
+        depth = 0
+        comma_pos = -1
+        for ci, ch in enumerate(rest):
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+            elif ch == ',' and depth == 0:
+                comma_pos = ci
+                break
+        if comma_pos < 0:
+            return None
+        loaded_type = rest[:comma_pos].strip()
+        # Extract source local from the end
+        sm = _re.search(r"(%[A-Za-z0-9_.]+)\s*(?:,\s*align\s+\d+)?\s*$", rest[comma_pos + 1:])
+        if not sm:
+            return None
+        source_local = sm.group(1)
+        return temp_name, loaded_type, source_local
+
+    # Match: store TYPE VAL, TYPE* %lM  (extract target local)
+    store_local_pat = _re.compile(
+        r"^\s*store\s+.+,\s*.+\s+(%[A-Za-z0-9_.]+)\s*(?:,\s*align\s+\d+)?\s*$"
+    )
+
+    def _parse_phi(line: str):
+        """Parse a phi instruction, returning (indent, result_var, phi_type, entries_str) or None.
+        Handles complex types like { double*, i64 }*.
+        """
+        m = _re.match(r"^(\s*)(%[A-Za-z0-9_.]+)\s*=\s*phi\s+", line)
+        if not m:
+            return None
+        indent = m.group(1)
+        result_var = m.group(2)
+        rest = line[m.end():]
+        # The type ends right before the first '['
+        bracket_pos = rest.find('[')
+        if bracket_pos < 0:
+            return None
+        phi_type = rest[:bracket_pos].strip()
+        entries_str = rest[bracket_pos:]
+        return indent, result_var, phi_type, entries_str
+    # Match individual phi incoming: [ %val, %label ]
+    phi_entry_pat = _re.compile(
+        r"\[\s*(%[A-Za-z0-9_.]+)\s*,\s*(%[A-Za-z0-9_.]+)\s*\]"
+    )
+
+    func_ranges: list[tuple[int, int]] = []
+    func_start_i = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if define_pat.match(stripped):
+            func_start_i = i
+        elif func_start_i is not None and stripped == "}":
+            func_ranges.append((func_start_i, i))
+            func_start_i = None
+
+    for fstart, fend in func_ranges:
+        # Build temp → (loaded_type, source_local) map
+        temp_info: dict[str, tuple[str, str]] = {}  # %tN → (type, %lM)
+        for i in range(fstart, fend + 1):
+            parsed = _parse_load(lines[i])
+            if parsed:
+                temp_name, loaded_type, source_local = parsed
+                temp_info[temp_name] = (loaded_type, source_local)
+
+        # Scan for phi nodes with type mismatches
+        for i in range(fstart, fend + 1):
+            parsed_phi = _parse_phi(lines[i])
+            if not parsed_phi:
+                continue
+            indent, result_var, phi_type, entries_str = parsed_phi
+
+            entries = phi_entry_pat.findall(entries_str)
+            if not entries:
+                continue
+
+            # Check for type mismatches in incoming values
+            has_mismatch = False
+            for val, lbl in entries:
+                if val in temp_info:
+                    val_type, _ = temp_info[val]
+                    if val_type != phi_type:
+                        has_mismatch = True
+                        break
+
+            if not has_mismatch:
+                continue
+
+            # Find the target local from the store instruction after the phi.
+            # When there are multiple phi nodes in a row, the store may be
+            # several lines down.  Skip other phi nodes and look for the
+            # store that corresponds to THIS phi's result variable.
+            target_local = None
+            for j in range(i + 1, min(i + 20, fend + 1)):
+                line_j = lines[j].strip()
+                # Skip other phi nodes
+                if _re.match(r"%[A-Za-z0-9_.]+\s*=\s*phi\s+", line_j):
+                    continue
+                # Look for store of our result_var
+                if result_var in line_j:
+                    sm = store_local_pat.match(lines[j])
+                    if sm:
+                        target_local = sm.group(1)
+                        break
+                # If we hit a terminator or label, stop looking
+                if line_j.startswith("br ") or line_j.startswith("ret ") or line_j.endswith(":"):
+                    break
+
+            if target_local is None:
+                continue
+
+            # Build a map of temp → line number for definition ordering
+            temp_def_line: dict[str, int] = {}
+            for j in range(fstart, fend + 1):
+                parsed_l = _parse_load(lines[j])
+                if parsed_l:
+                    temp_def_line[parsed_l[0]] = j
+
+            # Fix each mismatched entry by finding the correct temp
+            new_entries = []
+            any_fixed = False
+            for val, lbl in entries:
+                if val in temp_info:
+                    val_type, val_local = temp_info[val]
+                    if val_type != phi_type:
+                        # Find the temp loaded from target_local with correct type
+                        # that is defined BEFORE the phi (line i)
+                        correct_temp = None
+                        for tname, (ttype, tlocal) in temp_info.items():
+                            if tlocal == target_local and ttype == phi_type:
+                                tline = temp_def_line.get(tname, fend + 1)
+                                if tline < i:
+                                    # Prefer the latest-defined temp before the phi
+                                    if correct_temp is None or tline > temp_def_line.get(correct_temp, -1):
+                                        correct_temp = tname
+                        if correct_temp is not None:
+                            new_entries.append(f"[ {correct_temp}, {lbl} ]")
+                            any_fixed = True
+                            continue
+                new_entries.append(f"[ {val}, {lbl} ]")
+
+            if any_fixed:
+                new_phi = f"{indent}{result_var} = phi {phi_type} {', '.join(new_entries)}"
+                lines[i] = new_phi
+                changed += 1
 
     if not changed:
         return llvm_ir, 0
@@ -10180,13 +10467,28 @@ def main(argv: list[str]) -> int:
             try:
                 _manifest_text = _manifest_path.read_text(encoding="utf-8", errors="replace")
                 for _em in re.finditer(
-                    r"^\.layout\s+enum\s+name=(\S+)\s+.*?tag_type=(\S+)",
+                    r"^\.layout\s+enum\s+name=(\S+)\s+size=(\d+)\s+align=(\d+)\s+tag_type=(\S+)\s+tag_size=(\d+)",
                     _manifest_text, re.MULTILINE,
                 ):
                     _ename = "%" + _em.group(1)
-                    _tag = _em.group(2)
-                    known_named_type_defs.setdefault(
-                        _ename, f"{_ename} = type {{ {_tag} }}")
+                    _esize = int(_em.group(2))
+                    _ealign = int(_em.group(3))
+                    _tag = _em.group(4)
+                    _tag_size = int(_em.group(5))
+                    # Compute full enum layout: { tag, [padding x i8], [payload_slots x i64] }
+                    _payload_offset = max(_ealign, _tag_size)
+                    _padding = _payload_offset - _tag_size
+                    _payload_size = _esize - _payload_offset
+                    if _payload_size > 0 and _payload_size % 8 == 0:
+                        _slots = _payload_size // 8
+                        if _padding > 0:
+                            _typedef = f"{_ename} = type {{ {_tag}, [{_padding} x i8], [{_slots} x i64] }}"
+                        else:
+                            _typedef = f"{_ename} = type {{ {_tag}, [{_slots} x i64] }}"
+                    else:
+                        # Simple unit enum (tag only)
+                        _typedef = f"{_ename} = type {{ {_tag} }}"
+                    known_named_type_defs.setdefault(_ename, _typedef)
             except Exception:
                 pass
         if known_named_type_defs:
@@ -10903,6 +11205,15 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
+                    # Deduplicate global variable definitions.
+                    candidate, dup_global_changes = _fix_duplicate_globals(candidate)
+                    if dup_global_changes:
+                        print(
+                            f"[selfhost] deduplicated {dup_global_changes} global(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
                     # Fix duplicate parameter names in function definitions.
                     candidate, dup_param_changes = _fix_duplicate_param_names(candidate)
                     if dup_param_changes:
@@ -11114,6 +11425,15 @@ def main(argv: list[str]) -> int:
                     if phi_changes:
                         print(
                             f"[selfhost] fixed {phi_changes} phi predecessor mismatch(es) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Fix phi nodes where incoming value type doesn't match phi type.
+                    candidate, phi_type_changes = _fix_phi_type_mismatches(candidate)
+                    if phi_type_changes:
+                        print(
+                            f"[selfhost] fixed {phi_type_changes} phi type mismatch(es) in {module_name}",
                             file=sys.stderr,
                             flush=True,
                         )
