@@ -11012,10 +11012,6 @@ def main(argv: list[str]) -> int:
                 }
                 max_attempts = max(1, int(args.max_attempts))
                 cleaned = ""
-                # Track the best candidate across attempts: prefer the one
-                # with the fewest stub function bodies.
-                best_candidate = ""
-                best_stub_count: int | None = None
                 last_stderr = ""
                 last_rc: int | None = None
                 last_clang_stderr = ""
@@ -12170,27 +12166,11 @@ def main(argv: list[str]) -> int:
                         stats["clang_validations"]) + 1
 
                     if clang_proc.returncode == 0:
-                        # Check for stub function bodies — prefer attempts
-                        # with fewer stubs (real implementations).
-                        stubs = _count_stub_function_bodies(candidate)
-                        if stubs == 0:
-                            # Perfect — no stubs, accept immediately.
-                            cleaned = candidate
-                            break
-                        # Remember the best candidate so far (fewest stubs).
-                        if best_stub_count is None or stubs < best_stub_count:
-                            best_candidate = candidate
-                            best_stub_count = stubs
-                            print(
-                                f"[selfhost] attempt {attempt} for {module_name} has {stubs} stub function(s); trying next attempt",
-                                file=sys.stderr,
-                                flush=True,
-                            )
-                        # Continue to try the next attempt for a better result.
-                        if attempt < max_attempts:
-                            continue
-                        # Last attempt — use the best we found.
-                        cleaned = best_candidate
+                        cleaned = candidate
+                        # Do not reuse this object for the final build. We will
+                        # run a global named-type normalization pass after all
+                        # modules are emitted, then compile objects from the
+                        # normalized IR.
                         break
 
                     stats["clang_validation_failures"] = int(
@@ -12244,20 +12224,7 @@ def main(argv: list[str]) -> int:
                         clang_stderr_path.write_text(
                             last_clang_stderr, encoding="utf-8")
                         if clang_proc2.returncode == 0:
-                            stubs2 = _count_stub_function_bodies(patched_candidate)
-                            if stubs2 == 0:
-                                cleaned = patched_candidate
-                                break
-                            if best_stub_count is None or stubs2 < best_stub_count:
-                                best_candidate = patched_candidate
-                                best_stub_count = stubs2
-                                print(
-                                    f"[selfhost] attempt {attempt} (patched) for {module_name} has {stubs2} stub function(s); trying next attempt",
-                                    file=sys.stderr,
-                                    flush=True,
-                                )
-                            if attempt >= max_attempts:
-                                cleaned = best_candidate
+                            cleaned = patched_candidate
                             break
 
                     if cleaned:
@@ -12272,16 +12239,6 @@ def main(argv: list[str]) -> int:
 
                 if used_attempts > 1:
                     stats["modules_retried"] = 1
-
-                # If no stub-free candidate was found but we have a best
-                # candidate with stubs, use it as a fallback.
-                if not cleaned and best_candidate:
-                    cleaned = best_candidate
-                    print(
-                        f"[selfhost] using best candidate for {module_name} with {best_stub_count} stub(s) (no stub-free attempt found)",
-                        file=sys.stderr,
-                        flush=True,
-                    )
 
                 if not cleaned:
                     try:
