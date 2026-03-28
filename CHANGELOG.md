@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.141 (2026-03-28)
+
+### Bug Fixes
+
+- Token not needed
+  ([`b604c75`](https://github.com/SailfinIO/sailfin/commit/b604c75402f04a8c04b2aa1c1b7227158d846fe9))
+
+- Windows installation runtime
+  ([`9a09112`](https://github.com/SailfinIO/sailfin/commit/9a0911264d5719127049a938af40e84eb3f452eb))
+
+- Windows installation runtime
+  ([`6d47b86`](https://github.com/SailfinIO/sailfin/commit/6d47b86ec93f9936310a96e2c943b865c3e053b9))
+
+
 ## v0.1.1-alpha.140 (2026-03-28)
 
 ### Bug Fixes
