@@ -996,11 +996,22 @@ fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) ->
     return _clang_link_with_opt(ll_path, out_path, runtime_root, "-O2", "build/sailfin");
 }
 
+fn _is_macos() -> boolean {
+    // /proc/version is Linux-specific; its absence is a reliable macOS signal.
+    return !fs.exists("/proc/version");
+}
+
 fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
     // Tests prioritize compile/link latency over runtime performance.
     // Unit tests often import compiler modules (compiler/src/...), which are already
     // compiled as part of the native compiler build. Link against those objects
     // to satisfy symbols.
+    //
+    // On macOS (Mach-O), llvm-objcopy --weaken converts defined symbols into weak
+    // references rather than weak definitions, leaving them undefined at link time.
+    // Import inlining ensures each test uses a unique module-name suffix, so there
+    // are no duplicate symbols with the compiler objects.  Skip the compiler-object
+    // link step entirely on macOS to avoid the broken-weak-symbol issue.
 
     if runtime_root.length == 0 {
         print.error("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary");
@@ -1054,25 +1065,29 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
 
     // Weaken compiler module objects so test-defined symbols (from inlined
     // imports) take precedence, avoiding duplicate-symbol link errors.
+    // Skipped on macOS: llvm-objcopy --weaken on Mach-O objects converts defined
+    // symbols to weak references (undefined), which the Apple linker rejects.
     let mut link_objs -> string[] = [];
-    if module_objs.length > 0 {
-        let mut wi -> number = 0;
-        loop {
-            if wi >= module_objs.length {
-                break;
+    if !_is_macos() {
+        if module_objs.length > 0 {
+            let mut wi -> number = 0;
+            loop {
+                if wi >= module_objs.length {
+                    break;
+                }
+                let weak_path = cache_dir + "/weak_" + number_to_string(wi) + ".o";
+                process.run(["cp", module_objs[wi], weak_path]);
+                process.run(["llvm-objcopy", "--weaken", weak_path]);
+                link_objs.push(weak_path);
+                wi += 1;
             }
-            let weak_path = cache_dir + "/weak_" + number_to_string(wi) + ".o";
-            process.run(["cp", module_objs[wi], weak_path]);
-            process.run(["llvm-objcopy", "--weaken", weak_path]);
-            link_objs.push(weak_path);
-            wi += 1;
-        }
-    } else {
-        if fs.exists(selfhost_linked) {
-            let weak_path = cache_dir + "/native.linked.weak.o";
-            process.run(["cp", selfhost_linked, weak_path]);
-            process.run(["llvm-objcopy", "--weaken", weak_path]);
-            link_objs.push(weak_path);
+        } else {
+            if fs.exists(selfhost_linked) {
+                let weak_path = cache_dir + "/native.linked.weak.o";
+                process.run(["cp", selfhost_linked, weak_path]);
+                process.run(["llvm-objcopy", "--weaken", weak_path]);
+                link_objs.push(weak_path);
+            }
         }
     }
 
