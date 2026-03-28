@@ -1089,6 +1089,13 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
                 link_objs.push(weak_path);
             }
         }
+        // Cross-module shim resolves plain symbol names (e.g. split_lines) that
+        // the compiler modules call when crossing the seed's module boundaries.
+        // Required whenever native.linked.o or module objects are in the link.
+        let selfhost_shim = "build/selfhost/native/obj/cross_module_shim.o";
+        if fs.exists(selfhost_shim) {
+            link_objs.push(selfhost_shim);
+        }
     }
 
     let mut args -> string[] = [

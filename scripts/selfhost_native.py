@@ -83,134 +83,102 @@ _CROSS_MODULE_SHIM_C = """\
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- Pointer-returning functions (ptr→double bit-cast) ---- */
+/* ---- Pointer-returning functions ---- */
 
 extern void* split_lines__native_ir(void*);
 __attribute__((weak))
-double split_lines(void* arg) {
-    union { double d; void* p; } u;
-    u.p = split_lines__native_ir(arg);
-    return u.d;
+void* split_lines(void* arg) {
+    return split_lines__native_ir(arg);
 }
 
 extern void* select_text_artifact__native_ir(void*);
 __attribute__((weak))
-double select_text_artifact(void* arg) {
-    union { double d; void* p; } u;
-    u.p = select_text_artifact__native_ir(arg);
-    return u.d;
+void* select_text_artifact(void* arg) {
+    return select_text_artifact__native_ir(arg);
 }
 
 extern void* parse_native_functions_from_text__native_ir(void*);
 __attribute__((weak))
-double parse_native_functions_from_text(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_functions_from_text__native_ir(arg);
-    return u.d;
+void* parse_native_functions_from_text(void* arg) {
+    return parse_native_functions_from_text__native_ir(arg);
 }
 
 extern void* parse_native_structs_from_text__native_ir(void*);
 __attribute__((weak))
-double parse_native_structs_from_text(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_structs_from_text__native_ir(arg);
-    return u.d;
+void* parse_native_structs_from_text(void* arg) {
+    return parse_native_structs_from_text__native_ir(arg);
 }
 
 extern void* parse_native_imports_from_text__native_ir(void*);
 __attribute__((weak))
-double parse_native_imports_from_text(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_imports_from_text__native_ir(arg);
-    return u.d;
+void* parse_native_imports_from_text(void* arg) {
+    return parse_native_imports_from_text__native_ir(arg);
 }
 
 extern void* parse_native_interfaces_from_text__native_ir(void*);
 __attribute__((weak))
-double parse_native_interfaces_from_text(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_interfaces_from_text__native_ir(arg);
-    return u.d;
+void* parse_native_interfaces_from_text(void* arg) {
+    return parse_native_interfaces_from_text__native_ir(arg);
 }
 
 extern void* parse_native_enums_from_text__native_ir(void*);
 __attribute__((weak))
-double parse_native_enums_from_text(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_enums_from_text__native_ir(arg);
-    return u.d;
+void* parse_native_enums_from_text(void* arg) {
+    return parse_native_enums_from_text__native_ir(arg);
 }
 
 extern void* parse_native_bindings_from_text__native_ir(void*);
 __attribute__((weak))
-double parse_native_bindings_from_text(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_bindings_from_text__native_ir(arg);
-    return u.d;
+void* parse_native_bindings_from_text(void* arg) {
+    return parse_native_bindings_from_text__native_ir(arg);
 }
 
 extern void* parse_native_diagnostics_from_text__native_ir(void*);
 __attribute__((weak))
-double parse_native_diagnostics_from_text(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_diagnostics_from_text__native_ir(arg);
-    return u.d;
+void* parse_native_diagnostics_from_text(void* arg) {
+    return parse_native_diagnostics_from_text__native_ir(arg);
 }
 
 extern void* parse_native_structs_for_import__native_ir(void*);
 __attribute__((weak))
-double parse_native_structs_for_import(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_structs_for_import__native_ir(arg);
-    return u.d;
+void* parse_native_structs_for_import(void* arg) {
+    return parse_native_structs_for_import__native_ir(arg);
 }
 
 extern void* parse_native_imports_for_import__native_ir(void*);
 __attribute__((weak))
-double parse_native_imports_for_import(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_imports_for_import__native_ir(arg);
-    return u.d;
+void* parse_native_imports_for_import(void* arg) {
+    return parse_native_imports_for_import__native_ir(arg);
 }
 
 extern void* parse_native_interfaces_for_import__native_ir(void*);
 __attribute__((weak))
-double parse_native_interfaces_for_import(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_interfaces_for_import__native_ir(arg);
-    return u.d;
+void* parse_native_interfaces_for_import(void* arg) {
+    return parse_native_interfaces_for_import__native_ir(arg);
 }
 
 extern void* parse_native_enums_for_import__native_ir(void*);
 __attribute__((weak))
-double parse_native_enums_for_import(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_enums_for_import__native_ir(arg);
-    return u.d;
+void* parse_native_enums_for_import(void* arg) {
+    return parse_native_enums_for_import__native_ir(arg);
 }
 
 extern void* parse_native_functions_for_import__native_ir(void*);
 __attribute__((weak))
-double parse_native_functions_for_import(void* arg) {
-    union { double d; void* p; } u;
-    u.p = parse_native_functions_for_import__native_ir(arg);
-    return u.d;
+void* parse_native_functions_for_import(void* arg) {
+    return parse_native_functions_for_import__native_ir(arg);
 }
 
 extern void* number_to_string__llvm__utils(double);
 __attribute__((weak))
-double number_to_string(double arg) {
-    union { double d; void* p; } u;
-    u.p = number_to_string__llvm__utils(arg);
-    return u.d;
+void* number_to_string(double arg) {
+    return number_to_string__llvm__utils(arg);
 }
 
 extern void* empty_string_constant_set__llvm__strings(void);
 __attribute__((weak))
-double empty_string_constant_set(void) {
-    union { double d; void* p; } u;
-    u.p = empty_string_constant_set__llvm__strings();
-    return u.d;
+void* empty_string_constant_set(void) {
+    return empty_string_constant_set__llvm__strings();
 }
 
 /* ---- Double-returning function (direct forwarding) ---- */
@@ -227,56 +195,44 @@ typedef struct { void* f[7]; } ParseNativeResult;
 
 extern ParseNativeResult parse_native_artifact__native_ir(void*);
 __attribute__((weak))
-double parse_native_artifact(void* text) {
+void* parse_native_artifact(void* text) {
     ParseNativeResult* heap = (ParseNativeResult*)malloc(sizeof(ParseNativeResult));
     *heap = parse_native_artifact__native_ir(text);
-    union { double d; void* p; } u;
-    u.p = heap;
-    return u.d;
+    return heap;
 }
 
 extern ParseNativeResult parse_native_artifact_for_import_context__native_ir(void*);
 __attribute__((weak))
-double parse_native_artifact_for_import_context(void* text) {
+void* parse_native_artifact_for_import_context(void* text) {
     ParseNativeResult* heap = (ParseNativeResult*)malloc(sizeof(ParseNativeResult));
     *heap = parse_native_artifact_for_import_context__native_ir(text);
-    union { double d; void* p; } u;
-    u.p = heap;
-    return u.d;
+    return heap;
 }
 
-/* ---- Lowering_core recovery function shims (ptr→double bit-cast) ---- */
+/* ---- Lowering_core recovery function shims ---- */
 
 extern void* recover_native_functions_light__llvm__lowering__lowering_core(void*);
 __attribute__((weak))
-double recover_native_functions_light(void* arg) {
-    union { double d; void* p; } u;
-    u.p = recover_native_functions_light__llvm__lowering__lowering_core(arg);
-    return u.d;
+void* recover_native_functions_light(void* arg) {
+    return recover_native_functions_light__llvm__lowering__lowering_core(arg);
 }
 
 extern void* recover_native_structs_light__llvm__lowering__lowering_core(void*);
 __attribute__((weak))
-double recover_native_structs_light(void* arg) {
-    union { double d; void* p; } u;
-    u.p = recover_native_structs_light__llvm__lowering__lowering_core(arg);
-    return u.d;
+void* recover_native_structs_light(void* arg) {
+    return recover_native_structs_light__llvm__lowering__lowering_core(arg);
 }
 
 extern void* recover_native_imports_light__llvm__lowering__lowering_core(void*);
 __attribute__((weak))
-double recover_native_imports_light(void* arg) {
-    union { double d; void* p; } u;
-    u.p = recover_native_imports_light__llvm__lowering__lowering_core(arg);
-    return u.d;
+void* recover_native_imports_light(void* arg) {
+    return recover_native_imports_light__llvm__lowering__lowering_core(arg);
 }
 
 extern void* build_parse_result_from_text__llvm__lowering__lowering_core(void*);
 __attribute__((weak))
-double build_parse_result_from_text(void* arg) {
-    union { double d; void* p; } u;
-    u.p = build_parse_result_from_text__llvm__lowering__lowering_core(arg);
-    return u.d;
+void* build_parse_result_from_text(void* arg) {
+    return build_parse_result_from_text__llvm__lowering__lowering_core(arg);
 }
 
 /* ---- Missing local functions (no definition anywhere, stub) ---- */
