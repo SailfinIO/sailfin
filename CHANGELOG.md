@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.140 (2026-03-28)
+
+### Bug Fixes
+
+- Windows installation
+  ([`fc486aa`](https://github.com/SailfinIO/sailfin/commit/fc486aaab3ca2f77d488c4b9405062a39a49670c))
+
+- Windows installation
+  ([`8e986b0`](https://github.com/SailfinIO/sailfin/commit/8e986b046dfe55ad92d1dd0dc259ae23e6f440db))
+
+
 ## v0.1.1-alpha.139 (2026-03-28)
 
 ### Bug Fixes
