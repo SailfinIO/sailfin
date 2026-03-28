@@ -42,10 +42,6 @@ jobs:
             package_label: linux-x86_64
             clang: clang-18
             max_attempts: 10
-          - os: windows-latest
-            package_label: windows-x86_64
-            clang: clang
-            max_attempts: 15
 
     steps:
       - name: Checkout repository (tag)
@@ -86,13 +82,6 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-      - name: Install LLVM + tools (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          choco install llvm jq make -y
-          echo "CLANG=clang" >> "$GITHUB_ENV"
-
       - name: Build + test + package (via Makefile)
         uses: ./.github/actions/sailfin-build
         env:
@@ -107,15 +96,13 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          EXE_EXT=""
-          if [ "$RUNNER_OS" = "Windows" ]; then EXE_EXT=".exe"; fi
           expected="${RELEASE_TAG#v}"
           file_version="$(python -c "import re, pathlib; text=pathlib.Path('compiler/src/version.sfn').read_text(encoding='utf-8'); m=re.search(r'__version__\\s*=\\s*\"([^\"]+)\"', text); print(m.group(1) if m else '')")"
           if [ "$file_version" != "$expected" ]; then
             echo "[ci][error] compiler/src/version.sfn has '$file_version', expected '$expected'" >&2
             exit 1
           fi
-          actual="$("build/native/sailfin${EXE_EXT}" version | sed -n 's/.*sfn //p')"
+          actual="$(build/native/sailfin version | sed -n 's/.*sfn //p')"
           if [ "$actual" != "$expected" ]; then
             echo "[ci][error] built compiler reports '$actual', expected '$expected'" >&2
             exit 1
@@ -125,18 +112,29 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          EXE_EXT=""
-          if [ "$RUNNER_OS" = "Windows" ]; then EXE_EXT=".exe"; fi
           expected="${RELEASE_TAG#v}"
           rm -rf _installer_check
           mkdir -p _installer_check
           tar -xzf "dist/installer-${{ matrix.package_label }}.tar.gz" -C _installer_check
-          chmod +x "_installer_check/bin/sfn${EXE_EXT}" || true
-          actual="$("_installer_check/bin/sfn${EXE_EXT}" version | sed -n 's/.*sfn //p')"
+          chmod +x _installer_check/bin/sfn || true
+          actual="$(_installer_check/bin/sfn version | sed -n 's/.*sfn //p')"
           if [ "$actual" != "$expected" ]; then
             echo "[ci][error] installer contains compiler '$actual', expected '$expected'" >&2
             exit 1
           fi
+
+      # --- Cross-compile Windows binary from Linux LLVM IR ---
+      - name: Install MinGW-w64 cross-compiler (Linux)
+        if: matrix.package_label == 'linux-x86_64'
+        run: |
+          sudo apt-get install -y mingw-w64
+
+      - name: Cross-compile for Windows (Linux)
+        if: matrix.package_label == 'linux-x86_64'
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          CONDA=$(which conda) make ci-cross-windows
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
@@ -153,6 +151,24 @@ jobs:
         with:
           name: release-installer-${{ matrix.package_label }}
           path: dist/installer-${{ matrix.package_label }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Windows cross-compiled artifacts
+        if: matrix.package_label == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-native-windows-x86_64
+          path: |
+            dist/sailfin-native-windows-x86_64-*.tar.gz
+            dist/sailfin-native-windows-x86_64-*.tar.gz.sha256
+          if-no-files-found: error
+
+      - name: Upload Windows installer archive
+        if: matrix.package_label == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-installer-windows-x86_64
+          path: dist/installer-windows-x86_64.tar.gz
           if-no-files-found: error
 
   upload:

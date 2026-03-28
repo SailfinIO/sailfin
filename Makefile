@@ -461,6 +461,106 @@ rebuild-asan: check-conda
 	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --asan --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-selfhost
 	@echo "[rebuild-asan] built build/native/sailfin-selfhost"
 
+# =============================================================================
+# Cross-compile for Windows (from Linux, using MinGW-w64)
+# =============================================================================
+# Requires: x86_64-w64-mingw32-gcc, llvm-link (or llvm-link-18)
+# Reuses the LLVM IR (.ll files) from the Linux selfhost build.
+# Produces: build/windows/sailfin.exe + dist/ packaging artifacts.
+
+MINGW_CC ?= x86_64-w64-mingw32-gcc
+MINGW_TARGET := windows-x86_64
+
+.PHONY: ci-cross-windows
+ci-cross-windows:
+	@set -eu; \
+	echo "[cross-windows] cross-compiling for Windows from Linux LLVM IR..."; \
+	RAW_DIR="build/selfhost/native/raw"; \
+	if [ ! -d "$$RAW_DIR" ]; then \
+		echo "[cross-windows][error] missing $$RAW_DIR (run 'make rebuild' first)" >&2; \
+		exit 1; \
+	fi; \
+	WIN_OBJ="build/windows/obj"; \
+	WIN_OUT="build/windows/sailfin.exe"; \
+	rm -rf build/windows; \
+	mkdir -p "$$WIN_OBJ/runtime"; \
+	\
+	echo "[cross-windows] finding llvm-link..."; \
+	LLVM_LINK=""; \
+	for cand in llvm-link llvm-link-18 llvm-link-17 llvm-link-16; do \
+		if command -v "$$cand" >/dev/null 2>&1; then \
+			LLVM_LINK="$$cand"; \
+			break; \
+		fi; \
+	done; \
+	if [ -z "$$LLVM_LINK" ]; then \
+		echo "[cross-windows][error] llvm-link not found" >&2; \
+		exit 1; \
+	fi; \
+	echo "[cross-windows] using $$LLVM_LINK"; \
+	\
+	echo "[cross-windows] collecting .ll modules..."; \
+	LL_FILES=""; \
+	PRELUDE_LL=""; \
+	for f in "$$RAW_DIR"/*.ll; do \
+		base="$$(basename "$$f")"; \
+		case "$$base" in \
+			*.attempt*|*.clean*) continue ;; \
+			runtime__prelude.ll) PRELUDE_LL="$$f"; continue ;; \
+		esac; \
+		LL_FILES="$$LL_FILES $$f"; \
+	done; \
+	\
+	echo "[cross-windows] linking IR modules..."; \
+	$$LLVM_LINK -o "$$WIN_OBJ/sailfin.linked.bc" $$LL_FILES 2>&1 || \
+		$$LLVM_LINK --opaque-pointers -o "$$WIN_OBJ/sailfin.linked.bc" $$LL_FILES; \
+	\
+	echo "[cross-windows] compiling linked bitcode -> .o"; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$WIN_OBJ/sailfin.linked.bc" -o "$$WIN_OBJ/native.linked.o"; \
+	\
+	echo "[cross-windows] compiling prelude..."; \
+	if [ -n "$$PRELUDE_LL" ]; then \
+		$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+			-c "$$PRELUDE_LL" -o "$$WIN_OBJ/runtime/prelude.o"; \
+	fi; \
+	\
+	echo "[cross-windows] compiling C runtime..."; \
+	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_runtime.c \
+		-o "$$WIN_OBJ/sailfin_runtime.o"; \
+	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/native_driver.c \
+		-o "$$WIN_OBJ/native_driver.o"; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
+		-o "$$WIN_OBJ/runtime_globals.o"; \
+	\
+	echo "[cross-windows] linking sailfin.exe..."; \
+	$(MINGW_CC) -static -o "$$WIN_OUT" \
+		"$$WIN_OBJ/sailfin_runtime.o" \
+		"$$WIN_OBJ/native_driver.o" \
+		"$$WIN_OBJ/runtime_globals.o" \
+		"$$WIN_OBJ/native.linked.o" \
+		"$$WIN_OBJ/runtime/prelude.o" \
+		-lm -lpthread; \
+	\
+	echo "[cross-windows] built $$WIN_OUT"; \
+	ls -lh "$$WIN_OUT"; \
+	(file "$$WIN_OUT" || true); \
+	\
+	echo "[cross-windows] packaging..."; \
+	INSTALLER_DIR="dist/installer-$(MINGW_TARGET)"; \
+	rm -rf "$$INSTALLER_DIR"; \
+	mkdir -p "$$INSTALLER_DIR/bin"; \
+	cp -f "$$WIN_OUT" "$$INSTALLER_DIR/bin/sailfin.exe"; \
+	cp -f "$$WIN_OUT" "$$INSTALLER_DIR/bin/sfn.exe"; \
+	mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+	cp -R runtime/native "$$INSTALLER_DIR/runtime/native"; \
+	if [ -f "$$WIN_OBJ/runtime/prelude.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/prelude.o" "$$INSTALLER_DIR/runtime/native/obj/prelude.o"; \
+	fi; \
+	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
+	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"
+
 # Deprecated aliases.
 selfhost-native: rebuild
 selfhost-smoke-native: smoke

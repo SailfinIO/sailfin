@@ -38,12 +38,6 @@ jobs:
             asset_arch: x86_64
             clang: clang-18
             max_attempts: 10
-          - os: windows-latest
-            package_label: windows-x86_64
-            asset_os: windows
-            asset_arch: x86_64
-            clang: clang
-            max_attempts: 15
 
     steps:
       - name: Checkout repository
@@ -71,13 +65,6 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-      - name: Install LLVM + tools (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          choco install llvm jq make -y
-          echo "CLANG=clang" >> "$GITHUB_ENV"
-
       - name: Build + test + package (via Makefile)
         uses: ./.github/actions/sailfin-build
         env:
@@ -93,11 +80,9 @@ jobs:
         shell: bash -l {0}
         run: |
           set -euo pipefail
-          EXE_EXT=""
-          if [ "$RUNNER_OS" = "Windows" ]; then EXE_EXT=".exe"; fi
-          ls -lh "build/native/sailfin${EXE_EXT}"
-          (file "build/native/sailfin${EXE_EXT}" || true)
-          "build/native/sailfin${EXE_EXT}" version || "build/native/sailfin${EXE_EXT}" --version || true
+          ls -lh build/native/sailfin
+          (file build/native/sailfin || true)
+          build/native/sailfin version || build/native/sailfin --version || true
 
       - name: Enable test runner trace (macOS)
         if: runner.os == 'macOS'
@@ -118,7 +103,6 @@ jobs:
 
       - name: Fixed-point rebuild check (linux-x86_64, macos-arm64)
         if: >-
-          runner.os != 'Windows' &&
           (matrix.package_label == 'linux-x86_64' || matrix.package_label == 'macos-arm64') &&
           (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc')
         shell: bash -l {0}
@@ -144,7 +128,7 @@ jobs:
           (file build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
           build/native/sailfin-selfhost1 version || true
           build/native/sailfin-selfhost2 version || true
-          echo "[ci] fixed-point sha256:" 
+          echo "[ci] fixed-point sha256:"
           (sha256sum build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 2>/dev/null || shasum -a 256 build/native/sailfin-selfhost1 build/native/sailfin-selfhost2)
           if [ "${RUNNER_OS}" = "Linux" ]; then
             if ! cmp -s build/native/sailfin-selfhost1 build/native/sailfin-selfhost2; then
@@ -159,6 +143,19 @@ jobs:
             (dwarfdump --uuid build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
             build/native/sailfin-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
+
+      # --- Cross-compile Windows binary from Linux LLVM IR ---
+      - name: Install MinGW-w64 cross-compiler (Linux)
+        if: matrix.package_label == 'linux-x86_64'
+        run: |
+          sudo apt-get install -y mingw-w64
+
+      - name: Cross-compile for Windows (Linux)
+        if: matrix.package_label == 'linux-x86_64'
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          CONDA=$(which conda) make ci-cross-windows
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
@@ -176,3 +173,21 @@ jobs:
           name: ci-installer-${{ matrix.package_label }}
           path: dist/installer-${{ matrix.package_label }}.tar.gz
           if-no-files-found: error
+
+      - name: Upload Windows cross-compiled artifacts
+        if: matrix.package_label == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-native-windows-x86_64
+          path: |
+            dist/sailfin-native-windows-x86_64-*.tar.gz
+            dist/sailfin-native-windows-x86_64-*.tar.gz.sha256
+          if-no-files-found: warn
+
+      - name: Upload Windows installer archive
+        if: matrix.package_label == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-installer-windows-x86_64
+          path: dist/installer-windows-x86_64.tar.gz
+          if-no-files-found: warn
