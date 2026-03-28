@@ -44,6 +44,10 @@ jobs:
                       package_label: linux-x86_64
                       clang: clang-18
                       max_attempts: 10
+                    - os: windows-latest
+                      package_label: windows-x86_64
+                      clang: clang
+                      max_attempts: 15
 
         steps:
             - name: Checkout repository
@@ -71,6 +75,13 @@ jobs:
                   brew install jq llvm
                   echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
+            - name: Install LLVM + tools (Windows)
+              if: runner.os == 'Windows'
+              shell: bash
+              run: |
+                  choco install llvm jq make -y
+                  echo "CLANG=clang" >> "$GITHUB_ENV"
+
             - name: Build + test + package (via Makefile)
               uses: ./.github/actions/sailfin-build
               env:
@@ -85,9 +96,11 @@ jobs:
               shell: bash -l {0}
               run: |
                   set -euo pipefail
-                  ls -lh build/native/sailfin
-                  (file build/native/sailfin || true)
-                  build/native/sailfin version || build/native/sailfin --version || true
+                  EXE_EXT=""
+                  if [ "$RUNNER_OS" = "Windows" ]; then EXE_EXT=".exe"; fi
+                  ls -lh "build/native/sailfin${EXE_EXT}"
+                  (file "build/native/sailfin${EXE_EXT}" || true)
+                  "build/native/sailfin${EXE_EXT}" version || "build/native/sailfin${EXE_EXT}" --version || true
 
     semantic-release:
         name: Semantic Release

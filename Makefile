@@ -25,7 +25,16 @@ BUILD_JOBS ?= 1
 BUILD_ARGS ?=
 
 UNAME_S := $(shell uname -s)
+
+# Detect Windows (MSYS2/Git Bash/Cygwin on GitHub Actions runners).
+IS_WINDOWS := $(if $(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)),1,)
+
+# Executable extension (.exe on Windows, empty elsewhere).
+EXE_EXT := $(if $(IS_WINDOWS),.exe,)
+
 ifeq ($(UNAME_S),Darwin)
+TIMEOUT_CMD ?=
+else ifeq ($(IS_WINDOWS),1)
 TIMEOUT_CMD ?=
 else
 TIMEOUT_CMD ?= timeout
@@ -42,11 +51,11 @@ CLANG_LL_COMPILE := $(TIMEOUT_CMD) --kill-after=10 $(NATIVE_LL_TIMEOUT_SECONDS) 
 endif
 
 NATIVE_OBJ_DIR ?= build/native/obj
-NATIVE_OUT ?= build/native/sailfin
+NATIVE_OUT ?= build/native/sailfin$(EXE_EXT)
 NATIVE_LINK_EXTRA ?=
 
 # Preferred local path for the native compiler binary.
-NATIVE_BIN ?= build/native/sailfin
+NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
@@ -113,13 +122,17 @@ env: check-conda
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
 
 install:
-	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+	@if [ ! -x "$(NATIVE_BIN)" ] && [ ! -f "$(NATIVE_BIN)" ]; then \
 		echo "[install] missing $(NATIVE_BIN); run 'make compile' first"; \
 		exit 1; \
 	fi
 	@mkdir -p "$(DESTDIR)$(BINDIR)"
+ifeq ($(IS_WINDOWS),1)
+	@cp -f "$(NATIVE_BIN)" "$(DESTDIR)$(BINDIR)/$(INSTALL_NAME)$(EXE_EXT)"
+else
 	@install -m 755 "$(NATIVE_BIN)" "$(DESTDIR)$(BINDIR)/$(INSTALL_NAME)"
-	@echo "[install] installed $(DESTDIR)$(BINDIR)/$(INSTALL_NAME)"
+endif
+	@echo "[install] installed $(DESTDIR)$(BINDIR)/$(INSTALL_NAME)$(EXE_EXT)"
 
 test: test-unit test-integration test-e2e
 
@@ -139,7 +152,7 @@ SEED_GLOBAL_BIN_DIR ?= build/seed/bin
 # Override with a full path if needed, e.g. SEED=build/seed/bin/sailfin.
 SEED ?= sfn
 
-FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin
+FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
 
 fetch-seed:
 	@echo "[fetch-seed] installing seed into $(SEED_INSTALL_BASE)"
@@ -321,8 +334,8 @@ ci-package-installer:
 	INSTALLER_DIR="dist/installer-$(TARGET)"; \
 	rm -rf "$$INSTALLER_DIR"; \
 	mkdir -p "$$INSTALLER_DIR/bin"; \
-	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sailfin"; \
-	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sfn"; \
+	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sailfin$(EXE_EXT)"; \
+	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sfn$(EXE_EXT)"; \
 	mkdir -p "$$INSTALLER_DIR/runtime"; \
 	cp -R runtime/native "$$INSTALLER_DIR/runtime/native"; \
 	mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
