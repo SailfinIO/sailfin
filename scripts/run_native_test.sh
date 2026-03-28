@@ -16,11 +16,28 @@ BASENAME="$(basename "$TEST_FILE")"
 # 60s timeout — if the binary hangs, something is fundamentally broken
 TIMEOUT=60
 
-output=$(timeout "$TIMEOUT" "$COMPILER" test "$TEST_FILE" 2>&1) || {
-    echo "[test] FAIL: $BASENAME (exit code $?)"
-    echo "$output" | tail -5
-    exit 1
-}
+# macOS doesn't ship `timeout`; use gtimeout (coreutils) if available, else fallback
+if command -v timeout &>/dev/null; then
+    TIMEOUT_CMD="timeout"
+elif command -v gtimeout &>/dev/null; then
+    TIMEOUT_CMD="gtimeout"
+else
+    TIMEOUT_CMD=""
+fi
+
+if [ -n "$TIMEOUT_CMD" ]; then
+    output=$("$TIMEOUT_CMD" "$TIMEOUT" "$COMPILER" test "$TEST_FILE" 2>&1) || {
+        echo "[test] FAIL: $BASENAME (exit code $?)"
+        echo "$output" | tail -5
+        exit 1
+    }
+else
+    output=$("$COMPILER" test "$TEST_FILE" 2>&1) || {
+        echo "[test] FAIL: $BASENAME (exit code $?)"
+        echo "$output" | tail -5
+        exit 1
+    }
+fi
 
 # The binary must produce SOME output — a silent exit is not a pass
 if [ -z "$output" ]; then
