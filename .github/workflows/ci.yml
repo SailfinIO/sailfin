@@ -174,20 +174,10 @@ jobs:
           path: dist/installer-${{ matrix.package_label }}.tar.gz
           if-no-files-found: error
 
-      - name: Upload Windows cross-compiled artifacts
-        if: matrix.package_label == 'linux-x86_64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-native-windows-x86_64
-          path: |
-            dist/sailfin-native-windows-x86_64-*.tar.gz
-            dist/sailfin-native-windows-x86_64-*.tar.gz.sha256
-          if-no-files-found: warn
-
       - name: Upload Windows installer archive
         if: matrix.package_label == 'linux-x86_64'
         uses: actions/upload-artifact@v4
         with:
           name: ci-installer-windows-x86_64
           path: dist/installer-windows-x86_64.tar.gz
-          if-no-files-found: warn
+          if-no-files-found: error
