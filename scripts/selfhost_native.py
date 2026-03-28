@@ -1635,6 +1635,194 @@ def _fix_string_concat_as_gep(llvm_ir: str) -> tuple[str, int]:
     return result, total_changed
 
 
+def _fix_struct_byval_null_params(llvm_ir: str) -> tuple[str, int]:
+    r"""Fix function calls where a struct by-value parameter is passed as ``i8* null``.
+
+    The seed compiler cannot pass structs by value.  When a function is defined
+    as taking ``%SomeStruct %param`` but the call site doesn't know how to construct
+    the struct, it emits ``i8* null``.  This causes ABI mismatches and UB.
+
+    This pass specifically targets ``build_phi_and_store`` which takes
+    ``%LocalBinding %local`` but only uses field 1 (``local.pointer``).
+
+    Strategy:
+    1. Change the function definition to take ``i8* %local_pointer`` instead of
+       ``%LocalBinding %local``.
+    2. Replace ``extractvalue %LocalBinding %local, 1`` with ``%local_pointer``.
+    3. At call sites, find the ``find_local_binding`` result pointer and extract
+       field 1 to pass as the ``i8*`` parameter.
+    """
+    if "build_phi_and_store" not in llvm_ir:
+        return llvm_ir, 0
+
+    lines = llvm_ir.split("\n")
+    changed = 0
+
+    # Step 1: Fix the function definition
+    for i, line in enumerate(lines):
+        if "define" in line and "build_phi_and_store" in line and "%LocalBinding %local" in line:
+            lines[i] = line.replace("%LocalBinding %local", "i8* %local_pointer")
+            changed += 1
+            break
+
+    # Step 2: Fix extractvalue inside the function body
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if "extractvalue %LocalBinding %local, 1" in stripped:
+            # The result is used as the local pointer name.  Just alias it.
+            m = re.match(r"\s+(%\S+) = extractvalue %LocalBinding %local, 1", line)
+            if m:
+                ssa_name = m.group(1)
+                # Replace with a simple copy (bitcast i8* to i8* is a noop but valid IR)
+                lines[i] = f"  {ssa_name} = bitcast i8* %local_pointer to i8*"
+                changed += 1
+
+    # Step 3: Fix call sites — replace `i8* null` with actual field from find_local_binding
+    # Pattern: the find_local_binding result `%tN_ptr` (a %LocalBinding*) is available
+    # in the same function scope.  We GEP field 1 and load it.
+    call_pat = re.compile(
+        r"(\s*)(%\S+)\s*=\s*call\s+%PhiStoreEntry\s+@build_phi_and_store\S*\(i8\* null,"
+    )
+    # Find the closest find_local_binding result pointer before each call
+    flb_pat = re.compile(r"\s+(%\S+_ptr)\s*=\s*call\s+%LocalBinding\*\s+@find_local_binding")
+
+    i = 0
+    while i < len(lines):
+        mc = call_pat.match(lines[i])
+        if mc:
+            indent = mc.group(1)
+            # Search backward for the closest find_local_binding result
+            # (search to function boundary — can be hundreds of lines)
+            flb_var = None
+            for j in range(i - 1, -1, -1):
+                mf = flb_pat.match(lines[j])
+                if mf:
+                    flb_var = mf.group(1)
+                    break
+                # Stop at function boundary
+                if lines[j].strip().startswith("define "):
+                    break
+
+            if flb_var:
+                # Insert GEP + load to extract field 1 (pointer name) before the call
+                gep_tmp = mc.group(2) + "_local_gep"
+                load_tmp = mc.group(2) + "_local_ptr"
+                insert = [
+                    f"{indent}{gep_tmp} = getelementptr %LocalBinding, %LocalBinding* {flb_var}, i32 0, i32 1",
+                    f"{indent}{load_tmp} = load i8*, i8** {gep_tmp}",
+                ]
+                # Replace `i8* null` with the loaded pointer
+                lines[i] = lines[i].replace("i8* null,", f"i8* {load_tmp},", 1)
+                for k, ins_line in enumerate(insert):
+                    lines.insert(i + k, ins_line)
+                i += len(insert)
+                changed += 1
+        i += 1
+
+    if changed:
+        return "\n".join(lines), changed
+    return llvm_ir, 0
+
+
+def _fix_null_check_on_double_encoded_ptr(llvm_ir: str) -> tuple[str, int]:
+    r"""Fix broken null checks on struct pointers stored as doubles.
+
+    When a function returns a struct pointer (e.g. ``%LocalBinding*``), the
+    pointer is converted to double via ``ptrtoint→sitofp``.  Later, to check
+    ``if ptr != null``, the compiler does::
+
+        %s = call i8* @sailfin_runtime_number_to_string(double %val)
+        %c = icmp ne i8* %s, null
+
+    But ``number_to_string(0.0)`` returns ``"0"`` (non-null), so the null
+    check always passes.  Fix by replacing the ``icmp ne`` with a direct
+    bitcast check on the double value::
+
+        %c_bits = bitcast double %val to i64
+        %c = icmp ne i64 %c_bits, 0
+
+    This correctly detects 0.0 (which is the double representation of a null
+    pointer) because IEEE 754 double 0.0 has all-zero bits.
+    """
+    if "sailfin_runtime_number_to_string" not in llvm_ir:
+        return llvm_ir, 0
+
+    nts_re = re.compile(
+        r"(\s*)(%\S+)\s*=\s*call\s+i8\*\s+@sailfin_runtime_number_to_string\(double\s+(%\S+)\)"
+    )
+    icmp_ne_re = re.compile(
+        r"(\s*)(%\S+)\s*=\s*icmp\s+ne\s+i8\*\s+(%\S+),\s*null"
+    )
+
+    lines = llvm_ir.split("\n")
+    changed = 0
+    i = 0
+    while i < len(lines) - 1:
+        m_nts = nts_re.match(lines[i])
+        if m_nts:
+            indent = m_nts.group(1)
+            nts_result = m_nts.group(2)
+            double_val = m_nts.group(3)
+            # Look at next non-blank line for icmp ne ... null
+            j = i + 1
+            while j < len(lines) and lines[j].strip() == "":
+                j += 1
+            if j < len(lines):
+                m_icmp = icmp_ne_re.match(lines[j])
+                if m_icmp and m_icmp.group(3) == nts_result:
+                    icmp_result = m_icmp.group(2)
+                    # Replace icmp with bitcast + icmp on the double bits
+                    bits_name = icmp_result + "_bits"
+                    lines[j] = (
+                        f"{indent}{bits_name} = bitcast double {double_val} to i64\n"
+                        f"{indent}{icmp_result} = icmp ne i64 {bits_name}, 0"
+                    )
+                    changed += 1
+        i += 1
+
+    if changed:
+        return "\n".join(lines), changed
+    return llvm_ir, 0
+
+
+def _fix_bare_zero_lines(llvm_ir: str) -> tuple[str, int]:
+    r"""Remove bare ``0`` lines from LLVM IR.
+
+    The first-pass binary's ``materialize_mutation_values_at_label`` has
+    broken struct field access on ``%LocalBinding*`` (stored as double).
+    Instead of building proper load instructions like::
+
+        %tN = load i1, i1* %lM
+
+    it pushes the number-to-string of 0.0 ("0") to the output lines array.
+    Each broken field access (``local.llvm_type`` x2, ``local.pointer`` x1)
+    produces a bare ``0`` line in the LLVM IR.
+
+    Since the alloca-store approach is used (mutations are stored directly
+    to allocas in the then block), these materialization lines are not
+    needed — the values persist in the allocas.  Removing these bare ``0``
+    lines produces valid LLVM IR.
+
+    A bare ``0`` is never valid LLVM IR, so this pass is safe.
+    """
+    if "\n0\n" not in llvm_ir and not llvm_ir.startswith("0\n"):
+        return llvm_ir, 0
+
+    lines = llvm_ir.split("\n")
+    new_lines = []
+    removed = 0
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "0":
+            removed += 1
+            continue
+        new_lines.append(line)
+
+    if removed:
+        return "\n".join(new_lines), removed
+    return llvm_ir, 0
+
+
 def _fix_string_double_shadow(llvm_ir: str) -> tuple[str, int]:
     """Fix i8*-as-double shadow patterns introduced by _fix_cross_module_return_types.
 
@@ -11366,6 +11554,27 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
+                    # Fix broken null checks on double-encoded struct pointers.
+                    # number_to_string(0.0) returns "0" (non-null), breaking
+                    # `ptr != null` checks.  Replace with bitcast + icmp.
+                    candidate, null_check_fixes = _fix_null_check_on_double_encoded_ptr(candidate)
+                    if null_check_fixes:
+                        print(
+                            f"[selfhost] fixed {null_check_fixes} broken null check(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Strip bare ``0`` lines produced by broken struct field access
+                    # in materialize_mutation_values_at_label.
+                    candidate, zero_changes = _fix_bare_zero_lines(candidate)
+                    if zero_changes:
+                        print(
+                            f"[selfhost] removed {zero_changes} bare zero line(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
                     # Replace sailfin_runtime_get_field calls with proper GEP+load.
                     candidate, gf_changes = _replace_get_field_calls(candidate)
                     if gf_changes:
@@ -12118,6 +12327,48 @@ def main(argv: list[str]) -> int:
         if total_gep_fixes:
             print(
                 f"[selfhost] total string-concat-as-GEP fixes: {total_gep_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix struct by-value null parameter mismatches ---
+        # The seed compiler passes `i8* null` for struct by-value parameters
+        # it can't construct.  Fix known functions like build_phi_and_store.
+        total_struct_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], struct_fixes = _fix_struct_byval_null_params(ll_texts[idx])
+            if struct_fixes:
+                total_struct_fixes += struct_fixes
+                print(
+                    f"[selfhost] fixed {struct_fixes} struct by-value null param(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_struct_fixes:
+            print(
+                f"[selfhost] total struct by-value null param fixes: {total_struct_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Strip bare ``0`` lines from LLVM IR ---
+        # The first-pass binary's materialize_mutation_values_at_label has broken
+        # struct field access on %LocalBinding* (stored as double).  Instead of
+        # building load instructions, it pushes "0" to the output lines.
+        # Bare ``0`` is never valid LLVM IR; alloca-stores already hold the values.
+        total_zero_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], zero_fixes = _fix_bare_zero_lines(ll_texts[idx])
+            if zero_fixes:
+                total_zero_fixes += zero_fixes
+                print(
+                    f"[selfhost] removed {zero_fixes} bare zero line(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_zero_fixes:
+            print(
+                f"[selfhost] total bare zero line removals: {total_zero_fixes}",
                 file=sys.stderr,
                 flush=True,
             )
