@@ -1,6 +1,100 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.139 (2026-03-28)
+
+### Bug Fixes
+
+- At least runs hello world again
+  ([`24fcc1d`](https://github.com/SailfinIO/sailfin/commit/24fcc1d8c214c653de04653c28ddca48f7c4d205))
+
+- Bypass temporarily
+  ([`7cf46bd`](https://github.com/SailfinIO/sailfin/commit/7cf46bdcea16d9df9184d4a75b8f8c54454954a2))
+
+- Cross module shim
+  ([`b7ef61a`](https://github.com/SailfinIO/sailfin/commit/b7ef61aaf9dc3efbb2357c735507b1ccd8a8483d))
+
+- Fails on version check at the end
+  ([`8b50884`](https://github.com/SailfinIO/sailfin/commit/8b50884b72e844f6d6b25d2dc05a0a65613bb75e))
+
+- Fails on version check at the end
+  ([`6d82218`](https://github.com/SailfinIO/sailfin/commit/6d82218df648687849402657ed27d43480cbb998))
+
+- Implement file guard
+  ([`4f3f80e`](https://github.com/SailfinIO/sailfin/commit/4f3f80e8e943a5e62cbbd6cb5c31d022d126eac4))
+
+- Install curl
+  ([`941b2d4`](https://github.com/SailfinIO/sailfin/commit/941b2d4d2e0a748379a839827e063bb6b9ec89c1))
+
+- Install location
+  ([`2831026`](https://github.com/SailfinIO/sailfin/commit/28310261d69761db26ddf69b24ce693f42dc0d42))
+
+- Make check passing - version command works but run doesnt
+  ([`0f8a6f0`](https://github.com/SailfinIO/sailfin/commit/0f8a6f0c9328985b2e25b1aeb0c85c4b0385ec92))
+
+- Make check working but binary cant run hello world
+  ([`c1e14a5`](https://github.com/SailfinIO/sailfin/commit/c1e14a58c6327d1a03c1a2e2b05d2d62b071fe47))
+
+- Make check working but binary not
+  ([`48497e6`](https://github.com/SailfinIO/sailfin/commit/48497e69efad86c6cbf39880b03b340965ccfb0b))
+
+- Make check working with --version
+  ([`0375f91`](https://github.com/SailfinIO/sailfin/commit/0375f91072923ad1ae084cec9b850c9ec8caba03))
+
+- Make typecheck_diagnostics handle empty arrays explicitly
+  ([`d2397e7`](https://github.com/SailfinIO/sailfin/commit/d2397e7fc9e89e1017c939480f3796fc2c364331))
+
+- Missing effect
+  ([`447a4b9`](https://github.com/SailfinIO/sailfin/commit/447a4b950352a9788e067f1cb4c9450bbcf98093))
+
+- More fixups
+  ([`033925b`](https://github.com/SailfinIO/sailfin/commit/033925b934461d9fc2765be38c4c12ae75e55d92))
+
+- Null passes
+  ([`a9bf8a8`](https://github.com/SailfinIO/sailfin/commit/a9bf8a89d2f76a9f941f59117af798f4f41dd117))
+
+- Skip --weaken on macOS to fix test linker failure
+  ([`ff97c84`](https://github.com/SailfinIO/sailfin/commit/ff97c84accac05d955a392030913dd5a9bbd1ca0))
+
+On Mach-O (macOS ARM64), llvm-objcopy --weaken converts defined symbols to weak references rather
+  than weak definitions, causing the Apple linker to report them as undefined. Since import inlining
+  gives each test a unique module-name suffix, there are no duplicate symbols with the compiler
+  objects, so the weakening step is unnecessary and harmful on macOS.
+
+Skip the entire compiler-object link step on macOS. Tests remain self-contained via the existing
+  import inlining path.
+
+- Split out concat to push
+  ([`90e8691`](https://github.com/SailfinIO/sailfin/commit/90e86914940a5f2f2d856891702461e03252ca62))
+
+- Split out concat to push seedcheck compiles but no hellow world
+  ([`eaceb65`](https://github.com/SailfinIO/sailfin/commit/eaceb6516d794ff5544eab387574aeeb6284e515))
+
+- Struct dispatch
+  ([`a681c2e`](https://github.com/SailfinIO/sailfin/commit/a681c2e88ef24ec8c8d7faf18677f1f8ade11c3d))
+
+- Stub work
+  ([`4af135a`](https://github.com/SailfinIO/sailfin/commit/4af135afc74f732debbe56386c5f3c49eb0d8296))
+
+- Stub work
+  ([`a060c00`](https://github.com/SailfinIO/sailfin/commit/a060c0039f10113fc6a53c2cffcb8039d9812cff))
+
+- Tag access instead of .variant
+  ([`9d11e84`](https://github.com/SailfinIO/sailfin/commit/9d11e84122f4ccedb2b6e56f220d92ff7c9f8b57))
+
+- Timeout missing
+  ([`fdb5b18`](https://github.com/SailfinIO/sailfin/commit/fdb5b18b6e876a26121a064ae6d18820d80474dd))
+
+- Try rename truncated labels
+  ([`4fd66e9`](https://github.com/SailfinIO/sailfin/commit/4fd66e9b79e8a7a18fced5cb973678225d4ba363))
+
+- Typechecking
+  ([`0a0b1cf`](https://github.com/SailfinIO/sailfin/commit/0a0b1cf47e957563ee6c7508f9c067d626129a44))
+
+- Use tag accessors instead of .variant
+  ([`3c6458c`](https://github.com/SailfinIO/sailfin/commit/3c6458ceada10f5074a253b1c6d26098afd084f4))
+
+
 ## v0.1.1-alpha.138 (2026-01-23)
 
 ### Bug Fixes
