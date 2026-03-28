@@ -533,6 +533,15 @@ ci-cross-windows:
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
 		-o "$$WIN_OBJ/runtime_globals.o"; \
 	\
+	echo "[cross-windows] compiling cross-module shim (if present)..."; \
+	SHIM_O=""; \
+	SHIM_C="build/selfhost/native/obj/cross_module_shim.c"; \
+	if [ -f "$$SHIM_C" ]; then \
+		sed 's/__attribute__((weak))//' "$$SHIM_C" > "$$WIN_OBJ/cross_module_shim.c"; \
+		$(MINGW_CC) -O2 -c "$$WIN_OBJ/cross_module_shim.c" -o "$$WIN_OBJ/cross_module_shim.o"; \
+		SHIM_O="$$WIN_OBJ/cross_module_shim.o"; \
+	fi; \
+	\
 	echo "[cross-windows] linking sailfin.exe..."; \
 	$(MINGW_CC) -static -o "$$WIN_OUT" \
 		"$$WIN_OBJ/sailfin_runtime.o" \
@@ -540,6 +549,7 @@ ci-cross-windows:
 		"$$WIN_OBJ/runtime_globals.o" \
 		"$$WIN_OBJ/native.linked.o" \
 		"$$WIN_OBJ/runtime/prelude.o" \
+		$$SHIM_O \
 		-lm -lpthread; \
 	\
 	echo "[cross-windows] built $$WIN_OUT"; \

@@ -10,7 +10,9 @@
 #define PATH_MAX MAX_PATH
 #endif
 #define realpath(path, resolved) _fullpath((resolved), (path), PATH_MAX)
+#ifndef S_ISDIR
 #define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#endif
 #endif
 
 #include "sailfin_runtime.h"
