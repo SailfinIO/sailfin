@@ -49,7 +49,7 @@ function Log($msg) {
 
 function Die($msg) {
     Log "Error: $msg"
-    exit 1
+    throw $msg
 }
 
 # --- Detect architecture -----------------------------------------------------
