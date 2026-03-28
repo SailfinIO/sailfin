@@ -70,26 +70,42 @@ Python tooling from the production pipeline.
 
 ## Installing the compiler
 
-The compiler is published as per-OS/arch release assets and can be installed via the
-curlable `install.sh` script. The repository is currently private, so you need a
-token with `repo` scope.
+The compiler is published as per-OS/arch release assets and can be installed via
+the curlable `install.sh` script (Linux/macOS) or `install.ps1` (Windows).
+
+### Linux / macOS
 
 ```sh
-export GITHUB_TOKEN=<your-token>
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
 To pin a version:
 
 ```sh
-export GITHUB_TOKEN=<your-token>
 VERSION=0.1.1-alpha.135 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
+```
+
+To pin a version:
+
+```powershell
+$env:VERSION = "0.1.1-alpha.135"
+irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
+```
+
+The PowerShell installer places `sailfin.exe` and `sfn.exe` in `%LOCALAPPDATA%\sailfin\bin` and adds it to your user PATH.
+
 Notes:
 
-- Windows is supported for the published sailfin binary. Run the installer from WSL or Git Bash (MSYS2/Cygwin environments are detected as `windows`).
+- On Linux and macOS, use the `install.sh` script above.
+- On Windows, use the PowerShell installer or run `install.sh` from WSL / Git Bash.
 - Release assets are named `sailfin_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin` (or `bin/sailfin.exe` on Windows).
+- Set `GITHUB_TOKEN` to increase GitHub API rate limits if you hit throttling.
 
 ## Architecture Overview
 

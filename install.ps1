@@ -20,7 +20,7 @@
       BINARY         (default: sailfin)
       INSTALL_BASE   (default: $env:LOCALAPPDATA\sailfin\versions)
       GLOBAL_BIN_DIR (default: $env:LOCALAPPDATA\sailfin\bin)
-      GITHUB_TOKEN   (required for private repos)
+      GITHUB_TOKEN   (optional; increases API rate limits)
 
     Assets are expected to be named:
       sailfin_<version>_windows_<arch>.tar.gz
@@ -65,15 +65,13 @@ $OS = "windows"
 Log "Detected OS: $OS"
 Log "Detected ARCH: $Arch"
 
-# --- Require token for private repos -----------------------------------------
-
-if (-not $Token) {
-    Die "GITHUB_TOKEN is required (private repo). Set `$env:GITHUB_TOKEN with 'repo' scope."
-}
+# --- Optional token for higher API rate limits -------------------------------
 
 $Headers = @{
-    "Authorization" = "token $Token"
-    "Accept"        = "application/vnd.github+json"
+    "Accept" = "application/vnd.github+json"
+}
+if ($Token) {
+    $Headers["Authorization"] = "token $Token"
 }
 
 # --- Resolve version and asset -----------------------------------------------
@@ -133,8 +131,10 @@ $ArchivePath = Join-Path $TmpDir $Asset
 Log "Downloading asset via GitHub API (id=$AssetId)..."
 
 $DownloadHeaders = @{
-    "Authorization" = "token $Token"
-    "Accept"        = "application/octet-stream"
+    "Accept" = "application/octet-stream"
+}
+if ($Token) {
+    $DownloadHeaders["Authorization"] = "token $Token"
 }
 $DownloadUrl = "https://api.github.com/repos/$Repo/releases/assets/$AssetId"
 Invoke-WebRequest -Uri $DownloadUrl -Headers $DownloadHeaders -OutFile $ArchivePath

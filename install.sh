@@ -14,11 +14,11 @@ set -euo pipefail
 #   BINARY=sailfin           (default: sailfin)
 #   INSTALL_BASE=...         (default: ~/.local/share/sailfin/versions)
 #   GLOBAL_BIN_DIR=...       (default: ~/.local/bin)
-#   GITHUB_TOKEN=...         (required for private repos)
+#   GITHUB_TOKEN=...         (optional; increases API rate limits)
 #
 # Assets are expected to be named:
 #   sailfin_<version>_<os>_<arch>.tar.gz
-# where <os> is linux|macos and <arch> is x86_64|arm64.
+# where <os> is linux|macos|windows and <arch> is x86_64|arm64.
 
 REPO="${REPO:-SailfinIO/sailfin}"
 BINARY="${BINARY:-sailfin}"
@@ -78,15 +78,15 @@ esac
 log "Detected OS: $OS"
 log "Detected ARCH: $ARCH"
 
-# Token required for private repo access.
-if [ -z "${GITHUB_TOKEN:-}" ]; then
-  die "GITHUB_TOKEN is required (private repo). Export GITHUB_TOKEN with 'repo' scope."
-fi
-
+# Optional token for higher API rate limits.
 api() {
   # $1 = url
+  local auth_args=()
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    auth_args=(-H "Authorization: token ${GITHUB_TOKEN}")
+  fi
   curl --fail -sSL \
-    -H "Authorization: token ${GITHUB_TOKEN}" \
+    "${auth_args[@]}" \
     -H "Accept: application/vnd.github+json" \
     "$1"
 }
@@ -148,8 +148,12 @@ trap cleanup EXIT
 ARCHIVE_PATH="${TMPDIR}/${ASSET}"
 log "Downloading asset via GitHub API (id=${asset_id})…"
 
+DL_AUTH_ARGS=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  DL_AUTH_ARGS=(-H "Authorization: token ${GITHUB_TOKEN}")
+fi
 curl --fail -sSL \
-  -H "Authorization: token ${GITHUB_TOKEN}" \
+  "${DL_AUTH_ARGS[@]}" \
   -H "Accept: application/octet-stream" \
   "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" \
   -o "$ARCHIVE_PATH"
