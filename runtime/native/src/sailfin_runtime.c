@@ -3,13 +3,20 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <signal.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <process.h>
+#include <io.h>
+#include <direct.h>
+#else
 #include <unistd.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#endif
 
 #if !defined(__APPLE__)
 #include <time.h>
@@ -30,7 +37,19 @@
 #include <execinfo.h>
 #endif
 
+/* Windows mkdir takes only one argument (no mode). */
+#if defined(_WIN32)
+#define sfn_mkdir(path, mode) mkdir(path)
+#else
+#define sfn_mkdir(path, mode) mkdir(path, mode)
+#endif
+
+#if defined(_WIN32)
+extern char **_environ;
+#define environ _environ
+#else
 extern char **environ;
+#endif
 
 static bool _env_enabled(const char *name);
 static int _env_int(const char *name, int fallback);
@@ -1701,12 +1720,21 @@ void sailfin_runtime_sleep(double seconds)
     {
         return;
     }
+#if defined(_WIN32)
+    double millis = seconds * 1000.0;
+    if (millis > 4294967295.0)
+    {
+        millis = 4294967295.0;
+    }
+    Sleep((DWORD)millis);
+#else
     double micros = seconds * 1000000.0;
     if (micros > 2147483647.0)
     {
         micros = 2147483647.0;
     }
     usleep((useconds_t)micros);
+#endif
 }
 
 /* Check if a string pointer looks like a corrupted double-encoded value.
@@ -4631,7 +4659,49 @@ double sailfin_runtime_process_run(SailfinPtrArray *argv)
         len = 0;
     }
 
-    // posix_spawnp expects a NULL-terminated argv.
+#if defined(_WIN32)
+    /* Build a single command-line string for CreateProcess. */
+    size_t total = 0;
+    for (int64_t i = 0; i < len; i++)
+    {
+        if (argv->data[i])
+            total += strlen(argv->data[i]) + 3; /* quotes + space */
+    }
+    char *cmdline = (char *)malloc(total + 1);
+    if (!cmdline)
+        return 127.0;
+    cmdline[0] = '\0';
+    for (int64_t i = 0; i < len; i++)
+    {
+        if (i > 0)
+            strcat(cmdline, " ");
+        strcat(cmdline, "\"");
+        if (argv->data[i])
+            strcat(cmdline, argv->data[i]);
+        strcat(cmdline, "\"");
+    }
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    memset(&pi, 0, sizeof(pi));
+
+    if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+        free(cmdline);
+        return 127.0;
+    }
+    free(cmdline);
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 0;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return (double)exit_code;
+#else
+    /* POSIX: use posix_spawnp. */
     size_t n = (size_t)len;
     char **child_argv = (char **)calloc(n + 1, sizeof(char *));
     if (!child_argv)
@@ -4671,6 +4741,7 @@ double sailfin_runtime_process_run(SailfinPtrArray *argv)
         return (double)(128 + WTERMSIG(status));
     }
     return 127.0;
+#endif
 }
 
 bool sailfin_runtime_is_callable(char *value)
@@ -5185,7 +5256,7 @@ bool sailfin_adapter_fs_create_directory(void *path, bool recursive)
 
     if (!recursive)
     {
-        if (mkdir(path_str, 0777) == 0)
+        if (sfn_mkdir(path_str, 0777) == 0)
         {
             return true;
         }
@@ -5210,7 +5281,7 @@ bool sailfin_adapter_fs_create_directory(void *path, bool recursive)
             scratch[i] = '\0';
             if (scratch[0] != '\0')
             {
-                if (mkdir(scratch, 0777) != 0 && errno != EEXIST)
+                if (sfn_mkdir(scratch, 0777) != 0 && errno != EEXIST)
                 {
                     scratch[i] = saved;
                     free(scratch);

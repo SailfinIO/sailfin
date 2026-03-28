@@ -4,6 +4,15 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#ifndef PATH_MAX
+#define PATH_MAX MAX_PATH
+#endif
+#define realpath(path, resolved) _fullpath((resolved), (path), PATH_MAX)
+#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#endif
+
 #include "sailfin_runtime.h"
 
 // Entry point exported by the native compiler IR.
