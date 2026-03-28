@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.2.0-alpha.1 (2026-03-28)
+
+### Features
+
+- Sfn registry functionality
+  ([`df5b635`](https://github.com/SailfinIO/sailfin/commit/df5b6353ccf85cb979a3b0faa9b6e867a520ca69))
+
+
 ## v0.1.1-alpha.142 (2026-03-28)
 
 ### Bug Fixes
