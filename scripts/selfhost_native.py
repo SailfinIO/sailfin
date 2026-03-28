@@ -8053,12 +8053,38 @@ def _inject_missing_block_labels(llvm_text: str) -> tuple[str, int]:
         referenced.discard("block.entry")
         missing = referenced - defined
         if missing:
-            stubs: list[str] = []
+            # First pass: try to find truncated labels (a defined label
+            # that is a suffix of a missing label).  If found, rename
+            # the defined label to the full name instead of adding a stub.
+            truly_missing: list[str] = []
             for label in sorted(missing):
-                stubs.append(f"{label}:")
-                stubs.append("  unreachable")
-                injected_total += 1
-            insertions[end] = stubs
+                found_match = False
+                for dlab in defined:
+                    if label.endswith(dlab) and len(label) > len(dlab):
+                        # dlab is a suffix — rename it in-place
+                        for idx2 in range(start, end + 1):
+                            stripped2 = lines[idx2].lstrip()
+                            if stripped2.startswith(dlab + ":"):
+                                # Replace the truncated label with the full name
+                                lines[idx2] = lines[idx2].replace(
+                                    dlab + ":", label + ":", 1
+                                )
+                                defined.discard(dlab)
+                                defined.add(label)
+                                injected_total += 1
+                                found_match = True
+                                break
+                        if found_match:
+                            break
+                if not found_match:
+                    truly_missing.append(label)
+            if truly_missing:
+                stubs: list[str] = []
+                for label in truly_missing:
+                    stubs.append(f"{label}:")
+                    stubs.append("  unreachable")
+                    injected_total += 1
+                insertions[end] = stubs
 
     if not insertions:
         return llvm_text, 0
