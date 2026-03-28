@@ -5320,6 +5320,203 @@ void *sailfin_adapter_http_post(void *request, void *body)
     return NULL;
 }
 
+/* ---- Package-manager HTTP helpers (curl subprocess) ---- */
+
+static char *_popen_read_all(const char *cmd)
+{
+    FILE *fp = popen(cmd, "r");
+    if (!fp)
+        return NULL;
+
+    size_t cap = 4096;
+    size_t len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { pclose(fp); return NULL; }
+
+    size_t n;
+    while ((n = fread(buf + len, 1, cap - len - 1, fp)) > 0) {
+        len += n;
+        if (len + 1 >= cap) {
+            cap *= 2;
+            char *tmp = (char *)realloc(buf, cap);
+            if (!tmp) { free(buf); pclose(fp); return NULL; }
+            buf = tmp;
+        }
+    }
+
+    int status = pclose(fp);
+    if (status != 0) {
+        free(buf);
+        return NULL;
+    }
+
+    buf[len] = '\0';
+    return buf;
+}
+
+/* Shell-escape a string for safe embedding in a single-quoted context.
+ * Caller must free the result. */
+static char *_shell_escape(const char *s)
+{
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    /* Worst case: every char is a single quote → replace with '\'' (4 chars) */
+    char *out = (char *)malloc(len * 4 + 3); /* + quotes + NUL */
+    if (!out) return NULL;
+    size_t j = 0;
+    out[j++] = '\'';
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '\'') {
+            out[j++] = '\''; out[j++] = '\\'; out[j++] = '\''; out[j++] = '\'';
+        } else {
+            out[j++] = s[i];
+        }
+    }
+    out[j++] = '\'';
+    out[j] = '\0';
+    return out;
+}
+
+char *sailfin_runtime_http_get(const char *url)
+{
+    if (!url) return NULL;
+    char *esc_url = _shell_escape(url);
+    if (!esc_url) return NULL;
+
+    /* curl -sfS: silent, fail on HTTP errors, show errors on stderr */
+    size_t cmd_len = strlen(esc_url) + 64;
+    char *cmd = (char *)malloc(cmd_len);
+    if (!cmd) { free(esc_url); return NULL; }
+    snprintf(cmd, cmd_len, "curl -sfS %s", esc_url);
+    free(esc_url);
+
+    char *result = _popen_read_all(cmd);
+    free(cmd);
+    return result;
+}
+
+char *sailfin_runtime_http_post_json(const char *url, const char *json_body,
+                                      const char *auth_header)
+{
+    if (!url || !json_body) return NULL;
+
+    /* Write JSON body to a temp file to avoid shell-escaping issues */
+    char tmppath[] = "/tmp/sfn_publish_XXXXXX";
+    int fd = mkstemp(tmppath);
+    if (fd < 0) return NULL;
+
+    size_t body_len = strlen(json_body);
+    ssize_t written = write(fd, json_body, body_len);
+    close(fd);
+    if (written < 0 || (size_t)written != body_len) {
+        unlink(tmppath);
+        return NULL;
+    }
+
+    char *esc_url = _shell_escape(url);
+    if (!esc_url) { unlink(tmppath); return NULL; }
+
+    size_t cmd_len = strlen(esc_url) + strlen(tmppath) + 256;
+    if (auth_header) cmd_len += strlen(auth_header) + 32;
+
+    char *cmd = (char *)malloc(cmd_len);
+    if (!cmd) { free(esc_url); unlink(tmppath); return NULL; }
+
+    if (auth_header && auth_header[0]) {
+        char *esc_auth = _shell_escape(auth_header);
+        if (!esc_auth) { free(cmd); free(esc_url); unlink(tmppath); return NULL; }
+        snprintf(cmd, cmd_len,
+                 "curl -sfS -X POST -H 'Content-Type: application/json' "
+                 "-H 'Authorization: '%s -d @%s %s",
+                 esc_auth, tmppath, esc_url);
+        free(esc_auth);
+    } else {
+        snprintf(cmd, cmd_len,
+                 "curl -sfS -X POST -H 'Content-Type: application/json' "
+                 "-d @%s %s",
+                 tmppath, esc_url);
+    }
+    free(esc_url);
+
+    char *result = _popen_read_all(cmd);
+    free(cmd);
+    unlink(tmppath);
+    return result;
+}
+
+char *sailfin_runtime_http_download(const char *url, const char *output_path)
+{
+    if (!url || !output_path) return NULL;
+
+    char *esc_url = _shell_escape(url);
+    char *esc_path = _shell_escape(output_path);
+    if (!esc_url || !esc_path) {
+        free(esc_url); free(esc_path);
+        return NULL;
+    }
+
+    size_t cmd_len = strlen(esc_url) + strlen(esc_path) + 64;
+    char *cmd = (char *)malloc(cmd_len);
+    if (!cmd) { free(esc_url); free(esc_path); return NULL; }
+    snprintf(cmd, cmd_len, "curl -sfS -o %s %s", esc_path, esc_url);
+    free(esc_url);
+    free(esc_path);
+
+    int status = system(cmd);
+    free(cmd);
+
+    if (status == 0) {
+        char *ok = (char *)malloc(3);
+        if (ok) { ok[0] = 'o'; ok[1] = 'k'; ok[2] = '\0'; }
+        return ok;
+    }
+    return NULL;
+}
+
+/* ---- Environment & path helpers ---- */
+
+char *sailfin_runtime_getenv(const char *name)
+{
+    if (!name) return NULL;
+    const char *val = getenv(name);
+    if (!val) return NULL;
+    return strdup(val);
+}
+
+char *sailfin_runtime_home_dir(void)
+{
+#if defined(_WIN32)
+    const char *home = getenv("USERPROFILE");
+#else
+    const char *home = getenv("HOME");
+#endif
+    if (!home) return NULL;
+    return strdup(home);
+}
+
+char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length)
+{
+    if (!path || !out_length) return NULL;
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (n < 0) { fclose(f); return NULL; }
+
+    char *buf = (char *)malloc((size_t)n + 1);
+    if (!buf) { fclose(f); return NULL; }
+
+    size_t read_n = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    buf[read_n] = '\0';
+    *out_length = (int64_t)read_n;
+    return buf;
+}
+
 void *sailfin_adapter_model_invoke_with_prompt(void *model, void *prompt)
 {
     (void)model;

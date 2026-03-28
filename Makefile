@@ -528,6 +528,10 @@ ci-cross-windows:
 	echo "[cross-windows] compiling C runtime..."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_runtime.c \
 		-o "$$WIN_OBJ/sailfin_runtime.o"; \
+	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_sha256.c \
+		-o "$$WIN_OBJ/sailfin_sha256.o"; \
+	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_base64.c \
+		-o "$$WIN_OBJ/sailfin_base64.o"; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/native_driver.c \
 		-o "$$WIN_OBJ/native_driver.o"; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
@@ -545,6 +549,8 @@ ci-cross-windows:
 	echo "[cross-windows] linking sailfin.exe..."; \
 	$(MINGW_CC) -static -o "$$WIN_OUT" \
 		"$$WIN_OBJ/sailfin_runtime.o" \
+		"$$WIN_OBJ/sailfin_sha256.o" \
+		"$$WIN_OBJ/sailfin_base64.o" \
 		"$$WIN_OBJ/native_driver.o" \
 		"$$WIN_OBJ/runtime_globals.o" \
 		"$$WIN_OBJ/native.linked.o" \

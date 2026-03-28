@@ -12923,11 +12923,15 @@ def main(argv: list[str]) -> int:
             "\n".join(module_names) + "\n", encoding="utf-8")
 
         runtime_c = REPO_ROOT / "runtime/native/src/sailfin_runtime.c"
+        sha256_c = REPO_ROOT / "runtime/native/src/sailfin_sha256.c"
+        base64_c = REPO_ROOT / "runtime/native/src/sailfin_base64.c"
         driver_c = REPO_ROOT / "runtime/native/src/native_driver.c"
         globals_ll = REPO_ROOT / "runtime/native/ir/runtime_globals.ll"
         include_dir = REPO_ROOT / "runtime/native/include"
 
         runtime_o = obj_dir / "sailfin_runtime.o"
+        sha256_o = obj_dir / "sailfin_sha256.o"
+        base64_o = obj_dir / "sailfin_base64.o"
         driver_o = obj_dir / "native_driver.o"
         globals_o = obj_dir / "runtime_globals.o"
 
@@ -12958,6 +12962,28 @@ def main(argv: list[str]) -> int:
             _run(
                 [clang, *clang_flags, "-I",
                     str(include_dir), "-c", str(runtime_c), "-o", str(runtime_o)],
+                cwd=REPO_ROOT,
+                timeout=_remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                if args.max_total_seconds > 0
+                else None,
+            )
+            clang_compile_s += time.perf_counter() - t0
+            t0 = time.perf_counter()
+            _run(
+                [clang, *clang_flags, "-I",
+                    str(include_dir), "-c", str(sha256_c), "-o", str(sha256_o)],
+                cwd=REPO_ROOT,
+                timeout=_remaining_budget_seconds(
+                    total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
+                if args.max_total_seconds > 0
+                else None,
+            )
+            clang_compile_s += time.perf_counter() - t0
+            t0 = time.perf_counter()
+            _run(
+                [clang, *clang_flags, "-I",
+                    str(include_dir), "-c", str(base64_c), "-o", str(base64_o)],
                 cwd=REPO_ROOT,
                 timeout=_remaining_budget_seconds(
                     total_start=t_total_start, max_total_seconds=float(args.max_total_seconds))
@@ -13288,6 +13314,8 @@ def main(argv: list[str]) -> int:
                 "-o",
                 str(out_path),
                 str(runtime_o),
+                str(sha256_o),
+                str(base64_o),
                 str(driver_o),
                 str(globals_o),
                 *[str(p) for p in aot_objects],

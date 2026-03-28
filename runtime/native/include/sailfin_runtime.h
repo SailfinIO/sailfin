@@ -161,6 +161,17 @@ extern "C"
     void *sailfin_adapter_http_post(void *request, void *body);
     void *sailfin_adapter_model_invoke_with_prompt(void *model, void *prompt);
 
+    // Package-manager HTTP helpers (curl subprocess).
+    char *sailfin_runtime_http_get(const char *url);
+    char *sailfin_runtime_http_post_json(const char *url, const char *json_body,
+                                          const char *auth_header);
+    char *sailfin_runtime_http_download(const char *url, const char *output_path);
+
+    // Environment & path helpers.
+    char *sailfin_runtime_getenv(const char *name);
+    char *sailfin_runtime_home_dir(void);
+    char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length);
+
     // Misc stubs.
     void *sailfin_runtime_to_debug_string(void *value);
     void sailfin_runtime_raise_value_error(void *message);

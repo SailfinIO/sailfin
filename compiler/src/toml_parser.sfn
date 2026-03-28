@@ -1,0 +1,230 @@
+// compiler/src/toml_parser.sfn
+//
+// Minimal TOML parser for sail.toml manifests. Provides a string-based API
+// so callers never need to allocate the SailToml struct across modules.
+
+struct SailToml {
+    name -> string;
+    version -> string;
+    description -> string;
+    entry -> string;
+    dependencies -> TomlDependency[];
+    capabilities -> string[];
+}
+
+struct TomlDependency {
+    capsule -> string;
+    version -> string;
+}
+
+fn _toml_trim(text -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = text.length;
+    loop {
+        if start >= end { break; }
+        let ch = text[start];
+        if ch == " " || ch == "\t" || ch == "\r" {
+            start += 1;
+        } else { break; }
+    }
+    loop {
+        if end <= start { break; }
+        let ch = text[end - 1];
+        if ch == " " || ch == "\t" || ch == "\r" {
+            end -= 1;
+        } else { break; }
+    }
+    return substring(text, start, end);
+}
+
+fn _toml_strip_quotes(text -> string) -> string {
+    if text.length >= 2 {
+        let first = text[0];
+        let last = text[text.length - 1];
+        if (first == "\"" && last == "\"") || (first == "'" && last == "'") {
+            return substring(text, 1, text.length - 1);
+        }
+    }
+    return text;
+}
+
+fn _toml_split_lines(text -> string) -> string[] {
+    let mut lines -> string[] = [];
+    let mut start -> number = 0;
+    let len = text.length;
+    let mut i -> number = 0;
+    loop {
+        if i >= len { break; }
+        if text[i] == "\n" {
+            lines.push(substring(text, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start <= len {
+        lines.push(substring(text, start, len));
+    }
+    return lines;
+}
+
+fn _toml_parse_string_array(value -> string) -> string[] {
+    let mut items -> string[] = [];
+    let trimmed = _toml_trim(value);
+    if trimmed.length < 2 { return items; }
+    if trimmed[0] != "[" || trimmed[trimmed.length - 1] != "]" { return items; }
+    let inner = _toml_trim(substring(trimmed, 1, trimmed.length - 1));
+    if inner.length == 0 { return items; }
+    let mut start -> number = 0;
+    let mut i -> number = 0;
+    let len = inner.length;
+    loop {
+        if i >= len { break; }
+        if inner[i] == "," {
+            let item = _toml_trim(substring(inner, start, i));
+            if item.length > 0 { items.push(_toml_strip_quotes(item)); }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    let last_item = _toml_trim(substring(inner, start, len));
+    if last_item.length > 0 { items.push(_toml_strip_quotes(last_item)); }
+    return items;
+}
+
+// ---- Internal parse ----
+
+fn _parse_toml_internal(text -> string) -> SailToml {
+    let mut toml = SailToml {
+        name: "",
+        version: "0.1.0",
+        description: "",
+        entry: "src/main.sfn",
+        dependencies: [],
+        capabilities: [],
+    };
+    let lines = _toml_split_lines(text);
+    let mut section -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= lines.length { break; }
+        let raw_line = lines[i];
+        i += 1;
+        let line = _toml_trim(raw_line);
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+        if line[0] == "[" {
+            let close = find_char(line, "]", 0);
+            if close > 0 { section = _toml_trim(substring(line, 1, close)); }
+            continue;
+        }
+        let eq_pos = find_char(line, "=", 0);
+        if eq_pos < 0 { continue; }
+        let key = _toml_trim(substring(line, 0, eq_pos));
+        let value = _toml_trim(substring(line, eq_pos + 1, line.length));
+        let stripped_key = _toml_strip_quotes(key);
+        let stripped_value = _toml_strip_quotes(value);
+        if strings_equal(section, "package") {
+            if strings_equal(stripped_key, "name") { toml.name = stripped_value; }
+            if strings_equal(stripped_key, "version") { toml.version = stripped_value; }
+            if strings_equal(stripped_key, "description") { toml.description = stripped_value; }
+            if strings_equal(stripped_key, "entry") { toml.entry = stripped_value; }
+        }
+        if strings_equal(section, "dependencies") {
+            toml.dependencies.push(TomlDependency { capsule: stripped_key, version: stripped_value });
+        }
+        if strings_equal(section, "capabilities") {
+            if strings_equal(stripped_key, "allow") {
+                toml.capabilities = _toml_parse_string_array(value);
+            }
+        }
+    }
+    return toml;
+}
+
+// ---- String-based public API (safe for cross-module use) ----
+
+fn toml_get_name(text -> string) -> string {
+    let t = _parse_toml_internal(text);
+    return t.name;
+}
+
+fn toml_get_version(text -> string) -> string {
+    let t = _parse_toml_internal(text);
+    return t.version;
+}
+
+fn toml_get_entry(text -> string) -> string {
+    let t = _parse_toml_internal(text);
+    return t.entry;
+}
+
+fn toml_get_description(text -> string) -> string {
+    let t = _parse_toml_internal(text);
+    return t.description;
+}
+
+// Generate a sail.toml string from individual fields
+fn toml_generate(name -> string, version -> string, description -> string, entry -> string) -> string {
+    let mut out -> string = "[package]\n";
+    out = out + "name = \"" + name + "\"\n";
+    out = out + "version = \"" + version + "\"\n";
+    if description.length > 0 {
+        out = out + "description = \"" + description + "\"\n";
+    }
+    out = out + "entry = \"" + entry + "\"\n";
+    out = out + "\n[dependencies]\n";
+    return out;
+}
+
+// Add a dependency to an existing sail.toml text and return the updated text.
+// If the dependency already exists, update its version.
+fn toml_add_dependency(toml_text -> string, capsule -> string, version -> string) -> string {
+    let t = _parse_toml_internal(toml_text);
+    // Check if already present and update
+    let mut found -> boolean = false;
+    let mut di -> number = 0;
+    loop {
+        if di >= t.dependencies.length { break; }
+        if strings_equal(t.dependencies[di].capsule, capsule) {
+            t.dependencies[di].version = version;
+            found = true;
+        }
+        di += 1;
+    }
+    if !found {
+        t.dependencies.push(TomlDependency { capsule: capsule, version: version });
+    }
+    return _write_toml(t);
+}
+
+// Write a SailToml back to string (internal)
+fn _write_toml(toml -> SailToml) -> string {
+    let mut out -> string = "[package]\n";
+    out = out + "name = \"" + toml.name + "\"\n";
+    out = out + "version = \"" + toml.version + "\"\n";
+    if toml.description.length > 0 {
+        out = out + "description = \"" + toml.description + "\"\n";
+    }
+    out = out + "entry = \"" + toml.entry + "\"\n";
+    out = out + "\n[dependencies]\n";
+    let mut i -> number = 0;
+    loop {
+        if i >= toml.dependencies.length { break; }
+        let dep = toml.dependencies[i];
+        out = out + "\"" + dep.capsule + "\" = \"" + dep.version + "\"\n";
+        i += 1;
+    }
+    if toml.capabilities.length > 0 {
+        out = out + "\n[capabilities]\n";
+        out = out + "allow = [";
+        let mut j -> number = 0;
+        loop {
+            if j >= toml.capabilities.length { break; }
+            if j > 0 { out = out + ", "; }
+            out = out + "\"" + toml.capabilities[j] + "\"";
+            j += 1;
+        }
+        out = out + "]\n";
+    }
+    return out;
+}
