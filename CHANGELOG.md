@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.1.1-alpha.142 (2026-03-28)
+
+### Bug Fixes
+
+- Exit in ps1
+  ([`c56a545`](https://github.com/SailfinIO/sailfin/commit/c56a5456d1151da5a398f8cdfd0f98ac452e9c3d))
+
+- Upload assets
+  ([`97137d7`](https://github.com/SailfinIO/sailfin/commit/97137d70cef9167f2bb26cb45db32b3fcfeb9685))
+
+
 ## v0.1.1-alpha.141 (2026-03-28)
 
 ### Bug Fixes
