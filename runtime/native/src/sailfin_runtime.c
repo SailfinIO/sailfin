@@ -1709,9 +1709,25 @@ void sailfin_runtime_sleep(double seconds)
     usleep((useconds_t)micros);
 }
 
+/* Check if a string pointer looks like a corrupted double-encoded value.
+   On macOS ARM64, valid user-space pointers are < 0x800000000000.
+   Double-encoded pointers (via ptrtoint→sitofp→double→bitcast back) produce
+   addresses with high bits set that are not valid user memory. */
+static inline int _is_corrupted_string_ptr(const char *ptr)
+{
+    uintptr_t value = (uintptr_t)ptr;
+    /* NULL or very low addresses are already handled elsewhere */
+    if (value == 0)
+        return 0;
+    /* Pointers above 48-bit user-space range are likely corrupted doubles */
+    if (value > (uintptr_t)0x7FFFFFFFFFFF)
+        return 1;
+    return 0;
+}
+
 int64_t sailfin_runtime_string_length(char *text)
 {
-    if (!text)
+    if (!text || _is_corrupted_string_ptr(text))
     {
         return 0;
     }
@@ -1996,9 +2012,9 @@ char *sailfin_runtime_string_concat(char *a, char *b)
 
     char *a_in = a;
     char *b_in = b;
-    if (!a)
+    if (!a || _is_corrupted_string_ptr(a))
     {
-        if (strict_strings)
+        if (strict_strings && a)
         {
             fprintf(stderr, "[stage2-native] string_concat got NULL lhs\n");
             fflush(stderr);
@@ -2006,9 +2022,9 @@ char *sailfin_runtime_string_concat(char *a, char *b)
         }
         a = "";
     }
-    if (!b)
+    if (!b || _is_corrupted_string_ptr(b))
     {
-        if (strict_strings)
+        if (strict_strings && b)
         {
             fprintf(stderr, "[stage2-native] string_concat got NULL rhs\n");
             fflush(stderr);
@@ -4450,6 +4466,10 @@ double sailfin_runtime_grapheme_count(char *text)
 
 char *sailfin_runtime_grapheme_at(char *text, double index)
 {
+    if (_is_corrupted_string_ptr(text))
+    {
+        return "";
+    }
     static int trace_enabled = -1;
     if (trace_enabled < 0)
     {

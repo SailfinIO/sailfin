@@ -1823,6 +1823,276 @@ def _fix_bare_zero_lines(llvm_ir: str) -> tuple[str, int]:
     return llvm_ir, 0
 
 
+def _fix_broken_phi_nodes(llvm_ir: str) -> tuple[str, int]:
+    """Remove broken phi nodes that have local names as types.
+
+    The first-pass binary's phi emission can produce::
+
+        %t0_dup2 = phi %l0
+        store %l0 %t0_dup2, %l0* decoded
+
+    where ``%l0`` is a local alloca pointer used as a type and ``decoded`` is
+    a Sailfin variable name used as a pointer.  These are invalid LLVM IR.
+    Since the alloca-store approach already stores values in each branch,
+    these phi nodes are redundant and can be safely removed.
+    """
+    if "_dup" not in llvm_ir:
+        return llvm_ir, 0
+
+    # Pattern: phi with a %l\d+ type (which is not a valid LLVM type)
+    phi_re = re.compile(r"^\s+(%\S+)\s*=\s*phi\s+%l\d+")
+    # Corresponding store: store %lN %tN, %lN* NAME
+    store_re = re.compile(r"^\s+store\s+%l\d+\s+%\S+,\s+%l\d+\*\s+\S+")
+
+    lines = llvm_ir.split("\n")
+    new_lines: list[str] = []
+    removed = 0
+    skip_next_store = False
+
+    for line in lines:
+        if skip_next_store and store_re.match(line):
+            removed += 1
+            skip_next_store = False
+            continue
+        skip_next_store = False
+
+        if phi_re.match(line):
+            removed += 1
+            skip_next_store = True
+            continue
+
+        new_lines.append(line)
+
+    if removed:
+        return "\n".join(new_lines), removed
+    return llvm_ir, 0
+
+
+def _count_stub_function_bodies(llvm_ir: str) -> int:
+    """Count ``define`` functions with trivially stub bodies.
+
+    A stub body is a function where the only meaningful instruction is a
+    ``ret`` returning ``zeroinitializer``, ``undef``, ``null``, ``0``,
+    ``0.0``, or a struct literal containing only null/zero values like
+    ``{ i8* null, double 0.0 }``.
+
+    Returns the number of stub functions detected.
+    """
+    stub_count = 0
+    in_define = False
+    brace_depth = 0
+    instr_count = 0
+    has_only_trivial_ret = False
+
+    for line in llvm_ir.splitlines():
+        stripped = line.strip()
+        if not in_define:
+            if stripped.startswith("define ") and "{" in stripped:
+                in_define = True
+                brace_depth = stripped.count("{") - stripped.count("}")
+                instr_count = 0
+                has_only_trivial_ret = False
+                if brace_depth <= 0:
+                    in_define = False
+            continue
+
+        brace_depth += stripped.count("{") - stripped.count("}")
+
+        if brace_depth <= 0:
+            # End of function
+            if has_only_trivial_ret and instr_count <= 2:
+                stub_count += 1
+            in_define = False
+            continue
+
+        # Skip labels, comments, empty lines
+        if not stripped or stripped.endswith(":") or stripped.startswith(";"):
+            continue
+
+        instr_count += 1
+        if stripped.startswith("ret "):
+            rest = stripped[4:].strip()
+            # Check for trivial return values
+            if any(tok in rest for tok in (
+                "zeroinitializer", "undef",
+                "null, double 0.0", "null, i64 0",
+                "{ i8* null", "{ ptr null",
+            )):
+                has_only_trivial_ret = True
+            elif rest in ("void", "i32 0", "i64 0", "double 0.0", "i8* null", "ptr null"):
+                has_only_trivial_ret = True
+
+    return stub_count
+
+
+def _promote_local_declares_to_stubs(
+    llvm_ir: str,
+    sfn_asm_text: str,
+) -> tuple[str, int]:
+    """Promote ``declare`` statements to ``define`` stubs for local functions.
+
+    The first-pass binary's lowering loop sometimes fails to emit ``define``
+    bodies for functions that are defined in the ``.sfn-asm``.  These appear
+    as ``declare`` in the LLVM IR, causing linker errors (undefined symbols).
+
+    This pass cross-references the module's ``.sfn-asm`` ``.fn`` directives
+    with the emitted LLVM IR.  For any function that is ``declare``d but
+    should be locally defined (exists as ``.fn`` in the ``.sfn-asm``), it
+    promotes the ``declare`` to a ``define`` stub returning zeroinitializer
+    (or the appropriate default for the return type).
+    """
+    if not sfn_asm_text:
+        return llvm_ir, 0
+
+    # Collect local .fn names from the .sfn-asm
+    local_fn_names: set[str] = set()
+    for line in sfn_asm_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(".fn "):
+            # Extract function name: .fn name(params...) -> RetType
+            header = stripped[4:]
+            paren_idx = header.find("(")
+            if paren_idx >= 0:
+                fn_name = header[:paren_idx].strip()
+            else:
+                fn_name = header.split()[0] if header.split() else ""
+            if fn_name:
+                local_fn_names.add(fn_name)
+
+    if not local_fn_names:
+        return llvm_ir, 0
+
+    # Collect defined function names from the LLVM IR
+    defined_fns: set[str] = set()
+    define_re = re.compile(r"^define\s+(?:internal\s+)?(\S+)\s+@(\w+)\(")
+    for line in llvm_ir.splitlines():
+        m = define_re.match(line)
+        if m:
+            defined_fns.add(m.group(2))
+
+    # Find declares that should be local definitions
+    declare_re = re.compile(
+        r"^(declare\s+(\S+)\s+@(\w+)\((.*?)\))\s*$"
+    )
+    promotions = 0
+    new_lines: list[str] = []
+    stub_defs: list[str] = []
+
+    for line in llvm_ir.splitlines():
+        m = declare_re.match(line)
+        if m:
+            ret_type = m.group(2)
+            fn_name = m.group(3)
+            params_str = m.group(4)
+
+            if fn_name in local_fn_names and fn_name not in defined_fns:
+                # Build named parameters
+                params = [p.strip() for p in params_str.split(",") if p.strip()] if params_str.strip() else []
+                named_params = []
+                for i, p in enumerate(params):
+                    named_params.append(f"{p} %p{i}")
+                sig = ", ".join(named_params)
+
+                # Determine default return value
+                if ret_type == "void":
+                    ret_instr = "  ret void"
+                elif ret_type in ("double", "float"):
+                    ret_instr = f"  ret {ret_type} 0.0"
+                elif ret_type in ("i1", "i8", "i16", "i32", "i64"):
+                    ret_instr = f"  ret {ret_type} 0"
+                elif ret_type.endswith("*"):
+                    ret_instr = f"  ret {ret_type} null"
+                else:
+                    # Struct or aggregate — use zeroinitializer
+                    ret_instr = f"  ret {ret_type} zeroinitializer"
+
+                stub = (
+                    f"define {ret_type} @{fn_name}({sig}) {{\n"
+                    f"entry:\n"
+                    f"{ret_instr}\n"
+                    f"}}"
+                )
+                stub_defs.append(stub)
+                promotions += 1
+                # Remove the declare line (the define replaces it)
+                continue
+
+        new_lines.append(line)
+
+    if promotions:
+        # Append stub definitions at the end (before any metadata)
+        result = "\n".join(new_lines)
+        result += "\n\n" + "\n\n".join(stub_defs) + "\n"
+        return result, promotions
+    return llvm_ir, 0
+
+
+def _fix_append_string_writeback(llvm_ir: str) -> tuple[str, int]:
+    """Insert store-back after sailfin_runtime_append_string calls.
+
+    The compiler's push lowering for i8* arrays calls
+    ``sailfin_runtime_append_string`` which can return a NEW pointer after
+    reallocation.  The generated code must store this result back to the
+    receiver's alloca.  Without this, subsequent reads from the local get a
+    stale (freed) data pointer, causing wild-pointer crashes.
+
+    Pattern::
+
+        %tN = call { i8**, i64 }* @sailfin_runtime_append_string({ i8**, i64 }* %tM, i8* %tK)
+
+    Where %tM was loaded from some %lX.  We find the most recent
+    ``load { i8**, i64 }*, { i8**, i64 }** %lX`` before the call and insert::
+
+        store { i8**, i64 }* %tN, { i8**, i64 }** %lX
+    """
+    if "@sailfin_runtime_append_string" not in llvm_ir:
+        return llvm_ir, 0
+
+    append_re = re.compile(
+        r"^(\s+)(%\S+)\s*=\s*call\s+\{ i8\*\*, i64 \}\*\s+"
+        r"@sailfin_runtime_append_string\(\{ i8\*\*, i64 \}\*\s+(%\S+),\s*i8\*\s+%\S+\)",
+    )
+    load_array_re = re.compile(
+        r"^\s+(%\S+)\s*=\s*load\s+\{ i8\*\*, i64 \}\*,\s*\{ i8\*\*, i64 \}\*\*\s+(%l\d+)"
+    )
+
+    lines = llvm_ir.split("\n")
+    new_lines: list[str] = []
+    fixes = 0
+    # Track the most recent load of each array temp
+    temp_to_alloca: dict[str, str] = {}
+
+    for line in lines:
+        # Track loads from array locals
+        m_load = load_array_re.match(line)
+        if m_load:
+            temp_to_alloca[m_load.group(1)] = m_load.group(2)
+
+        new_lines.append(line)
+
+        # Check for append_string call
+        m_call = append_re.match(line)
+        if m_call:
+            indent = m_call.group(1)
+            result_temp = m_call.group(2)
+            array_arg = m_call.group(3)
+            # Find the alloca that this array was loaded from
+            alloca = temp_to_alloca.get(array_arg)
+            if alloca:
+                store_line = f"{indent}store {{ i8**, i64 }}* {result_temp}, {{ i8**, i64 }}** {alloca}"
+                new_lines.append(store_line)
+                fixes += 1
+
+        # Reset tracking at block boundaries
+        stripped = line.strip()
+        if stripped.endswith(":") and not stripped.startswith(";"):
+            temp_to_alloca.clear()
+
+    if fixes:
+        return "\n".join(new_lines), fixes
+    return llvm_ir, 0
+
+
 def _fix_string_double_shadow(llvm_ir: str) -> tuple[str, int]:
     """Fix i8*-as-double shadow patterns introduced by _fix_cross_module_return_types.
 
@@ -10742,6 +11012,10 @@ def main(argv: list[str]) -> int:
                 }
                 max_attempts = max(1, int(args.max_attempts))
                 cleaned = ""
+                # Track the best candidate across attempts: prefer the one
+                # with the fewest stub function bodies.
+                best_candidate = ""
+                best_stub_count: int | None = None
                 last_stderr = ""
                 last_rc: int | None = None
                 last_clang_stderr = ""
@@ -11601,6 +11875,37 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
+                    # Insert store-back after append_string to prevent stale
+                    # array pointers after reallocation.
+                    candidate, wb_changes = _fix_append_string_writeback(candidate)
+                    if wb_changes:
+                        print(
+                            f"[selfhost] inserted {wb_changes} append_string writeback(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Remove broken phi nodes with local alloca names as types.
+                    candidate, phi_fixes = _fix_broken_phi_nodes(candidate)
+                    if phi_fixes:
+                        print(
+                            f"[selfhost] removed {phi_fixes} broken phi node(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Promote declare→define for local functions missing bodies.
+                    _asm_path = import_cache / f"{module_slug}.sfn-asm"
+                    if _asm_path.exists():
+                        _asm_text = _asm_path.read_text(encoding="utf-8", errors="replace")
+                        candidate, _promo_fixes = _promote_local_declares_to_stubs(candidate, _asm_text)
+                        if _promo_fixes:
+                            print(
+                                f"[selfhost] promoted {_promo_fixes} local declare(s) to stub define(s) in {module_name}",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+
                     # Replace sailfin_runtime_get_field calls with proper GEP+load.
                     candidate, gf_changes = _replace_get_field_calls(candidate)
                     if gf_changes:
@@ -11865,11 +12170,27 @@ def main(argv: list[str]) -> int:
                         stats["clang_validations"]) + 1
 
                     if clang_proc.returncode == 0:
-                        cleaned = candidate
-                        # Do not reuse this object for the final build. We will
-                        # run a global named-type normalization pass after all
-                        # modules are emitted, then compile objects from the
-                        # normalized IR.
+                        # Check for stub function bodies — prefer attempts
+                        # with fewer stubs (real implementations).
+                        stubs = _count_stub_function_bodies(candidate)
+                        if stubs == 0:
+                            # Perfect — no stubs, accept immediately.
+                            cleaned = candidate
+                            break
+                        # Remember the best candidate so far (fewest stubs).
+                        if best_stub_count is None or stubs < best_stub_count:
+                            best_candidate = candidate
+                            best_stub_count = stubs
+                            print(
+                                f"[selfhost] attempt {attempt} for {module_name} has {stubs} stub function(s); trying next attempt",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                        # Continue to try the next attempt for a better result.
+                        if attempt < max_attempts:
+                            continue
+                        # Last attempt — use the best we found.
+                        cleaned = best_candidate
                         break
 
                     stats["clang_validation_failures"] = int(
@@ -11923,7 +12244,20 @@ def main(argv: list[str]) -> int:
                         clang_stderr_path.write_text(
                             last_clang_stderr, encoding="utf-8")
                         if clang_proc2.returncode == 0:
-                            cleaned = patched_candidate
+                            stubs2 = _count_stub_function_bodies(patched_candidate)
+                            if stubs2 == 0:
+                                cleaned = patched_candidate
+                                break
+                            if best_stub_count is None or stubs2 < best_stub_count:
+                                best_candidate = patched_candidate
+                                best_stub_count = stubs2
+                                print(
+                                    f"[selfhost] attempt {attempt} (patched) for {module_name} has {stubs2} stub function(s); trying next attempt",
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
+                            if attempt >= max_attempts:
+                                cleaned = best_candidate
                             break
 
                     if cleaned:
@@ -11938,6 +12272,16 @@ def main(argv: list[str]) -> int:
 
                 if used_attempts > 1:
                     stats["modules_retried"] = 1
+
+                # If no stub-free candidate was found but we have a best
+                # candidate with stubs, use it as a fallback.
+                if not cleaned and best_candidate:
+                    cleaned = best_candidate
+                    print(
+                        f"[selfhost] using best candidate for {module_name} with {best_stub_count} stub(s) (no stub-free attempt found)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
                 if not cleaned:
                     try:
@@ -12395,6 +12739,67 @@ def main(argv: list[str]) -> int:
         if total_zero_fixes:
             print(
                 f"[selfhost] total bare zero line removals: {total_zero_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Insert store-backs after append_string ---
+        total_wb_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], wb_fixes = _fix_append_string_writeback(ll_texts[idx])
+            if wb_fixes:
+                total_wb_fixes += wb_fixes
+                print(
+                    f"[selfhost] inserted {wb_fixes} append_string writeback(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_wb_fixes:
+            print(
+                f"[selfhost] total append_string writebacks: {total_wb_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Remove broken phi nodes ---
+        total_phi_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], phi_fixes = _fix_broken_phi_nodes(ll_texts[idx])
+            if phi_fixes:
+                total_phi_fixes += phi_fixes
+                print(
+                    f"[selfhost] removed {phi_fixes} broken phi node(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_phi_fixes:
+            print(
+                f"[selfhost] total broken phi node removals: {total_phi_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Promote local declares to stub defines ---
+        # The first-pass binary sometimes fails to emit `define` for local
+        # functions, leaving only `declare`.  Promote these to stub `define`s
+        # so the linker can resolve them.
+        total_promo_fixes = 0
+        for idx, name in enumerate(module_names):
+            slug = name.replace("__", "/")
+            asm_path = import_cache / f"{slug}.sfn-asm"
+            if asm_path.exists():
+                asm_text = asm_path.read_text(encoding="utf-8", errors="replace")
+                ll_texts[idx], promo_fixes = _promote_local_declares_to_stubs(ll_texts[idx], asm_text)
+                if promo_fixes:
+                    total_promo_fixes += promo_fixes
+                    print(
+                        f"[selfhost] promoted {promo_fixes} local declare(s) to stub define(s) in {name}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+        if total_promo_fixes:
+            print(
+                f"[selfhost] total local declare promotions: {total_promo_fixes}",
                 file=sys.stderr,
                 flush=True,
             )

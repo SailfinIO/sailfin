@@ -2004,10 +2004,16 @@ fn lower_let_instruction(
 
     if llvm_type.length == 0 {
         if operand != null {
-            llvm_type = trim_text(operand.llvm_type);
+            let operand_type = trim_text(operand.llvm_type);
+            if operand_type.length > 0 {
+                llvm_type = operand_type;
+            }
         }
     }
 
+    // Only default to double as a last resort.  Struct and pointer types from
+    // the operand must be preserved to avoid the double-encoding corruption
+    // chain (ptrtoint→sitofp precision loss on struct pointers).
     if llvm_type.length == 0 {
         llvm_type = "double";
     }

@@ -807,6 +807,19 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             if push_result.operand == null {
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
             }
+            // CRITICAL: For i8* string arrays, sailfin_runtime_append_string may
+            // return a NEW array pointer after reallocation. We must store the
+            // result back to the receiver's alloca so subsequent reads see the
+            // new pointer. Without this writeback, the local variable holds a
+            // stale (potentially freed) pointer, causing wild-pointer crashes
+            // in downstream consumers like collect_defined_function_symbols.
+            if array_push_element_type == "i8*" && method_parse.success {
+                let push_receiver_name = trim_text(method_parse.base);
+                let push_receiver_local = find_local_binding(locals, push_receiver_name);
+                if push_receiver_local != null {
+                    current_lines.push("  store " + push_result.operand.llvm_type + " " + push_result.operand.value + ", " + push_result.operand.llvm_type + "* " + push_receiver_local.pointer);
+                }
+            }
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: push_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
         } else {
             diagnostics.push("llvm lowering: push requires two operands");

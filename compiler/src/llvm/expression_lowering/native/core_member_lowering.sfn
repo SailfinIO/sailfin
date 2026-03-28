@@ -1011,6 +1011,7 @@ fn try_file_based_struct_field_access(base_name -> string, field_name -> string,
 
 export {
     lower_member_access,
+    lower_dynamic_member_access,
     lower_enum_member_access,
     lower_runtime_global_reference,
 };

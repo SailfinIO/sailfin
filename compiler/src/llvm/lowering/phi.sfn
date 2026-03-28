@@ -545,20 +545,17 @@ fn emit_phi_merges_for_if_else(
                 }
             }
 
-            // Only emit phi if we have at least 2 inputs
-            if phi_inputs.length >= 2 {
-                let entry = build_phi_and_store(local, llvm_type, phi_inputs, current_temp);
-                phi_lines.push(entry.phi_line);
-                store_lines.push(entry.store_line);
-                current_temp += 1;
-            }
+            // Skip phi emission — alloca-store approach is used instead.
+            // The then/else blocks already store directly to allocas, so phi
+            // nodes are redundant. Disabling them avoids broken phi output
+            // from corrupted LocalMutation field access in the first-pass
+            // binary.  Same approach as emit_phi_merges_for_straight_if.
         }
 
         name_idx += 1;
     }
 
-    let lines_with_phi = extend_string_array(lines, phi_lines);
-    let combined_lines = extend_string_array(lines_with_phi, store_lines);
+    let combined_lines = extend_string_array(lines, phi_lines);
     return PhiMergeResult { lines: combined_lines, temp_index: current_temp };
 }
 
