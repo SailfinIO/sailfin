@@ -996,7 +996,7 @@ fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) ->
     return _clang_link_with_opt(ll_path, out_path, runtime_root, "-O2", "build/sailfin");
 }
 
-fn _is_macos() -> boolean {
+fn _is_macos() -> boolean ![io] {
     // /proc/version is Linux-specific; its absence is a reliable macOS signal.
     return !fs.exists("/proc/version");
 }
