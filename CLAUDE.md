@@ -265,8 +265,8 @@ The compiler must always compile itself. Breaking changes require:
 
 ## Key Terminology
 
-- **Capsule**: A Sailfin package with `sail.toml` manifest
-- **Fleet**: Multi-capsule workspace with shared `fleet.toml` policies
+- **Capsule**: A Sailfin package with `capsule.toml` manifest
+- **Workspace**: Multi-capsule project with shared `workspace.toml` policies
 - **Effect**: Capability annotation (`![io]`, `![net]`, etc.)
 - **Generation card**: Provenance metadata for model calls (input hashes, cost, latency, seed)
 - **Native IR**: `.sfn-asm` textual intermediate representation

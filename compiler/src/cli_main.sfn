@@ -1813,8 +1813,8 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             print.error("usage: sfn init");
             return 2;
         }
-        if fs.exists("sail.toml") {
-            print.error("sail.toml already exists in this directory");
+        if fs.exists("capsule.toml") {
+            print.error("capsule.toml already exists in this directory");
             return 1;
         }
         // Derive package name from current directory
@@ -1838,7 +1838,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             }
         }
         let toml_text = toml_generate(pkg_name, "0.1.0", "", "src/main.sfn");
-        fs.writeFile("sail.toml", toml_text);
+        fs.writeFile("capsule.toml", toml_text);
         if !fs.exists("src") {
             fs.createDirectory("src", true);
         }
@@ -1854,19 +1854,19 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             print.error("usage: sfn publish");
             return 2;
         }
-        if !fs.exists("sail.toml") {
-            print.error("no sail.toml found — run `sfn init` first");
+        if !fs.exists("capsule.toml") {
+            print.error("no capsule.toml found — run `sfn init` first");
             return 1;
         }
-        let toml_text = fs.readFile("sail.toml");
+        let toml_text = fs.readFile("capsule.toml");
         let pkg_name = toml_get_name(toml_text);
         let pkg_version = toml_get_version(toml_text);
         if pkg_name.length == 0 {
-            print.error("sail.toml: missing package name");
+            print.error("capsule.toml: missing package name");
             return 1;
         }
         if pkg_version.length == 0 {
-            print.error("sail.toml: missing package version");
+            print.error("capsule.toml: missing package version");
             return 1;
         }
 
@@ -1893,7 +1893,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         // Build .sfnpkg payload
         print.info("packaging " + pkg_name + "@" + pkg_version + "...");
         let mut payload -> string = "SFNPKG/1\n";
-        payload = payload + "--- path: sail.toml\n" + toml_text + "\n";
+        payload = payload + "--- path: capsule.toml\n" + toml_text + "\n";
 
         // Collect .sfn files under src/
         let src_files = _collect_sfn_files("src", 10);
@@ -1957,8 +1957,8 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         let capsule_id = args[1];
 
-        if !fs.exists("sail.toml") {
-            print.error("no sail.toml found — run `sfn init` first");
+        if !fs.exists("capsule.toml") {
+            print.error("no capsule.toml found — run `sfn init` first");
             return 1;
         }
 
@@ -2010,10 +2010,10 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let pkg_content = fs.readFile(pkg_path);
         _extract_sfnpkg(pkg_content, cache_base);
 
-        // Update sail.toml with the new dependency
-        let toml_text = fs.readFile("sail.toml");
+        // Update capsule.toml with the new dependency
+        let toml_text = fs.readFile("capsule.toml");
         let updated_toml = toml_add_dependency(toml_text, capsule_id, latest_version);
-        fs.writeFile("sail.toml", updated_toml);
+        fs.writeFile("capsule.toml", updated_toml);
         print.info("added " + capsule_id + "@" + latest_version);
         return 0;
     }

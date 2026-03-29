@@ -1,6 +1,6 @@
 [package]
 name = "sfn/fs"
-version = "0.1.0"
+version = "0.1.1"
 description = "Filesystem operations for Sailfin"
 entry = "src/mod.sfn"
 

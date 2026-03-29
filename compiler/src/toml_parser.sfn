@@ -1,6 +1,6 @@
 // compiler/src/toml_parser.sfn
 //
-// Minimal TOML parser for sail.toml manifests. Provides a string-based API
+// Minimal TOML parser for capsule.toml manifests. Provides a string-based API
 // so callers never need to allocate the SailToml struct across modules.
 
 struct SailToml {
@@ -163,7 +163,7 @@ fn toml_get_description(text -> string) -> string {
     return t.description;
 }
 
-// Generate a sail.toml string from individual fields
+// Generate a capsule.toml string from individual fields
 fn toml_generate(name -> string, version -> string, description -> string, entry -> string) -> string {
     let mut out -> string = "[package]\n";
     out = out + "name = \"" + name + "\"\n";
@@ -176,7 +176,7 @@ fn toml_generate(name -> string, version -> string, description -> string, entry
     return out;
 }
 
-// Add a dependency to an existing sail.toml text and return the updated text.
+// Add a dependency to an existing capsule.toml text and return the updated text.
 // If the dependency already exists, update its version.
 fn toml_add_dependency(toml_text -> string, capsule -> string, version -> string) -> string {
     let t = _parse_toml_internal(toml_text);

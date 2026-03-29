@@ -22,15 +22,15 @@ sfn add sfn/http
 ```
 
 This fetches the `sfn/http` capsule from the Sailfin registry and records it
-in your `sail.toml` manifest. Multiple capsules can be added at once:
+in your `capsule.toml` manifest. Multiple capsules can be added at once:
 
 ```bash
 sfn add sfn/http sfn/io sfn/net
 ```
 
-### The `sail.toml` Manifest
+### The `capsule.toml` Manifest
 
-Every capsule contains a `sail.toml` descriptor:
+Every capsule contains a `capsule.toml` descriptor:
 
 ```toml
 [package]
@@ -54,16 +54,16 @@ Capabilities listed here gate which effects the capsule may use; the compiler
 rejects code that performs an undeclared effect. Model entries capture provider
 versions so builds remain reproducible.
 
-Projects containing multiple capsules are organised as a fleet, defined by a
-top-level `fleet.toml`.
+Projects containing multiple capsules are organised as a workspace, defined by a
+top-level `workspace.toml`.
 
 ### Fleet Manifest Example
 
-Below is an illustrative `fleet.toml` showing how multiple capsules, shared
+Below is an illustrative `workspace.toml` showing how multiple capsules, shared
 profiles, and model provenance are declared. (Fields and syntax are evolving.)
 
 ```toml
-[fleet.meta]
+[workspace.meta]
 name        = "sailfin"
 version     = "0.0.0"
 description = "Core language, runtime, and tooling"
@@ -120,19 +120,19 @@ evaluators = [ Faithfulness, LatencyBudget(150ms) ]
 cost_cap = 0.05 # USD (currency literal support forthcoming)
 ```
 
-The fleet manifest orchestrates:
+The workspace manifest orchestrates:
 
 - Capsules and their effect capability boundaries
 - Reproducible model and dependency locking
 - Build profiles for different workflows
 - Shared evaluation / provenance policies
 
-Individual capsules still declare their own `sail.toml`; the fleet manifest
+Individual capsules still declare their own `capsule.toml`; the workspace manifest
 aggregates and overrides where necessary.
 
 ## Common Commands
 
-- `sfn init`: Scaffold a new capsule with `sail.toml`, `src/`, and mirrored
+- `sfn init`: Scaffold a new capsule with `capsule.toml`, `src/`, and mirrored
   `tests/`/`docs/` stubs aligned with `docs/style-guide.md`.
 - `sfn add <capsule>`: Add a dependency and record it in the manifest.
 - `sfn update`: Resolve the latest compatible versions for all dependencies.
