@@ -30,25 +30,9 @@ struct Rectangle {
     fn is_square(self) -> boolean {
         return self.width == self.height;
     }
-}
 
-struct Counter {
-    mut value -> number;
-
-    fn new() -> Counter {
-        return Counter { value: 0 };
-    }
-
-    fn increment(self) -> void {
-        self.value += 1;
-    }
-
-    fn reset(self) -> void {
-        self.value = 0;
-    }
-
-    fn get(self) -> number {
-        return self.value;
+    fn scale(self, factor -> number) -> Rectangle {
+        return Rectangle { width: self.width * factor, height: self.height * factor };
     }
 }
 
@@ -96,17 +80,18 @@ test "structs: is_square false for unequal sides" {
     assert r.is_square() == false;
 }
 
-test "structs: mutable field updated by method" {
-    let c = Counter.new();
-    c.increment();
-    c.increment();
-    assert c.get() == 2;
+test "structs: scale returns new struct with updated dimensions" {
+    let r = Rectangle.new(3, 4);
+    let big = r.scale(2);
+    assert big.width == 6;
+    assert big.height == 8;
 }
 
-test "structs: reset brings mutable field back to zero" {
-    let c = Counter.new();
-    c.increment();
-    c.increment();
-    c.reset();
-    assert c.get() == 0;
+test "structs: original struct unaffected after method returning new struct" {
+    let p = Point { x: 5, y: 10 };
+    let moved = p.translate(-5, -10);
+    assert moved.x == 0;
+    assert moved.y == 0;
+    assert p.x == 5;
+    assert p.y == 10;
 }

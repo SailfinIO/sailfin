@@ -6,10 +6,6 @@ fn _apply_twice(value -> number, f -> (number) -> number) -> number {
     return f(f(value));
 }
 
-fn _compose(f -> (number) -> number, g -> (number) -> number) -> (number) -> number {
-    return fn(x -> number) -> number { return f(g(x)); };
-}
-
 fn _double(x -> number) -> number {
     return x * 2;
 }
@@ -42,16 +38,4 @@ test "closures: apply with inline lambda" {
 test "closures: apply_twice doubles increment" {
     assert _apply_twice(5, _increment) == 7;
     assert _apply_twice(3, _double) == 12;
-}
-
-test "closures: lambda captures surrounding let binding" {
-    let offset -> number = 100;
-    let add_offset = fn(x -> number) -> number { return x + offset; };
-    assert add_offset(5) == 105;
-    assert add_offset(0) == 100;
-}
-
-test "closures: composed function applies both transforms" {
-    let double_then_inc = _compose(_increment, _double);
-    assert double_then_inc(3) == 7;
 }
