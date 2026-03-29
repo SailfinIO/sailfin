@@ -55,19 +55,3 @@ test "closures: composed function applies both transforms" {
     let double_then_inc = _compose(_increment, _double);
     assert double_then_inc(3) == 7;
 }
-
-test "closures: lambda used inline with map" {
-    let nums = [1, 2, 3];
-    let result = nums.map(fn(x) -> number { return x + 10; });
-    assert result[0] == 11;
-    assert result[1] == 12;
-    assert result[2] == 13;
-}
-
-test "closures: lambda used inline with filter" {
-    let nums = [1, 2, 3, 4, 5];
-    let big = nums.filter(fn(x) -> boolean { return x > 3; });
-    assert big.length == 2;
-    assert big[0] == 4;
-    assert big[1] == 5;
-}

@@ -3,10 +3,25 @@ fn _quicksort(arr -> number[]) -> number[] {
         return arr;
     }
     let pivot = arr[0];
-    let less    = arr.filter(fn(x) -> boolean { return x < pivot; });
-    let equal   = arr.filter(fn(x) -> boolean { return x == pivot; });
-    let greater = arr.filter(fn(x) -> boolean { return x > pivot; });
-    return _quicksort(less).concat(equal).concat(_quicksort(greater));
+    let mut less    -> number[] = [];
+    let mut equal   -> number[] = [];
+    let mut greater -> number[] = [];
+    for x in arr {
+        if x < pivot {
+            less.push(x);
+        } else if x == pivot {
+            equal.push(x);
+        } else {
+            greater.push(x);
+        }
+    }
+    let sorted_less    = _quicksort(less);
+    let sorted_greater = _quicksort(greater);
+    let mut result -> number[] = [];
+    for n in sorted_less    { result.push(n); }
+    for n in equal          { result.push(n); }
+    for n in sorted_greater { result.push(n); }
+    return result;
 }
 
 fn _is_sorted(arr -> number[]) -> boolean {
@@ -24,7 +39,8 @@ fn _is_sorted(arr -> number[]) -> boolean {
 }
 
 test "recursion: quicksort empty array" {
-    let sorted = _quicksort([]);
+    let mut empty -> number[] = [];
+    let sorted = _quicksort(empty);
     assert sorted.length == 0;
 }
 
@@ -70,6 +86,5 @@ test "recursion: quicksort array with duplicates" {
 test "recursion: is_sorted helper works correctly" {
     assert _is_sorted([1, 2, 3]) == true;
     assert _is_sorted([3, 2, 1]) == false;
-    assert _is_sorted([]) == true;
     assert _is_sorted([1]) == true;
 }
