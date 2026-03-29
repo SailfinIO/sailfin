@@ -1,0 +1,10 @@
+[package]
+name = "sfn/fs"
+version = "0.1.0"
+description = "Filesystem operations for Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = ["io"]

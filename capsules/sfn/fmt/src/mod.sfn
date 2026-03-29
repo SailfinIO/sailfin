@@ -1,0 +1,147 @@
+// sfn/fmt — String formatting and manipulation for Sailfin.
+//
+// Provides common string operations. No effects required — pure functions.
+
+fn trim(text -> string) -> string {
+    // Remove leading and trailing whitespace.
+    let mut start -> number = 0;
+    let mut end -> number = text.length;
+    loop {
+        if start >= end { break; }
+        let ch = text[start];
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            start += 1;
+        } else { break; }
+    }
+    loop {
+        if end <= start { break; }
+        let ch = text[end - 1];
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            end -= 1;
+        } else { break; }
+    }
+    return substring(text, start, end);
+}
+
+fn starts_with(text -> string, prefix -> string) -> boolean {
+    // Returns true if text begins with prefix.
+    if prefix.length > text.length { return false; }
+    return strings_equal(substring(text, 0, prefix.length), prefix);
+}
+
+fn ends_with(text -> string, suffix -> string) -> boolean {
+    // Returns true if text ends with suffix.
+    if suffix.length > text.length { return false; }
+    let start = text.length - suffix.length;
+    return strings_equal(substring(text, start, text.length), suffix);
+}
+
+fn contains(text -> string, needle -> string) -> boolean {
+    // Returns true if text contains needle.
+    return find(text, needle, 0) >= 0;
+}
+
+fn find(text -> string, needle -> string, start -> number) -> number {
+    // Find the first occurrence of needle in text starting from start.
+    // Returns -1 if not found.
+    if needle.length == 0 { return start; }
+    if needle.length > text.length { return -1; }
+    let mut i -> number = start;
+    let limit = text.length - needle.length;
+    loop {
+        if i > limit { return -1; }
+        if strings_equal(substring(text, i, i + needle.length), needle) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn split(text -> string, separator -> string) -> string[] {
+    // Split text by separator. Returns an array of substrings.
+    let mut parts -> string[] = [];
+    let mut start -> number = 0;
+    if separator.length == 0 {
+        // Split into individual characters
+        let mut i -> number = 0;
+        loop {
+            if i >= text.length { break; }
+            parts.push(substring(text, i, i + 1));
+            i += 1;
+        }
+        return parts;
+    }
+    loop {
+        let pos = find(text, separator, start);
+        if pos < 0 {
+            parts.push(substring(text, start, text.length));
+            break;
+        }
+        parts.push(substring(text, start, pos));
+        start = pos + separator.length;
+    }
+    return parts;
+}
+
+fn join(parts -> string[], separator -> string) -> string {
+    // Join an array of strings with a separator.
+    let mut out -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= parts.length { break; }
+        if i > 0 { out = out + separator; }
+        out = out + parts[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn replace(text -> string, old_str -> string, new_str -> string) -> string {
+    // Replace all occurrences of old_str with new_str.
+    if old_str.length == 0 { return text; }
+    let parts = split(text, old_str);
+    return join(parts, new_str);
+}
+
+fn repeat(text -> string, count -> number) -> string {
+    // Repeat text count times.
+    let mut out -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= count { break; }
+        out = out + text;
+        i += 1;
+    }
+    return out;
+}
+
+fn to_upper(ch -> string) -> string {
+    // Convert a single ASCII character to uppercase.
+    let code = char_code(ch);
+    if code >= 97 && code <= 122 {
+        // a-z → A-Z
+        return char_at(ch, code - 32);
+    }
+    return ch;
+}
+
+fn to_lower(ch -> string) -> string {
+    // Convert a single ASCII character to lowercase.
+    let code = char_code(ch);
+    if code >= 65 && code <= 90 {
+        // A-Z → a-z
+        return char_at(ch, code + 32);
+    }
+    return ch;
+}
+
+fn pad_left(text -> string, width -> number, pad_char -> string = " ") -> string {
+    if text.length >= width { return text; }
+    return repeat(pad_char, width - text.length) + text;
+}
+
+fn pad_right(text -> string, width -> number, pad_char -> string = " ") -> string {
+    if text.length >= width { return text; }
+    return text + repeat(pad_char, width - text.length);
+}

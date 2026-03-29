@@ -1,0 +1,10 @@
+[package]
+name = "sfn/json"
+version = "0.1.0"
+description = "JSON parsing and serialization for Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = []

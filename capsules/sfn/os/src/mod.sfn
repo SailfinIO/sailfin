@@ -1,0 +1,25 @@
+// sfn/os — Environment, process, and OS interaction for Sailfin.
+//
+// Provides access to environment variables, process execution, and
+// platform information. All operations require the `io` effect.
+
+fn env(name -> string) -> string ![io] {
+    // Read an environment variable. Returns an empty string if not set.
+    return env.get(name);
+}
+
+fn home() -> string ![io] {
+    // Returns the current user's home directory path.
+    return env.home();
+}
+
+fn exec(args -> string[]) -> number ![io] {
+    // Execute a subprocess and wait for it to finish.
+    // Returns the exit code (0 = success).
+    return process.run(args);
+}
+
+fn exit(code -> number) -> void ![io] {
+    // Terminate the current process with the given exit code.
+    process.exit(code);
+}
