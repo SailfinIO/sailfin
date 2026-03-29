@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v0.3.0 (2026-03-29)
+
+### Bug Fixes
+
+- Correct GitHub link to SailfinIO/sailfin repo in community page and footer
+  ([`fd7662f`](https://github.com/SailfinIO/sailfin/commit/fd7662fe49a74c40abfd1c0066c8e6f46cc81002))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/03d5bc9c-d954-49d3-b004-2d9cd151d9d1
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Features
+
+- **site**: Add Open Graph and Twitter Card social metadata
+  ([`1e503cd`](https://github.com/SailfinIO/sailfin/commit/1e503cd91e4cb8eb203cf727eef177fab8d340a0))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/fb95cc5b-9094-49f8-a634-2da6338cf0a6
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
 ## v0.2.1 (2026-03-29)
 
 ### Bug Fixes
