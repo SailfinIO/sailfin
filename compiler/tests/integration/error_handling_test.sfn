@@ -22,10 +22,16 @@ fn _parse_positive(n -> number) -> number | ParseError {
 
 test "error_handling: division returns numeric result on success" {
     let result = _safe_divide(10, 2);
+    let mut is_error -> boolean = false;
     match result {
-        DivisionError { message } -> runtime_raise_value_error_fn("unexpected error: " + message),
-        _ -> assert result == 5,
+        DivisionError { message } -> {
+            is_error = true;
+        },
+        _ -> {
+            assert result == 5;
+        },
     }
+    assert is_error == false;
 }
 
 test "error_handling: division returns error on zero divisor" {
@@ -36,17 +42,25 @@ test "error_handling: division returns error on zero divisor" {
             got_error = true;
             assert message == "division by zero";
         },
-        _ -> runtime_raise_value_error_fn("expected DivisionError"),
+        _ -> {
+            runtime_raise_value_error_fn("expected DivisionError");
+        },
     }
     assert got_error == true;
 }
 
 test "error_handling: parse returns value for non-negative input" {
     let result = _parse_positive(42);
+    let mut is_error -> boolean = false;
     match result {
-        ParseError { message } -> runtime_raise_value_error_fn("unexpected error: " + message),
-        _ -> assert result == 42,
+        ParseError { message } -> {
+            is_error = true;
+        },
+        _ -> {
+            assert result == 42;
+        },
     }
+    assert is_error == false;
 }
 
 test "error_handling: parse returns error for negative input" {
@@ -57,7 +71,9 @@ test "error_handling: parse returns error for negative input" {
             got_error = true;
             assert message == "expected non-negative number";
         },
-        _ -> runtime_raise_value_error_fn("expected ParseError"),
+        _ -> {
+            runtime_raise_value_error_fn("expected ParseError");
+        },
     }
     assert got_error == true;
 }

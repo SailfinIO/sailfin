@@ -82,7 +82,7 @@ test "loops: for-in sums array elements" {
 }
 
 test "loops: for-in with empty array" {
-    let empty = [];
+    let mut empty -> number[] = [];
     assert _sum_array(empty) == 0;
 }
 
