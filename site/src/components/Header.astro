@@ -52,14 +52,47 @@ const navItems = [
     </div>
 
     <button class="mobile-menu-btn" aria-label="Toggle menu" aria-expanded="false">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <svg class="icon-menu" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <line x1="3" y1="6" x2="21" y2="6" />
         <line x1="3" y1="12" x2="21" y2="12" />
         <line x1="3" y1="18" x2="21" y2="18" />
       </svg>
+      <svg class="icon-close" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+        <line x1="6" y1="6" x2="18" y2="18" />
+        <line x1="6" y1="18" x2="18" y2="6" />
+      </svg>
     </button>
   </div>
+
+  <div class="mobile-nav" aria-hidden="true">
+    <nav>
+      {navItems.map((item) => (
+        <a href={item.href} class="mobile-nav-link">{item.label}</a>
+      ))}
+      {navItems.filter((item) => item.children).flatMap((item) =>
+        item.children!.map((child) => (
+          <a href={child.href} class="mobile-nav-link mobile-nav-sub">{child.label}</a>
+        ))
+      )}
+    </nav>
+    <a href="/docs/getting-started/install" class="mobile-get-started">Get Started</a>
+  </div>
 </header>
+
+<script>
+  const btn = document.querySelector('.mobile-menu-btn')!;
+  const mobileNav = document.querySelector('.mobile-nav')!;
+  const iconMenu = btn.querySelector('.icon-menu') as HTMLElement;
+  const iconClose = btn.querySelector('.icon-close') as HTMLElement;
+
+  btn.addEventListener('click', () => {
+    const isOpen = mobileNav.classList.toggle('open');
+    btn.setAttribute('aria-expanded', String(isOpen));
+    mobileNav.setAttribute('aria-hidden', String(!isOpen));
+    iconMenu.style.display = isOpen ? 'none' : '';
+    iconClose.style.display = isOpen ? '' : 'none';
+  });
+</script>
 
 <style>
   .site-header {
@@ -200,6 +233,62 @@ const navItems = [
     color: var(--color-text);
   }
 
+  .mobile-nav {
+    display: none;
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-border);
+    padding: 1rem 1.5rem 1.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  }
+
+  .mobile-nav.open {
+    display: block;
+  }
+
+  .mobile-nav nav {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mobile-nav-link {
+    padding: 0.6rem 0;
+    color: var(--color-text-secondary);
+    font-size: 0.95rem;
+    font-weight: 500;
+    text-decoration: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .mobile-nav-link:hover {
+    color: var(--color-text);
+    text-decoration: none;
+  }
+
+  .mobile-nav-link.mobile-nav-sub {
+    padding-left: 1rem;
+    font-size: 0.875rem;
+    font-weight: 400;
+    color: var(--color-text-tertiary);
+  }
+
+  .mobile-get-started {
+    display: block;
+    text-align: center;
+    margin-top: 1rem;
+    padding: 0.65rem 1.25rem;
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-radius: 6px;
+    text-decoration: none;
+  }
+
+  .mobile-get-started:hover {
+    background: var(--color-primary-dark);
+    text-decoration: none;
+  }
+
   @media (max-width: 768px) {
     .main-nav,
     .header-actions {
@@ -209,6 +298,12 @@ const navItems = [
     .mobile-menu-btn {
       display: block;
       margin-left: auto;
+    }
+  }
+
+  @media (min-width: 769px) {
+    .mobile-nav {
+      display: none !important;
     }
   }
 </style>
