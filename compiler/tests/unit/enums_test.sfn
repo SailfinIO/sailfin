@@ -1,0 +1,88 @@
+enum Direction {
+    North,
+    South,
+    East,
+    West,
+}
+
+fn _direction_name(d -> Direction) -> string {
+    match d {
+        Direction.North -> return "north",
+        Direction.South -> return "south",
+        Direction.East  -> return "east",
+        Direction.West  -> return "west",
+    }
+}
+
+fn _is_horizontal(d -> Direction) -> boolean {
+    if d == Direction.East || d == Direction.West {
+        return true;
+    }
+    return false;
+}
+
+enum Shape {
+    Circle { radius -> number },
+    Rectangle { width -> number, height -> number },
+    Triangle { base -> number, height -> number },
+}
+
+fn _area(shape -> Shape) -> number {
+    match shape {
+        Shape.Circle { radius }           -> return 3 * radius * radius,
+        Shape.Rectangle { width, height } -> return width * height,
+        Shape.Triangle { base, height }   -> return base * height / 2,
+    }
+}
+
+test "enums: basic enum equality" {
+    let d -> Direction = Direction.North;
+    assert d == Direction.North;
+}
+
+test "enums: basic enum inequality" {
+    let d -> Direction = Direction.South;
+    assert d != Direction.North;
+}
+
+test "enums: match selects correct arm for North" {
+    assert _direction_name(Direction.North) == "north";
+}
+
+test "enums: match selects correct arm for East" {
+    assert _direction_name(Direction.East) == "east";
+}
+
+test "enums: all four directions match correctly" {
+    assert _direction_name(Direction.North) == "north";
+    assert _direction_name(Direction.South) == "south";
+    assert _direction_name(Direction.East)  == "east";
+    assert _direction_name(Direction.West)  == "west";
+}
+
+test "enums: horizontal detection for East" {
+    assert _is_horizontal(Direction.East) == true;
+}
+
+test "enums: horizontal detection for West" {
+    assert _is_horizontal(Direction.West) == true;
+}
+
+test "enums: horizontal false for North" {
+    assert _is_horizontal(Direction.North) == false;
+}
+
+test "enums: tagged enum Circle area computed correctly" {
+    let c = Shape.Circle { radius: 3 };
+    assert _area(c) == 27;
+}
+
+test "enums: tagged enum Rectangle area computed correctly" {
+    let r = Shape.Rectangle { width: 4, height: 5 };
+    assert _area(r) == 20;
+}
+
+test "enums: tagged enum Triangle area computed correctly" {
+    let t = Shape.Triangle { base: 6, height: 4 };
+    assert _area(t) == 12;
+}
