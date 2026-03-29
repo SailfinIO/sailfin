@@ -1,0 +1,20 @@
+// sfn/time — Time and scheduling primitives for Sailfin.
+//
+// Provides sleep, monotonic timing, and scheduling utilities.
+// All operations require the `clock` effect.
+
+fn sleep(milliseconds -> number) -> void ![clock] {
+    // Pause execution for the given number of milliseconds.
+    runtime.sleep(milliseconds);
+}
+
+fn now_millis() -> number ![clock] {
+    // Returns the current monotonic time in milliseconds.
+    // Useful for measuring elapsed time, not wall-clock time.
+    return runtime.monotonic_millis();
+}
+
+fn elapsed(start_millis -> number) -> number ![clock] {
+    // Returns the number of milliseconds elapsed since `start_millis`.
+    return runtime.monotonic_millis() - start_millis;
+}

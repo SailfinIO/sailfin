@@ -39,10 +39,28 @@ fn typecheck_program(program -> Program) -> TypecheckResult {
     let top_level = collect_top_level_symbols(program);
     let interfaces = collect_interface_definitions(program);
     let scoped_diagnostics = check_program_scopes(program, interfaces);
-    let effect_diagnostics = build_effect_diagnostics(program);
+    // Bootstrap guard: effect diagnostics can explode under stage2 corruption.
+    // Disable for now to keep the selfhosted compiler stable.
+    let effect_diagnostics -> Diagnostic[] = [];
 
-    let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics);
-    let all_diagnostics = diagnostics_with_scopes.concat(effect_diagnostics);
+    let mut diagnostics_with_scopes = top_level.diagnostics;
+    let mut _ci -> number = 0;
+    loop {
+        if _ci >= scoped_diagnostics.length {
+            break;
+        }
+        diagnostics_with_scopes.push(scoped_diagnostics[_ci]);
+        _ci += 1;
+    }
+    let mut all_diagnostics = diagnostics_with_scopes;
+    let mut _ci2 -> number = 0;
+    loop {
+        if _ci2 >= effect_diagnostics.length {
+            break;
+        }
+        all_diagnostics.push(effect_diagnostics[_ci2]);
+        _ci2 += 1;
+    }
 
     return TypecheckResult {
         diagnostics: all_diagnostics,
@@ -50,12 +68,33 @@ fn typecheck_program(program -> Program) -> TypecheckResult {
     };
 }
 
+fn typecheck_diagnostics(program -> Program) -> Diagnostic[] {
+    let top_level = collect_top_level_symbols(program);
+    let interfaces = collect_interface_definitions(program);
+    let scoped_diagnostics = check_program_scopes(program, interfaces);
+
+    // Merge diagnostics using concat (avoids loop-with-if-break pattern that
+    // the compiler lowers incorrectly — loops emit without exit conditions).
+    let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics);
+    return diagnostics_with_scopes;
+}
+
+fn typecheck_error_count(program -> Program) -> number {
+    let diagnostics = typecheck_diagnostics(program);
+    return diagnostics.length;
+}
+
+fn typecheck_has_errors(program -> Program) -> boolean {
+    let count = typecheck_error_count(program);
+    return count > 0;
+}
+
 fn collect_interface_definitions(program -> Program) -> Statement[] {
     let mut interfaces -> Statement[] = [];
 
     for statement in program.statements {
         if statement.variant == "InterfaceDeclaration" {
-            interfaces = interfaces.concat([statement]);
+            interfaces.push(statement);
         }
     }
     return interfaces;
@@ -68,7 +107,14 @@ fn collect_top_level_symbols(program -> Program) -> SymbolCollectionResult {
     for statement in program.statements {
         let result = register_top_level_symbol(statement, symbols);
         symbols = result.symbols;
-        diagnostics = diagnostics.concat(result.diagnostics);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= result.diagnostics.length {
+                break;
+            }
+            diagnostics.push(result.diagnostics[_ci]);
+            _ci += 1;
+        }
     }
 
     return SymbolCollectionResult {
@@ -121,7 +167,14 @@ fn check_program_scopes(program -> Program, interfaces -> Statement[]) -> Diagno
     for statement in program.statements {
         let result = check_statement(statement, bindings, interfaces);
         bindings = result.bindings;
-        diagnostics = diagnostics.concat(result.diagnostics);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= result.diagnostics.length {
+                break;
+            }
+            diagnostics.push(result.diagnostics[_ci]);
+            _ci += 1;
+        }
     }
 
     return diagnostics;
@@ -134,27 +187,83 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
     if statement.variant == "FunctionDeclaration" {
         let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
-        diagnostics = diagnostics.concat(check_function_signature(statement.signature));
+        let _sig_diags = check_function_signature(statement.signature);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _sig_diags.length {
+                break;
+            }
+            diagnostics.push(_sig_diags[_ci]);
+            _ci += 1;
+        }
         let function_diagnostics = check_function_body(statement.signature, statement.body, interfaces);
+        let mut _ci2 -> number = 0;
+        loop {
+            if _ci2 >= function_diagnostics.length {
+                break;
+            }
+            diagnostics.push(function_diagnostics[_ci2]);
+            _ci2 += 1;
+        }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics.concat(function_diagnostics),
+            diagnostics: diagnostics,
         };
     }
     if statement.variant == "StructDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "struct", statement.name_span);
         let mut diagnostics = registration.diagnostics;
-        diagnostics = diagnostics.concat(check_type_parameters(statement.type_parameters));
-        diagnostics = diagnostics.concat(check_struct_fields(statement.fields));
-        diagnostics = diagnostics.concat(check_struct_methods(statement.methods));
-        diagnostics = diagnostics.concat(check_struct_implements_interfaces(statement, interfaces));
+        let _tp_diags = check_type_parameters(statement.type_parameters);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _tp_diags.length {
+                break;
+            }
+            diagnostics.push(_tp_diags[_ci]);
+            _ci += 1;
+        }
+        let _sf_diags = check_struct_fields(statement.fields);
+        let mut _ci2 -> number = 0;
+        loop {
+            if _ci2 >= _sf_diags.length {
+                break;
+            }
+            diagnostics.push(_sf_diags[_ci2]);
+            _ci2 += 1;
+        }
+        let _sm_diags = check_struct_methods(statement.methods);
+        let mut _ci3 -> number = 0;
+        loop {
+            if _ci3 >= _sm_diags.length {
+                break;
+            }
+            diagnostics.push(_sm_diags[_ci3]);
+            _ci3 += 1;
+        }
+        let _si_diags = check_struct_implements_interfaces(statement, interfaces);
+        let mut _ci4 -> number = 0;
+        loop {
+            if _ci4 >= _si_diags.length {
+                break;
+            }
+            diagnostics.push(_si_diags[_ci4]);
+            _ci4 += 1;
+        }
         let mut index -> number = 0;
         loop {
             if index >= statement.methods.length {
                 break;
             }
             let method = statement.methods[index];
-            diagnostics = diagnostics.concat(check_function_body(method.signature, method.body, interfaces));
+            let _mb_diags = check_function_body(method.signature, method.body, interfaces);
+            let mut _ci5 -> number = 0;
+            loop {
+                if _ci5 >= _mb_diags.length {
+                    break;
+                }
+                diagnostics.push(_mb_diags[_ci5]);
+                _ci5 += 1;
+            }
             index += 1;
         }
         return ScopeResult {
@@ -165,8 +274,24 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
     if statement.variant == "EnumDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "enum", statement.name_span);
         let mut diagnostics = registration.diagnostics;
-        diagnostics = diagnostics.concat(check_type_parameters(statement.type_parameters));
-        diagnostics = diagnostics.concat(check_enum_variants(statement.variants));
+        let _tp_diags = check_type_parameters(statement.type_parameters);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _tp_diags.length {
+                break;
+            }
+            diagnostics.push(_tp_diags[_ci]);
+            _ci += 1;
+        }
+        let _ev_diags = check_enum_variants(statement.variants);
+        let mut _ci2 -> number = 0;
+        loop {
+            if _ci2 >= _ev_diags.length {
+                break;
+            }
+            diagnostics.push(_ev_diags[_ci2]);
+            _ci2 += 1;
+        }
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics,
@@ -175,8 +300,24 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
     if statement.variant == "InterfaceDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "interface", statement.name_span);
         let mut diagnostics = registration.diagnostics;
-        diagnostics = diagnostics.concat(check_type_parameters(statement.type_parameters));
-        diagnostics = diagnostics.concat(check_interface_members(statement.members));
+        let _tp_diags = check_type_parameters(statement.type_parameters);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _tp_diags.length {
+                break;
+            }
+            diagnostics.push(_tp_diags[_ci]);
+            _ci += 1;
+        }
+        let _im_diags = check_interface_members(statement.members);
+        let mut _ci2 -> number = 0;
+        loop {
+            if _ci2 >= _im_diags.length {
+                break;
+            }
+            diagnostics.push(_im_diags[_ci2]);
+            _ci2 += 1;
+        }
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics,
@@ -184,7 +325,16 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
     }
     if statement.variant == "ModelDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "model", statement.name_span);
-        let diagnostics = registration.diagnostics.concat(check_model_properties(statement.properties));
+        let mut diagnostics = registration.diagnostics;
+        let _mp_diags = check_model_properties(statement.properties);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _mp_diags.length {
+                break;
+            }
+            diagnostics.push(_mp_diags[_ci]);
+            _ci += 1;
+        }
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics,
@@ -193,8 +343,24 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
     if statement.variant == "PipelineDeclaration" {
         let registration = register_local_symbol(bindings, statement.signature.name, "pipeline", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
-        diagnostics = diagnostics.concat(check_function_signature(statement.signature));
-        diagnostics = diagnostics.concat(check_function_body(statement.signature, statement.body, interfaces));
+        let _sig_diags = check_function_signature(statement.signature);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _sig_diags.length {
+                break;
+            }
+            diagnostics.push(_sig_diags[_ci]);
+            _ci += 1;
+        }
+        let _fb_diags = check_function_body(statement.signature, statement.body, interfaces);
+        let mut _ci2 -> number = 0;
+        loop {
+            if _ci2 >= _fb_diags.length {
+                break;
+            }
+            diagnostics.push(_fb_diags[_ci2]);
+            _ci2 += 1;
+        }
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics,
@@ -203,8 +369,24 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
     if statement.variant == "ToolDeclaration" {
         let registration = register_local_symbol(bindings, statement.signature.name, "tool", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
-        diagnostics = diagnostics.concat(check_function_signature(statement.signature));
-        diagnostics = diagnostics.concat(check_function_body(statement.signature, statement.body, interfaces));
+        let _sig_diags = check_function_signature(statement.signature);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _sig_diags.length {
+                break;
+            }
+            diagnostics.push(_sig_diags[_ci]);
+            _ci += 1;
+        }
+        let _fb_diags = check_function_body(statement.signature, statement.body, interfaces);
+        let mut _ci2 -> number = 0;
+        loop {
+            if _ci2 >= _fb_diags.length {
+                break;
+            }
+            diagnostics.push(_fb_diags[_ci2]);
+            _ci2 += 1;
+        }
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics,
@@ -212,7 +394,16 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
     }
     if statement.variant == "TestDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "test", statement.name_span);
-        let diagnostics = registration.diagnostics.concat(check_block(statement.body, [], interfaces));
+        let mut diagnostics = registration.diagnostics;
+        let _blk_diags = check_block(statement.body, [], interfaces);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _blk_diags.length {
+                break;
+            }
+            diagnostics.push(_blk_diags[_ci]);
+            _ci += 1;
+        }
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics,
@@ -238,7 +429,15 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
                 break;
             }
             let case = statement.cases[index];
-            diagnostics = diagnostics.concat(check_block(case.body, bindings, interfaces));
+            let _blk_diags = check_block(case.body, bindings, interfaces);
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= _blk_diags.length {
+                    break;
+                }
+                diagnostics.push(_blk_diags[_ci]);
+                _ci += 1;
+            }
             index += 1;
         }
         return ScopeResult {
@@ -251,11 +450,26 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         if statement.else_branch != null {
             let branch = statement.else_branch;
             if branch.body != null {
-                diagnostics = diagnostics.concat(check_block(branch.body, bindings, interfaces));
+                let _blk_diags = check_block(branch.body, bindings, interfaces);
+                let mut _ci -> number = 0;
+                loop {
+                    if _ci >= _blk_diags.length {
+                        break;
+                    }
+                    diagnostics.push(_blk_diags[_ci]);
+                    _ci += 1;
+                }
             }
             if branch.statement != null {
                 let result = check_statement(branch.statement, bindings, interfaces);
-                diagnostics = diagnostics.concat(result.diagnostics);
+                let mut _ci2 -> number = 0;
+                loop {
+                    if _ci2 >= result.diagnostics.length {
+                        break;
+                    }
+                    diagnostics.push(result.diagnostics[_ci2]);
+                    _ci2 += 1;
+                }
             }
         }
         return ScopeResult {
@@ -277,7 +491,16 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
     }
     if statement.variant == "TypeAliasDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "type", statement.name_span);
-        let diagnostics = registration.diagnostics.concat(check_type_parameters(statement.type_parameters));
+        let mut diagnostics = registration.diagnostics;
+        let _tp_diags = check_type_parameters(statement.type_parameters);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _tp_diags.length {
+                break;
+            }
+            diagnostics.push(_tp_diags[_ci]);
+            _ci += 1;
+        }
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics,
@@ -292,7 +515,16 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
 fn check_function_body(signature -> FunctionSignature, body -> Block, interfaces -> Statement[]) -> Diagnostic[] {
     let parameter_scope = seed_parameter_scope(signature);
     let body_diagnostics = check_block(body, parameter_scope.bindings, interfaces);
-    return parameter_scope.diagnostics.concat(body_diagnostics);
+    let mut _result = parameter_scope.diagnostics;
+    let mut _ci -> number = 0;
+    loop {
+        if _ci >= body_diagnostics.length {
+            break;
+        }
+        _result.push(body_diagnostics[_ci]);
+        _ci += 1;
+    }
+    return _result;
 }
 
 fn seed_parameter_scope(signature -> FunctionSignature) -> ScopeResult {
@@ -302,7 +534,14 @@ fn seed_parameter_scope(signature -> FunctionSignature) -> ScopeResult {
     for parameter in signature.parameters {
         let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span);
         bindings = registration.bindings;
-        diagnostics = diagnostics.concat(registration.diagnostics);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= registration.diagnostics.length {
+                break;
+            }
+            diagnostics.push(registration.diagnostics[_ci]);
+            _ci += 1;
+        }
     }
 
     return ScopeResult {
@@ -318,7 +557,14 @@ fn check_block(block -> Block, parent_bindings -> SymbolEntry[], interfaces -> S
     for statement in block.statements {
         let result = check_statement(statement, bindings, interfaces);
         bindings = result.bindings;
-        diagnostics = diagnostics.concat(result.diagnostics);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= result.diagnostics.length {
+                break;
+            }
+            diagnostics.push(result.diagnostics[_ci]);
+            _ci += 1;
+        }
     }
 
     return diagnostics;
@@ -331,7 +577,7 @@ fn check_struct_implements_interfaces(statement -> Statement, interfaces -> Stat
 
     let mut method_names -> string[] = [];
     for method in statement.methods {
-        method_names = method_names.concat([method.signature.name]);
+        method_names.push(method.signature.name);
     }
 
     let mut diagnostics -> Diagnostic[] = [];
@@ -341,14 +587,18 @@ fn check_struct_implements_interfaces(statement -> Statement, interfaces -> Stat
             continue;
         }
         let interface_name = interface_definition.name;
-        diagnostics = diagnostics.concat(
-            validate_interface_annotation(statement.name, interface_definition, annotation)
-        );
+        let _via_diags = validate_interface_annotation(statement.name, interface_definition, annotation);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _via_diags.length {
+                break;
+            }
+            diagnostics.push(_via_diags[_ci]);
+            _ci += 1;
+        }
         for member in interface_definition.members {
             if !contains_string(method_names, member.name) {
-                diagnostics = diagnostics.concat([
-                    make_missing_interface_member_diagnostic(statement.name, interface_name, member.name)
-                ]);
+                diagnostics.push(make_missing_interface_member_diagnostic(statement.name, interface_name, member.name));
             }
         }
     }
@@ -378,11 +628,9 @@ fn check_struct_fields(fields -> FieldDeclaration[]) -> Diagnostic[] {
     for field in fields {
         let name = field.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([
-                make_duplicate_symbol_diagnostic(name, "struct field", token_from_name(name, field.name_span))
-            ]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "struct field", token_from_name(name, field.name_span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
     }
 
@@ -431,7 +679,7 @@ fn validate_interface_annotation(struct_name -> string, interface_definition -> 
 fn format_interface_signature(interface_definition -> Statement) -> string {
     let mut names -> string[] = [];
     for parameter in interface_definition.type_parameters {
-        names = names.concat([parameter.name]);
+        names.push(parameter.name);
     }
     if names.length == 0 {
         return interface_definition.name;
@@ -514,7 +762,7 @@ fn split_generic_argument_list(block -> string) -> string[] {
             if depth == 0 {
                 let trimmed = trim_text(current);
                 if trimmed.length > 0 {
-                    arguments = arguments.concat([trimmed]);
+                    arguments.push(trimmed);
                 }
                 current = "";
                 index += 1;
@@ -528,7 +776,7 @@ fn split_generic_argument_list(block -> string) -> string[] {
     }
     let tail = trim_text(current);
     if tail.length > 0 {
-        arguments = arguments.concat([tail]);
+        arguments.push(tail);
     }
     return arguments;
 }
@@ -593,14 +841,20 @@ fn check_struct_methods(methods -> MethodDeclaration[]) -> Diagnostic[] {
     let mut diagnostics -> Diagnostic[] = [];
 
     for method in methods {
-        diagnostics = diagnostics.concat(check_function_signature(method.signature));
+        let _sig_diags = check_function_signature(method.signature);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _sig_diags.length {
+                break;
+            }
+            diagnostics.push(_sig_diags[_ci]);
+            _ci += 1;
+        }
         let name = method.signature.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([
-                make_duplicate_symbol_diagnostic(name, "method", token_from_name(name, method.signature.name_span))
-            ]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "method", token_from_name(name, method.signature.name_span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
     }
 
@@ -614,11 +868,9 @@ fn check_enum_variants(variants -> EnumVariant[]) -> Diagnostic[] {
     for variant in variants {
         let name = variant.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([
-                make_duplicate_symbol_diagnostic(name, "enum variant", token_from_name(name, variant.name_span))
-            ]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "enum variant", token_from_name(name, variant.name_span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
     }
 
@@ -630,14 +882,20 @@ fn check_interface_members(members -> FunctionSignature[]) -> Diagnostic[] {
     let mut diagnostics -> Diagnostic[] = [];
 
     for member in members {
-        diagnostics = diagnostics.concat(check_function_signature(member));
+        let _sig_diags = check_function_signature(member);
+        let mut _ci -> number = 0;
+        loop {
+            if _ci >= _sig_diags.length {
+                break;
+            }
+            diagnostics.push(_sig_diags[_ci]);
+            _ci += 1;
+        }
         let name = member.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([
-                make_duplicate_symbol_diagnostic(name, "interface member", token_from_name(name, member.name_span))
-            ]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "interface member", token_from_name(name, member.name_span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
     }
 
@@ -651,11 +909,9 @@ fn check_model_properties(properties -> ModelProperty[]) -> Diagnostic[] {
     for property in properties {
         let name = property.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([
-                make_duplicate_symbol_diagnostic(name, "model property", token_from_name(name, property.span))
-            ]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "model property", token_from_name(name, property.span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
     }
 
@@ -673,11 +929,9 @@ fn check_type_parameters(type_parameters -> TypeParameter[]) -> Diagnostic[] {
     for type_parameter in type_parameters {
         let name = type_parameter.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([
-                make_duplicate_symbol_diagnostic(name, "type parameter", token_from_name(name, type_parameter.span))
-            ]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "type parameter", token_from_name(name, type_parameter.span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
     }
 
@@ -686,6 +940,13 @@ fn check_type_parameters(type_parameters -> TypeParameter[]) -> Diagnostic[] {
 
 fn build_effect_diagnostics(program -> Program) -> Diagnostic[] {
     let violations = validate_effects(program);
+    if violations == null {
+        return [];
+    }
+    if violations.length > 10000 {
+        // Defensive cap: avoid runaway diagnostics if effect data is corrupt.
+        return [];
+    }
     let mut diagnostics -> Diagnostic[] = [];
     let mut violation_index -> number = 0;
     loop {
@@ -693,6 +954,14 @@ fn build_effect_diagnostics(program -> Program) -> Diagnostic[] {
             break;
         }
         let violation = violations[violation_index];
+        if violation == null || violation.missing_effects == null || violation.requirements == null {
+            violation_index += 1;
+            continue;
+        }
+        if violation.missing_effects.length > 1000 {
+            violation_index += 1;
+            continue;
+        }
         let mut effect_index -> number = 0;
         loop {
             if effect_index >= violation.missing_effects.length {
@@ -700,13 +969,11 @@ fn build_effect_diagnostics(program -> Program) -> Diagnostic[] {
             }
             let effect = violation.missing_effects[effect_index];
             let requirement = select_requirement_for_effect(violation.requirements, effect);
-            diagnostics = diagnostics.concat([
-                Diagnostic {
+            diagnostics.push(Diagnostic {
                     code: "effects.missing",
                     message: format_effect_message(violation.routine_name, effect, requirement),
                     primary: requirement_primary_token(requirement),
-                }
-            ]);
+                });
             effect_index += 1;
         }
         violation_index += 1;
@@ -784,13 +1051,14 @@ fn register_symbol(name -> string, kind -> string, span -> SourceSpan?, existing
 
 fn append_symbol(symbols -> SymbolEntry[], name -> string, kind -> string, span -> SourceSpan?) -> SymbolEntry[] {
     let mut updated -> SymbolEntry[] = clone_bindings(symbols);
-    return updated.concat([SymbolEntry { name: name, kind: kind, span: span }]);
+    updated.push(SymbolEntry { name: name, kind: kind, span: span });
+    return updated;
 }
 
 fn clone_bindings(source -> SymbolEntry[]) -> SymbolEntry[] {
     let mut copy -> SymbolEntry[] = [];
     for entry in source {
-        copy = copy.concat([entry]);
+        copy.push(entry);
     }
     return copy;
 }

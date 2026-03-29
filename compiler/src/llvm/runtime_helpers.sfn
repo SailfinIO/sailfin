@@ -346,6 +346,20 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_append_file",
+        symbol: "sailfin_adapter_fs_append_file",
+        return_type: "void",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.appendFile",
+        symbol: "sailfin_adapter_fs_append_file",
+        return_type: "void",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_write_lines",
         symbol: "sailfin_adapter_fs_write_lines",
         return_type: "void",
@@ -540,6 +554,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.to_number",
+        symbol: "sailfin_runtime_string_to_number",
+        return_type: "double",
+        parameter_types: ["i8*"],
+        effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "strings_equal",
         symbol: "strings_equal",
         return_type: "i1",
@@ -698,11 +719,79 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         effects: [],
     });
 
+    // ---- Package-manager primitives ----
+
+    // SHA-256 hashing
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "crypto.sha256",
+        symbol: "sailfin_runtime_sha256_hex",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i64"],
+        effects: [],
+    });
+
+    // Base64 encode/decode
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "base64.encode",
+        symbol: "sailfin_runtime_base64_encode",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i64"],
+        effects: [],
+    });
+
+    // HTTP helpers (curl subprocess)
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "http.get_body",
+        symbol: "sailfin_runtime_http_get",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["net"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "http.post_json",
+        symbol: "sailfin_runtime_http_post_json",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*", "i8*"],
+        effects: ["net"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "http.download",
+        symbol: "sailfin_runtime_http_download",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["net", "io"],
+    });
+
+    // Environment & path helpers
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "env.get",
+        symbol: "sailfin_runtime_getenv",
+        return_type: "i8*",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "env.home",
+        symbol: "sailfin_runtime_home_dir",
+        return_type: "i8*",
+        parameter_types: [],
+        effects: ["io"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.read_bytes",
+        symbol: "sailfin_runtime_read_file_bytes",
+        return_type: "i8*",
+        parameter_types: ["i8*", "i8*"],
+        effects: ["io"],
+    });
+
     return descriptors;
 }
 
 fn append_runtime_helper(values -> RuntimeHelperDescriptor[], value -> RuntimeHelperDescriptor) -> RuntimeHelperDescriptor[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn find_runtime_helper(target -> string) -> RuntimeHelperDescriptor? {

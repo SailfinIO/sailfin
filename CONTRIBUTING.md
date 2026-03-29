@@ -26,11 +26,22 @@ repository.
 2. **Development commands**
    - Run tests: `make test`
    - Compile Sailfin sources: `make compile` (self-hosted native compiler).
-   - Install the built compiler: `make install` (defaults to `/usr/local/bin`).
+   - Install the built compiler: `make install` (defaults to `~/.local/bin`).
 3. **Testing expectations**
    - Add or update unit tests under `compiler/tests/` for compiler changes.
    - Reflect behaviour updates in `docs/status.md` and the relevant module docs.
    - Run `make test` before submitting.
+
+### Notes on Release Automation
+
+`python-semantic-release` updates `compiler/src/version.sfn` and `CHANGELOG.md`. When merging between prerelease branches (e.g., `alpha` → `beta`), those files frequently conflict because both branches bump them independently.
+
+This repo includes a `.gitattributes` rule that resolves those conflicts by keeping the destination branch's copy. To enable it locally, configure the built-in `ours` merge driver:
+
+```bash
+git config --local merge.ours.name "Keep ours during merge"
+git config --local merge.ours.driver true
+```
 
 ## 3. Documentation Process
 

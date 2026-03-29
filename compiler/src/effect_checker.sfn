@@ -502,10 +502,12 @@ fn contains_code(text -> string, needle -> string) -> boolean {
             break;
         }
 
-        let ch = substring(text, index, index + 1);
+        let _ec_next = index + 1;
+        let ch = substring(text, index, _ec_next);
         let mut two -> string = "";
-        if index + 1 < text.length {
-            two = substring(text, index, index + 2);
+        if _ec_next < text.length {
+            let _ec_next2 = index + 2;
+            two = substring(text, index, _ec_next2);
         }
 
         if in_string_quote.length > 0 {
@@ -563,7 +565,8 @@ fn contains_code(text -> string, needle -> string) -> boolean {
             continue;
         }
 
-        if index + needle.length <= text.length && substring(text, index, index + needle.length) == needle {
+        let _end_pos = index + needle.length;
+        if _end_pos <= text.length && substring(text, index, _end_pos) == needle {
             return true;
         }
         index += 1;
@@ -579,21 +582,23 @@ fn append_violations(violations -> EffectViolation[], new_violations -> EffectVi
         if index >= new_violations.length {
             break;
         }
-        result = result.concat([new_violations[index]]);
+        result.push(new_violations[index]);
         index += 1;
     }
     return result;
 }
 
 fn append_violation(collection -> EffectViolation[], item -> EffectViolation) -> EffectViolation[] {
-    return collection.concat([item]);
+    collection.push(item);
+    return collection;
 }
 
 fn append_unique_effect(effects -> string[], effect -> string) -> string[] {
     if contains_effect(effects, effect) {
         return effects;
     }
-    return effects.concat([effect]);
+    effects.push(effect);
+    return effects;
 }
 
 fn contains_effect(effects -> string[], effect -> string) -> boolean {
@@ -611,7 +616,8 @@ fn contains_effect(effects -> string[], effect -> string) -> boolean {
 }
 
 fn append_requirement(collection -> EffectRequirement[], item -> EffectRequirement) -> EffectRequirement[] {
-    return collection.concat([item]);
+    collection.push(item);
+    return collection;
 }
 
 fn merge_requirements(base -> EffectRequirement[], additions -> EffectRequirement[]) -> EffectRequirement[] {
@@ -621,7 +627,7 @@ fn merge_requirements(base -> EffectRequirement[], additions -> EffectRequiremen
         if index >= additions.length {
             break;
         }
-        result = result.concat([additions[index]]);
+        result.push(additions[index]);
         index += 1;
     }
     return result;

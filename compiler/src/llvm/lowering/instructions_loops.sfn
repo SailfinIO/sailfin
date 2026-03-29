@@ -1,0 +1,2042 @@
+// compiler/src/llvm/lowering/instructions_loops.sfn
+//
+// Control flow handlers: if/try/throw/loop/for instruction lowering.
+
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
+import { substring, char_code, grapheme_at } from "../../string_utils";
+
+import {
+    TypeContext,
+    LocalBinding,
+    ParameterBinding,
+    LLVMOperand,
+    BlockLoweringResult,
+    LetLoweringResult,
+    LoopContext,
+    LifetimeRegionMetadata,
+    LifetimeReleaseEvent,
+    OwnershipInfo,
+    OwnershipConsumption,
+    ScopeMetadata,
+    LocalMutation,
+    StringConstant,
+    IfStructure,
+    TryStructure,
+    LoopStructure,
+    MatchStructure,
+    MatchCaseStructure,
+    MatchCaseCondition,
+    MatchFieldBinding,
+    MatchStructFieldBinding,
+    EnumTypeInfo,
+    EnumVariantInfo,
+    StructTypeInfo,
+    StructFieldInfo,
+    ConditionConversion,
+    BlockLabelResult,
+    MatchArmMutations,
+} from "../types";
+
+import {
+    trim_text,
+    append_string,
+    extend_string_array,
+    number_to_string,
+    index_of,
+    starts_with,
+    strip_mut_prefix,
+    is_simple_identifier,
+    merge_parameter_bindings,
+    copy_string_array,
+} from "../utils";
+
+import {
+    append_string_constant,
+    merge_string_constants,
+} from "../strings";
+
+import {
+    build_type_context,
+    find_struct_info_by_name,
+    find_interface_info_by_name,
+    find_enum_info_by_llvm_type,
+    resolve_enum_info_for_literal,
+    resolve_enum_variant_info,
+    find_struct_info_by_llvm_type,
+    find_vtable_for_struct_interface,
+} from "../type_context";
+
+import {
+    map_return_type,
+    map_type_with_context,
+    render_default_value,
+    ends_with_pointer_suffix,
+    strip_pointer_suffix,
+    layout_annotation_represents_user_value,
+    map_struct_field_annotation,
+    array_struct_type_for_element,
+} from "../type_mapping";
+
+import {
+    is_number_literal,
+    normalise_number_literal,
+    find_local_binding,
+    find_parameter_binding,
+    mark_local_consumed,
+    mark_parameter_consumed,
+    default_return_literal,
+    format_local_pointer_name,
+    format_temp_name,
+} from "../expressions";
+
+import {
+    lower_expression,
+    analyze_value_ownership,
+    detect_borrow_conflicts,
+    append_match_arm_mutations,
+    format_block_entry_label,
+} from "../expression_lowering/native/core";
+
+import {
+    coerce_operand_to_type,
+    emit_boolean_and,
+    emit_comparison_instruction,
+    harmonise_operands,
+    load_local_operand,
+    operand_to_value,
+} from "../expression_lowering/native/core_operands";
+
+import {
+    append_local_binding,
+    format_scope_id,
+    push_scope_metadata,
+    pop_scope_metadata,
+} from "../expression_lowering/native/core_scopes";
+
+import {
+    parse_enum_literal,
+    parse_range_iterable,
+    parse_struct_pattern,
+    extract_operand_type,
+    llvm_operand_type,
+} from "../expression_lowering/native/core_parse";
+
+import {
+    extract_simple_identifier,
+    is_union_llvm_type,
+    parse_union_payload_types,
+    sanitize_text_for_llvm,
+} from "../expression_lowering/native/core_text";
+
+import {
+    detect_suspension_conflicts,
+    map_local_type,
+    lower_expression_statement,
+    lower_return_instruction,
+    lower_expression_for_statement,
+} from "../expression_lowering/native/statement";
+
+import {
+    array_pointer_element_type,
+    lower_array_literal_to_value,
+} from "../expression_lowering/arrays";
+
+import {
+    infer_borrow_base_scope,
+    append_lifetime_region,
+    append_lifetime_release_event,
+    make_lifetime_region_metadata,
+    make_child_scope_id,
+    validate_borrow_lifetimes,
+    format_root_scope_id,
+} from "../lifetime";
+
+import {
+    emit_phi_merges_for_match,
+    find_last_label,
+    materialize_mutation_values_at_label,
+    collect_mutation_names,
+    find_mutation_for_name,
+    emit_phi_merge_block,
+    emit_phi_nodes_for_merge,
+} from "./phi";
+
+import {
+    lower_instruction_range,
+    clone_local_bindings,
+    extend_lifetime_regions,
+    extend_mutations,
+    insert_lines_before_index,
+    _write_block_result_files,
+    _parse_int_from_string,
+} from "./instructions";
+
+import {
+    allocate_block_label,
+    lower_condition_to_i1,
+} from "./instructions_match";
+
+import {
+    get_instruction_tag,
+} from "./lowering_core";
+
+fn collect_if_structure(
+    instructions -> NativeInstruction[],
+    start_index -> number,
+    end -> number,
+    function_name -> string
+) -> IfStructure {
+    let mut diagnostics -> string[] = [];
+    let then_start = start_index + 1;
+    let mut then_end = end;
+    let mut else_start -> number = -1;
+    let mut else_end -> number = -1;
+    let mut has_else -> boolean = false;
+    let mut depth -> number = 0;
+    let mut index -> number = then_start;
+    let mut limit -> number = end;
+    if limit > instructions.length {
+        limit = instructions.length;
+    }
+    loop {
+        if index >= limit {
+            diagnostics.push("llvm lowering: unterminated `.if` in `" + function_name + "`");
+            return IfStructure {
+                then_start: then_start,
+                then_end: limit,
+                else_start: else_start,
+                else_end: else_end,
+                has_else: has_else,
+                next_index: limit - 1,
+                diagnostics: diagnostics,
+            };
+        }
+        let _cur_tag = get_instruction_tag(instructions, index);
+        if _cur_tag == 3 {  // If
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if _cur_tag == 5 {  // EndIf
+            if depth == 0 {
+                if !has_else {
+                    then_end = index;
+                } else {
+                    else_end = index;
+                }
+                return IfStructure {
+                    then_start: then_start,
+                    then_end: then_end,
+                    else_start: else_start,
+                    else_end: else_end,
+                    has_else: has_else,
+                    next_index: index,
+                    diagnostics: diagnostics,
+                };
+            }
+            depth -= 1;
+            index += 1;
+            continue;
+        }
+        if _cur_tag == 4 {  // Else
+            if depth == 0 {
+                if has_else {
+                    diagnostics.push("llvm lowering: duplicate `.else` in `.if` within `" + function_name + "`");
+                } else {
+                    has_else = true;
+                    then_end = index;
+                    else_start = index + 1;
+                }
+            }
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+
+    return IfStructure {
+        then_start: then_start,
+        then_end: then_end,
+        else_start: else_start,
+        else_end: else_end,
+        has_else: has_else,
+        next_index: limit,
+        diagnostics: diagnostics,
+    };
+}
+
+// NOTE: ThrowLoweringResult has been moved to ./llvm/types.sfn
+
+fn lower_throw_instruction(
+    function_name -> string,
+    instruction -> NativeInstruction,
+    llvm_return -> string,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    temp_index -> number,
+    lines -> string[],
+    functions -> NativeFunction[],
+    context -> TypeContext
+) -> ThrowLoweringResult {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+
+    let lowered_expr = lower_expression(
+        instruction.expression,
+        bindings,
+        locals,
+        current_temp,
+        current_lines,
+        functions,
+        context,
+        "i8*"
+    );
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= lowered_expr.diagnostics.length { break; }
+        diagnostics.push(lowered_expr.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    current_lines = lowered_expr.lines;
+    current_temp = lowered_expr.temp_index;
+    collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants);
+
+    if lowered_expr.operand == null {
+        diagnostics.push("llvm lowering: unsupported throw expression in `" + function_name + "`");
+        current_lines.push("  unreachable");
+        return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
+    }
+
+    let coerced = coerce_operand_to_type(lowered_expr.operand, "i8*", current_temp, current_lines);
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= coerced.diagnostics.length { break; }
+        diagnostics.push(coerced.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
+    current_lines = coerced.lines;
+    current_temp = coerced.temp_index;
+    if coerced.operand == null {
+        diagnostics.push("llvm lowering: unable to coerce throw value to string in `" + function_name + "`");
+        current_lines.push("  unreachable");
+        return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
+    }
+
+    current_lines.push("  call void @sailfin_runtime_set_exception(i8* " + coerced.operand.value + ")");
+    if llvm_return == "void" {
+        current_lines.push("  ret void");
+    } else {
+        current_lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
+    }
+    return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
+}
+
+fn collect_try_structure(instructions -> NativeInstruction[], start_index -> number, end -> number, function_name -> string) -> TryStructure {
+    let mut diagnostics -> string[] = [];
+    let mut depth -> number = 1;
+    let mut index -> number = start_index + 1;
+    let mut catch_index -> number = -1;
+    let mut catch_name -> string = "";
+    let mut finally_index -> number = -1;
+    let mut end_index -> number = -1;
+
+    loop {
+        if index >= end {
+            break;
+        }
+        let _try_tag = get_instruction_tag(instructions, index);
+        if _try_tag == 15 {  // Try
+            depth += 1;
+        } else if _try_tag == 18 {  // EndTry
+            depth -= 1;
+            if depth == 0 {
+                end_index = index;
+                break;
+            }
+        } else if _try_tag == 16 {  // Catch
+            if depth == 1 && catch_index == -1 {
+                catch_index = index;
+                let instruction = instructions[index];
+                catch_name = instruction.name;
+            }
+        } else if _try_tag == 17 {  // Finally
+            if depth == 1 && finally_index == -1 {
+                finally_index = index;
+            }
+        }
+        index += 1;
+    }
+
+    if end_index == -1 {
+        diagnostics.push("llvm lowering: try without endtry in `" + function_name + "`");
+        end_index = end - 1;
+    }
+
+    let try_start = start_index + 1;
+    let mut try_end -> number = end_index;
+    if catch_index != -1 {
+        try_end = catch_index;
+    } else if finally_index != -1 {
+        try_end = finally_index;
+    }
+
+    let mut catch_start -> number = -1;
+    let mut catch_end -> number = -1;
+    if catch_index != -1 {
+        catch_start = catch_index + 1;
+        catch_end = end_index;
+        if finally_index != -1 {
+            catch_end = finally_index;
+        }
+    }
+
+    let mut finally_start -> number = -1;
+    let mut finally_end -> number = -1;
+    if finally_index != -1 {
+        finally_start = finally_index + 1;
+        finally_end = end_index;
+    }
+
+    return TryStructure {
+        try_start: try_start,
+        try_end: try_end,
+        catch_index: catch_index,
+        catch_name: catch_name,
+        catch_start: catch_start,
+        catch_end: catch_end,
+        finally_index: finally_index,
+        finally_start: finally_start,
+        finally_end: finally_end,
+        end_index: end_index,
+        next_index: end_index + 1,
+        diagnostics: diagnostics,
+    };
+}
+
+fn lower_try_instruction(
+    function -> NativeFunction,
+    start_index -> number,
+    llvm_return -> string,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    allocas -> string[],
+    lines -> string[],
+    temp_index -> number,
+    block_counter -> number,
+    next_local_id -> number,
+    next_region_id -> number,
+    functions -> NativeFunction[],
+    loop_stack -> LoopContext[],
+    end -> number,
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number,
+    current_label -> string
+) -> BlockLoweringResult {
+    let mut diagnostics -> string[] = [];
+    let structure = collect_try_structure(function.instructions, start_index, end, function.name);
+    let mut _ci2 -> number = 0;
+    loop {
+        if _ci2 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci2]);
+        _ci2 += 1;
+    }
+
+    let mut current_lines -> string[] = lines;
+    let mut current_allocas -> string[] = allocas;
+    let mut current_locals -> LocalBinding[] = locals;
+    let mut current_bindings -> ParameterBinding[] = bindings;
+    let mut current_temp -> number = temp_index;
+    let mut current_block_counter -> number = block_counter;
+    let mut current_next_local -> number = next_local_id;
+    let mut current_next_region -> number = next_region_id;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+
+    // Reset exception state at start of try.
+    current_lines.push("  call void @sailfin_runtime_clear_exception()");
+
+    let try_label_alloc = allocate_block_label("try", current_block_counter);
+    let try_label = try_label_alloc.label;
+    current_block_counter = try_label_alloc.next_counter;
+
+    let mut catch_label -> string = "";
+    if structure.catch_index != -1 {
+        let catch_label_alloc = allocate_block_label("catch", current_block_counter);
+        catch_label = catch_label_alloc.label;
+        current_block_counter = catch_label_alloc.next_counter;
+    }
+
+    let mut finally_label -> string = "";
+    if structure.finally_index != -1 {
+        let finally_label_alloc = allocate_block_label("finally", current_block_counter);
+        finally_label = finally_label_alloc.label;
+        current_block_counter = finally_label_alloc.next_counter;
+    }
+
+    let merge_label_alloc = allocate_block_label("merge", current_block_counter);
+    let merge_label = merge_label_alloc.label;
+    current_block_counter = merge_label_alloc.next_counter;
+
+    current_lines.push("  br label %" + try_label);
+
+    // Try block
+    current_lines.push(try_label + ":");
+    let try_scope_id = make_child_scope_id(scope_id, try_label);
+    let try_result = lower_instruction_range(
+        function,
+        structure.try_start,
+        structure.try_end,
+        llvm_return,
+        current_bindings,
+        current_locals,
+        current_allocas,
+        [],
+        current_temp,
+        current_block_counter,
+        current_next_local,
+        current_next_region,
+        functions,
+        loop_stack,
+        context,
+        try_scope_id,
+        scope_depth + 1,
+        try_label
+    );
+    let mut _ci3 -> number = 0;
+    loop {
+        if _ci3 >= try_result.diagnostics.length { break; }
+        diagnostics.push(try_result.diagnostics[_ci3]);
+        _ci3 += 1;
+    }
+    lifetime_regions = extend_lifetime_regions(lifetime_regions, try_result.lifetime_regions);
+    current_allocas = try_result.allocas;
+    current_temp = try_result.temp_index;
+    current_block_counter = try_result.block_counter;
+    current_next_local = try_result.next_local_id;
+    current_next_region = try_result.next_lifetime_region_id;
+    current_lines = extend_string_array(current_lines, try_result.lines);
+    collected_string_constants = merge_string_constants(collected_string_constants, try_result.string_constants);
+
+    if !try_result.terminated {
+        let has_exc = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + has_exc + " = call i1 @sailfin_runtime_has_exception()");
+        let normal_target = merge_label;
+        if structure.finally_index != -1 {
+            normal_target = finally_label;
+        }
+        if structure.catch_index != -1 {
+            current_lines.push("  br i1 " + has_exc + ", label %" + catch_label + ", label %" + normal_target);
+        } else {
+            // No catch: proceed to normal target; any pending exception will be propagated after finally/merge.
+            current_lines.push("  br label %" + normal_target);
+        }
+    }
+
+    if structure.catch_index != -1 {
+        // Catch block
+        current_lines.push(catch_label + ":");
+        let catch_scope_id = make_child_scope_id(scope_id, catch_label);
+        let exception_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + exception_temp + " = call i8* @sailfin_runtime_take_exception()");
+
+        let mut catch_locals -> LocalBinding[] = current_locals;
+        let trimmed_name = trim_text(structure.catch_name);
+        if trimmed_name.length > 0 && trimmed_name != "_" {
+            // Bind catch variable as a local `i8*`.
+            let err_slot = format_local_pointer_name(current_next_local);
+            current_next_local += 1;
+            current_allocas.push("  " + err_slot + " = alloca i8*");
+            current_lines.push("  store i8* " + exception_temp + ", i8** " + err_slot);
+            catch_locals = append_local_binding(
+                catch_locals,
+                LocalBinding {
+                    name: trimmed_name,
+                    pointer: err_slot,
+                    llvm_type: "i8*",
+                    type_annotation: "string",
+                    ownership: null,
+                    consumed: false,
+                    scope_id: catch_scope_id,
+                    scope_depth: scope_depth + 1,
+                }
+            );
+        }
+
+        let catch_result = lower_instruction_range(
+            function,
+            structure.catch_start,
+            structure.catch_end,
+            llvm_return,
+            current_bindings,
+            catch_locals,
+            current_allocas,
+            [],
+            current_temp,
+            current_block_counter,
+            current_next_local,
+            current_next_region,
+            functions,
+            loop_stack,
+            context,
+            catch_scope_id,
+            scope_depth + 1,
+            catch_label
+        );
+        let mut _ci4 -> number = 0;
+        loop {
+            if _ci4 >= catch_result.diagnostics.length { break; }
+            diagnostics.push(catch_result.diagnostics[_ci4]);
+            _ci4 += 1;
+        }
+        lifetime_regions = extend_lifetime_regions(lifetime_regions, catch_result.lifetime_regions);
+        current_allocas = catch_result.allocas;
+        current_temp = catch_result.temp_index;
+        current_block_counter = catch_result.block_counter;
+        current_next_local = catch_result.next_local_id;
+        current_next_region = catch_result.next_lifetime_region_id;
+        current_lines = extend_string_array(current_lines, catch_result.lines);
+        collected_string_constants = merge_string_constants(collected_string_constants, catch_result.string_constants);
+
+        if !catch_result.terminated {
+            let target = merge_label;
+            if structure.finally_index != -1 {
+                target = finally_label;
+            }
+            current_lines.push("  br label %" + target);
+        }
+    }
+
+    if structure.finally_index != -1 {
+        current_lines.push(finally_label + ":");
+        let finally_scope_id = make_child_scope_id(scope_id, finally_label);
+        let finally_result = lower_instruction_range(
+            function,
+            structure.finally_start,
+            structure.finally_end,
+            llvm_return,
+            current_bindings,
+            current_locals,
+            current_allocas,
+            [],
+            current_temp,
+            current_block_counter,
+            current_next_local,
+            current_next_region,
+            functions,
+            loop_stack,
+            context,
+            finally_scope_id,
+            scope_depth + 1,
+            finally_label
+        );
+        let mut _ci5 -> number = 0;
+        loop {
+            if _ci5 >= finally_result.diagnostics.length { break; }
+            diagnostics.push(finally_result.diagnostics[_ci5]);
+            _ci5 += 1;
+        }
+        lifetime_regions = extend_lifetime_regions(lifetime_regions, finally_result.lifetime_regions);
+        current_allocas = finally_result.allocas;
+        current_temp = finally_result.temp_index;
+        current_block_counter = finally_result.block_counter;
+        current_next_local = finally_result.next_local_id;
+        current_next_region = finally_result.next_lifetime_region_id;
+        current_lines = extend_string_array(current_lines, finally_result.lines);
+        collected_string_constants = merge_string_constants(collected_string_constants, finally_result.string_constants);
+
+        if !finally_result.terminated {
+            current_lines.push("  br label %" + merge_label);
+        }
+    }
+
+    current_lines.push(merge_label + ":");
+
+    // If an exception is still pending after try/catch/finally, propagate it.
+    let has_exc_after = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + has_exc_after + " = call i1 @sailfin_runtime_has_exception()");
+    let propagate_label_alloc = allocate_block_label("try.propagate", current_block_counter);
+    let propagate_label = propagate_label_alloc.label;
+    current_block_counter = propagate_label_alloc.next_counter;
+    let continue_label_alloc = allocate_block_label("try.continue", current_block_counter);
+    let continue_label = continue_label_alloc.label;
+    current_block_counter = continue_label_alloc.next_counter;
+    current_lines.push("  br i1 " + has_exc_after + ", label %" + propagate_label + ", label %" + continue_label);
+    current_lines.push(propagate_label + ":");
+    if llvm_return == "void" {
+        current_lines.push("  ret void");
+    } else {
+        current_lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
+    }
+    current_lines.push(continue_label + ":");
+
+    return BlockLoweringResult {
+        lines: current_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        bindings: current_bindings,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        terminated: false,
+        next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
+        next_index: structure.next_index,
+        mutations: [],
+        string_constants: collected_string_constants,
+    };
+}
+
+fn collect_loop_structure(
+    instructions -> NativeInstruction[],
+    start_index -> number,
+    end -> number,
+    function_name -> string
+) -> LoopStructure {
+    let mut diagnostics -> string[] = [];
+    let body_start = start_index + 1;
+    let mut body_end = end;
+    let mut depth -> number = 0;
+    let mut index -> number = body_start;
+    let mut limit -> number = end;
+    if limit > instructions.length {
+        limit = instructions.length;
+    }
+    loop {
+        if index >= limit {
+            if limit <= 0 {
+                limit = 0;
+            }
+            diagnostics.push("llvm lowering: unterminated `.loop` in `" + function_name + "`");
+            return LoopStructure {
+                body_start: body_start,
+                body_end: limit,
+                next_index: limit - 1,
+                diagnostics: diagnostics,
+            };
+        }
+        let _loop_tag = get_instruction_tag(instructions, index);
+        if _loop_tag == 8 || _loop_tag == 6 {  // Loop || For
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if _loop_tag == 9 || _loop_tag == 7 {  // EndLoop || EndFor
+            if depth == 0 {
+                body_end = index;
+                return LoopStructure {
+                    body_start: body_start,
+                    body_end: body_end,
+                    next_index: index,
+                    diagnostics: diagnostics,
+                };
+            }
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+
+    return LoopStructure {
+        body_start: body_start,
+        body_end: body_end,
+        next_index: limit,
+        diagnostics: diagnostics,
+    };
+}
+
+fn append_loop_context(values -> LoopContext[], value -> LoopContext) -> LoopContext[] {
+    let mut out = values;
+    out = out.push(value);
+    return out;
+}
+
+fn last_loop_context(values -> LoopContext[]) -> LoopContext {
+    let mut index -> number = values.length;
+    if index <= 0 {
+        return LoopContext { break_label: "", continue_label: "" };
+    }
+    index -= 1;
+    return values[index];
+}
+
+fn lower_loop_instruction(
+    function -> NativeFunction,
+    start_index -> number,
+    llvm_return -> string,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    allocas -> string[],
+    lines -> string[],
+    temp_index -> number,
+    block_counter -> number,
+    next_local_id -> number,
+    next_region_id -> number,
+    functions -> NativeFunction[],
+    loop_stack -> LoopContext[],
+    end -> number,
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number,
+    current_label -> string
+) -> BlockLoweringResult {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    let mut current_allocas -> string[] = allocas;
+    let mut current_locals -> LocalBinding[] = locals;
+    let mut current_bindings -> ParameterBinding[] = bindings;
+    let mut current_temp -> number = temp_index;
+    let mut current_block_counter -> number = block_counter;
+    let mut current_next_local -> number = next_local_id;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut current_next_region -> number = next_region_id;
+    let mut collected_mutations -> LocalMutation[] = [];
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+
+    let debug_loop = fs.exists("build/sailfin/.trace_lowering");
+    if debug_loop {
+        print.warn("emit-llvm: lower_loop start fn=" + function.name + " start_index=" + number_to_string(start_index) + " end=" + number_to_string(end));
+    }
+    let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
+    if debug_loop {
+        print.warn("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+    }
+    let mut _ci6 -> number = 0;
+    loop {
+        if _ci6 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci6]);
+        _ci6 += 1;
+    }
+
+    // Preload all locals before entering the loop for phi node merging
+    let mut preloaded_locals -> string[] = [];
+    let mut preload_index -> number = 0;
+    loop {
+        if preload_index >= current_locals.length {
+            break;
+        }
+        let local = current_locals[preload_index];
+        let preload_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+        current_lines.push(preload_line);
+        preloaded_locals.push(preload_temp);
+        preload_index += 1;
+    }
+
+    // Allocate labels: preheader (current), header, body, latch, exit
+    let header_alloc = allocate_block_label("loop.header", current_block_counter);
+    let header_label = header_alloc.label;
+    current_block_counter = header_alloc.next_counter;
+
+    let body_alloc = allocate_block_label("loop.body", current_block_counter);
+    let body_label = body_alloc.label;
+    current_block_counter = body_alloc.next_counter;
+
+    let latch_alloc = allocate_block_label("loop.latch", current_block_counter);
+    let latch_label = latch_alloc.label;
+    current_block_counter = latch_alloc.next_counter;
+
+    let exit_alloc = allocate_block_label("afterloop", current_block_counter);
+    let exit_label = exit_alloc.label;
+    current_block_counter = exit_alloc.next_counter;
+
+    // Preheader: branch to header
+    current_lines.push("  br label %" + header_label);
+    current_lines.push(header_label + ":");
+
+    // Update loop context: break goes to exit, continue goes to latch
+    let loop_context = LoopContext { break_label: exit_label, continue_label: latch_label };
+    let stacked = append_loop_context(loop_stack, loop_context);
+
+    let base_locals = current_locals;
+    let base_allocas = current_allocas;
+    let base_local_id = current_next_local;
+
+    // Lower the body to discover mutations
+    let body_scope_id = make_child_scope_id(scope_id, body_label);
+    if debug_loop {
+        print.warn("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+    }
+    let body_result = lower_instruction_range(
+        function,
+        structure.body_start,
+        structure.body_end,
+        llvm_return,
+        current_bindings,
+        base_locals,
+        base_allocas,
+        [],
+        current_temp,
+        current_block_counter,
+        base_local_id,
+        current_next_region,
+        functions,
+        stacked,
+        context,
+        body_scope_id,
+        scope_depth + 1,
+        body_label
+    );
+    if debug_loop {
+        print.warn("emit-llvm: lower_loop post_body_lir fn=" + function.name + " body_lines=" + number_to_string(body_result.lines.length));
+    }
+
+    let mut _ci7 -> number = 0;
+    loop {
+        if _ci7 >= body_result.diagnostics.length { break; }
+        diagnostics.push(body_result.diagnostics[_ci7]);
+        _ci7 += 1;
+    }
+    lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
+    current_allocas = body_result.allocas;
+    current_temp = body_result.temp_index;
+    current_block_counter = body_result.block_counter;
+    current_next_local = body_result.next_local_id;
+    current_bindings = body_result.bindings;
+    current_next_region = body_result.next_lifetime_region_id;
+    collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
+    collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
+
+    // Now emit phi nodes in the header for mutated locals
+    let mut header_phis -> string[] = [];
+    let mut phi_stores -> string[] = [];
+
+    // Build a unique set of mutated local names
+    let mut mutated_names -> string[] = [];
+    let mut mut_idx -> number = 0;
+    loop {
+        if mut_idx >= body_result.mutations.length {
+            break;
+        }
+        let mutation = body_result.mutations[mut_idx];
+        let mut already_added -> boolean = false;
+        let mut check_idx -> number = 0;
+        loop {
+            if check_idx >= mutated_names.length {
+                break;
+            }
+            if mutated_names[check_idx] == mutation.name {
+                already_added = true;
+                break;
+            }
+            check_idx += 1;
+        }
+        if !already_added {
+            mutated_names.push(mutation.name);
+        }
+        mut_idx += 1;
+    }
+
+    // Note: We'll generate phi nodes after we know the latch load values
+
+    // For a simple loop, always branch to body (no condition check)
+    current_lines.push("  br label %" + body_label);
+    current_lines.push(body_label + ":");
+
+    // Append body lines
+    current_lines = extend_string_array(current_lines, body_result.lines);
+
+    // If body doesn't terminate, branch to latch
+    if !body_result.terminated {
+        current_lines.push("  br label %" + latch_label);
+    }
+
+    // Latch: load mutated locals, then branch back to header
+    current_lines.push(latch_label + ":");
+
+    // Load the values of mutated locals in the latch for the phi nodes
+    let mut latch_loads -> string[] = [];
+    let mut load_idx -> number = 0;
+    loop {
+        if load_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[load_idx];
+        let local = find_local_binding(base_locals, name);
+
+        if local != null {
+            let load_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            let load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+            current_lines.push(load_line);
+            latch_loads.push(load_temp);
+        } else {
+            latch_loads.push("");
+        }
+
+        load_idx += 1;
+    }
+
+    current_lines.push("  br label %" + header_label);
+
+    // Generate phi nodes using the latch load values.
+    let mut name_idx -> number = 0;
+    loop {
+        if name_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[name_idx];
+        let local = find_local_binding(base_locals, name);
+
+        if local != null && name_idx < latch_loads.length {
+            let latch_value = latch_loads[name_idx];
+
+            if latch_value.length > 0 {
+                // Find preloaded value for this local
+                let mut preload_value -> string = "";
+                let mut local_idx -> number = 0;
+                loop {
+                    if local_idx >= base_locals.length {
+                        break;
+                    }
+                    if base_locals[local_idx].name == name && local_idx < preloaded_locals.length {
+                        preload_value = preloaded_locals[local_idx];
+                        break;
+                    }
+                    local_idx += 1;
+                }
+
+                if preload_value.length > 0 {
+                    let phi_temp = format_temp_name(current_temp);
+                    current_temp += 1;
+
+                    let phi_line = "  " + phi_temp + " = phi " + local.llvm_type + " [ " + preload_value + ", %" + current_label + " ], [ " + latch_value + ", %" + latch_label + " ]";
+                    header_phis.push(phi_line);
+
+                    let store_line = "  store " + local.llvm_type + " " + phi_temp + ", " + local.llvm_type + "* " + local.pointer;
+                    phi_stores.push(store_line);
+                }
+            }
+        }
+
+        name_idx += 1;
+    }
+
+    // Now reconstruct the header with phi nodes after we know the structure
+    // We need to insert the phi nodes after the header label but before the branch to body
+    let mut final_lines -> string[] = [];
+    let mut line_idx -> number = 0;
+    let mut found_header -> boolean = false;
+    loop {
+        if line_idx >= current_lines.length {
+            break;
+        }
+        let line = current_lines[line_idx];
+        final_lines.push(line);
+
+        // Insert phi nodes right after header label
+        if !found_header && line == header_label + ":" {
+            found_header = true;
+            final_lines = extend_string_array(final_lines, header_phis);
+            final_lines = extend_string_array(final_lines, phi_stores);
+        }
+        line_idx += 1;
+    }
+    current_lines = final_lines;
+
+    // Exit label
+    current_lines.push(exit_label + ":");
+
+    current_locals = base_locals;
+
+    // Load mutated locals once at the loop exit so phi merges can consume
+    // values that dominate the merge block.
+    let mut exit_loads -> string[] = [];
+    let mut exit_load_idx -> number = 0;
+    loop {
+        if exit_load_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[exit_load_idx];
+        let local = find_local_binding(base_locals, name);
+        if local != null {
+            let exit_load_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines.push("  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
+            exit_loads.push(exit_load_temp);
+        } else {
+            exit_loads.push("");
+        }
+        exit_load_idx += 1;
+    }
+
+    let mut exit_mutations -> LocalMutation[] = [];
+    let mut name_idx -> number = 0;
+    loop {
+        if name_idx >= mutated_names.length {
+            break;
+        }
+        let name = mutated_names[name_idx];
+        let mut exit_value -> string = "";
+        if name_idx < exit_loads.length {
+            exit_value = exit_loads[name_idx];
+        }
+        if exit_value.length > 0 {
+            let original = find_mutation_for_name(collected_mutations, name);
+            let mut llvm_type -> string = "";
+            let mut original_span -> NativeSourceSpan? = null;
+            if original != null {
+                llvm_type = original.llvm_type;
+                original_span = original.span;
+            }
+            if llvm_type.length == 0 {
+                let local = find_local_binding(base_locals, name);
+                if local != null {
+                    llvm_type = local.llvm_type;
+                }
+            }
+            if llvm_type.length == 0 {
+                llvm_type = "double";
+            }
+            let exit_mutation = LocalMutation {
+                name: name,
+                llvm_type: llvm_type,
+                value_name: exit_value,
+                span: original_span,
+                originating_label: exit_label,
+            };
+            exit_mutations.push(exit_mutation);
+        }
+        name_idx += 1;
+    }
+
+    // Preserve mutations for locals introduced inside the loop body.
+    // These locals do not exist in `base_locals`, so they do not participate in phi merging,
+    // but callers still expect the loop lowering to report that the body introduced/mutated them.
+    let mut body_scoped_mutations -> LocalMutation[] = [];
+    let mut body_mut_idx -> number = 0;
+    loop {
+        if body_mut_idx >= body_result.mutations.length {
+            break;
+        }
+        let mutation = body_result.mutations[body_mut_idx];
+        if find_local_binding(base_locals, mutation.name) == null {
+            let mut already_added -> boolean = false;
+            let mut seen_idx -> number = 0;
+            loop {
+                if seen_idx >= body_scoped_mutations.length {
+                    break;
+                }
+                if body_scoped_mutations[seen_idx].name == mutation.name {
+                    already_added = true;
+                    break;
+                }
+                seen_idx += 1;
+            }
+            if !already_added {
+                body_scoped_mutations.push(mutation);
+            }
+        }
+        body_mut_idx += 1;
+    }
+
+    collected_mutations = extend_mutations(body_scoped_mutations, exit_mutations);
+
+    return BlockLoweringResult {
+        lines: current_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        bindings: current_bindings,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        terminated: false,
+        next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
+        next_index: structure.next_index + 1,
+        mutations: collected_mutations,
+        string_constants: collected_string_constants,
+    };
+}
+
+fn lower_for_instruction(
+    function -> NativeFunction,
+    start_index -> number,
+    llvm_return -> string,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    allocas -> string[],
+    lines -> string[],
+    temp_index -> number,
+    block_counter -> number,
+    next_local_id -> number,
+    next_region_id -> number,
+    functions -> NativeFunction[],
+    loop_stack -> LoopContext[],
+    end -> number,
+    context -> TypeContext,
+    scope_id -> string,
+    scope_depth -> number,
+    current_label -> string
+) -> BlockLoweringResult {
+    let mut diagnostics -> string[] = [];
+    let mut current_lines -> string[] = lines;
+    let mut current_allocas -> string[] = allocas;
+    let mut current_locals -> LocalBinding[] = locals;
+    let mut current_bindings -> ParameterBinding[] = bindings;
+    let mut current_temp -> number = temp_index;
+    let mut current_block_counter -> number = block_counter;
+    let mut current_next_local -> number = next_local_id;
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut current_next_region -> number = next_region_id;
+    let mut collected_mutations -> LocalMutation[] = [];
+    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+
+    let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
+    let mut _ci8 -> number = 0;
+    loop {
+        if _ci8 >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_ci8]);
+        _ci8 += 1;
+    }
+    let mut next_index -> number = structure.next_index + 1;
+
+    let instruction = function.instructions[start_index];
+
+    let mut raw_target = trim_text(instruction.target);
+    raw_target = strip_mut_prefix(raw_target);
+    if raw_target.length == 0 {
+        diagnostics.push("llvm lowering: `.for` loop missing iteration binding in `" + function.name + "`");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: current_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: next_index,
+            mutations: collected_mutations, string_constants: collected_string_constants,
+        };
+    }
+
+    if !is_simple_identifier(raw_target) {
+        diagnostics.push("llvm lowering: `.for` loop target `" + raw_target + "` is not a simple identifier in `" + function.name + "`");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: current_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: next_index,
+            mutations: collected_mutations, string_constants: collected_string_constants,
+        };
+    }
+
+    if find_local_binding(current_locals, raw_target) != null {
+        diagnostics.push("llvm lowering: `.for` loop target `" + raw_target + "` shadows existing local in `" + function.name + "`");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: current_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: next_index,
+            mutations: collected_mutations, string_constants: collected_string_constants,
+        };
+    }
+
+    let range_parse = parse_range_iterable(instruction.iterable);
+    if range_parse.success {
+        let mut _ci9 -> number = 0;
+        loop {
+            if _ci9 >= range_parse.diagnostics.length { break; }
+            diagnostics.push(range_parse.diagnostics[_ci9]);
+            _ci9 += 1;
+        }
+
+    let start_result = lower_expression(range_parse.start, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+        let mut _ci10 -> number = 0;
+        loop {
+            if _ci10 >= start_result.diagnostics.length { break; }
+            diagnostics.push(start_result.diagnostics[_ci10]);
+            _ci10 += 1;
+        }
+        current_lines = start_result.lines;
+        current_temp = start_result.temp_index;
+
+        if start_result.operand == null {
+            diagnostics.push("llvm lowering: unable to lower `.for` range start in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: next_index,
+                mutations: collected_mutations, string_constants: collected_string_constants,
+            };
+        }
+
+    let end_result = lower_expression(range_parse.end, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+        let mut _ci11 -> number = 0;
+        loop {
+            if _ci11 >= end_result.diagnostics.length { break; }
+            diagnostics.push(end_result.diagnostics[_ci11]);
+            _ci11 += 1;
+        }
+        current_lines = end_result.lines;
+        current_temp = end_result.temp_index;
+
+        if end_result.operand == null {
+            diagnostics.push("llvm lowering: unable to lower `.for` range end in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: next_index,
+                mutations: collected_mutations, string_constants: collected_string_constants,
+            };
+        }
+
+        let start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines);
+        let mut _ci12 -> number = 0;
+        loop {
+            if _ci12 >= start_coerced.diagnostics.length { break; }
+            diagnostics.push(start_coerced.diagnostics[_ci12]);
+            _ci12 += 1;
+        }
+        current_lines = start_coerced.lines;
+        current_temp = start_coerced.temp_index;
+        if start_coerced.operand == null {
+            diagnostics.push("llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: next_index,
+                mutations: collected_mutations, string_constants: collected_string_constants,
+            };
+        }
+        let start_operand = start_coerced.operand;
+
+        let end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines);
+        let mut _ci13 -> number = 0;
+        loop {
+            if _ci13 >= end_coerced.diagnostics.length { break; }
+            diagnostics.push(end_coerced.diagnostics[_ci13]);
+            _ci13 += 1;
+        }
+        current_lines = end_coerced.lines;
+        current_temp = end_coerced.temp_index;
+        if end_coerced.operand == null {
+            diagnostics.push("llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: next_index,
+                mutations: collected_mutations, string_constants: collected_string_constants,
+            };
+        }
+        let end_operand = end_coerced.operand;
+
+        let mut stride_operand = LLVMOperand { llvm_type: "double", value: "1.0" };
+        let stride_text = trim_text(range_parse.stride);
+        if stride_text.length > 0 {
+            let stride_result = lower_expression(stride_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+            let mut _ci14 -> number = 0;
+            loop {
+                if _ci14 >= stride_result.diagnostics.length { break; }
+                diagnostics.push(stride_result.diagnostics[_ci14]);
+                _ci14 += 1;
+            }
+            current_lines = stride_result.lines;
+            current_temp = stride_result.temp_index;
+
+            if stride_result.operand == null {
+                diagnostics.push("llvm lowering: `.for` stride expression did not produce a value in `" + function.name + "`");
+                return BlockLoweringResult {
+                    lines: current_lines,
+                    allocas: current_allocas,
+                    locals: current_locals,
+                    bindings: current_bindings,
+                    temp_index: current_temp,
+                    block_counter: current_block_counter,
+                    diagnostics: diagnostics,
+                    terminated: false,
+                    next_local_id: current_next_local,
+                    lifetime_regions: lifetime_regions,
+                    next_lifetime_region_id: current_next_region,
+                    next_index: next_index,
+                    mutations: collected_mutations, string_constants: collected_string_constants,
+                };
+            }
+
+            let stride_coerced = coerce_operand_to_type(stride_result.operand, "double", current_temp, current_lines);
+            let mut _ci15 -> number = 0;
+            loop {
+                if _ci15 >= stride_coerced.diagnostics.length { break; }
+                diagnostics.push(stride_coerced.diagnostics[_ci15]);
+                _ci15 += 1;
+            }
+            current_lines = stride_coerced.lines;
+            current_temp = stride_coerced.temp_index;
+            if stride_coerced.operand == null {
+                diagnostics.push("llvm lowering: `.for` stride expression must evaluate to `number` in `" + function.name + "`");
+                return BlockLoweringResult {
+                    lines: current_lines,
+                    allocas: current_allocas,
+                    locals: current_locals,
+                    bindings: current_bindings,
+                    temp_index: current_temp,
+                    block_counter: current_block_counter,
+                    diagnostics: diagnostics,
+                    terminated: false,
+                    next_local_id: current_next_local,
+                    lifetime_regions: lifetime_regions,
+                    next_lifetime_region_id: current_next_region,
+                    next_index: next_index,
+                    mutations: collected_mutations, string_constants: collected_string_constants,
+                };
+            }
+            stride_operand = stride_coerced.operand;
+
+            if is_number_literal(stride_text) {
+                let normalised_stride = normalise_number_literal(stride_text);
+                if normalised_stride == "0.0" {
+                    diagnostics.push("llvm lowering: `.for` stride must not be zero in `" + function.name + "`");
+                }
+            }
+        }
+
+        let stride_pointer = format_local_pointer_name(current_next_local);
+        current_next_local += 1;
+        current_allocas.push("  " + stride_pointer + " = alloca double");
+        current_lines.push("  store double " + stride_operand.value + ", double* " + stride_pointer);
+
+        let loop_header_alloc = allocate_block_label("for", current_block_counter);
+        let loop_header_label = loop_header_alloc.label;
+        current_block_counter = loop_header_alloc.next_counter;
+
+        let loop_body_alloc = allocate_block_label("forbody", current_block_counter);
+        let loop_body_label = loop_body_alloc.label;
+        current_block_counter = loop_body_alloc.next_counter;
+
+        let loop_increment_alloc = allocate_block_label("forinc", current_block_counter);
+        let loop_increment_label = loop_increment_alloc.label;
+        current_block_counter = loop_increment_alloc.next_counter;
+
+        let loop_exit_alloc = allocate_block_label("afterfor", current_block_counter);
+        let loop_exit_label = loop_exit_alloc.label;
+        current_block_counter = loop_exit_alloc.next_counter;
+
+        let iteration_pointer = format_local_pointer_name(current_next_local);
+        current_next_local += 1;
+        current_allocas.push("  " + iteration_pointer + " = alloca double");
+        current_lines.push("  store double " + start_operand.value + ", double* " + iteration_pointer);
+
+        current_lines.push("  br label %" + loop_header_label);
+        current_lines.push(loop_header_label + ":");
+        let loop_body_scope_id = make_child_scope_id(scope_id, loop_body_label);
+        let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double", type_annotation: "number", ownership: null, consumed: false, scope_id: loop_body_scope_id, scope_depth: scope_depth + 1 };
+        let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
+        let mut _ci16 -> number = 0;
+        loop {
+            if _ci16 >= header_load.diagnostics.length { break; }
+            diagnostics.push(header_load.diagnostics[_ci16]);
+            _ci16 += 1;
+        }
+        current_lines = header_load.lines;
+        current_temp = header_load.temp_index;
+
+        if header_load.operand == null {
+            diagnostics.push("llvm lowering: internal error loading `.for` iteration value in `" + function.name + "`");
+            current_lines.push("  br label %" + loop_exit_label);
+            current_lines.push(loop_exit_label + ":");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: next_index,
+                mutations: collected_mutations, string_constants: collected_string_constants,
+            };
+        }
+
+        let stride_header_name = format_temp_name(current_temp);
+        current_lines.push("  " + stride_header_name + " = load double, double* " + stride_pointer);
+        current_temp += 1;
+
+        let stride_positive_name = format_temp_name(current_temp);
+        current_lines.push("  " + stride_positive_name + " = fcmp ogt double " + stride_header_name + ", 0.0");
+        current_temp += 1;
+
+        let stride_negative_name = format_temp_name(current_temp);
+        current_lines.push("  " + stride_negative_name + " = fcmp olt double " + stride_header_name + ", 0.0");
+        current_temp += 1;
+
+        let ascending_comparison = emit_comparison_instruction("<", header_load.operand, end_operand, current_temp, current_lines);
+        let mut _ci17 -> number = 0;
+        loop {
+            if _ci17 >= ascending_comparison.diagnostics.length { break; }
+            diagnostics.push(ascending_comparison.diagnostics[_ci17]);
+            _ci17 += 1;
+        }
+        current_lines = ascending_comparison.lines;
+        current_temp = ascending_comparison.temp_index;
+
+        if ascending_comparison.operand == null {
+            diagnostics.push("llvm lowering: unable to compare `.for` range bounds in `" + function.name + "`");
+            current_lines.push("  br label %" + loop_exit_label);
+            current_lines.push(loop_exit_label + ":");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: next_index,
+                mutations: collected_mutations, string_constants: collected_string_constants,
+            };
+        }
+
+        let descending_comparison = emit_comparison_instruction(">", header_load.operand, end_operand, current_temp, current_lines);
+        let mut _ci18 -> number = 0;
+        loop {
+            if _ci18 >= descending_comparison.diagnostics.length { break; }
+            diagnostics.push(descending_comparison.diagnostics[_ci18]);
+            _ci18 += 1;
+        }
+        current_lines = descending_comparison.lines;
+        current_temp = descending_comparison.temp_index;
+
+        if descending_comparison.operand == null {
+            diagnostics.push("llvm lowering: unable to compare descending `.for` range bounds in `" + function.name + "`");
+            current_lines.push("  br label %" + loop_exit_label);
+            current_lines.push(loop_exit_label + ":");
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: false,
+                next_local_id: current_next_local,
+                lifetime_regions: lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: next_index,
+                mutations: collected_mutations, string_constants: collected_string_constants,
+            };
+        }
+
+        let ascending_active_name = format_temp_name(current_temp);
+        current_lines.push("  " + ascending_active_name + " = and i1 " + stride_positive_name + ", " + ascending_comparison.operand.value);
+        current_temp += 1;
+
+        let descending_active_name = format_temp_name(current_temp);
+        current_lines.push("  " + descending_active_name + " = and i1 " + stride_negative_name + ", " + descending_comparison.operand.value);
+        current_temp += 1;
+
+        let continue_name = format_temp_name(current_temp);
+        current_lines.push("  " + continue_name + " = or i1 " + ascending_active_name + ", " + descending_active_name);
+        current_temp += 1;
+
+        current_lines.push("  br i1 " + continue_name + ", label %" + loop_body_label + ", label %" + loop_exit_label);
+        current_lines.push(loop_body_label + ":");
+
+        let loop_context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
+        let stacked = append_loop_context(loop_stack, loop_context);
+
+        let body_locals = append_local_binding(current_locals, iteration_binding);
+        let body_result = lower_instruction_range(
+            function,
+            structure.body_start,
+            structure.body_end,
+            llvm_return,
+            current_bindings,
+            body_locals,
+            current_allocas,
+            [],
+            current_temp,
+            current_block_counter,
+            current_next_local,
+            current_next_region,
+            functions,
+            stacked,
+            context,
+            loop_body_scope_id,
+            scope_depth + 1,
+            loop_body_label
+        );
+
+        let mut _ci19 -> number = 0;
+        loop {
+            if _ci19 >= body_result.diagnostics.length { break; }
+            diagnostics.push(body_result.diagnostics[_ci19]);
+            _ci19 += 1;
+        }
+        lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
+        current_lines = extend_string_array(current_lines, body_result.lines);
+        current_allocas = body_result.allocas;
+        current_temp = body_result.temp_index;
+        current_block_counter = body_result.block_counter;
+        current_next_local = body_result.next_local_id;
+        current_bindings = body_result.bindings;
+        current_next_region = body_result.next_lifetime_region_id;
+        collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
+
+        if !body_result.terminated {
+            current_lines.push("  br label %" + loop_increment_label);
+        }
+
+        current_lines.push(loop_increment_label + ":");
+
+        let increment_load = load_local_operand(iteration_binding, current_temp, current_lines);
+        let mut _ci20 -> number = 0;
+        loop {
+            if _ci20 >= increment_load.diagnostics.length { break; }
+            diagnostics.push(increment_load.diagnostics[_ci20]);
+            _ci20 += 1;
+        }
+        current_lines = increment_load.lines;
+        current_temp = increment_load.temp_index;
+
+        if increment_load.operand != null {
+            let increment_stride_name = format_temp_name(current_temp);
+            current_lines.push("  " + increment_stride_name + " = load double, double* " + stride_pointer);
+            current_temp += 1;
+
+            let next_value_name = format_temp_name(current_temp);
+            current_lines.push("  " + next_value_name + " = fadd double " + increment_load.operand.value + ", " + increment_stride_name);
+            current_temp += 1;
+            current_lines.push("  store double " + next_value_name + ", double* " + iteration_pointer);
+        } else {
+            diagnostics.push("llvm lowering: unable to increment `.for` iterator in `" + function.name + "`");
+        }
+
+        current_lines.push("  br label %" + loop_header_label);
+        current_lines.push(loop_exit_label + ":");
+
+        let mutated_names = collect_mutation_names(collected_mutations);
+        let mut exit_loads -> string[] = [];
+        let mut load_idx -> number = 0;
+        loop {
+            if load_idx >= mutated_names.length {
+                break;
+            }
+            let name = mutated_names[load_idx];
+            let local = find_local_binding(locals, name);
+            if local != null {
+                let exit_load_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines.push("  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
+                exit_loads.push(exit_load_temp);
+            } else {
+                exit_loads.push("");
+            }
+            load_idx += 1;
+        }
+
+        let mut exit_mutations -> LocalMutation[] = [];
+        let mut exit_idx -> number = 0;
+        loop {
+            if exit_idx >= mutated_names.length {
+                break;
+            }
+            let name = mutated_names[exit_idx];
+            let mut exit_value -> string = "";
+            if exit_idx < exit_loads.length {
+                exit_value = exit_loads[exit_idx];
+            }
+            if exit_value.length > 0 {
+                let original = find_mutation_for_name(collected_mutations, name);
+                let mut llvm_type -> string = "";
+                let mut original_span -> NativeSourceSpan? = null;
+                if original != null {
+                    llvm_type = original.llvm_type;
+                    original_span = original.span;
+                }
+                if llvm_type.length == 0 {
+                    let local = find_local_binding(locals, name);
+                    if local != null {
+                        llvm_type = local.llvm_type;
+                    }
+                }
+                if llvm_type.length == 0 {
+                    llvm_type = "double";
+                }
+                let exit_mutation = LocalMutation {
+                    name: name,
+                    llvm_type: llvm_type,
+                    value_name: exit_value,
+                    span: original_span,
+                    originating_label: loop_exit_label,
+                };
+                exit_mutations.push(exit_mutation);
+            }
+            exit_idx += 1;
+        }
+        collected_mutations = exit_mutations;
+
+        current_locals = locals;
+
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: current_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: next_index,
+            mutations: collected_mutations, string_constants: collected_string_constants,
+        };
+    }
+
+    let iterable_result = lower_expression(instruction.iterable, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+    let mut _ci21 -> number = 0;
+    loop {
+        if _ci21 >= iterable_result.diagnostics.length { break; }
+        diagnostics.push(iterable_result.diagnostics[_ci21]);
+        _ci21 += 1;
+    }
+    current_lines = iterable_result.lines;
+    current_temp = iterable_result.temp_index;
+
+    if iterable_result.operand == null {
+        let mut _ci22 -> number = 0;
+        loop {
+            if _ci22 >= range_parse.diagnostics.length { break; }
+            diagnostics.push(range_parse.diagnostics[_ci22]);
+            _ci22 += 1;
+        }
+        diagnostics.push("llvm lowering: unable to lower `.for` iterable in `" + function.name + "`");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: current_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: next_index,
+            mutations: collected_mutations, string_constants: collected_string_constants,
+        };
+    }
+
+    let iterable_operand = iterable_result.operand;
+    let element_type = array_pointer_element_type(iterable_operand.llvm_type);
+    if element_type.length == 0 {
+        let mut _ci23 -> number = 0;
+        loop {
+            if _ci23 >= range_parse.diagnostics.length { break; }
+            diagnostics.push(range_parse.diagnostics[_ci23]);
+            _ci23 += 1;
+        }
+        diagnostics.push("llvm lowering: `.for` iterable must resolve to an array value in `" + function.name + "`");
+        return BlockLoweringResult {
+            lines: current_lines,
+            allocas: current_allocas,
+            locals: current_locals,
+            bindings: current_bindings,
+            temp_index: current_temp,
+            block_counter: current_block_counter,
+            diagnostics: diagnostics,
+            terminated: false,
+            next_local_id: current_next_local,
+            lifetime_regions: lifetime_regions,
+            next_lifetime_region_id: current_next_region,
+            next_index: next_index,
+            mutations: collected_mutations, string_constants: collected_string_constants,
+        };
+    }
+
+    let array_struct_type = array_struct_type_for_element(element_type);
+    let data_pointer_type = element_type + "*";
+    let data_pointer_pointer_type = data_pointer_type + "*";
+
+    let length_pointer_name = format_temp_name(current_temp);
+    current_lines.push("  " + length_pointer_name + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + iterable_operand.value + ", i32 0, i32 1");
+    current_temp += 1;
+
+    let length_load_name = format_temp_name(current_temp);
+    current_lines.push("  " + length_load_name + " = load i64, i64* " + length_pointer_name);
+    current_temp += 1;
+    let length_operand = LLVMOperand { llvm_type: "i64", value: length_load_name };
+
+    let data_pointer_name = format_temp_name(current_temp);
+    current_lines.push("  " + data_pointer_name + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + iterable_operand.value + ", i32 0, i32 0");
+    current_temp += 1;
+
+    let data_load_name = format_temp_name(current_temp);
+    current_lines.push("  " + data_load_name + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + data_pointer_name);
+    current_temp += 1;
+    let data_operand = LLVMOperand { llvm_type: data_pointer_type, value: data_load_name };
+
+    let loop_header_alloc = allocate_block_label("for", current_block_counter);
+    let loop_header_label = loop_header_alloc.label;
+    current_block_counter = loop_header_alloc.next_counter;
+
+    let loop_body_alloc = allocate_block_label("forbody", current_block_counter);
+    let loop_body_label = loop_body_alloc.label;
+    current_block_counter = loop_body_alloc.next_counter;
+
+    let loop_increment_alloc = allocate_block_label("forinc", current_block_counter);
+    let loop_increment_label = loop_increment_alloc.label;
+    current_block_counter = loop_increment_alloc.next_counter;
+
+    let loop_exit_alloc = allocate_block_label("afterfor", current_block_counter);
+    let loop_exit_label = loop_exit_alloc.label;
+    current_block_counter = loop_exit_alloc.next_counter;
+
+    let index_pointer = format_local_pointer_name(current_next_local);
+    current_next_local += 1;
+    current_allocas.push("  " + index_pointer + " = alloca i64");
+    current_lines.push("  store i64 0, i64* " + index_pointer);
+
+    let iteration_pointer = format_local_pointer_name(current_next_local);
+    current_next_local += 1;
+    current_allocas.push("  " + iteration_pointer + " = alloca " + element_type);
+    current_lines.push("  store " + element_type + " " + default_return_literal(element_type) + ", " + element_type + "* " + iteration_pointer);
+
+    current_lines.push("  br label %" + loop_header_label);
+    current_lines.push(loop_header_label + ":");
+
+    let header_index_name = format_temp_name(current_temp);
+    current_lines.push("  " + header_index_name + " = load i64, i64* " + index_pointer);
+    current_temp += 1;
+
+    let comparison_name = format_temp_name(current_temp);
+    current_lines.push("  " + comparison_name + " = icmp slt i64 " + header_index_name + ", " + length_operand.value);
+    current_temp += 1;
+    current_lines.push("  br i1 " + comparison_name + ", label %" + loop_body_label + ", label %" + loop_exit_label);
+    current_lines.push(loop_body_label + ":");
+
+    let body_index_name = format_temp_name(current_temp);
+    current_lines.push("  " + body_index_name + " = load i64, i64* " + index_pointer);
+    current_temp += 1;
+
+    let element_pointer_name = format_temp_name(current_temp);
+    current_lines.push("  " + element_pointer_name + " = getelementptr " + element_type + ", " + element_type + "* " + data_operand.value + ", i64 " + body_index_name);
+    current_temp += 1;
+
+    let element_load_name = format_temp_name(current_temp);
+    current_lines.push("  " + element_load_name + " = load " + element_type + ", " + element_type + "* " + element_pointer_name);
+    current_temp += 1;
+
+    current_lines.push("  store " + element_type + " " + element_load_name + ", " + element_type + "* " + iteration_pointer);
+
+    let loop_context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
+    let stacked = append_loop_context(loop_stack, loop_context);
+
+    let element_loop_scope_id = make_child_scope_id(scope_id, loop_body_label);
+    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, type_annotation: "", ownership: null, consumed: false, scope_id: element_loop_scope_id, scope_depth: scope_depth + 1 };
+    let body_locals = append_local_binding(current_locals, iteration_binding);
+    let body_result = lower_instruction_range(
+        function,
+        structure.body_start,
+        structure.body_end,
+        llvm_return,
+        current_bindings,
+        body_locals,
+        current_allocas,
+        [],
+        current_temp,
+        current_block_counter,
+        current_next_local,
+        current_next_region,
+        functions,
+        stacked,
+        context,
+        element_loop_scope_id,
+        scope_depth + 1,
+        loop_body_label
+    );
+
+    let mut _ci24 -> number = 0;
+    loop {
+        if _ci24 >= body_result.diagnostics.length { break; }
+        diagnostics.push(body_result.diagnostics[_ci24]);
+        _ci24 += 1;
+    }
+    lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
+    current_lines = extend_string_array(current_lines, body_result.lines);
+    current_allocas = body_result.allocas;
+    current_temp = body_result.temp_index;
+    current_block_counter = body_result.block_counter;
+    current_next_local = body_result.next_local_id;
+    current_bindings = body_result.bindings;
+    current_next_region = body_result.next_lifetime_region_id;
+    collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
+    collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
+
+    if !body_result.terminated {
+        current_lines.push("  br label %" + loop_increment_label);
+    }
+
+    current_lines.push(loop_increment_label + ":");
+
+    let increment_index_name = format_temp_name(current_temp);
+    current_lines.push("  " + increment_index_name + " = load i64, i64* " + index_pointer);
+    current_temp += 1;
+
+    let next_index_name = format_temp_name(current_temp);
+    current_lines.push("  " + next_index_name + " = add i64 " + increment_index_name + ", 1");
+    current_temp += 1;
+
+    current_lines.push("  store i64 " + next_index_name + ", i64* " + index_pointer);
+        current_lines.push("  br label %" + loop_header_label);
+        current_lines.push(loop_exit_label + ":");
+
+        let mutated_names = collect_mutation_names(collected_mutations);
+        let mut exit_loads -> string[] = [];
+        let mut load_idx -> number = 0;
+        loop {
+            if load_idx >= mutated_names.length {
+                break;
+            }
+            let name = mutated_names[load_idx];
+            let local = find_local_binding(locals, name);
+            if local != null {
+                let exit_load_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                current_lines.push("  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
+                exit_loads.push(exit_load_temp);
+            } else {
+                exit_loads.push("");
+            }
+            load_idx += 1;
+        }
+
+        let mut exit_mutations -> LocalMutation[] = [];
+        let mut exit_idx -> number = 0;
+        loop {
+            if exit_idx >= mutated_names.length {
+                break;
+            }
+            let name = mutated_names[exit_idx];
+            let mut exit_value -> string = "";
+            if exit_idx < exit_loads.length {
+                exit_value = exit_loads[exit_idx];
+            }
+            if exit_value.length > 0 {
+                let original = find_mutation_for_name(collected_mutations, name);
+                let mut llvm_type -> string = "";
+                let mut original_span -> NativeSourceSpan? = null;
+                if original != null {
+                    llvm_type = original.llvm_type;
+                    original_span = original.span;
+                }
+                if llvm_type.length == 0 {
+                    let local = find_local_binding(locals, name);
+                    if local != null {
+                        llvm_type = local.llvm_type;
+                    }
+                }
+                if llvm_type.length == 0 {
+                    llvm_type = "double";
+                }
+                let exit_mutation = LocalMutation {
+                    name: name,
+                    llvm_type: llvm_type,
+                    value_name: exit_value,
+                    span: original_span,
+                    originating_label: loop_exit_label,
+                };
+                exit_mutations.push(exit_mutation);
+            }
+            exit_idx += 1;
+        }
+        collected_mutations = exit_mutations;
+
+        current_locals = locals;
+
+    let empty_constants = empty_string_constant_set();
+    return BlockLoweringResult {
+        lines: current_lines,
+        allocas: current_allocas,
+        locals: current_locals,
+        bindings: current_bindings,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        terminated: false,
+        next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
+        next_index: next_index,
+        mutations: collected_mutations, string_constants: empty_constants,
+    };
+}
+

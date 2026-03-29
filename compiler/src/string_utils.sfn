@@ -85,9 +85,10 @@ fn index_of(value -> string, target -> string) -> number {
 	if target.length == 0 {
 		return 0;
 	}
+	let _search_limit = value.length - target.length;
 	let mut index -> number = 0;
 	loop {
-		if index + target.length > value.length {
+		if index > _search_limit {
 			break;
 		}
 		let mut match_index -> number = 0;
@@ -96,7 +97,8 @@ fn index_of(value -> string, target -> string) -> number {
 			if match_index >= target.length {
 				break;
 			}
-			if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index) {
+			let _cmp_pos = index + match_index;
+			if char_code_at_text(value, _cmp_pos) != char_code_at_text(target, match_index) {
 				matches = false;
 				break;
 			}

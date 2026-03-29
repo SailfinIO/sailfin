@@ -27,7 +27,7 @@ import {
     number_to_string,
 } from "../../utils";
 
-import { substring } from "../../../string_utils";
+import { substring, index_of } from "../../../string_utils";
 
 import {
     empty_string_constant_set,
@@ -75,7 +75,7 @@ fn emit_string_constant_pointer(constant -> StringConstant, temp_index -> number
     let array_length = constant.byte_count + 1;
     let array_type = "[" + number_to_string(array_length) + " x i8]";
     let temp_name = format_temp_name(temp_index);
-    current_lines = append_string(current_lines, "  " + temp_name + " = getelementptr inbounds " + array_type + ", " + array_type + "* " + constant.name + ", i32 0, i32 0");
+    current_lines.push("  " + temp_name + " = getelementptr inbounds " + array_type + ", " + array_type + "* " + constant.name + ", i32 0, i32 0");
     return StringPointerResult { lines: current_lines, temp_index: temp_index + 1, pointer: temp_name };
 }
 
@@ -100,8 +100,16 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
     let field_pointer = pointer_result.pointer;
 
     let call_temp = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + call_temp + " = call i8* @sailfin_runtime_get_field(i8* " + base_operand.value + ", i8* " + field_pointer + ")");
+    current_lines.push("  " + call_temp + " = call i8* @sailfin_runtime_get_field(i8* " + base_operand.value + ", i8* " + field_pointer + ")");
     current_temp += 1;
+
+    if field == "align" || field == "size" || field == "offset" || field == "tag" || field == "tag_size" || field == "tag_align" || field == "max_payload_size" || field == "index" || field == "len" || field == "length" {
+        let number_temp = format_temp_name(current_temp);
+        current_lines.push("  " + number_temp + " = call double @sailfin_runtime_string_to_number(i8* " + call_temp + ")");
+        current_temp += 1;
+        let operand = LLVMOperand { llvm_type: "double", value: number_temp };
+        return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
+    }
 
     let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
     return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
@@ -110,7 +118,7 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
 fn lower_runtime_global_reference(temp_index -> number, lines -> string[]) -> ExpressionResult {
     let runtime_temp = format_temp_name(temp_index);
     let mut current_lines = lines;
-    current_lines = append_string(current_lines, "  " + runtime_temp + " = load i8*, i8** @runtime");
+    current_lines.push("  " + runtime_temp + " = load i8*, i8** @runtime");
     let operand = LLVMOperand { llvm_type: "i8*", value: runtime_temp };
     let empty_constants = empty_string_constant_set();
     return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: empty_constants };
@@ -125,15 +133,15 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     let mut tag_operand -> LLVMOperand = LLVMOperand { llvm_type: enum_info.tag_type, value: "" };
     if pointer_available {
         let tag_ptr = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + tag_ptr + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + base_operand.value + ", i32 0, i32 0");
+        current_lines.push("  " + tag_ptr + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + base_operand.value + ", i32 0, i32 0");
         current_temp += 1;
         let tag_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + tag_temp + " = load " + enum_info.tag_type + ", " + enum_info.tag_type + "* " + tag_ptr);
+        current_lines.push("  " + tag_temp + " = load " + enum_info.tag_type + ", " + enum_info.tag_type + "* " + tag_ptr);
         current_temp += 1;
         tag_operand = LLVMOperand { llvm_type: enum_info.tag_type, value: tag_temp };
     } else {
         let tag_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + tag_temp + " = extractvalue " + enum_info.llvm_name + " " + base_operand.value + ", 0");
+        current_lines.push("  " + tag_temp + " = extractvalue " + enum_info.llvm_name + " " + base_operand.value + ", 0");
         current_temp += 1;
         tag_operand = LLVMOperand { llvm_type: enum_info.tag_type, value: tag_temp };
     }
@@ -178,11 +186,11 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
             let variant_pointer = pointer_result.pointer;
 
             let compare_temp = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + compare_temp + " = icmp eq " + tag_operand.llvm_type + " " + tag_operand.value + ", " + number_to_string(variant_info.tag));
+            current_lines.push("  " + compare_temp + " = icmp eq " + tag_operand.llvm_type + " " + tag_operand.value + ", " + number_to_string(variant_info.tag));
             current_temp += 1;
 
             let select_temp = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + select_temp + " = select i1 " + compare_temp + ", i8* " + variant_pointer + ", i8* " + current_pointer);
+            current_lines.push("  " + select_temp + " = select i1 " + compare_temp + ", i8* " + variant_pointer + ", i8* " + current_pointer);
             current_temp += 1;
 
             current_pointer = select_temp;
@@ -233,7 +241,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     }
 
     if matched_variants.length == 0 {
-        messages = append_string(messages, "llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` on any variant");
+        messages.push("llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` on any variant");
         return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
@@ -263,9 +271,9 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
 
     if selected_variants.length == 0 {
         if expected_type.length > 0 {
-            messages = append_string(messages, "llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` compatible with expected type `" + expected_type + "`");
+            messages.push("llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` compatible with expected type `" + expected_type + "`");
         } else {
-            messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
+            messages.push("llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
         }
         return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
@@ -317,7 +325,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     }
 
     if !consistent_base {
-        messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
+        messages.push("llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
         return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
@@ -340,11 +348,11 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     }
     let mut pointer_coercion -> boolean = false;
     if pointer_depth_mismatch {
-        if (max_pointer_depth - min_pointer_depth == 1) && base_type.length > 0 && base_type[0] == "%" {
+        if (max_pointer_depth - min_pointer_depth == 1) && base_type.length > 0 && substring(base_type, 0, 1) == "%" {
             pointer_coercion = true;
             field_type = base_type + "*";
         } else {
-            messages = append_string(messages, "llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
+            messages.push("llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
             return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
         }
     }
@@ -352,9 +360,9 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     let mut enum_pointer_value -> string = base_operand.value;
     if !pointer_available {
         let alloca_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + alloca_temp + " = alloca " + enum_info.llvm_name);
+        current_lines.push("  " + alloca_temp + " = alloca " + enum_info.llvm_name);
         current_temp += 1;
-        current_lines = append_string(current_lines, "  store " + enum_info.llvm_name + " " + base_operand.value + ", " + enum_info.llvm_name + "* " + alloca_temp);
+        current_lines.push("  store " + enum_info.llvm_name + " " + base_operand.value + ", " + enum_info.llvm_name + "* " + alloca_temp);
         enum_pointer_value = alloca_temp;
     }
 
@@ -373,18 +381,18 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         if enum_info.max_payload_size > 0 && enum_info.align > enum_info.tag_size {
             payload_field_index = 2;
         }
-        current_lines = append_string(current_lines, "  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + enum_pointer_value + ", i32 0, i32 " + number_to_string(payload_field_index));
+        current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + enum_pointer_value + ", i32 0, i32 " + number_to_string(payload_field_index));
         current_temp += 1;
 
         let byte_ptr_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
+        current_lines.push("  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
         current_temp += 1;
 
         let field_offset_in_payload = field_info.offset - variant_info.offset;
         let mut field_ptr_temp -> string = byte_ptr_temp;
         if field_offset_in_payload > 0 {
             let offset_ptr_temp = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+            current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
             current_temp += 1;
             field_ptr_temp = offset_ptr_temp;
         }
@@ -407,28 +415,28 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
             storage_type = mapped;
         }
         let typed_ptr_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
+        current_lines.push("  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
         current_temp += 1;
 
         let mut value_temp -> string = typed_ptr_temp;
         if pointer_coercion {
             if ends_with_pointer_suffix(storage_type) {
                 value_temp = format_temp_name(current_temp);
-                current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp);
+                current_lines.push("  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp);
                 current_temp += 1;
             }
         } else {
             value_temp = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp);
+            current_lines.push("  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp);
             current_temp += 1;
         }
 
         let compare_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + compare_temp + " = icmp eq " + tag_operand.llvm_type + " " + tag_operand.value + ", " + number_to_string(variant_info.tag));
+        current_lines.push("  " + compare_temp + " = icmp eq " + tag_operand.llvm_type + " " + tag_operand.value + ", " + number_to_string(variant_info.tag));
         current_temp += 1;
 
         let select_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + select_temp + " = select i1 " + compare_temp + ", " + field_type + " " + value_temp + ", " + field_type + " " + current_value_text);
+        current_lines.push("  " + select_temp + " = select i1 " + compare_temp + ", " + field_type + " " + value_temp + ", " + field_type + " " + current_value_text);
         current_temp += 1;
 
         current_value_text = select_temp;
@@ -439,7 +447,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
 }
 
-fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
+fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult ![io] {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
     let mut diagnostics -> string[] = base_result.diagnostics;
     let mut collected_string_constants -> StringConstant[] = base_result.string_constants;
@@ -453,15 +461,15 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
 
     if parse.field == "length" && ends_with_pointer_suffix(base_operand.llvm_type) {
         let inner_type = strip_pointer_suffix(base_operand.llvm_type);
-        if starts_with(inner_type, "{") && inner_type.length > 0 && inner_type[inner_type.length - 1] == "}" {
+        if starts_with(inner_type, "{") && inner_type.length > 0 && substring(inner_type, inner_type.length - 1, inner_type.length) == "}" {
             let struct_inner = trim_text(substring(inner_type, 1, inner_type.length - 1));
             if contains_text(struct_inner, ", i64") {
                 let loaded_array = format_temp_name(current_temp);
-                current_lines = append_string(current_lines, "  " + loaded_array + " = load " + inner_type + ", " + base_operand.llvm_type + " " + base_operand.value);
+                current_lines.push("  " + loaded_array + " = load " + inner_type + ", " + base_operand.llvm_type + " " + base_operand.value);
                 current_temp += 1;
 
                 let length_temp = format_temp_name(current_temp);
-                current_lines = append_string(current_lines, "  " + length_temp + " = extractvalue " + inner_type + " " + loaded_array + ", 1");
+                current_lines.push("  " + length_temp + " = extractvalue " + inner_type + " " + loaded_array + ", 1");
                 current_temp += 1;
 
                 let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
@@ -472,7 +480,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
 
     if parse.field == "length" && base_operand.llvm_type == "i8*" {
         let length_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + length_temp + " = call i64 @sailfin_runtime_string_length(i8* " + base_operand.value + ")");
+        current_lines.push("  " + length_temp + " = call i64 @sailfin_runtime_string_length(i8* " + base_operand.value + ")");
         current_temp += 1;
         let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
@@ -481,37 +489,283 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     let mut struct_info -> StructTypeInfo? = null;
     let mut pointer_available -> boolean = false;
     let pointer_operand = base_operand;
+    let mut base_type_trimmed -> string = base_operand.llvm_type;
+    loop {
+        if !starts_with(base_type_trimmed, " ") {
+            break;
+        }
+        base_type_trimmed = substring(base_type_trimmed, 1, base_type_trimmed.length);
+    }
 
-    if ends_with_pointer_suffix(base_operand.llvm_type) {
-        let candidate = strip_pointer_suffix(base_operand.llvm_type);
+    if ends_with_pointer_suffix(base_type_trimmed) {
+        let candidate = trim_text(strip_pointer_suffix(base_type_trimmed));
         struct_info = find_struct_info_by_llvm_type(context, candidate);
         if struct_info == null {
             let enum_info_candidate = find_enum_info_by_llvm_type(context, candidate);
             if enum_info_candidate != null {
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, true, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
-            if base_operand.llvm_type == "i8*" {
-                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
+            if base_type_trimmed == "i8*" {
+                // Inline file-based struct field access (GEP) before falling back to get_field.
+                // We inline this instead of using a helper function because the seed corrupts
+                // ExpressionResult struct returns even within the same module.
+                let mut _igep_done -> boolean = false;
+                if fs.exists("build/sailfin/.struct_info") {
+                    let _igep_base = trim_text(parse.base);
+                    let mut _igep_struct -> string = "";
+                    // Check bindings for type annotation
+                    let mut _igep_bi -> number = 0;
+                    loop {
+                        if _igep_bi >= bindings.length { break; }
+                        if bindings[_igep_bi].name == _igep_base {
+                            _igep_struct = bindings[_igep_bi].type_annotation;
+                            break;
+                        }
+                        _igep_bi += 1;
+                    }
+                    // For self param, extract struct from function name
+                    if _igep_struct.length == 0 && _igep_base == "self" && fs.exists("build/sailfin/.instr_fn_name") {
+                        let _igep_fn = fs.readFile("build/sailfin/.instr_fn_name");
+                        if _igep_fn.length > 0 {
+                            let _igep_si = fs.readFile("build/sailfin/.struct_info");
+                            let mut _igep_sp -> number = 0;
+                            loop {
+                                if _igep_sp >= _igep_si.length { break; }
+                                let _igep_nl = index_of(substring(_igep_si, _igep_sp, _igep_si.length), "\n");
+                                let mut _igep_ln -> string = "";
+                                if _igep_nl < 0 { _igep_ln = substring(_igep_si, _igep_sp, _igep_si.length); _igep_sp = _igep_si.length; }
+                                else { _igep_ln = substring(_igep_si, _igep_sp, _igep_sp + _igep_nl); _igep_sp = _igep_sp + _igep_nl + 1; }
+                                if _igep_ln.length == 0 { continue; }
+                                let _igep_t = index_of(_igep_ln, "\t");
+                                if _igep_t < 0 { continue; }
+                                let _igep_sn = substring(_igep_ln, 0, _igep_t);
+                                if _igep_sn.length > 0 && _igep_sn.length < _igep_fn.length {
+                                    if substring(_igep_fn, 0, _igep_sn.length) == _igep_sn {
+                                        _igep_struct = _igep_sn;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Check condition_locals for local variables
+                    if _igep_struct.length == 0 && fs.exists("build/sailfin/.condition_locals") {
+                        let _igep_cl = fs.readFile("build/sailfin/.condition_locals");
+                        let mut _igep_cp -> number = 0;
+                        loop {
+                            if _igep_cp >= _igep_cl.length { break; }
+                            let _igep_cnl = index_of(substring(_igep_cl, _igep_cp, _igep_cl.length), "\n");
+                            let mut _igep_cln -> string = "";
+                            if _igep_cnl < 0 { _igep_cln = substring(_igep_cl, _igep_cp, _igep_cl.length); _igep_cp = _igep_cl.length; }
+                            else { _igep_cln = substring(_igep_cl, _igep_cp, _igep_cp + _igep_cnl); _igep_cp = _igep_cp + _igep_cnl + 1; }
+                            if _igep_cln.length == 0 { continue; }
+                            let _igep_ct = index_of(_igep_cln, "\t");
+                            if _igep_ct < 0 { continue; }
+                            if substring(_igep_cln, 0, _igep_ct) == _igep_base {
+                                let _igep_cr = substring(_igep_cln, _igep_ct + 1, _igep_cln.length);
+                                let _igep_ct2 = index_of(_igep_cr, "\t");
+                                if _igep_ct2 > 0 { _igep_struct = substring(_igep_cr, 0, _igep_ct2); }
+                                break;
+                            }
+                        }
+                    }
+                    if _igep_struct.length > 0 {
+                        // Look up struct in .struct_info and find field
+                        let _igep_raw = fs.readFile("build/sailfin/.struct_info");
+                        let mut _igep_rp -> number = 0;
+                        let mut _igep_llvm -> string = "";
+                        let mut _igep_fidx -> number = -1;
+                        let mut _igep_ftype -> string = "";
+                        loop {
+                            if _igep_rp >= _igep_raw.length { break; }
+                            let _igep_rnl = index_of(substring(_igep_raw, _igep_rp, _igep_raw.length), "\n");
+                            let mut _igep_rln -> string = "";
+                            if _igep_rnl < 0 { _igep_rln = substring(_igep_raw, _igep_rp, _igep_raw.length); _igep_rp = _igep_raw.length; }
+                            else { _igep_rln = substring(_igep_raw, _igep_rp, _igep_rp + _igep_rnl); _igep_rp = _igep_rp + _igep_rnl + 1; }
+                            if _igep_rln.length == 0 { continue; }
+                            let _igep_rt = index_of(_igep_rln, "\t");
+                            if _igep_rt < 0 { continue; }
+                            if substring(_igep_rln, 0, _igep_rt) != _igep_struct { continue; }
+                            let _igep_rr = substring(_igep_rln, _igep_rt + 1, _igep_rln.length);
+                            let _igep_rt2 = index_of(_igep_rr, "\t");
+                            if _igep_rt2 < 0 { continue; }
+                            _igep_llvm = substring(_igep_rr, 0, _igep_rt2);
+                            let _igep_fs = substring(_igep_rr, _igep_rt2 + 1, _igep_rr.length);
+                            let mut _igep_fi -> number = 0;
+                            let mut _igep_fp -> number = 0;
+                            loop {
+                                if _igep_fp >= _igep_fs.length { break; }
+                                let _igep_fc = index_of(substring(_igep_fs, _igep_fp, _igep_fs.length), ",");
+                                let mut _igep_fe -> string = "";
+                                if _igep_fc < 0 { _igep_fe = substring(_igep_fs, _igep_fp, _igep_fs.length); _igep_fp = _igep_fs.length; }
+                                else { _igep_fe = substring(_igep_fs, _igep_fp, _igep_fp + _igep_fc); _igep_fp = _igep_fp + _igep_fc + 1; }
+                                let _igep_fk = index_of(_igep_fe, ":");
+                                if _igep_fk < 0 { _igep_fi += 1; continue; }
+                                if substring(_igep_fe, 0, _igep_fk) == parse.field {
+                                    _igep_fidx = _igep_fi;
+                                    _igep_ftype = substring(_igep_fe, _igep_fk + 1, _igep_fe.length);
+                                    break;
+                                }
+                                _igep_fi += 1;
+                            }
+                            break;
+                        }
+                        if _igep_llvm.length > 0 && _igep_fidx >= 0 && _igep_ftype.length > 0 {
+                            // Emit bitcast + GEP + load
+                            let _igep_ct1 = format_temp_name(current_temp);
+                            current_lines.push("  " + _igep_ct1 + " = bitcast i8* " + base_operand.value + " to " + _igep_llvm + "*");
+                            current_temp += 1;
+                            let _igep_ct2_name = format_temp_name(current_temp);
+                            current_lines.push("  " + _igep_ct2_name + " = getelementptr inbounds " + _igep_llvm + ", " + _igep_llvm + "* " + _igep_ct1 + ", i32 0, i32 " + number_to_string(_igep_fidx));
+                            current_temp += 1;
+                            let _igep_ct3 = format_temp_name(current_temp);
+                            current_lines.push("  " + _igep_ct3 + " = load " + _igep_ftype + ", " + _igep_ftype + "* " + _igep_ct2_name);
+                            current_temp += 1;
+                            let _igep_op = LLVMOperand { llvm_type: _igep_ftype, value: _igep_ct3 };
+                            _igep_done = true;
+                            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: _igep_op, diagnostics: diagnostics, string_constants: collected_string_constants };
+                        }
+                    }
+                }
+                if !_igep_done {
+                    return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
+                }
             }
 
-            if base_operand.llvm_type != "double" && base_operand.llvm_type != "i8" {
-                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            if base_type_trimmed != "double" && base_type_trimmed != "i8" {
+                diagnostics.push("llvm lowering: member access base `" + base_type_trimmed + "` lacks struct metadata");
             }
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
         pointer_available = true;
     } else {
-        struct_info = find_struct_info_by_llvm_type(context, base_operand.llvm_type);
+        struct_info = find_struct_info_by_llvm_type(context, base_type_trimmed);
         if struct_info == null {
-            let enum_info_candidate = find_enum_info_by_llvm_type(context, base_operand.llvm_type);
+            let enum_info_candidate = find_enum_info_by_llvm_type(context, base_type_trimmed);
             if enum_info_candidate != null {
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
-            if base_operand.llvm_type == "i8*" {
-                return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
+            if base_type_trimmed == "i8*" {
+                // Same inline GEP logic for the non-pointer path
+                let mut _igep2_done -> boolean = false;
+                if fs.exists("build/sailfin/.struct_info") {
+                    let _igep2_base = trim_text(parse.base);
+                    let mut _igep2_struct -> string = "";
+                    let mut _igep2_bi -> number = 0;
+                    loop {
+                        if _igep2_bi >= bindings.length { break; }
+                        if bindings[_igep2_bi].name == _igep2_base {
+                            _igep2_struct = bindings[_igep2_bi].type_annotation;
+                            break;
+                        }
+                        _igep2_bi += 1;
+                    }
+                    if _igep2_struct.length == 0 && _igep2_base == "self" && fs.exists("build/sailfin/.instr_fn_name") {
+                        let _igep2_fn = fs.readFile("build/sailfin/.instr_fn_name");
+                        if _igep2_fn.length > 0 {
+                            let _igep2_si = fs.readFile("build/sailfin/.struct_info");
+                            let mut _igep2_sp -> number = 0;
+                            loop {
+                                if _igep2_sp >= _igep2_si.length { break; }
+                                let _igep2_nl = index_of(substring(_igep2_si, _igep2_sp, _igep2_si.length), "\n");
+                                let mut _igep2_ln -> string = "";
+                                if _igep2_nl < 0 { _igep2_ln = substring(_igep2_si, _igep2_sp, _igep2_si.length); _igep2_sp = _igep2_si.length; }
+                                else { _igep2_ln = substring(_igep2_si, _igep2_sp, _igep2_sp + _igep2_nl); _igep2_sp = _igep2_sp + _igep2_nl + 1; }
+                                if _igep2_ln.length == 0 { continue; }
+                                let _igep2_t = index_of(_igep2_ln, "\t");
+                                if _igep2_t < 0 { continue; }
+                                let _igep2_sn = substring(_igep2_ln, 0, _igep2_t);
+                                if _igep2_sn.length > 0 && _igep2_sn.length < _igep2_fn.length {
+                                    if substring(_igep2_fn, 0, _igep2_sn.length) == _igep2_sn {
+                                        _igep2_struct = _igep2_sn;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if _igep2_struct.length == 0 && fs.exists("build/sailfin/.condition_locals") {
+                        let _igep2_cl = fs.readFile("build/sailfin/.condition_locals");
+                        let mut _igep2_cp -> number = 0;
+                        loop {
+                            if _igep2_cp >= _igep2_cl.length { break; }
+                            let _igep2_cnl = index_of(substring(_igep2_cl, _igep2_cp, _igep2_cl.length), "\n");
+                            let mut _igep2_cln -> string = "";
+                            if _igep2_cnl < 0 { _igep2_cln = substring(_igep2_cl, _igep2_cp, _igep2_cl.length); _igep2_cp = _igep2_cl.length; }
+                            else { _igep2_cln = substring(_igep2_cl, _igep2_cp, _igep2_cp + _igep2_cnl); _igep2_cp = _igep2_cp + _igep2_cnl + 1; }
+                            if _igep2_cln.length == 0 { continue; }
+                            let _igep2_ct = index_of(_igep2_cln, "\t");
+                            if _igep2_ct < 0 { continue; }
+                            if substring(_igep2_cln, 0, _igep2_ct) == _igep2_base {
+                                let _igep2_cr = substring(_igep2_cln, _igep2_ct + 1, _igep2_cln.length);
+                                let _igep2_ct2 = index_of(_igep2_cr, "\t");
+                                if _igep2_ct2 > 0 { _igep2_struct = substring(_igep2_cr, 0, _igep2_ct2); }
+                                break;
+                            }
+                        }
+                    }
+                    if _igep2_struct.length > 0 {
+                        let _igep2_raw = fs.readFile("build/sailfin/.struct_info");
+                        let mut _igep2_rp -> number = 0;
+                        let mut _igep2_llvm -> string = "";
+                        let mut _igep2_fidx -> number = -1;
+                        let mut _igep2_ftype -> string = "";
+                        loop {
+                            if _igep2_rp >= _igep2_raw.length { break; }
+                            let _igep2_rnl = index_of(substring(_igep2_raw, _igep2_rp, _igep2_raw.length), "\n");
+                            let mut _igep2_rln -> string = "";
+                            if _igep2_rnl < 0 { _igep2_rln = substring(_igep2_raw, _igep2_rp, _igep2_raw.length); _igep2_rp = _igep2_raw.length; }
+                            else { _igep2_rln = substring(_igep2_raw, _igep2_rp, _igep2_rp + _igep2_rnl); _igep2_rp = _igep2_rp + _igep2_rnl + 1; }
+                            if _igep2_rln.length == 0 { continue; }
+                            let _igep2_rt = index_of(_igep2_rln, "\t");
+                            if _igep2_rt < 0 { continue; }
+                            if substring(_igep2_rln, 0, _igep2_rt) != _igep2_struct { continue; }
+                            let _igep2_rr = substring(_igep2_rln, _igep2_rt + 1, _igep2_rln.length);
+                            let _igep2_rt2 = index_of(_igep2_rr, "\t");
+                            if _igep2_rt2 < 0 { continue; }
+                            _igep2_llvm = substring(_igep2_rr, 0, _igep2_rt2);
+                            let _igep2_fs = substring(_igep2_rr, _igep2_rt2 + 1, _igep2_rr.length);
+                            let mut _igep2_fi -> number = 0;
+                            let mut _igep2_fp -> number = 0;
+                            loop {
+                                if _igep2_fp >= _igep2_fs.length { break; }
+                                let _igep2_fc = index_of(substring(_igep2_fs, _igep2_fp, _igep2_fs.length), ",");
+                                let mut _igep2_fe -> string = "";
+                                if _igep2_fc < 0 { _igep2_fe = substring(_igep2_fs, _igep2_fp, _igep2_fs.length); _igep2_fp = _igep2_fs.length; }
+                                else { _igep2_fe = substring(_igep2_fs, _igep2_fp, _igep2_fp + _igep2_fc); _igep2_fp = _igep2_fp + _igep2_fc + 1; }
+                                let _igep2_fk = index_of(_igep2_fe, ":");
+                                if _igep2_fk < 0 { _igep2_fi += 1; continue; }
+                                if substring(_igep2_fe, 0, _igep2_fk) == parse.field {
+                                    _igep2_fidx = _igep2_fi;
+                                    _igep2_ftype = substring(_igep2_fe, _igep2_fk + 1, _igep2_fe.length);
+                                    break;
+                                }
+                                _igep2_fi += 1;
+                            }
+                            break;
+                        }
+                        if _igep2_llvm.length > 0 && _igep2_fidx >= 0 && _igep2_ftype.length > 0 {
+                            let _igep2_ct1 = format_temp_name(current_temp);
+                            current_lines.push("  " + _igep2_ct1 + " = bitcast i8* " + base_operand.value + " to " + _igep2_llvm + "*");
+                            current_temp += 1;
+                            let _igep2_ct2n = format_temp_name(current_temp);
+                            current_lines.push("  " + _igep2_ct2n + " = getelementptr inbounds " + _igep2_llvm + ", " + _igep2_llvm + "* " + _igep2_ct1 + ", i32 0, i32 " + number_to_string(_igep2_fidx));
+                            current_temp += 1;
+                            let _igep2_ct3 = format_temp_name(current_temp);
+                            current_lines.push("  " + _igep2_ct3 + " = load " + _igep2_ftype + ", " + _igep2_ftype + "* " + _igep2_ct2n);
+                            current_temp += 1;
+                            let _igep2_op = LLVMOperand { llvm_type: _igep2_ftype, value: _igep2_ct3 };
+                            _igep2_done = true;
+                            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: _igep2_op, diagnostics: diagnostics, string_constants: collected_string_constants };
+                        }
+                    }
+                }
+                if !_igep2_done {
+                    return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
+                }
             }
-            if base_operand.llvm_type != "double" && base_operand.llvm_type != "i8" {
-                diagnostics = append_string(diagnostics, "llvm lowering: member access base `" + base_operand.llvm_type + "` lacks struct metadata");
+            if base_type_trimmed != "double" && base_type_trimmed != "i8" {
+                diagnostics.push("llvm lowering: member access base `" + base_type_trimmed + "` lacks struct metadata");
             }
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
         }
@@ -520,17 +774,17 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     let info = struct_info;
     let field_info = find_struct_field_info(info, parse.field);
     if field_info == null {
-        diagnostics = append_string(diagnostics, "llvm lowering: struct `" + info.name + "` has no field `" + parse.field + "`");
+        diagnostics.push("llvm lowering: struct `" + info.name + "` has no field `" + parse.field + "`");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     if pointer_available {
         let struct_type = info.llvm_name;
         let gep_name = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + gep_name + " = getelementptr " + struct_type + ", " + struct_type + "* " + pointer_operand.value + ", i32 0, i32 " + number_to_string(field_info.index));
+        current_lines.push("  " + gep_name + " = getelementptr " + struct_type + ", " + struct_type + "* " + pointer_operand.value + ", i32 0, i32 " + number_to_string(field_info.index));
         current_temp += 1;
         let load_name = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + load_name + " = load " + field_info.llvm_type + ", " + field_info.llvm_type + "* " + gep_name);
+        current_lines.push("  " + load_name + " = load " + field_info.llvm_type + ", " + field_info.llvm_type + "* " + gep_name);
         current_temp += 1;
 
         if field_info.llvm_type == "i8*" && field_info.type_annotation.length > 0 {
@@ -538,7 +792,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
             let enum_info = resolve_enum_info_for_literal(context, base_type);
             if enum_info != null {
                 let cast_name = format_temp_name(current_temp);
-                current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + load_name + " to " + enum_info.llvm_name + "*");
+                current_lines.push("  " + cast_name + " = bitcast i8* " + load_name + " to " + enum_info.llvm_name + "*");
                 current_temp += 1;
                 let typed_operand = LLVMOperand { llvm_type: enum_info.llvm_name + "*", value: cast_name };
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
@@ -547,7 +801,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
             let struct_info_candidate = find_struct_info_by_name(context, base_type);
             if struct_info_candidate != null {
                 let cast_name = format_temp_name(current_temp);
-                current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + load_name + " to " + struct_info_candidate.llvm_name + "*");
+                current_lines.push("  " + cast_name + " = bitcast i8* " + load_name + " to " + struct_info_candidate.llvm_name + "*");
                 current_temp += 1;
                 let typed_operand = LLVMOperand { llvm_type: struct_info_candidate.llvm_name + "*", value: cast_name };
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
@@ -559,7 +813,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     }
 
     let extract_name = format_temp_name(current_temp);
-    current_lines = append_string(current_lines, "  " + extract_name + " = extractvalue " + info.llvm_name + " " + base_operand.value + ", " + number_to_string(field_info.index));
+    current_lines.push("  " + extract_name + " = extractvalue " + info.llvm_name + " " + base_operand.value + ", " + number_to_string(field_info.index));
     current_temp += 1;
 
     if field_info.llvm_type == "i8*" && field_info.type_annotation.length > 0 {
@@ -567,7 +821,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
         let enum_info = resolve_enum_info_for_literal(context, base_type);
         if enum_info != null {
             let cast_name = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + extract_name + " to " + enum_info.llvm_name + "*");
+            current_lines.push("  " + cast_name + " = bitcast i8* " + extract_name + " to " + enum_info.llvm_name + "*");
             current_temp += 1;
             let typed_operand = LLVMOperand { llvm_type: enum_info.llvm_name + "*", value: cast_name };
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
@@ -576,7 +830,7 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
         let struct_info_candidate = find_struct_info_by_name(context, base_type);
         if struct_info_candidate != null {
             let cast_name = format_temp_name(current_temp);
-            current_lines = append_string(current_lines, "  " + cast_name + " = bitcast i8* " + extract_name + " to " + struct_info_candidate.llvm_name + "*");
+            current_lines.push("  " + cast_name + " = bitcast i8* " + extract_name + " to " + struct_info_candidate.llvm_name + "*");
             current_temp += 1;
             let typed_operand = LLVMOperand { llvm_type: struct_info_candidate.llvm_name + "*", value: cast_name };
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
@@ -587,8 +841,177 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
+// File-based struct field access: when the TypeContext is corrupted (v0.1.1 seed ABI),
+// look up struct info from the .struct_info file and emit a proper GEP instruction
+// instead of sailfin_runtime_get_field.
+fn try_file_based_struct_field_access(base_name -> string, field_name -> string, base_operand -> LLVMOperand, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult ![io] {
+    let empty_constants = empty_string_constant_set();
+    let null_result = ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+    if !fs.exists("build/sailfin/.struct_info") {
+        return null_result;
+    }
+    // Find the struct type annotation for this base from bindings or locals.
+    let mut struct_type_ann -> string = "";
+    let trimmed_base = trim_text(base_name);
+    let mut _bi -> number = 0;
+    loop {
+        if _bi >= bindings.length { break; }
+        if bindings[_bi].name == trimmed_base {
+            struct_type_ann = bindings[_bi].type_annotation;
+            break;
+        }
+        _bi += 1;
+    }
+    if struct_type_ann.length == 0 {
+        // Check condition_locals file for locals
+        if fs.exists("build/sailfin/.condition_locals") {
+            let _cl_raw = fs.readFile("build/sailfin/.condition_locals");
+            let mut _cl_pos -> number = 0;
+            loop {
+                if _cl_pos >= _cl_raw.length { break; }
+                let _cl_nl = index_of(substring(_cl_raw, _cl_pos, _cl_raw.length), "\n");
+                let mut _cl_line -> string = "";
+                if _cl_nl < 0 {
+                    _cl_line = substring(_cl_raw, _cl_pos, _cl_raw.length);
+                    _cl_pos = _cl_raw.length;
+                } else {
+                    _cl_line = substring(_cl_raw, _cl_pos, _cl_pos + _cl_nl);
+                    _cl_pos = _cl_pos + _cl_nl + 1;
+                }
+                if _cl_line.length == 0 { continue; }
+                let _cl_t1 = index_of(_cl_line, "\t");
+                if _cl_t1 < 0 { continue; }
+                let _cl_name = substring(_cl_line, 0, _cl_t1);
+                if _cl_name != trimmed_base { continue; }
+                let _cl_rest = substring(_cl_line, _cl_t1 + 1, _cl_line.length);
+                let _cl_t2 = index_of(_cl_rest, "\t");
+                if _cl_t2 > 0 {
+                    struct_type_ann = substring(_cl_rest, 0, _cl_t2);
+                }
+                break;
+            }
+        }
+    }
+    if struct_type_ann.length == 0 && trimmed_base == "self" {
+        // For "self" parameter in methods, extract the struct name from the
+        // current function name (e.g., "Persongreet" → struct "Person").
+        // The function name is available from .instr_fn_name file.
+        if fs.exists("build/sailfin/.instr_fn_name") {
+            let _fn_name = fs.readFile("build/sailfin/.instr_fn_name");
+            if _fn_name.length > 0 {
+                // Check each struct in .struct_info; if the function name
+                // starts with the struct name, that's our struct.
+                let _sf_raw = fs.readFile("build/sailfin/.struct_info");
+                let mut _sf_pos -> number = 0;
+                loop {
+                    if _sf_pos >= _sf_raw.length { break; }
+                    let _sf_nl = index_of(substring(_sf_raw, _sf_pos, _sf_raw.length), "\n");
+                    let mut _sf_line -> string = "";
+                    if _sf_nl < 0 {
+                        _sf_line = substring(_sf_raw, _sf_pos, _sf_raw.length);
+                        _sf_pos = _sf_raw.length;
+                    } else {
+                        _sf_line = substring(_sf_raw, _sf_pos, _sf_pos + _sf_nl);
+                        _sf_pos = _sf_pos + _sf_nl + 1;
+                    }
+                    if _sf_line.length == 0 { continue; }
+                    let _sf_t1 = index_of(_sf_line, "\t");
+                    if _sf_t1 < 0 { continue; }
+                    let _sf_sname = substring(_sf_line, 0, _sf_t1);
+                    if _sf_sname.length > 0 && _sf_sname.length < _fn_name.length {
+                        let _fn_prefix = substring(_fn_name, 0, _sf_sname.length);
+                        if _fn_prefix == _sf_sname {
+                            struct_type_ann = _sf_sname;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if struct_type_ann.length == 0 {
+        return null_result;
+    }
+    // Look up struct in .struct_info
+    let _si_raw = fs.readFile("build/sailfin/.struct_info");
+    if _si_raw.length == 0 {
+        return null_result;
+    }
+    let mut _si_llvm -> string = "";
+    let mut _si_field_idx -> number = -1;
+    let mut _si_field_type -> string = "";
+    let mut _si_pos -> number = 0;
+    loop {
+        if _si_pos >= _si_raw.length { break; }
+        let _si_nl = index_of(substring(_si_raw, _si_pos, _si_raw.length), "\n");
+        let mut _si_line -> string = "";
+        if _si_nl < 0 {
+            _si_line = substring(_si_raw, _si_pos, _si_raw.length);
+            _si_pos = _si_raw.length;
+        } else {
+            _si_line = substring(_si_raw, _si_pos, _si_pos + _si_nl);
+            _si_pos = _si_pos + _si_nl + 1;
+        }
+        if _si_line.length == 0 { continue; }
+        let _si_t1 = index_of(_si_line, "\t");
+        if _si_t1 < 0 { continue; }
+        let _si_name = substring(_si_line, 0, _si_t1);
+        if _si_name != struct_type_ann { continue; }
+        let _si_rest = substring(_si_line, _si_t1 + 1, _si_line.length);
+        let _si_t2 = index_of(_si_rest, "\t");
+        if _si_t2 < 0 { continue; }
+        _si_llvm = substring(_si_rest, 0, _si_t2);
+        let _si_fields = substring(_si_rest, _si_t2 + 1, _si_rest.length);
+        // Find the field index and type
+        let mut _fi -> number = 0;
+        let mut _fpos -> number = 0;
+        loop {
+            if _fpos >= _si_fields.length { break; }
+            let _fcomma = index_of(substring(_si_fields, _fpos, _si_fields.length), ",");
+            let mut _fentry -> string = "";
+            if _fcomma < 0 {
+                _fentry = substring(_si_fields, _fpos, _si_fields.length);
+                _fpos = _si_fields.length;
+            } else {
+                _fentry = substring(_si_fields, _fpos, _fpos + _fcomma);
+                _fpos = _fpos + _fcomma + 1;
+            }
+            let _fcolon = index_of(_fentry, ":");
+            if _fcolon < 0 { _fi += 1; continue; }
+            let _fname = substring(_fentry, 0, _fcolon);
+            let _ftype = substring(_fentry, _fcolon + 1, _fentry.length);
+            if _fname == field_name {
+                _si_field_idx = _fi;
+                _si_field_type = _ftype;
+                break;
+            }
+            _fi += 1;
+        }
+        break;
+    }
+    if _si_llvm.length == 0 || _si_field_idx < 0 || _si_field_type.length == 0 {
+        return null_result;
+    }
+    // Emit: bitcast i8* to %Struct*, then GEP, then load
+    let mut _out_lines = lines;
+    let mut _out_temp = temp_index;
+    let cast_temp = format_temp_name(_out_temp);
+    _out_lines.push("  " + cast_temp + " = bitcast i8* " + base_operand.value + " to " + _si_llvm + "*");
+    _out_temp += 1;
+    let gep_temp = format_temp_name(_out_temp);
+    _out_lines.push("  " + gep_temp + " = getelementptr inbounds " + _si_llvm + ", " + _si_llvm + "* " + cast_temp + ", i32 0, i32 " + number_to_string(_si_field_idx));
+    _out_temp += 1;
+    let load_temp = format_temp_name(_out_temp);
+    let field_ptr_type = _si_field_type + "*";
+    _out_lines.push("  " + load_temp + " = load " + _si_field_type + ", " + field_ptr_type + " " + gep_temp);
+    _out_temp += 1;
+    let operand = LLVMOperand { llvm_type: _si_field_type, value: load_temp };
+    return ExpressionResult { lines: _out_lines, temp_index: _out_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+}
+
 export {
     lower_member_access,
+    lower_dynamic_member_access,
     lower_enum_member_access,
     lower_runtime_global_reference,
 };

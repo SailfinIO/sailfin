@@ -112,7 +112,7 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
         return "";
     }
     // Check if this is an optional type (ends with ?)
-    if trimmed[trimmed.length - 1] != "?" {
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != "?" {
         return "";
     }
     // Extract the inner type (everything before the ?)
@@ -140,7 +140,7 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
         return "i8*";
     }
     // If already a pointer, return as-is, otherwise make it a pointer
-    if inner_type[inner_type.length - 1] == "*" {
+    if substring(inner_type, inner_type.length - 1, inner_type.length) == "*" {
         return inner_type;
     }
     return inner_type + "*";
@@ -181,7 +181,7 @@ fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
     if remainder.length == 0 {
         return "";
     }
-    if remainder[0] == "(" && remainder[remainder.length - 1] == ")" {
+    if substring(remainder, 0, 1) == "(" && substring(remainder, remainder.length - 1, remainder.length) == ")" {
         remainder = trim_text(substring(remainder, 1, remainder.length - 1));
     }
     let inner_type = map_reference_inner_type(context, remainder);
@@ -226,7 +226,7 @@ fn unwrap_move_wrapper(annotation -> string) -> string {
     if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
         let open_index = index_of(trimmed, "<");
         if open_index >= 0 {
-            if trimmed[trimmed.length - 1] == ">" {
+            if substring(trimmed, trimmed.length - 1, trimmed.length) == ">" {
                 let inner = substring(trimmed, open_index + 1, trimmed.length - 1);
                 return unwrap_move_wrapper(trim_text(inner));
             }
@@ -358,13 +358,13 @@ fn split_union_annotations(text -> string) -> string[] {
         if index < 0 {
             let tail = trim_text(remaining);
             if tail.length > 0 {
-                result = append_string(result, tail);
+                result.push(tail);
             }
             break;
         }
         let left = trim_text(substring(remaining, 0, index));
         if left.length > 0 {
-            result = append_string(result, left);
+            result.push(left);
         }
         remaining = trim_text(substring(remaining, index + 1, remaining.length));
     }
@@ -402,7 +402,7 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
         if mapped.length == 0 || mapped == "void" {
             return "";
         }
-        llvm_parts = append_string(llvm_parts, mapped);
+        llvm_parts.push(mapped);
         index += 1;
     }
     // Represent unions as an inline tagged struct: { i32, <variant0>, <variant1>, ... }

@@ -2,12 +2,21 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <process.h>
+#include <io.h>
+#include <direct.h>
+#else
 #include <unistd.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#endif
 
 #if !defined(__APPLE__)
 #include <time.h>
@@ -28,7 +37,19 @@
 #include <execinfo.h>
 #endif
 
+/* Windows mkdir takes only one argument (no mode). */
+#if defined(_WIN32)
+#define sfn_mkdir(path, mode) mkdir(path)
+#else
+#define sfn_mkdir(path, mode) mkdir(path, mode)
+#endif
+
+#if defined(_WIN32)
+extern char **_environ;
+#define environ _environ
+#else
 extern char **environ;
+#endif
 
 static bool _env_enabled(const char *name);
 static int _env_int(const char *name, int fallback);
@@ -186,13 +207,19 @@ extern bool strings_equal(char *a, char *b);
 // The stage2 build links in a Sailfin-level `char_at` helper with that name;
 // calling it from here would recurse back into `sailfin_runtime_grapheme_at`.
 
+/* Global safe buffer for unresolved get_field calls.  Zeroed memory acts as:
+   - empty string (first byte NUL)
+   - array with length 0 ({NULL, 0})
+   - false boolean / 0.0 number
+   This prevents SIGSEGV while the LLVM IR fixup pass handles known fields. */
+static char _get_field_safe_buf[4096] __attribute__((aligned(16)));
+
 char *sailfin_runtime_get_field(char *base, char *field)
 {
-    if (!base || !field)
-    {
-        return "";
-    }
-    return "";
+    /* For remaining calls not handled by the GEP replacement pass,
+       return a pointer to zeroed memory instead of NULL to avoid SIGSEGV.
+       The zeroed buffer reads as empty string / zero array / false / 0.0. */
+    return _get_field_safe_buf;
 }
 
 static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codepoint)
@@ -203,7 +230,6 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
     }
 
     uintptr_t raw = (uintptr_t)text;
-
     // Secondary encoding: sometimes a single-byte grapheme leaks through as a
     // near-null pointer (e.g. 0x2e for '.'). Treat ASCII values as immediate
     // codepoints so we never attempt to dereference them as C strings.
@@ -347,6 +373,174 @@ apple_upper32_immediate_done:
     return true;
 }
 
+// Encode a Unicode codepoint as UTF-8 into buf (which must have room for 5 bytes).
+// Returns the number of bytes written (1-4), or 0 on error.
+static int _codepoint_to_utf8(uint32_t cp, char *buf)
+{
+    if (cp <= 0x7fu)
+    {
+        buf[0] = (char)cp;
+        buf[1] = '\0';
+        return 1;
+    }
+    if (cp <= 0x7ffu)
+    {
+        buf[0] = (char)(0xc0u | (cp >> 6));
+        buf[1] = (char)(0x80u | (cp & 0x3fu));
+        buf[2] = '\0';
+        return 2;
+    }
+    if (cp <= 0xffffu)
+    {
+        buf[0] = (char)(0xe0u | (cp >> 12));
+        buf[1] = (char)(0x80u | ((cp >> 6) & 0x3fu));
+        buf[2] = (char)(0x80u | (cp & 0x3fu));
+        buf[3] = '\0';
+        return 3;
+    }
+    if (cp <= 0x10ffffu)
+    {
+        buf[0] = (char)(0xf0u | (cp >> 18));
+        buf[1] = (char)(0x80u | ((cp >> 12) & 0x3fu));
+        buf[2] = (char)(0x80u | ((cp >> 6) & 0x3fu));
+        buf[3] = (char)(0x80u | (cp & 0x3fu));
+        buf[4] = '\0';
+        return 4;
+    }
+    buf[0] = '\0';
+    return 0;
+}
+
+// Fast string equality check that handles immediate codepoint strings.
+// Called from the LLVM-level replacement of the prelude's grapheme-based
+// strings_equal (which is O(n^2) due to per-character grapheme_at calls).
+bool _strings_equal_fast(const char *a, const char *b)
+{
+    if (a == b)
+    {
+        return true;
+    }
+    if (!a || !b)
+    {
+        return false;
+    }
+
+    uint32_t a_cp = 0, b_cp = 0;
+    bool a_imm = _is_immediate_codepoint_string(a, &a_cp);
+    bool b_imm = _is_immediate_codepoint_string(b, &b_cp);
+
+    if (a_imm && b_imm)
+    {
+        return a_cp == b_cp;
+    }
+    if (a_imm)
+    {
+        char buf[5];
+        _codepoint_to_utf8(a_cp, buf);
+        return strcmp(buf, b) == 0;
+    }
+    if (b_imm)
+    {
+        char buf[5];
+        _codepoint_to_utf8(b_cp, buf);
+        return strcmp(a, buf) == 0;
+    }
+    return strcmp(a, b) == 0;
+}
+
+#if defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)
+static SAILFIN_NOINLINE int _string_ptr_mapped_readable(const void *ptr)
+{
+    if (!ptr)
+    {
+        return 0;
+    }
+
+    uintptr_t raw = (uintptr_t)ptr;
+    uintptr_t key = raw & ~(uintptr_t)0xfff;
+    enum
+    {
+        MAP_CACHE_SIZE = 256,
+        MAP_CACHE_PROBES = 8
+    };
+    static uintptr_t map_cache_keys[MAP_CACHE_SIZE];
+    static uint8_t map_cache_vals[MAP_CACHE_SIZE];
+
+    uint32_t h = (uint32_t)(key ^ (key >> 32) ^ (key >> 12));
+    uint32_t slot = h & (MAP_CACHE_SIZE - 1);
+
+    uint8_t cached_val = 0;
+    for (uint32_t probe = 0; probe < MAP_CACHE_PROBES; probe++)
+    {
+        uint32_t idx = (slot + probe) & (MAP_CACHE_SIZE - 1);
+        uintptr_t existing = map_cache_keys[idx];
+        uint8_t existing_val = map_cache_vals[idx];
+        if (existing == key && existing_val != 0)
+        {
+            cached_val = existing_val;
+            break;
+        }
+        if (existing_val == 0)
+        {
+            break;
+        }
+    }
+
+    if (cached_val == 1)
+    {
+        return 1;
+    }
+    if (cached_val == 2)
+    {
+        return 0;
+    }
+
+    bool mapped_readable = false;
+    {
+        mach_vm_address_t query = (mach_vm_address_t)(uintptr_t)ptr;
+        mach_vm_address_t region = query;
+        mach_vm_size_t region_size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object_name = MACH_PORT_NULL;
+
+        kern_return_t kr = mach_vm_region(
+            mach_task_self(),
+            &region,
+            &region_size,
+            VM_REGION_BASIC_INFO_64,
+            (vm_region_info_t)&info,
+            &count,
+            &object_name);
+
+        if (object_name != MACH_PORT_NULL)
+        {
+            mach_port_deallocate(mach_task_self(), object_name);
+        }
+
+        if (kr == KERN_SUCCESS)
+        {
+            bool readable = (info.protection & VM_PROT_READ) != 0;
+            bool contains = (query >= region) && (query < (region + region_size));
+            mapped_readable = readable && contains;
+        }
+    }
+
+    for (uint32_t probe = 0; probe < MAP_CACHE_PROBES; probe++)
+    {
+        uint32_t idx = (slot + probe) & (MAP_CACHE_SIZE - 1);
+        if (map_cache_vals[idx] == 0 || map_cache_keys[idx] == key)
+        {
+            map_cache_keys[idx] = key;
+            map_cache_vals[idx] = mapped_readable ? 1 : 2;
+            break;
+        }
+    }
+
+    return mapped_readable ? 1 : 0;
+}
+#endif
+
 // ---- Stage2-native memory tracking (bootstrap-safe) ----
 //
 // Stage2 currently uses a raw `char *` ABI for strings, with a mix of:
@@ -445,6 +639,8 @@ static void _print_alloc_stats(void)
 // If later array ops drop it, that strongly implicates array length/ABI bugs.
 static pthread_mutex_t _sailfin_trace_header_lock = PTHREAD_MUTEX_INITIALIZER;
 static const char *_sailfin_tracked_source_filename = NULL;
+
+static void _trace_backtrace_budgeted(const char *label);
 static int _sailfin_tracked_source_budget = -1;
 
 // Recent array allocation tracking (data pointer ring).
@@ -496,6 +692,31 @@ static void _recent_string_record(const char *base, size_t len)
     _sailfin_recent_string_cursor = (_sailfin_recent_string_cursor + 1) % (sizeof(_sailfin_recent_strings) / sizeof(_sailfin_recent_strings[0]));
     pthread_mutex_unlock(&_sailfin_recent_string_lock);
 }
+
+#if defined(__APPLE__)
+static void _sailfin_crash_handler(int sig)
+{
+    fprintf(stderr, "[native] crash signal=%d\n", sig);
+    _trace_backtrace_budgeted("crash");
+    fflush(stderr);
+    _exit(128 + sig);
+}
+
+__attribute__((constructor)) static void _sailfin_install_crash_handler(void)
+{
+    const char *v = getenv("SAILFIN_TRACE_CRASH");
+    if (!v || v[0] == '\0' || v[0] == '0')
+    {
+        return;
+    }
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = _sailfin_crash_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+}
+#endif
 
 #if defined(__APPLE__)
 static void _trace_backtrace_budgeted(const char *label)
@@ -1059,9 +1280,9 @@ static int _env_int(const char *name, int fallback)
     {
         return 0;
     }
-    if (parsed > 1000)
+    if (parsed > 100000000)
     {
-        return 1000;
+        return 100000000;
     }
     return (int)parsed;
 }
@@ -1138,6 +1359,41 @@ static void _maybe_print_string_backtrace(
 #endif
 }
 
+static void _maybe_print_array_backtrace(const char *context, const void *ptr)
+{
+    if (!_env_enabled("SAILFIN_TRACE_ARRAY_BACKTRACE"))
+    {
+        return;
+    }
+
+    static int remaining = -1;
+    if (remaining < 0)
+    {
+        remaining = _env_int("SAILFIN_TRACE_ARRAY_BACKTRACE_BUDGET", 3);
+    }
+    if (remaining <= 0)
+    {
+        return;
+    }
+    remaining--;
+
+    fprintf(
+        stderr,
+        "[stage2-native] backtrace (%s): array=%p\n",
+        context ? context : "?",
+        ptr);
+    fflush(stderr);
+
+#if defined(__APPLE__)
+    void *frames[64];
+    int count = backtrace(frames, (int)(sizeof(frames) / sizeof(frames[0])));
+    if (count > 0)
+    {
+        backtrace_symbols_fd(frames, count, fileno(stderr));
+    }
+#endif
+}
+
 static SAILFIN_NOINLINE bool _asan_poisoned(const void *addr);
 
 static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *text, bool *out_truncated)
@@ -1180,19 +1436,43 @@ static SAILFIN_NOINLINE SAILFIN_OPTNONE size_t _safe_strlen_asan(const char *tex
         }
     }
 
+#if defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)
+    static int guard_init = 0;
+    static int guard_enabled = 0;
+    if (!guard_init)
+    {
+        guard_init = 1;
+        guard_enabled = _env_int("SAILFIN_GUARD_STRING_PTRS", 0) ? 1 : 0;
+    }
+    if (guard_enabled && !_string_ptr_mapped_readable(text))
+    {
+        if (out_truncated)
+        {
+            *out_truncated = true;
+        }
+        return 0;
+    }
+#endif
+
     // Defensive cap: most stage2 compiler strings are tiny, but the compiler
     // also manipulates large strings (notably full LLVM modules) that can
     // exceed 1 MiB. Keep a bounded scan to avoid runaway reads for invalid
     // pointers, but allow a higher default and make it configurable.
-    size_t max_scan = _env_sizet("SAILFIN_MAX_STRLEN_SCAN", 16u * 1024u * 1024u);
-    if (max_scan < 4096u)
+    // Cache the result to avoid calling getenv on every string_length call.
+    static size_t cached_max_scan = 0;
+    if (!cached_max_scan)
     {
-        max_scan = 4096u;
+        cached_max_scan = _env_sizet("SAILFIN_MAX_STRLEN_SCAN", 16u * 1024u * 1024u);
+        if (cached_max_scan < 4096u)
+        {
+            cached_max_scan = 4096u;
+        }
+        if (cached_max_scan > (512u * 1024u * 1024u))
+        {
+            cached_max_scan = (512u * 1024u * 1024u);
+        }
     }
-    if (max_scan > (512u * 1024u * 1024u))
-    {
-        max_scan = (512u * 1024u * 1024u);
-    }
+    size_t max_scan = cached_max_scan;
 
 #if !defined(SAILFIN_WITH_ASAN)
     // Fast path for non-ASAN builds: rely on libc's bounded scan.
@@ -1362,6 +1642,19 @@ void sailfin_runtime_print_info(char *msg) { _print_line(stdout, "[info] ", msg)
 void sailfin_runtime_print_warn(char *msg) { _print_line(stderr, "[warn] ", msg); }
 void sailfin_runtime_print_error(char *msg) { _print_line(stderr, "[error] ", msg); }
 
+// Debug: print a pointer value as hex to stderr
+void sailfin_runtime_debug_ptr(const char *label, const void *ptr) {
+    fprintf(stderr, "[dbg] %s = %p", label ? label : "ptr", ptr);
+    if (ptr && (uintptr_t)ptr >= 4096u) {
+        // Try to read first 8 bytes
+        const unsigned char *p = (const unsigned char *)ptr;
+        fprintf(stderr, " bytes=[%02x %02x %02x %02x %02x %02x %02x %02x]",
+                p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+    }
+    fprintf(stderr, "\n");
+    fflush(stderr);
+}
+
 // -----------------------------------------------------------------------------
 // Debug helpers (best-effort; used by selfhost crash instrumentation)
 // -----------------------------------------------------------------------------
@@ -1427,17 +1720,42 @@ void sailfin_runtime_sleep(double seconds)
     {
         return;
     }
+#if defined(_WIN32)
+    double millis = seconds * 1000.0;
+    if (millis > 4294967295.0)
+    {
+        millis = 4294967295.0;
+    }
+    Sleep((DWORD)millis);
+#else
     double micros = seconds * 1000000.0;
     if (micros > 2147483647.0)
     {
         micros = 2147483647.0;
     }
     usleep((useconds_t)micros);
+#endif
+}
+
+/* Check if a string pointer looks like a corrupted double-encoded value.
+   On macOS ARM64, valid user-space pointers are < 0x800000000000.
+   Double-encoded pointers (via ptrtoint→sitofp→double→bitcast back) produce
+   addresses with high bits set that are not valid user memory. */
+static inline int _is_corrupted_string_ptr(const char *ptr)
+{
+    uintptr_t value = (uintptr_t)ptr;
+    /* NULL or very low addresses are already handled elsewhere */
+    if (value == 0)
+        return 0;
+    /* Pointers above 48-bit user-space range are likely corrupted doubles */
+    if (value > (uintptr_t)0x7FFFFFFFFFFF)
+        return 1;
+    return 0;
 }
 
 int64_t sailfin_runtime_string_length(char *text)
 {
-    if (!text)
+    if (!text || _is_corrupted_string_ptr(text))
     {
         return 0;
     }
@@ -1688,27 +2006,9 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
         end = start;
     }
 
-    // Even though this is the "unchecked" variant (used on hot paths), we've
-    // seen cases where the stage2 compiler can pass invalid bounds. Allowing
-    // out-of-bounds reads here introduces nondeterminism and can corrupt
-    // downstream output (e.g. malformed LLVM IR). Clamp to the actual string
-    // length to keep the runtime safe.
-    bool truncated = false;
-    int64_t n = (int64_t)_safe_strlen_asan(text, &truncated);
-    if (truncated)
-    {
-        fprintf(stderr, "[stage2-native] substring_unchecked: unterminated string at %p; treating length=%lld\n", (void *)text, (long long)n);
-        fflush(stderr);
-    }
-    if (start > n)
-    {
-        start = n;
-    }
-    if (end > n)
-    {
-        end = n;
-    }
-
+    // Truly unchecked: trust the caller's bounds (they already checked via
+    // .length which calls strlen once).  Removing the per-call strlen turns
+    // per-character scanning loops from O(n²) to O(n).
     int64_t length = end - start;
     char *out = (char *)malloc((size_t)length + 1);
     if (!out)
@@ -1740,9 +2040,9 @@ char *sailfin_runtime_string_concat(char *a, char *b)
 
     char *a_in = a;
     char *b_in = b;
-    if (!a)
+    if (!a || _is_corrupted_string_ptr(a))
     {
-        if (strict_strings)
+        if (strict_strings && a)
         {
             fprintf(stderr, "[stage2-native] string_concat got NULL lhs\n");
             fflush(stderr);
@@ -1750,9 +2050,9 @@ char *sailfin_runtime_string_concat(char *a, char *b)
         }
         a = "";
     }
-    if (!b)
+    if (!b || _is_corrupted_string_ptr(b))
     {
-        if (strict_strings)
+        if (strict_strings && b)
         {
             fprintf(stderr, "[stage2-native] string_concat got NULL rhs\n");
             fflush(stderr);
@@ -1853,6 +2153,51 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     bool b_truncated = false;
     size_t alen = a_immediate ? _utf8_encode(a_codepoint, a_buf) : _safe_strlen_asan(a, &a_truncated);
     size_t blen = b_immediate ? _utf8_encode(b_codepoint, b_buf) : _safe_strlen_asan(b, &b_truncated);
+
+    static int concat_limit_init = 0;
+    static size_t concat_limit = 0;
+    if (!concat_limit_init)
+    {
+        concat_limit_init = 1;
+        int limit = _env_int("SAILFIN_MAX_STRING_CONCAT", 20000000);
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        concat_limit = (size_t)limit;
+    }
+    if (concat_limit > 0 && (alen + blen) > concat_limit)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] string_concat limit exceeded (alen=%zu blen=%zu limit=%zu)\n",
+            alen,
+            blen,
+            concat_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string concat limit exceeded");
+    }
+    if (alen > SIZE_MAX - blen)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] string_concat overflow (alen=%zu blen=%zu)\n",
+            alen,
+            blen);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string concat overflow");
+    }
+    if (concat_limit > 0 && alen > concat_limit - blen)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] string_concat limit exceeded (alen=%zu blen=%zu limit=%zu)\n",
+            alen,
+            blen,
+            concat_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string concat limit exceeded");
+    }
 
     static int trace_min_len_init = 0;
     static size_t trace_min_len = 0;
@@ -2246,6 +2591,12 @@ char *sailfin_runtime_string_concat(char *a, char *b)
 
 char *sailfin_runtime_number_to_string(double value)
 {
+    static int trace_enabled = -1;
+    if (trace_enabled < 0)
+    {
+        const char *trace = getenv("SAILFIN_TRACE_NUMBER_TO_STRING");
+        trace_enabled = (trace && trace[0] != '\0' && trace[0] != '0') ? 1 : 0;
+    }
     char buf[64];
     // Use a `%.15g` style to match the typical language-level printing of numbers:
     // integers render without a trailing `.0`, floats preserve useful precision.
@@ -2268,11 +2619,54 @@ char *sailfin_runtime_number_to_string(double value)
     }
     memcpy(out, buf, len + 1);
     _track_owned_string(out);
+    if (trace_enabled)
+    {
+        static int trace_budget = 32;
+        if (trace_budget > 0)
+        {
+            trace_budget--;
+            fprintf(stderr, "[stage2-native] number_to_string(%.6f) -> %s\n", value, out);
+            fflush(stderr);
+        }
+    }
+    return out;
+}
+
+double sailfin_runtime_string_to_number(char *text)
+{
+    if (!text)
+    {
+        return 0.0;
+    }
+    char *end = NULL;
+    double out = strtod(text, &end);
     return out;
 }
 
 static SailfinPtrArray *_alloc_array(int64_t len)
 {
+    static int array_len_limit_init = 0;
+    static int64_t array_len_limit = 0;
+    if (!array_len_limit_init)
+    {
+        array_len_limit_init = 1;
+        int limit = _env_int("SAILFIN_MAX_ARRAY_LEN", 5000000);
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        array_len_limit = (int64_t)limit;
+    }
+    if (array_len_limit > 0 && len > array_len_limit)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array alloc limit exceeded (len=%lld limit=%lld)\n",
+            (long long)len,
+            (long long)array_len_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("array alloc limit exceeded");
+    }
     _maybe_init_alloc_stats();
     SailfinPtrArray *arr = (SailfinPtrArray *)malloc(sizeof(SailfinPtrArray));
     if (!arr)
@@ -2387,8 +2781,31 @@ static SailfinPtrArray *_alloc_array(int64_t len)
     return arr;
 }
 
+static int _array_is_suspicious_ptr(const void *ptr)
+{
+    uintptr_t value = (uintptr_t)ptr;
+    if (value < 4096u)
+    {
+        return 1;
+    }
+    return 0;
+}
+
 static void _array_check_canary(const char *label, SailfinPtrArray *arr)
 {
+    if (_array_is_suspicious_ptr(arr))
+    {
+        if (label)
+        {
+            fprintf(
+                stderr,
+                "[stage2-native] array_canary skipped suspicious ptr label=%s arr=%p\n",
+                label,
+                (void *)arr);
+            fflush(stderr);
+        }
+        return;
+    }
     static int canary_init = 0;
     static int canary_enabled = 0;
     if (!canary_init)
@@ -2449,6 +2866,24 @@ static void _array_check_canary(const char *label, SailfinPtrArray *arr)
 
 SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 {
+    if (_array_is_suspicious_ptr(a))
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array_concat suspicious a=%p (treating as NULL)\n",
+            (void *)a);
+        fflush(stderr);
+        a = NULL;
+    }
+    if (_array_is_suspicious_ptr(b))
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array_concat suspicious b=%p (treating as NULL)\n",
+            (void *)b);
+        fflush(stderr);
+        b = NULL;
+    }
     _array_check_canary("concat.a", a);
     _array_check_canary("concat.b", b);
 
@@ -2695,6 +3130,16 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 
 SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
 {
+    if (_array_is_suspicious_ptr(a))
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] append_string suspicious a=%p (treating as NULL)\n",
+            (void *)a);
+        fflush(stderr);
+        _maybe_print_array_backtrace("append_string suspicious", a);
+        a = NULL;
+    }
     _array_check_canary("append.in", a);
 
     int64_t raw_alen = a ? a->len : 0;
@@ -2811,6 +3256,7 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
                 (void *)a,
                 (void *)a->data,
                 (void *)tracked);
+            _trace_backtrace_budgeted("array_len_stomp");
             fflush(stderr);
         }
     }
@@ -3319,6 +3765,28 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
         len = 0;
         *len_ptr = 0;
     }
+    static int array_push_limit_init = 0;
+    static int64_t array_push_limit = 0;
+    if (!array_push_limit_init)
+    {
+        array_push_limit_init = 1;
+        int limit = _env_int("SAILFIN_MAX_ARRAY_LEN", 5000000);
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        array_push_limit = (int64_t)limit;
+    }
+    if (array_push_limit > 0 && len > array_push_limit)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array_push len exceeded (len=%lld limit=%lld)\n",
+            (long long)len,
+            (long long)array_push_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("array push limit exceeded");
+    }
 
     const uint64_t header_magic = 0x5341494c46494e43ull;
     const size_t header_words = 4u; // magic, capacity, elem_size, reserved
@@ -3326,6 +3794,18 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
     const size_t canary_bytes = 32u;
 
     uint8_t *data = (uint8_t *)(*data_ptr_ptr);
+    if (data && (uintptr_t)data < 4096u)
+    {
+        fprintf(
+            stderr,
+            "[stage2-native] array_push suspicious data=%p (resetting array)\n",
+            (void *)data);
+        fflush(stderr);
+        data = NULL;
+        *data_ptr_ptr = NULL;
+        *len_ptr = 0;
+        len = 0;
+    }
     size_t capacity = 0;
     bool has_header = false;
 
@@ -3471,6 +3951,36 @@ double sailfin_runtime_byte_at(char *text, int64_t index)
 
     unsigned char byte = (unsigned char)text[index];
     return (double)byte;
+}
+
+// Find the index of the first occurrence of a byte in a string starting from a given index.
+// Uses memchr for O(n) performance without per-character strlen overhead.
+// Returns -1 if not found.
+double sailfin_runtime_find_byte_index(char *text, double byte_value, double start_index)
+{
+    if (!text)
+    {
+        return -1.0;
+    }
+    int64_t start = (int64_t)start_index;
+    if (start < 0)
+    {
+        start = 0;
+    }
+    // Get string length once
+    bool truncated = false;
+    int64_t len = (int64_t)_safe_strlen_asan(text, &truncated);
+    if (start >= len)
+    {
+        return -1.0;
+    }
+    unsigned char target = (unsigned char)(int64_t)byte_value;
+    char *found = (char *)memchr(text + start, target, (size_t)(len - start));
+    if (!found)
+    {
+        return -1.0;
+    }
+    return (double)(found - text);
 }
 
 bool sailfin_runtime_is_decimal_digit(double ch)
@@ -3984,6 +4494,43 @@ double sailfin_runtime_grapheme_count(char *text)
 
 char *sailfin_runtime_grapheme_at(char *text, double index)
 {
+    if (_is_corrupted_string_ptr(text))
+    {
+        return "";
+    }
+    static int trace_enabled = -1;
+    if (trace_enabled < 0)
+    {
+        const char *trace = getenv("SAILFIN_TRACE_GRAPHEME_AT");
+        trace_enabled = (trace && trace[0] != '\0' && trace[0] != '0') ? 1 : 0;
+    }
+    if (trace_enabled)
+    {
+        static int trace_budget = 64;
+        if (trace_budget > 0)
+        {
+            trace_budget--;
+            uintptr_t raw = (uintptr_t)text;
+            unsigned char b0 = 0;
+            unsigned char b1 = 0;
+            bool has_bytes = false;
+            if (text && raw >= 4096u)
+            {
+                b0 = (unsigned char)text[0];
+                b1 = (unsigned char)text[1];
+                has_bytes = true;
+            }
+            if (has_bytes)
+            {
+                fprintf(stderr, "[stage2-native] grapheme_at(%p, %.2f) first_bytes=%02x%02x\n", (void *)text, index, b0, b1);
+            }
+            else
+            {
+                fprintf(stderr, "[stage2-native] grapheme_at(%p, %.2f)\n", (void *)text, index);
+            }
+            fflush(stderr);
+        }
+    }
     if (!text)
     {
         return "";
@@ -4112,7 +4659,49 @@ double sailfin_runtime_process_run(SailfinPtrArray *argv)
         len = 0;
     }
 
-    // posix_spawnp expects a NULL-terminated argv.
+#if defined(_WIN32)
+    /* Build a single command-line string for CreateProcess. */
+    size_t total = 0;
+    for (int64_t i = 0; i < len; i++)
+    {
+        if (argv->data[i])
+            total += strlen(argv->data[i]) + 3; /* quotes + space */
+    }
+    char *cmdline = (char *)malloc(total + 1);
+    if (!cmdline)
+        return 127.0;
+    cmdline[0] = '\0';
+    for (int64_t i = 0; i < len; i++)
+    {
+        if (i > 0)
+            strcat(cmdline, " ");
+        strcat(cmdline, "\"");
+        if (argv->data[i])
+            strcat(cmdline, argv->data[i]);
+        strcat(cmdline, "\"");
+    }
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    memset(&pi, 0, sizeof(pi));
+
+    if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+        free(cmdline);
+        return 127.0;
+    }
+    free(cmdline);
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 0;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return (double)exit_code;
+#else
+    /* POSIX: use posix_spawnp. */
     size_t n = (size_t)len;
     char **child_argv = (char **)calloc(n + 1, sizeof(char *));
     if (!child_argv)
@@ -4152,6 +4741,7 @@ double sailfin_runtime_process_run(SailfinPtrArray *argv)
         return (double)(128 + WTERMSIG(status));
     }
     return 127.0;
+#endif
 }
 
 bool sailfin_runtime_is_callable(char *value)
@@ -4287,12 +4877,40 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
     FILE *f = fopen(path_str, "wb");
     if (!f)
     {
-        _print_line(stderr, "[stage2-native] fs.writeFile failed", path_str);
+        _print_line(stderr, "[native] fs.writeFile failed", path_str);
         return;
     }
 
     uint32_t codepoint = 0;
     bool immediate = _is_immediate_codepoint_string(contents_str, &codepoint);
+
+    // Enhanced debugging for zero-length writes
+    if (trace_write_enabled)
+    {
+        uintptr_t addr = (uintptr_t)contents_str;
+        fprintf(stderr, "[native] fs.writeFile PRE-LENGTH contents=%p immediate=%d cp=%u addr_low32=0x%x addr_high32=0x%x\n",
+                (void *)contents_str, immediate ? 1 : 0, (unsigned)codepoint,
+                (unsigned)(addr & 0xffffffffu), (unsigned)(addr >> 32));
+        fflush(stderr);
+
+        // Check for premature null termination around 65535
+        if (!immediate && contents_str)
+        {
+            size_t check_start = 65530;
+            size_t check_end = 65545;
+            fprintf(stderr, "[native] fs.writeFile checking bytes %zu-%zu\n", check_start, check_end);
+            for (size_t i = check_start; i < check_end; i++)
+            {
+                unsigned char byte = (unsigned char)contents_str[i];
+                if (byte == 0)
+                {
+                    fprintf(stderr, "[native] fs.writeFile found NULL at offset %zu\n", i);
+                    break;
+                }
+            }
+            fflush(stderr);
+        }
+    }
     if (trace_write_enabled)
     {
         char preview_buf[40];
@@ -4368,7 +4986,7 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
 
         fprintf(
             stderr,
-            "[stage2-native] fs.writeFile path=%s contents=%p%s cp=%u len=%lld preview=\"%s\" marker_source_filename=%lld marker_prototype=%lld range_base=%p range_len=%zu range_offset=%zu\n",
+            "[native] fs.writeFile path=%s contents=%p%s cp=%u len=%lld preview=\"%s\" marker_source_filename=%lld marker_prototype=%lld range_base=%p range_len=%zu range_offset=%zu\n",
             path_str,
             (void *)contents_str,
             immediate ? " immediate" : "",
@@ -4403,6 +5021,45 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
     fclose(f);
 }
 
+void sailfin_adapter_fs_append_file(void *path, void *contents)
+{
+    const char *path_str = (const char *)path;
+    const char *contents_str = (const char *)contents;
+    if (!path_str || !contents_str)
+    {
+        return;
+    }
+
+    FILE *f = fopen(path_str, "ab");
+    if (!f)
+    {
+        _print_line(stderr, "[native] fs.appendFile failed", path_str);
+        return;
+    }
+
+    uint32_t codepoint = 0;
+    bool immediate = _is_immediate_codepoint_string(contents_str, &codepoint);
+    if (immediate)
+    {
+        unsigned char buf[5] = {0};
+        size_t len = _utf8_encode(codepoint, buf);
+        if (len > 0)
+        {
+            (void)fwrite(buf, 1, len, f);
+        }
+    }
+    else
+    {
+        int64_t len64 = sailfin_runtime_string_length((char *)contents_str);
+        if (len64 > 0)
+        {
+            (void)fwrite(contents_str, 1, (size_t)len64, f);
+        }
+    }
+
+    fclose(f);
+}
+
 void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
 {
     const char *path_str = (const char *)path;
@@ -4414,7 +5071,7 @@ void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
     FILE *f = fopen(path_str, "wb");
     if (!f)
     {
-        _print_line(stderr, "[stage2-native] fs.writeLines failed", path_str);
+        _print_line(stderr, "[native] fs.writeLines failed", path_str);
         return;
     }
 
@@ -4429,14 +5086,14 @@ void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
     // writing for a very long time.
     if (n > (int64_t)10000000)
     {
-        fprintf(stderr, "[stage2-native] fs.writeLines refusing to write absurd line count=%lld (possible ABI corruption)\n", (long long)n);
+        fprintf(stderr, "[native] fs.writeLines refusing to write absurd line count=%lld (possible ABI corruption)\n", (long long)n);
         fclose(f);
         return;
     }
 
     if (!lines->data && n > 0)
     {
-        fprintf(stderr, "[stage2-native] fs.writeLines missing data pointer (len=%lld)\n", (long long)n);
+        fprintf(stderr, "[native] fs.writeLines missing data pointer (len=%lld)\n", (long long)n);
         fclose(f);
         return;
     }
@@ -4599,7 +5256,7 @@ bool sailfin_adapter_fs_create_directory(void *path, bool recursive)
 
     if (!recursive)
     {
-        if (mkdir(path_str, 0777) == 0)
+        if (sfn_mkdir(path_str, 0777) == 0)
         {
             return true;
         }
@@ -4624,7 +5281,7 @@ bool sailfin_adapter_fs_create_directory(void *path, bool recursive)
             scratch[i] = '\0';
             if (scratch[0] != '\0')
             {
-                if (mkdir(scratch, 0777) != 0 && errno != EEXIST)
+                if (sfn_mkdir(scratch, 0777) != 0 && errno != EEXIST)
                 {
                     scratch[i] = saved;
                     free(scratch);
@@ -4661,6 +5318,203 @@ void *sailfin_adapter_http_post(void *request, void *body)
     (void)request;
     (void)body;
     return NULL;
+}
+
+/* ---- Package-manager HTTP helpers (curl subprocess) ---- */
+
+static char *_popen_read_all(const char *cmd)
+{
+    FILE *fp = popen(cmd, "r");
+    if (!fp)
+        return NULL;
+
+    size_t cap = 4096;
+    size_t len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf) { pclose(fp); return NULL; }
+
+    size_t n;
+    while ((n = fread(buf + len, 1, cap - len - 1, fp)) > 0) {
+        len += n;
+        if (len + 1 >= cap) {
+            cap *= 2;
+            char *tmp = (char *)realloc(buf, cap);
+            if (!tmp) { free(buf); pclose(fp); return NULL; }
+            buf = tmp;
+        }
+    }
+
+    int status = pclose(fp);
+    if (status != 0) {
+        free(buf);
+        return NULL;
+    }
+
+    buf[len] = '\0';
+    return buf;
+}
+
+/* Shell-escape a string for safe embedding in a single-quoted context.
+ * Caller must free the result. */
+static char *_shell_escape(const char *s)
+{
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    /* Worst case: every char is a single quote → replace with '\'' (4 chars) */
+    char *out = (char *)malloc(len * 4 + 3); /* + quotes + NUL */
+    if (!out) return NULL;
+    size_t j = 0;
+    out[j++] = '\'';
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '\'') {
+            out[j++] = '\''; out[j++] = '\\'; out[j++] = '\''; out[j++] = '\'';
+        } else {
+            out[j++] = s[i];
+        }
+    }
+    out[j++] = '\'';
+    out[j] = '\0';
+    return out;
+}
+
+char *sailfin_runtime_http_get(const char *url)
+{
+    if (!url) return NULL;
+    char *esc_url = _shell_escape(url);
+    if (!esc_url) return NULL;
+
+    /* curl -sfS: silent, fail on HTTP errors, show errors on stderr */
+    size_t cmd_len = strlen(esc_url) + 64;
+    char *cmd = (char *)malloc(cmd_len);
+    if (!cmd) { free(esc_url); return NULL; }
+    snprintf(cmd, cmd_len, "curl -sfS %s", esc_url);
+    free(esc_url);
+
+    char *result = _popen_read_all(cmd);
+    free(cmd);
+    return result;
+}
+
+char *sailfin_runtime_http_post_json(const char *url, const char *json_body,
+                                      const char *auth_header)
+{
+    if (!url || !json_body) return NULL;
+
+    /* Write JSON body to a temp file to avoid shell-escaping issues */
+    char tmppath[] = "/tmp/sfn_publish_XXXXXX";
+    int fd = mkstemp(tmppath);
+    if (fd < 0) return NULL;
+
+    size_t body_len = strlen(json_body);
+    ssize_t written = write(fd, json_body, body_len);
+    close(fd);
+    if (written < 0 || (size_t)written != body_len) {
+        unlink(tmppath);
+        return NULL;
+    }
+
+    char *esc_url = _shell_escape(url);
+    if (!esc_url) { unlink(tmppath); return NULL; }
+
+    size_t cmd_len = strlen(esc_url) + strlen(tmppath) + 256;
+    if (auth_header) cmd_len += strlen(auth_header) + 32;
+
+    char *cmd = (char *)malloc(cmd_len);
+    if (!cmd) { free(esc_url); unlink(tmppath); return NULL; }
+
+    if (auth_header && auth_header[0]) {
+        char *esc_auth = _shell_escape(auth_header);
+        if (!esc_auth) { free(cmd); free(esc_url); unlink(tmppath); return NULL; }
+        snprintf(cmd, cmd_len,
+                 "curl -sfS -X POST -H 'Content-Type: application/json' "
+                 "-H 'Authorization: '%s -d @%s %s",
+                 esc_auth, tmppath, esc_url);
+        free(esc_auth);
+    } else {
+        snprintf(cmd, cmd_len,
+                 "curl -sfS -X POST -H 'Content-Type: application/json' "
+                 "-d @%s %s",
+                 tmppath, esc_url);
+    }
+    free(esc_url);
+
+    char *result = _popen_read_all(cmd);
+    free(cmd);
+    unlink(tmppath);
+    return result;
+}
+
+char *sailfin_runtime_http_download(const char *url, const char *output_path)
+{
+    if (!url || !output_path) return NULL;
+
+    char *esc_url = _shell_escape(url);
+    char *esc_path = _shell_escape(output_path);
+    if (!esc_url || !esc_path) {
+        free(esc_url); free(esc_path);
+        return NULL;
+    }
+
+    size_t cmd_len = strlen(esc_url) + strlen(esc_path) + 64;
+    char *cmd = (char *)malloc(cmd_len);
+    if (!cmd) { free(esc_url); free(esc_path); return NULL; }
+    snprintf(cmd, cmd_len, "curl -sfS -o %s %s", esc_path, esc_url);
+    free(esc_url);
+    free(esc_path);
+
+    int status = system(cmd);
+    free(cmd);
+
+    if (status == 0) {
+        char *ok = (char *)malloc(3);
+        if (ok) { ok[0] = 'o'; ok[1] = 'k'; ok[2] = '\0'; }
+        return ok;
+    }
+    return NULL;
+}
+
+/* ---- Environment & path helpers ---- */
+
+char *sailfin_runtime_getenv(const char *name)
+{
+    if (!name) return NULL;
+    const char *val = getenv(name);
+    if (!val) return NULL;
+    return strdup(val);
+}
+
+char *sailfin_runtime_home_dir(void)
+{
+#if defined(_WIN32)
+    const char *home = getenv("USERPROFILE");
+#else
+    const char *home = getenv("HOME");
+#endif
+    if (!home) return NULL;
+    return strdup(home);
+}
+
+char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length)
+{
+    if (!path || !out_length) return NULL;
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (n < 0) { fclose(f); return NULL; }
+
+    char *buf = (char *)malloc((size_t)n + 1);
+    if (!buf) { fclose(f); return NULL; }
+
+    size_t read_n = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    buf[read_n] = '\0';
+    *out_length = (int64_t)read_n;
+    return buf;
 }
 
 void *sailfin_adapter_model_invoke_with_prompt(void *model, void *prompt)

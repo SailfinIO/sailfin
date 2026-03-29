@@ -1,0 +1,206 @@
+---
+const exampleCode = `fn analyze(data: Dataset<Record>) -> Report ![io, model] {
+    let cleaned = data
+        .filter(|r| r.is_valid())
+        .map(|r| normalize(r));
+
+    model gpt4o = openai:"gpt-4o";
+
+    let insights = prompt gpt4o ![model] {
+        system "You are a data analyst."
+        user "Summarize trends in: {{cleaned}}"
+    };
+
+    Report {
+        data: cleaned,
+        summary: insights,
+    }
+}`;
+---
+
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-text">
+      <h1>Build safe, intelligent systems with <span class="highlight">Sailfin</span></h1>
+      <p class="hero-subtitle">
+        An AI-native, systems-friendly programming language with effect types, ownership semantics, and first-class AI constructs.
+      </p>
+      <div class="hero-actions">
+        <a href="/docs/getting-started/install" class="btn btn-primary">Get Started</a>
+        <a href="/docs/getting-started/tour" class="btn btn-secondary">Take the Tour</a>
+      </div>
+      <div class="hero-install">
+        <code>curl -fsSL https://sailfin.dev/install.sh | sh</code>
+      </div>
+    </div>
+    <div class="hero-code">
+      <div class="code-window">
+        <div class="code-titlebar">
+          <span class="dot red"></span>
+          <span class="dot yellow"></span>
+          <span class="dot green"></span>
+          <span class="code-filename">analyze.sfn</span>
+        </div>
+        <pre><code>{exampleCode}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    background: linear-gradient(180deg, var(--sfn-blue-light) 0%, var(--color-bg) 100%);
+    padding: 5rem 0 4rem;
+  }
+
+  .hero-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 4rem;
+  }
+
+  .hero-text {
+    flex: 1;
+    max-width: 520px;
+  }
+
+  .hero-text h1 {
+    font-size: 2.75rem;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    margin-bottom: 1.25rem;
+  }
+
+  .highlight {
+    color: var(--color-primary);
+  }
+
+  .hero-subtitle {
+    font-size: 1.15rem;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    margin-bottom: 2rem;
+  }
+
+  .hero-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.7rem 1.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--color-primary);
+    color: #fff;
+  }
+
+  .btn-primary:hover {
+    background: var(--color-primary-dark);
+    text-decoration: none;
+  }
+
+  .btn-secondary {
+    background: var(--color-bg);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+  }
+
+  .btn-secondary:hover {
+    background: var(--color-bg-alt);
+    border-color: var(--gray-300);
+    text-decoration: none;
+  }
+
+  .hero-install code {
+    display: block;
+    background: var(--gray-900);
+    color: var(--gray-300);
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+  }
+
+  .hero-code {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .code-window {
+    background: var(--gray-900);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  }
+
+  .code-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--gray-800);
+  }
+
+  .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+
+  .dot.red { background: #ff5f57; }
+  .dot.yellow { background: #febc2e; }
+  .dot.green { background: #28c840; }
+
+  .code-filename {
+    margin-left: 0.5rem;
+    color: var(--gray-400);
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+  }
+
+  .code-window pre {
+    margin: 0;
+    padding: 1.25rem 1.5rem;
+    background: var(--gray-900);
+    border-radius: 0;
+  }
+
+  .code-window code {
+    color: var(--gray-300);
+    font-size: 0.825rem;
+    background: none;
+    padding: 0;
+  }
+
+  @media (max-width: 900px) {
+    .hero-inner {
+      flex-direction: column;
+      gap: 2.5rem;
+    }
+
+    .hero-text {
+      max-width: 100%;
+      text-align: center;
+    }
+
+    .hero-text h1 {
+      font-size: 2.25rem;
+    }
+
+    .hero-actions {
+      justify-content: center;
+    }
+  }
+</style>

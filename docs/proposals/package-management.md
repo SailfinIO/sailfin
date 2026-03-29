@@ -18,19 +18,26 @@ deterministic, AI-native projects.
 ### Installing Capsules
 
 ```bash
-sfn add sfn/http
+sfn add http
 ```
 
-This fetches the `sfn/http` capsule from the Sailfin registry and records it
-in your `sail.toml` manifest. Multiple capsules can be added at once:
+Standard library capsules use bare names (`http`, `fs`, `json`, etc.).
+Third-party capsules use scoped names (`acme/router`, `myorg/utils`).
+Multiple capsules can be added at once:
 
 ```bash
-sfn add sfn/http sfn/io sfn/net
+sfn add http fs json
 ```
 
-### The `sail.toml` Manifest
+Dev dependencies (test frameworks, benchmarks) are added with `--dev`:
 
-Every capsule contains a `sail.toml` descriptor:
+```bash
+sfn add --dev test bench
+```
+
+### The `capsule.toml` Manifest
+
+Every capsule contains a `capsule.toml` descriptor:
 
 ```toml
 [package]
@@ -40,8 +47,11 @@ description = "A simple Sailfin capsule"
 entry = "src/main.sfn"
 
 [dependencies]
-"sailfin/http" = "^1.0.0"
-"sailfin/io"   = "^0.5.0"
+"http" = "^1.0.0"
+"fs"   = "^0.5.0"
+
+[dev-dependencies]
+"test" = "^0.1.0"
 
 [capabilities]
 allow = ["io", "net", "model"]
@@ -54,16 +64,16 @@ Capabilities listed here gate which effects the capsule may use; the compiler
 rejects code that performs an undeclared effect. Model entries capture provider
 versions so builds remain reproducible.
 
-Projects containing multiple capsules are organised as a fleet, defined by a
-top-level `fleet.toml`.
+Projects containing multiple capsules are organised as a workspace, defined by a
+top-level `workspace.toml`.
 
-### Fleet Manifest Example
+### Workspace Manifest Example
 
-Below is an illustrative `fleet.toml` showing how multiple capsules, shared
+Below is an illustrative `workspace.toml` showing how multiple capsules, shared
 profiles, and model provenance are declared. (Fields and syntax are evolving.)
 
 ```toml
-[fleet.meta]
+[workspace.meta]
 name        = "sailfin"
 version     = "0.0.0"
 description = "Core language, runtime, and tooling"
@@ -120,21 +130,24 @@ evaluators = [ Faithfulness, LatencyBudget(150ms) ]
 cost_cap = 0.05 # USD (currency literal support forthcoming)
 ```
 
-The fleet manifest orchestrates:
+The workspace manifest orchestrates:
 
 - Capsules and their effect capability boundaries
 - Reproducible model and dependency locking
 - Build profiles for different workflows
 - Shared evaluation / provenance policies
 
-Individual capsules still declare their own `sail.toml`; the fleet manifest
+Individual capsules still declare their own `capsule.toml`; the workspace manifest
 aggregates and overrides where necessary.
 
 ## Common Commands
 
-- `sfn init`: Scaffold a new capsule with `sail.toml`, `src/`, and mirrored
+- `sfn init`: Scaffold a new capsule with `capsule.toml`, `src/`, and mirrored
   `tests/`/`docs/` stubs aligned with `docs/style-guide.md`.
-- `sfn add <capsule>`: Add a dependency and record it in the manifest.
+- `sfn add <capsule>`: Add a dependency and record it in the manifest. Standard
+  library capsules use bare names (`http`, `fs`); third-party use scoped names
+  (`acme/router`).
+- `sfn add --dev <capsule>`: Add a dev-only dependency (test, bench, etc.).
 - `sfn update`: Resolve the latest compatible versions for all dependencies.
 - `sfn remove <capsule>`: Remove a dependency and tidy the manifest.
 - `sfn run`: Build and execute the current capsule with capability checks.
@@ -174,13 +187,13 @@ sfn init
 Install dependencies:
 
 ```bash
-sfn add sailfin/http
+sfn add http
 ```
 
 Write code using Sailfin syntax:
 
 ```sailfin
-import { serve } from "sfn/http"
+import { serve } from "http"
 
 fn main() {
     serve(fn(req, res) {
@@ -205,7 +218,7 @@ sfn test --scope seed=42 --scope temperature=0.2
 Publish when ready:
 
 ```bash
-sfn publish --registry registry.sailfin.dev
+sfn publish
 ```
 
 ## Registry & Provenance

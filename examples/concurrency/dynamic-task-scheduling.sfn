@@ -1,6 +1,6 @@
 // examples/concurrency/dynamic-task-scheduling.sfn
 
-import { Channel, channel } from "sfn/async";
+import { Channel, channel } from "sync";
 
 fn main() ![io] {
     let tasks -> Channel<fn() -> void> = channel();
