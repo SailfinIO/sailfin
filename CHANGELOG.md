@@ -1,6 +1,9 @@
 # CHANGELOG
 
 
+## v0.2.0-beta.1 (2026-03-29)
+
+
 ## v0.2.0-alpha.3 (2026-03-29)
 
 ### Bug Fixes
