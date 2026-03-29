@@ -1,0 +1,105 @@
+name: Merge beta → rc
+
+on:
+    push:
+        branches:
+            - beta
+        paths-ignore:
+            - CHANGELOG.md
+            - compiler/src/version.sfn
+    workflow_dispatch:
+        inputs:
+            dry_run:
+                description: "Open a PR instead of merging directly"
+                required: false
+                default: "false"
+                type: choice
+                options:
+                    - "true"
+                    - "false"
+
+concurrency:
+    group: merge-beta-to-rc
+    cancel-in-progress: true
+
+jobs:
+    merge:
+        name: Merge beta into rc
+        runs-on: ubuntu-latest
+        if: >-
+            github.event_name == 'workflow_dispatch' || (
+            github.event.head_commit.author.name != 'semantic-release' &&
+            github.event.head_commit.author.name != 'Sailfin Release Bot' &&
+            !contains(github.event.head_commit.author.email, 'semantic-release'))
+        permissions:
+            contents: write
+            pull-requests: write
+
+        steps:
+            - name: Require RELEASE_PAT
+              if: ${{ !secrets.RELEASE_PAT }}
+              shell: bash
+              run: |
+                  echo "[ci][error] RELEASE_PAT secret is required to push to protected branches." >&2
+                  exit 1
+
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Configure git credentials
+              env:
+                  RELEASE_TOKEN: ${{ secrets.RELEASE_PAT }}
+              run: |
+                  git config user.name "Sailfin Release Bot"
+                  git config user.email "releases@sailfin.io"
+                  git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git"
+
+            - name: Fetch beta and rc
+              run: |
+                  git fetch origin beta rc
+
+            - name: Check if beta is already merged into rc
+              id: check_merge
+              run: |
+                  set -euo pipefail
+                  beta_sha="$(git rev-parse origin/beta)"
+                  if git merge-base --is-ancestor "$beta_sha" origin/rc; then
+                    echo "already_merged=true" >> "$GITHUB_OUTPUT"
+                    echo "[ci] beta is already an ancestor of rc — nothing to do."
+                  else
+                    echo "already_merged=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Merge beta into rc (direct fast-forward or merge commit)
+              if: >-
+                  steps.check_merge.outputs.already_merged == 'false' &&
+                  (github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false')
+              env:
+                  RELEASE_TOKEN: ${{ secrets.RELEASE_PAT }}
+              run: |
+                  set -euo pipefail
+                  git checkout -B rc origin/rc
+                  git merge --no-ff origin/beta \
+                    -m "chore(release): merge beta into rc [skip ci]"
+                  git push origin rc
+
+            - name: Open PR (dry-run mode)
+              if: >-
+                  steps.check_merge.outputs.already_merged == 'false' &&
+                  github.event_name == 'workflow_dispatch' &&
+                  inputs.dry_run == 'true'
+              env:
+                  GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+              run: |
+                  set -euo pipefail
+                  branch="chore/merge-beta-to-rc-$(date +%Y%m%d%H%M%S)"
+                  git checkout -B "$branch" origin/beta
+                  git push origin "$branch"
+                  gh pr create \
+                    --base rc \
+                    --head "$branch" \
+                    --title "chore(release): merge beta into rc" \
+                    --body "Automated PR to merge \`beta\` into \`rc\`. Triggered by workflow dispatch (dry-run mode)."
