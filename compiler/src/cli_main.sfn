@@ -1133,6 +1133,9 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
 }
 
 // ---- Package management helpers ----
+// NOTE: These use process.run + temp files because the seed compiler doesn't
+// know about our new runtime helpers (env.get, crypto.sha256, etc.).
+// Once this binary becomes the seed, these can switch to direct calls.
 
 fn _toml_trim_str(text -> string) -> string {
     let mut start -> number = 0;
@@ -1156,6 +1159,82 @@ fn _toml_trim_str(text -> string) -> string {
         }
     }
     return substring(text, start, end);
+}
+
+fn _shell_read(cmd -> string) -> string ![io] {
+    // Run a shell command and capture its stdout via a temp file.
+    let tmp = "/tmp/.sfn_shell_tmp";
+    let rc = process.run(["sh", "-c", cmd + " > " + tmp + " 2>/dev/null"]);
+    if rc != 0 {
+        return "";
+    }
+    if !fs.exists(tmp) {
+        return "";
+    }
+    let result = fs.readFile(tmp);
+    process.run(["rm", "-f", tmp]);
+    return _toml_trim_str(result);
+}
+
+fn _get_env(name -> string) -> string ![io] {
+    return _shell_read("printf '%s' \"$" + name + "\"");
+}
+
+fn _get_home() -> string ![io] {
+    return _get_env("HOME");
+}
+
+fn _curl_get(url -> string) -> string ![io] {
+    let tmp = "/tmp/.sfn_curl_get_tmp";
+    let rc = process.run(["curl", "-sfS", "-o", tmp, url]);
+    if rc != 0 {
+        return "";
+    }
+    if !fs.exists(tmp) {
+        return "";
+    }
+    let result = fs.readFile(tmp);
+    process.run(["rm", "-f", tmp]);
+    return result;
+}
+
+fn _curl_post_json(url -> string, body_path -> string, auth_header -> string) -> string ![io] {
+    let tmp = "/tmp/.sfn_curl_response_tmp";
+    let rc = process.run([
+        "curl", "-sfS",
+        "-X", "POST",
+        "-H", "Content-Type: application/json",
+        "-H", "Authorization: " + auth_header,
+        "-d", "@" + body_path,
+        "-o", tmp,
+        url,
+    ]);
+    if rc != 0 {
+        return "";
+    }
+    if !fs.exists(tmp) {
+        return "";
+    }
+    let result = fs.readFile(tmp);
+    process.run(["rm", "-f", tmp]);
+    return _toml_trim_str(result);
+}
+
+fn _curl_download(url -> string, output_path -> string) -> number ![io] {
+    return process.run(["curl", "-sfS", "-o", output_path, url]);
+}
+
+fn _sha256_of_file(file_path -> string) -> string ![io] {
+    // Use sha256sum command and extract just the hash
+    let raw = _shell_read("sha256sum '" + file_path + "' | cut -d' ' -f1");
+    if raw.length == 0 {
+        return "";
+    }
+    return "sha256:" + raw;
+}
+
+fn _base64_encode_file(file_path -> string) -> string ![io] {
+    return _shell_read("base64 -w0 '" + file_path + "'");
 }
 
 fn _collect_sfn_files(root -> string, max_depth -> number) -> string[] ![io] {
@@ -1739,9 +1818,9 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 1;
         }
         // Derive package name from current directory
-        let cwd = env.get("PWD");
+        let cwd = _get_env("PWD");
         let mut pkg_name -> string = "my-capsule";
-        if cwd != null {
+        if cwd.length > 0 {
             // Extract last path segment
             let mut last_slash -> number = -1;
             let mut si -> number = 0;
@@ -1793,12 +1872,12 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
         // Read auth token
         let mut token -> string = "";
-        let env_token = env.get("SFN_TOKEN");
-        if env_token != null && env_token.length > 0 {
+        let env_token = _get_env("SFN_TOKEN");
+        if env_token.length > 0 {
             token = env_token;
         } else {
-            let home = env.home();
-            if home != null {
+            let home = _get_home();
+            if home.length > 0 {
                 let cred_path = home + "/.sfn/credentials";
                 if fs.exists(cred_path) {
                     let cred = fs.readFile(cred_path);
@@ -1829,22 +1908,41 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             fi += 1;
         }
 
-        // Compute digest and encode
-        let digest = crypto.sha256(payload, payload.length);
-        let encoded = base64.encode(payload, payload.length);
+        // Write payload to temp file, then hash it
+        let payload_tmp = "/tmp/.sfn_payload_tmp";
+        fs.writeFile(payload_tmp, payload);
+        let digest = _sha256_of_file(payload_tmp);
 
-        // Build JSON publish body
-        let json_body = "{\"type\":\"capsule\",\"capsule\":\""
-            + pkg_name + "\",\"version\":\""
-            + pkg_version + "\",\"digest\":\""
-            + digest + "\",\"content_b64\":\""
-            + encoded + "\",\"meta\":{}}";
+        if digest.length == 0 {
+            print.error("failed to compute digest");
+            process.run(["rm", "-f", payload_tmp]);
+            return 1;
+        }
+
+        // Build JSON publish body via shell to avoid string concatenation
+        // limits with the large base64 content
+        let body_tmp = "/tmp/.sfn_publish_body_tmp";
+        let build_json_rc = process.run(["sh", "-c",
+            "printf '{\"type\":\"capsule\",\"capsule\":\"" + pkg_name
+            + "\",\"version\":\"" + pkg_version
+            + "\",\"digest\":\"" + digest
+            + "\",\"content_b64\":\"' > " + body_tmp
+            + " && base64 -w0 '" + payload_tmp + "' >> " + body_tmp
+            + " && printf '\",\"meta\":{}}' >> " + body_tmp
+        ]);
+        if build_json_rc != 0 {
+            print.error("failed to build publish payload");
+            process.run(["rm", "-f", payload_tmp]);
+            return 1;
+        }
 
         let auth_header = "Bearer " + token;
         let registry_url = "https://registry.sailfin.dev/publish";
         print.info("publishing to " + registry_url + "...");
-        let response = http.post_json(registry_url, json_body, auth_header);
-        if response == null {
+        let response = _curl_post_json(registry_url, body_tmp, auth_header);
+        process.run(["rm", "-f", payload_tmp]);
+        process.run(["rm", "-f", body_tmp]);
+        if response.length == 0 {
             print.error("publish failed — check your token and network connection");
             return 1;
         }
@@ -1864,24 +1962,15 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 1;
         }
 
-        // Fetch registry index
+        // Fetch registry index and extract latest version using shell tools
+        // (avoids Sailfin string processing limits on large JSON)
         print.info("fetching registry index...");
-        let index_json = http.get_body("https://registry.sailfin.dev/index.json");
-        if index_json == null {
-            print.error("failed to fetch registry index");
-            return 1;
-        }
-
-        // Extract version for this capsule from the JSON index
-        let capsule_block_pos = _json_find_key(index_json, capsule_id, 0);
-        if capsule_block_pos < 0 {
-            print.error("capsule not found in registry: " + capsule_id);
-            return 1;
-        }
-
-        let latest_version = _json_extract_value(index_json, "latest", capsule_block_pos);
+        let latest_version = _shell_read(
+            "curl -sfS 'https://registry.sailfin.dev/index.json'"
+            + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('" + capsule_id + "',{}); print(c.get('latest',''))\" 2>/dev/null"
+        );
         if latest_version.length == 0 {
-            print.error("could not determine latest version for: " + capsule_id);
+            print.error("capsule not found in registry: " + capsule_id);
             return 1;
         }
 
@@ -1895,8 +1984,8 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let name = substring(capsule_id, slash_pos + 1, capsule_id.length);
 
         // Download .sfnpkg
-        let home = env.home();
-        if home == null {
+        let home = _get_home();
+        if home.length == 0 {
             print.error("could not determine home directory");
             return 1;
         }
@@ -1911,8 +2000,8 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let pkg_path = cache_base + "/" + latest_version + ".sfnpkg";
         let download_url = "https://registry.sailfin.dev/capsules/" + scope + "/" + name + "/" + latest_version + ".sfnpkg";
         print.info("downloading " + capsule_id + "@" + latest_version + "...");
-        let dl_result = http.download(download_url, pkg_path);
-        if dl_result == null {
+        let dl_rc = _curl_download(download_url, pkg_path);
+        if dl_rc != 0 {
             print.error("failed to download: " + download_url);
             return 1;
         }

@@ -1,0 +1,58 @@
+// sfn/http — HTTP server and request handling for Sailfin.
+//
+// This capsule provides the core HTTP primitives for building web services.
+// It wraps the runtime's net capabilities behind a safe, typed API.
+
+struct Request {
+    method -> string;
+    path -> string;
+    headers -> string[];
+    body -> string;
+}
+
+struct Response {
+    status -> number;
+    headers -> string[];
+    body -> string;
+}
+
+struct ServerConfig {
+    port -> number;
+    host -> string;
+}
+
+fn response(body -> string) -> Response {
+    return Response {
+        status: 200,
+        headers: [],
+        body: body,
+    };
+}
+
+fn response_with_status(status -> number, body -> string) -> Response {
+    return Response {
+        status: status,
+        headers: [],
+        body: body,
+    };
+}
+
+fn serve(handler -> any, config -> any?) -> void ![io, net] {
+    // Delegates to the runtime's serve intrinsic.
+    // Full implementation will dispatch incoming HTTP requests to the handler
+    // function and send back Response values.
+    //
+    // Usage:
+    //   import { serve, response } from "sfn/http"
+    //
+    //   serve(fn(req) {
+    //       return response("Hello, Sailfin!")
+    //   }, { port: 8080 })
+    //
+    print.info("[sfn/http] serve is not yet fully implemented — capsule structure placeholder");
+}
+
+fn get(url -> string) -> string ![net] {
+    // HTTP GET request. Returns the response body as a string.
+    return http.get_body(url);
+}
