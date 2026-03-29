@@ -9,6 +9,7 @@ struct SailToml {
     description -> string;
     entry -> string;
     dependencies -> TomlDependency[];
+    dev_dependencies -> TomlDependency[];
     capabilities -> string[];
 }
 
@@ -91,6 +92,51 @@ fn _toml_parse_string_array(value -> string) -> string[] {
     return items;
 }
 
+// ---- Stdlib resolution ----
+// Standard capsules can be referenced by bare name ("http") or full
+// registry name ("sfn/http"). These functions handle the mapping.
+
+fn _is_stdlib(name -> string) -> boolean {
+    if strings_equal(name, "http") { return true; }
+    if strings_equal(name, "fs") { return true; }
+    if strings_equal(name, "os") { return true; }
+    if strings_equal(name, "sync") { return true; }
+    if strings_equal(name, "json") { return true; }
+    if strings_equal(name, "crypto") { return true; }
+    if strings_equal(name, "fmt") { return true; }
+    if strings_equal(name, "log") { return true; }
+    if strings_equal(name, "time") { return true; }
+    return false;
+}
+
+fn resolve_capsule_name(name -> string) -> string {
+    // "http" → "sfn/http", "sfn/http" → "sfn/http", "acme/router" → "acme/router"
+    // Check if it already has a scope (contains "/")
+    let mut i -> number = 0;
+    loop {
+        if i >= name.length { break; }
+        if name[i] == "/" { return name; }
+        i += 1;
+    }
+    // Bare name — check if it's a stdlib capsule
+    if _is_stdlib(name) {
+        return "sfn/" + name;
+    }
+    // Unknown bare name — return as-is (will fail at download if not found)
+    return name;
+}
+
+fn display_capsule_name(name -> string) -> string {
+    // "sfn/http" → "http" for stdlib, "acme/router" → "acme/router" for third-party
+    if string_starts_with(name, "sfn/") {
+        let short = substring(name, 4, name.length);
+        if _is_stdlib(short) {
+            return short;
+        }
+    }
+    return name;
+}
+
 // ---- Internal parse ----
 
 fn _parse_toml_internal(text -> string) -> SailToml {
@@ -100,6 +146,7 @@ fn _parse_toml_internal(text -> string) -> SailToml {
         description: "",
         entry: "src/main.sfn",
         dependencies: [],
+        dev_dependencies: [],
         capabilities: [],
     };
     let lines = _toml_split_lines(text);
@@ -131,6 +178,9 @@ fn _parse_toml_internal(text -> string) -> SailToml {
         }
         if strings_equal(section, "dependencies") {
             toml.dependencies.push(TomlDependency { capsule: stripped_key, version: stripped_value });
+        }
+        if strings_equal(section, "dev-dependencies") {
+            toml.dev_dependencies.push(TomlDependency { capsule: stripped_key, version: stripped_value });
         }
         if strings_equal(section, "capabilities") {
             if strings_equal(stripped_key, "allow") {
@@ -180,7 +230,6 @@ fn toml_generate(name -> string, version -> string, description -> string, entry
 // If the dependency already exists, update its version.
 fn toml_add_dependency(toml_text -> string, capsule -> string, version -> string) -> string {
     let t = _parse_toml_internal(toml_text);
-    // Check if already present and update
     let mut found -> boolean = false;
     let mut di -> number = 0;
     loop {
@@ -193,6 +242,25 @@ fn toml_add_dependency(toml_text -> string, capsule -> string, version -> string
     }
     if !found {
         t.dependencies.push(TomlDependency { capsule: capsule, version: version });
+    }
+    return _write_toml(t);
+}
+
+// Add a dev dependency to an existing capsule.toml text and return the updated text.
+fn toml_add_dev_dependency(toml_text -> string, capsule -> string, version -> string) -> string {
+    let t = _parse_toml_internal(toml_text);
+    let mut found -> boolean = false;
+    let mut di -> number = 0;
+    loop {
+        if di >= t.dev_dependencies.length { break; }
+        if strings_equal(t.dev_dependencies[di].capsule, capsule) {
+            t.dev_dependencies[di].version = version;
+            found = true;
+        }
+        di += 1;
+    }
+    if !found {
+        t.dev_dependencies.push(TomlDependency { capsule: capsule, version: version });
     }
     return _write_toml(t);
 }
@@ -214,15 +282,25 @@ fn _write_toml(toml -> SailToml) -> string {
         out = out + "\"" + dep.capsule + "\" = \"" + dep.version + "\"\n";
         i += 1;
     }
+    if toml.dev_dependencies.length > 0 {
+        out = out + "\n[dev-dependencies]\n";
+        let mut j -> number = 0;
+        loop {
+            if j >= toml.dev_dependencies.length { break; }
+            let dep = toml.dev_dependencies[j];
+            out = out + "\"" + dep.capsule + "\" = \"" + dep.version + "\"\n";
+            j += 1;
+        }
+    }
     if toml.capabilities.length > 0 {
         out = out + "\n[capabilities]\n";
         out = out + "allow = [";
-        let mut j -> number = 0;
+        let mut k -> number = 0;
         loop {
-            if j >= toml.capabilities.length { break; }
-            if j > 0 { out = out + ", "; }
-            out = out + "\"" + toml.capabilities[j] + "\"";
-            j += 1;
+            if k >= toml.capabilities.length { break; }
+            if k > 0 { out = out + ", "; }
+            out = out + "\"" + toml.capabilities[k] + "\"";
+            k += 1;
         }
         out = out + "]\n";
     }

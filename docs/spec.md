@@ -65,7 +65,7 @@ Source files compile independently. Imports use ES-module style syntax and
 canonical Sailfin-branded paths:
 
 ```sfn
-import { Channel, channel } from "sfn/async";
+import { Channel, channel } from "sync";
 ```
 
 Modules may re-export their own declarations or items from other modules via

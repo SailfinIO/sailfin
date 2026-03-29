@@ -24,6 +24,7 @@ import {
     toml_get_entry,
     toml_generate,
     toml_add_dependency,
+    toml_add_dev_dependency,
 } from "./toml_parser";
 
 fn _usage() -> string {
@@ -38,7 +39,7 @@ fn _usage() -> string {
     "  sfn test [path]\n" +
     "  sfn init\n" +
     "  sfn publish\n" +
-    "  sfn add <scope/name>\n" +
+    "  sfn add [--dev] <capsule>\n" +
         "\n" +
         "examples:\n" +
         "  sfn emit llvm examples/basics/hello-world.sfn\n" +
@@ -48,7 +49,9 @@ fn _usage() -> string {
     "  sfn test .\n" +
     "  sfn init\n" +
     "  sfn publish\n" +
-    "  sfn add sailfin/http\n";
+    "  sfn add http\n" +
+    "  sfn add --dev test\n" +
+    "  sfn add acme/router\n";
 }
 
 fn _ends_with(value -> string, suffix -> string) -> boolean {
@@ -1161,6 +1164,49 @@ fn _toml_trim_str(text -> string) -> string {
     return substring(text, start, end);
 }
 
+fn _is_stdlib_capsule(name -> string) -> boolean {
+    if strings_equal(name, "http") { return true; }
+    if strings_equal(name, "fs") { return true; }
+    if strings_equal(name, "os") { return true; }
+    if strings_equal(name, "sync") { return true; }
+    if strings_equal(name, "json") { return true; }
+    if strings_equal(name, "crypto") { return true; }
+    if strings_equal(name, "fmt") { return true; }
+    if strings_equal(name, "log") { return true; }
+    if strings_equal(name, "time") { return true; }
+    return false;
+}
+
+fn _has_slash(name -> string) -> boolean {
+    let mut i -> number = 0;
+    loop {
+        if i >= name.length { break; }
+        if name[i] == "/" { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _resolve_capsule_name(name -> string) -> string {
+    // "http" → "sfn/http", "sfn/http" → "sfn/http", "acme/router" → "acme/router"
+    if _has_slash(name) { return name; }
+    if _is_stdlib_capsule(name) {
+        return "sfn/" + name;
+    }
+    return name;
+}
+
+fn _display_capsule_name(name -> string) -> string {
+    // "sfn/http" → "http" for stdlib, "acme/router" → "acme/router" for third-party
+    if string_starts_with(name, "sfn/") {
+        let short = substring(name, 4, name.length);
+        if _is_stdlib_capsule(short) {
+            return short;
+        }
+    }
+    return name;
+}
+
 fn _shell_read(cmd -> string) -> string ![io] {
     // Run a shell command and capture its stdout via a temp file.
     let tmp = "/tmp/.sfn_shell_tmp";
@@ -1951,37 +1997,53 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     }
 
     if is_add {
-        if args.length != 2 {
-            print.error("usage: sfn add <scope/name>");
+        // Parse: sfn add [--dev] <capsule>
+        let mut is_dev -> boolean = false;
+        let mut capsule_arg -> string = "";
+        if args.length == 2 {
+            capsule_arg = args[1];
+        } else if args.length == 3 {
+            if strings_equal(args[1], "--dev") {
+                is_dev = true;
+                capsule_arg = args[2];
+            } else {
+                print.error("usage: sfn add [--dev] <capsule>");
+                return 2;
+            }
+        } else {
+            print.error("usage: sfn add [--dev] <capsule>");
             return 2;
         }
-        let capsule_id = args[1];
 
         if !fs.exists("capsule.toml") {
             print.error("no capsule.toml found — run `sfn init` first");
             return 1;
         }
 
-        // Fetch registry index and extract latest version using shell tools
-        // (avoids Sailfin string processing limits on large JSON)
+        // Resolve bare name → scoped registry name
+        // "http" → "sfn/http", "acme/router" → "acme/router"
+        let registry_name = _resolve_capsule_name(capsule_arg);
+        let display_name = _display_capsule_name(registry_name);
+
+        // Fetch registry index and extract latest version
         print.info("fetching registry index...");
         let latest_version = _shell_read(
             "curl -sfS 'https://registry.sailfin.dev/api/index.json'"
-            + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('" + capsule_id + "',{}); print(c.get('latest',''))\" 2>/dev/null"
+            + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('" + registry_name + "',{}); print(c.get('latest',''))\" 2>/dev/null"
         );
         if latest_version.length == 0 {
-            print.error("capsule not found in registry: " + capsule_id);
+            print.error("capsule not found in registry: " + registry_name);
             return 1;
         }
 
         // Parse scope/name for download path
-        let slash_pos = find_char(capsule_id, "/", 0);
+        let slash_pos = find_char(registry_name, "/", 0);
         if slash_pos < 0 {
-            print.error("invalid capsule id — expected scope/name format: " + capsule_id);
+            print.error("invalid capsule id — expected scope/name format: " + registry_name);
             return 1;
         }
-        let scope = substring(capsule_id, 0, slash_pos);
-        let name = substring(capsule_id, slash_pos + 1, capsule_id.length);
+        let scope = substring(registry_name, 0, slash_pos);
+        let name = substring(registry_name, slash_pos + 1, registry_name.length);
 
         // Download .sfnpkg
         let home = _get_home();
@@ -1999,7 +2061,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
         let pkg_path = cache_base + "/" + latest_version + ".sfnpkg";
         let download_url = "https://registry.sailfin.dev/api/capsules/" + scope + "/" + name + "/" + latest_version + ".sfnpkg";
-        print.info("downloading " + capsule_id + "@" + latest_version + "...");
+        print.info("downloading " + display_name + "@" + latest_version + "...");
         let dl_rc = _curl_download(download_url, pkg_path);
         if dl_rc != 0 {
             print.error("failed to download: " + download_url);
@@ -2010,11 +2072,20 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let pkg_content = fs.readFile(pkg_path);
         _extract_sfnpkg(pkg_content, cache_base);
 
-        // Update capsule.toml with the new dependency
+        // Update capsule.toml — store unscoped name for stdlib, full name for third-party
         let toml_text = fs.readFile("capsule.toml");
-        let updated_toml = toml_add_dependency(toml_text, capsule_id, latest_version);
+        let mut updated_toml -> string = "";
+        if is_dev {
+            updated_toml = toml_add_dev_dependency(toml_text, display_name, latest_version);
+        } else {
+            updated_toml = toml_add_dependency(toml_text, display_name, latest_version);
+        }
         fs.writeFile("capsule.toml", updated_toml);
-        print.info("added " + capsule_id + "@" + latest_version);
+        if is_dev {
+            print.info("added dev dependency: " + display_name + "@" + latest_version);
+        } else {
+            print.info("added " + display_name + "@" + latest_version);
+        }
         return 0;
     }
 
