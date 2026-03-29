@@ -1,6 +1,18 @@
 # CHANGELOG
 
 
+## v0.3.1 (2026-03-29)
+
+### Bug Fixes
+
+- **site**: Show close icon when mobile hamburger menu is open
+  ([`18c8429`](https://github.com/SailfinIO/sailfin/commit/18c8429181bb9cb82715267c90b6a12ce6ab89c6))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/88d7fe86-c0b7-46ac-b109-20e791156b9a
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
 ## v0.3.0 (2026-03-29)
 
 ### Bug Fixes
