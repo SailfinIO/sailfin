@@ -16,7 +16,7 @@ order: 1
 The fastest way to install Sailfin is with the install script:
 
 ```bash
-curl -fsSL https://sailfin.dev/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
 This installs the `sailfin` and `sfn` binaries to `~/.local/bin`.
@@ -26,7 +26,7 @@ This installs the `sailfin` and `sfn` binaries to `~/.local/bin`.
 If you prefer to build from source:
 
 ```bash
-git clone https://github.com/sailfin/sailfin.git
+git clone https://github.com/SailfinIO/sailfin.git
 cd sailfin
 make env       # Create the Conda environment
 make compile   # Build the compiler (self-hosting from seed)

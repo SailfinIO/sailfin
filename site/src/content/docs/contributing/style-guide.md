@@ -5,7 +5,7 @@ section: contributing
 order: 3
 ---
 
-> Canonical source: [`docs/style-guide.md`](https://github.com/sailfin/sailfin/blob/main/docs/style-guide.md)
+> Canonical source: [`docs/style-guide.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/style-guide.md)
 
 ## Goals
 
