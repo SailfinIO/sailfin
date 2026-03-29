@@ -1,6 +1,100 @@
 # CHANGELOG
 
 
+## v0.1.2-rc.1 (2026-03-29)
+
+### Bug Fixes
+
+- Apply conflict resolution from beta/rc merge to PR branch
+  ([`7e4a7eb`](https://github.com/SailfinIO/sailfin/commit/7e4a7ebb3ff1fa76798815968c6ef92d28c9275a))
+
+Resolves the two files that had conflicts when merging beta into rc: - CHANGELOG.md: combine beta's
+  new entries (v0.2.0-alpha.3..v0.1.1-alpha.136) with rc's v0.1.1-rc.1 entry in correct
+  chronological order - compiler/src/version.sfn: keep beta's version string (0.2.0-alpha.3)
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/c6f135b3-740d-4485-8fd3-1334d6e0921c
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Chores
+
+- **deps**: Bump actions/checkout from 4 to 6
+  ([`8b42713`](https://github.com/SailfinIO/sailfin/commit/8b42713726b7ac39a11b99d0695bc9ad78f89d65))
+
+Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6. - [Release
+  notes](https://github.com/actions/checkout/releases) -
+  [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/actions/checkout/compare/v4...v6)
+
+--- updated-dependencies: - dependency-name: actions/checkout dependency-version: '6'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/download-artifact from 4 to 7
+  ([`089ba9a`](https://github.com/SailfinIO/sailfin/commit/089ba9a0554d52c25ebc781e18d6ee123d30a165))
+
+Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 4 to 7. -
+  [Release notes](https://github.com/actions/download-artifact/releases) -
+  [Commits](https://github.com/actions/download-artifact/compare/v4...v7)
+
+--- updated-dependencies: - dependency-name: actions/download-artifact dependency-version: '7'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/download-artifact from 7 to 8
+  ([`e93c9ef`](https://github.com/SailfinIO/sailfin/commit/e93c9ef722550da755195eea83aca31dfa1f2dc2))
+
+Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 7 to 8. -
+  [Release notes](https://github.com/actions/download-artifact/releases) -
+  [Commits](https://github.com/actions/download-artifact/compare/v7...v8)
+
+--- updated-dependencies: - dependency-name: actions/download-artifact dependency-version: '8'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/upload-artifact from 4 to 6
+  ([`12cad17`](https://github.com/SailfinIO/sailfin/commit/12cad17d6ffe9fe16220ef69fe0a6ec65de00e10))
+
+Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 4 to 6. - [Release
+  notes](https://github.com/actions/upload-artifact/releases) -
+  [Commits](https://github.com/actions/upload-artifact/compare/v4...v6)
+
+--- updated-dependencies: - dependency-name: actions/upload-artifact dependency-version: '6'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/upload-artifact from 6 to 7
+  ([`0a9ed07`](https://github.com/SailfinIO/sailfin/commit/0a9ed0756d6c8b063d028f8d8d065bfd33b43bbd))
+
+Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 6 to 7. - [Release
+  notes](https://github.com/actions/upload-artifact/releases) -
+  [Commits](https://github.com/actions/upload-artifact/compare/v6...v7)
+
+--- updated-dependencies: - dependency-name: actions/upload-artifact dependency-version: '7'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+
 ## v0.1.1 (2026-01-20)
 
 
