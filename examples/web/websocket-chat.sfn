@@ -1,6 +1,6 @@
 // examples/web/websocket-chat.sfn
 
-import { websocket } from "sfn/net";
+import { websocket } from "http";
 
 fn main() ![io, net] {
     let server = websocket.serve({ port: 8080 });

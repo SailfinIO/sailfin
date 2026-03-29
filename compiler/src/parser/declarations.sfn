@@ -272,7 +272,7 @@ fn parse_effect_list(initial_parser -> Parser) -> EffectParseResult {
         }
         if current.kind.variant == "Identifier" {
             let effect = identifier_text(current);
-            effects = append_string(effects, effect);
+            effects.push(effect);
             parser = parser_advance_raw(parser);
             parser = skip_trivia(parser);
             let separator = parser_peek_raw(parser);

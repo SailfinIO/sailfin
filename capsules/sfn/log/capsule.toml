@@ -1,0 +1,10 @@
+[package]
+name = "sfn/log"
+version = "0.2.1"
+description = "Structured, leveled logging for Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = ["io", "clock"]

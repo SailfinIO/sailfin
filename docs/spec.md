@@ -19,8 +19,8 @@ This specification is organised into two parts:
 For an at-a-glance summary of what is implemented today, consult
 `docs/status.md`.
 
-NOTE: Diagrams and directory trees showing a unified fleet layout (with
-`fleet.toml`, `std/`, `runtime/`, etc.) represent the target architecture, not
+NOTE: Diagrams and directory trees showing a unified workspace layout (with
+`workspace.toml`, `std/`, `runtime/`, etc.) represent the target architecture, not
 the current on-disk structure.
 
 ## Part A — Current Language
@@ -65,7 +65,7 @@ Source files compile independently. Imports use ES-module style syntax and
 canonical Sailfin-branded paths:
 
 ```sfn
-import { Channel, channel } from "sfn/async";
+import { Channel, channel } from "sync";
 ```
 
 Modules may re-export their own declarations or items from other modules via
@@ -75,8 +75,8 @@ Modules may re-export their own declarations or items from other modules via
 export { substring, find_char as locate } from "./string_utils";
 ```
 
-Capsules declare their required capabilities in `sail.toml`; multi-capsule
-workspaces centralise shared policies in `fleet.toml`. When self-hosted,
+Capsules declare their required capabilities in `capsule.toml`; multi-capsule
+workspaces centralise shared policies in `workspace.toml`. When self-hosted,
 invoking an undeclared capability (e.g. sending a network request) that is not
 listed in the manifest or function effect set results in a compile-time error.
 
@@ -653,7 +653,7 @@ The `Linear<T>` wrapper ensures the buffer is consumed exactly once, preventing 
 The `unsafe` capability must be declared in the capsule manifest before any unsafe code can compile:
 
 ```toml
-# sail.toml
+# capsule.toml
 [package]
 name = "my-native-lib"
 version = "0.1.0"
@@ -665,7 +665,7 @@ required = ["io", "unsafe"]
 Fleet-level policies can restrict which capsules may request `unsafe`:
 
 ```toml
-# fleet.toml
+# workspace.toml
 [policies.unsafe]
 # Only allow unsafe in specific capsules
 allowed_capsules = ["runtime-adapters", "native-bindings"]
@@ -775,8 +775,8 @@ See `examples/advanced/` for unsafe/extern examples:
 
 ## 7. Capability-Based Security
 
-- Capsules declare capabilities in `sail.toml`; fleets coordinate shared
-  policies in `fleet.toml`. Modules may not escalate at runtime.
+- Capsules declare capabilities in `capsule.toml`; workspaces coordinate shared
+  policies in `workspace.toml`. Modules may not escalate at runtime.
 - Secrets cannot be logged, hashed, or serialised without explicit policies.
 - Runtime egress guards prevent `PII` from leaving the trust boundary unless a
   redaction or consent transformer is applied.
@@ -989,7 +989,7 @@ Upcoming milestones include:
 1. Full type-checking and inference, including linear/affine tracking.
 2. Exhaustive pattern matching with guards and destructuring.
 3. Native package manager integration for models and code (`sfn`, capsules,
-   fleets, provenance locking).
+   workspaces, provenance locking).
 4. Notebook and LSP support with live cost/latency overlays.
 5. Complete the Sailfin-native runtime migration.
 
@@ -1066,7 +1066,7 @@ on declarations but are not validated yet.
 Planned:
 
 - Hierarchical, composable effects with scoping (e.g. `io.fs.read`, `net.http`).
-- Cross-manifest capability gates (capsule/fleet manifests) for compilation and runtime.
+- Cross-manifest capability gates (capsule/workspace manifests) for compilation and runtime.
 - Flow-sensitive effect inference and minimal annotations.
 
 Cross-reference: enforcement logic lives in `compiler/src/effect_checker.sfn`

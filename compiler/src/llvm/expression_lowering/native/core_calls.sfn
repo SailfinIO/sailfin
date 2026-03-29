@@ -112,13 +112,13 @@ fn split_call_arguments(text -> string) -> string[] {
             }
             current = current + ch;
         } else if ch == "," && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-            entries = append_string(entries, trim_text(current));
+            entries.push(trim_text(current));
             current = "";
         } else {
             current = current + ch;
         }
         index += 1;
     }
-    entries = append_string(entries, trim_text(current));
+    entries.push(trim_text(current));
     return entries;
 }

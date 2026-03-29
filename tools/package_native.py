@@ -226,14 +226,10 @@ def _copy_runtime_bundle(archive_root: pathlib.Path) -> None:
 
     prelude_obj = REPO_ROOT / "build" / "native" / "obj" / "runtime" / "prelude.o"
     if not prelude_obj.exists():
-        legacy = REPO_ROOT / "build" / "native" / "obj" / "prelude.o"
-        if legacy.exists():
-            prelude_obj = legacy
-        else:
-            raise NativePackageError(
-                "missing prelude object; expected either "
-                f"{prelude_obj} or {legacy}"
-            )
+        raise NativePackageError(
+            "missing prelude object; expected "
+            f"{prelude_obj}"
+        )
     obj_dir = runtime_dst / "obj"
     obj_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(prelude_obj, obj_dir / "prelude.o")
@@ -335,13 +331,6 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         description="Package Sailfin native compiler artifacts")
     parser.add_argument("--out", dest="out", type=pathlib.Path, default=REPO_ROOT / "dist",
                         help="Directory to receive the packaged archive (default: dist/)")
-    parser.add_argument(
-        "--stage1-out",
-        dest="stage1_out",
-        type=pathlib.Path,
-        default=REPO_ROOT / "compiler" / "build",
-        help="DEPRECATED (ignored): legacy Stage1 output directory",
-    )
     parser.add_argument("--native-out", dest="native_out", type=pathlib.Path,
                         default=REPO_ROOT / "build" / "native" / "import-context",
                         help="Directory containing native artifacts to package (default: build/native/import-context)")
@@ -356,44 +345,13 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Optional compiler binary to include in the archive (e.g. build/native/sailfin)",
     )
-    parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="DEPRECATED (ignored): legacy bootstrap verbosity flag",
-    )
     parser.add_argument("--skip-build", dest="skip_build", action="store_true",
                         help="Skip rebuilding and package existing artifacts")
-    parser.add_argument(
-        "--link-binary",
-        dest="link_binary",
-        action="store_true",
-        help="DEPRECATED: include build/native/sailfin in the archive bin/",
-    )
-    parser.add_argument(
-        "--clang",
-        dest="clang",
-        default=os.environ.get("SAILFIN_NATIVE_CLANG", "clang"),
-        help="DEPRECATED (ignored): legacy linker control",
-    )
-    parser.add_argument(
-        "--ldflag",
-        dest="ldflags",
-        action="append",
-        help="DEPRECATED (ignored): legacy linker flags",
-    )
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = _parse_args(argv)
-
-    if args.link_binary and args.compiler_bin is None:
-        args.compiler_bin = REPO_ROOT / "build" / "native" / "sailfin"
-    if args.clang != "clang" or (args.ldflags and len(args.ldflags) > 0):
-        print(
-            "[package-native][warn] --clang/--ldflag are deprecated and ignored in selfhost-only packaging",
-            file=sys.stderr,
-        )
 
     version = args.version or _infer_version()
     try:

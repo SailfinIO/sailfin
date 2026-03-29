@@ -1113,11 +1113,13 @@ fn append_object_field(fields -> ObjectField[], field -> ObjectField) -> ObjectF
 }
 
 fn append_parameter(parameters -> Parameter[], parameter -> Parameter) -> Parameter[] {
-    return parameters.concat([parameter]);
+    parameters.push(parameter);
+    return parameters;
 }
 
 fn append_string_local(values -> string[], value -> string) -> string[] {
-    return values.concat([value]);
+    values.push(value);
+    return values;
 }
 
 // ============================================================================

@@ -278,8 +278,8 @@ The grammar’s `Argument` rule supports this form.
 ### Effects and Capability Tokens
 
 Effect identifiers in `![ ... ]` lists are ordinary identifiers that must
-correspond to capabilities granted via manifests (`sail.toml`, aggregated in
-`fleet.toml`). The compiler uses these lists to enforce deterministic,
+correspond to capabilities granted via manifests (`capsule.toml`, aggregated in
+`workspace.toml`). The compiler uses these lists to enforce deterministic,
 auditable use of I/O (`io`), networking (`net`), randomness (`rand`), model
 invocation (`model`), accelerator usage (`gpu`), and clocks/timers (`clock`).
 

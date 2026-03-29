@@ -58,11 +58,15 @@ fn infer_borrow_base_scope(base -> string, locals -> LocalBinding[], bindings ->
 }
 
 fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeRegionMetadata) -> LifetimeRegionMetadata[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_lifetime_release_event(events -> LifetimeReleaseEvent[], event -> LifetimeReleaseEvent) -> LifetimeReleaseEvent[] {
-    return events.concat([event]);
+    let mut out = events;
+    out = out.push(event);
+    return out;
 }
 
 fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id -> number, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata[] {
@@ -168,23 +172,41 @@ fn is_scope_descendant(parent -> string, candidate -> string) -> boolean {
 }
 
 fn append_local_binding(values -> LocalBinding[], value -> LocalBinding) -> LocalBinding[] {
-    return values.concat([value]);
+    let mut out -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        out.push(values[index]);
+        index += 1;
+    }
+    out.push(value);
+    return out;
 }
 
 fn append_llvm_operand(values -> LLVMOperand[], value -> LLVMOperand) -> LLVMOperand[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_struct_literal_field(values -> StructLiteralField[], value -> StructLiteralField) -> StructLiteralField[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_native_struct(values -> NativeStruct[], value -> NativeStruct) -> NativeStruct[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_native_enum(values -> NativeEnum[], value -> NativeEnum) -> NativeEnum[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn replace_llvm_operand(values -> LLVMOperand[], index -> number, value -> LLVMOperand) -> LLVMOperand[] {

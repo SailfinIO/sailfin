@@ -1,0 +1,91 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Community" description="Join the Sailfin community.">
+  <div class="page">
+    <div class="container">
+      <h1>Community</h1>
+      <p class="lead">
+        Sailfin is built in the open. Here's how to get involved.
+      </p>
+
+      <div class="grid">
+        <a href="https://github.com/sailfin" class="community-card">
+          <h3>GitHub</h3>
+          <p>Browse source code, file issues, and contribute to the compiler, runtime, and tooling.</p>
+        </a>
+
+        <a href="/docs/contributing/guide" class="community-card">
+          <h3>Contributing</h3>
+          <p>Read the contributor guide to learn how to set up the development environment and submit changes.</p>
+        </a>
+
+        <a href="/blog" class="community-card">
+          <h3>Blog</h3>
+          <p>Design decisions, release notes, and deep dives into Sailfin's internals.</p>
+        </a>
+
+        <a href="/docs/contributing/roadmap" class="community-card">
+          <h3>Roadmap</h3>
+          <p>See what's planned for Sailfin and where the language is heading.</p>
+        </a>
+      </div>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .page {
+    padding: 3rem 0 5rem;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .lead {
+    font-size: 1.2rem;
+    color: var(--color-text-secondary);
+    margin-bottom: 3rem;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+
+  .community-card {
+    padding: 2rem;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .community-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 12px rgba(0, 114, 206, 0.08);
+    text-decoration: none;
+  }
+
+  .community-card h3 {
+    font-size: 1.15rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .community-card p {
+    color: var(--color-text-secondary);
+    font-size: 0.925rem;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 600px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
