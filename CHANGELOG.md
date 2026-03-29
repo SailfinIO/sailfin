@@ -1,6 +1,54 @@
 # CHANGELOG
 
 
+## v0.2.0 (2026-03-29)
+
+### Chores
+
+- Add .github/copilot-instructions.md for GitHub Copilot coding agent
+  ([`46ed7cf`](https://github.com/SailfinIO/sailfin/commit/46ed7cf4ed3afe4d6316b91bcacfd24aefb463ff))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a66c4f80-7eac-4e3e-b144-9a0293f0441b
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- Merge beta into rc, resolving conflicts
+  ([`8b4f59a`](https://github.com/SailfinIO/sailfin/commit/8b4f59ad1341e0b31cf45f918af3c1cba5f48ef2))
+
+Merge origin/beta (v0.2.0-beta.1) into rc (v0.1.2-rc.1).
+
+Conflict resolutions: - compiler/src/version.sfn: use beta version '0.2.0-beta.1' - CHANGELOG.md:
+  combine both changelog sections; beta's newer entries (v0.2.0-beta.1 through v0.1.1-alpha.136)
+  precede rc's entries (v0.1.2-rc.1) - .github/workflows/release-tag.yml: use beta's version which
+  has correct 2-space YAML indentation and adds Windows cross-compile steps
+
+Key changes from beta included: - site/ directory (Astro-based documentation website) -
+  capsules/sfn/* standard library capsules - Windows cross-compile support (MinGW-w64) - Runtime
+  enhancements (base64, sha256) - Compiler improvements (LLVM lowering, parser, type checker) -
+  install.ps1 for Windows installer
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- Merge rc into main (v0.1.2-rc.1)
+  ([`1cc5308`](https://github.com/SailfinIO/sailfin/commit/1cc530862bf54d7e980f0b01b84013a1261f8b76))
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- Merge remote tracking branch for conflict resolution
+  ([`c1b8572`](https://github.com/SailfinIO/sailfin/commit/c1b85726a1438643a66f2c2b2955a8cb89adf278))
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Documentation
+
+- Add conflict resolution log for beta→rc merge (PR #27)
+  ([`d237280`](https://github.com/SailfinIO/sailfin/commit/d237280bbd92d88998c2d7539ec99a0bb022858e))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/ed49f562-6e19-463d-a741-d2b2cb8ce450
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
 ## v0.2.0-beta.1 (2026-03-29)
 
 
@@ -186,6 +234,21 @@ Skip the entire compiler-object link step on macOS. Tests remain self-contained 
 - Abi enahancement
   ([`0762add`](https://github.com/SailfinIO/sailfin/commit/0762add251caf40f8271c53042cbcdb9eed98366))
 
+- Merge conflicts by adding gitattributes
+  ([`0fdac52`](https://github.com/SailfinIO/sailfin/commit/0fdac52b61db42c5d7bbd0b8fbdc3844224cdba2))
+
+
+## v0.1.1-alpha.135 (2026-01-21)
+
+### Bug Fixes
+
+- Module naming
+  ([`80afafe`](https://github.com/SailfinIO/sailfin/commit/80afafed4f9265b3e4637792eabfdf1ed6435ff1))
+
+- Remove legacy stage2 ref
+  ([`3d2781d`](https://github.com/SailfinIO/sailfin/commit/3d2781d78a564672f8a5e4ec7df294f39f1d2e2b))
+
+
 ## v0.1.2-rc.1 (2026-03-29)
 
 ### Bug Fixes
@@ -287,22 +350,6 @@ Signed-off-by: dependabot[bot] <support@github.com>
 
 
 ## v0.1.1-beta.2 (2026-01-20)
-
-### Bug Fixes
-
-- Merge conflicts by adding gitattributes
-  ([`0fdac52`](https://github.com/SailfinIO/sailfin/commit/0fdac52b61db42c5d7bbd0b8fbdc3844224cdba2))
-
-
-## v0.1.1-alpha.135 (2026-01-21)
-
-### Bug Fixes
-
-- Module naming
-  ([`80afafe`](https://github.com/SailfinIO/sailfin/commit/80afafed4f9265b3e4637792eabfdf1ed6435ff1))
-
-- Remove legacy stage2 ref
-  ([`3d2781d`](https://github.com/SailfinIO/sailfin/commit/3d2781d78a564672f8a5e4ec7df294f39f1d2e2b))
 
 
 ## v0.1.1-beta.1 (2026-01-20)
