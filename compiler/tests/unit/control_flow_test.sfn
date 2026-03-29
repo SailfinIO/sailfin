@@ -89,9 +89,7 @@ test "control_flow: nested if evaluates inner condition" {
 
 test "control_flow: boolean short-circuit with &&" {
     let mut side_effect -> number = 0;
-    let left -> boolean = false;
-    // right side should not matter when left is false
-    if left && (side_effect == 0) {
+    if false && (side_effect == 0) {
         side_effect = 1;
     }
     assert side_effect == 0;
