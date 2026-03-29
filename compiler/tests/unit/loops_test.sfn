@@ -1,0 +1,128 @@
+fn _sum_to(n -> number) -> number {
+    let mut total -> number = 0;
+    let mut i -> number = 1;
+    loop {
+        if i > n {
+            break;
+        }
+        total += i;
+        i += 1;
+    }
+    return total;
+}
+
+fn _count_evens_up_to(n -> number) -> number {
+    let mut count -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i > n {
+            break;
+        }
+        if i % 2 == 0 {
+            count += 1;
+        }
+        i += 1;
+    }
+    return count;
+}
+
+fn _first_multiple_of_seven(limit -> number) -> number {
+    let mut i -> number = 1;
+    loop {
+        if i > limit {
+            return -1;
+        }
+        if i % 7 == 0 {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _sum_array(arr -> number[]) -> number {
+    let mut total -> number = 0;
+    for n in arr {
+        total += n;
+    }
+    return total;
+}
+
+fn _count_positive(arr -> number[]) -> number {
+    let mut count -> number = 0;
+    for n in arr {
+        if n > 0 {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+test "loops: loop accumulates sum correctly" {
+    assert _sum_to(5) == 15;
+    assert _sum_to(10) == 55;
+    assert _sum_to(1) == 1;
+    assert _sum_to(0) == 0;
+}
+
+test "loops: loop counts even numbers" {
+    assert _count_evens_up_to(6) == 4;
+    assert _count_evens_up_to(0) == 1;
+    assert _count_evens_up_to(1) == 1;
+}
+
+test "loops: break exits on first match" {
+    assert _first_multiple_of_seven(20) == 7;
+    assert _first_multiple_of_seven(6) == -1;
+}
+
+test "loops: for-in sums array elements" {
+    let numbers = [1, 2, 3, 4, 5];
+    assert _sum_array(numbers) == 15;
+}
+
+test "loops: for-in with empty array" {
+    let empty = [];
+    assert _sum_array(empty) == 0;
+}
+
+test "loops: for-in counts positive elements" {
+    let mixed = [-1, 2, -3, 4, 5];
+    assert _count_positive(mixed) == 3;
+}
+
+test "loops: continue skips iteration body" {
+    let mut evens -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= 10 {
+            break;
+        }
+        i += 1;
+        if i % 2 != 0 {
+            continue;
+        }
+        evens += 1;
+    }
+    assert evens == 5;
+}
+
+test "loops: nested loops accumulate correctly" {
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= 3 {
+            break;
+        }
+        let mut j -> number = 0;
+        loop {
+            if j >= 3 {
+                break;
+            }
+            total += 1;
+            j += 1;
+        }
+        i += 1;
+    }
+    assert total == 9;
+}

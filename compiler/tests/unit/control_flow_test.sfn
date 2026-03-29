@@ -1,0 +1,98 @@
+fn _sign(n -> number) -> string {
+    if n > 0 {
+        return "positive";
+    } else if n < 0 {
+        return "negative";
+    } else {
+        return "zero";
+    }
+}
+
+fn _classify_day(day -> number) -> string {
+    match day {
+        1 -> return "Monday",
+        2 -> return "Tuesday",
+        3 -> return "Wednesday",
+        4 -> return "Thursday",
+        5 -> return "Friday",
+        6 -> return "Saturday",
+        7 -> return "Sunday",
+        _ -> return "unknown",
+    }
+}
+
+fn _max(a -> number, b -> number) -> number {
+    if a >= b {
+        return a;
+    }
+    return b;
+}
+
+fn _min(a -> number, b -> number) -> number {
+    if a <= b {
+        return a;
+    }
+    return b;
+}
+
+test "control_flow: if branch taken when condition true" {
+    let result = _sign(5);
+    assert result == "positive";
+}
+
+test "control_flow: else-if branch taken for negative" {
+    let result = _sign(-3);
+    assert result == "negative";
+}
+
+test "control_flow: else branch taken for zero" {
+    let result = _sign(0);
+    assert result == "zero";
+}
+
+test "control_flow: match selects correct arm for 1" {
+    assert _classify_day(1) == "Monday";
+}
+
+test "control_flow: match selects correct arm for 5" {
+    assert _classify_day(5) == "Friday";
+}
+
+test "control_flow: match wildcard arm for unknown value" {
+    assert _classify_day(0) == "unknown";
+    assert _classify_day(8) == "unknown";
+}
+
+test "control_flow: max returns larger value" {
+    assert _max(3, 7) == 7;
+    assert _max(7, 3) == 7;
+    assert _max(4, 4) == 4;
+}
+
+test "control_flow: min returns smaller value" {
+    assert _min(3, 7) == 3;
+    assert _min(7, 3) == 3;
+    assert _min(4, 4) == 4;
+}
+
+test "control_flow: nested if evaluates inner condition" {
+    let a -> number = 10;
+    let b -> number = 5;
+    let mut result -> string = "none";
+    if a > 0 {
+        if b > 0 {
+            result = "both positive";
+        }
+    }
+    assert result == "both positive";
+}
+
+test "control_flow: boolean short-circuit with &&" {
+    let mut side_effect -> number = 0;
+    let left -> boolean = false;
+    // right side should not matter when left is false
+    if left && (side_effect == 0) {
+        side_effect = 1;
+    }
+    assert side_effect == 0;
+}

@@ -1,0 +1,96 @@
+fn _add(x -> number, y -> number) -> number {
+    return x + y;
+}
+
+fn _multiply(x -> number, y -> number) -> number {
+    return x * y;
+}
+
+fn _subtract(a -> number, b -> number) -> number {
+    return a - b;
+}
+
+fn _identity(x -> number) -> number {
+    return x;
+}
+
+fn _is_even(n -> number) -> boolean {
+    return n % 2 == 0;
+}
+
+fn _factorial(n -> number) -> number {
+    if n <= 1 {
+        return 1;
+    }
+    return n * _factorial(n - 1);
+}
+
+fn _fibonacci(n -> number) -> number {
+    if n <= 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    return _fibonacci(n - 1) + _fibonacci(n - 2);
+}
+
+fn _greet(name -> string = "Sailfin") -> string {
+    return "Hello, " + name + "!";
+}
+
+test "functions: add returns correct sum" {
+    assert _add(2, 3) == 5;
+    assert _add(-1, 1) == 0;
+    assert _add(0, 0) == 0;
+}
+
+test "functions: multiply returns correct product" {
+    assert _multiply(3, 4) == 12;
+    assert _multiply(0, 99) == 0;
+    assert _multiply(-2, 5) == -10;
+}
+
+test "functions: subtract returns correct difference" {
+    assert _subtract(10, 4) == 6;
+    assert _subtract(0, 5) == -5;
+}
+
+test "functions: identity returns input unchanged" {
+    assert _identity(7) == 7;
+    assert _identity(0) == 0;
+    assert _identity(-3) == -3;
+}
+
+test "functions: is_even correctly classifies numbers" {
+    assert _is_even(2) == true;
+    assert _is_even(3) == false;
+    assert _is_even(0) == true;
+    assert _is_even(-4) == true;
+}
+
+test "functions: factorial computes correctly" {
+    assert _factorial(0) == 1;
+    assert _factorial(1) == 1;
+    assert _factorial(5) == 120;
+    assert _factorial(6) == 720;
+}
+
+test "functions: fibonacci produces correct sequence" {
+    assert _fibonacci(0) == 0;
+    assert _fibonacci(1) == 1;
+    assert _fibonacci(2) == 1;
+    assert _fibonacci(3) == 2;
+    assert _fibonacci(7) == 13;
+    assert _fibonacci(10) == 55;
+}
+
+test "functions: default parameter used when arg omitted" {
+    let result = _greet();
+    assert result == "Hello, Sailfin!";
+}
+
+test "functions: explicit arg overrides default" {
+    let result = _greet("Alice");
+    assert result == "Hello, Alice!";
+}

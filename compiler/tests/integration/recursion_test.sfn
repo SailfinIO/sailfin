@@ -1,0 +1,75 @@
+fn _quicksort(arr -> number[]) -> number[] {
+    if arr.length <= 1 {
+        return arr;
+    }
+    let pivot = arr[0];
+    let less    = arr.filter(fn(x) -> boolean { return x < pivot; });
+    let equal   = arr.filter(fn(x) -> boolean { return x == pivot; });
+    let greater = arr.filter(fn(x) -> boolean { return x > pivot; });
+    return _quicksort(less).concat(equal).concat(_quicksort(greater));
+}
+
+fn _is_sorted(arr -> number[]) -> boolean {
+    let mut i -> number = 0;
+    loop {
+        if i + 1 >= arr.length {
+            break;
+        }
+        if arr[i] > arr[i + 1] {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+test "recursion: quicksort empty array" {
+    let sorted = _quicksort([]);
+    assert sorted.length == 0;
+}
+
+test "recursion: quicksort single element" {
+    let sorted = _quicksort([42]);
+    assert sorted.length == 1;
+    assert sorted[0] == 42;
+}
+
+test "recursion: quicksort already-sorted array" {
+    let arr = [1, 2, 3, 4, 5];
+    let sorted = _quicksort(arr);
+    assert _is_sorted(sorted) == true;
+    assert sorted.length == 5;
+}
+
+test "recursion: quicksort reverse-sorted array" {
+    let arr = [5, 4, 3, 2, 1];
+    let sorted = _quicksort(arr);
+    assert _is_sorted(sorted) == true;
+    assert sorted[0] == 1;
+    assert sorted[4] == 5;
+}
+
+test "recursion: quicksort mixed array" {
+    let arr = [10, 7, 8, 9, 1, 5];
+    let sorted = _quicksort(arr);
+    assert _is_sorted(sorted) == true;
+    assert sorted.length == 6;
+    assert sorted[0] == 1;
+    assert sorted[5] == 10;
+}
+
+test "recursion: quicksort array with duplicates" {
+    let arr = [3, 1, 4, 1, 5, 9, 2, 6, 5];
+    let sorted = _quicksort(arr);
+    assert _is_sorted(sorted) == true;
+    assert sorted.length == 9;
+    assert sorted[0] == 1;
+    assert sorted[8] == 9;
+}
+
+test "recursion: is_sorted helper works correctly" {
+    assert _is_sorted([1, 2, 3]) == true;
+    assert _is_sorted([3, 2, 1]) == false;
+    assert _is_sorted([]) == true;
+    assert _is_sorted([1]) == true;
+}
