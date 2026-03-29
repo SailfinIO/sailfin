@@ -1,0 +1,262 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Hero from "../components/Hero.astro";
+
+const features = [
+  {
+    title: "Effect Types",
+    description: "Declare what your code can do — IO, network, model calls, GPU access. The compiler enforces capabilities at every call site.",
+    icon: "shield",
+    href: "/docs/learn/effects",
+  },
+  {
+    title: "Ownership & Borrowing",
+    description: "Move-by-default semantics with explicit borrows. Linear and affine types ensure resources are used exactly as intended.",
+    icon: "lock",
+    href: "/docs/learn/ownership",
+  },
+  {
+    title: "First-Class AI",
+    description: "Models, prompts, pipelines, and tools are language primitives — not library hacks. Type-safe from prompt to response.",
+    icon: "cpu",
+    href: "/docs/learn/ai-constructs",
+  },
+  {
+    title: "Self-Hosted Compiler",
+    description: "Sailfin compiles itself via LLVM. A real systems language with a real native toolchain, not an interpreter wrapper.",
+    icon: "terminal",
+    href: "/docs/contributing/architecture",
+  },
+  {
+    title: "Capability Security",
+    description: "Functions declare required capabilities. Untrusted code can't access the filesystem, network, or models without explicit grants.",
+    icon: "key",
+    href: "/docs/reference/effects",
+  },
+  {
+    title: "Package Registry",
+    description: "Capsules — Sailfin's packages — are published to registry.sailfin.dev with full dependency resolution and capability auditing.",
+    icon: "package",
+    href: "https://registry.sailfin.dev",
+  },
+];
+
+const useCases = [
+  {
+    title: "AI-Powered Services",
+    description: "Build production AI pipelines with type-safe model calls, structured prompts, and generation provenance tracking.",
+  },
+  {
+    title: "Systems Programming",
+    description: "Ownership semantics and native compilation via LLVM make Sailfin suitable for performance-critical infrastructure.",
+  },
+  {
+    title: "Secure Data Processing",
+    description: "PII and Secret wrapper types, plus capability-based security, enforce data handling policies at compile time.",
+  },
+  {
+    title: "CLI Tools & Automation",
+    description: "Concise syntax, fast compilation, and single-binary output make Sailfin ideal for developer tooling.",
+  },
+];
+---
+
+<BaseLayout title="Home">
+  <Hero />
+
+  <!-- Features -->
+  <section class="features">
+    <div class="container">
+      <h2 class="section-title">Why Sailfin?</h2>
+      <p class="section-subtitle">A language designed from the ground up for safe, intelligent systems.</p>
+      <div class="features-grid">
+        {features.map((f) => (
+          <a href={f.href} class="feature-card">
+            <h3>{f.title}</h3>
+            <p>{f.description}</p>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- Use Cases -->
+  <section class="use-cases">
+    <div class="container">
+      <h2 class="section-title">Built for</h2>
+      <div class="use-cases-grid">
+        {useCases.map((uc) => (
+          <div class="use-case-card">
+            <h3>{uc.title}</h3>
+            <p>{uc.description}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- Getting Started CTA -->
+  <section class="cta">
+    <div class="container">
+      <h2>Ready to dive in?</h2>
+      <p>Install Sailfin and build your first program in minutes.</p>
+      <div class="cta-actions">
+        <a href="/docs/getting-started/install" class="btn btn-primary">Get Started</a>
+        <a href="/docs/getting-started/tour" class="btn btn-secondary">Take the Tour</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .features {
+    padding: 5rem 0;
+  }
+
+  .section-title {
+    font-size: 2rem;
+    text-align: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .section-subtitle {
+    text-align: center;
+    color: var(--color-text-secondary);
+    font-size: 1.1rem;
+    margin-bottom: 3rem;
+  }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+  }
+
+  .feature-card {
+    padding: 1.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .feature-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 12px rgba(0, 114, 206, 0.08);
+    text-decoration: none;
+  }
+
+  .feature-card h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+    color: var(--color-text);
+  }
+
+  .feature-card p {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+  }
+
+  .use-cases {
+    padding: 4rem 0;
+    background: var(--color-bg-alt);
+  }
+
+  .use-cases-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    margin-top: 2.5rem;
+  }
+
+  .use-case-card {
+    padding: 2rem;
+    background: var(--color-bg);
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+  }
+
+  .use-case-card h3 {
+    font-size: 1.15rem;
+    margin-bottom: 0.5rem;
+    color: var(--color-primary);
+  }
+
+  .use-case-card p {
+    font-size: 0.925rem;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+  }
+
+  .cta {
+    padding: 5rem 0;
+    text-align: center;
+  }
+
+  .cta h2 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .cta p {
+    color: var(--color-text-secondary);
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
+  }
+
+  .cta-actions {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.7rem 1.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--color-primary);
+    color: #fff;
+  }
+
+  .btn-primary:hover {
+    background: var(--color-primary-dark);
+    text-decoration: none;
+  }
+
+  .btn-secondary {
+    background: var(--color-bg);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+  }
+
+  .btn-secondary:hover {
+    background: var(--color-bg-alt);
+    text-decoration: none;
+  }
+
+  @media (max-width: 768px) {
+    .features-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .use-cases-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .features-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>

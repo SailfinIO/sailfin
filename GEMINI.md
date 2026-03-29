@@ -38,7 +38,7 @@ The primary workflow for development is as follows:
 The following commands are available for development:
 
 - `make env`: Create or update the Conda environment used for the compiler.
-- `make install`: Install the built compiler into `PREFIX/bin` (default: `/usr/local/bin`).
+- `make install`: Install the built compiler into `PREFIX/bin` (default: `~/.local/bin`).
 - `make test`: Run the full suite.
 - `make compile`: Build the native compiler by self-hosting from a released seed (preferred).
 - `make check`: Compile (if needed) then run the full test suite.

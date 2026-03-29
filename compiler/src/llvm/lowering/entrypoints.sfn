@@ -1,22 +1,42 @@
 // compiler/src/llvm/lowering/entrypoints.sfn
 //
-// LLVM IR lowering entrypoints.
+// LLVM IR lowering entrypoints — public API surface.
 
-import { NativeModule } from "../../emit_native";
+import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
     select_text_artifact,
     select_layout_manifest_artifact,
     parse_native_artifact,
+    parse_native_function_count_from_text,
+    parse_native_functions_from_text,
+    parse_native_structs_from_text,
+    parse_native_imports_from_text,
+    parse_native_interfaces_from_text,
+    parse_native_enums_from_text,
+    parse_native_bindings_from_text,
+    parse_native_diagnostics_from_text,
+    parse_native_structs_for_import,
+    parse_native_imports_for_import,
+    parse_native_interfaces_for_import,
+    parse_native_enums_for_import,
+    parse_native_functions_for_import,
     parse_native_artifact_for_import_context,
     parse_layout_manifest,
+    split_lines,
     NativeImport,
     NativeImportSpecifier,
     NativeFunction,
+    NativeParameter,
+    NativeInstruction,
     NativeInterface,
     NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
+    NativeStructLayoutField,
     NativeEnum,
     LayoutManifest,
     ParseNativeResult,
+    NativeBinding,
 } from "../../native_ir";
 import { substring, char_code } from "../../string_utils";
 
@@ -25,12 +45,15 @@ import {
     TraitMetadata,
     TraitDescriptor,
     TraitImplementationDescriptor,
+    ImportedModuleContext,
     LoweredLLVMResult,
     LoweredLLVMLinesResult,
     FunctionEffectEntry,
     LifetimeRegionMetadata,
     StringConstant,
     CapabilityManifest,
+    EnumTypeInfo,
+    EnumVariantInfo,
 } from "../types";
 
 import {
@@ -58,6 +81,7 @@ import {
     collect_runtime_helper_targets,
     append_unique_effect,
     find_function_effect_entry,
+    append_function_effect_entry,
 } from "../effects";
 
 import {
@@ -71,7 +95,6 @@ import {
     render_trait_metadata_comments,
     render_runtime_helper_declarations,
     render_imported_function_declarations,
-    collect_exported_symbol_names,
     should_internalize_function,
     find_function_by_name,
 } from "../rendering";
@@ -85,6 +108,7 @@ import {
     collect_imported_module_context_for_module,
     apply_layout_manifest_to_module,
     resolve_import_module_slug_for_module,
+    resolve_import_artifact_slug,
 } from "../imports";
 
 import {
@@ -95,766 +119,90 @@ import {
     emit_llvm_function,
 } from "./emission";
 
-fn empty_trait_metadata() -> TraitMetadata {
-    return TraitMetadata { interfaces: [], implementations: [] };
-}
+import {
+    empty_capability_manifest,
+    empty_trait_metadata,
+    _join_llvm_lines_linear,
+    sanitize_collection_length,
+    build_trait_metadata,
+    flatten_struct_methods,
+    is_test_module_slug,
+    render_test_harness_main_for_module,
+    extend_native_structs,
+    extend_native_enums,
+    extend_native_interfaces,
+    extend_native_functions,
+    concat_native_functions,
+    append_native_function,
+    collect_defined_function_symbols,
+    collect_available_import_module_names,
+    resolve_import_provider_module_name,
+    apply_module_symbol_mangling,
+    find_declare_signature,
+    render_function_shim,
+    insert_before_llvm_footer,
+    DeclareSignature,
+    MangledModuleResult,
+} from "./lowering_helpers";
 
-fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug -> string) -> string[] {
-    let mut lines -> string[] = [];
-    lines = lines.concat([
-        "define i32 @main(i32 %argc, i8** %argv) {",
-        "entry:",
-    ]);
-
-    let should_mangle = !starts_with(module_slug, "runtime/");
-    let module_suffix = sanitize_module_suffix(module_slug);
-
-    let mut index -> number = 0;
-    loop {
-        if index >= tests.length {
-            break;
-        }
-        let mut sym = sanitize_symbol(tests[index].name);
-        if should_mangle {
-            if index_of(sym, "__") < 0 {
-                sym = sym + "__" + module_suffix;
-            }
-        }
-        lines = append_string(lines, "  call void @" + sym + "()");
-        index += 1;
-    }
-    lines = lines.concat([
-        "  ret i32 0",
-        "}",
-    ]);
-    return lines;
-}
-
-struct MangledModuleResult {
-    lines -> string[];
-    diagnostics -> string[];
-}
-
-struct DeclareSignature {
-    return_type -> string;
-    param_types -> string[];
-}
-
-fn is_llvm_symbol_char(ch -> string) -> boolean {
-    if ch.length == 0 {
-        return false;
-    }
-    if ch == "_" {
-        return true;
-    }
-    let code = char_code(ch);
-    let lower_a = char_code("a");
-    let lower_z = char_code("z");
-    if code >= lower_a && code <= lower_z {
-        return true;
-    }
-    let upper_a = char_code("A");
-    let upper_z = char_code("Z");
-    if code >= upper_a && code <= upper_z {
-        return true;
-    }
-    let zero = char_code("0");
-    let nine = char_code("9");
-    if code >= zero && code <= nine {
-        return true;
-    }
-    return false;
-}
-
-fn sanitize_module_suffix(module_name -> string) -> string {
-    if module_name.length == 0 {
-        return "module";
-    }
-    let mut out -> string = "";
-    let mut index -> number = 0;
-    loop {
-        if index >= module_name.length {
-            break;
-        }
-        let ch = module_name[index];
-        if is_llvm_symbol_char(ch) {
-            out = out + ch;
-        } else {
-            if ch == "/" {
-                out = out + "__";
-            } else {
-                out = out + "_";
-            }
-        }
-        index += 1;
-    }
-    if out.length == 0 {
-        return "module";
-    }
-    return out;
-}
-
-fn should_keep_unmangled_abi_symbol(symbol -> string) -> boolean {
-    // These are consumed directly by the native C driver.
-    if symbol == "native_cli_main" {
-        return true;
-    }
-    if symbol == "compile_to_sailfin" {
-        return true;
-    }
-    if symbol == "compile_to_llvm" {
-        return true;
-    }
-    // Program entrypoint for `sfn build`/`sfn run`.
-    // The clang toolchain expects an unmangled `main` symbol when linking an executable.
-    if symbol == "main" {
-        return true;
-    }
-    return false;
-}
-
-fn extract_module_name_from_native_text(native_text -> string) -> string {
-    // The native text artifact begins with `.module <name>`.
-    if native_text.length == 0 {
-        return "";
-    }
-
-    // Avoid building lines via repeated string concatenation (quadratic cost on large modules).
-    // We only need the `.module <name>` header and can find it via a linear scan.
-    let module_index = index_of(native_text, ".module ");
-    if module_index < 0 {
-        return "";
-    }
-
-    let mut start = module_index + 8;
-    // Skip any extra whitespace after `.module `.
-    loop {
-        if start >= native_text.length {
-            break;
-        }
-        let ch = native_text[start];
-        if ch == " " || ch == "\t" {
-            start += 1;
-            continue;
-        }
-        break;
-    }
-
-    let mut end = start;
-    loop {
-        if end >= native_text.length {
-            break;
-        }
-        if native_text[end] == "\n" {
-            break;
-        }
-        end += 1;
-    }
-
-    return trim_text(substring(native_text, start, end));
-}
-
-fn collect_available_import_module_names(imported_native_texts -> string[]) -> string[] {
-    let mut names -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= imported_native_texts.length {
-            break;
-        }
-        let text = imported_native_texts[index];
-        let name = extract_module_name_from_native_text(text);
-        if name.length > 0 && !string_array_contains(names, name) {
-            names = append_string(names, name);
-        }
-        index += 1;
-    }
-    return names;
-}
-
-fn resolve_import_provider_module_name(import_path -> string, current_module_slug -> string, available_module_names -> string[]) -> string {
-    let base = resolve_import_module_slug_for_module(import_path, current_module_slug);
-    if base.length == 0 {
-        return base;
-    }
-    if string_array_contains(available_module_names, base) {
-        return base;
-    }
-    let mod_slug = base + "/mod";
-    if string_array_contains(available_module_names, mod_slug) {
-        return mod_slug;
-    }
-    return base;
-}
-
-fn collect_defined_function_symbols(lines -> string[]) -> string[] {
-    let mut symbols -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= lines.length {
-            break;
-        }
-        let trimmed = trim_text(lines[index]);
-        if starts_with(trimmed, "define ") {
-            let mut at_index -> number = index_of(trimmed, "@");
-            if at_index >= 0 {
-                let mut start = at_index + 1;
-                let mut end = start;
-                loop {
-                    if end >= trimmed.length {
-                        break;
-                    }
-                    if !is_llvm_symbol_char(trimmed[end]) {
-                        break;
-                    }
-                    end += 1;
-                }
-                if end > start {
-                    let sym = substring(trimmed, start, end);
-                    if !string_array_contains(symbols, sym) {
-                        symbols = append_string(symbols, sym);
-                    }
-                }
-            }
-        }
-        index += 1;
-    }
-    return symbols;
-}
-
-fn find_substitution_index(olds -> string[], news -> string[], symbol -> string) -> number {
-    let mut index -> number = 0;
-    loop {
-        if index >= olds.length || index >= news.length {
-            break;
-        }
-        if olds[index] == symbol {
-            return index;
-        }
-        index += 1;
-    }
-    return -1;
-}
-
-fn replace_symbol_refs_in_line(line -> string, olds -> string[], news -> string[]) -> string {
-    if olds.length == 0 {
-        return line;
-    }
-    if line.length == 0 {
-        return line;
-    }
-    let mut out -> string = "";
-    let mut index -> number = 0;
-    let mut in_string -> boolean = false;
-    loop {
-        if index >= line.length {
-            break;
-        }
-        let ch = line[index];
-        if ch == "\"" {
-            in_string = !in_string;
-            out = out + ch;
-            index += 1;
-            continue;
-        }
-        if in_string {
-            out = out + ch;
-            index += 1;
-            continue;
-        }
-        if ch != "@" {
-            out = out + ch;
-            index += 1;
-            continue;
-        }
-
-        let start = index + 1;
-        if start >= line.length {
-            out = out + ch;
-            index += 1;
-            continue;
-        }
-
-        let mut end = start;
-        loop {
-            if end >= line.length {
-                break;
-            }
-            if !is_llvm_symbol_char(line[end]) {
-                break;
-            }
-            end += 1;
-        }
-        if end == start {
-            // Not a function symbol (e.g. @.str), leave it untouched.
-            out = out + ch;
-            index += 1;
-            continue;
-        }
-
-        let sym = substring(line, start, end);
-        let replacement_index = find_substitution_index(olds, news, sym);
-        if replacement_index >= 0 {
-            out = out + "@" + news[replacement_index];
-        } else {
-            out = out + "@" + sym;
-        }
-        index = end;
-    }
-    return out;
-}
-
-fn apply_symbol_substitutions(lines -> string[], olds -> string[], news -> string[]) -> string[] {
-    if olds.length == 0 {
-        return lines;
-    }
-    let mut out -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= lines.length {
-            break;
-        }
-        out = append_string(out, replace_symbol_refs_in_line(lines[index], olds, news));
-        index += 1;
-    }
-    return out;
-}
-
-fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignature? {
-    if symbol.length == 0 {
-        return null;
-    }
-    let mut index -> number = 0;
-    loop {
-        if index >= lines.length {
-            break;
-        }
-        let trimmed = trim_text(lines[index]);
-        if starts_with(trimmed, "declare ") {
-            let at_index = index_of(trimmed, "@");
-            if at_index >= 0 {
-                let start = at_index + 1;
-                let mut end = start;
-                loop {
-                    if end >= trimmed.length {
-                        break;
-                    }
-                    if !is_llvm_symbol_char(trimmed[end]) {
-                        break;
-                    }
-                    end += 1;
-                }
-                if end > start {
-                    let sym = substring(trimmed, start, end);
-                    if sym == symbol {
-                        let open_index = index_of(trimmed, "(");
-                        let close_index = index_of(trimmed, ")");
-                        if open_index < 0 || close_index < 0 || close_index <= open_index {
-                            return null;
-                        }
-                        let ret_type = trim_text(substring(trimmed, 8, at_index));
-                        let params_text = trim_text(substring(trimmed, open_index + 1, close_index));
-                        if params_text.length == 0 || params_text == "void" {
-                            return DeclareSignature { return_type: ret_type, param_types: [] };
-                        }
-
-                        // Split parameters on top-level commas only (struct types include commas).
-                        let mut parts -> string[] = [];
-                        let mut start_index -> number = 0;
-                        let mut scan -> number = 0;
-                        let mut curly_depth -> number = 0;
-                        let mut angle_depth -> number = 0;
-                        loop {
-                            if scan >= params_text.length {
-                                break;
-                            }
-                            let ch = params_text[scan];
-                            if ch == "{" {
-                                curly_depth += 1;
-                            } else if ch == "}" {
-                                if curly_depth > 0 {
-                                    curly_depth -= 1;
-                                }
-                            } else if ch == "<" {
-                                angle_depth += 1;
-                            } else if ch == ">" {
-                                if angle_depth > 0 {
-                                    angle_depth -= 1;
-                                }
-                            }
-                            if ch == "," && curly_depth == 0 && angle_depth == 0 {
-                                let part = trim_text(substring(params_text, start_index, scan));
-                                if part.length > 0 {
-                                    parts = append_string(parts, part);
-                                }
-                                start_index = scan + 1;
-                            }
-                            scan += 1;
-                        }
-                        let final_part = trim_text(substring(params_text, start_index, params_text.length));
-                        if final_part.length > 0 {
-                            parts = append_string(parts, final_part);
-                        }
-                        return DeclareSignature { return_type: ret_type, param_types: parts };
-                    }
-                }
-            }
-        }
-        index += 1;
-    }
-    return null;
-}
-
-fn render_function_shim(export_symbol -> string, target_symbol -> string, signature -> DeclareSignature) -> string[] {
-    let mut param_decls -> string[] = [];
-    let mut call_args -> string[] = [];
-    let mut idx -> number = 0;
-    loop {
-        if idx >= signature.param_types.length {
-            break;
-        }
-        let ty = trim_text(signature.param_types[idx]);
-        if ty == "..." {
-            param_decls = append_string(param_decls, "...");
-            // Varargs shims are not supported; omit forwarding.
-            idx += 1;
-            continue;
-        }
-        let name = "%a" + number_to_string(idx);
-        param_decls = append_string(param_decls, ty + " " + name);
-        call_args = append_string(call_args, ty + " " + name);
-        idx += 1;
-    }
-
-    let header = "define " + signature.return_type + " @" + export_symbol + "(" + join_with_separator(param_decls, ", ") + ") {";
-    if signature.return_type == "void" {
-        return [
-            header,
-            "entry:",
-            "  call void @" + target_symbol + "(" + join_with_separator(call_args, ", ") + ")",
-            "  ret void",
-            "}",
-        ];
-    }
-    return [
-        header,
-        "entry:",
-        "  %t0 = call " + signature.return_type + " @" + target_symbol + "(" + join_with_separator(call_args, ", ") + ")",
-        "  ret " + signature.return_type + " %t0",
-        "}",
-    ];
-}
-
-fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[] {
-    if inserted.length == 0 {
-        return lines;
-    }
-    let mut footer_index = lines.length;
-    let mut index -> number = 0;
-    loop {
-        if index >= lines.length {
-            break;
-        }
-        let trimmed = trim_text(lines[index]);
-        if starts_with(trimmed, "attributes ") || starts_with(trimmed, "!") {
-            footer_index = index;
-            break;
-        }
-        index += 1;
-    }
-    let mut out -> string[] = [];
-    let mut i -> number = 0;
-    loop {
-        if i >= lines.length {
-            break;
-        }
-        if i == footer_index {
-            let mut j -> number = 0;
-            loop {
-                if j >= inserted.length {
-                    break;
-                }
-                out = append_string(out, inserted[j]);
-                j += 1;
-            }
-        }
-        out = append_string(out, lines[i]);
-        i += 1;
-    }
-    if footer_index == lines.length {
-        let mut j -> number = 0;
-        loop {
-            if j >= inserted.length {
-                break;
-            }
-            out = append_string(out, inserted[j]);
-            j += 1;
-        }
-    }
-    return out;
-}
-
-fn apply_module_symbol_mangling(
-    lines -> string[],
-    imports -> NativeImport[],
-    current_module_slug -> string,
-    imported_native_texts -> string[]
-) -> MangledModuleResult {
-    let mut diagnostics -> string[] = [];
-
-    // Keep runtime modules unmangled: they can be referenced implicitly
-    // (without explicit imports) and effectively act as a stable ABI.
-    if starts_with(current_module_slug, "runtime/") {
-        return MangledModuleResult { lines: lines, diagnostics: diagnostics };
-    }
-
-    let module_suffix = sanitize_module_suffix(current_module_slug);
-
-    let available_modules = collect_available_import_module_names(imported_native_texts);
-
-    // 1) Mangle every function defined in this module to a module-qualified symbol.
-    let defined = collect_defined_function_symbols(lines);
-    let mut local_olds -> string[] = [];
-    let mut local_news -> string[] = [];
-    let mut def_index -> number = 0;
-    loop {
-        if def_index >= defined.length {
-            break;
-        }
-        let sym = defined[def_index];
-        if should_keep_unmangled_abi_symbol(sym) {
-            def_index += 1;
-            continue;
-        }
-        // Avoid double-mangling if already qualified.
-        if index_of(sym, "__") >= 0 {
-            def_index += 1;
-            continue;
-        }
-        local_olds = append_string(local_olds, sym);
-        local_news = append_string(local_news, sym + "__" + module_suffix);
-        def_index += 1;
-    }
-
-    let mut rewritten = apply_symbol_substitutions(lines, local_olds, local_news);
-
-    // 2) Rewrite imported symbol references to the provider's qualified symbol,
-    // and generate re-export shims so downstream modules can import symbols
-    // from this module even if they're transitively provided.
-    let mut import_olds -> string[] = [];
-    let mut import_news -> string[] = [];
-    let mut shim_exports -> string[] = [];
-    let mut shim_targets -> string[] = [];
-    let mut import_index -> number = 0;
-    loop {
-        if import_index >= imports.length {
-            break;
-        }
-        let entry = imports[import_index];
-        if entry.kind != "import" {
-            import_index += 1;
-            continue;
-        }
-        let provider_module = resolve_import_provider_module_name(entry.module, current_module_slug, available_modules);
-        let provider_is_runtime = starts_with(provider_module, "runtime/");
-        let provider_suffix = sanitize_module_suffix(provider_module);
-        let mut spec_index -> number = 0;
-        loop {
-            if spec_index >= entry.specifiers.length {
-                break;
-            }
-            let spec -> NativeImportSpecifier = entry.specifiers[spec_index];
-            let imported_name = sanitize_symbol(spec.name);
-            let mut local_name = spec.name;
-            if spec.alias != null && spec.alias.length > 0 {
-                local_name = spec.alias;
-            }
-            let local_symbol = sanitize_symbol(local_name);
-            if should_keep_unmangled_abi_symbol(local_symbol) {
-                spec_index += 1;
-                continue;
-            }
-            if string_array_contains(defined, local_symbol) {
-                diagnostics = append_string(diagnostics, "llvm lowering: import `" + local_symbol + "` shadows local function in module `" + current_module_slug + "`");
-                spec_index += 1;
-                continue;
-            }
-            // Don't rewrite if already qualified.
-            if index_of(local_symbol, "__") >= 0 {
-                spec_index += 1;
-                continue;
-            }
-            import_olds = append_string(import_olds, local_symbol);
-            let mut target_symbol = imported_name;
-            if !provider_is_runtime {
-                target_symbol = imported_name + "__" + provider_suffix;
-            }
-            import_news = append_string(import_news, target_symbol);
-
-            // Re-export shim: provide `local_symbol__<this_module>` as a thin
-            // wrapper forwarding to the provider's symbol.
-            let export_sym = local_symbol + "__" + module_suffix;
-            if !string_array_contains(shim_exports, export_sym) {
-                shim_exports = append_string(shim_exports, export_sym);
-                shim_targets = append_string(shim_targets, target_symbol);
-            }
-            spec_index += 1;
-        }
-        import_index += 1;
-    }
-
-    rewritten = apply_symbol_substitutions(rewritten, import_olds, import_news);
-
-    // 3) Append shims before the LLVM footer (attributes/metadata).
-    let mut shim_lines -> string[] = [];
-    let mut shim_index -> number = 0;
-    loop {
-        if shim_index >= shim_exports.length || shim_index >= shim_targets.length {
-            break;
-        }
-        let export_sym = shim_exports[shim_index];
-        let target_sym = shim_targets[shim_index];
-        let signature = find_declare_signature(rewritten, target_sym);
-        if signature == null {
-            // Not a function import (e.g. struct/enum type), or declaration not emitted.
-            shim_index += 1;
-            continue;
-        }
-        shim_lines = shim_lines.concat(render_function_shim(export_sym, target_sym, signature));
-        shim_lines = append_string(shim_lines, "");
-        shim_index += 1;
-    }
-    rewritten = insert_before_llvm_footer(rewritten, shim_lines);
-
-    return MangledModuleResult { lines: rewritten, diagnostics: diagnostics };
-}
-
-fn empty_capability_manifest() -> CapabilityManifest {
-    return CapabilityManifest { entries: [] };
-}
-
-fn build_trait_metadata(interfaces -> NativeInterface[], structs -> NativeStruct[]) -> TraitMetadata {
-    let mut interface_descriptors -> TraitDescriptor[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= interfaces.length {
-            break;
-        }
-        let interface = interfaces[index];
-        interface_descriptors = interface_descriptors.concat([
-            TraitDescriptor {
-                name: interface.name,
-                type_parameters: interface.type_parameters,
-                signatures: interface.signatures,
-            }
-        ]);
-        index += 1;
-    }
-
-    let mut implementation_descriptors -> TraitImplementationDescriptor[] = [];
-    index = 0;
-    loop {
-        if index >= structs.length {
-            break;
-        }
-        let definition = structs[index];
-        if definition.implements.length > 0 {
-            implementation_descriptors = implementation_descriptors.concat([
-                TraitImplementationDescriptor { struct_name: definition.name, interfaces: definition.implements }
-            ]);
-        }
-        index += 1;
-    }
-
-    return TraitMetadata { interfaces: interface_descriptors, implementations: implementation_descriptors };
-}
-
-fn append_native_function(values -> NativeFunction[], value -> NativeFunction) -> NativeFunction[] {
-    return values.concat([value]);
-}
-
-fn concat_native_functions(first -> NativeFunction[], second -> NativeFunction[]) -> NativeFunction[] {
-    let mut result -> NativeFunction[] = first;
-    let mut index -> number = 0;
-    loop {
-        if index >= second.length {
-            break;
-        }
-        result = append_native_function(result, second[index]);
-        index += 1;
-    }
-    return result;
-}
-
-fn flatten_struct_methods(structs -> NativeStruct[]) -> NativeFunction[] {
-    let mut result -> NativeFunction[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= structs.length {
-            break;
-        }
-        let definition = structs[index];
-        let mut method_index -> number = 0;
-        loop {
-            if method_index >= definition.methods.length {
-                break;
-            }
-            let method = definition.methods[method_index];
-            let qualified_name = definition.name + "::" + method.name;
-            let qualified = NativeFunction {
-                name: qualified_name,
-                is_async: method.is_async,
-                parameters: method.parameters,
-                return_type: method.return_type,
-                effects: method.effects,
-                decorators: method.decorators,
-                instructions: method.instructions,
-                is_extern: false,
-            };
-            result = append_native_function(result, qualified);
-            method_index += 1;
-        }
-        index += 1;
-    }
-    return result;
-}
+import {
+    lower_to_llvm_lines_with_parsed_context,
+    lower_to_llvm_lines_with_parsed_context_for_tests,
+    extend_string_lines,
+    extend_string_lines_checked,
+    write_llvm_lines_chunked,
+    recover_functions_for_lowering,
+    recover_native_functions_light,
+    recover_native_structs_light,
+    recover_native_imports_light,
+    parse_native_artifact_with_retry,
+    parse_native_artifact_safe,
+    ensure_intrinsic_declarations,
+    module_source_filename,
+    append_string_lines,
+    extend_lifetime_regions_checked,
+    compile_native_text_to_llvm_file,
+} from "./lowering_core";
 
 fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        return lower_to_llvm_with_context(native_module, [], [], []);
-    }
-    // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
-    let parse = parse_native_artifact(artifact.contents);
-    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    return lower_to_llvm_with_parsed_context(
-        native_module,
-        parse,
-        import_context.manifests,
-        import_context.native_texts,
-        import_context.diagnostics
-    );
+        if artifact == null || artifact.contents.length == 0 {
+            return lower_to_llvm_with_context(native_module, [], [], []);
+        }
+        let parse = parse_native_artifact_safe(artifact.contents);
+        let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
+        return lower_to_llvm_with_parsed_context(
+            native_module,
+            parse,
+            import_context.manifests,
+            import_context.native_texts,
+            import_context.diagnostics
+        );
 }
 
 fn lower_to_llvm_lines(native_module -> NativeModule) -> LoweredLLVMLinesResult ![io] {
-    let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        return lower_to_llvm_lines_with_context(native_module, [], [], []);
-    }
-    // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
-    let parse = parse_native_artifact(artifact.contents);
-    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    return lower_to_llvm_lines_with_parsed_context(
-        native_module,
-        parse,
-        import_context.manifests,
-        import_context.native_texts,
-        import_context.diagnostics
-    );
+    let ir = lower_to_llvm_ir(native_module);
+        if ir == null || ir.length == 0 {
+            return LoweredLLVMLinesResult { lines: [], diagnostics: [], trait_metadata: empty_trait_metadata(), function_effects: [], lifetime_regions: [], capability_manifest: empty_capability_manifest(), string_constants: empty_string_constant_set() };
+        }
+    let lines = split_lines(ir);
+    return LoweredLLVMLinesResult {
+        lines: lines,
+        diagnostics: [],
+        trait_metadata: empty_trait_metadata(),
+        function_effects: [],
+        lifetime_regions: [],
+        capability_manifest: empty_capability_manifest(),
+        string_constants: empty_string_constant_set(),
+    };
 }
 
 fn lower_to_llvm_lines_only(native_module -> NativeModule) -> string[] ![io] {
-    let lowered = lower_to_llvm_lines(native_module);
-    return lowered.lines;
+    let ir = lower_to_llvm_ir(native_module);
+    if ir == null || ir.length == 0 {
+        return [];
+    }
+    return split_lines(ir);
 }
 
 // Convenience wrapper for tool/driver entrypoints that only need the emitted
@@ -862,7 +210,21 @@ fn lower_to_llvm_lines_only(native_module -> NativeModule) -> string[] ![io] {
 // struct across compilation boundaries (stage1 Python + stage2 native), which
 // has historically caused layout/ABI mismatches and nondeterministic output.
 fn lower_to_llvm_ir(native_module -> NativeModule) -> string ![io] {
-    let lowered = lower_to_llvm(native_module);
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null || artifact.contents.length == 0 {
+        let lowered = lower_to_llvm_with_context(native_module, [], [], []);
+        return lowered.ir;
+    }
+    // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
+    let parse = parse_native_artifact_safe(artifact.contents);
+    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
+    let lowered = lower_to_llvm_with_parsed_context(
+        native_module,
+        parse,
+        import_context.manifests,
+        import_context.native_texts,
+        import_context.diagnostics
+    );
     return lowered.ir;
 }
 
@@ -872,7 +234,7 @@ fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult !
         return lower_to_llvm_with_context_for_tests(native_module, [], [], []);
     }
     // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
-    let parse = parse_native_artifact(artifact.contents);
+    let parse = parse_native_artifact_safe(artifact.contents);
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
     return lower_to_llvm_with_parsed_context_for_tests(
         native_module,
@@ -883,193 +245,196 @@ fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult !
     );
 }
 
+fn lower_to_llvm_lines_for_tests(native_module -> NativeModule) -> LoweredLLVMLinesResult ![io] {
+    let ir = lower_to_llvm_ir_for_tests_direct(native_module);
+    if ir.length == 0 {
+        return LoweredLLVMLinesResult {
+            lines: [],
+            diagnostics: [],
+            trait_metadata: empty_trait_metadata(),
+            function_effects: [],
+            lifetime_regions: [],
+            capability_manifest: empty_capability_manifest(),
+            string_constants: empty_string_constant_set(),
+        };
+    }
+    let lines = split_lines(ir);
+    return LoweredLLVMLinesResult {
+        lines: lines,
+        diagnostics: [],
+        trait_metadata: empty_trait_metadata(),
+        function_effects: [],
+        lifetime_regions: [],
+        capability_manifest: empty_capability_manifest(),
+        string_constants: empty_string_constant_set(),
+    };
+}
+
 fn lower_to_llvm_ir_for_tests(native_module -> NativeModule) -> string ![io] {
     let lowered = lower_to_llvm_for_tests(native_module);
     return lowered.ir;
 }
 
-fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifests -> LayoutManifest[]) -> LoweredLLVMResult {
-    return lower_to_llvm_with_context(native_module, imported_manifests, [], []);
-}
-
-fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
-    let base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
-    if base.ir.length == 0 {
-        return base;
-    }
-
+// Direct text lowering for tests to avoid returning large structs across call
+// boundaries (can trigger ABI corruption in stage2-native).
+fn lower_to_llvm_ir_for_tests_direct(native_module -> NativeModule) -> string ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
-        return base;
+        return "";
     }
-
-    let parse = parse_native_artifact(artifact.contents);
-    let mut tests -> NativeFunction[] = [];
-    let mut has_main -> boolean = false;
-
-    let mut index -> number = 0;
-    loop {
-        if index >= parse.functions.length {
-            break;
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    if trace {
+        print.info("test llvm: direct parse start (bytes=" + number_to_string(artifact.contents.length) + ")");
+    }
+    let parse = parse_native_artifact_safe(artifact.contents);
+    if trace {
+        print.info("test llvm: direct parse done (imports=" + number_to_string(parse.imports.length) + ")");
+    }
+    if trace {
+        print.info("test llvm: direct import-context start");
+    }
+    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
+    if trace {
+        print.info("test llvm: direct import-context done (texts=" + number_to_string(import_context.native_texts.length) + ")");
+        print.info("test llvm: direct lowering start");
+    }
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context_for_tests(
+        native_module,
+        parse,
+        import_context.manifests,
+        import_context.native_texts,
+        import_context.diagnostics
+    );
+    if trace {
+        print.info("test llvm: direct lines=" + number_to_string(lowered_lines.lines.length));
+        let mut preview -> number = 0;
+        loop {
+            if preview >= lowered_lines.lines.length || preview >= 3 {
+                break;
+            }
+            print.info("test llvm: direct line " + number_to_string(preview) + " -> " + lowered_lines.lines[preview]);
+            preview += 1;
         }
-        let fun = parse.functions[index];
-        if fun.name == "main" {
-            has_main = true;
+    }
+    if lowered_lines.lines == null || lowered_lines.lines.length == 0 {
+        return "";
+    }
+    let ir = _join_llvm_lines_linear(lowered_lines.lines);
+    if ir.length <= 4 {
+        let mut first_line -> string = "";
+        if lowered_lines.lines.length > 0 {
+            first_line = lowered_lines.lines[0];
         }
-        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
-            tests = tests.concat([fun]);
-        }
-        index += 1;
+        print.warn(
+            "test llvm: suspiciously short IR (len=" + number_to_string(ir.length)
+            + " lines=" + number_to_string(lowered_lines.lines.length)
+            + " first='" + first_line + "')"
+        );
     }
-
-    if tests.length == 0 {
-        return base;
+    if ir.length == 0 {
+        return "";
     }
-
-    // For now we only synthesize `main` when no user-provided `main` exists.
-    if has_main {
-        let mut updated = base;
-        updated.diagnostics = updated.diagnostics.concat([
-            "llvm lowering (test): module defines `main`; skipping synthesized test harness",
-        ]);
-        return updated;
-    }
-
-    let harness = render_test_harness_main_for_module(tests, native_module.module_name);
-    let mut updated = base;
-    if updated.ir.length > 0 {
-        updated.ir = updated.ir + "\n";
-    }
-    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
-    return updated;
+    return ir + "\n";
 }
 
-fn lower_to_llvm_with_parsed_context(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
-    let lowered = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics);
-    let ir = join_with_separator(lowered.lines, "\n");
-    let mut output -> string = ir;
-    if output.length > 0 {
-        output = output + "\n";
+// Build and write LLVM IR for tests without returning large structs/arrays.
+// This keeps `LoweredLLVMLinesResult` within this module to avoid ABI issues.
+fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) -> boolean ![io] {
+    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let timing = fs.exists("build/sailfin/.test_runner_active");
+    let start_ms = monotonic_millis();
+    let mut is_test_module = is_test_module_slug(native_module.module_name);
+    if !is_test_module && fs.exists("build/sailfin/.test_runner_active") {
+        is_test_module = true;
     }
-    return LoweredLLVMResult {
-        ir: output,
-        diagnostics: lowered.diagnostics,
-        trait_metadata: lowered.trait_metadata,
-        function_effects: lowered.function_effects,
-        lifetime_regions: lowered.lifetime_regions,
-        capability_manifest: lowered.capability_manifest,
-        string_constants: lowered.string_constants,
-    };
-}
-
-fn lower_to_llvm_with_parsed_context_for_tests(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
-    let base = lower_to_llvm_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics);
-    if base.ir.length == 0 {
-        return base;
+    if trace {
+        print.info("test llvm: write_llvm_ir_for_tests start");
     }
-
-    let mut tests -> NativeFunction[] = [];
-    let mut has_main -> boolean = false;
-
-    let mut index -> number = 0;
-    loop {
-        if index >= parse.functions.length {
-            break;
-        }
-        let fun = parse.functions[index];
-        if fun.name == "main" {
-            has_main = true;
-        }
-        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
-            tests = tests.concat([fun]);
-        }
-        index += 1;
-    }
-
-    if tests.length == 0 {
-        return base;
-    }
-
-    // For now we only synthesize `main` when no user-provided `main` exists.
-    if has_main {
-        let mut updated = base;
-        updated.diagnostics = updated.diagnostics.concat([
-            "llvm lowering (test): module defines `main`; skipping synthesized test harness",
-        ]);
-        return updated;
-    }
-
-    let harness = render_test_harness_main_for_module(tests, native_module.module_name);
-    let mut updated = base;
-    if updated.ir.length > 0 {
-        updated.ir = updated.ir + "\n";
-    }
-    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
-    return updated;
-}
-
-fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
-    let lowered = lower_to_llvm_lines_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
-    let ir = join_with_separator(lowered.lines, "\n");
-    let mut output -> string = ir;
-    if output.length > 0 {
-        output = output + "\n";
-    }
-    return LoweredLLVMResult {
-        ir: output,
-        diagnostics: lowered.diagnostics,
-        trait_metadata: lowered.trait_metadata,
-        function_effects: lowered.function_effects,
-        lifetime_regions: lowered.lifetime_regions,
-        capability_manifest: lowered.capability_manifest,
-        string_constants: lowered.string_constants,
-    };
-}
-
-fn lower_to_llvm_lines_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMLinesResult {
-    let mut diagnostics -> string[] = [];
-    if imported_diagnostics.length > 0 {
-        diagnostics = diagnostics.concat(imported_diagnostics);
+    if native_module.artifacts == null || native_module.artifacts.length == 0 {
+        print.warn("test llvm: native module missing artifacts");
+        return false;
     }
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
-        diagnostics = append_string(diagnostics, "no sailfin-native-text artifact present");
-        let empty_constants = empty_string_constant_set();
-        return LoweredLLVMLinesResult {
-            lines: [],
-            diagnostics: diagnostics,
-            trait_metadata: empty_trait_metadata(),
-            function_effects: [],
-            lifetime_regions: [],
-            capability_manifest: empty_capability_manifest(),
-            string_constants: empty_constants,
-        };
+        print.warn("test llvm: missing sailfin-native-text artifact");
+        return false;
+    }
+    if trace {
+        print.info("test llvm: native artifact bytes=" + number_to_string(artifact.contents.length));
+    }
+    let parse = parse_native_artifact_safe(artifact.contents);
+    if trace {
+        print.info("test llvm: parsed native artifact (imports=" + number_to_string(parse.imports.length) + ")");
+    }
+    if timing {
+        print.info("test llvm: phase=parse ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
+    if trace {
+        print.info("test llvm: stage=after-parse");
     }
 
-    let parse = parse_native_artifact(artifact.contents);
-    return lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, diagnostics);
-}
+    if !is_test_module && parse.functions != null {
+        let mut scan_index -> number = 0;
+        loop {
+            if scan_index >= parse.functions.length {
+                break;
+            }
+            let fun = parse.functions[scan_index];
+            if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
+                is_test_module = true;
+                break;
+            }
+            scan_index += 1;
+        }
+    }
 
-fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], diagnostics_in -> string[]) -> LoweredLLVMLinesResult {
-    let mut diagnostics = diagnostics_in.concat(parse.diagnostics);
+    let mut imported_manifests -> LayoutManifest[] = [];
+    let mut imported_native_texts -> string[] = [];
+    let mut imported_diagnostics -> string[] = [];
+    if parse.imports != null && parse.imports.length > 0 {
+        let skip_imports = is_test_module;
+        if !skip_imports {
+            let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
+            imported_manifests = import_context.manifests;
+            imported_native_texts = import_context.native_texts;
+            imported_diagnostics = import_context.diagnostics;
+            if trace {
+                print.info("test llvm: collected import context (texts=" + number_to_string(imported_native_texts.length) + ")");
+            }
+        } else if trace {
+            print.info("test llvm: skipping import context for inlined test module");
+        }
+    }
+    if timing {
+        print.info("test llvm: phase=imports ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
 
-    // Only exported symbols should keep external linkage across modules.
+    let mut diagnostics = extend_string_lines_checked(imported_diagnostics, parse.diagnostics, "parse");
+    if trace {
+        print.info("test llvm: lower_to_llvm_lines_with_parsed_context start");
+    }
+
     let exported_symbols = collect_exported_symbol_names(parse.imports);
 
-    let manifest_artifact = select_layout_manifest_artifact(native_module.artifacts);
     let mut module_manifest -> LayoutManifest? = null;
-    if manifest_artifact != null {
-        let parsed_manifest = parse_layout_manifest(manifest_artifact.contents);
-        diagnostics = diagnostics.concat(parsed_manifest.diagnostics);
-        module_manifest = parsed_manifest;
-    }
 
     let manifest_application = apply_layout_manifest_to_module(parse.structs, parse.enums, module_manifest);
-    diagnostics = diagnostics.concat(manifest_application.diagnostics);
+    diagnostics = extend_string_lines_checked(diagnostics, manifest_application.diagnostics, "layout application");
     let module_structs = manifest_application.structs;
     let module_enums = manifest_application.enums;
+    if trace {
+        print.info(
+            "test llvm: manifest applied (structs="
+            + number_to_string(module_structs.length)
+            + " enums="
+            + number_to_string(module_enums.length)
+            + ")"
+        );
+    }
+    if timing {
+        print.info("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
 
-    // Gather imported module context (layout + signatures) to improve lowering fidelity
     let mut imported_structs -> NativeStruct[] = [];
     let mut imported_enums -> NativeEnum[] = [];
     let mut imported_interfaces -> NativeInterface[] = [];
@@ -1091,22 +456,26 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse 
         if native_text.length == 0 {
             if manifest_for_module != null {
                 let manifest_only = manifest_for_module;
-                imported_structs = imported_structs.concat(manifest_only.structs);
-                imported_enums = imported_enums.concat(manifest_only.enums);
+                imported_structs = extend_native_structs(imported_structs, manifest_only.structs);
+                imported_enums = extend_native_enums(imported_enums, manifest_only.enums);
             }
             text_index += 1;
             continue;
         }
 
-        let imported_parse = parse_native_artifact_for_import_context(native_text);
-        let applied_import = apply_layout_manifest_to_module(imported_parse.structs, imported_parse.enums, manifest_for_module);
+        // Use individual import-context extractors to avoid struct-return ABI bug
+        let imported_structs_ctx = parse_native_structs_for_import(native_text);
+        let imported_enums_ctx = parse_native_enums_for_import(native_text);
+        let imported_interfaces_ctx = parse_native_interfaces_for_import(native_text);
+        let imported_functions_ctx = parse_native_functions_for_import(native_text);
+        let applied_import = apply_layout_manifest_to_module(imported_structs_ctx, imported_enums_ctx, manifest_for_module);
 
-        imported_structs = imported_structs.concat(applied_import.structs);
-        imported_enums = imported_enums.concat(applied_import.enums);
-        imported_interfaces = imported_interfaces.concat(imported_parse.interfaces);
-        imported_functions = imported_functions.concat(imported_parse.functions);
+        imported_structs = extend_native_structs(imported_structs, applied_import.structs);
+        imported_enums = extend_native_enums(imported_enums, applied_import.enums);
+        imported_interfaces = extend_native_interfaces(imported_interfaces, imported_interfaces_ctx);
+        imported_functions = extend_native_functions(imported_functions, imported_functions_ctx);
         let imported_methods = flatten_struct_methods(applied_import.structs);
-        imported_struct_methods = imported_struct_methods.concat(imported_methods);
+        imported_struct_methods = extend_native_functions(imported_struct_methods, imported_methods);
         text_index += 1;
     }
 
@@ -1117,87 +486,215 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse 
                 break;
             }
             let leftover_manifest = imported_manifests[manifest_index];
-            imported_structs = imported_structs.concat(leftover_manifest.structs);
-            imported_enums = imported_enums.concat(leftover_manifest.enums);
+            imported_structs = extend_native_structs(imported_structs, leftover_manifest.structs);
+            imported_enums = extend_native_enums(imported_enums, leftover_manifest.enums);
             manifest_index += 1;
         }
     }
 
-    let combined_structs = module_structs.concat(imported_structs);
-    let combined_enums = module_enums.concat(imported_enums);
-    let combined_interfaces = parse.interfaces.concat(imported_interfaces);
+    let combined_structs = extend_native_structs(module_structs, imported_structs);
+    let combined_enums = extend_native_enums(module_enums, imported_enums);
+    let mut combined_interfaces = extend_native_interfaces(parse.interfaces, imported_interfaces);
+    if is_test_module {
+        combined_interfaces = [];
+        if trace {
+            print.info("test llvm: skipping interface metadata for inlined tests");
+        }
+    }
+    if trace {
+        print.info(
+            "test llvm: combined types (structs="
+            + number_to_string(combined_structs.length)
+            + " enums="
+            + number_to_string(combined_enums.length)
+            + " interfaces="
+            + number_to_string(combined_interfaces.length)
+            + ")"
+        );
+    }
 
     let trait_metadata = build_trait_metadata(combined_interfaces, combined_structs);
+    if trace {
+        print.info("test llvm: enum layout fixup start");
+    }
     let fixed_enums = fixup_enum_layouts(combined_enums);
-    diagnostics = diagnostics.concat(fixed_enums.diagnostics);
+    diagnostics = extend_string_lines_checked(diagnostics, fixed_enums.diagnostics, "enum layout");
+    if trace {
+        print.info("test llvm: type context build start");
+    }
+    // Write struct info BEFORE the cross-module build_type_context call.
+    let mut _si1_content -> string = "";
+    let mut _si1_idx -> number = 0;
+    loop {
+        if _si1_idx >= combined_structs.length { break; }
+        let _si1_s = combined_structs[_si1_idx];
+        if _si1_s.name == null || _si1_s.name.length == 0 {
+            _si1_idx += 1;
+            continue;
+        }
+        if _si1_idx > 0 && _si1_content.length > 0 { _si1_content = _si1_content + "\n"; }
+        let _si1_llvm = "%" + sanitize_symbol(_si1_s.name);
+        _si1_content = _si1_content + _si1_s.name + "\t" + _si1_llvm + "\t";
+        let mut _fi1 -> number = 0;
+        let _si1_fields = _si1_s.fields;
+        if _si1_fields != null {
+            loop {
+                if _fi1 >= _si1_fields.length { break; }
+                let _sf1 = _si1_fields[_fi1];
+                if _fi1 > 0 { _si1_content = _si1_content + ","; }
+                let mut _fn1 = _sf1.name;
+                if _fn1 == null { _fn1 = ""; }
+                let mut _ft1 = "i8*";
+                let _ann1 = _sf1.type_annotation;
+                if _ann1 == "number" { _ft1 = "double"; }
+                else if _ann1 == "boolean" || _ann1 == "bool" { _ft1 = "i1"; }
+                else if _ann1 == "i64" || _ann1 == "int" || _ann1 == "usize" { _ft1 = "i64"; }
+                else if _ann1 == "i32" { _ft1 = "i32"; }
+                else if _ann1 == "u8" { _ft1 = "i8"; }
+                _si1_content = _si1_content + _fn1 + ":" + _ft1;
+                _fi1 += 1;
+            }
+        }
+        _si1_idx += 1;
+    }
+    fs.writeFile("build/sailfin/.struct_info", _si1_content);
     let type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces);
-    diagnostics = diagnostics.concat(type_build.diagnostics);
+    diagnostics = extend_string_lines_checked(diagnostics, type_build.diagnostics, "type context");
     let type_context = type_build.context;
+    if trace {
+        print.info("test llvm: type context built");
+    }
+    if timing {
+        print.info("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
 
     let module_struct_methods = flatten_struct_methods(module_structs);
-    let local_functions = concat_native_functions(parse.functions, module_struct_methods);
+    let local_functions = concat_native_functions(safe_functions, module_struct_methods);
     let mut context_functions = concat_native_functions(local_functions, imported_functions);
     context_functions = concat_native_functions(context_functions, imported_struct_methods);
+    if debug_lowering {
+        let mut imported_index -> number = 0;
+        loop {
+            if imported_index >= imported_functions.length {
+                break;
+            }
+            let imported_function = imported_functions[imported_index];
+            if index_of(imported_function.name, "parse_native_artifact") >= 0 || index_of(imported_function.name, "parse_native_function_count_from_text") >= 0 {
+                print.warn("emit-llvm: imported fn sig " + imported_function.name + " -> " + imported_function.return_type);
+            }
+            imported_index += 1;
+        }
+    }
 
-    let mut runtime_helpers = collect_runtime_helper_targets(local_functions);
-    // Some lowering paths (e.g. array lowering) emit direct calls to
-    // `@sailfin_runtime_copy_bytes` that do not appear in Native IR call targets.
-    // Ensure the declaration is always present to keep per-module clang compiles valid.
+    // Bootstrap guard: effect analysis currently introduces instability in
+    // selfhost/native lowering for some modules. Keep disabled by default.
+    let skip_effects = true;
+    let mut runtime_helpers -> string[] = [];
+    if !is_test_module && !skip_effects {
+        if debug_lowering {
+            print.warn("emit-llvm: phase=helpers_start");
+        }
+        runtime_helpers = collect_runtime_helper_targets(local_functions);
+        if debug_lowering {
+            print.warn("emit-llvm: phase=helpers_done");
+        }
+    } else if trace {
+        print.info("test llvm: skipping runtime helper collection for inlined tests");
+    }
     if !string_array_contains(runtime_helpers, "copy_bytes") {
-        runtime_helpers = append_string(runtime_helpers, "copy_bytes");
+        runtime_helpers.push("copy_bytes");
     }
-    // `lower_array_push_in_place` emits a direct call to `@sailfin_runtime_array_push_slot`.
-    // This helper target must be present so we emit the corresponding declaration.
     if !string_array_contains(runtime_helpers, "array_push_slot") {
-        runtime_helpers = append_string(runtime_helpers, "array_push_slot");
+        runtime_helpers.push("array_push_slot");
     }
-    // `lower_array_push_in_place` uses `@sailfin_runtime_append_string` for `i8*` arrays.
-    // This helper target must be present so we emit the corresponding declaration.
     if !string_array_contains(runtime_helpers, "append_string") {
-        runtime_helpers = append_string(runtime_helpers, "append_string");
+        runtime_helpers.push("append_string");
     }
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
+    runtime_helpers = append_unique_effect(runtime_helpers, "print.info");
+    runtime_helpers = append_unique_effect(runtime_helpers, "print.warn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "print.error");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.length");
+    runtime_helpers = append_unique_effect(runtime_helpers, "substring");
+    runtime_helpers = append_unique_effect(runtime_helpers, "substring_unchecked");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.to_number");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.length");
+    runtime_helpers = append_unique_effect(runtime_helpers, "substring");
+    runtime_helpers = append_unique_effect(runtime_helpers, "substring_unchecked");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
     runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at");
     runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.to_number");
     runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_raise_value_error_fn");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
     runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent");
-    let direct_effects = collect_direct_function_effects(context_functions);
-    let call_graph = collect_function_call_graph(context_functions);
-    let aggregated_effects = propagate_function_effects(direct_effects, call_graph);
+    let mut direct_effects -> FunctionEffectEntry[] = [];
+    let mut aggregated_effects -> FunctionEffectEntry[] = [];
+    if !skip_effects {
+        if debug_lowering {
+            print.warn("emit-llvm: phase=direct_effects");
+        }
+        direct_effects = collect_direct_function_effects(context_functions);
+        aggregated_effects = direct_effects;
+        if !is_test_module {
+            let call_graph = collect_function_call_graph(context_functions);
+            aggregated_effects = propagate_function_effects(direct_effects, call_graph);
+        } else if trace {
+            print.info("test llvm: skipping effect propagation for inlined tests");
+        }
+    }
+    if trace {
+        print.info("test llvm: runtime helpers collected");
+    }
+    if timing {
+        print.info("test llvm: phase=effects ms=" + number_to_string(monotonic_millis() - start_ms));
+    }
 
     let mut function_effects -> FunctionEffectEntry[] = [];
     let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
     let mut lines -> string[] = [];
-    lines = append_string(lines, "source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
-    lines = append_string(lines, "");
+    lines.push("source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
+    lines.push("");
 
     let trait_lines = render_trait_metadata_comments(trait_metadata);
-    if trait_lines.length > 0 {
+    if trait_lines != null {
+        if trait_lines.length > 0 {
         lines = extend_string_lines(lines, trait_lines);
-        lines = append_string(lines, "");
+        lines.push("");
+        }
     }
 
     let struct_type_lines = render_struct_type_definitions(type_context, context_functions);
-    if struct_type_lines.length > 0 {
+    if struct_type_lines != null {
+        if struct_type_lines.length > 0 {
         lines = extend_string_lines(lines, struct_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
+        }
     }
 
-    let enum_type_lines = render_enum_type_definitions(type_context);
-    if enum_type_lines.length > 0 {
+    let mut enum_type_lines -> string[] = [];
+    if type_context.enums != null && type_context.enums.length > 0 {
+        enum_type_lines = render_enum_type_definitions(type_context);
+    }
+    if enum_type_lines != null {
+        if enum_type_lines.length > 0 {
         lines = extend_string_lines(lines, enum_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
+        }
     }
 
-    let interface_type_lines = render_interface_type_definitions(type_context);
-    if interface_type_lines.length > 0 {
+    let mut interface_type_lines -> string[] = [];
+    if type_context.interfaces != null && type_context.interfaces.length > 0 {
+        interface_type_lines = render_interface_type_definitions(type_context);
+    }
+    if interface_type_lines != null {
+        if interface_type_lines.length > 0 {
         lines = extend_string_lines(lines, interface_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
+        }
     }
 
-    // Async/future runtime types (opaque in LLVM; implemented by the native runtime).
     lines = extend_string_lines(lines, [
         "%SailfinFutureNumber = type opaque",
         "%SailfinFutureBool = type opaque",
@@ -1226,57 +723,62 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse 
     let vtable_type_lines = render_vtable_type_definitions(type_context);
     if vtable_type_lines.length > 0 {
         lines = extend_string_lines(lines, vtable_type_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     let vtable_const_lines = render_vtable_constants(type_context);
     if vtable_const_lines.length > 0 {
         lines = extend_string_lines(lines, vtable_const_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
     if helper_declarations.length > 0 {
         lines = extend_string_lines(lines, helper_declarations);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
-    // Declare imported functions from other modules (excluding local functions)
     let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
     if imported_declarations.length > 0 {
         lines = extend_string_lines(lines, imported_declarations);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
-    // Provide libc declarations for common helpers when not declared in the module.
     if find_function_by_name(context_functions, "malloc") == null {
-        lines = append_string(lines, "declare noalias i8* @malloc(i64)");
+        lines.push("declare noalias i8* @malloc(i64)");
     }
     if find_function_by_name(context_functions, "free") == null {
-        lines = append_string(lines, "declare void @free(i8*)");
+        lines.push("declare void @free(i8*)");
     }
-    lines = append_string(lines, "");
+    lines.push("");
 
-    // Declare the runtime global (provided by the Python bootstrap runtime)
-    lines = append_string(lines, "@runtime = external global i8**");
-    lines = append_string(lines, "");
+    lines.push("@runtime = external global i8**");
+    lines.push("");
 
-    // Lower module-level `let` bindings into LLVM globals (and an optional init function).
     let module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name);
-    diagnostics = diagnostics.concat(module_globals.diagnostics);
+    diagnostics = extend_string_lines_checked(diagnostics, module_globals.diagnostics, "module globals");
     if module_globals.preamble_lines.length > 0 {
         lines = extend_string_lines(lines, module_globals.preamble_lines);
-        lines = append_string(lines, "");
+        lines.push("");
     }
 
     if module_globals.init_function_lines.length > 0 {
         lines = extend_string_lines(lines, module_globals.init_function_lines);
-        lines = append_string(lines, "");
+        lines.push("");
+    }
+    if trace {
+        print.info("test llvm: module globals lowered");
+    }
+    if timing {
+        print.info("test llvm: phase=globals ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     let mut index -> number = 0;
     let mut has_add_function -> boolean = false;
     let mut all_string_constants -> StringConstant[] = module_globals.string_constants;
+    if trace {
+        print.info("test llvm: lowering functions start (count=" + number_to_string(local_functions.length) + ")");
+    }
     loop {
         if index >= local_functions.length {
             break;
@@ -1287,14 +789,15 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse 
         if aggregated_entry != null {
             effective_effects = aggregated_entry.effects;
         }
-        function_effects = function_effects.concat([
+        function_effects = append_function_effect_entry(
+            function_effects,
             FunctionEffectEntry {
                 name: current_function.name,
                 effects: effective_effects,
             }
-        ]);
+        );
         let lowered = emit_llvm_function(
-            current_function,
+            current_function.name,
             context_functions,
             effective_effects,
             type_context,
@@ -1309,24 +812,28 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse 
         if sanitize_symbol(current_function.name) == "add" {
             has_add_function = true;
         }
-        diagnostics = diagnostics.concat(lowered.diagnostics);
-        lifetime_regions = lifetime_regions.concat(lowered.lifetime_regions);
-        all_string_constants = merge_string_constants(all_string_constants, lowered.string_constants);
+        diagnostics = extend_string_lines_checked(diagnostics, lowered.diagnostics, "function lowering");
         if lowered.lines.length > 0 {
-            // NOTE: Stage2-native has exhibited corruption when concatenating
-            // large `string[]` buffers (dropping the module preamble/header).
-            // Extend into the main module `lines` incrementally instead.
-            lines = extend_string_lines(lines, lowered.lines);
-            if index + 1 < local_functions.length {
-                lines = append_string(lines, "");
+            let mut _asl_i -> number = 0;
+            loop {
+                if _asl_i >= lowered.lines.length { break; }
+                lines.push(lowered.lines[_asl_i]);
+                _asl_i += 1;
             }
+            let _ep_next = index + 1;
+            if _ep_next < local_functions.length {
+                lines.push("");
+            }
+        }
+        if lowered.string_constants.length > 0 {
+            let existing_constants = all_string_constants;
+            all_string_constants = merge_string_constants(existing_constants, lowered.string_constants);
         }
         index += 1;
     }
 
     if !has_add_function {
-        // Keep the generated helper separated from prior output.
-        lines = append_string(lines, "");
+        lines.push("");
         lines = extend_string_lines(lines, [
             "define internal double @add(double %a, double %b) {",
             "entry:",
@@ -1338,103 +845,372 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse 
 
     let string_constant_lines = render_string_constants(all_string_constants);
     if string_constant_lines.length > 0 {
-        lines = append_string(lines, "");
-        lines = extend_string_lines(lines, string_constant_lines);
-        lines = append_string(lines, "");
+        lines.push("");
+        let mut _asl2_i -> number = 0;
+        loop {
+            if _asl2_i >= string_constant_lines.length { break; }
+            lines.push(string_constant_lines[_asl2_i]);
+            _asl2_i += 1;
+        }
+        lines.push("");
     }
 
     lines = ensure_intrinsic_declarations(lines);
 
-    let mangled = apply_module_symbol_mangling(lines, parse.imports, native_module.module_name, imported_native_texts);
-    diagnostics = diagnostics.concat(mangled.diagnostics);
-    lines = mangled.lines;
+    // Apply test harness when appropriate (no user main).
+    let mut tests -> NativeFunction[] = [];
+    let mut has_main -> boolean = false;
+    let mut t_index -> number = 0;
+    loop {
+        if t_index >= parse.functions.length {
+            break;
+        }
+        let fun = parse.functions[t_index];
+        if fun.name == "main" {
+            has_main = true;
+        }
+        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
+            tests = tests.push(fun);
+        }
+        t_index += 1;
+    }
+    if tests.length > 0 && !has_main {
+        let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
+        if lines.length > 0 {
+            lines.push("");
+        }
+        lines = extend_string_lines(lines, harness);
+    }
 
-    let manifest = build_capability_manifest(native_module.entry_points, function_effects);
-    return LoweredLLVMLinesResult {
-        lines: lines,
-        diagnostics: diagnostics,
-        trait_metadata: trait_metadata,
-        function_effects: function_effects,
-        lifetime_regions: lifetime_regions,
-        capability_manifest: manifest,
-        string_constants: all_string_constants,
+    if trace {
+        print.info("test llvm: final lines=" + number_to_string(lines.length));
+    }
+    if lines.length == 0 {
+        print.warn("test llvm: no lines emitted (functions=" + number_to_string(parse.functions.length) + ")");
+        return false;
+    }
+    let mut ir = join_with_separator(lines, "\n");
+    if trace {
+        print.info("test llvm: joined ir bytes=" + number_to_string(ir.length));
+    }
+    if ir.length == 0 {
+        print.warn("test llvm: empty ir after join (lines=" + number_to_string(lines.length) + ")");
+        return false;
+    }
+    ir = ir + "\n";
+    let mut target_path -> string = out_path;
+    if target_path.length == 0 || index_of(target_path, ".ll") < 0 {
+        target_path = "build/sailfin/test.ll";
+    }
+    fs.writeFile(target_path, ir);
+    return true;
+}
+
+// Build and write LLVM IR for tests from raw native text, avoiding NativeModule ABI issues.
+fn write_llvm_ir_for_tests_from_text(native_text -> string, module_name -> string, out_path -> string) -> boolean ![io] {
+    if native_text.length == 0 {
+        print.warn("test llvm: empty native text");
+        return false;
+    }
+    // Write the native text to emit-native.tmp so that the recovery path
+    // in lower_to_llvm_lines_with_parsed_context reads the correct module
+    // rather than stale data from a previous `run` invocation.
+    fs.writeFile("build/sailfin/emit-native.tmp", native_text);
+    let parse = parse_native_artifact_with_retry(native_text, 3);
+    let dummy_module = NativeModule {
+        module_name: module_name,
+        artifacts: [NativeArtifact { name: module_name, format: "sailfin-native-text", contents: native_text }],
+        entry_points: [],
+        symbol_count: 0,
+    };
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context_for_tests(
+        dummy_module,
+        parse,
+        [],
+        [],
+        []
+    );
+    if lowered_lines.lines.length == 0 {
+        print.warn("test llvm: no lines emitted from native text");
+        return false;
+    }
+    let ir = _join_llvm_lines_linear(lowered_lines.lines);
+    if ir.length == 0 {
+        print.warn("test llvm: empty IR after join from native text");
+        return false;
+    }
+    fs.writeFile(out_path, ir + "\n");
+    return true;
+}
+
+// Build LLVM IR from raw native text (non-test path), avoiding NativeModule ABI issues.
+fn lower_to_llvm_ir_from_text(native_text -> string, module_name -> string) -> string ![io] {
+    if native_text.length == 0 {
+        return "";
+    }
+    let parse = parse_native_artifact_safe(native_text);
+    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
+    let dummy_module = NativeModule {
+        module_name: module_name,
+        artifacts: [NativeArtifact { name: module_name, format: "sailfin-native-text", contents: native_text }],
+        entry_points: [],
+        symbol_count: 0,
+    };
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(
+        dummy_module,
+        parse,
+        import_context.manifests,
+        import_context.native_texts,
+        import_context.diagnostics,
+        true,
+        native_text
+    );
+    if lowered_lines.lines == null || lowered_lines.lines.length == 0 {
+        print.warn(
+            "emit-llvm: no lines from native text (functions="
+            + number_to_string(parse.functions.length)
+            + " structs="
+            + number_to_string(parse.structs.length)
+            + " enums="
+            + number_to_string(parse.enums.length)
+            + " diagnostics="
+            + number_to_string(parse.diagnostics.length)
+            + ")"
+        );
+        return "";
+    }
+    return _join_llvm_lines_linear(lowered_lines.lines);
+}
+
+// Build and write LLVM IR with module symbol mangling for non-test usage.
+// Avoids returning large structs/arrays across boundaries.
+fn write_llvm_ir(native_module -> NativeModule, out_path -> string) -> boolean ![io] {
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        return false;
+    }
+    let parse = parse_native_artifact_safe(artifact.contents);
+    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(
+        native_module,
+        parse,
+        import_context.manifests,
+        import_context.native_texts,
+        import_context.diagnostics,
+        true,
+        ""
+    );
+    let lines = lowered_lines.lines;
+    if lines.length == 0 {
+        print.warn(
+            "emit-llvm: no lines from module (module="
+            + native_module.module_name
+            + " functions="
+            + number_to_string(parse.functions.length)
+            + " imports="
+            + number_to_string(parse.imports.length)
+            + " diagnostics="
+            + number_to_string(lowered_lines.diagnostics.length)
+            + ")"
+        );
+        if lowered_lines.diagnostics.length > 0 {
+            print.warn("emit-llvm: diagnostic " + lowered_lines.diagnostics[0]);
+        }
+        return false;
+    }
+    return write_llvm_lines_chunked(out_path, lines);
+}
+
+// Build and write LLVM IR from a native text file, avoiding large string returns.
+fn write_llvm_ir_from_native_text_file(native_text_path -> string, module_name -> string, out_path -> string) -> boolean ![io] {
+    // Delegate to lowering_core where all calls are intra-module (avoiding
+    // cross-module ABI bugs and struct literal drops in the seed).
+    return compile_native_text_to_llvm_file(native_text_path, module_name, out_path);
+}
+
+fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifests -> LayoutManifest[]) -> LoweredLLVMResult {
+    return lower_to_llvm_with_context(native_module, imported_manifests, [], []);
+}
+
+fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+    let base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
+    if base.ir.length == 0 {
+        return base;
+    }
+
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        return base;
+    }
+
+    let parse = parse_native_artifact_safe(artifact.contents);
+    let mut tests -> NativeFunction[] = [];
+    let mut has_main -> boolean = false;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= parse.functions.length {
+            break;
+        }
+        let fun = parse.functions[index];
+        if fun.name == "main" {
+            has_main = true;
+        }
+        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
+            tests = tests.push(fun);
+        }
+        index += 1;
+    }
+
+    if tests.length == 0 {
+        return base;
+    }
+
+    // For now we only synthesize `main` when no user-provided `main` exists.
+    if has_main {
+        let mut updated = base;
+        updated.diagnostics.push("llvm lowering (test): module defines `main`; skipping synthesized test harness");
+        return updated;
+    }
+
+    let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
+    let mut updated = base;
+    if updated.ir.length > 0 {
+        updated.ir = updated.ir + "\n";
+    }
+    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
+    return updated;
+}
+
+fn lower_to_llvm_with_parsed_context(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+    let lowered = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, true, "");
+    if lowered.lines == null {
+        return LoweredLLVMResult {
+            ir: "",
+            diagnostics: append_string(lowered.diagnostics, "llvm lowering: emitted null line list"),
+            trait_metadata: lowered.trait_metadata,
+            function_effects: lowered.function_effects,
+            lifetime_regions: lowered.lifetime_regions,
+            capability_manifest: lowered.capability_manifest,
+            string_constants: lowered.string_constants,
+        };
+    }
+    let ir = _join_llvm_lines_linear(lowered.lines);
+    let mut output -> string = ir;
+    if output.length > 0 {
+        output = output + "\n";
+    }
+    return LoweredLLVMResult {
+        ir: output,
+        diagnostics: lowered.diagnostics,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
     };
 }
 
-fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
-    let mut out = values;
+fn lower_to_llvm_with_parsed_context_for_tests(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+    let base = lower_to_llvm_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics);
+    if base.ir.length == 0 {
+        print.warn(
+            "test llvm: base IR empty (functions=" + number_to_string(parse.functions.length)
+            + " imports=" + number_to_string(parse.imports.length)
+            + " structs=" + number_to_string(parse.structs.length)
+            + " diagnostics=" + number_to_string(base.diagnostics.length)
+            + ")"
+        );
+        if base.diagnostics.length > 0 {
+            print.warn("test llvm: diagnostic " + base.diagnostics[0]);
+        }
+        return base;
+    }
+
+    let mut tests -> NativeFunction[] = [];
+    let mut has_main -> boolean = false;
+
     let mut index -> number = 0;
     loop {
-        if index >= extras.length {
+        if index >= parse.functions.length {
             break;
         }
-        out = append_string(out, extras[index]);
-        index += 1;
-    }
-    return out;
-}
-
-fn module_source_filename(module_name -> string) -> string {
-    if module_name.length == 0 {
-        return "sailfin";
-    }
-    // Avoid appending twice.
-    if module_name.length >= 4 {
-        let suffix = substring(module_name, module_name.length - 4, module_name.length);
-        if suffix == ".sfn" {
-            return module_name;
+        let fun = parse.functions[index];
+        if fun.name == "main" {
+            has_main = true;
         }
-    }
-    return module_name + ".sfn";
-}
-
-fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
-    let mut uses_round -> boolean = false;
-    let mut has_round_decl -> boolean = false;
-    let mut index -> number = 0;
-    loop {
-        if index >= lines.length {
-            break;
-        }
-        let line = lines[index];
-        if index_of(line, "call double @round(") >= 0 {
-            uses_round = true;
-        }
-        let trimmed = trim_text(line);
-        if starts_with(trimmed, "declare double @round(double)") {
-            has_round_decl = true;
+        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
+            tests = tests.push(fun);
         }
         index += 1;
     }
 
-    if !uses_round || has_round_decl {
-        return lines;
+    if tests.length == 0 {
+        return base;
     }
 
-    // NOTE: LLVM allows `declare` statements anywhere at top-level. Append
-    // instead of inserting near the header to avoid rebuilding large `string[]`
-    // buffers, which has exhibited stage2-native corruption in some modules.
-    let mut out = lines;
-    out = append_string(out, "");
-    out = append_string(out, "declare double @round(double)");
-    return out;
+    // For now we only synthesize `main` when no user-provided `main` exists.
+    if has_main {
+        let mut updated = base;
+        updated.diagnostics.push("llvm lowering (test): module defines `main`; skipping synthesized test harness");
+        return updated;
+    }
+
+    let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
+    let mut updated = base;
+    if updated.ir.length > 0 {
+        updated.ir = updated.ir + "\n";
+    }
+    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
+    return updated;
 }
 
-fn insert_string_at(values -> string[], insert_index -> number, value -> string) -> string[] {
-    let mut out -> string[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= values.length {
-            break;
-        }
-        if index == insert_index {
-            out = append_string(out, value);
-        }
-        out = append_string(out, values[index]);
-        index += 1;
+
+fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+    let lowered = lower_to_llvm_lines_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
+    let ir = _join_llvm_lines_linear(lowered.lines);
+    let mut output -> string = ir;
+    if output.length > 0 {
+        output = output + "\n";
     }
-    if insert_index >= values.length {
-        out = append_string(out, value);
-    }
-    return out;
+    return LoweredLLVMResult {
+        ir: output,
+        diagnostics: lowered.diagnostics,
+        trait_metadata: lowered.trait_metadata,
+        function_effects: lowered.function_effects,
+        lifetime_regions: lowered.lifetime_regions,
+        capability_manifest: lowered.capability_manifest,
+        string_constants: lowered.string_constants,
+    };
 }
+
+
+fn lower_to_llvm_lines_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMLinesResult {
+    let mut diagnostics -> string[] = [];
+    if imported_diagnostics.length > 0 {
+        let mut _ci0 -> number = 0;
+        loop {
+            if _ci0 >= imported_diagnostics.length { break; }
+            diagnostics.push(imported_diagnostics[_ci0]);
+            _ci0 += 1;
+        }
+    }
+    let artifact = select_text_artifact(native_module.artifacts);
+    if artifact == null {
+        diagnostics.push("no sailfin-native-text artifact present");
+        let empty_constants = empty_string_constant_set();
+        return LoweredLLVMLinesResult {
+            lines: [],
+            diagnostics: diagnostics,
+            trait_metadata: empty_trait_metadata(),
+            function_effects: [],
+            lifetime_regions: [],
+            capability_manifest: empty_capability_manifest(),
+            string_constants: empty_constants,
+        };
+    }
+
+    let parse = parse_native_artifact_safe(artifact.contents);
+    return lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, diagnostics, true, "");
+}
+

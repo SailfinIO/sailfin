@@ -1,0 +1,10 @@
+[package]
+name = "sfn/http"
+version = "0.2.1"
+description = "HTTP client and server for Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = ["io", "net"]

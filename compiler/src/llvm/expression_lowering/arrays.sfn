@@ -31,13 +31,13 @@ fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_typ
     let mut current_temp = temp_index;
     let mut diagnostics -> string[] = [];
     if element_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: concat requires a concrete element type");
+        diagnostics.push("llvm lowering: concat requires a concrete element type");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
     }
 
     let array_struct_type = array_struct_type_for_element(element_type);
     if array_struct_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: unsupported concat element type `" + element_type + "`");
+        diagnostics.push("llvm lowering: unsupported concat element type `" + element_type + "`");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
     }
 
@@ -46,97 +46,97 @@ fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_typ
 
     let lhs_data_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_data_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 0");
+    current_lines.push("  " + lhs_data_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 0");
     let lhs_data_value = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + lhs_data_ptr);
+    current_lines.push("  " + lhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + lhs_data_ptr);
     let lhs_len_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_len_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 1");
+    current_lines.push("  " + lhs_len_ptr + " = getelementptr " + array_struct_type + ", " + lhs.llvm_type + " " + lhs.value + ", i32 0, i32 1");
     let lhs_len_value = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_len_value + " = load i64, i64* " + lhs_len_ptr);
+    current_lines.push("  " + lhs_len_value + " = load i64, i64* " + lhs_len_ptr);
 
     let rhs_data_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_data_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 0");
+    current_lines.push("  " + rhs_data_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 0");
     let rhs_data_value = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + rhs_data_ptr);
+    current_lines.push("  " + rhs_data_value + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + rhs_data_ptr);
     let rhs_len_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_len_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 1");
+    current_lines.push("  " + rhs_len_ptr + " = getelementptr " + array_struct_type + ", " + rhs.llvm_type + " " + rhs.value + ", i32 0, i32 1");
     let rhs_len_value = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_len_value + " = load i64, i64* " + rhs_len_ptr);
+    current_lines.push("  " + rhs_len_value + " = load i64, i64* " + rhs_len_ptr);
 
     let element_size_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1");
+    current_lines.push("  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1");
     let element_size_value = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64");
+    current_lines.push("  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64");
 
     let total_length = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + total_length + " = add i64 " + lhs_len_value + ", " + rhs_len_value);
+    current_lines.push("  " + total_length + " = add i64 " + lhs_len_value + ", " + rhs_len_value);
     let total_bytes = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length);
+    current_lines.push("  " + total_bytes + " = mul i64 " + element_size_value + ", " + total_length);
 
     let new_raw_buffer = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")");
+    current_lines.push("  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")");
     let new_data_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type);
+    current_lines.push("  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type);
     let new_data_i8 = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*");
+    current_lines.push("  " + new_data_i8 + " = bitcast " + data_pointer_type + " " + new_data_ptr + " to i8*");
 
     let lhs_bytes = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_bytes + " = mul i64 " + element_size_value + ", " + lhs_len_value);
+    current_lines.push("  " + lhs_bytes + " = mul i64 " + element_size_value + ", " + lhs_len_value);
     let lhs_src_i8 = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + lhs_src_i8 + " = bitcast " + data_pointer_type + " " + lhs_data_value + " to i8*");
-    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + lhs_src_i8 + ", i64 " + lhs_bytes + ")");
+    current_lines.push("  " + lhs_src_i8 + " = bitcast " + data_pointer_type + " " + lhs_data_value + " to i8*");
+    current_lines.push("  call void @sailfin_runtime_copy_bytes(i8* " + new_data_i8 + ", i8* " + lhs_src_i8 + ", i64 " + lhs_bytes + ")");
 
     let rhs_bytes = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_bytes + " = mul i64 " + element_size_value + ", " + rhs_len_value);
+    current_lines.push("  " + rhs_bytes + " = mul i64 " + element_size_value + ", " + rhs_len_value);
     let rhs_src_i8 = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_src_i8 + " = bitcast " + data_pointer_type + " " + rhs_data_value + " to i8*");
+    current_lines.push("  " + rhs_src_i8 + " = bitcast " + data_pointer_type + " " + rhs_data_value + " to i8*");
     let rhs_dest_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + lhs_len_value);
+    current_lines.push("  " + rhs_dest_ptr + " = getelementptr " + element_type + ", " + data_pointer_type + " " + new_data_ptr + ", i64 " + lhs_len_value);
     let rhs_dest_i8 = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + rhs_dest_i8 + " = bitcast " + data_pointer_type + " " + rhs_dest_ptr + " to i8*");
-    current_lines = append_string(current_lines, "  call void @sailfin_runtime_copy_bytes(i8* " + rhs_dest_i8 + ", i8* " + rhs_src_i8 + ", i64 " + rhs_bytes + ")");
+    current_lines.push("  " + rhs_dest_i8 + " = bitcast " + data_pointer_type + " " + rhs_dest_ptr + " to i8*");
+    current_lines.push("  call void @sailfin_runtime_copy_bytes(i8* " + rhs_dest_i8 + ", i8* " + rhs_src_i8 + ", i64 " + rhs_bytes + ")");
 
     let struct_size_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + struct_size_ptr + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* null, i32 1");
+    current_lines.push("  " + struct_size_ptr + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* null, i32 1");
     let struct_size_value = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + struct_size_value + " = ptrtoint " + array_struct_type + "* " + struct_size_ptr + " to i64");
+    current_lines.push("  " + struct_size_value + " = ptrtoint " + array_struct_type + "* " + struct_size_ptr + " to i64");
 
     let new_struct_raw = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_struct_raw + " = call i8* @malloc(i64 " + struct_size_value + ")");
+    current_lines.push("  " + new_struct_raw + " = call i8* @malloc(i64 " + struct_size_value + ")");
     let new_struct_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_struct_ptr + " = bitcast i8* " + new_struct_raw + " to " + array_struct_type + "*");
+    current_lines.push("  " + new_struct_ptr + " = bitcast i8* " + new_struct_raw + " to " + array_struct_type + "*");
     let new_data_field = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_data_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 0");
-    current_lines = append_string(current_lines, "  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + new_data_field);
+    current_lines.push("  " + new_data_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 0");
+    current_lines.push("  store " + data_pointer_type + " " + new_data_ptr + ", " + data_pointer_pointer_type + " " + new_data_field);
     let new_len_field = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + new_len_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 1");
-    current_lines = append_string(current_lines, "  store i64 " + total_length + ", i64* " + new_len_field);
+    current_lines.push("  " + new_len_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 1");
+    current_lines.push("  store i64 " + total_length + ", i64* " + new_len_field);
 
     let result_operand = LLVMOperand { llvm_type: lhs.llvm_type, value: new_struct_ptr };
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
@@ -147,7 +147,7 @@ fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element
     let mut current_temp = temp_index;
     let mut diagnostics -> string[] = [];
     if element_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: push requires a concrete element type");
+        diagnostics.push("llvm lowering: push requires a concrete element type");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
     }
 
@@ -160,14 +160,14 @@ fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element
         current_temp += 1;
         // NOTE: Do not embed `{ ... }` literally in Sailfin strings; braces are
         // treated as interpolation markers. Use `array.llvm_type` instead.
-        current_lines = append_string(current_lines, "  " + pushed + " = call " + array.llvm_type + " @sailfin_runtime_append_string(" + array.llvm_type + " " + array.value + ", i8* " + value.value + ")");
+        current_lines.push("  " + pushed + " = call " + array.llvm_type + " @sailfin_runtime_append_string(" + array.llvm_type + " " + array.value + ", i8* " + value.value + ")");
         let result_operand = LLVMOperand { llvm_type: array.llvm_type, value: pushed };
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
     }
 
     let array_struct_type = array_struct_type_for_element(element_type);
     if array_struct_type.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: unsupported push element type `" + element_type + "`");
+        diagnostics.push("llvm lowering: unsupported push element type `" + element_type + "`");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
     }
 
@@ -177,33 +177,33 @@ fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element
     // Read current array fields.
     let data_ptr_gep = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + data_ptr_gep + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 0");
+    current_lines.push("  " + data_ptr_gep + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 0");
     let len_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + len_ptr + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 1");
+    current_lines.push("  " + len_ptr + " = getelementptr " + array_struct_type + ", " + array.llvm_type + " " + array.value + ", i32 0, i32 1");
     // Compute element size in bytes.
     let element_size_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1");
+    current_lines.push("  " + element_size_ptr + " = getelementptr [1 x " + element_type + "], [1 x " + element_type + "]* null, i32 0, i32 1");
     let element_size_value = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64");
+    current_lines.push("  " + element_size_value + " = ptrtoint " + element_type + "* " + element_size_ptr + " to i64");
 
     // Ask the runtime to grow backing storage (realloc) and return a writable
     // slot pointer. This avoids per-push malloc+copy, which is quadratic for
     // large struct arrays (e.g., Token[] during lexing).
     let data_ptr_i8 = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + data_ptr_i8 + " = bitcast " + data_pointer_pointer_type + " " + data_ptr_gep + " to i8**");
+    current_lines.push("  " + data_ptr_i8 + " = bitcast " + data_pointer_pointer_type + " " + data_ptr_gep + " to i8**");
 
     let slot_i8 = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + slot_i8 + " = call i8* @sailfin_runtime_array_push_slot(i8** " + data_ptr_i8 + ", i64* " + len_ptr + ", i64 " + element_size_value + ")");
+    current_lines.push("  " + slot_i8 + " = call i8* @sailfin_runtime_array_push_slot(i8** " + data_ptr_i8 + ", i64* " + len_ptr + ", i64 " + element_size_value + ")");
 
     let slot_typed = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines = append_string(current_lines, "  " + slot_typed + " = bitcast i8* " + slot_i8 + " to " + element_type + "*");
-    current_lines = append_string(current_lines, "  store " + element_type + " " + value.value + ", " + element_type + "* " + slot_typed);
+    current_lines.push("  " + slot_typed + " = bitcast i8* " + slot_i8 + " to " + element_type + "*");
+    current_lines.push("  store " + element_type + " " + value.value + ", " + element_type + "* " + slot_typed);
 
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: array, diagnostics: diagnostics, string_constants: [] };
 }
@@ -218,7 +218,7 @@ fn find_top_level_comma_in_llvm_type(text -> string) -> number {
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = substring(text, index, index + 1);
         if ch == "{" {
             brace_depth += 1;
             index += 1;
@@ -246,17 +246,17 @@ fn array_pointer_element_type(llvm_type -> string) -> string {
     if trimmed.length == 0 {
         return "";
     }
-    if trimmed[trimmed.length - 1] != "*" {
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != "*" {
         return "";
     }
     let without_pointer = trim_text(substring(trimmed, 0, trimmed.length - 1));
     if without_pointer.length < 2 {
         return "";
     }
-    if without_pointer[0] != "{" {
+    if substring(without_pointer, 0, 1) != "{" {
         return "";
     }
-    if without_pointer[without_pointer.length - 1] != "}" {
+    if substring(without_pointer, without_pointer.length - 1, without_pointer.length) != "}" {
         return "";
     }
     let inner = trim_text(substring(without_pointer, 1, without_pointer.length - 1));
@@ -271,7 +271,7 @@ fn array_pointer_element_type(llvm_type -> string) -> string {
     if first_segment.length == 0 {
         return "";
     }
-    if first_segment[first_segment.length - 1] != "*" {
+    if substring(first_segment, first_segment.length - 1, first_segment.length) != "*" {
         return "";
     }
     let element = trim_text(substring(first_segment, 0, first_segment.length - 1));

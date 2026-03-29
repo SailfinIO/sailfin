@@ -1,0 +1,214 @@
+---
+const navItems = [
+  { label: "Why Sailfin", href: "/why" },
+  { label: "Learn", href: "/docs/getting-started/install" },
+  {
+    label: "Docs",
+    href: "/docs",
+    children: [
+      { label: "Language Spec", href: "/docs/reference/spec" },
+      { label: "Standard Library", href: "/docs/reference/standard-library" },
+      { label: "Effect System", href: "/docs/reference/effects" },
+      { label: "CLI Reference", href: "/docs/reference/cli" },
+    ],
+  },
+  { label: "Packages", href: "https://registry.sailfin.dev" },
+  { label: "Blog", href: "/blog" },
+  { label: "Community", href: "/community" },
+];
+---
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="/" class="logo">
+      <img src="/images/sfn_lang_logo_256.svg" alt="Sailfin" width="32" height="32" />
+      <span class="logo-text">Sailfin</span>
+    </a>
+
+    <nav class="main-nav" aria-label="Main navigation">
+      {navItems.map((item) => (
+        <div class="nav-item">
+          <a href={item.href} class:list={["nav-link", { "has-children": item.children }]}>
+            {item.label}
+            {item.children && (
+              <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            )}
+          </a>
+          {item.children && (
+            <div class="dropdown">
+              {item.children.map((child) => (
+                <a href={child.href} class="dropdown-link">{child.label}</a>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </nav>
+
+    <div class="header-actions">
+      <a href="/docs/getting-started/install" class="btn-get-started">Get Started</a>
+    </div>
+
+    <button class="mobile-menu-btn" aria-label="Toggle menu" aria-expanded="false">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="6" x2="21" y2="6" />
+        <line x1="3" y1="12" x2="21" y2="12" />
+        <line x1="3" y1="18" x2="21" y2="18" />
+      </svg>
+    </button>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    height: var(--header-height);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-bg);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    text-decoration: none;
+    color: var(--color-text);
+    flex-shrink: 0;
+  }
+
+  .logo-text {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .main-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex: 1;
+  }
+
+  .nav-item {
+    position: relative;
+  }
+
+  .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.5rem 0.75rem;
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .nav-link:hover {
+    color: var(--color-text);
+    background: var(--color-bg-alt);
+    text-decoration: none;
+  }
+
+  .chevron {
+    transition: transform 0.15s;
+  }
+
+  .nav-item:hover .chevron {
+    transform: rotate(180deg);
+  }
+
+  .dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 200px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  .nav-item:hover .dropdown {
+    display: block;
+  }
+
+  .dropdown-link {
+    display: block;
+    padding: 0.5rem 0.75rem;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    border-radius: 4px;
+    text-decoration: none;
+  }
+
+  .dropdown-link:hover {
+    color: var(--color-text);
+    background: var(--color-bg-alt);
+    text-decoration: none;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+  }
+
+  .btn-get-started {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 1.25rem;
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+
+  .btn-get-started:hover {
+    background: var(--color-primary-dark);
+    text-decoration: none;
+  }
+
+  .mobile-menu-btn {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.5rem;
+    color: var(--color-text);
+  }
+
+  @media (max-width: 768px) {
+    .main-nav,
+    .header-actions {
+      display: none;
+    }
+
+    .mobile-menu-btn {
+      display: block;
+      margin-left: auto;
+    }
+  }
+</style>

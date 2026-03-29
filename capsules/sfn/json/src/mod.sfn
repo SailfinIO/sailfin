@@ -1,0 +1,375 @@
+// sfn/json — JSON parsing and serialization for Sailfin.
+//
+// Provides functions for converting between Sailfin values and JSON strings.
+// No effects required — pure data transformation.
+
+struct JsonValue {
+    kind -> string;       // "string", "number", "boolean", "null", "array", "object"
+    string_value -> string;
+    number_value -> number;
+    bool_value -> boolean;
+    items -> JsonValue[];  // for arrays
+    keys -> string[];      // for objects
+    values -> JsonValue[]; // for objects (parallel with keys)
+}
+
+fn string_val(value -> string) -> JsonValue {
+    return JsonValue {
+        kind: "string", string_value: value, number_value: 0,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn number_val(value -> number) -> JsonValue {
+    return JsonValue {
+        kind: "number", string_value: "", number_value: value,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn bool_val(value -> boolean) -> JsonValue {
+    return JsonValue {
+        kind: "boolean", string_value: "", number_value: 0,
+        bool_value: value, items: [], keys: [], values: [],
+    };
+}
+
+fn null_val() -> JsonValue {
+    return JsonValue {
+        kind: "null", string_value: "", number_value: 0,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn array_val(items -> JsonValue[]) -> JsonValue {
+    return JsonValue {
+        kind: "array", string_value: "", number_value: 0,
+        bool_value: false, items: items, keys: [], values: [],
+    };
+}
+
+fn object_val(keys -> string[], values -> JsonValue[]) -> JsonValue {
+    return JsonValue {
+        kind: "object", string_value: "", number_value: 0,
+        bool_value: false, items: [], keys: keys, values: values,
+    };
+}
+
+// ---- Serialization ----
+
+fn _escape_json_string(s -> string) -> string {
+    let mut out -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = s[i];
+        if ch == "\"" {
+            out = out + "\\\"";
+        } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" {
+            out = out + "\\n";
+        } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" {
+            out = out + "\\t";
+        } else {
+            out = out + ch;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn stringify(value -> JsonValue) -> string {
+    // Serialize a JsonValue to a JSON string.
+    if strings_equal(value.kind, "string") {
+        return "\"" + _escape_json_string(value.string_value) + "\"";
+    }
+    if strings_equal(value.kind, "number") {
+        return number_to_string(value.number_value);
+    }
+    if strings_equal(value.kind, "boolean") {
+        if value.bool_value {
+            return "true";
+        }
+        return "false";
+    }
+    if strings_equal(value.kind, "null") {
+        return "null";
+    }
+    if strings_equal(value.kind, "array") {
+        let mut out -> string = "[";
+        let mut i -> number = 0;
+        loop {
+            if i >= value.items.length { break; }
+            if i > 0 { out = out + ","; }
+            out = out + stringify(value.items[i]);
+            i += 1;
+        }
+        return out + "]";
+    }
+    if strings_equal(value.kind, "object") {
+        let mut out -> string = "{";
+        let mut i -> number = 0;
+        loop {
+            if i >= value.keys.length { break; }
+            if i > 0 { out = out + ","; }
+            out = out + "\"" + _escape_json_string(value.keys[i]) + "\":" + stringify(value.values[i]);
+            i += 1;
+        }
+        return out + "}";
+    }
+    return "null";
+}
+
+// ---- Parsing ----
+// Minimal recursive-descent JSON parser.
+
+fn _skip_whitespace(text -> string, pos -> number) -> number {
+    let mut p -> number = pos;
+    loop {
+        if p >= text.length { break; }
+        let ch = text[p];
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            p += 1;
+        } else {
+            break;
+        }
+    }
+    return p;
+}
+
+fn parse(text -> string) -> JsonValue {
+    // Parse a JSON string into a JsonValue tree.
+    // Returns null_val() on parse error.
+    let result = _parse_value(text, 0);
+    return result.value;
+}
+
+struct _ParseResult {
+    value -> JsonValue;
+    pos -> number;
+}
+
+fn _parse_result(value -> JsonValue, pos -> number) -> _ParseResult {
+    return _ParseResult { value: value, pos: pos };
+}
+
+fn _parse_value(text -> string, start -> number) -> _ParseResult {
+    let pos = _skip_whitespace(text, start);
+    if pos >= text.length {
+        return _parse_result(null_val(), pos);
+    }
+    let ch = text[pos];
+    if ch == "\"" {
+        return _parse_string(text, pos);
+    }
+    if ch == "{" {
+        return _parse_object(text, pos);
+    }
+    if ch == "[" {
+        return _parse_array(text, pos);
+    }
+    if ch == "t" || ch == "f" {
+        return _parse_bool(text, pos);
+    }
+    if ch == "n" {
+        return _parse_result(null_val(), pos + 4);
+    }
+    // Must be a number
+    return _parse_number(text, pos);
+}
+
+fn _parse_string(text -> string, start -> number) -> _ParseResult {
+    // start points at opening "
+    let mut p -> number = start + 1;
+    let mut out -> string = "";
+    loop {
+        if p >= text.length { break; }
+        let ch = text[p];
+        if ch == "\"" {
+            return _parse_result(string_val(out), p + 1);
+        }
+        if ch == "\\" {
+            p += 1;
+            if p < text.length {
+                let esc = text[p];
+                if esc == "\"" { out = out + "\""; }
+                else if esc == "\\" { out = out + "\\"; }
+                else if esc == "n" { out = out + "\n"; }
+                else if esc == "r" { out = out + "\r"; }
+                else if esc == "t" { out = out + "\t"; }
+                else { out = out + esc; }
+            }
+        } else {
+            out = out + ch;
+        }
+        p += 1;
+    }
+    return _parse_result(string_val(out), p);
+}
+
+fn _parse_number(text -> string, start -> number) -> _ParseResult {
+    let mut p -> number = start;
+    loop {
+        if p >= text.length { break; }
+        let ch = text[p];
+        if ch == "," || ch == "}" || ch == "]" || ch == " " || ch == "\n" || ch == "\r" || ch == "\t" {
+            break;
+        }
+        p += 1;
+    }
+    let num_str = substring(text, start, p);
+    // Use a simple string-to-number conversion
+    // Full implementation will use a runtime intrinsic
+    let mut value -> number = 0;
+    let mut i -> number = 0;
+    let mut negative -> boolean = false;
+    let mut decimal_place -> number = 0;
+    if num_str.length > 0 && num_str[0] == "-" {
+        negative = true;
+        i = 1;
+    }
+    loop {
+        if i >= num_str.length { break; }
+        let ch = num_str[i];
+        if ch == "." {
+            decimal_place = 1;
+        } else {
+            let digit = char_code(ch) - 48;
+            if decimal_place > 0 {
+                let mut divisor -> number = 1;
+                let mut d -> number = 0;
+                loop {
+                    if d >= decimal_place { break; }
+                    divisor = divisor * 10;
+                    d += 1;
+                }
+                value = value + digit / divisor;
+                decimal_place += 1;
+            } else {
+                value = value * 10 + digit;
+            }
+        }
+        i += 1;
+    }
+    if negative { value = 0 - value; }
+    return _parse_result(number_val(value), p);
+}
+
+fn _parse_bool(text -> string, start -> number) -> _ParseResult {
+    if text[start] == "t" {
+        return _parse_result(bool_val(true), start + 4);
+    }
+    return _parse_result(bool_val(false), start + 5);
+}
+
+fn _parse_array(text -> string, start -> number) -> _ParseResult {
+    let mut p -> number = start + 1; // skip [
+    let mut items -> JsonValue[] = [];
+    p = _skip_whitespace(text, p);
+    if p < text.length && text[p] == "]" {
+        return _parse_result(array_val(items), p + 1);
+    }
+    loop {
+        if p >= text.length { break; }
+        let item = _parse_value(text, p);
+        items.push(item.value);
+        p = _skip_whitespace(text, item.pos);
+        if p < text.length && text[p] == "," {
+            p += 1;
+        } else {
+            break;
+        }
+    }
+    p = _skip_whitespace(text, p);
+    if p < text.length && text[p] == "]" { p += 1; }
+    return _parse_result(array_val(items), p);
+}
+
+fn _parse_object(text -> string, start -> number) -> _ParseResult {
+    let mut p -> number = start + 1; // skip {
+    let mut keys -> string[] = [];
+    let mut values -> JsonValue[] = [];
+    p = _skip_whitespace(text, p);
+    if p < text.length && text[p] == "}" {
+        return _parse_result(object_val(keys, values), p + 1);
+    }
+    loop {
+        if p >= text.length { break; }
+        p = _skip_whitespace(text, p);
+        // Parse key
+        let key_result = _parse_string(text, p);
+        keys.push(key_result.value.string_value);
+        p = _skip_whitespace(text, key_result.pos);
+        if p < text.length && text[p] == ":" { p += 1; }
+        // Parse value
+        let val_result = _parse_value(text, p);
+        values.push(val_result.value);
+        p = _skip_whitespace(text, val_result.pos);
+        if p < text.length && text[p] == "," {
+            p += 1;
+        } else {
+            break;
+        }
+    }
+    p = _skip_whitespace(text, p);
+    if p < text.length && text[p] == "}" { p += 1; }
+    return _parse_result(object_val(keys, values), p);
+}
+
+// ---- Convenience accessors ----
+
+fn get_string(obj -> JsonValue, key -> string) -> string {
+    // Get a string value from a JSON object by key.
+    if !strings_equal(obj.kind, "object") { return ""; }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) {
+            return obj.values[i].string_value;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn get_number(obj -> JsonValue, key -> string) -> number {
+    if !strings_equal(obj.kind, "object") { return 0; }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) {
+            return obj.values[i].number_value;
+        }
+        i += 1;
+    }
+    return 0;
+}
+
+fn get_object(obj -> JsonValue, key -> string) -> JsonValue {
+    if !strings_equal(obj.kind, "object") { return null_val(); }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) {
+            return obj.values[i];
+        }
+        i += 1;
+    }
+    return null_val();
+}
+
+fn get_array(obj -> JsonValue, key -> string) -> JsonValue[] {
+    if !strings_equal(obj.kind, "object") { return []; }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) {
+            return obj.values[i].items;
+        }
+        i += 1;
+    }
+    return [];
+}

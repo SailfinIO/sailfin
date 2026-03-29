@@ -45,10 +45,10 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
 
     let mut current_lines -> string[] = lines;
     let malloc_temp = format_temp_name(temp_index);
-    current_lines = append_string(current_lines, "  " + malloc_temp + " = call i8* @malloc(i64 " + number_to_string(array_length) + ")");
+    current_lines.push("  " + malloc_temp + " = call i8* @malloc(i64 " + number_to_string(array_length) + ")");
     let cast_temp = format_temp_name(temp_index + 1);
-    current_lines = append_string(current_lines, "  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + array_type + "*");
-    current_lines = append_string(current_lines, "  store " + array_type + " c\"" + escaped + "\\00\", " + array_type + "* " + cast_temp);
+    current_lines.push("  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + array_type + "*");
+    current_lines.push("  store " + array_type + " c\"" + escaped + "\\00\", " + array_type + "* " + cast_temp);
 
     let operand = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
     let empty_constants = empty_string_constant_set();
@@ -67,9 +67,20 @@ fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
         return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: harmonised.diagnostics, string_constants: empty_string_constant_set() };
     }
     let left_aligned = coerce_operand_to_type(harmonised.left, "i8*", harmonised.temp_index, harmonised.lines);
-    let mut diagnostics = harmonised.diagnostics.concat(left_aligned.diagnostics);
+    let mut diagnostics -> string[] = harmonised.diagnostics;
+    let mut _ci0 -> number = 0;
+    loop {
+        if _ci0 >= left_aligned.diagnostics.length { break; }
+        diagnostics.push(left_aligned.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
     let right_aligned = coerce_operand_to_type(harmonised.right, "i8*", left_aligned.temp_index, left_aligned.lines);
-    diagnostics = diagnostics.concat(right_aligned.diagnostics);
+    let mut _ci1 -> number = 0;
+    loop {
+        if _ci1 >= right_aligned.diagnostics.length { break; }
+        diagnostics.push(right_aligned.diagnostics[_ci1]);
+        _ci1 += 1;
+    }
     if left_aligned.operand == null || right_aligned.operand == null {
         return ExpressionResult { lines: right_aligned.lines, temp_index: right_aligned.temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_string_constant_set() };
     }
@@ -97,7 +108,7 @@ fn coerce_operand_to_string(operand -> LLVMOperand, temp_index -> number, lines 
         let cast_temp = format_temp_name(temp_index);
         let mut out_lines = append_string(lines, "  " + cast_temp + " = sitofp i64 " + operand.value + " to double");
         let call_temp = format_temp_name(temp_index + 1);
-        out_lines = append_string(out_lines, "  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")");
+        out_lines.push("  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")");
         let out_operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
         return ExpressionResult { lines: out_lines, temp_index: temp_index + 2, operand: out_operand, diagnostics: [], string_constants: empty_constants };
     }
@@ -106,7 +117,7 @@ fn coerce_operand_to_string(operand -> LLVMOperand, temp_index -> number, lines 
         let cast_temp = format_temp_name(temp_index);
         let mut out_lines = append_string(lines, "  " + cast_temp + " = sitofp i32 " + operand.value + " to double");
         let call_temp = format_temp_name(temp_index + 1);
-        out_lines = append_string(out_lines, "  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")");
+        out_lines.push("  " + call_temp + " = call i8* @sailfin_runtime_number_to_string(double " + cast_temp + ")");
         let out_operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
         return ExpressionResult { lines: out_lines, temp_index: temp_index + 2, operand: out_operand, diagnostics: [], string_constants: empty_constants };
     }
@@ -116,8 +127,8 @@ fn coerce_operand_to_string(operand -> LLVMOperand, temp_index -> number, lines 
         let as_double = format_temp_name(temp_index + 1);
         let as_string = format_temp_name(temp_index + 2);
         let mut out_lines = append_string(lines, "  " + as_i64 + " = sext i8 " + operand.value + " to i64");
-        out_lines = append_string(out_lines, "  " + as_double + " = sitofp i64 " + as_i64 + " to double");
-        out_lines = append_string(out_lines, "  " + as_string + " = call i8* @sailfin_runtime_number_to_string(double " + as_double + ")");
+        out_lines.push("  " + as_double + " = sitofp i64 " + as_i64 + " to double");
+        out_lines.push("  " + as_string + " = call i8* @sailfin_runtime_number_to_string(double " + as_double + ")");
         let out_operand = LLVMOperand { llvm_type: "i8*", value: as_string };
         return ExpressionResult { lines: out_lines, temp_index: temp_index + 3, operand: out_operand, diagnostics: [], string_constants: empty_constants };
     }
@@ -137,6 +148,6 @@ fn coerce_operand_to_string(operand -> LLVMOperand, temp_index -> number, lines 
         return ExpressionResult { lines: out_lines, temp_index: false_lit.temp_index + 1, operand: out_operand, diagnostics: [], string_constants: empty_constants };
     }
 
-    let diagnostics = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"]; 
+    let diagnostics -> string[] = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"];
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
 }

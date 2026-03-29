@@ -70,7 +70,7 @@ fn number_to_string(value -> number) -> string {
         }
         if started || count > 0 {
             started = true;
-            let ch = digits[count];
+            let ch = substring(digits, count, count + 1);
             output = output + ch;
         }
         index += 1;
@@ -155,24 +155,17 @@ fn index_of(value -> string, target -> string) -> number {
     if target.length == 0 {
         return 0;
     }
+    // Use substring + == instead of char_code_at_text comparisons.
+    // char_code_at_text is miscompiled by older seeds, but substring
+    // (backed by the C runtime grapheme_at) and == both work correctly.
+    let _search_limit = value.length - target.length;
     let mut index -> number = 0;
     loop {
-        if index + target.length > value.length {
+        if index > _search_limit {
             break;
         }
-        let mut match_index -> number = 0;
-        let mut matches -> boolean = true;
-        loop {
-            if match_index >= target.length {
-                break;
-            }
-            if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index) {
-                matches = false;
-                break;
-            }
-            match_index += 1;
-        }
-        if matches {
+        let candidate = substring(value, index, index + target.length);
+        if candidate == target {
             return index;
         }
         index += 1;
@@ -184,14 +177,15 @@ fn find_last_index_of_char(value -> string, target -> string) -> number {
     if target.length != 1 {
         return -1;
     }
-    let target_code = char_code_at_text(target, 0);
+    // Use substring + == instead of char_code_at_text.
     let mut index -> number = value.length;
     loop {
         if index <= 0 {
             break;
         }
         index -= 1;
-        if char_code_at_text(value, index) == target_code {
+        let ch = substring(value, index, index + 1);
+        if ch == target {
             return index;
         }
     }
@@ -240,8 +234,9 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             if index >= parts.length {
                 break;
             }
-            if index + 1 < parts.length {
-                let combined = parts[index] + separator + parts[index + 1];
+            let _ct_next = index + 1;
+            if _ct_next < parts.length {
+                let combined = parts[index] + separator + parts[_ct_next];
                 next.push(combined);
                 index += 2;
                 continue;
@@ -263,23 +258,14 @@ fn find_substring_from(value -> string, target -> string, start -> number) -> nu
     if index < 0 {
         index = 0;
     }
+    // Use substring + == instead of char_code_at_text comparisons.
+    let _search_limit = value.length - target.length;
     loop {
-        if index + target.length > value.length {
+        if index > _search_limit {
             break;
         }
-        let mut match_index -> number = 0;
-        let mut matches -> boolean = true;
-        loop {
-            if match_index >= target.length {
-                break;
-            }
-            if char_code_at_text(value, index + match_index) != char_code_at_text(target, match_index) {
-                matches = false;
-                break;
-            }
-            match_index += 1;
-        }
-        if matches {
+        let candidate = substring(value, index, index + target.length);
+        if candidate == target {
             return index;
         }
         index += 1;
@@ -318,7 +304,7 @@ fn parse_union_payload_types(union_llvm_type -> string) -> string[] {
         if index >= fields.length {
             break;
         }
-        result = append_string(result, trim_text(fields[index]));
+        result.push(trim_text(fields[index]));
         index += 1;
     }
     return result;
@@ -329,7 +315,7 @@ fn extract_simple_identifier(text -> string) -> string {
     if trimmed.length == 0 {
         return "";
     }
-    let first = trimmed[0];
+    let first = substring(trimmed, 0, 1);
     if !is_identifier_start_char(first) {
         return "";
     }
@@ -338,7 +324,7 @@ fn extract_simple_identifier(text -> string) -> string {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         if !is_identifier_part_char(ch) {
             return "";
         }
@@ -383,7 +369,7 @@ fn is_integer_literal(text -> string) -> boolean {
         return false;
     }
     let mut index -> number = 0;
-    if char_code_at_text(trimmed, 0) == char_code("-") {
+    if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 {
             return false;
         }
@@ -394,8 +380,8 @@ fn is_integer_literal(text -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let code = char_code_at_text(trimmed, index);
-        if code >= char_code("0") && code <= char_code("9") {
+        let ch = substring(trimmed, index, index + 1);
+        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
             has_digit = true;
             index += 1;
             continue;
@@ -413,7 +399,7 @@ fn is_number_literal(text -> string) -> boolean {
     if trimmed.length == 0 {
         return false;
     }
-    if char_code_at_text(trimmed, 0) == char_code("-") {
+    if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 {
             return false;
         }
@@ -423,13 +409,13 @@ fn is_number_literal(text -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let code = char_code_at_text(trimmed, index);
-        if code >= char_code("0") && code <= char_code("9") {
+        let ch = substring(trimmed, index, index + 1);
+        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
             has_digit = true;
             index += 1;
             continue;
         }
-        if code == char_code(".") {
+        if ch == "." {
             if has_decimal {
                 return false;
             }
@@ -455,10 +441,10 @@ fn is_string_literal(text -> string) -> boolean {
     if trimmed.length < 2 {
         return false;
     }
-    if char_code_at_text(trimmed, 0) != char_code("\"") {
+    if substring(trimmed, 0, 1) != "\"" {
         return false;
     }
-    if char_code_at_text(trimmed, trimmed.length - 1) != char_code("\"") {
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != "\"" {
         return false;
     }
 
@@ -498,12 +484,12 @@ fn is_character_literal(text -> string) -> boolean {
     if text.length < 2 {
         return false;
     }
-    if char_code_at_text(text, 0) != char_code("\"") || char_code_at_text(text, text.length - 1) != char_code("\"") {
+    if substring(text, 0, 1) != "\"" || substring(text, text.length - 1, text.length) != "\"" {
         return false;
     }
     let inner = substring(text, 1, text.length - 1);
     // Handle escape sequences
-    if inner.length == 2 && char_code_at_text(inner, 0) == char_code("\\") {
+    if inner.length == 2 && substring(inner, 0, 1) == "\\" {
         return true;
     }
     // Single character
@@ -516,7 +502,7 @@ fn get_character_literal_value(text -> string) -> number {
         return 0;
     }
     // Handle escape sequences
-    if inner.length == 2 && char_code_at_text(inner, 0) == char_code("\\") {
+    if inner.length == 2 && substring(inner, 0, 1) == "\\" {
         let escape = char_at(inner, 1);
         let escape_code = char_code(escape);
         if escape_code == char_code("n") {
@@ -561,7 +547,7 @@ fn compute_string_constant_hash(content -> string) -> number {
         if index >= content.length {
             break;
         }
-        let code = char_code_at_text(content, index);
+        let code = char_code(char_at(content, index));
         hash = hash * 33 + code;
         loop {
             if hash < modulus {
@@ -591,10 +577,10 @@ fn parse_interpolated_template(content -> string) -> InterpolatedTemplateParse {
         }
         let start = find_substring_from(content, "{{", index);
         if start < 0 {
-            parts = append_string(parts, substring(content, index, content.length));
+            parts.push(substring(content, index, content.length));
             break;
         }
-        parts = append_string(parts, substring(content, index, start));
+        parts.push(substring(content, index, start));
         let end = find_substring_from(content, "}}", start + 2);
         if end < 0 {
             return InterpolatedTemplateParse { parts: [], expressions: [], success: false };
@@ -603,7 +589,7 @@ fn parse_interpolated_template(content -> string) -> InterpolatedTemplateParse {
         if expr_text.length == 0 {
             return InterpolatedTemplateParse { parts: [], expressions: [], success: false };
         }
-        expressions = append_string(expressions, expr_text);
+        expressions.push(expr_text);
         index = end + 2;
     }
     return InterpolatedTemplateParse { parts: parts, expressions: expressions, success: true };
@@ -621,7 +607,7 @@ fn escape_string_for_sailfin_literal(content -> string) -> string {
         if index >= content.length {
             break;
         }
-        let ch = content[index];
+        let ch = substring(content, index, index + 1);
         if ch == "\\" {
             result = result + "\\\\";
         } else if ch == "\"" {
@@ -655,8 +641,9 @@ fn unescape_string_literal(literal -> string) -> string {
             break;
         }
         let ch = char_at(inner, index);
-        if char_code(ch) == char_code("\\") && index + 1 < inner.length {
-            let next = char_at(inner, index + 1);
+        let _esc_next = index + 1;
+        if char_code(ch) == char_code("\\") && _esc_next < inner.length {
+            let next = char_at(inner, _esc_next);
             let next_code = char_code(next);
             if next_code == char_code("n") {
                 result = result + "\n";
@@ -726,7 +713,7 @@ fn sanitize_symbol(name -> string) -> string {
         if index >= name.length {
             break;
         }
-        let ch = name[index];
+        let ch = substring(name, index, index + 1);
         if is_symbol_char(ch) {
             result = result + ch;
         }
@@ -735,7 +722,7 @@ fn sanitize_symbol(name -> string) -> string {
     if result.length == 0 {
         return "_";
     }
-    let first = result[0];
+    let first = substring(result, 0, 1);
     let first_code = char_code(first);
     let zero = char_code("0");
     let nine = char_code("9");

@@ -189,7 +189,7 @@ def main(argv: list[str]) -> int:
             [str(out), "version"],
             cwd=REPO_ROOT,
             env=env,
-            log_path=logs_dir / "stage2_version.log",
+            log_path=logs_dir / "seed_version.log",
         )
 
         hello_env = dict(env)

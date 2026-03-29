@@ -46,9 +46,21 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
             mutable_flag = true;
             remainder = trim_text(after_mut);
         }
-        if remainder.length > 0 && remainder[0] == "(" {
+        if remainder.length > 0 && substring(remainder, 0, 1) == "(" {
             let argument_parse = extract_borrow_argument(remainder);
-            let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
+            let mut messages -> string[] = [];
+            let mut _ci0 -> number = 0;
+            loop {
+                if _ci0 >= diagnostics.length { break; }
+                messages.push(diagnostics[_ci0]);
+                _ci0 += 1;
+            }
+            let mut _ci1 -> number = 0;
+            loop {
+                if _ci1 >= argument_parse.diagnostics.length { break; }
+                messages.push(argument_parse.diagnostics[_ci1]);
+                _ci1 += 1;
+            }
             if !argument_parse.success {
                 return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
             }
@@ -62,7 +74,7 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
                 }
             }
             if argument_text.length == 0 {
-                messages = append_string(messages, "llvm lowering: borrow expression missing target");
+                messages.push("llvm lowering: borrow expression missing target");
                 return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
             }
             if !is_valid_borrow_target(argument_text) {
@@ -110,7 +122,7 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = substring(text, index, index + 1);
         if ch == "(" {
             depth += 1;
             index += 1;
@@ -118,7 +130,7 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
         }
         if ch == ")" {
             if depth == 0 {
-                diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing opening `(`");
+                diagnostics.push("llvm lowering: borrow expression missing opening `(`");
                 return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
             }
             depth -= 1;
@@ -133,13 +145,13 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
         index += 1;
     }
     if closing_index < 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing closing `)`");
+        diagnostics.push("llvm lowering: borrow expression missing closing `)`");
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
     let inner = substring(text, 1, closing_index);
     let remainder = trim_text(substring(text, closing_index + 1, text.length));
     if remainder.length > 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`");
+        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
     return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
@@ -149,7 +161,7 @@ fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
     let mut diagnostics -> string[] = [];
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        diagnostics.push("llvm lowering: borrow expression missing target");
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
     let mut index -> number = 0;
@@ -157,7 +169,7 @@ fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         if is_effect_delimiter(ch) {
             break;
         }
@@ -165,12 +177,12 @@ fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
     }
     let target = trim_text(substring(trimmed, 0, index));
     if target.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        diagnostics.push("llvm lowering: borrow expression missing target");
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
     let remainder = trim_text(substring(trimmed, index, trimmed.length));
     if remainder.length > 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`");
+        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
         return BorrowArgumentParse { success: false, argument: target, diagnostics: diagnostics };
     }
     return BorrowArgumentParse { success: true, argument: target, diagnostics: diagnostics };
@@ -186,7 +198,7 @@ fn is_valid_borrow_target(text -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         if ch == "." {
             index += 1;
             continue;
@@ -219,7 +231,7 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
     let mut target = strip_enclosing_parentheses(parse.target);
     target = trim_text(target);
     if target.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        diagnostics.push("llvm lowering: borrow expression missing target");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
@@ -227,7 +239,7 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
     if local == null {
         let parameter = find_parameter_binding(bindings, target);
         if parameter == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: borrow target `" + target + "` not found");
+            diagnostics.push("llvm lowering: borrow target `" + target + "` not found");
             return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
         }
 
@@ -237,7 +249,7 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
             return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
         }
 
-        diagnostics = append_string(diagnostics, "llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)");
+        diagnostics.push("llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
@@ -267,7 +279,7 @@ fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, lo
         }
         let resolved_base = resolve_borrow_base(parse.target, locals);
         if resolved_base.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+            diagnostics.push("llvm lowering: borrow expression missing target");
             return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
         }
     let ownership = OwnershipInfo { variant: "Borrow", base: resolved_base, mutable: parse.mutable, span: span, region_id: -1 };
@@ -279,7 +291,7 @@ fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, lo
         let local = find_local_binding(locals, name);
         if local != null {
             if local.consumed {
-                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span));
+                diagnostics.push(format_use_after_move_message(name, span));
                 return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
             }
             if is_copy_type(local.type_annotation, local.llvm_type) {
@@ -292,7 +304,7 @@ fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, lo
         let parameter = find_parameter_binding(bindings, name);
         if parameter != null {
             if parameter.consumed {
-                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span));
+                diagnostics.push(format_use_after_move_message(name, span));
                 return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
             }
             if is_copy_type(parameter.type_annotation, parameter.llvm_type) {
@@ -360,13 +372,13 @@ fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[]
                 if existing_base == base {
                     if ownership.mutable {
                         if details.mutable {
-                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: mutable borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
                         } else {
-                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active shared borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: mutable borrow `" + binding_name + "` conflicts with active shared borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
                         }
                     } else {
                         if details.mutable {
-                            diagnostics = append_string(diagnostics, "llvm lowering: shared borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: shared borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
                         }
                     }
                 }
@@ -412,15 +424,15 @@ fn normalise_borrow_base(raw_base -> string) -> string {
         if trimmed.length == 0 {
             break;
         }
-        if trimmed[0] == "*" {
+        if substring(trimmed, 0, 1) == "*" {
             trimmed = trim_text(substring(trimmed, 1, trimmed.length));
             continue;
         }
         break;
     }
     if trimmed.length >= 2 {
-        if trimmed[0] == "(" {
-            if trimmed[trimmed.length - 1] == ")" {
+        if substring(trimmed, 0, 1) == "(" {
+            if substring(trimmed, trimmed.length - 1, trimmed.length) == ")" {
                 let inner = trim_text(substring(trimmed, 1, trimmed.length - 1));
                 if inner.length > 0 {
                     return inner;
@@ -440,7 +452,7 @@ fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
     if normalized.length == 0 {
         return false;
     }
-    if normalized[0] != "&" {
+    if substring(normalized, 0, 1) != "&" {
         return false;
     }
     let remainder = trim_text(substring(normalized, 1, normalized.length));
@@ -458,11 +470,15 @@ fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
 // =============================================================================
 
 fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeRegionMetadata) -> LifetimeRegionMetadata[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_lifetime_release_event(events -> LifetimeReleaseEvent[], event -> LifetimeReleaseEvent) -> LifetimeReleaseEvent[] {
-    return events.concat([event]);
+    let mut out = events;
+    out = out.push(event);
+    return out;
 }
 
 fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id -> number, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata[] {
@@ -549,6 +565,13 @@ fn infer_borrow_base_scope(base -> string, locals -> LocalBinding[], bindings ->
 
 fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegionMetadata[]) -> string[] {
     let mut diagnostics -> string[] = [];
+    if regions == null {
+        return diagnostics;
+    }
+    if regions.length > 1000000 {
+        diagnostics.push("llvm lowering: lifetime region overflow in `" + function.name + "` (len=" + number_to_string(regions.length) + ")");
+        return diagnostics;
+    }
     let mut index -> number = 0;
     let root_scope = format_root_scope_id(function.name);
     loop {
@@ -581,7 +604,7 @@ fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegi
             if region.start_span != null {
                 location = " at " + format_span_location(region.start_span);
             }
-            diagnostics = append_string(diagnostics, "llvm lowering: borrow `" + region.binding + "` of `" + region.base + "` escapes lifetime of `" + region.base + "` in `" + function.name + "`" + location);
+            diagnostics.push("llvm lowering: borrow `" + region.binding + "` of `" + region.base + "` escapes lifetime of `" + region.base + "` in `" + function.name + "`" + location);
         }
         index += 1;
     }
@@ -605,7 +628,7 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
             if details.variant == "Borrow" && details.mutable {
                 let base_name = normalise_borrow_base(details.base);
                 let location = format_suspension_location(keyword, details.span, suspension_span);
-                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+                diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
             }
         }
         index += 1;
@@ -619,7 +642,7 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
         if !binding.consumed {
             if is_mutable_borrow_annotation(binding.type_annotation) {
                 let location = format_suspension_location(keyword, binding.span, suspension_span);
-                diagnostics = append_string(diagnostics, "llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location);
+                diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location);
             }
         }
         parameter_index += 1;
