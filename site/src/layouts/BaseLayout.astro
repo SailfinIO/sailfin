@@ -6,9 +6,21 @@ import "../styles/global.css";
 interface Props {
   title: string;
   description?: string;
+  image?: string;
+  type?: "website" | "article";
 }
 
-const { title, description = "An AI-native, systems-friendly programming language designed for precision, safety, and introspection." } = Astro.props;
+const {
+  title,
+  description = "An AI-native, systems-friendly programming language designed for precision, safety, and introspection.",
+  image = "/images/sfn_lang_logo_256.png",
+  type = "website",
+} = Astro.props;
+
+const siteUrl = Astro.site ?? new URL("https://sailfin.dev");
+const canonicalURL = new URL(Astro.url.pathname, siteUrl);
+const ogImage = new URL(image, siteUrl);
+const pageTitle = title === "Home" ? "Sailfin" : `${title} - Sailfin`;
 ---
 
 <!doctype html>
@@ -17,11 +29,30 @@ const { title, description = "An AI-native, systems-friendly programming languag
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalURL} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content={type} />
+    <meta property="og:site_name" content="Sailfin" />
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:alt" content="Sailfin — AI-native programming language" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content={canonicalURL} />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content="Sailfin — AI-native programming language" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <title>{title} - Sailfin</title>
+    <title>{pageTitle}</title>
   </head>
   <body>
     <Header />
