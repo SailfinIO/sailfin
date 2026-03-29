@@ -1,6 +1,18 @@
 # CHANGELOG
 
 
+## v0.2.1 (2026-03-29)
+
+### Bug Fixes
+
+- **site**: Fix hamburger menu — add mobile nav drawer, toggle JS, icon swap
+  ([`8c4ecdb`](https://github.com/SailfinIO/sailfin/commit/8c4ecdbb6004758dc79ae5c92f6962a6b6d320fe))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/e6accb75-dc83-40d0-8fb8-532a0f97a1aa
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
 ## v0.2.0 (2026-03-29)
 
 ### Chores
