@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.2.0-alpha.3 (2026-03-29)
+
+### Bug Fixes
+
+- Extract with shell tools
+  ([`e36bec3`](https://github.com/SailfinIO/sailfin/commit/e36bec3f76b041efab0494fae1469f914e3c96df))
+
+### Chores
+
+- Restructure basic capsules
+  ([`93eaced`](https://github.com/SailfinIO/sailfin/commit/93eaced275fdec274c391320a281812cd0066306))
+
+
 ## v0.2.0-alpha.2 (2026-03-29)
 
 ### Bug Fixes
