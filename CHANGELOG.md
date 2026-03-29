@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.2.0-alpha.2 (2026-03-29)
+
+### Bug Fixes
+
+- Capsule publish and adding
+  ([`9db5e00`](https://github.com/SailfinIO/sailfin/commit/9db5e003fba15ba39544f588535258f27c7a950a))
+
+
 ## v0.2.0-alpha.1 (2026-03-28)
 
 ### Features
