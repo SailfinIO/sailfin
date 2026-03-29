@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.2.0-alpha.4 (2026-03-29)
+
+### Bug Fixes
+
+- Hamburger menu
+  ([`dd2ca07`](https://github.com/SailfinIO/sailfin/commit/dd2ca0760bc18549b83b0baf1fe97a91fdb95f23))
+
+
 ## v0.2.0-alpha.3 (2026-03-29)
 
 ### Bug Fixes
