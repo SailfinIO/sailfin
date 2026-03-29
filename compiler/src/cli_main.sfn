@@ -1937,7 +1937,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
 
         let auth_header = "Bearer " + token;
-        let registry_url = "https://registry.sailfin.dev/publish";
+        let registry_url = "https://registry.sailfin.dev/api/publish";
         print.info("publishing to " + registry_url + "...");
         let response = _curl_post_json(registry_url, body_tmp, auth_header);
         process.run(["rm", "-f", payload_tmp]);
@@ -1966,7 +1966,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         // (avoids Sailfin string processing limits on large JSON)
         print.info("fetching registry index...");
         let latest_version = _shell_read(
-            "curl -sfS 'https://registry.sailfin.dev/index.json'"
+            "curl -sfS 'https://registry.sailfin.dev/api/index.json'"
             + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('" + capsule_id + "',{}); print(c.get('latest',''))\" 2>/dev/null"
         );
         if latest_version.length == 0 {
@@ -1998,7 +1998,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         _ensure_dir_recursive(cache_base);
 
         let pkg_path = cache_base + "/" + latest_version + ".sfnpkg";
-        let download_url = "https://registry.sailfin.dev/dl/capsules/" + scope + "/" + name + "/" + latest_version + ".sfnpkg";
+        let download_url = "https://registry.sailfin.dev/api/capsules/" + scope + "/" + name + "/" + latest_version + ".sfnpkg";
         print.info("downloading " + capsule_id + "@" + latest_version + "...");
         let dl_rc = _curl_download(download_url, pkg_path);
         if dl_rc != 0 {
