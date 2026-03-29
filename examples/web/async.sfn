@@ -1,6 +1,6 @@
 // examples/web/async.sfn
 
-import { http } from "sfn/net";
+import { http } from "http";
 
 async fn fetchData(url -> string) -> string ![net] {
     let response = await http.get(url);

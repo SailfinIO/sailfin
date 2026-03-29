@@ -30,9 +30,9 @@ fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter
             }
         }
         if llvm_type.length == 0 {
-            types = append_string(types, "double");
+            types.push("double");
         } else {
-            types = append_string(types, llvm_type);
+            types.push(llvm_type);
         }
         index += 1;
     }

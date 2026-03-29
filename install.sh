@@ -4,7 +4,9 @@ set -euo pipefail
 # curlable installer for the Sailfin compiler binary.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | VERSION=0.1.1 bash
+#   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash -s -- --version 0.1.1
+#   curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash  # installs latest
 #
 # Env overrides:
 #   REPO=owner/repo          (default: SailfinIO/sailfin)
@@ -12,21 +14,24 @@ set -euo pipefail
 #   BINARY=sailfin           (default: sailfin)
 #   INSTALL_BASE=...         (default: ~/.local/share/sailfin/versions)
 #   GLOBAL_BIN_DIR=...       (default: ~/.local/bin)
-#   GITHUB_TOKEN=...         (required for private repos)
+#   GITHUB_TOKEN=...         (optional; increases API rate limits)
 #
 # Assets are expected to be named:
 #   sailfin_<version>_<os>_<arch>.tar.gz
-# where <os> is linux|macos and <arch> is x86_64|arm64.
-
-# Legacy fallback (pre-1.0) asset naming:
-#   sailfin-stage2_<version>_<os>_<arch>.tar.gz
+# where <os> is linux|macos|windows and <arch> is x86_64|arm64.
 
 REPO="${REPO:-SailfinIO/sailfin}"
 BINARY="${BINARY:-sailfin}"
 VERSION="${VERSION:-latest}"
 EXCLUDE_TAG="${EXCLUDE_TAG:-}"
 
-LEGACY_BINARY="sailfin-stage2"
+# Parse CLI arguments (supports: --version <ver>)
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version) VERSION="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 
 log() {
   printf '[%s] %s\n' "$(date +'%Y-%m-%dT%H:%M:%S%z')" "$*"
@@ -73,23 +78,21 @@ esac
 log "Detected OS: $OS"
 log "Detected ARCH: $ARCH"
 
-# Token required for private repo access.
-if [ -z "${GITHUB_TOKEN:-}" ]; then
-  die "GITHUB_TOKEN is required (private repo). Export GITHUB_TOKEN with 'repo' scope."
-fi
-
+# Optional token for higher API rate limits.
 api() {
   # $1 = url
+  local auth_args=()
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    auth_args=(-H "Authorization: token ${GITHUB_TOKEN}")
+  fi
   curl --fail -sSL \
-    -H "Authorization: token ${GITHUB_TOKEN}" \
+    "${auth_args[@]}" \
     -H "Accept: application/vnd.github+json" \
     "$1"
 }
 
 TAG=""
 ASSET=""
-ASSET_BINARY=""
-
 if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
   log "VERSION is 'latest'; resolving most recent release with matching asset (including prereleases)…"
   releases_json="$(api "https://api.github.com/repos/${REPO}/releases?per_page=50")"
@@ -112,21 +115,6 @@ if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
   TAG="$(printf '%s' "$selected" | jq -r '.tag // empty')"
   VERSION="$(printf '%s' "$selected" | jq -r '.version // empty')"
   ASSET="$(printf '%s' "$selected" | jq -r '.asset // empty')"
-  ASSET_BINARY="$BINARY"
-
-  if [ -z "$TAG" ] || [ -z "$VERSION" ] || [ -z "$ASSET" ]; then
-    if [ "$BINARY" != "$LEGACY_BINARY" ]; then
-      selected="$(select_release "$LEGACY_BINARY")"
-      TAG="$(printf '%s' "$selected" | jq -r '.tag // empty')"
-      VERSION="$(printf '%s' "$selected" | jq -r '.version // empty')"
-      ASSET="$(printf '%s' "$selected" | jq -r '.asset // empty')"
-      ASSET_BINARY="$LEGACY_BINARY"
-      if [ -n "$TAG" ] && [ -n "$VERSION" ] && [ -n "$ASSET" ]; then
-        log "Falling back to legacy release asset naming (${LEGACY_BINARY}_...)."
-      fi
-    fi
-  fi
-
   if [ -z "$TAG" ] || [ -z "$VERSION" ] || [ -z "$ASSET" ]; then
     if [ -n "$EXCLUDE_TAG" ]; then
       die "Could not find any release (excluding '${EXCLUDE_TAG}') with asset for ${OS}/${ARCH}."
@@ -138,7 +126,6 @@ else
   VERSION="${VERSION#V}"
   TAG="v${VERSION}"
   ASSET="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
-  ASSET_BINARY="$BINARY"
 fi
 
 log "Using release tag: ${TAG}"
@@ -147,19 +134,6 @@ log "Expected asset: ${ASSET}"
 
 release_json="$(api "https://api.github.com/repos/${REPO}/releases/tags/${TAG}")"
 asset_id="$(printf '%s' "$release_json" | jq -r '.assets[]? | select(.name=="'"$ASSET"'") | .id' | head -n 1)"
-
-if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
-  if [ "$ASSET_BINARY" != "$LEGACY_BINARY" ]; then
-    fallback_asset="${LEGACY_BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
-    fallback_id="$(printf '%s' "$release_json" | jq -r '.assets[]? | select(.name=="'"$fallback_asset"'") | .id' | head -n 1)"
-    if [ -n "$fallback_id" ] && [ "$fallback_id" != "null" ]; then
-      log "Falling back to legacy asset: ${fallback_asset}"
-      ASSET="$fallback_asset"
-      ASSET_BINARY="$LEGACY_BINARY"
-      asset_id="$fallback_id"
-    fi
-  fi
-fi
 
 if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
   die "Could not find asset '${ASSET}' in release '${TAG}'."
@@ -174,8 +148,12 @@ trap cleanup EXIT
 ARCHIVE_PATH="${TMPDIR}/${ASSET}"
 log "Downloading asset via GitHub API (id=${asset_id})…"
 
+DL_AUTH_ARGS=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  DL_AUTH_ARGS=(-H "Authorization: token ${GITHUB_TOKEN}")
+fi
 curl --fail -sSL \
-  -H "Authorization: token ${GITHUB_TOKEN}" \
+  "${DL_AUTH_ARGS[@]}" \
   -H "Accept: application/octet-stream" \
   "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" \
   -o "$ARCHIVE_PATH"
@@ -201,10 +179,6 @@ if [ ! -d "${EXTRACT_DIR}/bin" ] && [ ! -f "${EXTRACT_DIR}/${BINARY}" ] && [ ! -
 fi
 
 SRC_BINARY=""
-ALT_BINARY="$LEGACY_BINARY"
-if [ "$BINARY" = "$LEGACY_BINARY" ]; then
-  ALT_BINARY="sailfin"
-fi
 if [ "$OS" = "windows" ]; then
   if [ -f "${ROOT_DIR}/${BINARY}.exe" ]; then
     SRC_BINARY="${ROOT_DIR}/${BINARY}.exe"
@@ -214,18 +188,6 @@ if [ "$OS" = "windows" ]; then
     SRC_BINARY="${ROOT_DIR}/${BINARY}"
   elif [ -f "${ROOT_DIR}/bin/${BINARY}" ]; then
     SRC_BINARY="${ROOT_DIR}/bin/${BINARY}"
-  elif [ -f "${ROOT_DIR}/${ALT_BINARY}.exe" ]; then
-    log "Archive contains '${ALT_BINARY}.exe'; installing as '${BINARY}.exe'."
-    SRC_BINARY="${ROOT_DIR}/${ALT_BINARY}.exe"
-  elif [ -f "${ROOT_DIR}/bin/${ALT_BINARY}.exe" ]; then
-    log "Archive contains 'bin/${ALT_BINARY}.exe'; installing as '${BINARY}.exe'."
-    SRC_BINARY="${ROOT_DIR}/bin/${ALT_BINARY}.exe"
-  elif [ -f "${ROOT_DIR}/${ALT_BINARY}" ]; then
-    log "Archive contains '${ALT_BINARY}'; installing as '${BINARY}'."
-    SRC_BINARY="${ROOT_DIR}/${ALT_BINARY}"
-  elif [ -f "${ROOT_DIR}/bin/${ALT_BINARY}" ]; then
-    log "Archive contains 'bin/${ALT_BINARY}'; installing as '${BINARY}'."
-    SRC_BINARY="${ROOT_DIR}/bin/${ALT_BINARY}"
   else
     die "Binary '${BINARY}.exe' not found in archive."
   fi
@@ -234,27 +196,13 @@ else
     SRC_BINARY="${ROOT_DIR}/${BINARY}"
   elif [ -f "${ROOT_DIR}/bin/${BINARY}" ]; then
     SRC_BINARY="${ROOT_DIR}/bin/${BINARY}"
-  elif [ -f "${ROOT_DIR}/${ALT_BINARY}" ]; then
-    log "Archive contains '${ALT_BINARY}'; installing as '${BINARY}'."
-    SRC_BINARY="${ROOT_DIR}/${ALT_BINARY}"
-  elif [ -f "${ROOT_DIR}/bin/${ALT_BINARY}" ]; then
-    log "Archive contains 'bin/${ALT_BINARY}'; installing as '${BINARY}'."
-    SRC_BINARY="${ROOT_DIR}/bin/${ALT_BINARY}"
   else
     die "Binary '${BINARY}' not found in archive."
   fi
 fi
 
 INSTALL_BASE="${INSTALL_BASE:-$HOME/.local/share/sailfin/versions}"
-if [ -z "${GLOBAL_BIN_DIR:-}" ]; then
-  if [ "$OS" = "macos" ]; then
-    GLOBAL_BIN_DIR="/usr/local/bin"
-  else
-    GLOBAL_BIN_DIR="$HOME/.local/bin"
-  fi
-else
-  GLOBAL_BIN_DIR="${GLOBAL_BIN_DIR}"
-fi
+GLOBAL_BIN_DIR="${GLOBAL_BIN_DIR:-$HOME/.local/bin}"
 TARGET_DIR="${INSTALL_BASE}/${VERSION}"
 
 MAYBE_SUDO=""

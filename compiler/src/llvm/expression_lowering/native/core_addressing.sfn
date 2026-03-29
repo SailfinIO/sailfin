@@ -39,7 +39,7 @@ fn lower_raw_address_expression(parse -> RawAddressParseResult, bindings -> Para
     }
     let target = trim_text(parse.target);
     if !is_simple_identifier(target) {
-        diagnostics = append_string(diagnostics, "llvm lowering: &raw currently supports only simple identifiers (got `" + target + "`)");
+        diagnostics.push("llvm lowering: &raw currently supports only simple identifiers (got `" + target + "`)");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
     let local = find_local_binding(locals, target);
@@ -49,9 +49,9 @@ fn lower_raw_address_expression(parse -> RawAddressParseResult, bindings -> Para
     }
     let param = find_parameter_binding(bindings, target);
     if param != null {
-        diagnostics = append_string(diagnostics, "llvm lowering: cannot take raw address of parameter `" + target + "` yet");
+        diagnostics.push("llvm lowering: cannot take raw address of parameter `" + target + "` yet");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
-    diagnostics = append_string(diagnostics, "llvm lowering: &raw target `" + target + "` is not a local");
+    diagnostics.push("llvm lowering: &raw target `" + target + "` is not a local");
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
 }

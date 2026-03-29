@@ -1,6 +1,6 @@
 // examples/web/rest-api.sfn
 
-import { serve } from "sfn/http";
+import { serve } from "http";
 
 fn handleRequest(req, res) {
     match req.method {

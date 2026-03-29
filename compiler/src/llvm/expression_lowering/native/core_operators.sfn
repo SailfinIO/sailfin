@@ -55,7 +55,7 @@ fn strip_enclosing_parentheses(expression -> string) -> string {
     if trimmed.length < 2 {
         return trimmed;
     }
-    if trimmed[0] != "(" || trimmed[trimmed.length - 1] != ")" {
+    if substring(trimmed, 0, 1) != "(" || substring(trimmed, trimmed.length - 1, trimmed.length) != ")" {
         return trimmed;
     }
     let mut depth -> number = 0;
@@ -223,35 +223,35 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
         if index >= expression.length {
             break;
         }
-        let code = char_code_at_text(expression, index);
+        let ch = substring(expression, index, index + 1);
         if in_string {
             if escape_next {
                 escape_next = false;
                 index += 1;
                 continue;
             }
-            if code == char_code("\\") {
+            if ch == "\\" {
                 escape_next = true;
                 index += 1;
                 continue;
             }
-            if code == char_code("\"") {
+            if ch == "\"" {
                 in_string = false;
             }
             index += 1;
             continue;
         }
-        if code == char_code("\"") {
+        if ch == "\"" {
             in_string = true;
             index += 1;
             continue;
         }
-        if code == char_code("(") {
+        if ch == "(" {
             depth += 1;
             index += 1;
             continue;
         }
-        if code == char_code(")") {
+        if ch == ")" {
             if depth > 0 {
                 depth -= 1;
             }
@@ -263,29 +263,28 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
             continue;
         }
 
-        // Compare operators without substring/string-equality.
-        // This keeps the lowering resilient even if string helpers are broken.
-        if index + 1 < expression.length {
-            let next_code = char_code_at_text(expression, index + 1);
-            if next_code == char_code("=") {
-                if code == char_code("=") {
-                    return OperatorMatch { index: index, symbol: "==", success: true };
-                }
-                if code == char_code("!") {
-                    return OperatorMatch { index: index, symbol: "!=", success: true };
-                }
-                if code == char_code("<") {
-                    return OperatorMatch { index: index, symbol: "<=", success: true };
-                }
-                if code == char_code(">") {
-                    return OperatorMatch { index: index, symbol: ">=", success: true };
-                }
+        // Compare operators using substring + == (safe under older seeds).
+        let _co_next = index + 1;
+        let _co_next2 = index + 2;
+        if _co_next < expression.length {
+            let two_char = substring(expression, index, _co_next2);
+            if two_char == "==" {
+                return OperatorMatch { index: index, symbol: "==", success: true };
+            }
+            if two_char == "!=" {
+                return OperatorMatch { index: index, symbol: "!=", success: true };
+            }
+            if two_char == "<=" {
+                return OperatorMatch { index: index, symbol: "<=", success: true };
+            }
+            if two_char == ">=" {
+                return OperatorMatch { index: index, symbol: ">=", success: true };
             }
         }
-        if code == char_code("<") {
+        if ch == "<" {
             return OperatorMatch { index: index, symbol: "<", success: true };
         }
-        if code == char_code(">") {
+        if ch == ">" {
             return OperatorMatch { index: index, symbol: ">", success: true };
         }
         index += 1;
@@ -299,11 +298,13 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
     let mut in_string -> boolean = false;
     let mut escape_next -> boolean = false;
 
+    let _lo_limit = expression.length - 1;
     loop {
-        if index + 1 >= expression.length {
+        if index >= _lo_limit {
             break;
         }
-        let ch = expression[index];
+        let _lo_next = index + 1;
+        let ch = substring(expression, index, _lo_next);
         if in_string {
             if escape_next {
                 escape_next = false;
@@ -339,7 +340,8 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
             continue;
         }
         if depth == 0 {
-            let two = substring(expression, index, index + 2);
+            let _lo_next2 = index + 2;
+            let two = substring(expression, index, _lo_next2);
             if two == "||" {
                 return OperatorMatch { index: index, symbol: "||", success: true };
             }
@@ -352,10 +354,11 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
     in_string = false;
     escape_next = false;
     loop {
-        if index + 1 >= expression.length {
+        if index >= _lo_limit {
             break;
         }
-        let ch = expression[index];
+        let _lo2_next = index + 1;
+        let ch = substring(expression, index, _lo2_next);
         if in_string {
             if escape_next {
                 escape_next = false;
@@ -391,7 +394,8 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
             continue;
         }
         if depth == 0 {
-            let two = substring(expression, index, index + 2);
+            let _lo2_next2 = index + 2;
+            let two = substring(expression, index, _lo2_next2);
             if two == "&&" {
                 return OperatorMatch { index: index, symbol: "&&", success: true };
             }
@@ -405,13 +409,13 @@ fn contains_char(set -> string, ch -> string) -> boolean {
     if ch.length == 0 {
         return false;
     }
-    let target = char_code(ch);
     let mut index -> number = 0;
     loop {
         if index >= set.length {
             break;
         }
-        if char_code(char_at(set, index)) == target {
+        let set_ch = substring(set, index, index + 1);
+        if set_ch == ch {
             return true;
         }
         index += 1;

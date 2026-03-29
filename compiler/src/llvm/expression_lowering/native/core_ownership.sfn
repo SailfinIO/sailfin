@@ -55,7 +55,7 @@ fn analyze_value_ownership_impl(initializer -> string?, span -> NativeSourceSpan
         }
         let resolved_base = resolve_borrow_base_impl(parse.target, locals);
         if resolved_base.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+            diagnostics.push("llvm lowering: borrow expression missing target");
             return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
         }
         let ownership = OwnershipInfo { variant: "Borrow", base: resolved_base, mutable: parse.mutable, span: span, region_id: -1 };
@@ -67,7 +67,7 @@ fn analyze_value_ownership_impl(initializer -> string?, span -> NativeSourceSpan
         let local = find_local_binding(locals, name);
         if local != null {
             if local.consumed {
-                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span));
+                diagnostics.push(format_use_after_move_message(name, span));
                 return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
             }
             if is_copy_type(local.type_annotation, local.llvm_type) {
@@ -80,7 +80,7 @@ fn analyze_value_ownership_impl(initializer -> string?, span -> NativeSourceSpan
         let parameter = find_parameter_binding(bindings, name);
         if parameter != null {
             if parameter.consumed {
-                diagnostics = append_string(diagnostics, format_use_after_move_message(name, span));
+                diagnostics.push(format_use_after_move_message(name, span));
                 return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
             }
             if is_copy_type(parameter.type_annotation, parameter.llvm_type) {
@@ -155,13 +155,13 @@ fn detect_borrow_conflicts_impl(ownership -> OwnershipInfo?, locals -> LocalBind
                 if existing_base == base {
                     if ownership.mutable {
                         if details.mutable {
-                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: mutable borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
                         } else {
-                            diagnostics = append_string(diagnostics, "llvm lowering: mutable borrow `" + binding_name + "` conflicts with active shared borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: mutable borrow `" + binding_name + "` conflicts with active shared borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
                         }
                     } else {
                         if details.mutable {
-                            diagnostics = append_string(diagnostics, "llvm lowering: shared borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: shared borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
                         }
                     }
                 }

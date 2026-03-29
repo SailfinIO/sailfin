@@ -19,21 +19,30 @@ fn infer_effects(existing -> string[], decorator_names -> string[]) -> string[] 
             break;
         }
         let name = decorator_names[index];
-        if name == "trace" || name == "logExecution" || name == "logexecution" {
+        if name == "trace" {
+            requires_io = true;
+        }
+        if name == "logExecution" {
+            requires_io = true;
+        }
+        if name == "logexecution" {
             requires_io = true;
         }
         index += 1;
     }
 
-    if requires_io && !contains_effect(effects, "io") {
-        effects = append_string(effects, "io");
+    if requires_io {
+        if !contains_effect(effects, "io") {
+            effects.push("io");
+        }
     }
 
     return effects;
 }
 
 fn append_string(collection -> string[], item -> string) -> string[] {
-    return collection.concat([item]);
+    collection.push(item);
+    return collection;
 }
 
 fn clone_effects(effects -> string[]) -> string[] {
@@ -43,7 +52,7 @@ fn clone_effects(effects -> string[]) -> string[] {
         if index >= effects.length {
             break;
         }
-        clone = append_string(clone, effects[index]);
+        clone.push(effects[index]);
         index += 1;
     }
     return clone;
