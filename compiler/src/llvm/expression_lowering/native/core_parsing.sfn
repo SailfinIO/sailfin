@@ -63,7 +63,7 @@ fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
         } else {
             return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
         }
-        if after_keyword.length == 0 || after_keyword[0] != "(" {
+        if after_keyword.length == 0 || substring(after_keyword, 0, 1) != "(" {
             return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
         }
         remainder = after_keyword;
@@ -82,9 +82,15 @@ fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
         return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: issue };
     }
 
-    if remainder.length > 0 && remainder[0] == "(" {
+    if remainder.length > 0 && substring(remainder, 0, 1) == "(" {
         let argument_parse = extract_borrow_argument(remainder);
-        let mut messages -> string[] = diagnostics.concat(argument_parse.diagnostics);
+        let mut messages -> string[] = diagnostics;
+        let mut _ci0 -> number = 0;
+        loop {
+            if _ci0 >= argument_parse.diagnostics.length { break; }
+            messages.push(argument_parse.diagnostics[_ci0]);
+            _ci0 += 1;
+        }
         if !argument_parse.success {
             return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
         }
@@ -98,7 +104,7 @@ fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
             }
         }
         if argument_text.length == 0 {
-            messages = append_string(messages, "llvm lowering: borrow expression missing target");
+            messages.push("llvm lowering: borrow expression missing target");
             return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
         }
         if !is_valid_borrow_target(argument_text) {
@@ -126,7 +132,7 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
         if index >= text.length {
             break;
         }
-        let ch = text[index];
+        let ch = substring(text, index, index + 1);
         if ch == "(" {
             depth += 1;
             index += 1;
@@ -134,7 +140,7 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
         }
         if ch == ")" {
             if depth == 0 {
-                diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing opening `(`");
+                diagnostics.push("llvm lowering: borrow expression missing opening `(`");
                 return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
             }
             depth -= 1;
@@ -149,13 +155,13 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
         index += 1;
     }
     if closing_index < 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing closing `)`");
+        diagnostics.push("llvm lowering: borrow expression missing closing `)`");
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
     let inner = substring(text, 1, closing_index);
     let remainder = trim_text(substring(text, closing_index + 1, text.length));
     if remainder.length > 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`");
+        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
     return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
@@ -165,7 +171,7 @@ fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
     let mut diagnostics -> string[] = [];
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        diagnostics.push("llvm lowering: borrow expression missing target");
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
     let mut index -> number = 0;
@@ -173,7 +179,7 @@ fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         if is_effect_delimiter(ch) {
             break;
         }
@@ -181,12 +187,12 @@ fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
     }
     let target = trim_text(substring(trimmed, 0, index));
     if target.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        diagnostics.push("llvm lowering: borrow expression missing target");
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
     let remainder = trim_text(substring(trimmed, index, trimmed.length));
     if remainder.length > 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression trailing content `" + remainder + "`");
+        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
         return BorrowArgumentParse { success: false, argument: target, diagnostics: diagnostics };
     }
     return BorrowArgumentParse { success: true, argument: target, diagnostics: diagnostics };
@@ -202,7 +208,7 @@ fn is_valid_borrow_target(text -> string) -> boolean {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         if ch == "." {
             index += 1;
             continue;
@@ -239,7 +245,7 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
         if index >= trimmed.length {
             break;
         }
-        let ch = trimmed[index];
+        let ch = substring(trimmed, index, index + 1);
         
         if ch == "(" || ch == "[" || ch == "{" {
             depth += 1;
@@ -273,7 +279,7 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
     }
     
     if question_index >= colon_index {
-        diagnostics = append_string(diagnostics, "llvm lowering: malformed ternary expression - `:` before `?`");
+        diagnostics.push("llvm lowering: malformed ternary expression - `:` before `?`");
         return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
     }
     
@@ -282,15 +288,15 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
     let false_value = trim_text(substring(trimmed, colon_index + 1, trimmed.length));
     
     if condition.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression missing condition");
+        diagnostics.push("llvm lowering: ternary expression missing condition");
         return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
     }
     if true_value.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression missing true branch value");
+        diagnostics.push("llvm lowering: ternary expression missing true branch value");
         return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
     }
     if false_value.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: ternary expression missing false branch value");
+        diagnostics.push("llvm lowering: ternary expression missing false branch value");
         return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
     }
     
@@ -310,7 +316,7 @@ fn parse_raw_address_expression(text -> string) -> RawAddressParseResult {
     if starts_with(trimmed, "&raw") {
         let remainder = trim_text(substring(trimmed, 4, trimmed.length));
         if remainder.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: &raw expression missing target");
+            diagnostics.push("llvm lowering: &raw expression missing target");
             return RawAddressParseResult { recognized: true, success: false, target: "", diagnostics: diagnostics };
         }
         return RawAddressParseResult { recognized: true, success: true, target: remainder, diagnostics: diagnostics };
@@ -320,7 +326,7 @@ fn parse_raw_address_expression(text -> string) -> RawAddressParseResult {
         if starts_with(after_amp, "raw") {
             let remainder = trim_text(substring(after_amp, 3, after_amp.length));
             if remainder.length == 0 {
-                diagnostics = append_string(diagnostics, "llvm lowering: &raw expression missing target");
+                diagnostics.push("llvm lowering: &raw expression missing target");
                 return RawAddressParseResult { recognized: true, success: false, target: "", diagnostics: diagnostics };
             }
             return RawAddressParseResult { recognized: true, success: true, target: remainder, diagnostics: diagnostics };
@@ -445,8 +451,9 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
         }
 
         if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
-            if index + 4 <= trimmed.length {
-                let window = substring(trimmed, index, index + 4);
+            let _as_end = index + 4;
+            if _as_end <= trimmed.length {
+                let window = substring(trimmed, index, _as_end);
                 if window == " as " {
                     match_index = index;
                 }
@@ -461,7 +468,7 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
     let value = trim_text(substring(trimmed, 0, match_index));
     let annotation = trim_text(substring(trimmed, match_index + 4, trimmed.length));
     if value.length == 0 || annotation.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: malformed cast expression `" + text + "`");
+        diagnostics.push("llvm lowering: malformed cast expression `" + text + "`");
         return CastParseResult { recognized: true, success: false, value: value, type_annotation: annotation, diagnostics: diagnostics };
     }
     return CastParseResult { recognized: true, success: true, value: value, type_annotation: annotation, diagnostics: diagnostics };

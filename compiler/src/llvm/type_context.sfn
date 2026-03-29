@@ -26,7 +26,8 @@ import {
     is_simple_identifier,
     find_last_index_of_char,
     index_of,
-    string_array_contains
+    string_array_contains,
+    number_to_string
 } from "./utils";
 import {
     map_type_annotation,
@@ -71,16 +72,14 @@ fn synthesize_unit_enum_layout(enum_def -> NativeEnum) -> NativeEnumLayout {
             break;
         }
         let variant = enum_def.variants[index];
-        layouts = layouts.concat([
-            NativeEnumVariantLayout {
-                name: variant.name,
-                tag: index,
-                offset: 0,
-                size: tag_size,
-                align: tag_align,
-                fields: [],
-            },
-        ]);
+        layouts.push(NativeEnumVariantLayout {
+            name: variant.name,
+            tag: index,
+            offset: 0,
+            size: tag_size,
+            align: tag_align,
+            fields: [],
+        });
         index += 1;
     }
     return NativeEnumLayout {
@@ -124,6 +123,12 @@ fn enum_layout_matches_variants(enum_def -> NativeEnum, layout -> NativeEnumLayo
 }
 
 fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
+    if enums.length > 10000 {
+        return EnumLayoutFixupResult {
+            enums: [],
+            diagnostics: ["llvm lowering: enum layout fixup skipped (too many enums=" + number_to_string(enums.length) + ")"],
+        };
+    }
     let mut diagnostics -> string[] = [];
     let mut updated -> NativeEnum[] = [];
     let mut index -> number = 0;
@@ -137,9 +142,9 @@ fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
         if enum_def.layout == null {
             if is_unit_enum(enum_def) {
                 fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
-                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout"]);
+                diagnostics.push("llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout");
             }
-            updated = updated.concat([fixed]);
+            updated.push(fixed);
             index += 1;
             continue;
         }
@@ -148,13 +153,13 @@ fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
         if !enum_layout_matches_variants(enum_def, layout) {
             if is_unit_enum(enum_def) {
                 fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
-                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout"]);
+                diagnostics.push("llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout");
             } else {
-                diagnostics = diagnostics.concat(["llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata"]);
+                diagnostics.push("llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata");
             }
         }
 
-        updated = updated.concat([fixed]);
+        updated.push(fixed);
         index += 1;
     }
 
@@ -170,6 +175,25 @@ fn empty_type_context() -> TypeContext {
 }
 
 fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[]) -> TypeContextBuild {
+    // Guard against absurdly large collections that could indicate ABI corruption.
+    // Use 1000000 as the limit — real programs have at most a few hundred types,
+    // but corrupted lengths from cross-module ABI issues can be arbitrarily large.
+    // A lower limit (e.g. 10000) incorrectly triggers on valid counts that appear
+    // corrupted due to number_to_string bugs in the seed.
+    if structs.length > 1000000 || enums.length > 1000000 || interfaces.length > 1000000 {
+        return TypeContextBuild {
+            context: empty_type_context(),
+            diagnostics: [
+                "llvm lowering: type context build skipped (counts structs="
+                + number_to_string(structs.length)
+                + " enums="
+                + number_to_string(enums.length)
+                + " interfaces="
+                + number_to_string(interfaces.length)
+                + ")",
+            ],
+        };
+    }
     let mut diagnostics -> string[] = [];
     let mut struct_entries -> StructTypeInfo[] = [];
     let mut index -> number = 0;
@@ -179,7 +203,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         }
         let definition = structs[index];
         if definition.layout == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` missing layout metadata; skipping type emission");
+            diagnostics.push("llvm lowering: struct `" + definition.name + "` missing layout metadata; skipping type emission");
             index += 1;
             continue;
         }
@@ -196,7 +220,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             let mapped = map_struct_field_annotation(layout_field.type_annotation);
             let mut llvm_field_type -> string = mapped;
             if llvm_field_type.length == 0 {
-                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
+                diagnostics.push("llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
                 llvm_field_type = "i8*";
             } else if ends_with_pointer_suffix(llvm_field_type) {
                 let layout_base_type = layout_annotation_base_type(layout_field.type_annotation);
@@ -227,7 +251,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         }
         let enum_def = enums[enum_index];
         if enum_def.layout == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` missing layout metadata; skipping type emission");
+            diagnostics.push("llvm lowering: enum `" + enum_def.name + "` missing layout metadata; skipping type emission");
             enum_index += 1;
             continue;
         }
@@ -251,7 +275,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                 let mapped_variant_type = map_struct_field_annotation(variant_field.type_annotation);
                 let mut llvm_variant_field_type -> string = mapped_variant_type;
                 if llvm_variant_field_type.length == 0 {
-                    diagnostics = append_string(diagnostics, "llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
+                    diagnostics.push("llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
                     llvm_variant_field_type = "i8*";
                 } else if ends_with_pointer_suffix(llvm_variant_field_type) {
                     let variant_base_type = layout_annotation_base_type(variant_field.type_annotation);
@@ -333,12 +357,16 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             break;
         }
         let struct_def = structs[struct_vtable_index];
+        let mut implements = struct_def.implements;
+        if implements == null {
+            implements = [];
+        }
         let mut implements_index -> number = 0;
         loop {
-            if implements_index >= struct_def.implements.length {
+            if implements_index >= implements.length {
                 break;
             }
-            let interface_name = struct_def.implements[implements_index];
+            let interface_name = implements[implements_index];
             // Find the interface definition
             let mut interface_def_opt -> NativeInterface? = null;
             let mut search_idx -> number = 0;
@@ -354,7 +382,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             }
 
             if interface_def_opt == null {
-                diagnostics = append_string(diagnostics, "llvm lowering: struct `" + struct_def.name + "` implements unknown interface `" + interface_name + "`");
+                diagnostics.push("llvm lowering: struct `" + struct_def.name + "` implements unknown interface `" + interface_name + "`");
                 implements_index += 1;
                 continue;
             }
@@ -382,7 +410,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                     }
                     let param = signature.parameters[param_idx];
                     let mapped_type = map_type_annotation(param.type_annotation);
-                    param_types = append_string(param_types, mapped_type);
+                    param_types.push(mapped_type);
                     param_idx += 1;
                 }
                 let return_type = map_type_annotation(signature.return_type);
@@ -437,7 +465,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                             }
                             let param = signature.parameters[param_idx];
                             let mapped_type = map_type_annotation(param.type_annotation);
-                            param_types = append_string(param_types, mapped_type);
+                            param_types.push(mapped_type);
                             param_idx += 1;
                         }
                         let return_type = map_type_annotation(signature.return_type);
@@ -472,31 +500,45 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
 // =============================================================================
 
 fn append_struct_type_info(values -> StructTypeInfo[], value -> StructTypeInfo) -> StructTypeInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_struct_field_info(values -> StructFieldInfo[], value -> StructFieldInfo) -> StructFieldInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_enum_variant_info(values -> EnumVariantInfo[], value -> EnumVariantInfo) -> EnumVariantInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_enum_type_info(values -> EnumTypeInfo[], value -> EnumTypeInfo) -> EnumTypeInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_interface_type_info(values -> InterfaceTypeInfo[], value -> InterfaceTypeInfo) -> InterfaceTypeInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_vtable_info(values -> VTableInfo[], value -> VTableInfo) -> VTableInfo[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 fn append_vtable_entry(values -> VTableEntry[], value -> VTableEntry) -> VTableEntry[] {
-    return values.concat([value]);
+    let mut out = values;
+    out = out.push(value);
+    return out;
 }
 
 // =============================================================================
@@ -504,12 +546,16 @@ fn append_vtable_entry(values -> VTableEntry[], value -> VTableEntry) -> VTableE
 // =============================================================================
 
 fn struct_declares_interface(struct_def -> NativeStruct, interface_name -> string) -> boolean {
+    let mut implements = struct_def.implements;
+    if implements == null {
+        implements = [];
+    }
     let mut index -> number = 0;
     loop {
-        if index >= struct_def.implements.length {
+        if index >= implements.length {
             break;
         }
-        if struct_def.implements[index] == interface_name {
+        if implements[index] == interface_name {
             return true;
         }
         index += 1;
@@ -518,12 +564,16 @@ fn struct_declares_interface(struct_def -> NativeStruct, interface_name -> strin
 }
 
 fn find_struct_method(struct_def -> NativeStruct, method_name -> string) -> NativeFunction? {
+    let mut methods = struct_def.methods;
+    if methods == null {
+        return null;
+    }
     let mut index -> number = 0;
     loop {
-        if index >= struct_def.methods.length {
+        if index >= methods.length {
             break;
         }
-        let method = struct_def.methods[index];
+        let method = methods[index];
         if method.name == method_name {
             return method;
         }
@@ -731,7 +781,7 @@ fn lookup_allocation_info(context -> TypeContext, llvm_type -> string) -> TypeAl
 // Method Target Resolution
 // =============================================================================
 
-fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> StructTypeInfo? {
+fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> StructTypeInfo? ![io] {
     let trimmed = trim_text(base);
     if trimmed.length == 0 {
         return null;
@@ -743,6 +793,14 @@ fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBi
             if info != null {
                 return info;
             }
+            // Fallback: when the LLVM type is i8* (opaque pointer from async/await
+            // or runtime functions), check the source type_annotation instead.
+            if parameter.type_annotation != null && parameter.type_annotation.length > 0 {
+                let by_annotation = find_struct_info_by_name(context, parameter.type_annotation);
+                if by_annotation != null {
+                    return by_annotation;
+                }
+            }
         }
         let local = find_local_binding(locals, trimmed);
         if local != null {
@@ -750,12 +808,57 @@ fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBi
             if info != null {
                 return info;
             }
+            // Fallback: check source type_annotation when llvm_type is i8*.
+            if local.type_annotation != null && local.type_annotation.length > 0 {
+                let by_annotation = find_struct_info_by_name(context, local.type_annotation);
+                if by_annotation != null {
+                    return by_annotation;
+                }
+            }
         }
     }
     // Allow static method calls on a struct type (e.g. `BankAccount.new(123)`).
     let by_name = find_struct_info_by_name(context, trimmed);
     if by_name != null {
         return by_name;
+    }
+    // Last resort: read locals from the condition_locals file written by
+    // instructions.sfn.  Cross-module ABI corruption in the v0.1.1 seed can
+    // leave the in-memory `locals` array empty/corrupt, so this file-based
+    // fallback ensures the type_annotation is available.
+    if fs.exists("build/sailfin/.condition_locals") {
+        let _cl_raw = fs.readFile("build/sailfin/.condition_locals");
+        if _cl_raw.length > 0 {
+            let mut _cl_pos -> number = 0;
+            loop {
+                if _cl_pos >= _cl_raw.length { break; }
+                let _cl_nl = index_of(substring(_cl_raw, _cl_pos, _cl_raw.length), "\n");
+                let mut _cl_line -> string = "";
+                if _cl_nl < 0 {
+                    _cl_line = substring(_cl_raw, _cl_pos, _cl_raw.length);
+                    _cl_pos = _cl_raw.length;
+                } else {
+                    _cl_line = substring(_cl_raw, _cl_pos, _cl_pos + _cl_nl);
+                    _cl_pos = _cl_pos + _cl_nl + 1;
+                }
+                if _cl_line.length == 0 { continue; }
+                // Format: name\ttype_annotation\tllvm_type\tpointer
+                let _ct1 = index_of(_cl_line, "\t");
+                if _ct1 < 0 { continue; }
+                let _cl_name = substring(_cl_line, 0, _ct1);
+                if _cl_name != trimmed { continue; }
+                let _cl_rest = substring(_cl_line, _ct1 + 1, _cl_line.length);
+                let _ct2 = index_of(_cl_rest, "\t");
+                if _ct2 < 0 { continue; }
+                let _cl_type_ann = substring(_cl_rest, 0, _ct2);
+                if _cl_type_ann.length > 0 {
+                    let by_file_annotation = find_struct_info_by_name(context, _cl_type_ann);
+                    if by_file_annotation != null {
+                        return by_file_annotation;
+                    }
+                }
+            }
+        }
     }
     return null;
 }
@@ -850,7 +953,7 @@ fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) 
         let base = trim_text(substring(trimmed, 0, generic_index));
         if base.length > 0 {
             if !string_array_contains(candidates, base) {
-                candidates = append_string(candidates, base);
+                candidates.push(base);
             }
         }
     }
@@ -860,14 +963,14 @@ fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) 
         let tail_full = trim_text(substring(trimmed, last_dot + 1, trimmed.length));
         if tail_full.length > 0 {
             if !string_array_contains(candidates, tail_full) {
-                candidates = append_string(candidates, tail_full);
+                candidates.push(tail_full);
             }
             let tail_generic_index = index_of(tail_full, "<");
             if tail_generic_index >= 0 {
                 let tail_base = trim_text(substring(tail_full, 0, tail_generic_index));
                 if tail_base.length > 0 {
                     if !string_array_contains(candidates, tail_base) {
-                        candidates = append_string(candidates, tail_base);
+                        candidates.push(tail_base);
                     }
                 }
             }
@@ -986,8 +1089,9 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
             if index >= parts.length {
                 break;
             }
-            if index + 1 < parts.length {
-                let combined = parts[index] + separator + parts[index + 1];
+            let _tc_next = index + 1;
+            if _tc_next < parts.length {
+                let combined = parts[index] + separator + parts[_tc_next];
                 next.push(combined);
                 index += 2;
                 continue;

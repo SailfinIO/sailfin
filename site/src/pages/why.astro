@@ -1,0 +1,126 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Why Sailfin" description="Why choose Sailfin for your next project.">
+  <div class="page">
+    <div class="container">
+      <h1>Why Sailfin?</h1>
+      <p class="lead">
+        Sailfin is built for a world where AI, safety, and systems performance aren't competing concerns — they're unified in one language.
+      </p>
+
+      <section id="use-cases">
+        <h2>Use Cases</h2>
+
+        <div class="card">
+          <h3>AI-Powered Services</h3>
+          <p>
+            Models, prompts, and pipelines are language primitives. You get type-safe model invocation,
+            structured prompt composition, and generation cards that track provenance — input hashes, cost,
+            latency, and seed — for every model call. No more stringly-typed LLM wrappers.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Systems Programming</h3>
+          <p>
+            Sailfin compiles to native code via LLVM. Ownership and borrowing semantics (affine and linear types)
+            give you memory safety without a garbage collector. The effect system replaces runtime permission checks
+            with compile-time capability verification.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Secure Data Processing</h3>
+          <p>
+            <code>PII&lt;T&gt;</code> and <code>Secret&lt;T&gt;</code> wrapper types propagate through your program,
+            ensuring sensitive data can't be logged, serialized, or sent over the network without explicit handling.
+            Capability-based security means untrusted code can't access IO or network even at runtime.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>Developer Tooling & CLI</h3>
+          <p>
+            Fast compilation, single-binary output, and a clean standard library make Sailfin a natural fit
+            for CLI tools, build systems, and developer infrastructure. The capsule system provides
+            dependency management with capability auditing built in.
+          </p>
+        </div>
+      </section>
+
+      <section id="security">
+        <h2>Security by Design</h2>
+        <p>
+          Every function declares its capabilities: <code>![io]</code>, <code>![net]</code>,
+          <code>![model]</code>, <code>![gpu]</code>. The compiler rejects calls that exceed declared
+          capabilities. This isn't a lint rule — it's a type system guarantee.
+        </p>
+        <pre><code>// This won't compile — fetch_data needs ![net] but main only grants ![io]
+fn main() ![io] {"{"}
+    let data = fetch_data("https://api.example.com");  // ERROR
+{"}"}</code></pre>
+      </section>
+
+      <section id="case-studies">
+        <h2>Who's Using Sailfin?</h2>
+        <p>
+          Sailfin is pre-1.0 and actively developed. Early adopters and contributors are shaping the
+          language. <a href="/community">Join the community</a> to get involved.
+        </p>
+      </section>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .page {
+    padding: 3rem 0 5rem;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .lead {
+    font-size: 1.2rem;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    max-width: 40rem;
+    margin-bottom: 3rem;
+  }
+
+  section {
+    margin-bottom: 3rem;
+  }
+
+  h2 {
+    font-size: 1.75rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .card {
+    padding: 1.5rem 2rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+  }
+
+  .card h3 {
+    font-size: 1.15rem;
+    margin-bottom: 0.5rem;
+    color: var(--color-primary);
+  }
+
+  .card p {
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+  }
+
+  pre {
+    background: var(--gray-900);
+    color: var(--gray-300);
+  }
+</style>

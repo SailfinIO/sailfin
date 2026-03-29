@@ -1,0 +1,25 @@
+// sfn/crypto — Cryptographic hashing and digest functions for Sailfin.
+//
+// Provides secure hash functions for data integrity, checksums, and
+// content-addressable storage. No effects required — pure computation.
+
+fn sha256(data -> string) -> string {
+    // Compute the SHA-256 hash of a string.
+    // Returns the digest in the format "sha256:<64 hex chars>".
+    //
+    // Usage:
+    //   let hash = sha256("hello world");
+    //   // hash == "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    //
+    return crypto.sha256(data, data.length);
+}
+
+fn sha256_hex(data -> string) -> string {
+    // Compute the SHA-256 hash and return just the hex string (no prefix).
+    let full = crypto.sha256(data, data.length);
+    // Strip "sha256:" prefix (7 chars)
+    if full.length > 7 {
+        return substring(full, 7, full.length);
+    }
+    return full;
+}

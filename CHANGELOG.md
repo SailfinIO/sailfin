@@ -1,6 +1,192 @@
 # CHANGELOG
 
 
+## v0.2.0-beta.1 (2026-03-29)
+
+
+## v0.2.0-alpha.3 (2026-03-29)
+
+### Bug Fixes
+
+- Extract with shell tools
+  ([`e36bec3`](https://github.com/SailfinIO/sailfin/commit/e36bec3f76b041efab0494fae1469f914e3c96df))
+
+### Chores
+
+- Restructure basic capsules
+  ([`93eaced`](https://github.com/SailfinIO/sailfin/commit/93eaced275fdec274c391320a281812cd0066306))
+
+
+## v0.2.0-alpha.2 (2026-03-29)
+
+### Bug Fixes
+
+- Capsule publish and adding
+  ([`9db5e00`](https://github.com/SailfinIO/sailfin/commit/9db5e003fba15ba39544f588535258f27c7a950a))
+
+
+## v0.2.0-alpha.1 (2026-03-28)
+
+### Features
+
+- Sfn registry functionality
+  ([`df5b635`](https://github.com/SailfinIO/sailfin/commit/df5b6353ccf85cb979a3b0faa9b6e867a520ca69))
+
+
+## v0.1.1-alpha.142 (2026-03-28)
+
+### Bug Fixes
+
+- Exit in ps1
+  ([`c56a545`](https://github.com/SailfinIO/sailfin/commit/c56a5456d1151da5a398f8cdfd0f98ac452e9c3d))
+
+- Upload assets
+  ([`97137d7`](https://github.com/SailfinIO/sailfin/commit/97137d70cef9167f2bb26cb45db32b3fcfeb9685))
+
+
+## v0.1.1-alpha.141 (2026-03-28)
+
+### Bug Fixes
+
+- Token not needed
+  ([`b604c75`](https://github.com/SailfinIO/sailfin/commit/b604c75402f04a8c04b2aa1c1b7227158d846fe9))
+
+- Windows installation runtime
+  ([`9a09112`](https://github.com/SailfinIO/sailfin/commit/9a0911264d5719127049a938af40e84eb3f452eb))
+
+- Windows installation runtime
+  ([`6d47b86`](https://github.com/SailfinIO/sailfin/commit/6d47b86ec93f9936310a96e2c943b865c3e053b9))
+
+
+## v0.1.1-alpha.140 (2026-03-28)
+
+### Bug Fixes
+
+- Windows installation
+  ([`fc486aa`](https://github.com/SailfinIO/sailfin/commit/fc486aaab3ca2f77d488c4b9405062a39a49670c))
+
+- Windows installation
+  ([`8e986b0`](https://github.com/SailfinIO/sailfin/commit/8e986b046dfe55ad92d1dd0dc259ae23e6f440db))
+
+
+## v0.1.1-alpha.139 (2026-03-28)
+
+### Bug Fixes
+
+- At least runs hello world again
+  ([`24fcc1d`](https://github.com/SailfinIO/sailfin/commit/24fcc1d8c214c653de04653c28ddca48f7c4d205))
+
+- Bypass temporarily
+  ([`7cf46bd`](https://github.com/SailfinIO/sailfin/commit/7cf46bdcea16d9df9184d4a75b8f8c54454954a2))
+
+- Cross module shim
+  ([`b7ef61a`](https://github.com/SailfinIO/sailfin/commit/b7ef61aaf9dc3efbb2357c735507b1ccd8a8483d))
+
+- Fails on version check at the end
+  ([`8b50884`](https://github.com/SailfinIO/sailfin/commit/8b50884b72e844f6d6b25d2dc05a0a65613bb75e))
+
+- Fails on version check at the end
+  ([`6d82218`](https://github.com/SailfinIO/sailfin/commit/6d82218df648687849402657ed27d43480cbb998))
+
+- Implement file guard
+  ([`4f3f80e`](https://github.com/SailfinIO/sailfin/commit/4f3f80e8e943a5e62cbbd6cb5c31d022d126eac4))
+
+- Install curl
+  ([`941b2d4`](https://github.com/SailfinIO/sailfin/commit/941b2d4d2e0a748379a839827e063bb6b9ec89c1))
+
+- Install location
+  ([`2831026`](https://github.com/SailfinIO/sailfin/commit/28310261d69761db26ddf69b24ce693f42dc0d42))
+
+- Make check passing - version command works but run doesnt
+  ([`0f8a6f0`](https://github.com/SailfinIO/sailfin/commit/0f8a6f0c9328985b2e25b1aeb0c85c4b0385ec92))
+
+- Make check working but binary cant run hello world
+  ([`c1e14a5`](https://github.com/SailfinIO/sailfin/commit/c1e14a58c6327d1a03c1a2e2b05d2d62b071fe47))
+
+- Make check working but binary not
+  ([`48497e6`](https://github.com/SailfinIO/sailfin/commit/48497e69efad86c6cbf39880b03b340965ccfb0b))
+
+- Make check working with --version
+  ([`0375f91`](https://github.com/SailfinIO/sailfin/commit/0375f91072923ad1ae084cec9b850c9ec8caba03))
+
+- Make typecheck_diagnostics handle empty arrays explicitly
+  ([`d2397e7`](https://github.com/SailfinIO/sailfin/commit/d2397e7fc9e89e1017c939480f3796fc2c364331))
+
+- Missing effect
+  ([`447a4b9`](https://github.com/SailfinIO/sailfin/commit/447a4b950352a9788e067f1cb4c9450bbcf98093))
+
+- More fixups
+  ([`033925b`](https://github.com/SailfinIO/sailfin/commit/033925b934461d9fc2765be38c4c12ae75e55d92))
+
+- Null passes
+  ([`a9bf8a8`](https://github.com/SailfinIO/sailfin/commit/a9bf8a89d2f76a9f941f59117af798f4f41dd117))
+
+- Skip --weaken on macOS to fix test linker failure
+  ([`ff97c84`](https://github.com/SailfinIO/sailfin/commit/ff97c84accac05d955a392030913dd5a9bbd1ca0))
+
+On Mach-O (macOS ARM64), llvm-objcopy --weaken converts defined symbols to weak references rather
+  than weak definitions, causing the Apple linker to report them as undefined. Since import inlining
+  gives each test a unique module-name suffix, there are no duplicate symbols with the compiler
+  objects, so the weakening step is unnecessary and harmful on macOS.
+
+Skip the entire compiler-object link step on macOS. Tests remain self-contained via the existing
+  import inlining path.
+
+- Split out concat to push
+  ([`90e8691`](https://github.com/SailfinIO/sailfin/commit/90e86914940a5f2f2d856891702461e03252ca62))
+
+- Split out concat to push seedcheck compiles but no hellow world
+  ([`eaceb65`](https://github.com/SailfinIO/sailfin/commit/eaceb6516d794ff5544eab387574aeeb6284e515))
+
+- Struct dispatch
+  ([`a681c2e`](https://github.com/SailfinIO/sailfin/commit/a681c2e88ef24ec8c8d7faf18677f1f8ade11c3d))
+
+- Stub work
+  ([`4af135a`](https://github.com/SailfinIO/sailfin/commit/4af135afc74f732debbe56386c5f3c49eb0d8296))
+
+- Stub work
+  ([`a060c00`](https://github.com/SailfinIO/sailfin/commit/a060c0039f10113fc6a53c2cffcb8039d9812cff))
+
+- Tag access instead of .variant
+  ([`9d11e84`](https://github.com/SailfinIO/sailfin/commit/9d11e84122f4ccedb2b6e56f220d92ff7c9f8b57))
+
+- Timeout missing
+  ([`fdb5b18`](https://github.com/SailfinIO/sailfin/commit/fdb5b18b6e876a26121a064ae6d18820d80474dd))
+
+- Try rename truncated labels
+  ([`4fd66e9`](https://github.com/SailfinIO/sailfin/commit/4fd66e9b79e8a7a18fced5cb973678225d4ba363))
+
+- Typechecking
+  ([`0a0b1cf`](https://github.com/SailfinIO/sailfin/commit/0a0b1cf47e957563ee6c7508f9c067d626129a44))
+
+- Use tag accessors instead of .variant
+  ([`3c6458c`](https://github.com/SailfinIO/sailfin/commit/3c6458ceada10f5074a253b1c6d26098afd084f4))
+
+
+## v0.1.1-alpha.138 (2026-01-23)
+
+### Bug Fixes
+
+- Making LLVM line concatenation non-mutating
+  ([`19eb092`](https://github.com/SailfinIO/sailfin/commit/19eb09202d277bbf53d2181e25d86474ad5269c7))
+
+
+## v0.1.1-alpha.137 (2026-01-23)
+
+### Bug Fixes
+
+- Pin 135 for now since 136 seems broken with duplicates
+  ([`9fd464d`](https://github.com/SailfinIO/sailfin/commit/9fd464d26e774b9859f845c20efff28493a42847))
+
+
+## v0.1.1-alpha.136 (2026-01-22)
+
+### Bug Fixes
+
+- Abi enahancement
+  ([`0762add`](https://github.com/SailfinIO/sailfin/commit/0762add251caf40f8271c53042cbcdb9eed98366))
+
+
 ## v0.1.2-rc.1 (2026-03-29)
 
 ### Bug Fixes
@@ -8,91 +194,22 @@
 - Apply conflict resolution from beta/rc merge to PR branch
   ([`7e4a7eb`](https://github.com/SailfinIO/sailfin/commit/7e4a7ebb3ff1fa76798815968c6ef92d28c9275a))
 
-Resolves the two files that had conflicts when merging beta into rc: - CHANGELOG.md: combine beta's
-  new entries (v0.2.0-alpha.3..v0.1.1-alpha.136) with rc's v0.1.1-rc.1 entry in correct
-  chronological order - compiler/src/version.sfn: keep beta's version string (0.2.0-alpha.3)
-
-Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/c6f135b3-740d-4485-8fd3-1334d6e0921c
-
-Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
-
 ### Chores
 
 - **deps**: Bump actions/checkout from 4 to 6
   ([`8b42713`](https://github.com/SailfinIO/sailfin/commit/8b42713726b7ac39a11b99d0695bc9ad78f89d65))
 
-Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6. - [Release
-  notes](https://github.com/actions/checkout/releases) -
-  [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) -
-  [Commits](https://github.com/actions/checkout/compare/v4...v6)
-
---- updated-dependencies: - dependency-name: actions/checkout dependency-version: '6'
-
-dependency-type: direct:production
-
-update-type: version-update:semver-major ...
-
-Signed-off-by: dependabot[bot] <support@github.com>
-
 - **deps**: Bump actions/download-artifact from 4 to 7
   ([`089ba9a`](https://github.com/SailfinIO/sailfin/commit/089ba9a0554d52c25ebc781e18d6ee123d30a165))
-
-Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 4 to 7. -
-  [Release notes](https://github.com/actions/download-artifact/releases) -
-  [Commits](https://github.com/actions/download-artifact/compare/v4...v7)
-
---- updated-dependencies: - dependency-name: actions/download-artifact dependency-version: '7'
-
-dependency-type: direct:production
-
-update-type: version-update:semver-major ...
-
-Signed-off-by: dependabot[bot] <support@github.com>
 
 - **deps**: Bump actions/download-artifact from 7 to 8
   ([`e93c9ef`](https://github.com/SailfinIO/sailfin/commit/e93c9ef722550da755195eea83aca31dfa1f2dc2))
 
-Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 7 to 8. -
-  [Release notes](https://github.com/actions/download-artifact/releases) -
-  [Commits](https://github.com/actions/download-artifact/compare/v7...v8)
-
---- updated-dependencies: - dependency-name: actions/download-artifact dependency-version: '8'
-
-dependency-type: direct:production
-
-update-type: version-update:semver-major ...
-
-Signed-off-by: dependabot[bot] <support@github.com>
-
 - **deps**: Bump actions/upload-artifact from 4 to 6
   ([`12cad17`](https://github.com/SailfinIO/sailfin/commit/12cad17d6ffe9fe16220ef69fe0a6ec65de00e10))
 
-Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 4 to 6. - [Release
-  notes](https://github.com/actions/upload-artifact/releases) -
-  [Commits](https://github.com/actions/upload-artifact/compare/v4...v6)
-
---- updated-dependencies: - dependency-name: actions/upload-artifact dependency-version: '6'
-
-dependency-type: direct:production
-
-update-type: version-update:semver-major ...
-
-Signed-off-by: dependabot[bot] <support@github.com>
-
 - **deps**: Bump actions/upload-artifact from 6 to 7
   ([`0a9ed07`](https://github.com/SailfinIO/sailfin/commit/0a9ed0756d6c8b063d028f8d8d065bfd33b43bbd))
-
-Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 6 to 7. - [Release
-  notes](https://github.com/actions/upload-artifact/releases) -
-  [Commits](https://github.com/actions/upload-artifact/compare/v6...v7)
-
---- updated-dependencies: - dependency-name: actions/upload-artifact dependency-version: '7'
-
-dependency-type: direct:production
-
-update-type: version-update:semver-major ...
-
-Signed-off-by: dependabot[bot] <support@github.com>
 
 
 ## v0.1.1 (2026-01-20)
@@ -102,6 +219,22 @@ Signed-off-by: dependabot[bot] <support@github.com>
 
 
 ## v0.1.1-beta.2 (2026-01-20)
+
+### Bug Fixes
+
+- Merge conflicts by adding gitattributes
+  ([`0fdac52`](https://github.com/SailfinIO/sailfin/commit/0fdac52b61db42c5d7bbd0b8fbdc3844224cdba2))
+
+
+## v0.1.1-alpha.135 (2026-01-21)
+
+### Bug Fixes
+
+- Module naming
+  ([`80afafe`](https://github.com/SailfinIO/sailfin/commit/80afafed4f9265b3e4637792eabfdf1ed6435ff1))
+
+- Remove legacy stage2 ref
+  ([`3d2781d`](https://github.com/SailfinIO/sailfin/commit/3d2781d78a564672f8a5e4ec7df294f39f1d2e2b))
 
 
 ## v0.1.1-beta.1 (2026-01-20)

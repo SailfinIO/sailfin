@@ -88,8 +88,23 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             break;
         }
         let binding = bindings[index];
-        let mut type_annotation = trim_text(binding.type_annotation);
-        let mut effective_type_annotation = binding.type_annotation;
+        if binding == null {
+            diagnostics.push("llvm lowering: module binding was null; skipping");
+            index += 1;
+            continue;
+        }
+        let mut name = binding.name;
+        if name == null || name.length == 0 {
+            diagnostics.push("llvm lowering: module binding missing name; skipping");
+            index += 1;
+            continue;
+        }
+        let mut raw_type_annotation = binding.type_annotation;
+        if raw_type_annotation == null {
+            raw_type_annotation = "";
+        }
+        let mut type_annotation = trim_text(raw_type_annotation);
+        let mut effective_type_annotation = raw_type_annotation;
         if type_annotation.length == 0 && binding.value != null {
             let init_expr = trim_text(binding.value);
             if is_string_literal(init_expr) {
@@ -101,19 +116,18 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             index += 1;
             continue;
         }
-        let name = binding.name;
         let global_name = module_global_symbol(name);
         let mut llvm_type -> string = "";
         if type_annotation.length > 0 {
             llvm_type = map_local_type(context, type_annotation);
         }
         if llvm_type.length == 0 {
-            diagnostics = append_string(diagnostics, "llvm lowering: module binding `" + name + "` has unsupported type annotation `" + effective_type_annotation + "`");
+            diagnostics.push("llvm lowering: module binding `" + name + "` has unsupported type annotation `" + effective_type_annotation + "`");
             llvm_type = "double";
         }
 
         if llvm_type == "i8*" {
-            preamble_lines = append_string(preamble_lines, global_name + " = internal global i8* null");
+            preamble_lines.push(global_name + " = internal global i8* null");
             if binding.value != null {
                 needs_init = true;
             }
@@ -136,7 +150,7 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
                     needs_init = true;
                 }
             }
-            preamble_lines = append_string(preamble_lines, global_name + " = internal global " + llvm_type + " " + initializer_text);
+            preamble_lines.push(global_name + " = internal global " + llvm_type + " " + initializer_text);
         }
 
         locals = append_local_binding(locals, LocalBinding {
@@ -165,10 +179,8 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
         };
     }
 
-    init_lines = init_lines.concat([
-        "define internal void " + init_symbol + "() {",
-        "block.entry:",
-    ]);
+    init_lines.push("define internal void " + init_symbol + "() {");
+    init_lines.push("block.entry:");
 
     let mut init_index -> number = 0;
     let mut current_temp -> number = 0;
@@ -178,7 +190,22 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             break;
         }
         let binding = bindings[init_index];
-        let mut type_annotation = trim_text(binding.type_annotation);
+        if binding == null {
+            diagnostics.push("llvm lowering: module init binding was null; skipping");
+            init_index += 1;
+            continue;
+        }
+        let mut name = binding.name;
+        if name == null || name.length == 0 {
+            diagnostics.push("llvm lowering: module init binding missing name; skipping");
+            init_index += 1;
+            continue;
+        }
+        let mut raw_type_annotation = binding.type_annotation;
+        if raw_type_annotation == null {
+            raw_type_annotation = "";
+        }
+        let mut type_annotation = trim_text(raw_type_annotation);
         if type_annotation.length == 0 && binding.value != null {
             let init_expr = trim_text(binding.value);
             if is_string_literal(init_expr) {
@@ -193,7 +220,6 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             init_index += 1;
             continue;
         }
-        let name = binding.name;
         let global_name = module_global_symbol(name);
         let local = find_local_binding(locals, name);
         if local == null {
@@ -205,14 +231,19 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
 
         if llvm_type == "i8*" {
             let lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type);
-            diagnostics = diagnostics.concat(lowered.diagnostics);
+            let mut _ci0 -> number = 0;
+            loop {
+                if _ci0 >= lowered.diagnostics.length { break; }
+                diagnostics.push(lowered.diagnostics[_ci0]);
+                _ci0 += 1;
+            }
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
             if lowered.operand != null {
-                current_lines = append_string(current_lines, "  store i8* " + lowered.operand.value + ", i8** " + global_name);
+                current_lines.push("  store i8* " + lowered.operand.value + ", i8** " + global_name);
             } else {
-                diagnostics = append_string(diagnostics, "llvm lowering: failed to initialize module string binding `" + name + "`");
+                diagnostics.push("llvm lowering: failed to initialize module string binding `" + name + "`");
             }
         } else {
             let mut should_store -> boolean = true;
@@ -230,17 +261,27 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             }
             if should_store {
                 let lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type);
-                diagnostics = diagnostics.concat(lowered.diagnostics);
+                let mut _ci1 -> number = 0;
+                loop {
+                    if _ci1 >= lowered.diagnostics.length { break; }
+                    diagnostics.push(lowered.diagnostics[_ci1]);
+                    _ci1 += 1;
+                }
                 current_lines = lowered.lines;
                 current_temp = lowered.temp_index;
                 collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                 if lowered.operand != null {
                     let coerced = coerce_operand_to_type(lowered.operand, llvm_type, current_temp, current_lines);
-                    diagnostics = diagnostics.concat(coerced.diagnostics);
+                    let mut _ci2 -> number = 0;
+                    loop {
+                        if _ci2 >= coerced.diagnostics.length { break; }
+                        diagnostics.push(coerced.diagnostics[_ci2]);
+                        _ci2 += 1;
+                    }
                     current_lines = coerced.lines;
                     current_temp = coerced.temp_index;
                     if coerced.operand != null {
-                        current_lines = append_string(current_lines, "  store " + llvm_type + " " + coerced.operand.value + ", " + llvm_type + "* " + global_name);
+                        current_lines.push("  store " + llvm_type + " " + coerced.operand.value + ", " + llvm_type + "* " + global_name);
                     }
                 }
             }
@@ -249,8 +290,8 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
         init_index += 1;
     }
 
-    current_lines = append_string(current_lines, "  ret void");
-    current_lines = append_string(current_lines, "}");
+    current_lines.push("  ret void");
+    current_lines.push("}");
 
     return ModuleGlobalLoweringResult {
         preamble_lines: preamble_lines,

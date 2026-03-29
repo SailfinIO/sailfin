@@ -23,7 +23,7 @@ This proposal formalizes:
 - Native Tensor and Dataset types
 - Training declarations (`training ... for ... { ... }`)
 - Provenance and deterministic reproducibility
-- CLI and manifest extensions (`sfn train`, `fleet.toml` changes)
+- CLI and manifest extensions (`sfn train`, `workspace.toml` changes)
 
 These additions make Sailfin a fully AI-native systems language: capable of defining, training, and deploying models reproducibly.
 
@@ -244,13 +244,13 @@ Card types and contents (planned):
 - Generation Card (model.call): engine ident, parameters, token counts (if available), seed, device, precision, latency, cost
 - Training Card (training): engine ident, dataset digests, optimizer config, loss curve, metrics, step/epoch counts, checkpoint hashes, seeds, device/precision
 
-Cards are stored under `.sfn/cards/` and signed if `signing = true` in `fleet.toml`.
+Cards are stored under `.sfn/cards/` and signed if `signing = true` in `workspace.toml`.
 
 ---
 
 ## 7. Package Manager & CLI Extensions
 
-### 7.1 `sail.toml` (capsule-level)
+### 7.1 `capsule.toml` (capsule-level)
 
 ```toml
 [models]
@@ -263,7 +263,7 @@ Cards are stored under `.sfn/cards/` and signed if `signing = true` in `fleet.to
 allow = ["model", "train", "gpu", "io"]
 ```
 
-### 7.2 `fleet.toml` (workspace-level)
+### 7.2 `workspace.toml` (workspace-level)
 
 ```toml
 [provenance]

@@ -70,26 +70,42 @@ Python tooling from the production pipeline.
 
 ## Installing the compiler
 
-The compiler is published as per-OS/arch release assets and can be installed via the
-curlable `install.sh` script. The repository is currently private, so you need a
-token with `repo` scope.
+The compiler is published as per-OS/arch release assets and can be installed via
+the curlable `install.sh` script (Linux/macOS) or `install.ps1` (Windows).
+
+### Linux / macOS
 
 ```sh
-export GITHUB_TOKEN=<your-token>
-curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
 To pin a version:
 
 ```sh
-export GITHUB_TOKEN=<your-token>
-VERSION=0.1.1-alpha.121 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/alpha/install.sh | bash
+VERSION=0.1.1-alpha.135 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
+```
+
+To pin a version:
+
+```powershell
+$env:VERSION = "0.1.1-alpha.135"
+irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
+```
+
+The PowerShell installer places `sailfin.exe` and `sfn.exe` in `%LOCALAPPDATA%\sailfin\bin` and adds it to your user PATH.
 
 Notes:
 
-- Windows is supported for the published sailfin binary. Run the installer from WSL or Git Bash (MSYS2/Cygwin environments are detected as `windows`).
+- On Linux and macOS, use the `install.sh` script above.
+- On Windows, use the PowerShell installer or run `install.sh` from WSL / Git Bash.
 - Release assets are named `sailfin_<version>_<os>_<arch>.tar.gz` and contain `bin/sailfin` (or `bin/sailfin.exe` on Windows).
+- Set `GITHUB_TOKEN` to increase GitHub API rate limits if you hit throttling.
 
 ## Architecture Overview
 
@@ -114,7 +130,7 @@ For now, experiment, record findings, and propose ideas through pull requests.
 - `make env` — create or update the `sailfin` Conda environment defined in `environment.yml`.
 - `make compile` — build the native compiler by self-hosting from a released seed.
 - `make test` — run the suite using the self-hosted native compiler.
-- `make install` — install the built compiler into `PREFIX/bin` (default: `/usr/local/bin`).
+- `make install` — install the built compiler into `PREFIX/bin` (default: `~/.local/bin`).
 
 Tip: use the repo-local wrapper `./sfn` to run the freshly built compiler without relying on PATH:
 

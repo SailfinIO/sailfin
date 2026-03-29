@@ -1,0 +1,200 @@
+---
+const columns = [
+  {
+    title: "Why Sailfin",
+    links: [
+      { label: "Use Cases", href: "/why#use-cases" },
+      { label: "Case Studies", href: "/why#case-studies" },
+      { label: "Security", href: "/why#security" },
+    ],
+  },
+  {
+    title: "Learn",
+    links: [
+      { label: "Getting Started", href: "/docs/getting-started/install" },
+      { label: "Tour of Sailfin", href: "/docs/getting-started/tour" },
+      { label: "Tutorials", href: "/docs/learn/basics" },
+      { label: "Effective Sailfin", href: "/docs/learn/effective-sailfin" },
+    ],
+  },
+  {
+    title: "Reference",
+    links: [
+      { label: "Language Spec", href: "/docs/reference/spec" },
+      { label: "Standard Library", href: "/docs/reference/standard-library" },
+      { label: "CLI Reference", href: "/docs/reference/cli" },
+      { label: "Grammar (EBNF)", href: "/docs/reference/grammar" },
+    ],
+  },
+  {
+    title: "Community",
+    links: [
+      { label: "GitHub", href: "https://github.com/sailfin" },
+      { label: "Blog", href: "/blog" },
+      { label: "Contributing", href: "/docs/contributing/guide" },
+      { label: "Roadmap", href: "/docs/contributing/roadmap" },
+    ],
+  },
+];
+---
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <a href="/" class="footer-logo">
+        <img src="/images/sfn_lang_logo_256.svg" alt="Sailfin" width="28" height="28" />
+        <span>Sailfin</span>
+      </a>
+      <p class="footer-tagline">
+        An AI-native, systems-friendly programming language designed for precision, safety, and introspection.
+      </p>
+    </div>
+
+    <div class="footer-links">
+      {columns.map((col) => (
+        <div class="footer-col">
+          <h4>{col.title}</h4>
+          <ul>
+            {col.links.map((link) => (
+              <li><a href={link.href}>{link.label}</a></li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  </div>
+
+  <div class="footer-bottom">
+    <div class="footer-bottom-inner">
+      <p>&copy; {new Date().getFullYear()} Sailfin. All rights reserved.</p>
+      <div class="footer-bottom-links">
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    background: var(--gray-900);
+    color: var(--gray-400);
+    margin-top: auto;
+  }
+
+  .footer-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 3.5rem 1.5rem 2.5rem;
+    display: flex;
+    gap: 4rem;
+  }
+
+  .footer-brand {
+    max-width: 280px;
+    flex-shrink: 0;
+  }
+
+  .footer-logo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #fff;
+    font-weight: 700;
+    font-size: 1.1rem;
+    text-decoration: none;
+    margin-bottom: 0.75rem;
+  }
+
+  .footer-tagline {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--gray-500);
+  }
+
+  .footer-links {
+    display: flex;
+    gap: 3rem;
+    flex: 1;
+  }
+
+  .footer-col h4 {
+    color: #fff;
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .footer-col ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .footer-col li {
+    margin-bottom: 0.5rem;
+  }
+
+  .footer-col a {
+    color: var(--gray-400);
+    font-size: 0.875rem;
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+
+  .footer-col a:hover {
+    color: #fff;
+    text-decoration: none;
+  }
+
+  .footer-bottom {
+    border-top: 1px solid var(--gray-800);
+  }
+
+  .footer-bottom-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+  }
+
+  .footer-bottom-links {
+    display: flex;
+    gap: 1.5rem;
+  }
+
+  .footer-bottom-links a {
+    color: var(--gray-500);
+    text-decoration: none;
+  }
+
+  .footer-bottom-links a:hover {
+    color: var(--gray-300);
+  }
+
+  @media (max-width: 768px) {
+    .footer-inner {
+      flex-direction: column;
+      gap: 2.5rem;
+    }
+
+    .footer-links {
+      flex-wrap: wrap;
+      gap: 2rem;
+    }
+
+    .footer-col {
+      min-width: 140px;
+    }
+
+    .footer-bottom-inner {
+      flex-direction: column;
+      gap: 0.75rem;
+      text-align: center;
+    }
+  }
+</style>

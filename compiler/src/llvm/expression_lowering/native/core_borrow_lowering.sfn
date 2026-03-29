@@ -23,7 +23,7 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
     let mut target = strip_enclosing_parentheses(parse.target);
     target = trim_text(target);
     if target.length == 0 {
-        diagnostics = append_string(diagnostics, "llvm lowering: borrow expression missing target");
+        diagnostics.push("llvm lowering: borrow expression missing target");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 
@@ -31,7 +31,7 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
     if local == null {
         let parameter = find_parameter_binding(bindings, target);
         if parameter == null {
-            diagnostics = append_string(diagnostics, "llvm lowering: borrow target `" + target + "` not found");
+            diagnostics.push("llvm lowering: borrow target `" + target + "` not found");
             return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
         }
 
@@ -41,7 +41,7 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
             return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
         }
 
-        diagnostics = append_string(diagnostics, "llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)");
+        diagnostics.push("llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)");
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
 

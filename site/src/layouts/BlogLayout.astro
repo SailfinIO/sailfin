@@ -1,0 +1,77 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+
+interface Props {
+  title: string;
+  description?: string;
+  date?: string;
+  author?: string;
+}
+
+const { title, description, date, author } = Astro.props;
+---
+
+<BaseLayout title={title} description={description}>
+  <article class="blog-post">
+    <header class="blog-header">
+      <h1>{title}</h1>
+      {(date || author) && (
+        <div class="blog-meta">
+          {date && <time datetime={date}>{new Date(date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</time>}
+          {author && <span class="author">by {author}</span>}
+        </div>
+      )}
+    </header>
+    <div class="blog-body">
+      <slot />
+    </div>
+  </article>
+</BaseLayout>
+
+<style>
+  .blog-post {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem;
+  }
+
+  .blog-header {
+    margin-bottom: 2.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .blog-header h1 {
+    font-size: 2.25rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .blog-meta {
+    color: var(--color-text-secondary);
+    font-size: 0.95rem;
+    display: flex;
+    gap: 1rem;
+  }
+
+  .blog-body :global(p) {
+    margin-bottom: 1rem;
+  }
+
+  .blog-body :global(h2) {
+    font-size: 1.5rem;
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .blog-body :global(h3) {
+    font-size: 1.2rem;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .blog-body :global(ul),
+  .blog-body :global(ol) {
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+  }
+</style>

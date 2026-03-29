@@ -25,7 +25,16 @@ BUILD_JOBS ?= 1
 BUILD_ARGS ?=
 
 UNAME_S := $(shell uname -s)
+
+# Detect Windows (MSYS2/Git Bash/Cygwin on GitHub Actions runners).
+IS_WINDOWS := $(if $(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)),1,)
+
+# Executable extension (.exe on Windows, empty elsewhere).
+EXE_EXT := $(if $(IS_WINDOWS),.exe,)
+
 ifeq ($(UNAME_S),Darwin)
+TIMEOUT_CMD ?=
+else ifeq ($(IS_WINDOWS),1)
 TIMEOUT_CMD ?=
 else
 TIMEOUT_CMD ?= timeout
@@ -42,11 +51,11 @@ CLANG_LL_COMPILE := $(TIMEOUT_CMD) --kill-after=10 $(NATIVE_LL_TIMEOUT_SECONDS) 
 endif
 
 NATIVE_OBJ_DIR ?= build/native/obj
-NATIVE_OUT ?= build/native/sailfin
+NATIVE_OUT ?= build/native/sailfin$(EXE_EXT)
 NATIVE_LINK_EXTRA ?=
 
 # Preferred local path for the native compiler binary.
-NATIVE_BIN ?= build/native/sailfin
+NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
@@ -98,7 +107,7 @@ help:
 	@echo "  make smoke        # Rebuild + run smoke tests"
 	@echo "  make clean        # Remove packaged artifacts (dist/)"
 
-PREFIX ?= /usr/local
+PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= sailfin
 
@@ -113,13 +122,17 @@ env: check-conda
 	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
 
 install:
-	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+	@if [ ! -x "$(NATIVE_BIN)" ] && [ ! -f "$(NATIVE_BIN)" ]; then \
 		echo "[install] missing $(NATIVE_BIN); run 'make compile' first"; \
 		exit 1; \
 	fi
 	@mkdir -p "$(DESTDIR)$(BINDIR)"
+ifeq ($(IS_WINDOWS),1)
+	@cp -f "$(NATIVE_BIN)" "$(DESTDIR)$(BINDIR)/$(INSTALL_NAME)$(EXE_EXT)"
+else
 	@install -m 755 "$(NATIVE_BIN)" "$(DESTDIR)$(BINDIR)/$(INSTALL_NAME)"
-	@echo "[install] installed $(DESTDIR)$(BINDIR)/$(INSTALL_NAME)"
+endif
+	@echo "[install] installed $(DESTDIR)$(BINDIR)/$(INSTALL_NAME)$(EXE_EXT)"
 
 test: test-unit test-integration test-e2e
 
@@ -139,7 +152,7 @@ SEED_GLOBAL_BIN_DIR ?= build/seed/bin
 # Override with a full path if needed, e.g. SEED=build/seed/bin/sailfin.
 SEED ?= sfn
 
-FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin
+FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
 
 fetch-seed:
 	@echo "[fetch-seed] installing seed into $(SEED_INSTALL_BASE)"
@@ -166,7 +179,7 @@ test-unit:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		$(NATIVE_BIN) test "$$f"; \
+		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
 	done
 
 test-integration:
@@ -181,7 +194,7 @@ test-integration:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		$(NATIVE_BIN) test "$$f"; \
+		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
 	done
 
 test-e2e:
@@ -196,7 +209,7 @@ test-e2e:
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		$(NATIVE_BIN) test "$$f"; \
+		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
 	done
 
 # Run the full Sailfin-native test suite using the *self-hosted* compiler.
@@ -233,7 +246,28 @@ compile:
 		echo "[compile] built $(NATIVE_OUT)"; \
 	fi
 
-check: compile test
+check: check-conda
+	@$(MAKE) compile
+	@seed="build/native/sailfin"; \
+	if [ ! -x "$$seed" ]; then \
+		echo "[check][error] missing $$seed (run: make compile)"; \
+		exit 1; \
+	fi; \
+	echo "[check] verifying seed selfhost..."; \
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py \
+		--seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) --opt="-O0" $(BUILD_ARGS) --max-total-seconds 3600 --out build/native/sailfin-seedcheck
+	@echo "[check] validating seedcheck binary can run programs..."
+	@sc="build/native/sailfin-seedcheck"; \
+	output=$$(timeout 10 $$sc run examples/basics/hello-world.sfn 2>&1) || true; \
+	if ! echo "$$output" | grep -q "Hello, Sailfin!"; then \
+		echo "[check][FAIL] seedcheck binary cannot run hello-world.sfn (expected 'Hello, Sailfin!' in output)"; \
+		echo "[check][FAIL] got: $$output"; \
+		echo "[check][FAIL] the seedcheck compiler is NOT viable — fix the compiler, not the build script"; \
+		exit 1; \
+	fi; \
+	echo "[check] seedcheck binary runs hello-world.sfn OK"
+	@echo "[check] running test suite with seedcheck binary (no fallbacks)..."
+	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
 
 # =============================================================================
 # Packaging (release artifacts)
@@ -254,21 +288,15 @@ package: check-conda
 # scripts/selfhost_native.py, which stages outputs under build/selfhost/native/.
 ci-prepare-test-artifacts:
 	@set -eu; \
-	SRC="build/selfhost/native/seed_cwd/build/import-context"; \
-	if [ ! -d "$$SRC" ]; then SRC="build/selfhost/native/seed_cwd/build/stage2"; fi; \
+	SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
 	if [ ! -d "$$SRC" ]; then \
 		echo "[ci-prepare-test-artifacts][error] missing $$SRC (selfhost did not stage import artifacts?)" >&2; \
-		find build/selfhost -maxdepth 5 -type d -name import-context -o -name stage2 -print || true; \
+		find build/selfhost -maxdepth 5 -type d -name import-context -print || true; \
 		exit 1; \
 	fi; \
 	rm -rf build/native/import-context; \
 	mkdir -p build/native/import-context; \
 	cp -a "$$SRC/." build/native/import-context/; \
-	rm -rf build/stage2 2>/dev/null || true; \
-	ln -s build/native/import-context build/stage2 2>/dev/null || { \
-		mkdir -p build/stage2; \
-		cp -a build/native/import-context/. build/stage2/; \
-	}; \
 	if [ ! -f build/selfhost/native/obj/runtime/prelude.o ]; then \
 		echo "[ci-prepare-test-artifacts][error] missing build/selfhost/native/obj/runtime/prelude.o" >&2; \
 		find build/selfhost -maxdepth 4 -type f -name 'prelude.o' -print || true; \
@@ -306,8 +334,8 @@ ci-package-installer:
 	INSTALLER_DIR="dist/installer-$(TARGET)"; \
 	rm -rf "$$INSTALLER_DIR"; \
 	mkdir -p "$$INSTALLER_DIR/bin"; \
-	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sailfin"; \
-	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sfn"; \
+	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sailfin$(EXE_EXT)"; \
+	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sfn$(EXE_EXT)"; \
 	mkdir -p "$$INSTALLER_DIR/runtime"; \
 	cp -R runtime/native "$$INSTALLER_DIR/runtime/native"; \
 	mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
@@ -357,8 +385,8 @@ rebuild: check-conda
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi; \
 	echo "[rebuild] running build script (seed=$$seed)..."; \
-	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out $(NATIVE_OUT)
-	@SRC="build/selfhost/native/seed_cwd/build/import-context"; \
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out $(NATIVE_OUT)
+	@SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
 	if [ ! -d "$$SRC" ]; then \
 		echo "[rebuild][error] missing import-context output at $$SRC" >&2; \
 		echo "[rebuild][error] ensure you're using a modern seed (or run: make fetch-seed)" >&2; \
@@ -430,8 +458,124 @@ rebuild-asan: check-conda
 		exit 1; \
 	fi; \
 	echo "[rebuild-asan] running build script (ASAN output; seed=$$seed)..."; \
-	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --asan --seed "$$seed" --no-prefer-asan-seed --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-selfhost
+	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --asan --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-selfhost
 	@echo "[rebuild-asan] built build/native/sailfin-selfhost"
+
+# =============================================================================
+# Cross-compile for Windows (from Linux, using MinGW-w64)
+# =============================================================================
+# Requires: x86_64-w64-mingw32-gcc, llvm-link (or llvm-link-18)
+# Reuses the LLVM IR (.ll files) from the Linux selfhost build.
+# Produces: build/windows/sailfin.exe + dist/ packaging artifacts.
+
+MINGW_CC ?= x86_64-w64-mingw32-gcc
+MINGW_TARGET := windows-x86_64
+
+.PHONY: ci-cross-windows
+ci-cross-windows:
+	@set -eu; \
+	echo "[cross-windows] cross-compiling for Windows from Linux LLVM IR..."; \
+	RAW_DIR="build/selfhost/native/raw"; \
+	if [ ! -d "$$RAW_DIR" ]; then \
+		echo "[cross-windows][error] missing $$RAW_DIR (run 'make rebuild' first)" >&2; \
+		exit 1; \
+	fi; \
+	WIN_OBJ="build/windows/obj"; \
+	WIN_OUT="build/windows/sailfin.exe"; \
+	rm -rf build/windows; \
+	mkdir -p "$$WIN_OBJ/runtime"; \
+	\
+	echo "[cross-windows] finding llvm-link..."; \
+	LLVM_LINK=""; \
+	for cand in llvm-link llvm-link-18 llvm-link-17 llvm-link-16; do \
+		if command -v "$$cand" >/dev/null 2>&1; then \
+			LLVM_LINK="$$cand"; \
+			break; \
+		fi; \
+	done; \
+	if [ -z "$$LLVM_LINK" ]; then \
+		echo "[cross-windows][error] llvm-link not found" >&2; \
+		exit 1; \
+	fi; \
+	echo "[cross-windows] using $$LLVM_LINK"; \
+	\
+	echo "[cross-windows] collecting .ll modules..."; \
+	LL_FILES=""; \
+	PRELUDE_LL=""; \
+	for f in "$$RAW_DIR"/*.ll; do \
+		base="$$(basename "$$f")"; \
+		case "$$base" in \
+			*.attempt*|*.clean*) continue ;; \
+			runtime__prelude.ll) PRELUDE_LL="$$f"; continue ;; \
+		esac; \
+		LL_FILES="$$LL_FILES $$f"; \
+	done; \
+	\
+	echo "[cross-windows] linking IR modules..."; \
+	$$LLVM_LINK -o "$$WIN_OBJ/sailfin.linked.bc" $$LL_FILES 2>&1 || \
+		$$LLVM_LINK --opaque-pointers -o "$$WIN_OBJ/sailfin.linked.bc" $$LL_FILES; \
+	\
+	echo "[cross-windows] compiling linked bitcode -> .o"; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$WIN_OBJ/sailfin.linked.bc" -o "$$WIN_OBJ/native.linked.o"; \
+	\
+	echo "[cross-windows] compiling prelude..."; \
+	if [ -n "$$PRELUDE_LL" ]; then \
+		$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+			-c "$$PRELUDE_LL" -o "$$WIN_OBJ/runtime/prelude.o"; \
+	fi; \
+	\
+	echo "[cross-windows] compiling C runtime..."; \
+	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_runtime.c \
+		-o "$$WIN_OBJ/sailfin_runtime.o"; \
+	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_sha256.c \
+		-o "$$WIN_OBJ/sailfin_sha256.o"; \
+	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_base64.c \
+		-o "$$WIN_OBJ/sailfin_base64.o"; \
+	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/native_driver.c \
+		-o "$$WIN_OBJ/native_driver.o"; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
+		-o "$$WIN_OBJ/runtime_globals.o"; \
+	\
+	echo "[cross-windows] compiling cross-module shim (if present)..."; \
+	SHIM_O=""; \
+	SHIM_C="build/selfhost/native/obj/cross_module_shim.c"; \
+	if [ -f "$$SHIM_C" ]; then \
+		sed 's/__attribute__((weak))//' "$$SHIM_C" > "$$WIN_OBJ/cross_module_shim.c"; \
+		$(MINGW_CC) -O2 -c "$$WIN_OBJ/cross_module_shim.c" -o "$$WIN_OBJ/cross_module_shim.o"; \
+		SHIM_O="$$WIN_OBJ/cross_module_shim.o"; \
+	fi; \
+	\
+	echo "[cross-windows] linking sailfin.exe..."; \
+	$(MINGW_CC) -static -o "$$WIN_OUT" \
+		"$$WIN_OBJ/sailfin_runtime.o" \
+		"$$WIN_OBJ/sailfin_sha256.o" \
+		"$$WIN_OBJ/sailfin_base64.o" \
+		"$$WIN_OBJ/native_driver.o" \
+		"$$WIN_OBJ/runtime_globals.o" \
+		"$$WIN_OBJ/native.linked.o" \
+		"$$WIN_OBJ/runtime/prelude.o" \
+		$$SHIM_O \
+		-lm -lpthread; \
+	\
+	echo "[cross-windows] built $$WIN_OUT"; \
+	ls -lh "$$WIN_OUT"; \
+	(file "$$WIN_OUT" || true); \
+	\
+	echo "[cross-windows] packaging..."; \
+	INSTALLER_DIR="dist/installer-$(MINGW_TARGET)"; \
+	rm -rf "$$INSTALLER_DIR"; \
+	mkdir -p "$$INSTALLER_DIR/bin"; \
+	cp -f "$$WIN_OUT" "$$INSTALLER_DIR/bin/sailfin.exe"; \
+	cp -f "$$WIN_OUT" "$$INSTALLER_DIR/bin/sfn.exe"; \
+	mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+	cp -R runtime/native "$$INSTALLER_DIR/runtime/native"; \
+	if [ -f "$$WIN_OBJ/runtime/prelude.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/prelude.o" "$$INSTALLER_DIR/runtime/native/obj/prelude.o"; \
+	fi; \
+	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
+	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"
 
 # Deprecated aliases.
 selfhost-native: rebuild
