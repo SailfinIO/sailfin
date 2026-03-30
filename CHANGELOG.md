@@ -55,6 +55,8 @@ Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
 
 ## v0.4.0-alpha.1 (2026-03-30)
 
+## v0.3.3 (2026-03-30)
+
 ### Bug Fixes
 
 - **agents**: Replace ./sfn run with build/native/sailfin run in docs-writer agent
