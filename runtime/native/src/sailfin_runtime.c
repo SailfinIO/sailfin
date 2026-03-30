@@ -1661,7 +1661,10 @@ void sailfin_runtime_print_err(char *msg)
 // The seed may emit `call double @print(i8*)` (default return type), so this
 // returns double for ABI compatibility. The return value is unused.
 // Can be removed once all seeds include the "print" → "sailfin_runtime_print_raw" mapping.
-__attribute__((weak)) double print(char *msg)
+#if !defined(_WIN32) && !defined(__MINGW32__)
+__attribute__((weak))
+#endif
+double print(char *msg)
 {
     sailfin_runtime_print_raw(msg);
     return 0.0;

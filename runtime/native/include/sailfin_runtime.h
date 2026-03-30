@@ -25,7 +25,11 @@ extern "C"
 
     void sailfin_runtime_print_raw(char *msg);
     void sailfin_runtime_print_err(char *msg);
+#if !defined(_WIN32) && !defined(__MINGW32__)
     double print(char *msg) __attribute__((weak)); // weak alias for legacy seed compatibility
+#else
+    double print(char *msg); // strong on Windows (mingw ld does not support weak)
+#endif
     void sailfin_runtime_print_info(char *msg);
     void sailfin_runtime_print_warn(char *msg);
     void sailfin_runtime_print_error(char *msg);
