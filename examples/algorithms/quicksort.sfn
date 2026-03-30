@@ -13,5 +13,5 @@ fn quicksort(arr -> number[]) -> number[] {
 
 fn main() ![io] {
     let nums = [10, 7, 8, 9, 1, 5];
-    print.info("Sorted: {{quicksort(nums)}}");
+    print("Sorted: {{quicksort(nums)}}");
 }

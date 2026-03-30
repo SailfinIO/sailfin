@@ -136,7 +136,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let dot_index = index_of(trimmed_target, ".");
     let trace_calls = fs.exists("build/sailfin/.trace_call_lowering");
     if trace_calls {
-        print.info("call_lowering: target='" + trimmed_target + "' dot_index=" + number_to_string(dot_index) + " enums=" + number_to_string(context.enums.length));
+        print("call_lowering: target='" + trimmed_target + "' dot_index=" + number_to_string(dot_index) + " enums=" + number_to_string(context.enums.length));
     }
     if dot_index > 0 {
         let enum_name = trim_text(substring(trimmed_target, 0, dot_index));
@@ -149,7 +149,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             if enum_info != null {
                 found_text = "found";
             }
-            print.info("call_lowering: enum_name='" + enum_name + "' variant='" + variant_name + "' resolved=" + found_text);
+            print("call_lowering: enum_name='" + enum_name + "' variant='" + variant_name + "' resolved=" + found_text);
         }
         if enum_info != null {
             // This is an enum variant constructor!

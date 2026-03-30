@@ -674,7 +674,7 @@ fn apply_module_symbol_mangling(
     let mut diagnostics -> string[] = [];
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
-        print.warn("emit-llvm: mangle start module=" + current_module_slug);
+        print("emit-llvm: mangle start module=" + current_module_slug);
     }
     let mut safe_imports = imports;
     if safe_imports == null {
@@ -684,7 +684,7 @@ fn apply_module_symbol_mangling(
         diagnostics.push("llvm lowering: import list too large for mangling; dropping");
         safe_imports = [];
         if debug_lowering {
-            print.warn("emit-llvm: mangle import list too large; dropping");
+            print("emit-llvm: mangle import list too large; dropping");
         }
     }
 
@@ -698,13 +698,13 @@ fn apply_module_symbol_mangling(
 
     let available_modules = collect_available_import_module_names(imported_native_texts);
     if debug_lowering {
-        print.warn("emit-llvm: mangle available_modules=" + number_to_string(available_modules.length));
+        print("emit-llvm: mangle available_modules=" + number_to_string(available_modules.length));
     }
 
     // 1) Mangle every function defined in this module to a module-qualified symbol.
     let defined = collect_defined_function_symbols(lines);
     if debug_lowering {
-        print.warn("emit-llvm: mangle defined_symbols=" + number_to_string(defined.length));
+        print("emit-llvm: mangle defined_symbols=" + number_to_string(defined.length));
     }
     let mut local_olds -> string[] = [];
     let mut local_news -> string[] = [];
@@ -730,7 +730,7 @@ fn apply_module_symbol_mangling(
 
     let mut rewritten = apply_symbol_substitutions(lines, local_olds, local_news);
     if debug_lowering {
-        print.warn("emit-llvm: mangle local_subs=" + number_to_string(local_olds.length));
+        print("emit-llvm: mangle local_subs=" + number_to_string(local_olds.length));
     }
 
     // 2) Rewrite imported symbol references to the provider's qualified symbol,
@@ -820,7 +820,7 @@ fn apply_module_symbol_mangling(
 
     rewritten = apply_symbol_substitutions(rewritten, import_olds, import_news);
     if debug_lowering {
-        print.warn("emit-llvm: mangle import_subs=" + number_to_string(import_olds.length));
+        print("emit-llvm: mangle import_subs=" + number_to_string(import_olds.length));
     }
 
     // 3) Append shims before the LLVM footer (attributes/metadata).
@@ -850,7 +850,7 @@ fn apply_module_symbol_mangling(
     }
     rewritten = insert_before_llvm_footer(rewritten, shim_lines);
     if debug_lowering {
-        print.warn("emit-llvm: mangle shims=" + number_to_string(shim_exports.length));
+        print("emit-llvm: mangle shims=" + number_to_string(shim_exports.length));
     }
 
     return MangledModuleResult { lines: rewritten, diagnostics: diagnostics };

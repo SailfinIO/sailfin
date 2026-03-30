@@ -42,16 +42,16 @@ fn main() ![io] {
 
     // Deposit money
     account.deposit(50);
-    print.info("Balance after deposit: {{account.getBalance()}}"); // Outputs: Balance after deposit: 150
+    print("Balance after deposit: {{account.getBalance()}}"); // Outputs: Balance after deposit: 150
 
     // Withdraw money
     account.withdraw(30);
-    print.info("Balance after withdrawal: {{account.getBalance()}}"); // Outputs: Balance after withdrawal: 120
+    print("Balance after withdrawal: {{account.getBalance()}}"); // Outputs: Balance after withdrawal: 120
 
     // Try an invalid operation
     try {
         account.withdraw(200); // This will throw an error
     } catch (err) {
-        print.info("Error: {{err}}"); // Outputs: Error: Insufficient funds.
+        print("Error: {{err}}"); // Outputs: Error: Insufficient funds.
     }
 }

@@ -7,5 +7,5 @@ fn identity<T>(value -> T) -> T {
 fn main() ![io] {
     let num = identity(42);
     let text = identity("Sailfin");
-    print.info("Values: {{num}}, {{text}}");
+    print("Values: {{num}}, {{text}}");
 }

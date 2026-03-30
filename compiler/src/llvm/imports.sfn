@@ -24,7 +24,7 @@ fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleC
 fn collect_imported_module_context_for_module(imports -> NativeImport[], current_module_slug -> string) -> ImportedModuleContext ![io] {
     let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
     if trace {
-        print.info("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
+        print("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
     }
     let mut manifests -> LayoutManifest[] = [];
     let mut native_texts -> string[] = [];
@@ -36,7 +36,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
             break;
         }
         if trace && index > 0 && index % 50 == 0 {
-            print.info("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")");
+            print("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")");
         }
         let module_path = imports[index].module;
         let base_slug = resolve_import_module_slug_for_module(module_path, current_module_slug);
@@ -86,7 +86,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
     }
 
     if trace {
-        print.info("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(seen.length) + ")");
+        print("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(seen.length) + ")");
     }
 
     return ImportedModuleContext { manifests: manifests, native_texts: native_texts, diagnostics: diagnostics };

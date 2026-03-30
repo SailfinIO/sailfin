@@ -9,5 +9,5 @@ async fn fetchData(url -> string) -> string ![net] {
 
 async fn main() -> void ![io, net] {
     let data = await fetchData("https://example.com");
-    print.info("Data: {{data}}");
+    print("Data: {{data}}");
 }

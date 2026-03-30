@@ -1638,6 +1638,20 @@ void sailfin_runtime_string_drop(char *text)
     free(text);
 }
 
+void sailfin_runtime_print_raw(char *msg)
+{
+    if (msg)
+    {
+        fputs(msg, stdout);
+        fputc('\n', stdout);
+        fflush(stdout);
+    }
+}
+// Bridge: older seeds (< v0.5) that don't have the "print" runtime helper
+// descriptor emit bare `@print` calls when compiling `print("text")`.
+// This alias ensures the linker resolves them to the raw print implementation.
+// Can be removed once all seeds include the "print" → "sailfin_runtime_print_raw" mapping.
+double print(char *msg) { sailfin_runtime_print_raw(msg); return 0.0; }
 void sailfin_runtime_print_info(char *msg) { _print_line(stdout, "[info] ", msg); }
 void sailfin_runtime_print_warn(char *msg) { _print_line(stderr, "[warn] ", msg); }
 void sailfin_runtime_print_error(char *msg) { _print_line(stderr, "[error] ", msg); }

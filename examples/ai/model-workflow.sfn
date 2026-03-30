@@ -41,6 +41,6 @@ pipeline summarize_all(docs -> Array<string>) -> void ![model, io] {
 fn main() -> void ![model, io] {
     with seed(42), temperature(0.2) {
         let result -> string = summarize("Design doc");
-        print.info(result);
+        print(result);
     }
 }
