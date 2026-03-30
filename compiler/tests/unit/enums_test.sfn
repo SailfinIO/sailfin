@@ -28,9 +28,9 @@ fn _is_horizontal(d -> Direction) -> boolean {
     return false;
 }
 
-// NOTE: Tagged (data-carrying) enums with match destructuring cause a
-// compiler segfault. The Shape enum and _area function are commented out
-// until the match statement is fixed.
+// NOTE: Tagged (data-carrying) enums with match destructuring currently
+// cause a compiler segfault, so tests exercising that behavior are
+// temporarily excluded until the match statement is fixed.
 // See: https://github.com/SailfinIO/sailfin/issues/50
 
 test "enums: basic enum equality" {

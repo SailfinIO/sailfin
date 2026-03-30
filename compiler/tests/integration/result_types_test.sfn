@@ -13,7 +13,7 @@ struct ParseError {
     message -> string;
 }
 
-fn _parse_positive(n -> number) -> number | ParseError {
+fn _parse_non_negative(n -> number) -> number | ParseError {
     if n < 0 {
         return ParseError { message: "expected non-negative number" };
     }
@@ -39,11 +39,11 @@ test "error_handling: union return function compiles and runs (error path)" {
 }
 
 test "error_handling: parse_positive compiles and runs (success path)" {
-    let result = _parse_positive(42);
+    let result = _parse_non_negative(42);
     assert 1 == 1;
 }
 
 test "error_handling: parse_positive compiles and runs (error path)" {
-    let result = _parse_positive(-5);
+    let result = _parse_non_negative(-5);
     assert 1 == 1;
 }
