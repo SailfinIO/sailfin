@@ -1,6 +1,151 @@
 # CHANGELOG
 
 
+## v0.3.3 (2026-03-30)
+
+### Bug Fixes
+
+- **agents**: Replace ./sfn run with build/native/sailfin run in docs-writer agent
+  ([`1c39ac2`](https://github.com/SailfinIO/sailfin/commit/1c39ac222d4d0ae39c9ade5b69cc981249834df1))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a76eb7e3-8066-4508-8e49-c74ec98f045b
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Chores
+
+- Bump deps
+  ([`8e82cff`](https://github.com/SailfinIO/sailfin/commit/8e82cff396c54fdd6cbbaaacc99b574ed824f78d))
+
+- Bump deps
+  ([`bf51a77`](https://github.com/SailfinIO/sailfin/commit/bf51a77a21213e0d0c7963ef5ab3e423b997a1ec))
+
+- Change default INSTALL_NAME to sfn and remove legacy Python compiler line
+  ([`7b7f3cf`](https://github.com/SailfinIO/sailfin/commit/7b7f3cf671c031693f2847cd1fe25b68faeefc11))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/de057bdf-cc8a-490a-b7b8-0f4e90485f02
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- Configure agents
+  ([`6e903be`](https://github.com/SailfinIO/sailfin/commit/6e903be60db03225c8bfa5049712d43a61f64210))
+
+- Remove sfn_disabled wrapper script and update docs
+  ([`618657f`](https://github.com/SailfinIO/sailfin/commit/618657fd9722055b68f3fe921a4f60cc22556622))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a102743c-784f-4a59-9e4e-ef5c7893e751
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **dependabot**: Add weekly npm updates for /site
+  ([`fc2fc9e`](https://github.com/SailfinIO/sailfin/commit/fc2fc9ee2c679d8b79a6850a7ccd0ba3bd71da23))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/908e7870-a9e6-45f2-8339-1804e4c624e3
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **deps**: Bump @astrojs/cloudflare from 12.6.13 to 13.1.4 in /site
+  ([`016ec28`](https://github.com/SailfinIO/sailfin/commit/016ec285a6cff7b95b40d1a30fbe4d292d0fb4a2))
+
+Bumps
+  [@astrojs/cloudflare](https://github.com/withastro/astro/tree/HEAD/packages/integrations/cloudflare)
+  from 12.6.13 to 13.1.4. - [Release notes](https://github.com/withastro/astro/releases) -
+  [Changelog](https://github.com/withastro/astro/blob/main/packages/integrations/cloudflare/CHANGELOG.md)
+  -
+  [Commits](https://github.com/withastro/astro/commits/@astrojs/cloudflare@13.1.4/packages/integrations/cloudflare)
+
+--- updated-dependencies: - dependency-name: "@astrojs/cloudflare" dependency-version: 13.1.4
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/checkout from 4 to 6
+  ([`5dcd676`](https://github.com/SailfinIO/sailfin/commit/5dcd6766073a89d5939c9a829e518a848f046fa9))
+
+Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6. - [Release
+  notes](https://github.com/actions/checkout/releases) -
+  [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/actions/checkout/compare/v4...v6)
+
+--- updated-dependencies: - dependency-name: actions/checkout dependency-version: '6'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/download-artifact from 4 to 8
+  ([`667ef0b`](https://github.com/SailfinIO/sailfin/commit/667ef0beeb69e2907e259abec5244fdcf3435219))
+
+Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 4 to 8. -
+  [Release notes](https://github.com/actions/download-artifact/releases) -
+  [Commits](https://github.com/actions/download-artifact/compare/v4...v8)
+
+--- updated-dependencies: - dependency-name: actions/download-artifact dependency-version: '8'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/upload-artifact from 4 to 7
+  ([`8318004`](https://github.com/SailfinIO/sailfin/commit/831800422450d062e0068dc5a212ec39afaeba01))
+
+Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 4 to 7. - [Release
+  notes](https://github.com/actions/upload-artifact/releases) -
+  [Commits](https://github.com/actions/upload-artifact/compare/v4...v7)
+
+--- updated-dependencies: - dependency-name: actions/upload-artifact dependency-version: '7'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump sharp from 0.33.5 to 0.34.5 in /site
+  ([`d23ee34`](https://github.com/SailfinIO/sailfin/commit/d23ee3461041e5b03d2ab2061606419b3a8fc133))
+
+Bumps [sharp](https://github.com/lovell/sharp) from 0.33.5 to 0.34.5. - [Release
+  notes](https://github.com/lovell/sharp/releases) -
+  [Commits](https://github.com/lovell/sharp/compare/v0.33.5...v0.34.5)
+
+--- updated-dependencies: - dependency-name: sharp dependency-version: 0.34.5
+
+dependency-type: direct:production
+
+update-type: version-update:semver-minor ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump undici from 7.14.0 to 7.24.4 in /site
+  ([`a7d4820`](https://github.com/SailfinIO/sailfin/commit/a7d482038378d64b441a9119ec66ec2f008f7183))
+
+Bumps [undici](https://github.com/nodejs/undici) from 7.14.0 to 7.24.4. - [Release
+  notes](https://github.com/nodejs/undici/releases) -
+  [Commits](https://github.com/nodejs/undici/compare/v7.14.0...v7.24.4)
+
+--- updated-dependencies: - dependency-name: undici dependency-version: 7.24.4
+
+dependency-type: indirect ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+### Documentation
+
+- Update getting-started install page to document native Windows support
+  ([`bc69387`](https://github.com/SailfinIO/sailfin/commit/bc693879e5f5ca0acc41dffd8cab858611821c32))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/2ea2c5cd-267b-4f6b-923f-a7829b26829a
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
 ## v0.3.2 (2026-03-30)
 
 ### Bug Fixes
