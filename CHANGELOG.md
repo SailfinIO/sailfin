@@ -11,6 +11,13 @@
 
 ## v0.4.0-alpha.2 (2026-03-30)
 
+### Breaking Changes
+
+- **log capsule**: `log.warn()` and `log.error()` now write to **stderr** instead of stdout.
+  Previously, all log levels routed through `print()` (stdout). They now use `print.err()` (stderr).
+  Code that captures or redirects stdout expecting warn/error output must switch to stderr.
+  The `log.info()` and `log.debug()` functions continue to write to stdout.
+
 ### Bug Fixes
 
 - Make non weak for mingw
