@@ -44,7 +44,7 @@ Update documents in this order when behavior changes:
 
 - Be precise and concise — this is a language reference, not a tutorial
 - Use the project's terminology: capsule (not package), fleet (not workspace), generation card (not trace)
-- Include code examples only when they compile and run (verify with `./sfn run` if possible)
+- Include code examples only when they compile and run (verify with `build/native/sailfin run` if possible)
 - Mark planned/unimplemented features clearly: *"Planned for 1.0"* or *"Parsed but not yet enforced"*
 - Keep effect annotations in examples accurate and minimal
 
