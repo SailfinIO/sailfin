@@ -137,7 +137,7 @@ jobs:
           CONDA=$(which conda) make ci-cross-windows
 
       - name: Upload native artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-native-${{ matrix.package_label }}
           path: |
@@ -147,7 +147,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload installer archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-installer-${{ matrix.package_label }}
           path: dist/installer-${{ matrix.package_label }}.tar.gz
@@ -155,7 +155,7 @@ jobs:
 
       - name: Upload Windows installer archive
         if: matrix.package_label == 'linux-x86_64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-installer-windows-x86_64
           path: dist/installer-windows-x86_64.tar.gz
