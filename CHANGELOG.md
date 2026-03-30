@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v0.3.2 (2026-03-30)
+
+### Bug Fixes
+
+- **docs**: Correct GitHub org and install script URLs in site docs
+  ([`05c988e`](https://github.com/SailfinIO/sailfin/commit/05c988e905ac36f0871b3e7152b204fdf4f7fbef))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/5bab19c7-30d8-4600-95fd-bee6cbb0b8a1
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Documentation
+
+- Add Sailfin VS Code extension (editor setup) documentation
+  ([`6f20611`](https://github.com/SailfinIO/sailfin/commit/6f206110a291dbbdfbc5f6eabb77c14908442674))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/782e46a7-7544-4553-b9d0-0f760f8ab6f7
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
 ## v0.3.1 (2026-03-29)
 
 ### Bug Fixes
