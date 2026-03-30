@@ -1,6 +1,54 @@
 # CHANGELOG
 
 
+## v0.4.0-alpha.3 (2026-03-30)
+
+### Bug Fixes
+
+- Mingw cross compilation
+  ([`349c050`](https://github.com/SailfinIO/sailfin/commit/349c0504c210061b75f6c4d7bbc5317cb75df4a4))
+
+
+## v0.4.0-alpha.2 (2026-03-30)
+
+### Breaking Changes
+
+- **log capsule**: `log.warn()` and `log.error()` now write to **stderr** instead of stdout.
+  Previously, all log levels routed through `print()` (stdout). They now use `print.err()` (stderr).
+  Code that captures or redirects stdout expecting warn/error output must switch to stderr.
+  The `log.info()` and `log.debug()` functions continue to write to stdout.
+
+### Bug Fixes
+
+- Make non weak for mingw
+  ([`c8dc473`](https://github.com/SailfinIO/sailfin/commit/c8dc47307d5d464029ace64d744462fb6edd8d78))
+
+- Need to add raw print
+  ([`518d193`](https://github.com/SailfinIO/sailfin/commit/518d19375abe8304b99ab7f356de0d3fcda5102c))
+
+- Need weak alias for backwards compatibility
+  ([`a65065a`](https://github.com/SailfinIO/sailfin/commit/a65065acd132a0263079ea112f423e3aee8d2f98))
+
+### Chores
+
+- Revert to pages
+  ([`4768255`](https://github.com/SailfinIO/sailfin/commit/4768255158477573fbdaa92f9b4539a8d29cf5e2))
+
+### Continuous Integration
+
+- Auto-resolve version/CHANGELOG conflicts on PRs
+  ([`c374847`](https://github.com/SailfinIO/sailfin/commit/c374847e68bad225691e4d0dde23203d8a8f7ac6))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a3cdb0f4-7818-434b-a70f-e7dd06e13953
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Features
+
+- Add shell build, smoke, and package scripts
+  ([`a94c202`](https://github.com/SailfinIO/sailfin/commit/a94c202793ef3a86ad39a3d2cc593401e6c920ef))
+
+
 ## v0.4.0-alpha.1 (2026-03-30)
 
 ### Bug Fixes

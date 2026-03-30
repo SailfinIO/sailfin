@@ -33,7 +33,7 @@ fn lex(source -> string) -> Token[] {
     loop {
         guard += 1;
         if guard > max_guard {
-            print.warn("lexer: guard limit exceeded");
+            print("lexer: guard limit exceeded");
             break;
         }
         if state.index >= state.source_len {

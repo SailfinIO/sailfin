@@ -8,5 +8,5 @@ fn main() ![io] {
     let bridge = fs_bridge(grant);
     bridge.write_text("scratch/capability-bridge.txt", "Hello from Sailfin capability bridges.");
     let contents = bridge.read_text("scratch/capability-bridge.txt");
-    print.info("Read back: {{ contents }}");
+    print("Read back: {{ contents }}");
 }

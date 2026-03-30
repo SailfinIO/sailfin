@@ -2,17 +2,17 @@
 
 fn checkNumber(value -> number) ![io] {
   if value > 0 {
-    print.info("{{ value }} is positive");
+    print("{{ value }} is positive");
   } else if value < 0 {
-    print.info("{{ value }} is negative");
+    print("{{ value }} is negative");
   } else {
-    print.info("{{ value }} is zero");
+    print("{{ value }} is zero");
   }
 
   match value {
-    42 ->   print.info("The answer to life, the universe, and everything!"),
-    -1 ->   print.info("A special negative number!"),
-    _ ->    print.info("Just another number."),
+    42 ->   print("The answer to life, the universe, and everything!"),
+    -1 ->   print("A special negative number!"),
+    _ ->    print("Just another number."),
   }
 }
 

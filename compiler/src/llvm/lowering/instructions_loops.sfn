@@ -804,11 +804,11 @@ fn lower_loop_instruction(
 
     let debug_loop = fs.exists("build/sailfin/.trace_lowering");
     if debug_loop {
-        print.warn("emit-llvm: lower_loop start fn=" + function.name + " start_index=" + number_to_string(start_index) + " end=" + number_to_string(end));
+        print("emit-llvm: lower_loop start fn=" + function.name + " start_index=" + number_to_string(start_index) + " end=" + number_to_string(end));
     }
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     if debug_loop {
-        print.warn("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+        print("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
     }
     let mut _ci6 -> number = 0;
     loop {
@@ -865,7 +865,7 @@ fn lower_loop_instruction(
     // Lower the body to discover mutations
     let body_scope_id = make_child_scope_id(scope_id, body_label);
     if debug_loop {
-        print.warn("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+        print("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
     }
     let body_result = lower_instruction_range(
         function,
@@ -888,7 +888,7 @@ fn lower_loop_instruction(
         body_label
     );
     if debug_loop {
-        print.warn("emit-llvm: lower_loop post_body_lir fn=" + function.name + " body_lines=" + number_to_string(body_result.lines.length));
+        print("emit-llvm: lower_loop post_body_lir fn=" + function.name + " body_lines=" + number_to_string(body_result.lines.length));
     }
 
     let mut _ci7 -> number = 0;

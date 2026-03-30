@@ -14,5 +14,5 @@ fn main() ![io] {
         fn() -> number { return computeTask2(); },
     ];
 
-    print.info("Results: {{results}}");
+    print("Results: {{results}}");
 }

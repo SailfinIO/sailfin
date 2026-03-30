@@ -4,12 +4,12 @@ import { websocket } from "http";
 
 fn main() ![io, net] {
     let server = websocket.serve({ port: 8080 });
-    print.info("WebSocket server is running on ws://localhost:8080");
+    print("WebSocket server is running on ws://localhost:8080");
 
     routine {
         for client in server.clients() {
             client.onMessage(fn(message) {
-                print.info("Received: {{message}}");
+                print("Received: {{message}}");
                 client.send("Echo: {{message}}");
             });
         }

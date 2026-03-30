@@ -9,12 +9,12 @@ fn main() ![unsafe, io] {
     unsafe {
         // Read through the pointer
         let read_value = *ptr;
-        print.info("Read value: {{ read_value }}");
+        print("Read value: {{ read_value }}");
 
         // Write through the pointer
         *ptr = 100;
     }
 
     // Value was modified through the pointer
-    print.info("Modified value: {{ value }}");
+    print("Modified value: {{ value }}");
 }

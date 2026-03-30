@@ -2,9 +2,9 @@
 
 fn printValue(value -> string | number) ![io] {
     if value is string {
-        print.info("It's a string: {{value}}");
+        print("It's a string: {{value}}");
     } else {
-        print.info("It's a number: {{value}}");
+        print("It's a number: {{value}}");
     }
 }
 
@@ -23,5 +23,5 @@ fn main() ![io] {
     printValue(42);
 
     let admin -> AdminUser = { name: "Alice", isAdmin: true };
-    print.info("Admin: {{admin.name}}");
+    print("Admin: {{admin.name}}");
 }

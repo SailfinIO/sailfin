@@ -17,5 +17,5 @@ fn render_report(generator -> EchoSummarizer, doc -> string) -> string ![model] 
 fn main() -> void ![model, io] {
     let summarizer -> EchoSummarizer = EchoSummarizer {};
     let summary -> string = render_report(summarizer, "Quarterly metrics");
-    print.info(summary);
+    print(summary);
 }

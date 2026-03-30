@@ -21,6 +21,7 @@ network: defaults
 tools:
   github:
     toolsets: [default]
+    min-integrity: unapproved
 
 safe-outputs:
   add-comment:

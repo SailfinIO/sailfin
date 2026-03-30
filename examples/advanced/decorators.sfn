@@ -9,5 +9,5 @@ fn compute(x -> number) -> number ![io] {
 
 fn main() ![io] {
   let value = compute(5);
-  print.info("compute(5) = {{value}}");
+  print("compute(5) = {{value}}");
 }

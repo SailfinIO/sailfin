@@ -66,5 +66,5 @@ fn serve(handler -> any, config -> any?) -> void ![io, net] {
     //   }, { port: 8080 })
     //
     // Full implementation pending runtime HTTP adapter.
-    print.info("[sfn/http] serve is not yet fully implemented");
+    print("[sfn/http] serve is not yet fully implemented");
 }
