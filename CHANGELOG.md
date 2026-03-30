@@ -1,6 +1,321 @@
 # CHANGELOG
 
 
+## v0.4.0-alpha.1 (2026-03-30)
+
+### Bug Fixes
+
+- **agents**: Replace ./sfn run with build/native/sailfin run in docs-writer agent
+  ([`1c39ac2`](https://github.com/SailfinIO/sailfin/commit/1c39ac222d4d0ae39c9ade5b69cc981249834df1))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a76eb7e3-8066-4508-8e49-c74ec98f045b
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **tests**: Address Copilot review comments
+  ([`ddfe57f`](https://github.com/SailfinIO/sailfin/commit/ddfe57fd2e40d579f4dd1c3d63b1889233a23983))
+
+- enums_test: fix inaccurate comment about "commented out" code (removed) - result_types_test:
+  rename _parse_positive to _parse_non_negative to match its actual semantics (returns success for
+  0)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- **tests**: Remove closure capture and void-method patterns, use block match arms
+  ([`8b1ee2b`](https://github.com/SailfinIO/sailfin/commit/8b1ee2b0c4a0da164f135aab49e99b332e75b343))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/81b87995-0e3e-40d1-b408-4af0a304afdc
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **tests**: Remove closures_test (higher-order fn calls unsupported), fix error_handling match arms
+  ([`0adc74d`](https://github.com/SailfinIO/sailfin/commit/0adc74df60777844f113467fb2523dbbb926e6ed))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/9b9a5975-2229-4707-ba53-f2197f9b6365
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **tests**: Replace unsupported array method calls with loop-based equivalents
+  ([`7cc1725`](https://github.com/SailfinIO/sailfin/commit/7cc1725a6bb1c38387c5fac26917b01b13c22702))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/6f1144be-270c-4992-8816-f0867d263757
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **tests**: Work around compiler bugs to make all tests pass
+  ([`4ff1466`](https://github.com/SailfinIO/sailfin/commit/4ff1466c9e7fb51338348e50ac642d82810bd4cf))
+
+- control_flow_test: replace match-on-number-literals with if/else chain (#50) - enums_test: replace
+  match-on-enum-variants with if/else; remove tagged enum tests that require match destructuring
+  (#50) - structs_test: rewrite perimeter() to avoid literal * (paren-expr) bug (#51) -
+  error_handling_test: rename to result_types_test to avoid test runner false positive (#55); remove
+  match on union types (#50), keep union return type compilation tests - All 23 tests now pass
+
+Created GitHub issues for discovered compiler bugs: - #50: match statement segfaults during LLVM
+  lowering - #51: integer literal * parenthesized struct field expression wrong result - #52:
+  higher-order function calls via typed parameters undefined symbol - #53: closure capture of local
+  let bindings undefined symbol - #54: array higher-order methods not reliably lowered - #55: test
+  runner grep matches 'error' in file paths
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Chores
+
+- Bump deps
+  ([`8e82cff`](https://github.com/SailfinIO/sailfin/commit/8e82cff396c54fdd6cbbaaacc99b574ed824f78d))
+
+- Bump deps
+  ([`bf51a77`](https://github.com/SailfinIO/sailfin/commit/bf51a77a21213e0d0c7963ef5ab3e423b997a1ec))
+
+- Change default INSTALL_NAME to sfn and remove legacy Python compiler line
+  ([`7b7f3cf`](https://github.com/SailfinIO/sailfin/commit/7b7f3cf671c031693f2847cd1fe25b68faeefc11))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/de057bdf-cc8a-490a-b7b8-0f4e90485f02
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- Configure agents
+  ([`6e903be`](https://github.com/SailfinIO/sailfin/commit/6e903be60db03225c8bfa5049712d43a61f64210))
+
+- Remove sfn_disabled wrapper script and update docs
+  ([`618657f`](https://github.com/SailfinIO/sailfin/commit/618657fd9722055b68f3fe921a4f60cc22556622))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a102743c-784f-4a59-9e4e-ef5c7893e751
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **dependabot**: Add weekly npm updates for /site
+  ([`fc2fc9e`](https://github.com/SailfinIO/sailfin/commit/fc2fc9ee2c679d8b79a6850a7ccd0ba3bd71da23))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/908e7870-a9e6-45f2-8339-1804e4c624e3
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **deps**: Bump @astrojs/cloudflare from 12.6.13 to 13.1.4 in /site
+  ([`016ec28`](https://github.com/SailfinIO/sailfin/commit/016ec285a6cff7b95b40d1a30fbe4d292d0fb4a2))
+
+Bumps
+  [@astrojs/cloudflare](https://github.com/withastro/astro/tree/HEAD/packages/integrations/cloudflare)
+  from 12.6.13 to 13.1.4. - [Release notes](https://github.com/withastro/astro/releases) -
+  [Changelog](https://github.com/withastro/astro/blob/main/packages/integrations/cloudflare/CHANGELOG.md)
+  -
+  [Commits](https://github.com/withastro/astro/commits/@astrojs/cloudflare@13.1.4/packages/integrations/cloudflare)
+
+--- updated-dependencies: - dependency-name: "@astrojs/cloudflare" dependency-version: 13.1.4
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/checkout from 4 to 6
+  ([`5dcd676`](https://github.com/SailfinIO/sailfin/commit/5dcd6766073a89d5939c9a829e518a848f046fa9))
+
+Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6. - [Release
+  notes](https://github.com/actions/checkout/releases) -
+  [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/actions/checkout/compare/v4...v6)
+
+--- updated-dependencies: - dependency-name: actions/checkout dependency-version: '6'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/download-artifact from 4 to 8
+  ([`667ef0b`](https://github.com/SailfinIO/sailfin/commit/667ef0beeb69e2907e259abec5244fdcf3435219))
+
+Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 4 to 8. -
+  [Release notes](https://github.com/actions/download-artifact/releases) -
+  [Commits](https://github.com/actions/download-artifact/compare/v4...v8)
+
+--- updated-dependencies: - dependency-name: actions/download-artifact dependency-version: '8'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/upload-artifact from 4 to 7
+  ([`8318004`](https://github.com/SailfinIO/sailfin/commit/831800422450d062e0068dc5a212ec39afaeba01))
+
+Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 4 to 7. - [Release
+  notes](https://github.com/actions/upload-artifact/releases) -
+  [Commits](https://github.com/actions/upload-artifact/compare/v4...v7)
+
+--- updated-dependencies: - dependency-name: actions/upload-artifact dependency-version: '7'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump sharp from 0.33.5 to 0.34.5 in /site
+  ([`d23ee34`](https://github.com/SailfinIO/sailfin/commit/d23ee3461041e5b03d2ab2061606419b3a8fc133))
+
+Bumps [sharp](https://github.com/lovell/sharp) from 0.33.5 to 0.34.5. - [Release
+  notes](https://github.com/lovell/sharp/releases) -
+  [Commits](https://github.com/lovell/sharp/compare/v0.33.5...v0.34.5)
+
+--- updated-dependencies: - dependency-name: sharp dependency-version: 0.34.5
+
+dependency-type: direct:production
+
+update-type: version-update:semver-minor ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump undici from 7.14.0 to 7.24.4 in /site
+  ([`a7d4820`](https://github.com/SailfinIO/sailfin/commit/a7d482038378d64b441a9119ec66ec2f008f7183))
+
+Bumps [undici](https://github.com/nodejs/undici) from 7.14.0 to 7.24.4. - [Release
+  notes](https://github.com/nodejs/undici/releases) -
+  [Commits](https://github.com/nodejs/undici/compare/v7.14.0...v7.24.4)
+
+--- updated-dependencies: - dependency-name: undici dependency-version: 7.24.4
+
+dependency-type: indirect ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+### Documentation
+
+- Update getting-started install page to document native Windows support
+  ([`bc69387`](https://github.com/SailfinIO/sailfin/commit/bc693879e5f5ca0acc41dffd8cab858611821c32))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/2ea2c5cd-267b-4f6b-923f-a7829b26829a
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Features
+
+- **tests**: Add comprehensive unit and integration tests for core language features
+  ([`b810973`](https://github.com/SailfinIO/sailfin/commit/b810973b06bcdc8fdb6f0c035c1e9e345eeeb9fc))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/53eb0370-96ff-44ad-a1d4-0f0eadebdac4
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
+## v0.3.2 (2026-03-30)
+
+### Bug Fixes
+
+- **docs**: Correct GitHub org and install script URLs in site docs
+  ([`05c988e`](https://github.com/SailfinIO/sailfin/commit/05c988e905ac36f0871b3e7152b204fdf4f7fbef))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/5bab19c7-30d8-4600-95fd-bee6cbb0b8a1
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Documentation
+
+- Add Sailfin VS Code extension (editor setup) documentation
+  ([`6f20611`](https://github.com/SailfinIO/sailfin/commit/6f206110a291dbbdfbc5f6eabb77c14908442674))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/782e46a7-7544-4553-b9d0-0f760f8ab6f7
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
+## v0.3.1 (2026-03-29)
+
+### Bug Fixes
+
+- **site**: Show close icon when mobile hamburger menu is open
+  ([`18c8429`](https://github.com/SailfinIO/sailfin/commit/18c8429181bb9cb82715267c90b6a12ce6ab89c6))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/88d7fe86-c0b7-46ac-b109-20e791156b9a
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
+## v0.3.0 (2026-03-29)
+
+### Bug Fixes
+
+- Correct GitHub link to SailfinIO/sailfin repo in community page and footer
+  ([`fd7662f`](https://github.com/SailfinIO/sailfin/commit/fd7662fe49a74c40abfd1c0066c8e6f46cc81002))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/03d5bc9c-d954-49d3-b004-2d9cd151d9d1
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Features
+
+- **site**: Add Open Graph and Twitter Card social metadata
+  ([`1e503cd`](https://github.com/SailfinIO/sailfin/commit/1e503cd91e4cb8eb203cf727eef177fab8d340a0))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/fb95cc5b-9094-49f8-a634-2da6338cf0a6
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
+## v0.2.1 (2026-03-29)
+
+### Bug Fixes
+
+- **site**: Fix hamburger menu — add mobile nav drawer, toggle JS, icon swap
+  ([`8c4ecdb`](https://github.com/SailfinIO/sailfin/commit/8c4ecdbb6004758dc79ae5c92f6962a6b6d320fe))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/e6accb75-dc83-40d0-8fb8-532a0f97a1aa
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
+## v0.2.0 (2026-03-29)
+
+### Chores
+
+- Add .github/copilot-instructions.md for GitHub Copilot coding agent
+  ([`46ed7cf`](https://github.com/SailfinIO/sailfin/commit/46ed7cf4ed3afe4d6316b91bcacfd24aefb463ff))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a66c4f80-7eac-4e3e-b144-9a0293f0441b
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- Merge beta into rc, resolving conflicts
+  ([`8b4f59a`](https://github.com/SailfinIO/sailfin/commit/8b4f59ad1341e0b31cf45f918af3c1cba5f48ef2))
+
+Merge origin/beta (v0.2.0-beta.1) into rc (v0.1.2-rc.1).
+
+Conflict resolutions: - compiler/src/version.sfn: use beta version '0.2.0-beta.1' - CHANGELOG.md:
+  combine both changelog sections; beta's newer entries (v0.2.0-beta.1 through v0.1.1-alpha.136)
+  precede rc's entries (v0.1.2-rc.1) - .github/workflows/release-tag.yml: use beta's version which
+  has correct 2-space YAML indentation and adds Windows cross-compile steps
+
+Key changes from beta included: - site/ directory (Astro-based documentation website) -
+  capsules/sfn/* standard library capsules - Windows cross-compile support (MinGW-w64) - Runtime
+  enhancements (base64, sha256) - Compiler improvements (LLVM lowering, parser, type checker) -
+  install.ps1 for Windows installer
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- Merge rc into main (v0.1.2-rc.1)
+  ([`1cc5308`](https://github.com/SailfinIO/sailfin/commit/1cc530862bf54d7e980f0b01b84013a1261f8b76))
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- Merge remote tracking branch for conflict resolution
+  ([`c1b8572`](https://github.com/SailfinIO/sailfin/commit/c1b85726a1438643a66f2c2b2955a8cb89adf278))
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Documentation
+
+- Add conflict resolution log for beta→rc merge (PR #27)
+  ([`d237280`](https://github.com/SailfinIO/sailfin/commit/d237280bbd92d88998c2d7539ec99a0bb022858e))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/ed49f562-6e19-463d-a741-d2b2cb8ce450
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+
 ## v0.2.0-beta.1 (2026-03-29)
 
 
@@ -186,11 +501,6 @@ Skip the entire compiler-object link step on macOS. Tests remain self-contained 
 - Abi enahancement
   ([`0762add`](https://github.com/SailfinIO/sailfin/commit/0762add251caf40f8271c53042cbcdb9eed98366))
 
-
-## v0.1.1-beta.2 (2026-01-20)
-
-### Bug Fixes
-
 - Merge conflicts by adding gitattributes
   ([`0fdac52`](https://github.com/SailfinIO/sailfin/commit/0fdac52b61db42c5d7bbd0b8fbdc3844224cdba2))
 
@@ -204,6 +514,109 @@ Skip the entire compiler-object link step on macOS. Tests remain self-contained 
 
 - Remove legacy stage2 ref
   ([`3d2781d`](https://github.com/SailfinIO/sailfin/commit/3d2781d78a564672f8a5e4ec7df294f39f1d2e2b))
+
+
+## v0.1.2-rc.1 (2026-03-29)
+
+### Bug Fixes
+
+- Apply conflict resolution from beta/rc merge to PR branch
+  ([`7e4a7eb`](https://github.com/SailfinIO/sailfin/commit/7e4a7ebb3ff1fa76798815968c6ef92d28c9275a))
+
+Resolves the two files that had conflicts when merging beta into rc: - CHANGELOG.md: combine beta's
+  new entries (v0.2.0-alpha.3..v0.1.1-alpha.136) with rc's v0.1.1-rc.1 entry in correct
+  chronological order - compiler/src/version.sfn: keep beta's version string (0.2.0-alpha.3)
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/c6f135b3-740d-4485-8fd3-1334d6e0921c
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Chores
+
+- **deps**: Bump actions/checkout from 4 to 6
+  ([`8b42713`](https://github.com/SailfinIO/sailfin/commit/8b42713726b7ac39a11b99d0695bc9ad78f89d65))
+
+Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6. - [Release
+  notes](https://github.com/actions/checkout/releases) -
+  [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/actions/checkout/compare/v4...v6)
+
+--- updated-dependencies: - dependency-name: actions/checkout dependency-version: '6'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/download-artifact from 4 to 7
+  ([`089ba9a`](https://github.com/SailfinIO/sailfin/commit/089ba9a0554d52c25ebc781e18d6ee123d30a165))
+
+Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 4 to 7. -
+  [Release notes](https://github.com/actions/download-artifact/releases) -
+  [Commits](https://github.com/actions/download-artifact/compare/v4...v7)
+
+--- updated-dependencies: - dependency-name: actions/download-artifact dependency-version: '7'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/download-artifact from 7 to 8
+  ([`e93c9ef`](https://github.com/SailfinIO/sailfin/commit/e93c9ef722550da755195eea83aca31dfa1f2dc2))
+
+Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 7 to 8. -
+  [Release notes](https://github.com/actions/download-artifact/releases) -
+  [Commits](https://github.com/actions/download-artifact/compare/v7...v8)
+
+--- updated-dependencies: - dependency-name: actions/download-artifact dependency-version: '8'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/upload-artifact from 4 to 6
+  ([`12cad17`](https://github.com/SailfinIO/sailfin/commit/12cad17d6ffe9fe16220ef69fe0a6ec65de00e10))
+
+Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 4 to 6. - [Release
+  notes](https://github.com/actions/upload-artifact/releases) -
+  [Commits](https://github.com/actions/upload-artifact/compare/v4...v6)
+
+--- updated-dependencies: - dependency-name: actions/upload-artifact dependency-version: '6'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump actions/upload-artifact from 6 to 7
+  ([`0a9ed07`](https://github.com/SailfinIO/sailfin/commit/0a9ed0756d6c8b063d028f8d8d065bfd33b43bbd))
+
+Bumps [actions/upload-artifact](https://github.com/actions/upload-artifact) from 6 to 7. - [Release
+  notes](https://github.com/actions/upload-artifact/releases) -
+  [Commits](https://github.com/actions/upload-artifact/compare/v6...v7)
+
+--- updated-dependencies: - dependency-name: actions/upload-artifact dependency-version: '7'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+
+## v0.1.1 (2026-01-20)
+
+
+## v0.1.1-rc.1 (2026-01-20)
+
+
+## v0.1.1-beta.2 (2026-01-20)
 
 
 ## v0.1.1-beta.1 (2026-01-20)

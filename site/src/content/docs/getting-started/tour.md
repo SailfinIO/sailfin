@@ -2,7 +2,7 @@
 title: Tour of Sailfin
 description: A guided introduction to Sailfin's key features.
 section: getting-started
-order: 3
+order: 4
 ---
 
 This tour walks through Sailfin's distinctive features. By the end, you'll understand what makes Sailfin different and how its features work together.

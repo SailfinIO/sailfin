@@ -5,7 +5,7 @@ section: reference
 order: 7
 ---
 
-> Canonical source: [`docs/runtime_abi.md`](https://github.com/sailfin/sailfin/blob/main/docs/runtime_abi.md)
+> Canonical source: [`docs/runtime_abi.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/runtime_abi.md)
 
 ## Goals
 
@@ -54,4 +54,4 @@ Structured frames with deterministic unwind. Currently implemented via C runtime
 
 ---
 
-*The runtime is actively migrating from C to Sailfin. See the [runtime audit](https://github.com/sailfin/sailfin/blob/main/docs/runtime_audit.md) for current status.*
+*The runtime is actively migrating from C to Sailfin. See the [runtime audit](https://github.com/SailfinIO/sailfin/blob/main/docs/runtime_audit.md) for current status.*

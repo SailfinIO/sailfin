@@ -6,12 +6,13 @@ interface Props {
   description?: string;
   date?: string;
   author?: string;
+  image?: string;
 }
 
-const { title, description, date, author } = Astro.props;
+const { title, description, date, author, image } = Astro.props;
 ---
 
-<BaseLayout title={title} description={description}>
+<BaseLayout title={title} description={description} image={image} type="article">
   <article class="blog-post">
     <header class="blog-header">
       <h1>{title}</h1>

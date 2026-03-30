@@ -10,7 +10,7 @@ order: 1
 1. Fork and clone the repository:
 
 ```bash
-git clone https://github.com/sailfin/sailfin.git
+git clone https://github.com/SailfinIO/sailfin.git
 cd sailfin
 ```
 
