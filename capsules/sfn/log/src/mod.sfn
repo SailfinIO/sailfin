@@ -56,11 +56,11 @@ fn log_info(log -> Logger, message -> string, fields -> string[] = []) -> void !
 }
 
 fn log_warn(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
-    print(_format_message("WARN", log, message, fields));
+    print.err(_format_message("WARN", log, message, fields));
 }
 
 fn log_error(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
-    print(_format_message("ERROR", log, message, fields));
+    print.err(_format_message("ERROR", log, message, fields));
 }
 
 fn log_debug(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
@@ -76,12 +76,12 @@ fn info(message -> string, fields -> string[] = []) -> void ![io] {
 
 fn warn(message -> string, fields -> string[] = []) -> void ![io] {
     let root = Logger { name: "" };
-    print(_format_message("WARN", root, message, fields));
+    print.err(_format_message("WARN", root, message, fields));
 }
 
 fn error(message -> string, fields -> string[] = []) -> void ![io] {
     let root = Logger { name: "" };
-    print(_format_message("ERROR", root, message, fields));
+    print.err(_format_message("ERROR", root, message, fields));
 }
 
 fn debug(message -> string, fields -> string[] = []) -> void ![io] {

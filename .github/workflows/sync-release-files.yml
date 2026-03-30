@@ -41,8 +41,8 @@ jobs:
             - name: Sync version.sfn and CHANGELOG.md to base branch
               run: |
                   set -euo pipefail
-                  head="${{ github.head_ref }}"
-                  base="${{ github.base_ref }}"
+                  head=$(printf '%s' "${{ github.head_ref }}" | tr -cd 'A-Za-z0-9/_.-')
+                  base=$(printf '%s' "${{ github.base_ref }}" | tr -cd 'A-Za-z0-9/_.-')
 
                   # Never modify a managed release branch — each owns its own
                   # version string and CHANGELOG section.
