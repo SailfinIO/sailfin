@@ -53,4 +53,4 @@ Workspaces enforce policies across all members:
 
 ---
 
-*Workspace support is specified but not yet fully implemented in the CLI. See the [package management proposal](https://github.com/sailfin/sailfin/blob/main/docs/proposals/package-management.md).*
+*Workspace support is specified but not yet fully implemented in the CLI. See the [package management proposal](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/package-management.md).*

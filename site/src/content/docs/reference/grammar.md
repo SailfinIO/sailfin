@@ -5,7 +5,7 @@ section: reference
 order: 2
 ---
 
-> The complete EBNF grammar is maintained in [`docs/enbf.md`](https://github.com/sailfin/sailfin/blob/main/docs/enbf.md).
+> The complete EBNF grammar is maintained in [`docs/enbf.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/enbf.md).
 
 The grammar covers:
 
@@ -22,4 +22,4 @@ The grammar covers:
 
 ---
 
-*Full EBNF will be rendered here. For now, refer to the [source grammar](https://github.com/sailfin/sailfin/blob/main/docs/enbf.md).*
+*Full EBNF will be rendered here. For now, refer to the [source grammar](https://github.com/SailfinIO/sailfin/blob/main/docs/enbf.md).*

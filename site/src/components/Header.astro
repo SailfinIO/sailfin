@@ -51,15 +51,89 @@ const navItems = [
       <a href="/docs/getting-started/install" class="btn-get-started">Get Started</a>
     </div>
 
-    <button class="mobile-menu-btn" aria-label="Toggle menu" aria-expanded="false">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle menu" aria-expanded="false" aria-controls="mobile-nav">
+      <svg class="icon-hamburger" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <line x1="3" y1="6" x2="21" y2="6" />
         <line x1="3" y1="12" x2="21" y2="12" />
         <line x1="3" y1="18" x2="21" y2="18" />
       </svg>
+      <svg class="icon-close hidden" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="4" y1="4" x2="20" y2="20" />
+        <line x1="20" y1="4" x2="4" y2="20" />
+      </svg>
     </button>
   </div>
+
+  <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation" aria-hidden="true">
+    {navItems.map((item) => (
+      <div class="mobile-nav-item">
+        <a href={item.href} class="mobile-nav-link">{item.label}</a>
+        {item.children && (
+          <div class="mobile-nav-children">
+            {item.children.map((child) => (
+              <a href={child.href} class="mobile-nav-child-link">{child.label}</a>
+            ))}
+          </div>
+        )}
+      </div>
+    ))}
+    <a href="/docs/getting-started/install" class="mobile-btn-get-started">Get Started</a>
+  </nav>
 </header>
+
+<script>
+  const btn = document.getElementById("mobile-menu-btn") as HTMLButtonElement | null;
+  const nav = document.getElementById("mobile-nav") as HTMLElement | null;
+
+  if (btn && nav) {
+    const iconHamburger = btn.querySelector<SVGElement>(".icon-hamburger");
+    const iconClose = btn.querySelector<SVGElement>(".icon-close");
+    let isOpen = false;
+
+    function openMenu() {
+      isOpen = true;
+      nav.classList.add("is-open");
+      nav.setAttribute("aria-hidden", "false");
+      btn.setAttribute("aria-expanded", "true");
+      if (iconHamburger) iconHamburger.classList.add("hidden");
+      if (iconClose) iconClose.classList.remove("hidden");
+    }
+
+    function closeMenu() {
+      isOpen = false;
+      nav.classList.remove("is-open");
+      nav.setAttribute("aria-hidden", "true");
+      btn.setAttribute("aria-expanded", "false");
+      if (iconHamburger) iconHamburger.classList.remove("hidden");
+      if (iconClose) iconClose.classList.add("hidden");
+    }
+
+    btn.addEventListener("click", () => {
+      if (isOpen) {
+        closeMenu();
+      } else {
+        openMenu();
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && isOpen) {
+        closeMenu();
+        btn.focus();
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (
+        isOpen &&
+        !nav.contains(e.target as Node) &&
+        !btn.contains(e.target as Node)
+      ) {
+        closeMenu();
+      }
+    });
+  }
+</script>
 
 <style>
   .site-header {
@@ -69,6 +143,13 @@ const navItems = [
     position: sticky;
     top: 0;
     z-index: 100;
+  }
+
+  @media (max-width: 768px) {
+    .site-header {
+      height: auto;
+      min-height: var(--header-height);
+    }
   }
 
   .header-inner {
@@ -200,6 +281,10 @@ const navItems = [
     color: var(--color-text);
   }
 
+  .hidden {
+    display: none !important;
+  }
+
   @media (max-width: 768px) {
     .main-nav,
     .header-actions {
@@ -210,5 +295,88 @@ const navItems = [
       display: block;
       margin-left: auto;
     }
+  }
+
+  /* Mobile nav drawer */
+  .mobile-nav {
+    display: none;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem 1.5rem 1.5rem;
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .mobile-nav.is-open {
+    display: flex;
+  }
+
+  @media (min-width: 769px) {
+    .mobile-nav {
+      display: none !important;
+    }
+  }
+
+  .mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mobile-nav-link {
+    padding: 0.65rem 0.5rem;
+    color: var(--color-text);
+    font-size: 1rem;
+    font-weight: 500;
+    text-decoration: none;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+
+  .mobile-nav-link:hover {
+    background: var(--color-bg-alt);
+    text-decoration: none;
+  }
+
+  .mobile-nav-children {
+    display: flex;
+    flex-direction: column;
+    padding-left: 1rem;
+    border-left: 2px solid var(--color-border);
+    margin: 0.25rem 0 0.25rem 0.5rem;
+  }
+
+  .mobile-nav-child-link {
+    padding: 0.5rem 0.5rem;
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    text-decoration: none;
+    border-radius: 4px;
+    transition: background 0.15s;
+  }
+
+  .mobile-nav-child-link:hover {
+    background: var(--color-bg-alt);
+    color: var(--color-text);
+    text-decoration: none;
+  }
+
+  .mobile-btn-get-started {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0.75rem;
+    padding: 0.65rem 1.25rem;
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+
+  .mobile-btn-get-started:hover {
+    background: var(--color-primary-dark);
+    text-decoration: none;
   }
 </style>

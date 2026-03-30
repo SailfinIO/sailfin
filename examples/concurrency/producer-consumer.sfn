@@ -8,7 +8,7 @@ fn main() ![clock, io] {
 
     routine {
         for i in 1..20 {
-            print.info("Producing {{i}}");
+            print("Producing {{i}}");
             buffer.send(i);
             sleep(500);
         }
@@ -17,7 +17,7 @@ fn main() ![clock, io] {
     routine {
         loop {
             let item = await buffer.receive();
-            print.info("Consumed {{item}}");
+            print("Consumed {{item}}");
             sleep(1000);
         }
     }

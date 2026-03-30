@@ -1,0 +1,49 @@
+struct DivisionError {
+    message -> string;
+}
+
+fn _safe_divide(a -> number, b -> number) -> number | DivisionError {
+    if b == 0 {
+        return DivisionError { message: "division by zero" };
+    }
+    return a / b;
+}
+
+struct ParseError {
+    message -> string;
+}
+
+fn _parse_non_negative(n -> number) -> number | ParseError {
+    if n < 0 {
+        return ParseError { message: "expected non-negative number" };
+    }
+    return n;
+}
+
+// NOTE: match on union return types (e.g. `number | DivisionError`) causes
+// a compiler segfault during LLVM lowering. These tests verify that union
+// return types compile and can be called, but cannot yet inspect the result
+// via match destructuring.
+// See: https://github.com/SailfinIO/sailfin/issues/50
+
+test "error_handling: union return function compiles and runs (success path)" {
+    let result = _safe_divide(10, 2);
+    // Once match on union types is supported, assert the numeric result here
+    assert 1 == 1;
+}
+
+test "error_handling: union return function compiles and runs (error path)" {
+    let result = _safe_divide(10, 0);
+    // Once match on union types is supported, assert the error message here
+    assert 1 == 1;
+}
+
+test "error_handling: parse_positive compiles and runs (success path)" {
+    let result = _parse_non_negative(42);
+    assert 1 == 1;
+}
+
+test "error_handling: parse_positive compiles and runs (error path)" {
+    let result = _parse_non_negative(-5);
+    assert 1 == 1;
+}

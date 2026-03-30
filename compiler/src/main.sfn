@@ -226,7 +226,7 @@ fn compile_to_native_llvm(source -> string) -> LoweredLLVMResultAny ![io] {
             if index >= combined.length {
                 break;
             }
-            print.warn("[native-llvm] " + combined[index]);
+            print("[native-llvm] " + combined[index]);
             index += 1;
         }
     }
@@ -279,7 +279,7 @@ fn compile_to_native_llvm_with_module(source -> string, module_name -> string) -
             if index >= combined.length {
                 break;
             }
-            print.warn("[native-llvm] " + combined[index]);
+            print("[native-llvm] " + combined[index]);
             index += 1;
         }
     }
@@ -307,19 +307,19 @@ fn compile_to_llvm(source -> string) -> string ![io] {
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, "main");
     if trace_emit {
-        print.warn("emit-llvm: native text bytes=" + number_to_string(native_text.length));
+        print("emit-llvm: native text bytes=" + number_to_string(native_text.length));
         if native_text.length > 0 {
             fs.writeFile("build/sailfin/debug-emit-native.sfn-asm", native_text);
-            print.warn("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
+            print("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
         }
     }
     if native_text.length > 0 {
         let ir = lower_to_llvm_ir_from_text(native_text, "main");
         if trace_emit {
-            print.warn("emit-llvm: llvm bytes=" + number_to_string(ir.length));
+            print("emit-llvm: llvm bytes=" + number_to_string(ir.length));
             if ir.length > 0 {
                 fs.writeFile("build/sailfin/debug-emit-llvm.ll", ir);
-                print.warn("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
+                print("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
             }
         }
         return ir;
@@ -327,10 +327,10 @@ fn compile_to_llvm(source -> string) -> string ![io] {
     let native_result = emit_native_with_module_name(program, "main");
     let ir = lower_to_llvm_ir(native_result.module);
     if trace_emit {
-        print.warn("emit-llvm: llvm bytes=" + number_to_string(ir.length));
+        print("emit-llvm: llvm bytes=" + number_to_string(ir.length));
         if ir.length > 0 {
             fs.writeFile("build/sailfin/debug-emit-llvm.ll", ir);
-            print.warn("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
+            print("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
         }
     }
     return ir;
@@ -346,15 +346,15 @@ fn compile_to_llvm_with_module(source -> string, module_name -> string) -> strin
             return "";
         }
     } else {
-        print.warn("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
+        print("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
-        print.warn("emit-llvm: native text bytes=" + number_to_string(native_text.length));
+        print("emit-llvm: native text bytes=" + number_to_string(native_text.length));
         if native_text.length > 0 {
             fs.writeFile("build/sailfin/debug-emit-native.sfn-asm", native_text);
-            print.warn("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
+            print("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
         }
     }
     let mut ir -> string = "";
@@ -369,10 +369,10 @@ fn compile_to_llvm_with_module(source -> string, module_name -> string) -> strin
         ir = lower_to_llvm_ir(native_result.module);
     }
     if trace_emit {
-        print.warn("emit-llvm: llvm bytes=" + number_to_string(ir.length));
+        print("emit-llvm: llvm bytes=" + number_to_string(ir.length));
         if ir.length > 0 {
             fs.writeFile("build/sailfin/debug-emit-llvm.ll", ir);
-            print.warn("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
+            print("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
         }
     }
     return ir;
@@ -391,23 +391,23 @@ fn compile_to_llvm_with_module_timed(source -> string, module_name -> string) ->
         if typecheck_has_errors(program) {
             let diagnostics = typecheck_diagnostics(program);
             report_typecheck_errors(diagnostics, source);
-            print.warn(_timing_line(module_name, "parse", t_parse));
-            print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+            print(_timing_line(module_name, "parse", t_parse));
+            print(_timing_line(module_name, "typecheck", t_typecheck));
             return "";
         }
     } else {
         t_typecheck = _ms_since(t1);
-        print.warn("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
+        print("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
 
     let t2 = monotonic_millis();
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
-        print.warn("emit-llvm: native text bytes=" + number_to_string(native_text.length));
+        print("emit-llvm: native text bytes=" + number_to_string(native_text.length));
         if native_text.length > 0 {
             fs.writeFile("build/sailfin/debug-emit-native.sfn-asm", native_text);
-            print.warn("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
+            print("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
         }
     }
     let t_emit_native = _ms_since(t2);
@@ -421,19 +421,19 @@ fn compile_to_llvm_with_module_timed(source -> string, module_name -> string) ->
         ir = lower_to_llvm_ir(native_result.module);
     }
     if trace_emit {
-        print.warn("emit-llvm: llvm bytes=" + number_to_string(ir.length));
+        print("emit-llvm: llvm bytes=" + number_to_string(ir.length));
         if ir.length > 0 {
             fs.writeFile("build/sailfin/debug-emit-llvm.ll", ir);
-            print.warn("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
+            print("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
         }
     }
     let t_lower_llvm = _ms_since(t3);
 
-    print.warn(_timing_line(module_name, "parse", t_parse));
-    print.warn(_timing_line(module_name, "typecheck", t_typecheck));
-    print.warn(_timing_line(module_name, "emit_native", t_emit_native));
-    print.warn(_timing_line(module_name, "lower_llvm", t_lower_llvm));
-    print.warn(_timing_line(module_name, "total", _ms_since(t0)));
+    print(_timing_line(module_name, "parse", t_parse));
+    print(_timing_line(module_name, "typecheck", t_typecheck));
+    print(_timing_line(module_name, "emit_native", t_emit_native));
+    print(_timing_line(module_name, "lower_llvm", t_lower_llvm));
+    print(_timing_line(module_name, "total", _ms_since(t0)));
     return ir;
 }
 
@@ -447,7 +447,7 @@ fn compile_to_llvm_lines_with_module(source -> string, module_name -> string) ->
             return [];
         }
     } else {
-        print.warn("emit-llvm-lines: skipping typecheck (build/sailfin/.skip_typecheck present)");
+        print("emit-llvm-lines: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
     let native_result = emit_native_with_module_name(program, module_name);
     return lower_to_llvm_lines_only(native_result.module);
@@ -463,8 +463,8 @@ fn compile_to_llvm_lines_with_module_timed(source -> string, module_name -> stri
     if typecheck_has_errors(program) {
         let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
-        print.warn(_timing_line(module_name, "parse", t_parse));
-        print.warn(_timing_line(module_name, "typecheck", t_typecheck));
+        print(_timing_line(module_name, "parse", t_parse));
+        print(_timing_line(module_name, "typecheck", t_typecheck));
         return [];
     }
 
@@ -476,11 +476,11 @@ fn compile_to_llvm_lines_with_module_timed(source -> string, module_name -> stri
     let lines = lower_to_llvm_lines_only(native_result.module);
     let t_lower_llvm = _ms_since(t3);
 
-    print.warn(_timing_line(module_name, "parse", t_parse));
-    print.warn(_timing_line(module_name, "typecheck", t_typecheck));
-    print.warn(_timing_line(module_name, "emit_native", t_emit_native));
-    print.warn(_timing_line(module_name, "lower_llvm", t_lower_llvm));
-    print.warn(_timing_line(module_name, "total", _ms_since(t0)));
+    print(_timing_line(module_name, "parse", t_parse));
+    print(_timing_line(module_name, "typecheck", t_typecheck));
+    print(_timing_line(module_name, "emit_native", t_emit_native));
+    print(_timing_line(module_name, "lower_llvm", t_lower_llvm));
+    print(_timing_line(module_name, "total", _ms_since(t0)));
     return lines;
 }
 
@@ -489,16 +489,16 @@ fn compile_to_llvm_lines_with_module_timed(source -> string, module_name -> stri
 fn compile_tests_to_llvm(source -> string) -> string ![io] {
     let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
     if trace {
-        print.info("test compiler: compile_to_native start");
+        print("test compiler: compile_to_native start");
     }
     let native_result = compile_to_native(source);
     if trace {
-        print.info("test compiler: compile_to_native done (diagnostics=" + number_to_string(native_result.diagnostics.length) + ")");
-        print.info("test compiler: lower_to_llvm_for_tests start");
+        print("test compiler: compile_to_native done (diagnostics=" + number_to_string(native_result.diagnostics.length) + ")");
+        print("test compiler: lower_to_llvm_for_tests start");
     }
     let ir = lower_to_llvm_ir_for_tests(native_result.module);
     if trace {
-        print.info("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(ir.length) + ")");
+        print("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(ir.length) + ")");
     }
     return ir;
 }
@@ -506,7 +506,7 @@ fn compile_tests_to_llvm(source -> string) -> string ![io] {
 fn compile_tests_to_llvm_with_module(source -> string, module_name -> string) -> string ![io] {
     let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
     if trace {
-        print.info("test compiler: parse_program start");
+        print("test compiler: parse_program start");
     }
     let program -> Program = parse_program(source);
     if typecheck_has_errors(program) {
@@ -515,18 +515,18 @@ fn compile_tests_to_llvm_with_module(source -> string, module_name -> string) ->
         return "";
     }
     if trace {
-        print.info("test compiler: emit_native_with_module_name start (module=" + module_name + ")");
+        print("test compiler: emit_native_with_module_name start (module=" + module_name + ")");
     }
     let native_result = emit_native_with_module_name(program, module_name);
     if trace {
-        print.info("test compiler: native artifacts=" + number_to_string(native_result.module.artifacts.length));
+        print("test compiler: native artifacts=" + number_to_string(native_result.module.artifacts.length));
         let mut artifact_index -> number = 0;
         loop {
             if artifact_index >= native_result.module.artifacts.length {
                 break;
             }
             let artifact = native_result.module.artifacts[artifact_index];
-            print.info(
+            print(
                 "test compiler: artifact[" + number_to_string(artifact_index)
                 + "] format=" + artifact.format
                 + " bytes=" + number_to_string(artifact.contents.length)
@@ -535,15 +535,15 @@ fn compile_tests_to_llvm_with_module(source -> string, module_name -> string) ->
         }
         let text_artifact = select_text_artifact(native_result.module.artifacts);
         if text_artifact == null {
-            print.warn("test compiler: missing sailfin-native-text artifact");
+            print("test compiler: missing sailfin-native-text artifact");
         } else {
-            print.info("test compiler: native text bytes=" + number_to_string(text_artifact.contents.length));
+            print("test compiler: native text bytes=" + number_to_string(text_artifact.contents.length));
         }
-        print.info("test compiler: lower_to_llvm_for_tests start");
+        print("test compiler: lower_to_llvm_for_tests start");
     }
     let llvm_text = lower_to_llvm_ir_for_tests(native_result.module);
     if trace {
-        print.info("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(llvm_text.length) + ")");
+        print("test compiler: lower_to_llvm_for_tests done (ir_bytes=" + number_to_string(llvm_text.length) + ")");
     }
     return llvm_text;
 }
@@ -555,7 +555,7 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
     let trace = trace_file && active_file;
     if trace_file || active_file {
         if trace {
-            print.info("test compiler: trace enabled (trace_file=true, active_file=true)");
+            print("test compiler: trace enabled (trace_file=true, active_file=true)");
         } else {
             let mut trace_text -> string = "false";
             if trace_file {
@@ -565,7 +565,7 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
             if active_file {
                 active_text = "true";
             }
-            print.warn(
+            print(
                 "test compiler: trace disabled (trace_file="
                 + trace_text
                 + ", active_file="
@@ -575,7 +575,7 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
         }
     }
     if trace {
-        print.info("test compiler: parse_program start");
+        print("test compiler: parse_program start");
     }
     let program -> Program = parse_program(source);
     if typecheck_has_errors(program) {
@@ -584,12 +584,12 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
         return false;
     }
     if trace {
-        print.info("test compiler: emit_native_with_module_name start (module=" + module_name + ")");
+        print("test compiler: emit_native_with_module_name start (module=" + module_name + ")");
     }
     let native_text = emit_native_text_with_module_name(program, module_name);
     if trace {
-        print.info("test compiler: native text bytes=" + number_to_string(native_text.length));
-        print.info("test compiler: lower_to_llvm_for_tests start");
+        print("test compiler: native text bytes=" + number_to_string(native_text.length));
+        print("test compiler: lower_to_llvm_for_tests start");
     }
     if fs.exists(out_path) {
         fs.deleteFile(out_path);
@@ -597,7 +597,7 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
     if trace {
         if native_text.length > 0 {
             fs.writeFile("build/sailfin/debug-test-native.sfn-asm", native_text);
-            print.info("test compiler: wrote build/sailfin/debug-test-native.sfn-asm");
+            print("test compiler: wrote build/sailfin/debug-test-native.sfn-asm");
         }
     }
 
@@ -607,11 +607,11 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
     }
     let content = fs.readFile(out_path);
     if trace {
-        print.info("test compiler: write_llvm_ir_for_tests bytes=" + number_to_string(content.length));
+        print("test compiler: write_llvm_ir_for_tests bytes=" + number_to_string(content.length));
     }
     if content.length <= 4 {
         if trace {
-            print.warn("test compiler: suspiciously short llvm output (len=" + number_to_string(content.length) + ")");
+            print("test compiler: suspiciously short llvm output (len=" + number_to_string(content.length) + ")");
         }
         return false;
     }
@@ -628,18 +628,18 @@ fn compile_tests_to_llvm_lines_with_module(source -> string, module_name -> stri
     }
     let native_result = emit_native_with_module_name(program, module_name);
     if trace {
-        print.info("test compiler: native artifacts=" + number_to_string(native_result.module.artifacts.length));
+        print("test compiler: native artifacts=" + number_to_string(native_result.module.artifacts.length));
         let text_artifact = select_text_artifact(native_result.module.artifacts);
         if text_artifact == null {
-            print.warn("test compiler: missing sailfin-native-text artifact");
+            print("test compiler: missing sailfin-native-text artifact");
         } else {
-            print.info("test compiler: native text bytes=" + number_to_string(text_artifact.contents.length));
+            print("test compiler: native text bytes=" + number_to_string(text_artifact.contents.length));
         }
-        print.info("test compiler: lower_to_llvm_ir_for_tests start");
+        print("test compiler: lower_to_llvm_ir_for_tests start");
     }
     let llvm_text = lower_to_llvm_ir_for_tests(native_result.module);
     if trace {
-        print.info("test compiler: lower_to_llvm_ir_for_tests done (ir_bytes=" + number_to_string(llvm_text.length) + ")");
+        print("test compiler: lower_to_llvm_ir_for_tests done (ir_bytes=" + number_to_string(llvm_text.length) + ")");
     }
     if llvm_text.length == 0 {
         return [];
@@ -661,10 +661,10 @@ fn compile_to_native_text_with_module(source -> string, module_name -> string) -
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
-        print.warn("emit-native: native text bytes=" + number_to_string(text.length));
+        print("emit-native: native text bytes=" + number_to_string(text.length));
         if text.length > 0 {
             fs.writeFile("build/sailfin/debug-emit-native.sfn-asm", text);
-            print.warn("emit-native: wrote build/sailfin/debug-emit-native.sfn-asm");
+            print("emit-native: wrote build/sailfin/debug-emit-native.sfn-asm");
         }
     }
     return text;
@@ -760,7 +760,7 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
             return false;
         }
     } else {
-        print.warn("emit-llvm-file: skipping typecheck (build/sailfin/.skip_typecheck present)");
+        print("emit-llvm-file: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
 
     let native_text_path = "build/sailfin/emit-native.tmp";
@@ -769,14 +769,14 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
     }
     let native_ok = emit_native_text_to_file_with_module_name(program, module_name, native_text_path);
     if !native_ok {
-        print.warn("emit-llvm-file: empty native output for module " + module_name);
+        print("emit-llvm-file: empty native output for module " + module_name);
         let cached_native_path = "build/native/import-context/" + module_name + ".sfn-asm";
         if fs.exists(cached_native_path) {
             let cached_ok = write_llvm_ir_from_native_text_file(cached_native_path, module_name, out_path);
             if cached_ok && fs.exists(out_path) {
                 let cached_contents = fs.readFile(out_path);
                 if _looks_like_llvm_text(cached_contents) {
-                    print.warn("emit-llvm-file: used cached native artifact fallback for module " + module_name);
+                    print("emit-llvm-file: used cached native artifact fallback for module " + module_name);
                     return true;
                 }
             }
@@ -817,16 +817,16 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
                 let header = "source_filename = \"" + module_name + ".sfn\"\n\n";
                 fs.writeFile(out_path, header + written);
                 output_valid = true;
-                print.warn("emit-llvm-file: prepended header for module " + module_name);
+                print("emit-llvm-file: prepended header for module " + module_name);
             }
         }
         if !output_valid {
-            print.warn("emit-llvm-file: malformed llvm output for module " + module_name + "; falling back");
+            print("emit-llvm-file: malformed llvm output for module " + module_name + "; falling back");
         }
     }
     if !output_valid {
         if !ok {
-            print.warn("emit-llvm-file: empty llvm output for module " + module_name);
+            print("emit-llvm-file: empty llvm output for module " + module_name);
         }
         let llvm_text = compile_to_llvm_with_module(source, module_name);
         if _looks_like_llvm_text(llvm_text) {
@@ -865,7 +865,7 @@ fn compile_to_native_llvm_full(source -> string) -> LLVMCompilationResult ![io] 
             if index >= combined.length {
                 break;
             }
-            print.warn("[native-llvm] " + combined[index]);
+            print("[native-llvm] " + combined[index]);
             index += 1;
         }
     }
@@ -924,7 +924,7 @@ fn compile_to_native_llvm_full_with_module(source -> string, module_name -> stri
             if index >= combined.length {
                 break;
             }
-            print.warn("[native-llvm] " + combined[index]);
+            print("[native-llvm] " + combined[index]);
             index += 1;
         }
     }
@@ -987,7 +987,7 @@ fn compile_to_native_llvm_with_context(source -> string, manifest_contents -> st
             if index >= combined.length {
                 break;
             }
-            print.warn("[native-llvm] " + combined[index]);
+            print("[native-llvm] " + combined[index]);
             index += 1;
         }
     }
@@ -1061,7 +1061,7 @@ fn compile_to_native_llvm_with_context_with_module(source -> string, module_name
             if index >= combined.length {
                 break;
             }
-            print.warn("[native-llvm] " + combined[index]);
+            print("[native-llvm] " + combined[index]);
             index += 1;
         }
     }
@@ -1147,7 +1147,7 @@ fn compile_to_native_llvm_with_context_with_module_and_entry_points(
             if index >= combined.length {
                 break;
             }
-            print.warn("[native-llvm] " + combined[index]);
+            print("[native-llvm] " + combined[index]);
             index += 1;
         }
     }
@@ -1169,7 +1169,7 @@ fn compile_to_native_llvm_with_manifests(source -> string, manifest_contents -> 
 }
 
 fn stage2_compiler_main() ![io] {
-    print.info("Sailfin compiler");
+    print("Sailfin compiler");
 }
 
 fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> string[] {
@@ -1203,7 +1203,7 @@ fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
         let message = formatted[index];
         let lines = split_source_lines(message);
         if lines.length == 0 {
-            print.error(prefix);
+            print(prefix);
             index += 1;
             continue;
         }
@@ -1213,9 +1213,9 @@ fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
                 break;
             }
             if line_index == 0 {
-                print.error(prefix + lines[line_index]);
+                print(prefix + lines[line_index]);
             } else {
-                print.error(padding + lines[line_index]);
+                print(padding + lines[line_index]);
             }
             line_index += 1;
         }

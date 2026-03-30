@@ -52,41 +52,41 @@ fn _format_message(level -> string, log -> Logger, message -> string, fields -> 
 // ---- Leveled output (with logger) ----
 
 fn log_info(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
-    print.info(_format_message("INFO", log, message, fields));
+    print(_format_message("INFO", log, message, fields));
 }
 
 fn log_warn(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
-    print.warn(_format_message("WARN", log, message, fields));
+    print.err(_format_message("WARN", log, message, fields));
 }
 
 fn log_error(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
-    print.error(_format_message("ERROR", log, message, fields));
+    print.err(_format_message("ERROR", log, message, fields));
 }
 
 fn log_debug(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
-    print.info(_format_message("DEBUG", log, message, fields));
+    print(_format_message("DEBUG", log, message, fields));
 }
 
 // ---- Convenience: leveled output without a logger ----
 
 fn info(message -> string, fields -> string[] = []) -> void ![io] {
     let root = Logger { name: "" };
-    print.info(_format_message("INFO", root, message, fields));
+    print(_format_message("INFO", root, message, fields));
 }
 
 fn warn(message -> string, fields -> string[] = []) -> void ![io] {
     let root = Logger { name: "" };
-    print.warn(_format_message("WARN", root, message, fields));
+    print.err(_format_message("WARN", root, message, fields));
 }
 
 fn error(message -> string, fields -> string[] = []) -> void ![io] {
     let root = Logger { name: "" };
-    print.error(_format_message("ERROR", root, message, fields));
+    print.err(_format_message("ERROR", root, message, fields));
 }
 
 fn debug(message -> string, fields -> string[] = []) -> void ![io] {
     let root = Logger { name: "" };
-    print.info(_format_message("DEBUG", root, message, fields));
+    print(_format_message("DEBUG", root, message, fields));
 }
 
 // ---- Timing ----

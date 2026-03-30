@@ -21,7 +21,7 @@ The language features effect types (`![io, net, model, gpu, rand, clock]`), owne
 ### Environment Setup
 
 ```bash
-make env              # Create/update the 'sailfin' Conda environment
+make env              # Create/update the 'sailfin' Conda environment (only needed for BUILD_DRIVER=py; the default shell driver has no Conda requirement)
 ```
 
 ### Development Workflow
@@ -149,7 +149,7 @@ Examples in `examples/` demonstrate language features:
 
 ```bash
 make compile
-./sfn run examples/basics/hello-world.sfn
+build/native/sailfin run examples/basics/hello-world.sfn
 ```
 
 Check `examples/README.md` for capability requirements (`![io]`, `![model]`, etc.).
@@ -239,7 +239,7 @@ test "parser: parses effectful fn" {
 
 1. Isolate the failing `.sfn` source
 2. Run `make compile` to see bootstrap compiler errors
-3. Run `./sfn test path/to/test_file.sfn` for focused output
+3. Run `build/native/sailfin test path/to/test_file.sfn` for focused output
 4. Review diagnostics for source spans and fix-it hints
 
 ### Self-Hosting Invariants

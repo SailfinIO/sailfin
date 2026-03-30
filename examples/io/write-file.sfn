@@ -4,5 +4,5 @@ import { fs } from "fs";
 
 fn main() ![io] {
     fs.writeFile("output.txt", "Hello, Sail!");
-    print.info("File written successfully.");
+    print("File written successfully.");
 }

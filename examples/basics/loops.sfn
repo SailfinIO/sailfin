@@ -5,7 +5,7 @@ fn main() ![io] {
     let numbers = [1, 2, 3, 4, 5];
 
     for number in numbers {
-        print.info("for value: {{number}}");
+        print("for value: {{number}}");
     }
 
     let mut attempts -> number = 0;
@@ -21,8 +21,8 @@ fn main() ![io] {
             break;
         }
 
-        print.info("loop iteration {{attempts}}");
+        print("loop iteration {{attempts}}");
     }
 
-    print.info("exited loop after {{attempts}} iterations");
+    print("exited loop after {{attempts}} iterations");
 }

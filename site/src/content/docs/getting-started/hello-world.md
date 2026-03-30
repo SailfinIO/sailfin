@@ -2,7 +2,7 @@
 title: "Hello, World!"
 description: Write and run your first Sailfin program.
 section: getting-started
-order: 2
+order: 3
 ---
 
 ## Your First Program

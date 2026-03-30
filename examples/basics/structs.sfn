@@ -11,5 +11,5 @@ struct User {
 
 fn main() ![io] {
     let user -> User = User { id: 1, name: "Alice" };
-    print.info(user.greet());
+    print(user.greet());
 }

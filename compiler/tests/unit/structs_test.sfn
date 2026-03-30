@@ -1,0 +1,102 @@
+struct Point {
+    x -> number;
+    y -> number;
+
+    fn distance_squared_from_origin(self) -> number {
+        return self.x * self.x + self.y * self.y;
+    }
+
+    fn translate(self, dx -> number, dy -> number) -> Point {
+        return Point { x: self.x + dx, y: self.y + dy };
+    }
+}
+
+struct Rectangle {
+    width -> number;
+    height -> number;
+
+    fn new(w -> number, h -> number) -> Rectangle {
+        return Rectangle { width: w, height: h };
+    }
+
+    fn area(self) -> number {
+        return self.width * self.height;
+    }
+
+    // NOTE: `2 * (self.width + self.height)` produces incorrect results
+    // due to a compiler bug with integer literal * parenthesized struct
+    // field expression. Using addition as a workaround.
+    // See: https://github.com/SailfinIO/sailfin/issues/51
+    fn perimeter(self) -> number {
+        let sum = self.width + self.height;
+        return sum + sum;
+    }
+
+    fn is_square(self) -> boolean {
+        return self.width == self.height;
+    }
+
+    fn scale(self, factor -> number) -> Rectangle {
+        return Rectangle { width: self.width * factor, height: self.height * factor };
+    }
+}
+
+test "structs: field access returns correct values" {
+    let p = Point { x: 3, y: 4 };
+    assert p.x == 3;
+    assert p.y == 4;
+}
+
+test "structs: method computes distance squared from origin" {
+    let p = Point { x: 3, y: 4 };
+    assert p.distance_squared_from_origin() == 25;
+}
+
+test "structs: method returns new struct with translated coordinates" {
+    let p = Point { x: 1, y: 2 };
+    let q = p.translate(3, -1);
+    assert q.x == 4;
+    assert q.y == 1;
+}
+
+test "structs: constructor via static method" {
+    let r = Rectangle.new(5, 3);
+    assert r.width == 5;
+    assert r.height == 3;
+}
+
+test "structs: area method returns correct value" {
+    let r = Rectangle.new(6, 4);
+    assert r.area() == 24;
+}
+
+test "structs: perimeter method returns correct value" {
+    let r = Rectangle.new(5, 3);
+    assert r.perimeter() == 16;
+}
+
+test "structs: is_square true for equal sides" {
+    let r = Rectangle.new(4, 4);
+    assert r.is_square() == true;
+}
+
+test "structs: is_square false for unequal sides" {
+    let r = Rectangle.new(3, 5);
+    assert r.is_square() == false;
+}
+
+test "structs: scale returns new struct with updated dimensions" {
+    let r = Rectangle.new(3, 4);
+    let big = r.scale(2);
+    assert big.width == 6;
+    assert big.height == 8;
+}
+
+test "structs: original struct unaffected after method returning new struct" {
+    let p = Point { x: 5, y: 10 };
+    let moved = p.translate(-5, -10);
+    assert moved.x == 0;
+    assert moved.y == 0;
+    assert p.x == 5;
+    assert p.y == 10;
+}

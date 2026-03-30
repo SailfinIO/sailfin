@@ -9,7 +9,7 @@ struct TreeNode {
 fn traverse(node -> TreeNode?) ![io] {
     if node == null { return; }
     traverse(node.left);
-    print.info("{{node.value}}");
+    print("{{node.value}}");
     traverse(node.right);
 }
 

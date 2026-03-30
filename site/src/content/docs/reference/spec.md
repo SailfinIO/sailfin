@@ -5,7 +5,7 @@ section: reference
 order: 1
 ---
 
-> This page will contain the full Sailfin language specification. The canonical source is [`docs/spec.md`](https://github.com/sailfin/sailfin/blob/main/docs/spec.md) in the Sailfin repository.
+> This page will contain the full Sailfin language specification. The canonical source is [`docs/spec.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/spec.md) in the Sailfin repository.
 
 The specification is organized in two parts:
 
@@ -36,4 +36,4 @@ Features that are specified but not yet fully implemented:
 
 ---
 
-*Full specification content will be published here as part of the 1.0 documentation effort. For now, refer to the [source spec](https://github.com/sailfin/sailfin/blob/main/docs/spec.md).*
+*Full specification content will be published here as part of the 1.0 documentation effort. For now, refer to the [source spec](https://github.com/SailfinIO/sailfin/blob/main/docs/spec.md).*

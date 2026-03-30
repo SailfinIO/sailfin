@@ -33,6 +33,6 @@ Check out the [roadmap](/docs/contributing/roadmap) to see what's planned.
 
 - Browse the source on [GitHub](https://github.com/sailfin)
 - Read the [contributor guide](/docs/contributing/guide)
-- Try it out: `curl -fsSL https://sailfin.dev/install.sh | sh`
+- Try it out: `curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash`
 
 We're building Sailfin in the open and welcome contributions of all kinds — from code to documentation to feedback.

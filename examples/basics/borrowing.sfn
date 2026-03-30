@@ -33,5 +33,5 @@ fn main() ![io] {
     let delta -> number = read_counter(final_view) - initial;
 
     let result -> number = after_increment + delta;
-    print.info("Borrowing result: {{result}}");
+    print("Borrowing result: {{result}}");
 }
