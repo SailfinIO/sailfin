@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.4.0-beta.1 (2026-03-30)
+
+### Chores
+
+- Docs, changelog and pr-review tool level
+  ([`29ec5a3`](https://github.com/SailfinIO/sailfin/commit/29ec5a34537642c6eff1edd979b0185d8f19b6fe))
+
+- Regenerate lockfile for awe
+  ([`26f9736`](https://github.com/SailfinIO/sailfin/commit/26f9736e215e76e0c476be1d1c18e46a444fc95b))
+
+
 ## v0.4.0-alpha.3 (2026-03-30)
 
 ### Bug Fixes
@@ -10,13 +21,6 @@
 
 
 ## v0.4.0-alpha.2 (2026-03-30)
-
-### Breaking Changes
-
-- **log capsule**: `log.warn()` and `log.error()` now write to **stderr** instead of stdout.
-  Previously, all log levels routed through `print()` (stdout). They now use `print.err()` (stderr).
-  Code that captures or redirects stdout expecting warn/error output must switch to stderr.
-  The `log.info()` and `log.debug()` functions continue to write to stdout.
 
 ### Bug Fixes
 
