@@ -38,9 +38,10 @@ Move-by-default semantics prevent use-after-free and data races. Verify:
 - The LLVM lowering respects ownership metadata
 
 ### 3. Capability-Based Security
-`Secret<T>` and `PII<T>` types restrict data flow. Verify:
-- Sensitive data doesn't leak through logging, serialization, or display
-- Capability grants in `runtime/prelude.sfn` are minimal and justified
+`Secret<T>` and `PII<T>` are nominal wrappers used to *mark* sensitive data today (no automatic runtime enforcement yet) and are intended to constrain data flow as the implementation matures. Verify:
+- Code and docs do not claim stronger enforcement for `Secret<T>`/`PII<T>` than is actually implemented (they do not, by themselves, prevent leaks)
+- Sensitive data is explicitly protected from leaking through logging, serialization, or display (e.g., redaction, formatting, effect-gated I/O paths)
+- Capability grants in `runtime/prelude.sfn` are minimal, justified, and do not assume implicit protection from `Secret<T>`/`PII<T>`
 
 ## What to Audit
 
