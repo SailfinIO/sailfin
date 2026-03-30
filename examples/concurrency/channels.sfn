@@ -10,5 +10,5 @@ async fn main() ![io] {
     }
 
     let result -> number = await messages.receive();
-    print.info("Received: {{result}}");
+    print("Received: {{result}}");
 }

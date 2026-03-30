@@ -11,6 +11,12 @@ This document tracks what works today and what is in progress.
 - The test runner inlines relative imports (including `compiler/src/*`) into a single compilation unit to avoid missing symbols when executing `sfn test`.
 - Native AOT builds do not rely on any `aot-prepare` text rewrite step; the native compiler emits link-safe LLVM IR directly.
 
+## Print API (Current)
+
+- `print(value)` is the canonical output builtin (stdout, no prefix). `print.err(value)` writes to stderr.
+- `print.info`/`print.warn`/`print.error` are deprecated legacy variants kept for backward compatibility; new code should use `print()` and `print.err()`.
+- The `sfn/log` capsule provides structured logging (`log.info`, `log.warn`, `log.error`, `log.debug`) with named loggers and fields. `log.warn` and `log.error` route to stderr via `print.err()`.
+
 ## Runtime (Current)
 
 - The runtime is implemented in C under `runtime/native/` and linked into the native compiler binary.

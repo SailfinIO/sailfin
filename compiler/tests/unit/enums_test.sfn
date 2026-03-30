@@ -1,0 +1,71 @@
+enum Direction {
+    North,
+    South,
+    East,
+    West,
+}
+
+// NOTE: match on enum variants causes a compiler segfault during LLVM
+// lowering (globals phase). Using if/else chains as a workaround.
+// See: https://github.com/SailfinIO/sailfin/issues/50
+fn _direction_name(d -> Direction) -> string {
+    if d == Direction.North {
+        return "north";
+    } else if d == Direction.South {
+        return "south";
+    } else if d == Direction.East {
+        return "east";
+    } else if d == Direction.West {
+        return "west";
+    }
+    return "unknown";
+}
+
+fn _is_horizontal(d -> Direction) -> boolean {
+    if d == Direction.East || d == Direction.West {
+        return true;
+    }
+    return false;
+}
+
+// NOTE: Tagged (data-carrying) enums with match destructuring currently
+// cause a compiler segfault, so tests exercising that behavior are
+// temporarily excluded until the match statement is fixed.
+// See: https://github.com/SailfinIO/sailfin/issues/50
+
+test "enums: basic enum equality" {
+    let d -> Direction = Direction.North;
+    assert d == Direction.North;
+}
+
+test "enums: basic enum inequality" {
+    let d -> Direction = Direction.South;
+    assert d != Direction.North;
+}
+
+test "enums: direction_name returns correct string for North" {
+    assert _direction_name(Direction.North) == "north";
+}
+
+test "enums: direction_name returns correct string for East" {
+    assert _direction_name(Direction.East) == "east";
+}
+
+test "enums: all four directions resolve correctly" {
+    assert _direction_name(Direction.North) == "north";
+    assert _direction_name(Direction.South) == "south";
+    assert _direction_name(Direction.East)  == "east";
+    assert _direction_name(Direction.West)  == "west";
+}
+
+test "enums: horizontal detection for East" {
+    assert _is_horizontal(Direction.East) == true;
+}
+
+test "enums: horizontal detection for West" {
+    assert _is_horizontal(Direction.West) == true;
+}
+
+test "enums: horizontal false for North" {
+    assert _is_horizontal(Direction.North) == false;
+}

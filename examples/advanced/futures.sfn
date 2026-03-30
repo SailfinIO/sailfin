@@ -15,5 +15,5 @@ async fn main() ![io] {
     let result1 = await future1;
     let result2 = await future2;
 
-    print.info("Results: {{[result1, result2]}}");
+    print("Results: {{[result1, result2]}}");
 }

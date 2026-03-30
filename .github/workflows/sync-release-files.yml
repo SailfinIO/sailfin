@@ -1,0 +1,75 @@
+name: Sync release files
+
+# Prevents version/CHANGELOG merge conflicts on PRs by syncing those files
+# to the base branch before GitHub evaluates mergeability.
+#
+# Why this is needed:
+#   - python-semantic-release bumps compiler/src/version.sfn and CHANGELOG.md
+#     on every push to a release branch (main, rc, beta, alpha).
+#   - Feature branches diverge on those files the moment the next release runs.
+#   - GitHub's server-side conflict check does not honour the `merge=ours`
+#     driver set in .gitattributes, so every PR shows a spurious conflict.
+#   - This workflow resolves that by keeping the base branch's copy of those
+#     files on the PR branch, which is always the correct content anyway
+#     (semantic-release will regenerate them after the PR lands).
+
+on:
+    pull_request:
+        types: [opened, synchronize, reopened]
+
+jobs:
+    sync-release-files:
+        # Skip forks — GITHUB_TOKEN cannot push to a fork's branch.
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+
+        steps:
+            - name: Checkout PR head branch
+              uses: actions/checkout@v6
+              with:
+                  ref: ${{ github.head_ref }}
+                  fetch-depth: 1
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Configure git identity
+              run: |
+                  git config user.name "Sailfin Release Bot"
+                  git config user.email "releases@sailfin.io"
+
+            - name: Sync version.sfn and CHANGELOG.md to base branch
+              run: |
+                  set -euo pipefail
+                  head=$(printf '%s' "${{ github.head_ref }}" | tr -cd 'A-Za-z0-9/_.-')
+                  base=$(printf '%s' "${{ github.base_ref }}" | tr -cd 'A-Za-z0-9/_.-')
+
+                  # Never modify a managed release branch — each owns its own
+                  # version string and CHANGELOG section.
+                  case "$head" in
+                      main|rc|beta|alpha)
+                          echo "Skipping: '${head}' is a managed release branch."
+                          exit 0
+                          ;;
+                  esac
+
+                  git fetch origin "${base}" --depth=1
+
+                  changed=false
+                  for f in compiler/src/version.sfn CHANGELOG.md; do
+                      if ! git diff --quiet FETCH_HEAD HEAD -- "$f"; then
+                          git checkout FETCH_HEAD -- "$f"
+                          changed=true
+                      fi
+                  done
+
+                  if [ "$changed" = "true" ]; then
+                      git add compiler/src/version.sfn CHANGELOG.md
+                      if ! git diff --cached --quiet; then
+                          git commit -m "chore: sync version/changelog to ${base} [skip ci]"
+                          git push
+                          echo "Synced release files to base branch '${base}'."
+                      fi
+                  else
+                      echo "version.sfn and CHANGELOG.md already match '${base}' — nothing to do."
+                  fi

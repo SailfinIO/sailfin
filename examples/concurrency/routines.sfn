@@ -2,10 +2,10 @@
 
 fn main() ![io] {
     routine "named" {
-        print.info("This is routine 1");
+        print("This is routine 1");
     }
 
     routine {
-        print.info("This is an unnamed routine");
+        print("This is an unnamed routine");
     }
 }

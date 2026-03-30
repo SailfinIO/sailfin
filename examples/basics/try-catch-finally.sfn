@@ -8,8 +8,8 @@ fn main() ![io] {
     try {
         performRiskyOperation();
     } catch (err) {
-        print.error("Something went wrong: {{err}}");
+        print("Something went wrong: {{err}}");
     } finally {
-        print.info("Shutting down cleanly.");
+        print("Shutting down cleanly.");
     }
 }

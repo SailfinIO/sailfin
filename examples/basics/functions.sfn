@@ -9,7 +9,7 @@ fn greet(name -> string = "Sailfin") -> string {
 }
 
 fn main() ![io] {
-  print.info(add(3, 5)); // Outputs: 8
-  print.info(greet());   // Outputs: Hello, Sail!
-  print.info(greet("Alice")); // Outputs: Hello, Alice!
+  print(add(3, 5)); // Outputs: 8
+  print(greet());   // Outputs: Hello, Sail!
+  print(greet("Alice")); // Outputs: Hello, Alice!
 }

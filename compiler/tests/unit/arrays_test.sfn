@@ -1,0 +1,108 @@
+test "arrays: literal length is correct" {
+    let arr = [1, 2, 3, 4, 5];
+    assert arr.length == 5;
+}
+
+test "arrays: index access returns correct element" {
+    let arr = [10, 20, 30];
+    assert arr[0] == 10;
+    assert arr[1] == 20;
+    assert arr[2] == 30;
+}
+
+test "arrays: typed empty array has zero length" {
+    let mut arr -> number[] = [];
+    assert arr.length == 0;
+}
+
+test "arrays: string array indexing" {
+    let words = ["hello", "world", "sailfin"];
+    assert words[0] == "hello";
+    assert words[2] == "sailfin";
+    assert words.length == 3;
+}
+
+test "arrays: boolean array values" {
+    let flags = [true, false, true];
+    assert flags[0] == true;
+    assert flags[1] == false;
+    assert flags.length == 3;
+}
+
+test "arrays: push appends element and updates length" {
+    let mut arr -> number[] = [];
+    arr.push(10);
+    arr.push(20);
+    arr.push(30);
+    assert arr.length == 3;
+    assert arr[0] == 10;
+    assert arr[1] == 20;
+    assert arr[2] == 30;
+}
+
+test "arrays: for-in loop visits each element" {
+    let nums = [1, 2, 3, 4, 5];
+    let mut sum -> number = 0;
+    for n in nums {
+        sum += n;
+    }
+    assert sum == 15;
+}
+
+test "arrays: for-in counts even elements" {
+    let nums = [1, 2, 3, 4, 5, 6];
+    let mut count -> number = 0;
+    for n in nums {
+        if n % 2 == 0 {
+            count += 1;
+        }
+    }
+    assert count == 3;
+}
+
+test "arrays: for-in builds transformed array via push" {
+    let nums = [1, 2, 3];
+    let mut doubled -> number[] = [];
+    for n in nums {
+        doubled.push(n * 2);
+    }
+    assert doubled.length == 3;
+    assert doubled[0] == 2;
+    assert doubled[1] == 4;
+    assert doubled[2] == 6;
+}
+
+test "arrays: for-in accumulates product" {
+    let nums = [1, 2, 3, 4];
+    let mut product -> number = 1;
+    for n in nums {
+        product *= n;
+    }
+    assert product == 24;
+}
+
+test "arrays: push from two arrays merges into one" {
+    let a = [1, 2];
+    let b = [3, 4];
+    let mut c -> number[] = [];
+    for n in a { c.push(n); }
+    for n in b { c.push(n); }
+    assert c.length == 4;
+    assert c[0] == 1;
+    assert c[3] == 4;
+}
+
+test "arrays: for-in with condition collects matching elements" {
+    let nums = [1, 2, 3, 4, 5];
+    let mut result -> number[] = [];
+    for n in nums {
+        let sq -> number = n * n;
+        if sq > 5 {
+            result.push(sq);
+        }
+    }
+    assert result.length == 3;
+    assert result[0] == 9;
+    assert result[1] == 16;
+    assert result[2] == 25;
+}

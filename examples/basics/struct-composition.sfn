@@ -32,6 +32,6 @@ fn main() ![io] {
     let vehicle1 -> Driveable = Car.new("Subaru");
     let vehicle2 -> Driveable = Bike.new("Yamaha");
 
-    print.info(vehicle1.drive());
-    print.info(vehicle2.drive());
+    print(vehicle1.drive());
+    print(vehicle2.drive());
 }

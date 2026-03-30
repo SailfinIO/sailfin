@@ -11,7 +11,7 @@ fn redact(text -> string) -> string {
 fn summarize_invoice(invoice -> string) -> string ![model, io] {
     let payload -> string = redact(invoice);
     let summary -> string = call_model("summarizer", payload);
-    print.info(summary);
+    print(summary);
     return summary;
 }
 

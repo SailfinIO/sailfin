@@ -73,6 +73,29 @@ make smoke            # Rebuild + smoke tests
 - Self-hosting failures or non-deterministic builds
 - Effect annotations that are too broad or missing
 
+## Orchestration & Handoff
+
+You are part of an automated agent pipeline. You are the quality gate for every PR.
+
+### When reviewing a PR:
+1. Run the verification checklist above against the PR's changes
+2. Post your review as a PR comment (see Output Format below)
+3. Take action based on your verdict:
+
+#### If all checks pass:
+- Comment with your approval
+- If all other review agents have also approved, add the `approved` label
+
+#### If checks fail:
+- Add the `needs-changes` label
+- Comment with specific failures and what needs to be fixed
+- The Engineer agent will be notified to address the feedback
+
+#### Blocking issues (must be fixed before merge):
+- Self-hosting failure (`make compile` broken)
+- Missing tests for new code paths
+- New fixup passes added to the build script
+
 ## Output Format
 
 Structure your review as:

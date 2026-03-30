@@ -849,9 +849,11 @@ set and ultimately into the capability manifest for entry points.
 
 | Sailfin Name    | LLVM Symbol                      | Signature            | Effects    |
 | --------------- | -------------------------------- | -------------------- | ---------- |
-| `console.info`  | `sailfin_intrinsic_io_print`     | `(i8*) -> void`      | `![io]`    |
-| `console.log`   | `sailfin_intrinsic_io_print`     | `(i8*) -> void`      | `![io]`    |
-| `console.error` | `sailfin_intrinsic_io_print`     | `(i8*) -> void`      | `![io]`    |
+| `print`         | `sailfin_runtime_print_raw`      | `(i8*) -> void`      | `![io]`    |
+| `print.err`     | `sailfin_runtime_print_err`      | `(i8*) -> void`      | `![io]`    |
+| `console.info`  | `sailfin_runtime_print_raw`      | `(i8*) -> void`      | `![io]`    |
+| `console.log`   | `sailfin_runtime_print_raw`      | `(i8*) -> void`      | `![io]`    |
+| `console.error` | `sailfin_runtime_print_raw`      | `(i8*) -> void`      | `![io]`    |
 | `fs.read`       | `sailfin_intrinsic_fs_read`      | `(i8*) -> i8*`       | `![io]`    |
 | `fs.write`      | `sailfin_intrinsic_fs_write`     | `(i8*, i8*) -> void` | `![io]`    |
 | `fs.exists`     | `sailfin_intrinsic_fs_exists`    | `(i8*) -> i1`        | `![io]`    |
@@ -922,17 +924,28 @@ The runtime layers on:
 
 ### 10.1 Printing and Logging
 
-Source code should use `print.info(...)` for standard output and `print.error(...)`
-for errors. The compiler injects `print = runtime.console`, so these calls are
-implemented by `runtime.console.info` and `runtime.console.error`
-respectively. The identifier `console` is not automatically in scope for
-Sailfin source; use `print.*` from code.
+Source code should use `print(...)` for standard output and `print.err(...)` for
+stderr diagnostics. The compiler maps these to `sailfin_runtime_print_raw` and
+`sailfin_runtime_print_err` respectively during LLVM lowering.
 
 Supported today:
 
-- `print.info(value)` – prints a value or interpolated string.
-- `print.error(value)` – prints a value or interpolated string to error channel.
-- `print.warn(value)` – emits a warning-level message. The current runtime prefixes output with `[warn]`.
+- `print(value)` – prints to stdout with no prefix.
+- `print.err(value)` – prints to stderr with no prefix.
+
+Legacy variants (deprecated, will be removed once the log capsule is the recommended path):
+
+- `print.info(value)` – prints to stdout with `[info]` prefix.
+- `print.warn(value)` – prints to stderr with `[warn]` prefix.
+- `print.error(value)` – prints to stderr with `[error]` prefix.
+
+For structured logging, use the `sfn/log` capsule which provides `log.info`,
+`log.warn`, `log.error`, and `log.debug` with named loggers and structured fields.
+
+> **Breaking change (v0.4.0-alpha.2):** `log.warn()` and `log.error()` now write
+> to stderr via `print.err()`. Previously all log levels wrote to stdout via
+> `print()`. Code that captures stdout expecting warn/error output must switch to
+> stderr.
 
 Not supported yet:
 
