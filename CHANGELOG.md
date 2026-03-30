@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.4.0-alpha.3 (2026-03-30)
+
+### Bug Fixes
+
+- Mingw cross compilation
+  ([`349c050`](https://github.com/SailfinIO/sailfin/commit/349c0504c210061b75f6c4d7bbc5317cb75df4a4))
+
+
 ## v0.4.0-alpha.2 (2026-03-30)
 
 ### Bug Fixes
