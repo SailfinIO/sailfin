@@ -8,17 +8,26 @@ fn _sign(n -> number) -> string {
     }
 }
 
+// NOTE: match on number literals causes a compiler segfault during LLVM
+// lowering (globals phase). Using if/else-if chain as a workaround.
+// See: https://github.com/SailfinIO/sailfin/issues/50
 fn _classify_day(day -> number) -> string {
-    match day {
-        1 -> return "Monday",
-        2 -> return "Tuesday",
-        3 -> return "Wednesday",
-        4 -> return "Thursday",
-        5 -> return "Friday",
-        6 -> return "Saturday",
-        7 -> return "Sunday",
-        _ -> return "unknown",
+    if day == 1 {
+        return "Monday";
+    } else if day == 2 {
+        return "Tuesday";
+    } else if day == 3 {
+        return "Wednesday";
+    } else if day == 4 {
+        return "Thursday";
+    } else if day == 5 {
+        return "Friday";
+    } else if day == 6 {
+        return "Saturday";
+    } else if day == 7 {
+        return "Sunday";
     }
+    return "unknown";
 }
 
 fn _max(a -> number, b -> number) -> number {
@@ -50,15 +59,15 @@ test "control_flow: else branch taken for zero" {
     assert result == "zero";
 }
 
-test "control_flow: match selects correct arm for 1" {
+test "control_flow: classify_day selects correct arm for 1" {
     assert _classify_day(1) == "Monday";
 }
 
-test "control_flow: match selects correct arm for 5" {
+test "control_flow: classify_day selects correct arm for 5" {
     assert _classify_day(5) == "Friday";
 }
 
-test "control_flow: match wildcard arm for unknown value" {
+test "control_flow: classify_day returns unknown for out-of-range" {
     assert _classify_day(0) == "unknown";
     assert _classify_day(8) == "unknown";
 }
