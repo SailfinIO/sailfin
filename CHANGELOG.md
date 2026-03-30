@@ -1,7 +1,99 @@
 # CHANGELOG
 
 
+## v0.4.0 (2026-03-30)
+
+### Bug Fixes
+
+- Apply PR review comments - stderr routing, parallel build fix, comment accuracy
+  ([`6ebc8e0`](https://github.com/SailfinIO/sailfin/commit/6ebc8e0817a71b0e3970c516202f91d759c06916))
+
+- scripts/build.sh: compute REPO_ROOT from BASH_SOURCE[0] so it works when both executed and
+  sourced; use `bash scripts/build.sh` (not `source`) for the parallel worker invocation to avoid $0
+  / REPO_ROOT resolution issues - compiler/src/parser/mod.sfn: route 'no progress' diagnostic to
+  print.err() to keep stdout clean - compiler/src/main.sfn (compile_to_llvm): route all trace/debug
+  output to print.err() so LLVM IR returned on stdout is not interleaved with trace lines -
+  compiler/src/main.sfn (report_typecheck_errors): route all typecheck error output to print.err()
+  so errors go to stderr - tools/package.sh: fix inaccurate header comment — sailfin-<target>.tar.gz
+  contains only the compiler binary; installer-<target>.tar.gz has compiler + runtime
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/ac2c69e1-e6f6-44e1-9efc-dd140d1d755e
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Chores
+
+- Merge main into rc, resolve version/changelog conflicts
+  ([`9ae54a8`](https://github.com/SailfinIO/sailfin/commit/9ae54a8c6f6f0bbefc4fef5fd6962a8e56da291f))
+
+- Sync version/changelog to main [skip ci]
+  ([`2b7a243`](https://github.com/SailfinIO/sailfin/commit/2b7a2437703aae0fd245e988f76d17e9a2229b01))
+
+
 ## v0.3.3 (2026-03-30)
+
+### Chores
+
+- Merge rc into beta, resolve version/changelog conflicts
+  ([`61ca244`](https://github.com/SailfinIO/sailfin/commit/61ca2442760ee00ecbcf2f40408c0891a35c2693))
+
+
+## v0.2.0-rc.1 (2026-03-29)
+
+
+## v0.4.0-beta.1 (2026-03-30)
+
+### Chores
+
+- Docs, changelog and pr-review tool level
+  ([`29ec5a3`](https://github.com/SailfinIO/sailfin/commit/29ec5a34537642c6eff1edd979b0185d8f19b6fe))
+
+- Regenerate lockfile for awe
+  ([`26f9736`](https://github.com/SailfinIO/sailfin/commit/26f9736e215e76e0c476be1d1c18e46a444fc95b))
+
+
+## v0.4.0-alpha.3 (2026-03-30)
+
+### Bug Fixes
+
+- Mingw cross compilation
+  ([`349c050`](https://github.com/SailfinIO/sailfin/commit/349c0504c210061b75f6c4d7bbc5317cb75df4a4))
+
+
+## v0.4.0-alpha.2 (2026-03-30)
+
+### Bug Fixes
+
+- Make non weak for mingw
+  ([`c8dc473`](https://github.com/SailfinIO/sailfin/commit/c8dc47307d5d464029ace64d744462fb6edd8d78))
+
+- Need to add raw print
+  ([`518d193`](https://github.com/SailfinIO/sailfin/commit/518d19375abe8304b99ab7f356de0d3fcda5102c))
+
+- Need weak alias for backwards compatibility
+  ([`a65065a`](https://github.com/SailfinIO/sailfin/commit/a65065acd132a0263079ea112f423e3aee8d2f98))
+
+### Chores
+
+- Revert to pages
+  ([`4768255`](https://github.com/SailfinIO/sailfin/commit/4768255158477573fbdaa92f9b4539a8d29cf5e2))
+
+### Continuous Integration
+
+- Auto-resolve version/CHANGELOG conflicts on PRs
+  ([`c374847`](https://github.com/SailfinIO/sailfin/commit/c374847e68bad225691e4d0dde23203d8a8f7ac6))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a3cdb0f4-7818-434b-a70f-e7dd06e13953
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Features
+
+- Add shell build, smoke, and package scripts
+  ([`a94c202`](https://github.com/SailfinIO/sailfin/commit/a94c202793ef3a86ad39a3d2cc593401e6c920ef))
+
+
+## v0.4.0-alpha.1 (2026-03-30)
 
 ### Bug Fixes
 
@@ -11,6 +103,53 @@
 Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a76eb7e3-8066-4508-8e49-c74ec98f045b
 
 Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **tests**: Address Copilot review comments
+  ([`ddfe57f`](https://github.com/SailfinIO/sailfin/commit/ddfe57fd2e40d579f4dd1c3d63b1889233a23983))
+
+- enums_test: fix inaccurate comment about "commented out" code (removed) - result_types_test:
+  rename _parse_positive to _parse_non_negative to match its actual semantics (returns success for
+  0)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- **tests**: Remove closure capture and void-method patterns, use block match arms
+  ([`8b1ee2b`](https://github.com/SailfinIO/sailfin/commit/8b1ee2b0c4a0da164f135aab49e99b332e75b343))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/81b87995-0e3e-40d1-b408-4af0a304afdc
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **tests**: Remove closures_test (higher-order fn calls unsupported), fix error_handling match arms
+  ([`0adc74d`](https://github.com/SailfinIO/sailfin/commit/0adc74df60777844f113467fb2523dbbb926e6ed))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/9b9a5975-2229-4707-ba53-f2197f9b6365
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **tests**: Replace unsupported array method calls with loop-based equivalents
+  ([`7cc1725`](https://github.com/SailfinIO/sailfin/commit/7cc1725a6bb1c38387c5fac26917b01b13c22702))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/6f1144be-270c-4992-8816-f0867d263757
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- **tests**: Work around compiler bugs to make all tests pass
+  ([`4ff1466`](https://github.com/SailfinIO/sailfin/commit/4ff1466c9e7fb51338348e50ac642d82810bd4cf))
+
+- control_flow_test: replace match-on-number-literals with if/else chain (#50) - enums_test: replace
+  match-on-enum-variants with if/else; remove tagged enum tests that require match destructuring
+  (#50) - structs_test: rewrite perimeter() to avoid literal * (paren-expr) bug (#51) -
+  error_handling_test: rename to result_types_test to avoid test runner false positive (#55); remove
+  match on union types (#50), keep union return type compilation tests - All 23 tests now pass
+
+Created GitHub issues for discovered compiler bugs: - #50: match statement segfaults during LLVM
+  lowering - #51: integer literal * parenthesized struct field expression wrong result - #52:
+  higher-order function calls via typed parameters undefined symbol - #53: closure capture of local
+  let bindings undefined symbol - #54: array higher-order methods not reliably lowered - #55: test
+  runner grep matches 'error' in file paths
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 ### Chores
 
@@ -142,6 +281,15 @@ Signed-off-by: dependabot[bot] <support@github.com>
   ([`bc69387`](https://github.com/SailfinIO/sailfin/commit/bc693879e5f5ca0acc41dffd8cab858611821c32))
 
 Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/2ea2c5cd-267b-4f6b-923f-a7829b26829a
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Features
+
+- **tests**: Add comprehensive unit and integration tests for core language features
+  ([`b810973`](https://github.com/SailfinIO/sailfin/commit/b810973b06bcdc8fdb6f0c035c1e9e345eeeb9fc))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/53eb0370-96ff-44ad-a1d4-0f0eadebdac4
 
 Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
 
