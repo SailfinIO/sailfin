@@ -480,30 +480,20 @@ fn collect_until(parser -> Parser, terminators -> string[]) -> CaptureResult {
             let sym = token.lexeme;
             if strings_equal(sym, "(") {
                 paren_depth += 1;
-            } else {
-                let mut _elif419 -> boolean = false;
-                if strings_equal(sym, ")") {
-                    if paren_depth > 0 {
-                        _elif419 = true;
-                    }
-                }
-                if _elif419 {
+            } else if strings_equal(sym, ")") {
+                if paren_depth > 0 {
                     paren_depth -= 1;
-                } else if strings_equal(sym, "{") {
-                    brace_depth += 1;
                 }
-            }
-                brace_depth -= 1;
+            } else if strings_equal(sym, "{") {
+                brace_depth += 1;
+            } else if strings_equal(sym, "}") {
+                if brace_depth > 0 {
+                    brace_depth -= 1;
+                }
             } else if strings_equal(sym, "[") {
                 bracket_depth += 1;
-            } else {
-                let mut _elif420 -> boolean = false;
-                if strings_equal(sym, "]") {
-                    if bracket_depth > 0 {
-                        _elif420 = true;
-                    }
-                }
-                if _elif420 {
+            } else if strings_equal(sym, "]") {
+                if bracket_depth > 0 {
                     bracket_depth -= 1;
                 }
             }
@@ -608,36 +598,28 @@ fn split_tokens_by_comma(tokens -> Token[]) -> string[] {
             let sym = token.lexeme;
             if strings_equal(sym, "<") {
                 angle += 1;
-            } else {
-                let mut _elif422 -> boolean = false;
-                if strings_equal(sym, ">") {
-                    if angle > 0 {
-                        _elif422 = true;
-                    }
-                }
-                if _elif422 {
+            } else if strings_equal(sym, ">") {
+                if angle > 0 {
                     angle -= 1;
-                } else if strings_equal(sym, "(") {
-                    paren += 1;
                 }
-            }
-                paren -= 1;
+            } else if strings_equal(sym, "(") {
+                paren += 1;
+            } else if strings_equal(sym, ")") {
+                if paren > 0 {
+                    paren -= 1;
+                }
             } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else {
-                let mut _elif423 -> boolean = false;
-                if strings_equal(sym, "}") {
-                    if brace > 0 {
-                        _elif423 = true;
-                    }
-                }
-                if _elif423 {
+            } else if strings_equal(sym, "}") {
+                if brace > 0 {
                     brace -= 1;
-                } else if strings_equal(sym, "[") {
-                    bracket += 1;
                 }
-            }
-                bracket -= 1;
+            } else if strings_equal(sym, "[") {
+                bracket += 1;
+            } else if strings_equal(sym, "]") {
+                if bracket > 0 {
+                    bracket -= 1;
+                }
             }
 
             if strings_equal(sym, ",") {
@@ -687,36 +669,28 @@ fn split_token_slices_by_comma(tokens -> Token[]) -> Token[][] {
             let sym = token.lexeme;
             if strings_equal(sym, "<") {
                 angle += 1;
-            } else {
-                let mut _elif424 -> boolean = false;
-                if strings_equal(sym, ">") {
-                    if angle > 0 {
-                        _elif424 = true;
-                    }
-                }
-                if _elif424 {
+            } else if strings_equal(sym, ">") {
+                if angle > 0 {
                     angle -= 1;
-                } else if strings_equal(sym, "(") {
-                    paren += 1;
                 }
-            }
-                paren -= 1;
+            } else if strings_equal(sym, "(") {
+                paren += 1;
+            } else if strings_equal(sym, ")") {
+                if paren > 0 {
+                    paren -= 1;
+                }
             } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else {
-                let mut _elif425 -> boolean = false;
-                if strings_equal(sym, "}") {
-                    if brace > 0 {
-                        _elif425 = true;
-                    }
-                }
-                if _elif425 {
+            } else if strings_equal(sym, "}") {
+                if brace > 0 {
                     brace -= 1;
-                } else if strings_equal(sym, "[") {
-                    bracket += 1;
                 }
-            }
-                bracket -= 1;
+            } else if strings_equal(sym, "[") {
+                bracket += 1;
+            } else if strings_equal(sym, "]") {
+                if bracket > 0 {
+                    bracket -= 1;
+                }
             }
 
             if strings_equal(sym, ",") {
@@ -764,36 +738,28 @@ fn find_top_level_symbol(tokens -> Token[], symbol -> string) -> number {
             let sym = token.lexeme;
             if strings_equal(sym, "<") {
                 angle += 1;
-            } else {
-                let mut _elif426 -> boolean = false;
-                if strings_equal(sym, ">") {
-                    if angle > 0 {
-                        _elif426 = true;
-                    }
-                }
-                if _elif426 {
+            } else if strings_equal(sym, ">") {
+                if angle > 0 {
                     angle -= 1;
-                } else if strings_equal(sym, "(") {
-                    paren += 1;
                 }
-            }
-                paren -= 1;
+            } else if strings_equal(sym, "(") {
+                paren += 1;
+            } else if strings_equal(sym, ")") {
+                if paren > 0 {
+                    paren -= 1;
+                }
             } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else {
-                let mut _elif427 -> boolean = false;
-                if strings_equal(sym, "}") {
-                    if brace > 0 {
-                        _elif427 = true;
-                    }
-                }
-                if _elif427 {
+            } else if strings_equal(sym, "}") {
+                if brace > 0 {
                     brace -= 1;
-                } else if strings_equal(sym, "[") {
-                    bracket += 1;
                 }
-            }
-                bracket -= 1;
+            } else if strings_equal(sym, "[") {
+                bracket += 1;
+            } else if strings_equal(sym, "]") {
+                if bracket > 0 {
+                    bracket -= 1;
+                }
             }
 
             if strings_equal(sym, symbol) {
@@ -829,36 +795,28 @@ fn find_top_level_identifier(tokens -> Token[], keyword -> string) -> number {
             let sym = token.lexeme;
             if strings_equal(sym, "<") {
                 angle += 1;
-            } else {
-                let mut _elif428 -> boolean = false;
-                if strings_equal(sym, ">") {
-                    if angle > 0 {
-                        _elif428 = true;
-                    }
-                }
-                if _elif428 {
+            } else if strings_equal(sym, ">") {
+                if angle > 0 {
                     angle -= 1;
-                } else if strings_equal(sym, "(") {
-                    paren += 1;
                 }
-            }
-                paren -= 1;
+            } else if strings_equal(sym, "(") {
+                paren += 1;
+            } else if strings_equal(sym, ")") {
+                if paren > 0 {
+                    paren -= 1;
+                }
             } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else {
-                let mut _elif429 -> boolean = false;
-                if strings_equal(sym, "}") {
-                    if brace > 0 {
-                        _elif429 = true;
-                    }
-                }
-                if _elif429 {
+            } else if strings_equal(sym, "}") {
+                if brace > 0 {
                     brace -= 1;
-                } else if strings_equal(sym, "[") {
-                    bracket += 1;
                 }
-            }
-                bracket -= 1;
+            } else if strings_equal(sym, "[") {
+                bracket += 1;
+            } else if strings_equal(sym, "]") {
+                if bracket > 0 {
+                    bracket -= 1;
+                }
             }
         }
 
@@ -896,36 +854,28 @@ fn find_top_level_colon(tokens -> Token[]) -> number {
             let sym = token.lexeme;
             if strings_equal(sym, "<") {
                 angle += 1;
-            } else {
-                let mut _elif430 -> boolean = false;
-                if strings_equal(sym, ">") {
-                    if angle > 0 {
-                        _elif430 = true;
-                    }
-                }
-                if _elif430 {
+            } else if strings_equal(sym, ">") {
+                if angle > 0 {
                     angle -= 1;
-                } else if strings_equal(sym, "(") {
-                    paren += 1;
                 }
-            }
-                paren -= 1;
+            } else if strings_equal(sym, "(") {
+                paren += 1;
+            } else if strings_equal(sym, ")") {
+                if paren > 0 {
+                    paren -= 1;
+                }
             } else if strings_equal(sym, "{") {
                 brace += 1;
-            } else {
-                let mut _elif431 -> boolean = false;
-                if strings_equal(sym, "}") {
-                    if brace > 0 {
-                        _elif431 = true;
-                    }
-                }
-                if _elif431 {
+            } else if strings_equal(sym, "}") {
+                if brace > 0 {
                     brace -= 1;
-                } else if strings_equal(sym, "[") {
-                    bracket += 1;
                 }
-            }
-                bracket -= 1;
+            } else if strings_equal(sym, "[") {
+                bracket += 1;
+            } else if strings_equal(sym, "]") {
+                if bracket > 0 {
+                    bracket -= 1;
+                }
             } else if strings_equal(sym, ":") {
                 let mut _let432 -> boolean = false;
                 if angle == 0 {
