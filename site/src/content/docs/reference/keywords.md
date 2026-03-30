@@ -5,7 +5,7 @@ section: reference
 order: 3
 ---
 
-> Canonical source: [`docs/keywords.md`](https://github.com/sailfin/sailfin/blob/main/docs/keywords.md)
+> Canonical source: [`docs/keywords.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/keywords.md)
 
 ## Control Flow
 
@@ -37,4 +37,4 @@ order: 3
 
 ---
 
-*See [Keywords Reference](https://github.com/sailfin/sailfin/blob/main/docs/keywords.md) for parser behavior notes and discussion of future keywords.*
+*See [Keywords Reference](https://github.com/SailfinIO/sailfin/blob/main/docs/keywords.md) for parser behavior notes and discussion of future keywords.*

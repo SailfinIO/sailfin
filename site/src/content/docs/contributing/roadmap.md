@@ -5,7 +5,7 @@ section: contributing
 order: 4
 ---
 
-> Canonical source: [`docs/roadmap.md`](https://github.com/sailfin/sailfin/blob/main/docs/roadmap.md)
+> Canonical source: [`docs/roadmap.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/roadmap.md)
 
 ## 1.0 Priorities
 
@@ -54,4 +54,4 @@ order: 4
 
 ---
 
-*See [`docs/roadmap.md`](https://github.com/sailfin/sailfin/blob/main/docs/roadmap.md) for the complete roadmap with sequencing details.*
+*See [`docs/roadmap.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/roadmap.md) for the complete roadmap with sequencing details.*

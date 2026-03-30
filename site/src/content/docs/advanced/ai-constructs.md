@@ -61,4 +61,4 @@ Every model interaction produces provenance metadata:
 
 ---
 
-*Advanced AI features are specified in the [model engines proposal](https://github.com/sailfin/sailfin/blob/main/docs/proposals/model-engines-and-training.md). Implementation is phased across the 1.0 roadmap.*
+*Advanced AI features are specified in the [model engines proposal](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/model-engines-and-training.md). Implementation is phased across the 1.0 roadmap.*
