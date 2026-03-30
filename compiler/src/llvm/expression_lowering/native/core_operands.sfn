@@ -49,25 +49,36 @@ fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, ri
         diagnostics.push("llvm lowering: comparison operands have mismatched types `" + left_operand.llvm_type + "` and `" + right_operand.llvm_type + "`");
     }
     let mut symbol_is_equality -> boolean = false;
-    if symbol == "==" || symbol == "!=" {
+    let mut _if73 -> boolean = false;
+    if symbol == "==" { _if73 = true; }
+    if symbol == "!=" { _if73 = true; }
+    if _if73 {
         symbol_is_equality = true;
     }
     let left_is_string = is_string_pointer_type(left_operand.llvm_type);
     let right_is_string = is_string_pointer_type(right_operand.llvm_type);
     let left_is_null = left_operand.value == "null";
     let right_is_null = right_operand.value == "null";
-    if symbol_is_equality && left_is_string && right_is_string && !left_is_null && !right_is_null {
-        let compare_temp = format_temp_name(temp_index);
-        current_lines.push("  " + compare_temp + " = call i1 @strings_equal(i8* " + left_operand.value + ", i8* " + right_operand.value + ")");
-        let mut next_index = temp_index + 1;
-        let mut operand = LLVMOperand { llvm_type: "i1", value: compare_temp };
-        if symbol == "!=" {
-            let inverted_temp = format_temp_name(next_index);
-            current_lines.push("  " + inverted_temp + " = xor i1 " + compare_temp + ", true");
-            operand = LLVMOperand { llvm_type: "i1", value: inverted_temp };
-            next_index += 1;
+    if symbol_is_equality {
+        if left_is_string {
+            if right_is_string {
+                if !left_is_null {
+                    if !right_is_null {
+                        let compare_temp = format_temp_name(temp_index);
+                        current_lines.push("  " + compare_temp + " = call i1 @strings_equal(i8* " + left_operand.value + ", i8* " + right_operand.value + ")");
+                        let mut next_index = temp_index + 1;
+                        let mut operand = LLVMOperand { llvm_type: "i1", value: compare_temp };
+                        if symbol == "!=" {
+                            let inverted_temp = format_temp_name(next_index);
+                            current_lines.push("  " + inverted_temp + " = xor i1 " + compare_temp + ", true");
+                            operand = LLVMOperand { llvm_type: "i1", value: inverted_temp };
+                            next_index += 1;
+                        }
+                        return ComparisonEmission { lines: current_lines, temp_index: next_index, operand: operand, diagnostics: diagnostics };
+                    }
+                }
+            }
         }
-        return ComparisonEmission { lines: current_lines, temp_index: next_index, operand: operand, diagnostics: diagnostics };
     }
     let llvm_type = left_operand.llvm_type;
     let predicate = comparison_predicate_for_symbol(symbol, llvm_type);
@@ -108,7 +119,10 @@ fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> str
         if symbol == ">=" { return "fcmp oge"; }
         return "";
     }
-    if llvm_type == "i32" || llvm_type == "i64" {
+    let mut _if74 -> boolean = false;
+    if llvm_type == "i32" { _if74 = true; }
+    if llvm_type == "i64" { _if74 = true; }
+    if _if74 {
         if symbol == "==" { return "icmp eq"; }
         if symbol == "!=" { return "icmp ne"; }
         if symbol == "<" { return "icmp slt"; }
@@ -183,165 +197,213 @@ fn coerce_numeric_primitive(operand -> LLVMOperand, operand_type -> string, targ
     let mut current_lines -> string[] = lines;
     let mut diagnostics -> string[] = [];
 
-    if target == "double" && operand_type == "i64" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = sitofp i64 " + operand.value + " to double");
-        let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "double" {
+        if operand_type == "i64" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = sitofp i64 " + operand.value + " to double");
+            let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "double" && operand_type == "i32" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = sitofp i32 " + operand.value + " to double");
-        let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "double" {
+        if operand_type == "i32" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = sitofp i32 " + operand.value + " to double");
+            let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "double" && operand_type == "i1" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = uitofp i1 " + operand.value + " to double");
-        let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "double" {
+        if operand_type == "i1" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = uitofp i1 " + operand.value + " to double");
+            let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "double" && operand_type == "i8" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = sitofp i8 " + operand.value + " to double");
-        let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "double" {
+        if operand_type == "i8" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = sitofp i8 " + operand.value + " to double");
+            let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "double" && operand_type == "i8*" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = call double @sailfin_runtime_string_to_number(i8* " + operand.value + ")");
-        let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "double" {
+        if operand_type == "i8*" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = call double @sailfin_runtime_string_to_number(i8* " + operand.value + ")");
+            let coerced = LLVMOperand { llvm_type: "double", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i64" && operand_type == "double" {
-        let round_temp = format_temp_name(temp_index);
-        let convert_temp = format_temp_name(temp_index + 1);
-        current_lines.push("  " + round_temp + " = call double @round(double " + operand.value + ")");
-        current_lines.push("  " + convert_temp + " = fptosi double " + round_temp + " to i64");
-        let coerced = LLVMOperand { llvm_type: "i64", value: convert_temp };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    if target == "i64" {
+        if operand_type == "double" {
+            let round_temp = format_temp_name(temp_index);
+            let convert_temp = format_temp_name(temp_index + 1);
+            current_lines.push("  " + round_temp + " = call double @round(double " + operand.value + ")");
+            current_lines.push("  " + convert_temp + " = fptosi double " + round_temp + " to i64");
+            let coerced = LLVMOperand { llvm_type: "i64", value: convert_temp };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i64" && operand_type == "i32" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = sext i32 " + operand.value + " to i64");
-        let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i64" {
+        if operand_type == "i32" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = sext i32 " + operand.value + " to i64");
+            let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i64" && operand_type == "i8" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = sext i8 " + operand.value + " to i64");
-        let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i64" {
+        if operand_type == "i8" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = sext i8 " + operand.value + " to i64");
+            let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i64" && operand_type == "i1" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = zext i1 " + operand.value + " to i64");
-        let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i64" {
+        if operand_type == "i1" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = zext i1 " + operand.value + " to i64");
+            let coerced = LLVMOperand { llvm_type: "i64", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i32" && operand_type == "i64" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = trunc i64 " + operand.value + " to i32");
-        let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i32" {
+        if operand_type == "i64" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = trunc i64 " + operand.value + " to i32");
+            let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i32" && operand_type == "i8" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = sext i8 " + operand.value + " to i32");
-        let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i32" {
+        if operand_type == "i8" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = sext i8 " + operand.value + " to i32");
+            let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i32" && operand_type == "i1" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = zext i1 " + operand.value + " to i32");
-        let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i32" {
+        if operand_type == "i1" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = zext i1 " + operand.value + " to i32");
+            let coerced = LLVMOperand { llvm_type: "i32", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i32" && operand_type == "double" {
-        let round_temp = format_temp_name(temp_index);
-        let convert_temp = format_temp_name(temp_index + 1);
-        current_lines.push("  " + round_temp + " = call double @round(double " + operand.value + ")");
-        current_lines.push("  " + convert_temp + " = fptosi double " + round_temp + " to i32");
-        let coerced = LLVMOperand { llvm_type: "i32", value: convert_temp };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    if target == "i32" {
+        if operand_type == "double" {
+            let round_temp = format_temp_name(temp_index);
+            let convert_temp = format_temp_name(temp_index + 1);
+            current_lines.push("  " + round_temp + " = call double @round(double " + operand.value + ")");
+            current_lines.push("  " + convert_temp + " = fptosi double " + round_temp + " to i32");
+            let coerced = LLVMOperand { llvm_type: "i32", value: convert_temp };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i8" && operand_type == "i64" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = trunc i64 " + operand.value + " to i8");
-        let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i8" {
+        if operand_type == "i64" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = trunc i64 " + operand.value + " to i8");
+            let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i8" && operand_type == "i32" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = trunc i32 " + operand.value + " to i8");
-        let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i8" {
+        if operand_type == "i32" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = trunc i32 " + operand.value + " to i8");
+            let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i8" && operand_type == "i1" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = zext i1 " + operand.value + " to i8");
-        let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i8" {
+        if operand_type == "i1" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = zext i1 " + operand.value + " to i8");
+            let coerced = LLVMOperand { llvm_type: "i8", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i8" && operand_type == "double" {
-        let round_temp = format_temp_name(temp_index);
-        let convert_temp = format_temp_name(temp_index + 1);
-        current_lines.push("  " + round_temp + " = call double @round(double " + operand.value + ")");
-        current_lines.push("  " + convert_temp + " = fptosi double " + round_temp + " to i8");
-        let coerced = LLVMOperand { llvm_type: "i8", value: convert_temp };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    if target == "i8" {
+        if operand_type == "double" {
+            let round_temp = format_temp_name(temp_index);
+            let convert_temp = format_temp_name(temp_index + 1);
+            current_lines.push("  " + round_temp + " = call double @round(double " + operand.value + ")");
+            current_lines.push("  " + convert_temp + " = fptosi double " + round_temp + " to i8");
+            let coerced = LLVMOperand { llvm_type: "i8", value: convert_temp };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i8" && operand_type == "i8*" {
-        let char_ptr_temp = format_temp_name(temp_index);
-        let char_value_temp = format_temp_name(temp_index + 1);
-        current_lines.push("  " + char_ptr_temp + " = getelementptr i8, i8* " + operand.value + ", i64 0");
-        current_lines.push("  " + char_value_temp + " = load i8, i8* " + char_ptr_temp);
-        let coerced = LLVMOperand { llvm_type: "i8", value: char_value_temp };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    if target == "i8" {
+        if operand_type == "i8*" {
+            let char_ptr_temp = format_temp_name(temp_index);
+            let char_value_temp = format_temp_name(temp_index + 1);
+            current_lines.push("  " + char_ptr_temp + " = getelementptr i8, i8* " + operand.value + ", i64 0");
+            current_lines.push("  " + char_value_temp + " = load i8, i8* " + char_ptr_temp);
+            let coerced = LLVMOperand { llvm_type: "i8", value: char_value_temp };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i1" && operand_type == "double" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = fcmp one double " + operand.value + ", 0.0");
-        let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i1" {
+        if operand_type == "double" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = fcmp one double " + operand.value + ", 0.0");
+            let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i1" && operand_type == "i64" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = icmp ne i64 " + operand.value + ", 0");
-        let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i1" {
+        if operand_type == "i64" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = icmp ne i64 " + operand.value + ", 0");
+            let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i1" && operand_type == "i32" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = icmp ne i32 " + operand.value + ", 0");
-        let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i1" {
+        if operand_type == "i32" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = icmp ne i32 " + operand.value + ", 0");
+            let coerced = LLVMOperand { llvm_type: "i1", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i8*" && operand_type == "double" {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")");
-        let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i8*" {
+        if operand_type == "double" {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = call i8* @sailfin_runtime_number_to_string(double " + operand.value + ")");
+            let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i8*" && operand_type == "i64" {
-        let as_double = format_temp_name(temp_index);
-        let as_string = format_temp_name(temp_index + 1);
-        current_lines.push("  " + as_double + " = sitofp i64 " + operand.value + " to double");
-        current_lines.push("  " + as_string + " = call i8* @sailfin_runtime_number_to_string(double " + as_double + ")");
-        let coerced = LLVMOperand { llvm_type: "i8*", value: as_string };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+    if target == "i8*" {
+        if operand_type == "i64" {
+            let as_double = format_temp_name(temp_index);
+            let as_string = format_temp_name(temp_index + 1);
+            current_lines.push("  " + as_double + " = sitofp i64 " + operand.value + " to double");
+            current_lines.push("  " + as_string + " = call i8* @sailfin_runtime_number_to_string(double " + as_double + ")");
+            let coerced = LLVMOperand { llvm_type: "i8*", value: as_string };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+        }
     }
-    if target == "i8*" && operand_type == "i8" {
-        let malloc_temp = format_temp_name(temp_index);
-        current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 2)");
-        let char_ptr = format_temp_name(temp_index + 1);
-        current_lines.push("  " + char_ptr + " = getelementptr i8, i8* " + malloc_temp + ", i64 0");
-        current_lines.push("  store i8 " + operand.value + ", i8* " + char_ptr);
-        let null_ptr = format_temp_name(temp_index + 2);
-        current_lines.push("  " + null_ptr + " = getelementptr i8, i8* " + malloc_temp + ", i64 1");
-        current_lines.push("  store i8 0, i8* " + null_ptr);
-        let coerced = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 3, operand: coerced, diagnostics: diagnostics };
+    if target == "i8*" {
+        if operand_type == "i8" {
+            let malloc_temp = format_temp_name(temp_index);
+            current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 2)");
+            let char_ptr = format_temp_name(temp_index + 1);
+            current_lines.push("  " + char_ptr + " = getelementptr i8, i8* " + malloc_temp + ", i64 0");
+            current_lines.push("  store i8 " + operand.value + ", i8* " + char_ptr);
+            let null_ptr = format_temp_name(temp_index + 2);
+            current_lines.push("  " + null_ptr + " = getelementptr i8, i8* " + malloc_temp + ", i64 1");
+            current_lines.push("  store i8 0, i8* " + null_ptr);
+            let coerced = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 3, operand: coerced, diagnostics: diagnostics };
+        }
     }
     return null;
 }
@@ -352,17 +414,25 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
     let mut current_lines -> string[] = lines;
     let mut diagnostics -> string[] = [];
 
-    if target == "i8*" && operand_type != "i8*" && ends_with_pointer_suffix(operand_type) {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = bitcast " + operand_type + " " + operand.value + " to i8*");
-        let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if target == "i8*" {
+        if operand_type != "i8*" {
+            if ends_with_pointer_suffix(operand_type) {
+                let temp_name = format_temp_name(temp_index);
+                current_lines.push("  " + temp_name + " = bitcast " + operand_type + " " + operand.value + " to i8*");
+                let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
+                return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+            }
+        }
     }
-    if operand_type == "i8*" && target != "i8*" && ends_with_pointer_suffix(target) {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = bitcast i8* " + operand.value + " to " + target);
-        let coerced = LLVMOperand { llvm_type: target, value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if operand_type == "i8*" {
+        if target != "i8*" {
+            if ends_with_pointer_suffix(target) {
+                let temp_name = format_temp_name(temp_index);
+                current_lines.push("  " + temp_name + " = bitcast i8* " + operand.value + " to " + target);
+                let coerced = LLVMOperand { llvm_type: target, value: temp_name };
+                return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+            }
+        }
     }
     if operand_type.length > 1 {
         let op_last = substring(operand_type, operand_type.length - 1, operand_type.length);
@@ -381,7 +451,10 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
         if tgt_last == "*" {
             let tgt_base = trim_text(substring(target, 0, target.length - 1));
             if tgt_base == operand_type {
-                if starts_with(operand_type, "%") || starts_with(operand_type, "{") {
+                let mut _if75 -> boolean = false;
+                if starts_with(operand_type, "%") { _if75 = true; }
+                if starts_with(operand_type, "{") { _if75 = true; }
+                if _if75 {
                     let size_ptr_temp = format_temp_name(temp_index);
                     let size_temp = format_temp_name(temp_index + 1);
                     let malloc_temp = format_temp_name(temp_index + 2);
@@ -398,17 +471,32 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
             }
         }
     }
-    if operand_type.length > 1 && target.length > 1 {
-        let op_last2 = substring(operand_type, operand_type.length - 1, operand_type.length);
-        let tgt_last2 = substring(target, target.length - 1, target.length);
-        if op_last2 == "*" && tgt_last2 == "*" && operand_type != target {
-            let temp_name = format_temp_name(temp_index);
-            current_lines.push("  " + temp_name + " = bitcast " + operand_type + " " + operand.value + " to " + target);
-            let coerced = LLVMOperand { llvm_type: target, value: temp_name };
-            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    if operand_type.length > 1 {
+        if target.length > 1 {
+            let op_last2 = substring(operand_type, operand_type.length - 1, operand_type.length);
+            let tgt_last2 = substring(target, target.length - 1, target.length);
+            if op_last2 == "*" {
+                if tgt_last2 == "*" {
+                    if operand_type != target {
+                        let temp_name = format_temp_name(temp_index);
+                        current_lines.push("  " + temp_name + " = bitcast " + operand_type + " " + operand.value + " to " + target);
+                        let coerced = LLVMOperand { llvm_type: target, value: temp_name };
+                        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+                    }
+                }
+            }
         }
     }
-    if target == "i8*" && (starts_with(operand_type, "%") || starts_with(operand_type, "{")) {
+    let mut _if76 -> boolean = false;
+    if target == "i8*" {
+        let mut _if83 -> boolean = false;
+        if starts_with(operand_type, "%") { _if83 = true; }
+        if starts_with(operand_type, "{") { _if83 = true; }
+        if _if83 {
+            _if76 = true;
+        }
+    }
+    if _if76 {
         let size_ptr_temp = format_temp_name(temp_index);
         let size_temp = format_temp_name(temp_index + 1);
         let malloc_temp = format_temp_name(temp_index + 2);
@@ -422,7 +510,16 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
         let boxed = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
         return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: boxed, diagnostics: diagnostics };
     }
-    if operand_type == "i8*" && (starts_with(target, "%") || starts_with(target, "{")) {
+    let mut _if77 -> boolean = false;
+    if operand_type == "i8*" {
+        let mut _if84 -> boolean = false;
+        if starts_with(target, "%") { _if84 = true; }
+        if starts_with(target, "{") { _if84 = true; }
+        if _if84 {
+            _if77 = true;
+        }
+    }
+    if _if77 {
         let typed_ptr_temp = format_temp_name(temp_index);
         let loaded_temp = format_temp_name(temp_index + 1);
         current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + operand.value + " to " + target + "*");
@@ -438,22 +535,27 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
     let mut current_lines -> string[] = lines;
     let mut diagnostics -> string[] = [];
 
-    if ends_with_pointer_suffix(target) && !ends_with_pointer_suffix(operand_type) {
-        let expected_value_type = strip_pointer_suffix(target);
-        if expected_value_type == operand_type {
-            if starts_with(operand_type, "%") || starts_with(operand_type, "{") {
-                let size_ptr_temp = format_temp_name(temp_index);
-                let size_temp = format_temp_name(temp_index + 1);
-                let malloc_temp = format_temp_name(temp_index + 2);
-                let typed_ptr_temp = format_temp_name(temp_index + 3);
-                current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
-                current_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
-                current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
-                current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
-                current_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
-                current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
-                let boxed = LLVMOperand { llvm_type: target, value: typed_ptr_temp };
-                return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: boxed, diagnostics: diagnostics };
+    if ends_with_pointer_suffix(target) {
+        if !ends_with_pointer_suffix(operand_type) {
+            let expected_value_type = strip_pointer_suffix(target);
+            if expected_value_type == operand_type {
+                let mut _if85 -> boolean = false;
+                if starts_with(operand_type, "%") { _if85 = true; }
+                if starts_with(operand_type, "{") { _if85 = true; }
+                if _if85 {
+                    let size_ptr_temp = format_temp_name(temp_index);
+                    let size_temp = format_temp_name(temp_index + 1);
+                    let malloc_temp = format_temp_name(temp_index + 2);
+                    let typed_ptr_temp = format_temp_name(temp_index + 3);
+                    current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
+                    current_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
+                    current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                    current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
+                    current_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
+                    current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+                    let boxed = LLVMOperand { llvm_type: target, value: typed_ptr_temp };
+                    return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: boxed, diagnostics: diagnostics };
+                }
             }
         }
     }
@@ -472,38 +574,57 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
             if operand_type == variant_type {
                 has_value = true;
                 value_text = operand.value;
-            } else if !ends_with_pointer_suffix(operand_type) && ends_with_pointer_suffix(variant_type) {
-                let expected_value_type = strip_pointer_suffix(variant_type);
-                if expected_value_type == operand_type {
-                    let size_ptr_temp = format_temp_name(local_temp);
-                    let size_temp = format_temp_name(local_temp + 1);
-                    let malloc_temp = format_temp_name(local_temp + 2);
-                    let typed_ptr_temp = format_temp_name(local_temp + 3);
-                    local_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
-                    local_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
-                    local_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
-                    local_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
-                    local_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
-                    local_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
-                    has_value = true;
-                    value_text = typed_ptr_temp;
-                    local_temp += 4;
+            } else {
+                let mut _elif78 -> boolean = false;
+                if !ends_with_pointer_suffix(operand_type) {
+                    if ends_with_pointer_suffix(variant_type) {
+                        _elif78 = true;
+                    }
                 }
-            } else if variant_type == "i8*" && !ends_with_pointer_suffix(operand_type) {
-                if starts_with(operand_type, "%") || starts_with(operand_type, "{") {
-                    let size_ptr_temp = format_temp_name(local_temp);
-                    let size_temp = format_temp_name(local_temp + 1);
-                    let malloc_temp = format_temp_name(local_temp + 2);
-                    let typed_ptr_temp = format_temp_name(local_temp + 3);
-                    local_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
-                    local_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
-                    local_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
-                    local_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
-                    local_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
-                    local_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
-                    has_value = true;
-                    value_text = malloc_temp;
-                    local_temp += 4;
+                if _elif78 {
+                    let expected_value_type = strip_pointer_suffix(variant_type);
+                    if expected_value_type == operand_type {
+                        let size_ptr_temp = format_temp_name(local_temp);
+                        let size_temp = format_temp_name(local_temp + 1);
+                        let malloc_temp = format_temp_name(local_temp + 2);
+                        let typed_ptr_temp = format_temp_name(local_temp + 3);
+                        local_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
+                        local_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
+                        local_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                        local_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
+                        local_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
+                        local_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+                        has_value = true;
+                        value_text = typed_ptr_temp;
+                        local_temp += 4;
+                    }
+                } else {
+                    let mut _elif86 -> boolean = false;
+                    if variant_type == "i8*" {
+                        if !ends_with_pointer_suffix(operand_type) {
+                            _elif86 = true;
+                        }
+                    }
+                    if _elif86 {
+                        let mut _if89 -> boolean = false;
+                        if starts_with(operand_type, "%") { _if89 = true; }
+                        if starts_with(operand_type, "{") { _if89 = true; }
+                        if _if89 {
+                            let size_ptr_temp = format_temp_name(local_temp);
+                            let size_temp = format_temp_name(local_temp + 1);
+                            let malloc_temp = format_temp_name(local_temp + 2);
+                            let typed_ptr_temp = format_temp_name(local_temp + 3);
+                            local_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
+                            local_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
+                            local_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                            local_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
+                            local_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
+                            local_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+                            has_value = true;
+                            value_text = malloc_temp;
+                            local_temp += 4;
+                        }
+                    }
                 }
             }
             if has_value {
@@ -517,138 +638,168 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
             variant_index += 1;
         }
     }
-    if !ends_with_pointer_suffix(target) && ends_with_pointer_suffix(operand.llvm_type) {
-        let source_base = strip_pointer_suffix(operand.llvm_type);
-        if source_base == target {
+    if !ends_with_pointer_suffix(target) {
+        if ends_with_pointer_suffix(operand.llvm_type) {
+            let source_base = strip_pointer_suffix(operand.llvm_type);
+            if source_base == target {
+                let temp_name = format_temp_name(temp_index);
+                current_lines.push("  " + temp_name + " = load " + target + ", " + operand.llvm_type + " " + operand.value);
+                let coerced = LLVMOperand { llvm_type: target, value: temp_name };
+                return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+            }
+        }
+    }
+    if operand_type == "i8*" {
+        if !ends_with_pointer_suffix(target) {
+            let mut _if87 -> boolean = false;
+            if starts_with(target, "%") { _if87 = true; }
+            if starts_with(target, "{") { _if87 = true; }
+            if _if87 {
+                let typed_ptr_temp = format_temp_name(temp_index);
+                let load_temp = format_temp_name(temp_index + 1);
+                current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + operand.value + " to " + target + "*");
+                current_lines.push("  " + load_temp + " = load " + target + ", " + target + "* " + typed_ptr_temp);
+                let coerced = LLVMOperand { llvm_type: target, value: load_temp };
+                return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
+            }
+        }
+    }
+    if target == "i8*" {
+        if ends_with_pointer_suffix(operand.llvm_type) {
             let temp_name = format_temp_name(temp_index);
-            current_lines.push("  " + temp_name + " = load " + target + ", " + operand.llvm_type + " " + operand.value);
+            current_lines.push("  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to i8*");
+            let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
+            return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
+    }
+    if target == "i8*" {
+        if !ends_with_pointer_suffix(operand.llvm_type) {
+            let mut _if88 -> boolean = false;
+            if starts_with(operand.llvm_type, "%") { _if88 = true; }
+            if starts_with(operand.llvm_type, "{") { _if88 = true; }
+            if _if88 {
+                let size_ptr_temp = format_temp_name(temp_index);
+                let size_temp = format_temp_name(temp_index + 1);
+                let malloc_temp = format_temp_name(temp_index + 2);
+                let typed_ptr_temp = format_temp_name(temp_index + 3);
+                current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand.llvm_type + ", " + operand.llvm_type + "* null, i32 1");
+                current_lines.push("  " + size_temp + " = ptrtoint " + operand.llvm_type + "* " + size_ptr_temp + " to i64");
+                current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*");
+                current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp);
+                current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+                let coerced = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
+                return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: coerced, diagnostics: diagnostics };
+            }
+        }
+    }
+    if operand.llvm_type == "i8*" {
+        if ends_with_pointer_suffix(target) {
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = bitcast i8* " + operand.value + " to " + target);
             let coerced = LLVMOperand { llvm_type: target, value: temp_name };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
         }
     }
-    if operand_type == "i8*" && !ends_with_pointer_suffix(target) {
-        if starts_with(target, "%") || starts_with(target, "{") {
-            let typed_ptr_temp = format_temp_name(temp_index);
-            let load_temp = format_temp_name(temp_index + 1);
-            current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + operand.value + " to " + target + "*");
-            current_lines.push("  " + load_temp + " = load " + target + ", " + target + "* " + typed_ptr_temp);
-            let coerced = LLVMOperand { llvm_type: target, value: load_temp };
-            return CoercionResult { lines: current_lines, temp_index: temp_index + 2, operand: coerced, diagnostics: diagnostics };
-        }
-    }
-    if target == "i8*" && ends_with_pointer_suffix(operand.llvm_type) {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to i8*");
-        let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
-    }
-    if target == "i8*" && !ends_with_pointer_suffix(operand.llvm_type) {
-        if starts_with(operand.llvm_type, "%") || starts_with(operand.llvm_type, "{") {
-            let size_ptr_temp = format_temp_name(temp_index);
-            let size_temp = format_temp_name(temp_index + 1);
-            let malloc_temp = format_temp_name(temp_index + 2);
-            let typed_ptr_temp = format_temp_name(temp_index + 3);
-            current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand.llvm_type + ", " + operand.llvm_type + "* null, i32 1");
-            current_lines.push("  " + size_temp + " = ptrtoint " + operand.llvm_type + "* " + size_ptr_temp + " to i64");
-            current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
-            current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*");
-            current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp);
-            current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
-            let coerced = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
-            return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: coerced, diagnostics: diagnostics };
-        }
-    }
-    if operand.llvm_type == "i8*" && ends_with_pointer_suffix(target) {
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = bitcast i8* " + operand.value + " to " + target);
-        let coerced = LLVMOperand { llvm_type: target, value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
-    }
-    if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target) {
-        let expected_value_type = strip_pointer_suffix(target);
-        if expected_value_type == operand.llvm_type {
-            let size_ptr_temp = format_temp_name(temp_index);
-            let size_temp = format_temp_name(temp_index + 1);
-            let malloc_temp = format_temp_name(temp_index + 2);
-            let typed_ptr_temp = format_temp_name(temp_index + 3);
-            current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand.llvm_type + ", " + operand.llvm_type + "* null, i32 1");
-            current_lines.push("  " + size_temp + " = ptrtoint " + operand.llvm_type + "* " + size_ptr_temp + " to i64");
-            current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
-            current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*");
-            current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp);
-            current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
-            let mut pointer_value -> string = typed_ptr_temp;
-            let mut next_index -> number = temp_index + 4;
-            let typed_pointer_type = operand.llvm_type + "*";
-            if typed_pointer_type != target {
-                let cast_temp = format_temp_name(next_index);
-                current_lines.push("  " + cast_temp + " = bitcast " + typed_pointer_type + " " + typed_ptr_temp + " to " + target);
-                pointer_value = cast_temp;
-                next_index += 1;
+    if !ends_with_pointer_suffix(operand.llvm_type) {
+        if ends_with_pointer_suffix(target) {
+            let expected_value_type = strip_pointer_suffix(target);
+            if expected_value_type == operand.llvm_type {
+                let size_ptr_temp = format_temp_name(temp_index);
+                let size_temp = format_temp_name(temp_index + 1);
+                let malloc_temp = format_temp_name(temp_index + 2);
+                let typed_ptr_temp = format_temp_name(temp_index + 3);
+                current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand.llvm_type + ", " + operand.llvm_type + "* null, i32 1");
+                current_lines.push("  " + size_temp + " = ptrtoint " + operand.llvm_type + "* " + size_ptr_temp + " to i64");
+                current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*");
+                current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp);
+                current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
+                let mut pointer_value -> string = typed_ptr_temp;
+                let mut next_index -> number = temp_index + 4;
+                let typed_pointer_type = operand.llvm_type + "*";
+                if typed_pointer_type != target {
+                    let cast_temp = format_temp_name(next_index);
+                    current_lines.push("  " + cast_temp + " = bitcast " + typed_pointer_type + " " + typed_ptr_temp + " to " + target);
+                    pointer_value = cast_temp;
+                    next_index += 1;
+                }
+                let coerced = LLVMOperand { llvm_type: target, value: pointer_value };
+                return CoercionResult { lines: current_lines, temp_index: next_index, operand: coerced, diagnostics: diagnostics };
             }
-            let coerced = LLVMOperand { llvm_type: target, value: pointer_value };
-            return CoercionResult { lines: current_lines, temp_index: next_index, operand: coerced, diagnostics: diagnostics };
         }
     }
-    if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target) {
-        let operand_array_element = array_pointer_element_type(operand.llvm_type + "*");
-        if operand_array_element.length > 0 {
-            let alloca_temp = format_temp_name(temp_index);
-            current_lines.push("  " + alloca_temp + " = alloca " + operand.llvm_type);
-            current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + alloca_temp);
-            let mut next_index -> number = temp_index + 1;
-            let mut pointer_value -> string = alloca_temp;
-            let operand_pointer_type = operand.llvm_type + "*";
-            if operand_pointer_type != target {
-                let bitcast_temp = format_temp_name(next_index);
-                current_lines.push("  " + bitcast_temp + " = bitcast " + operand_pointer_type + " " + alloca_temp + " to " + target);
-                pointer_value = bitcast_temp;
-                next_index += 1;
+    if !ends_with_pointer_suffix(operand.llvm_type) {
+        if ends_with_pointer_suffix(target) {
+            let operand_array_element = array_pointer_element_type(operand.llvm_type + "*");
+            if operand_array_element.length > 0 {
+                let alloca_temp = format_temp_name(temp_index);
+                current_lines.push("  " + alloca_temp + " = alloca " + operand.llvm_type);
+                current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + alloca_temp);
+                let mut next_index -> number = temp_index + 1;
+                let mut pointer_value -> string = alloca_temp;
+                let operand_pointer_type = operand.llvm_type + "*";
+                if operand_pointer_type != target {
+                    let bitcast_temp = format_temp_name(next_index);
+                    current_lines.push("  " + bitcast_temp + " = bitcast " + operand_pointer_type + " " + alloca_temp + " to " + target);
+                    pointer_value = bitcast_temp;
+                    next_index += 1;
+                }
+                let coerced = LLVMOperand { llvm_type: target, value: pointer_value };
+                return CoercionResult { lines: current_lines, temp_index: next_index, operand: coerced, diagnostics: diagnostics };
             }
-            let coerced = LLVMOperand { llvm_type: target, value: pointer_value };
-            return CoercionResult { lines: current_lines, temp_index: next_index, operand: coerced, diagnostics: diagnostics };
         }
     }
-    if ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target) {
-        let source_element = array_pointer_element_type(operand.llvm_type);
-        let target_element = array_pointer_element_type(target);
-        if source_element.length > 0 && target_element.length > 0 {
+    if ends_with_pointer_suffix(operand.llvm_type) {
+        if ends_with_pointer_suffix(target) {
+            let source_element = array_pointer_element_type(operand.llvm_type);
+            let target_element = array_pointer_element_type(target);
+            if source_element.length > 0 {
+                if target_element.length > 0 {
+                    let temp_name = format_temp_name(temp_index);
+                    current_lines.push("  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target);
+                    let coerced = LLVMOperand { llvm_type: target, value: temp_name };
+                    return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
+                }
+            }
             let temp_name = format_temp_name(temp_index);
             current_lines.push("  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target);
             let coerced = LLVMOperand { llvm_type: target, value: temp_name };
             return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
         }
-        let temp_name = format_temp_name(temp_index);
-        current_lines.push("  " + temp_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target);
-        let coerced = LLVMOperand { llvm_type: target, value: temp_name };
-        return CoercionResult { lines: current_lines, temp_index: temp_index + 1, operand: coerced, diagnostics: diagnostics };
     }
-    if operand.value == "null" && ends_with_pointer_suffix(target) {
-        let coerced = LLVMOperand { llvm_type: target, value: "null" };
-        return CoercionResult { lines: current_lines, temp_index: temp_index, operand: coerced, diagnostics: diagnostics };
-    }
-    if operand.value == "null" && !ends_with_pointer_suffix(target) {
-        let literal = default_return_literal(target);
-        let coerced = LLVMOperand { llvm_type: target, value: literal };
-        return CoercionResult { lines: current_lines, temp_index: temp_index, operand: coerced, diagnostics: diagnostics };
-    }
-    if !ends_with_pointer_suffix(target) && ends_with_pointer_suffix(operand.llvm_type) {
-        let mut pointer_type -> string = operand.llvm_type;
-        let mut pointer_value -> string = operand.value;
-        let mut pointer_temp_index -> number = temp_index;
-        let base_type = strip_pointer_suffix(pointer_type);
-        if base_type != target {
-            let desired_pointer_type = target + "*";
-            let bitcast_temp = format_temp_name(pointer_temp_index);
-            current_lines.push("  " + bitcast_temp + " = bitcast " + pointer_type + " " + pointer_value + " to " + desired_pointer_type);
-            pointer_type = desired_pointer_type;
-            pointer_value = bitcast_temp;
-            pointer_temp_index += 1;
+    if operand.value == "null" {
+        if ends_with_pointer_suffix(target) {
+            let coerced = LLVMOperand { llvm_type: target, value: "null" };
+            return CoercionResult { lines: current_lines, temp_index: temp_index, operand: coerced, diagnostics: diagnostics };
         }
-        let load_temp = format_temp_name(pointer_temp_index);
-        current_lines.push("  " + load_temp + " = load " + target + ", " + pointer_type + " " + pointer_value);
-        let coerced = LLVMOperand { llvm_type: target, value: load_temp };
-        return CoercionResult { lines: current_lines, temp_index: pointer_temp_index + 1, operand: coerced, diagnostics: diagnostics };
+    }
+    if operand.value == "null" {
+        if !ends_with_pointer_suffix(target) {
+            let literal = default_return_literal(target);
+            let coerced = LLVMOperand { llvm_type: target, value: literal };
+            return CoercionResult { lines: current_lines, temp_index: temp_index, operand: coerced, diagnostics: diagnostics };
+        }
+    }
+    if !ends_with_pointer_suffix(target) {
+        if ends_with_pointer_suffix(operand.llvm_type) {
+            let mut pointer_type -> string = operand.llvm_type;
+            let mut pointer_value -> string = operand.value;
+            let mut pointer_temp_index -> number = temp_index;
+            let base_type = strip_pointer_suffix(pointer_type);
+            if base_type != target {
+                let desired_pointer_type = target + "*";
+                let bitcast_temp = format_temp_name(pointer_temp_index);
+                current_lines.push("  " + bitcast_temp + " = bitcast " + pointer_type + " " + pointer_value + " to " + desired_pointer_type);
+                pointer_type = desired_pointer_type;
+                pointer_value = bitcast_temp;
+                pointer_temp_index += 1;
+            }
+            let load_temp = format_temp_name(pointer_temp_index);
+            current_lines.push("  " + load_temp + " = load " + target + ", " + pointer_type + " " + pointer_value);
+            let coerced = LLVMOperand { llvm_type: target, value: load_temp };
+            return CoercionResult { lines: current_lines, temp_index: pointer_temp_index + 1, operand: coerced, diagnostics: diagnostics };
+        }
     }
     return null;
 }
@@ -697,26 +848,52 @@ fn dominant_type(first -> string, second -> string) -> string {
     }
     let first_is_pointer = ends_with_pointer_suffix(first);
     let second_is_pointer = ends_with_pointer_suffix(second);
-    if first_is_pointer && !second_is_pointer {
-        return first;
+    if first_is_pointer {
+        if !second_is_pointer {
+            return first;
+        }
     }
-    if second_is_pointer && !first_is_pointer {
-        return second;
+    if second_is_pointer {
+        if !first_is_pointer {
+            return second;
+        }
     }
-    if first_is_pointer && second_is_pointer {
-        return first;
+    if first_is_pointer {
+        if second_is_pointer {
+            return first;
+        }
     }
-    if first == "double" || second == "double" {
+    let mut _if79 -> boolean = false;
+    if first == "double" { _if79 = true; }
+    if second == "double" { _if79 = true; }
+    if _if79 {
         return "double";
     }
-    if first == "i64" || second == "i64" {
+    let mut _if80 -> boolean = false;
+    if first == "i64" { _if80 = true; }
+    if second == "i64" { _if80 = true; }
+    if _if80 {
         return "i64";
     }
     // i8 is narrower than i64, so i64 dominates
-    if (first == "i8" && second == "i64") || (first == "i64" && second == "i8") {
+    let mut _if81 -> boolean = false;
+    if first == "i8" {
+        if second == "i64" {
+            _if81 = true;
+        }
+    }
+    if first == "i64" {
+        if second == "i8" {
+            _if81 = true;
+        }
+    }
+    if _if81 {
         return "i64";
     }
-    if first == "i1" || second == "i1" {
+    let mut _if82 -> boolean = false;
+    if first == "i1" { _if82 = true; }
+    if second == "i1" { _if82 = true; }
+    if _if82 {
         return "i1";
     }
     return first;
@@ -728,11 +905,15 @@ fn harmonise_operands(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
     let mut current_temp -> number = temp_index;
     let mut left_operand = left;
     let mut right_operand = right;
-    if left_operand.value == "null" && ends_with_pointer_suffix(right_operand.llvm_type) {
-        left_operand = LLVMOperand { llvm_type: right_operand.llvm_type, value: "null" };
+    if left_operand.value == "null" {
+        if ends_with_pointer_suffix(right_operand.llvm_type) {
+            left_operand = LLVMOperand { llvm_type: right_operand.llvm_type, value: "null" };
+        }
     }
-    if right_operand.value == "null" && ends_with_pointer_suffix(left_operand.llvm_type) {
-        right_operand = LLVMOperand { llvm_type: left_operand.llvm_type, value: "null" };
+    if right_operand.value == "null" {
+        if ends_with_pointer_suffix(left_operand.llvm_type) {
+            right_operand = LLVMOperand { llvm_type: left_operand.llvm_type, value: "null" };
+        }
     }
     if left_operand.llvm_type == right_operand.llvm_type {
         return BinaryAlignmentResult {

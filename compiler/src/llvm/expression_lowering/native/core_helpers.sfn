@@ -19,13 +19,19 @@ fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter
         let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
 
         // Mirror `prepare_parameters`: infer method receiver type when `self` is unannotated.
-        if parameter.type_annotation.length == 0 && parameter.name == "self" && index == 0 {
-            let double_colon_pos = find_last_index_of_char(function_name, ":");
-            if double_colon_pos > 0 && substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
-                let struct_name = substring(function_name, 0, double_colon_pos - 1);
-                let struct_type = map_struct_type_annotation_ctx(context, struct_name);
-                if struct_type.length > 0 {
-                    llvm_type = struct_type + "*";
+        if parameter.type_annotation.length == 0 {
+            if parameter.name == "self" {
+                if index == 0 {
+                    let double_colon_pos = find_last_index_of_char(function_name, ":");
+                    if double_colon_pos > 0 {
+                        if substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+                            let struct_name = substring(function_name, 0, double_colon_pos - 1);
+                            let struct_type = map_struct_type_annotation_ctx(context, struct_name);
+                            if struct_type.length > 0 {
+                                llvm_type = struct_type + "*";
+                            }
+                        }
+                    }
                 }
             }
         }

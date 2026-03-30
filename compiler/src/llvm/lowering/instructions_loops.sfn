@@ -356,14 +356,18 @@ fn collect_try_structure(instructions -> NativeInstruction[], start_index -> num
                 break;
             }
         } else if _try_tag == 16 {  // Catch
-            if depth == 1 && catch_index == -1 {
-                catch_index = index;
-                let instruction = instructions[index];
-                catch_name = instruction.name;
+            if depth == 1 {
+                if catch_index == -1 {
+                    catch_index = index;
+                    let instruction = instructions[index];
+                    catch_name = instruction.name;
+                }
             }
         } else if _try_tag == 17 {  // Finally
-            if depth == 1 && finally_index == -1 {
-                finally_index = index;
+            if depth == 1 {
+                if finally_index == -1 {
+                    finally_index = index;
+                }
             }
         }
         index += 1;
@@ -546,25 +550,27 @@ fn lower_try_instruction(
 
         let mut catch_locals -> LocalBinding[] = current_locals;
         let trimmed_name = trim_text(structure.catch_name);
-        if trimmed_name.length > 0 && trimmed_name != "_" {
-            // Bind catch variable as a local `i8*`.
-            let err_slot = format_local_pointer_name(current_next_local);
-            current_next_local += 1;
-            current_allocas.push("  " + err_slot + " = alloca i8*");
-            current_lines.push("  store i8* " + exception_temp + ", i8** " + err_slot);
-            catch_locals = append_local_binding(
-                catch_locals,
-                LocalBinding {
-                    name: trimmed_name,
-                    pointer: err_slot,
-                    llvm_type: "i8*",
-                    type_annotation: "string",
-                    ownership: null,
-                    consumed: false,
-                    scope_id: catch_scope_id,
-                    scope_depth: scope_depth + 1,
-                }
-            );
+        if trimmed_name.length > 0 {
+            if trimmed_name != "_" {
+                // Bind catch variable as a local `i8*`.
+                let err_slot = format_local_pointer_name(current_next_local);
+                current_next_local += 1;
+                current_allocas.push("  " + err_slot + " = alloca i8*");
+                current_lines.push("  store i8* " + exception_temp + ", i8** " + err_slot);
+                catch_locals = append_local_binding(
+                    catch_locals,
+                    LocalBinding {
+                        name: trimmed_name,
+                        pointer: err_slot,
+                        llvm_type: "i8*",
+                        type_annotation: "string",
+                        ownership: null,
+                        consumed: false,
+                        scope_id: catch_scope_id,
+                        scope_depth: scope_depth + 1,
+                    }
+                );
+            }
         }
 
         let catch_result = lower_instruction_range(
@@ -722,12 +728,18 @@ fn collect_loop_structure(
             };
         }
         let _loop_tag = get_instruction_tag(instructions, index);
-        if _loop_tag == 8 || _loop_tag == 6 {  // Loop || For
+        let mut _is_loop_start -> boolean = false;
+        if _loop_tag == 8 { _is_loop_start = true; }
+        if _loop_tag == 6 { _is_loop_start = true; }
+        if _is_loop_start {  // Loop or For
             depth += 1;
             index += 1;
             continue;
         }
-        if _loop_tag == 9 || _loop_tag == 7 {  // EndLoop || EndFor
+        let mut _is_loop_end -> boolean = false;
+        if _loop_tag == 9 { _is_loop_end = true; }
+        if _loop_tag == 7 { _is_loop_end = true; }
+        if _is_loop_end {  // EndLoop or EndFor
             if depth == 0 {
                 body_end = index;
                 return LoopStructure {
@@ -988,33 +1000,37 @@ fn lower_loop_instruction(
         let name = mutated_names[name_idx];
         let local = find_local_binding(base_locals, name);
 
-        if local != null && name_idx < latch_loads.length {
-            let latch_value = latch_loads[name_idx];
-
-            if latch_value.length > 0 {
-                // Find preloaded value for this local
-                let mut preload_value -> string = "";
-                let mut local_idx -> number = 0;
-                loop {
-                    if local_idx >= base_locals.length {
-                        break;
+        if local != null {
+            if name_idx < latch_loads.length {
+                let latch_value = latch_loads[name_idx];
+    
+                if latch_value.length > 0 {
+                    // Find preloaded value for this local
+                    let mut preload_value -> string = "";
+                    let mut local_idx -> number = 0;
+                    loop {
+                        if local_idx >= base_locals.length {
+                            break;
+                        }
+                        if base_locals[local_idx].name == name {
+                            if local_idx < preloaded_locals.length {
+                                preload_value = preloaded_locals[local_idx];
+                                break;
+                            }
+                        }
+                        local_idx += 1;
                     }
-                    if base_locals[local_idx].name == name && local_idx < preloaded_locals.length {
-                        preload_value = preloaded_locals[local_idx];
-                        break;
+    
+                    if preload_value.length > 0 {
+                        let phi_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+    
+                        let phi_line = "  " + phi_temp + " = phi " + local.llvm_type + " [ " + preload_value + ", %" + current_label + " ], [ " + latch_value + ", %" + latch_label + " ]";
+                        header_phis.push(phi_line);
+    
+                        let store_line = "  store " + local.llvm_type + " " + phi_temp + ", " + local.llvm_type + "* " + local.pointer;
+                        phi_stores.push(store_line);
                     }
-                    local_idx += 1;
-                }
-
-                if preload_value.length > 0 {
-                    let phi_temp = format_temp_name(current_temp);
-                    current_temp += 1;
-
-                    let phi_line = "  " + phi_temp + " = phi " + local.llvm_type + " [ " + preload_value + ", %" + current_label + " ], [ " + latch_value + ", %" + latch_label + " ]";
-                    header_phis.push(phi_line);
-
-                    let store_line = "  store " + local.llvm_type + " " + phi_temp + ", " + local.llvm_type + "* " + local.pointer;
-                    phi_stores.push(store_line);
                 }
             }
         }
@@ -1035,10 +1051,12 @@ fn lower_loop_instruction(
         final_lines.push(line);
 
         // Insert phi nodes right after header label
-        if !found_header && line == header_label + ":" {
-            found_header = true;
-            final_lines = extend_string_array(final_lines, header_phis);
-            final_lines = extend_string_array(final_lines, phi_stores);
+        if !found_header {
+            if line == header_label + ":" {
+                found_header = true;
+                final_lines = extend_string_array(final_lines, header_phis);
+                final_lines = extend_string_array(final_lines, phi_stores);
+            }
         }
         line_idx += 1;
     }

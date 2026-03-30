@@ -31,8 +31,12 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
         // identifiers like `borrow_span` / `borrow_parse` as borrow expressions.
         if trimmed.length > 6 {
             let next = char_at(trimmed, 6);
-            if next != " " && next != "\t" && next != "(" {
-                return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+            if next != " " {
+                if next != "\t" {
+                    if next != "(" {
+                        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+                    }
+                }
             }
         }
         let mut remainder -> string = trim_text(substring(trimmed, 6, trimmed.length));
@@ -46,41 +50,43 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
             mutable_flag = true;
             remainder = trim_text(after_mut);
         }
-        if remainder.length > 0 && substring(remainder, 0, 1) == "(" {
-            let argument_parse = extract_borrow_argument(remainder);
-            let mut messages -> string[] = [];
-            let mut _ci0 -> number = 0;
-            loop {
-                if _ci0 >= diagnostics.length { break; }
-                messages.push(diagnostics[_ci0]);
-                _ci0 += 1;
-            }
-            let mut _ci1 -> number = 0;
-            loop {
-                if _ci1 >= argument_parse.diagnostics.length { break; }
-                messages.push(argument_parse.diagnostics[_ci1]);
-                _ci1 += 1;
-            }
-            if !argument_parse.success {
-                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
-            }
-            let mut argument_text -> string = argument_parse.argument;
-            if starts_with(argument_text, "mut") {
-                let after_mut = substring(argument_text, 3, argument_text.length);
-                let trimmed_after_mut = trim_text(after_mut);
-                if trimmed_after_mut.length > 0 {
-                    mutable_flag = true;
-                    argument_text = trimmed_after_mut;
+        if remainder.length > 0 {
+            if substring(remainder, 0, 1) == "(" {
+                let argument_parse = extract_borrow_argument(remainder);
+                let mut messages -> string[] = [];
+                let mut _ci0 -> number = 0;
+                loop {
+                    if _ci0 >= diagnostics.length { break; }
+                    messages.push(diagnostics[_ci0]);
+                    _ci0 += 1;
                 }
+                let mut _ci1 -> number = 0;
+                loop {
+                    if _ci1 >= argument_parse.diagnostics.length { break; }
+                    messages.push(argument_parse.diagnostics[_ci1]);
+                    _ci1 += 1;
+                }
+                if !argument_parse.success {
+                    return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+                }
+                let mut argument_text -> string = argument_parse.argument;
+                if starts_with(argument_text, "mut") {
+                    let after_mut = substring(argument_text, 3, argument_text.length);
+                    let trimmed_after_mut = trim_text(after_mut);
+                    if trimmed_after_mut.length > 0 {
+                        mutable_flag = true;
+                        argument_text = trimmed_after_mut;
+                    }
+                }
+                if argument_text.length == 0 {
+                    messages.push("llvm lowering: borrow expression missing target");
+                    return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+                }
+                if !is_valid_borrow_target(argument_text) {
+                    return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+                }
+                return BorrowParseResult { recognized: true, success: true, target: argument_text, mutable: mutable_flag, diagnostics: messages };
             }
-            if argument_text.length == 0 {
-                messages.push("llvm lowering: borrow expression missing target");
-                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
-            }
-            if !is_valid_borrow_target(argument_text) {
-                return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
-            }
-            return BorrowParseResult { recognized: true, success: true, target: argument_text, mutable: mutable_flag, diagnostics: messages };
         }
 
         let simple_parse = extract_simple_borrow_target(remainder);
@@ -623,12 +629,16 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
             break;
         }
         let local = locals[index];
-        if !local.consumed && local.ownership != null {
-            let details = local.ownership;
-            if details.variant == "Borrow" && details.mutable {
-                let base_name = normalise_borrow_base(details.base);
-                let location = format_suspension_location(keyword, details.span, suspension_span);
-                diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+        if !local.consumed {
+            if local.ownership != null {
+                let details = local.ownership;
+                if details.variant == "Borrow" {
+                    if details.mutable {
+                        let base_name = normalise_borrow_base(details.base);
+                        let location = format_suspension_location(keyword, details.span, suspension_span);
+                        diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+                    }
+                }
             }
         }
         index += 1;
@@ -671,7 +681,11 @@ fn find_suspension_keyword(text -> string) -> string {
             return "await";
         }
         let next = char_at(text, 5);
-        if next == " " || next == "\t" || next == "(" {
+        let mut _if192 -> boolean = false;
+        if next == " " { _if192 = true; }
+        if next == "\t" { _if192 = true; }
+        if next == "(" { _if192 = true; }
+        if _if192 {
             return "await";
         }
     }
@@ -680,7 +694,11 @@ fn find_suspension_keyword(text -> string) -> string {
             return "yield";
         }
         let next = char_at(text, 5);
-        if next == " " || next == "\t" || next == "(" {
+        let mut _if193 -> boolean = false;
+        if next == " " { _if193 = true; }
+        if next == "\t" { _if193 = true; }
+        if next == "(" { _if193 = true; }
+        if _if193 {
             return "yield";
         }
     }

@@ -150,10 +150,19 @@ fn _path_normalize(path -> string) -> string {
         }
         if path[i] == "/" {
             let seg = substring(path, seg_start, i);
-            if seg.length == 0 || seg == "." {
+            let mut _if1 -> boolean = false;
+            if seg.length == 0 { _if1 = true; }
+            if seg == "." { _if1 = true; }
+            if _if1 {
                 // skip
             } else if seg == ".." {
-                if parts.length > 0 && parts[parts.length - 1] != ".." {
+                let mut _if11 -> boolean = false;
+                if parts.length > 0 {
+                    if parts[parts.length - 1] != ".." {
+                        _if11 = true;
+                    }
+                }
+                if _if11 {
                     parts = _path_pop_last(parts);
                 } else if !is_abs {
                     parts.push("..");
@@ -169,10 +178,19 @@ fn _path_normalize(path -> string) -> string {
     // trailing segment
     if seg_start <= path.length {
         let seg = substring(path, seg_start, path.length);
-        if seg.length == 0 || seg == "." {
+        let mut _if2 -> boolean = false;
+        if seg.length == 0 { _if2 = true; }
+        if seg == "." { _if2 = true; }
+        if _if2 {
             // skip
         } else if seg == ".." {
-            if parts.length > 0 && parts[parts.length - 1] != ".." {
+            let mut _if12 -> boolean = false;
+            if parts.length > 0 {
+                if parts[parts.length - 1] != ".." {
+                    _if12 = true;
+                }
+            }
+            if _if12 {
                 parts = _path_pop_last(parts);
             } else if !is_abs {
                 parts.push("..");
@@ -358,10 +376,14 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
 
         if in_block_comment {
             let _bc_next = i + 1;
-            if ch == "*" && _bc_next < source_len && _byte_at(source, _bc_next) == "/" {
-                in_block_comment = false;
-                i += 2;
-                continue;
+            if ch == "*" {
+                if _bc_next < source_len {
+                    if _byte_at(source, _bc_next) == "/" {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
             }
             i += 1;
             continue;
@@ -389,17 +411,19 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
 
         // Not inside string/comment.
         let _sl_next = i + 1;
-        if ch == "/" && _sl_next < source_len {
-            let next = _byte_at(source, _sl_next);
-            if next == "/" {
-                in_line_comment = true;
-                i += 2;
-                continue;
-            }
-            if next == "*" {
-                in_block_comment = true;
-                i += 2;
-                continue;
+        if ch == "/" {
+            if _sl_next < source_len {
+                let next = _byte_at(source, _sl_next);
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
             }
         }
         if ch == "\"" {
@@ -440,10 +464,14 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
                 }
                 if stmt_in_block_comment {
                     let _sbc_next = j + 1;
-                    if cj == "*" && _sbc_next < source_len && _byte_at(source, _sbc_next) == "/" {
-                        stmt_in_block_comment = false;
-                        j += 2;
-                        continue;
+                    if cj == "*" {
+                        if _sbc_next < source_len {
+                            if _byte_at(source, _sbc_next) == "/" {
+                                stmt_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
                     }
                     j += 1;
                     continue;
@@ -469,17 +497,19 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
                 }
 
                 let _ssl_next = j + 1;
-                if cj == "/" && _ssl_next < source_len {
-                    let nextj = _byte_at(source, _ssl_next);
-                    if nextj == "/" {
-                        stmt_in_line_comment = true;
-                        j += 2;
-                        continue;
-                    }
-                    if nextj == "*" {
-                        stmt_in_block_comment = true;
-                        j += 2;
-                        continue;
+                if cj == "/" {
+                    if _ssl_next < source_len {
+                        let nextj = _byte_at(source, _ssl_next);
+                        if nextj == "/" {
+                            stmt_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nextj == "*" {
+                            stmt_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
                     }
                 }
                 if cj == "\"" {
@@ -488,45 +518,54 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
                     continue;
                 }
 
-                if spec.length == 0 && _word_matches(source, j, "from") {
-                    let mut k = j + 4;
-                    // skip whitespace
-                    loop {
-                        if k >= source_len {
-                            break;
-                        }
-                        let wk = _byte_at(source, k);
-                        if wk == " " || wk == "\t" || wk == "\n" || wk == "\r" {
-                            k += 1;
-                            continue;
-                        }
-                        break;
-                    }
-                    if k < source_len && _byte_at(source, k) == "\"" {
-                        // parse string literal value
-                        k += 1;
-                        let mut start = k;
-                        let mut esc -> boolean = false;
+                if spec.length == 0 {
+                    if _word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        // skip whitespace
                         loop {
                             if k >= source_len {
                                 break;
                             }
-                            let sk = _byte_at(source, k);
-                            if esc {
-                                esc = false;
+                            let wk = _byte_at(source, k);
+                            let mut _if13 -> boolean = false;
+                            if wk == " " { _if13 = true; }
+                            if wk == "\t" { _if13 = true; }
+                            if wk == "\n" { _if13 = true; }
+                            if wk == "\r" { _if13 = true; }
+                            if _if13 {
                                 k += 1;
                                 continue;
                             }
-                            if sk == "\\" {
-                                esc = true;
+                            break;
+                        }
+                        if k < source_len {
+                            if _byte_at(source, k) == "\"" {
+                                // parse string literal value
                                 k += 1;
-                                continue;
+                                let mut start = k;
+                                let mut esc -> boolean = false;
+                                loop {
+                                    if k >= source_len {
+                                        break;
+                                    }
+                                    let sk = _byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\"" {
+                                        spec = substring_unchecked(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
                             }
-                            if sk == "\"" {
-                                spec = substring_unchecked(source, start, k);
-                                break;
-                            }
-                            k += 1;
                         }
                     }
                 }
@@ -538,9 +577,14 @@ fn _collect_relative_import_spans(source -> string) -> _RelativeImportSpan[] {
                 j += 1;
             }
 
-            if stmt_end > 0 && spec.length > 0 {
-                if _has_prefix(spec, "./") || _has_prefix(spec, "../") {
-                    spans.push(_RelativeImportSpan { start: stmt_start, end: stmt_end, spec: spec });
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    let mut _if14 -> boolean = false;
+                    if _has_prefix(spec, "./") { _if14 = true; }
+                    if _has_prefix(spec, "../") { _if14 = true; }
+                    if _if14 {
+                        spans.push(_RelativeImportSpan { start: stmt_start, end: stmt_end, spec: spec });
+                    }
                 }
             }
 
@@ -823,15 +867,17 @@ fn _write_llvm_lines(path -> string, lines -> string[]) ![io] {
         }
         let line = lines[index] + "\n";
         let next_len = buffered + line.length;
-        if next_len > chunk_limit && buffer.length > 0 {
-            if wrote {
-                fs.appendFile(path, buffer);
-            } else {
-                fs.writeFile(path, buffer);
-                wrote = true;
+        if next_len > chunk_limit {
+            if buffer.length > 0 {
+                if wrote {
+                    fs.appendFile(path, buffer);
+                } else {
+                    fs.writeFile(path, buffer);
+                    wrote = true;
+                }
+                buffer = "";
+                buffered = 0;
             }
-            buffer = "";
-            buffered = 0;
         }
         buffer = buffer + line;
         buffered += line.length;
@@ -881,10 +927,17 @@ fn _runtime_bundle_exists(root -> string) -> boolean ![io] {
     let runtime_src = _path_join(root, "native/src/sailfin_runtime.c");
     let runtime_ir = _path_join(root, "native/ir/runtime_globals.ll");
     let prelude_obj = _runtime_prelude_path(root);
-    return fs.exists(include_dir) &&
-        fs.exists(runtime_src) &&
-        fs.exists(runtime_ir) &&
-        prelude_obj.length > 0;
+    let mut _bundle_ok -> boolean = false;
+    if fs.exists(include_dir) {
+        if fs.exists(runtime_src) {
+            if fs.exists(runtime_ir) {
+                if prelude_obj.length > 0 {
+                    _bundle_ok = true;
+                }
+            }
+        }
+    }
+    return _bundle_ok;
 }
 
 fn _runtime_prelude_path(root -> string) -> string ![io] {
@@ -987,7 +1040,11 @@ fn _clang_link_with_opt(ll_path -> string, out_path -> string, runtime_root -> s
     let globals_obj = cached[1];
     let prelude_obj = cached[2];
 
-    if runtime_obj.length == 0 || globals_obj.length == 0 || prelude_obj.length == 0 {
+    let mut _if3 -> boolean = false;
+    if runtime_obj.length == 0 { _if3 = true; }
+    if globals_obj.length == 0 { _if3 = true; }
+    if prelude_obj.length == 0 { _if3 = true; }
+    if _if3 {
         print("failed to build cached runtime objects");
         return 1;
     }
@@ -1046,7 +1103,11 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
     let runtime_obj = cached[0];
     let globals_obj = cached[1];
     let prelude_obj = cached[2];
-    if runtime_obj.length == 0 || globals_obj.length == 0 || prelude_obj.length == 0 {
+    let mut _if4 -> boolean = false;
+    if runtime_obj.length == 0 { _if4 = true; }
+    if globals_obj.length == 0 { _if4 = true; }
+    if prelude_obj.length == 0 { _if4 = true; }
+    if _if4 {
         print("failed to build cached runtime objects");
         return 1;
     }
@@ -1146,7 +1207,12 @@ fn _toml_trim_str(text -> string) -> string {
     loop {
         if start >= end { break; }
         let ch = text[start];
-        if ch == " " || ch == "\t" || ch == "\r" || ch == "\n" {
+        let mut _if5 -> boolean = false;
+        if ch == " " { _if5 = true; }
+        if ch == "\t" { _if5 = true; }
+        if ch == "\r" { _if5 = true; }
+        if ch == "\n" { _if5 = true; }
+        if _if5 {
             start += 1;
         } else {
             break;
@@ -1155,7 +1221,12 @@ fn _toml_trim_str(text -> string) -> string {
     loop {
         if end <= start { break; }
         let ch = text[end - 1];
-        if ch == " " || ch == "\t" || ch == "\r" || ch == "\n" {
+        let mut _if6 -> boolean = false;
+        if ch == " " { _if6 = true; }
+        if ch == "\t" { _if6 = true; }
+        if ch == "\r" { _if6 = true; }
+        if ch == "\n" { _if6 = true; }
+        if _if6 {
             end -= 1;
         } else {
             break;
@@ -1346,8 +1417,14 @@ fn _json_find_key(json -> string, key -> string, start -> number) -> number {
                 if json[cp] == ":" {
                     return cp + 1;
                 }
-                if json[cp] != " " && json[cp] != "\t" && json[cp] != "\n" && json[cp] != "\r" {
-                    break;
+                if json[cp] != " " {
+                    if json[cp] != "\t" {
+                        if json[cp] != "\n" {
+                            if json[cp] != "\r" {
+                                break;
+                            }
+                        }
+                    }
                 }
                 cp += 1;
             }
@@ -1371,8 +1448,14 @@ fn _json_extract_value(json -> string, key -> string, start -> number) -> string
         if json[vp] == "\"" {
             break;
         }
-        if json[vp] != " " && json[vp] != "\t" && json[vp] != "\n" && json[vp] != "\r" {
-            return "";
+        if json[vp] != " " {
+            if json[vp] != "\t" {
+                if json[vp] != "\n" {
+                    if json[vp] != "\r" {
+                        return "";
+                    }
+                }
+            }
         }
         vp += 1;
     }
@@ -1475,16 +1558,20 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
     let mut runtime_root -> string = "";
     let mut start_index -> number = 0;
-    if argv.length >= 2 && argv[0] == "--runtime-root" {
-        runtime_root = argv[1];
-        start_index = 2;
+    if argv.length >= 2 {
+        if argv[0] == "--runtime-root" {
+            runtime_root = argv[1];
+            start_index = 2;
+        }
     }
     if trace_argv {
         print("cli: runtime_root=" + runtime_root);
         print("cli: start_index=" + number_to_string(start_index));
     }
-    if runtime_root.length == 0 && _runtime_bundle_exists("runtime") {
-        runtime_root = "runtime";
+    if runtime_root.length == 0 {
+        if _runtime_bundle_exists("runtime") {
+            runtime_root = "runtime";
+        }
     }
 
     let mut args -> string[] = [];
@@ -1530,15 +1617,27 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     // Pre-compute command checks to avoid patterns the compiler drops
     // (&&-chained .length checks with function calls get dropped from IR)
     let cmd = args[0];
-    let is_version_flag = strings_equal(cmd, "--version") || strings_equal(cmd, "-V");
+    let mut _let7 -> boolean = false;
+    if strings_equal(cmd, "--version") { _let7 = true; }
+    if strings_equal(cmd, "-V") { _let7 = true; }
+    let is_version_flag = _let7;
     let is_emit_flag = strings_equal(cmd, "--emit");
-    let is_emit = strings_equal(cmd, "emit") || is_emit_flag;
-    let is_version = strings_equal(cmd, "version") || is_version_flag;
+    let mut _let8 -> boolean = false;
+    if strings_equal(cmd, "emit") { _let8 = true; }
+    if is_emit_flag { _let8 = true; }
+    let is_emit = _let8;
+    let mut _let9 -> boolean = false;
+    if strings_equal(cmd, "version") { _let9 = true; }
+    if is_version_flag { _let9 = true; }
+    let is_version = _let9;
     let is_emit_file = strings_equal(cmd, "emit-llvm-file");
     let is_build = strings_equal(cmd, "build");
     let is_run = strings_equal(cmd, "run");
     let is_test = strings_equal(cmd, "test");
-    let is_help = strings_equal(cmd, "-h") || strings_equal(cmd, "--help");
+    let mut _let10 -> boolean = false;
+    if strings_equal(cmd, "-h") { _let10 = true; }
+    if strings_equal(cmd, "--help") { _let10 = true; }
+    let is_help = _let10;
     let is_init = strings_equal(cmd, "init");
     let is_publish = strings_equal(cmd, "publish");
     let is_add = strings_equal(cmd, "add");
@@ -1879,8 +1978,10 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
                 }
                 si += 1;
             }
-            if last_slash >= 0 && last_slash < cwd.length - 1 {
-                pkg_name = substring(cwd, last_slash + 1, cwd.length);
+            if last_slash >= 0 {
+                if last_slash < cwd.length - 1 {
+                    pkg_name = substring(cwd, last_slash + 1, cwd.length);
+                }
             }
         }
         let toml_text = toml_generate(pkg_name, "0.1.0", "", "src/main.sfn");

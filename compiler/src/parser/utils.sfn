@@ -42,10 +42,11 @@ fn trim_text(value -> string) -> string {
 
 fn is_trim_whitespace(ch -> string) -> boolean {
     let code = char_code(ch);
-    return code == 32  // space
-        || code == 10  // newline
-        || code == 9   // tab
-        || code == 13; // carriage return
+    if code == 32 { return true; }
+    if code == 10 { return true; }
+    if code == 9 { return true; }
+    if code == 13 { return true; }
+    return false;
 }
 
 fn strip_surrounding_quotes(text -> string) -> string {
@@ -54,8 +55,10 @@ fn strip_surrounding_quotes(text -> string) -> string {
     }
     let first = char_code(char_at(text, 0));
     let last = char_code(char_at(text, text.length - 1));
-    if first == 34 && last == 34 {
-        return substring(text, 1, text.length - 1);
+    if first == 34 {
+        if last == 34 {
+            return substring(text, 1, text.length - 1);
+        }
     }
     return text;
 }
@@ -88,8 +91,10 @@ fn strip_loose_quotes(text -> string) -> string {
         }
         break;
     }
-    if start == 0 && end == text.length {
-        return text;
+    if start == 0 {
+        if end == text.length {
+            return text;
+        }
     }
     return substring(text, start, end);
 }
@@ -140,8 +145,10 @@ fn normalize_test_name(text -> string) -> string {
     if trimmed.length >= 2 {
         let first = char_code(char_at(trimmed, 0));
         let last = char_code(char_at(trimmed, trimmed.length - 1));
-        if first == 34 && last == 34 {
-            return strip_surrounding_quotes(trimmed);
+        if first == 34 {
+            if last == 34 {
+                return strip_surrounding_quotes(trimmed);
+            }
         }
     }
     return trimmed;
@@ -185,16 +192,18 @@ fn looks_like_number(text -> string) -> boolean {
 }
 
 fn is_decimal_digit(ch -> string) -> boolean {
-    return ch == "0"
-        || ch == "1"
-        || ch == "2"
-        || ch == "3"
-        || ch == "4"
-        || ch == "5"
-        || ch == "6"
-        || ch == "7"
-        || ch == "8"
-        || ch == "9";
+    let mut _ret433 -> boolean = false;
+    if ch == "0" { _ret433 = true; }
+    if ch == "1" { _ret433 = true; }
+    if ch == "2" { _ret433 = true; }
+    if ch == "3" { _ret433 = true; }
+    if ch == "4" { _ret433 = true; }
+    if ch == "5" { _ret433 = true; }
+    if ch == "6" { _ret433 = true; }
+    if ch == "7" { _ret433 = true; }
+    if ch == "8" { _ret433 = true; }
+    if ch == "9" { _ret433 = true; }
+    return _ret433;
 }
 
 // ============================================================================

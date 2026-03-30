@@ -428,8 +428,10 @@ fn emit_try(state -> NativeState, statement -> Statement) -> NativeState {
 
     if statement.catch_block != null {
         let mut catch_name -> string = "_";
-        if statement.catch_name != null && statement.catch_name.length > 0 {
-            catch_name = statement.catch_name;
+        if statement.catch_name != null {
+            if statement.catch_name.length > 0 {
+                catch_name = statement.catch_name;
+            }
         }
         current = state_emit_line(current, ".catch " + catch_name);
         current = state_push_indent(current);
@@ -474,7 +476,10 @@ fn render_export_specifiers(specifiers -> ExportSpecifier[]) -> string {
 }
 
 fn format_native_specifier(name -> string, alias -> string?) -> string {
-    if alias == null || alias.length == 0 {
+    let mut _if20 -> boolean = false;
+    if alias == null { _if20 = true; }
+    if alias.length == 0 { _if20 = true; }
+    if _if20 {
         return name;
     }
     return name + " as " + alias;
@@ -711,8 +716,10 @@ fn emit_struct(state -> NativeState, statement -> Statement) -> NativeState {
         method_index += 1;
     }
 
-    if statement.fields.length == 0 && statement.methods.length == 0 {
-        current = state_emit_line(current, "noop");
+    if statement.fields.length == 0 {
+        if statement.methods.length == 0 {
+            current = state_emit_line(current, "noop");
+        }
     }
 
     current = state_pop_indent(current);
@@ -1312,13 +1319,20 @@ fn analyze_type_layout(context -> LayoutContext, visiting -> string[], type_anno
     if trimmed == "number" {
         return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
     }
-    if trimmed == "int" || trimmed == "i64" {
+    let mut _if21 -> boolean = false;
+    if trimmed == "int" { _if21 = true; }
+    if trimmed == "i64" { _if21 = true; }
+    if _if21 {
         return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
     }
     if trimmed == "i32" {
         return TypeLayoutInfo { size: 4, align: 4, diagnostics: diagnostics };
     }
-    if trimmed == "boolean" || trimmed == "bool" || trimmed == "i1" {
+    let mut _if22 -> boolean = false;
+    if trimmed == "boolean" { _if22 = true; }
+    if trimmed == "bool" { _if22 = true; }
+    if trimmed == "i1" { _if22 = true; }
+    if _if22 {
         return TypeLayoutInfo { size: 1, align: 1, diagnostics: diagnostics };
     }
     if trimmed == "any" {
@@ -1846,14 +1860,21 @@ fn trim_text(value -> string) -> string {
         }
         break;
     }
-        if start == 0 && end == value.length {
-            return value;
+        if start == 0 {
+            if end == value.length {
+                return value;
+            }
         }
         return substring(value, start, end);
 }
 
 fn is_trim_char(ch -> string) -> boolean {
-    return ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
+    let mut _ret23 -> boolean = false;
+    if ch == " " { _ret23 = true; }
+    if ch == "\n" { _ret23 = true; }
+    if ch == "\r" { _ret23 = true; }
+    if ch == "\t" { _ret23 = true; }
+    return _ret23;
 }
 
 fn collect_entry_points(program -> Program) -> string[] {
@@ -1885,18 +1906,24 @@ fn is_test_symbol_char(ch -> string) -> boolean {
     let code = char_code(ch);
     let lower_a = char_code("a");
     let lower_z = char_code("z");
-    if code >= lower_a && code <= lower_z {
-        return true;
+    if code >= lower_a {
+        if code <= lower_z {
+            return true;
+        }
     }
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
-    if code >= upper_a && code <= upper_z {
-        return true;
+    if code >= upper_a {
+        if code <= upper_z {
+            return true;
+        }
     }
     let zero = char_code("0");
     let nine = char_code("9");
-    if code >= zero && code <= nine {
-        return true;
+    if code >= zero {
+        if code <= nine {
+            return true;
+        }
     }
     return false;
 }
@@ -1923,8 +1950,10 @@ fn sanitize_test_name_for_symbol(name -> string) -> string {
     // Ensure the name is not purely numeric / doesn't start with a digit.
     let first = out[0];
     let code = char_code(first);
-    if code >= char_code("0") && code <= char_code("9") {
-        return "_" + out;
+    if code >= char_code("0") {
+        if code <= char_code("9") {
+            return "_" + out;
+        }
     }
     return out;
 }
@@ -1943,15 +1972,17 @@ fn count_exported_symbols(program -> Program) -> number {
             break;
         }
         let stmt = program.statements[index];
-        if stmt.variant == "FunctionDeclaration"
-            || stmt.variant == "StructDeclaration"
-            || stmt.variant == "EnumDeclaration"
-            || stmt.variant == "PipelineDeclaration"
-            || stmt.variant == "ToolDeclaration"
-            || stmt.variant == "ModelDeclaration"
-            || stmt.variant == "TestDeclaration"
-            || stmt.variant == "TypeAliasDeclaration"
-            || stmt.variant == "InterfaceDeclaration" {
+        let mut _if24 -> boolean = false;
+        if stmt.variant == "FunctionDeclaration" { _if24 = true; }
+        if stmt.variant == "StructDeclaration" { _if24 = true; }
+        if stmt.variant == "EnumDeclaration" { _if24 = true; }
+        if stmt.variant == "PipelineDeclaration" { _if24 = true; }
+        if stmt.variant == "ToolDeclaration" { _if24 = true; }
+        if stmt.variant == "ModelDeclaration" { _if24 = true; }
+        if stmt.variant == "TestDeclaration" { _if24 = true; }
+        if stmt.variant == "TypeAliasDeclaration" { _if24 = true; }
+        if stmt.variant == "InterfaceDeclaration" { _if24 = true; }
+        if _if24 {
             count += 1;
         }
         index += 1;
@@ -2168,7 +2199,10 @@ fn trim_right(value -> string) -> string {
             break;
         }
         let ch = value[end - 1];
-        if ch == " " || ch == "\t" {
+        let mut _if25 -> boolean = false;
+        if ch == " " { _if25 = true; }
+        if ch == "\t" { _if25 = true; }
+        if _if25 {
             end -= 1;
             continue;
         }

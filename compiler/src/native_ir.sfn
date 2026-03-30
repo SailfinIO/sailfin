@@ -309,7 +309,10 @@ fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
         return null;
     }
     let mut max_items -> number = artifacts.length;
-    if max_items != max_items || max_items < 0 {
+    let mut _if356 -> boolean = false;
+    if max_items != max_items { _if356 = true; }
+    if max_items < 0 { _if356 = true; }
+    if _if356 {
         return null;
     }
     if max_items > 10000 {
@@ -334,7 +337,10 @@ fn select_layout_manifest_artifact(artifacts -> NativeArtifact[]) -> NativeArtif
         return null;
     }
     let mut max_items -> number = artifacts.length;
-    if max_items != max_items || max_items < 0 {
+    let mut _if357 -> boolean = false;
+    if max_items != max_items { _if357 = true; }
+    if max_items < 0 { _if357 = true; }
+    if _if357 {
         return null;
     }
     if max_items > 10000 {
@@ -657,7 +663,10 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
             }
 
             let mut raw_name -> string = "";
-            if trimmed[0] == "\"" || trimmed[0] == "'" {
+            let mut _if358 -> boolean = false;
+            if trimmed[0] == "\"" { _if358 = true; }
+            if trimmed[0] == "'" { _if358 = true; }
+            if _if358 {
                 let quote = trimmed[0];
                 let mut scan -> number = 1;
                 let mut escaping -> boolean = false;
@@ -804,24 +813,29 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
         // Import-context fast path: once a function/test header is parsed, skip the body
         // (instruction lines) in bulk. This preserves meta/param parsing above while
         // avoiding a per-line walk over potentially huge instruction streams.
-        if !include_instructions && current != null {
-            // We are in a function/test body (or have reached the first instruction).
-            // Fast-forward to the next terminator directive.
-            pending_span = null;
-            pending_value_span = null;
-            let mut scan = index;
-            loop {
-                if scan >= lines.length {
-                    break;
+        if !include_instructions {
+            if current != null {
+                // We are in a function/test body (or have reached the first instruction).
+                // Fast-forward to the next terminator directive.
+                pending_span = null;
+                pending_value_span = null;
+                let mut scan = index;
+                loop {
+                    if scan >= lines.length {
+                        break;
+                    }
+                    let candidate = trim_text(lines[scan]);
+                    let mut _if392 -> boolean = false;
+                    if starts_with(candidate, ".endfn") { _if392 = true; }
+                    if starts_with(candidate, ".endtest") { _if392 = true; }
+                    if _if392 {
+                        break;
+                    }
+                    scan += 1;
                 }
-                let candidate = trim_text(lines[scan]);
-                if starts_with(candidate, ".endfn") || starts_with(candidate, ".endtest") {
-                    break;
-                }
-                scan += 1;
+                index = scan;
+                continue;
             }
-            index = scan;
-            continue;
         }
         // Instruction line (or top-level binding) handling.
 
@@ -847,7 +861,13 @@ fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, i
 
         if current == null {
             if include_top_level_bindings {
-                if instructions.length == 1 && instructions[0].variant == "Let" {
+                let mut _if359 -> boolean = false;
+                if instructions.length == 1 {
+                    if instructions[0].variant == "Let" {
+                        _if359 = true;
+                    }
+                }
+                if _if359 {
                     bindings = append_binding(bindings, binding_from_instruction(instructions[0]));
                 } else {
                     diagnostics.push("top-level directive not supported in lowering: " + gathered_line);
@@ -1100,8 +1120,10 @@ fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGa
     }
 
     let mut state = update_instruction_depth_state(initial_instruction_depth_state(), first_line);
-    if !instruction_requires_continuation(state) && !instruction_line_requires_operator_continuation(first_line) {
-        return InstructionGatherResult { text: first_line, lines_consumed: 0 };
+    if !instruction_requires_continuation(state) {
+        if !instruction_line_requires_operator_continuation(first_line) {
+            return InstructionGatherResult { text: first_line, lines_consumed: 0 };
+        }
     }
 
     let mut combined -> string = first_line;
@@ -1126,8 +1148,10 @@ fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGa
         }
         consumed += 1;
         index += 1;
-        if !instruction_requires_continuation(state) && !instruction_line_requires_operator_continuation(last_nonempty) {
-            break;
+        if !instruction_requires_continuation(state) {
+            if !instruction_line_requires_operator_continuation(last_nonempty) {
+                break;
+            }
         }
     }
     let normalized = trim_text(combined);
@@ -1158,7 +1182,12 @@ fn instruction_line_requires_operator_continuation(line -> string) -> boolean {
             return false;
         }
         let ch = trimmed[index];
-        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+        let mut _if360 -> boolean = false;
+        if ch == " " { _if360 = true; }
+        if ch == "\t" { _if360 = true; }
+        if ch == "\n" { _if360 = true; }
+        if ch == "\r" { _if360 = true; }
+        if _if360 {
             index -= 1;
             continue;
         }
@@ -1380,7 +1409,10 @@ fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> Na
             };
         }
         let separator = line[3];
-        if separator == " " || separator == "\t" {
+        let mut _if361 -> boolean = false;
+        if separator == " " { _if361 = true; }
+        if separator == "\t" { _if361 = true; }
+        if _if361 {
             let remainder = trim_text(substring(line, 3, line.length));
             if remainder.length == 0 {
                 return InstructionParseResult {
@@ -1496,7 +1528,10 @@ fn parse_import_entry(kind -> string, entry -> string) -> NativeImport? {
     let brace_index = index_of(trimmed, "{");
     if brace_index >= 0 {
         let close_index = last_index_of(trimmed, "}");
-        if close_index < 0 || close_index <= brace_index {
+        let mut _if362 -> boolean = false;
+        if close_index < 0 { _if362 = true; }
+        if close_index <= brace_index { _if362 = true; }
+        if _if362 {
             return null;
         }
         module_text = trim_text(substring(trimmed, 0, brace_index));
@@ -1590,7 +1625,10 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             };
         }
         let raw_line = trim_text(lines[index]);
-        if raw_line.length == 0 || starts_with(raw_line, ";") {
+        let mut _if363 -> boolean = false;
+        if raw_line.length == 0 { _if363 = true; }
+        if starts_with(raw_line, ";") { _if363 = true; }
+        if _if363 {
             index += 1;
             continue;
         }
@@ -1911,7 +1949,10 @@ fn parse_interface_definition(lines -> string[], start_index -> number) -> Inter
             };
         }
         let raw_line = trim_text(lines[index]);
-        if raw_line.length == 0 || starts_with(raw_line, ";") {
+        let mut _if364 -> boolean = false;
+        if raw_line.length == 0 { _if364 = true; }
+        if starts_with(raw_line, ";") { _if364 = true; }
+        if _if364 {
             index += 1;
             continue;
         }
@@ -2069,7 +2110,13 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
             }
         }
         if effect_segment.length > 0 {
-            if starts_with(effect_segment, "![") && effect_segment[effect_segment.length - 1] == "]" {
+            let mut _if365 -> boolean = false;
+            if starts_with(effect_segment, "![") {
+                if effect_segment[effect_segment.length - 1] == "]" {
+                    _if365 = true;
+                }
+            }
+            if _if365 {
                 let body = substring(effect_segment, 2, effect_segment.length - 1);
                 effects = parse_effect_list(body);
             } else {
@@ -2086,7 +2133,13 @@ fn parse_interface_signature(text -> string, interface_name -> string) -> Interf
         return_type: return_type,
         effects: effects,
     };
-    let success = method_name.length > 0 && diagnostics.length == 0;
+    let mut _let366 -> boolean = false;
+    if method_name.length > 0 {
+        if diagnostics.length == 0 {
+            _let366 = true;
+        }
+    }
+    let success = _let366;
     return InterfaceSignatureParse { success: success, signature: signature, diagnostics: diagnostics };
 }
 
@@ -2168,7 +2221,10 @@ fn split_top_level_commas(text -> string) -> string[] {
             index += 1;
             continue;
         }
-        if ch == "\"" || ch == "'" {
+        let mut _if367 -> boolean = false;
+        if ch == "\"" { _if367 = true; }
+        if ch == "'" { _if367 = true; }
+        if _if367 {
             quote = ch;
             current = current + ch;
             index += 1;
@@ -2231,14 +2287,20 @@ fn split_top_level_commas(text -> string) -> string[] {
             continue;
         }
         if ch == "," {
-            if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-                let segment = trim_text(current);
-                if segment.length > 0 {
-                    entries.push(segment);
+            if angle_depth == 0 {
+                if paren_depth == 0 {
+                    if bracket_depth == 0 {
+                        if brace_depth == 0 {
+                            let segment = trim_text(current);
+                            if segment.length > 0 {
+                                entries.push(segment);
+                            }
+                            current = "";
+                            index += 1;
+                            continue;
+                        }
+                    }
                 }
-                current = "";
-                index += 1;
-                continue;
             }
         }
         current = current + ch;
@@ -2284,7 +2346,10 @@ fn find_matching_paren(text -> string, start_index -> number) -> number {
             break;
         }
         let ch = text[index];
-        if ch == "\"" || ch == "'" {
+        let mut _if368 -> boolean = false;
+        if ch == "\"" { _if368 = true; }
+        if ch == "'" { _if368 = true; }
+        if _if368 {
             let mut lookahead = index + 1;
             loop {
                 if lookahead >= text.length {
@@ -2364,7 +2429,10 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
             };
         }
         let raw_line = trim_text(lines[index]);
-        if raw_line.length == 0 || starts_with(raw_line, ";") {
+        let mut _if369 -> boolean = false;
+        if raw_line.length == 0 { _if369 = true; }
+        if starts_with(raw_line, ";") { _if369 = true; }
+        if _if369 {
             index += 1;
             continue;
         }
@@ -2518,7 +2586,10 @@ fn parse_enum_variant_line(text -> string) -> NativeEnumVariant? {
         return NativeEnumVariant { name: strip_generics(trimmed), fields: [] };
     }
     let close_index = last_index_of(trimmed, "}");
-    if close_index < 0 || close_index <= brace_index {
+    let mut _if370 -> boolean = false;
+    if close_index < 0 { _if370 = true; }
+    if close_index <= brace_index { _if370 = true; }
+    if _if370 {
         return null;
     }
     let name_text = strip_generics(trim_text(substring(trimmed, 0, brace_index)));
@@ -2558,14 +2629,30 @@ fn split_enum_field_entries(text -> string) -> string[] {
             break;
         }
         let ch = text[index];
-        if ch == "{" || ch == "[" || ch == "(" {
+        let mut _if371 -> boolean = false;
+        if ch == "{" { _if371 = true; }
+        if ch == "[" { _if371 = true; }
+        if ch == "(" { _if371 = true; }
+        if _if371 {
             depth += 1;
-        } else if ch == "}" || ch == "]" || ch == ")" {
-            if depth > 0 {
-                depth -= 1;
+        } else {
+            let mut _elif393 -> boolean = false;
+            if ch == "}" { _elif393 = true; }
+            if ch == "]" { _elif393 = true; }
+            if ch == ")" { _elif393 = true; }
+            if _elif393 {
+                if depth > 0 {
+                    depth -= 1;
+                }
             }
         }
-        if ch == ";" && depth == 0 {
+        let mut _if372 -> boolean = false;
+        if ch == ";" {
+            if depth == 0 {
+                _if372 = true;
+            }
+        }
+        if _if372 {
             entries.push(current);
             current = "";
         } else {
@@ -2618,7 +2705,10 @@ fn trim_trailing_delimiters(text -> string) -> string {
             break;
         }
         let ch = text_char_at(text, end - 1);
-        if ch == "," || ch == ";" {
+        let mut _if373 -> boolean = false;
+        if ch == "," { _if373 = true; }
+        if ch == ";" { _if373 = true; }
+        if _if373 {
             end -= 1;
             continue;
         }
@@ -2711,7 +2801,15 @@ fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
     if !align_found {
         diagnostics.push("struct layout header missing align entry");
     }
-    let success = size_found && align_found && diagnostics.length == 0;
+    let mut _let374 -> boolean = false;
+    if size_found {
+        if align_found {
+            if diagnostics.length == 0 {
+                _let374 = true;
+            }
+        }
+    }
+    let success = _let374;
     return StructLayoutHeaderParse { success: success, name: name_value, size: size_value, align: align_value, diagnostics: diagnostics };
 }
 
@@ -2792,7 +2890,19 @@ fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLay
     if !align_found {
         diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing align entry");
     }
-    let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0;
+    let mut _let375 -> boolean = false;
+    if type_text.length > 0 {
+        if offset_found {
+            if size_found {
+                if align_found {
+                    if diagnostics.length == 0 {
+                        _let375 = true;
+                    }
+                }
+            }
+        }
+    }
+    let success = _let375;
     let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value };
     return StructLayoutFieldParse { success: success, field: field, diagnostics: diagnostics };
 }
@@ -2882,7 +2992,21 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
     if !tag_align_found {
         diagnostics.push("enum layout header missing tag_align entry");
     }
-    let success = size_found && align_found && tag_type.length > 0 && tag_size_found && tag_align_found && diagnostics.length == 0;
+    let mut _let376 -> boolean = false;
+    if size_found {
+        if align_found {
+            if tag_type.length > 0 {
+                if tag_size_found {
+                    if tag_align_found {
+                        if diagnostics.length == 0 {
+                            _let376 = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let success = _let376;
     return EnumLayoutHeaderParse {
         success: success,
         name: name_value,
@@ -2980,7 +3104,19 @@ fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutV
     if !align_found {
         diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing align entry");
     }
-    let success = tag_found && offset_found && size_found && align_found && diagnostics.length == 0;
+    let mut _let377 -> boolean = false;
+    if tag_found {
+        if offset_found {
+            if size_found {
+                if align_found {
+                    if diagnostics.length == 0 {
+                        _let377 = true;
+                    }
+                }
+            }
+        }
+    }
+    let success = _let377;
     let variant = NativeEnumVariantLayout { name: variant_name, tag: tag_value, offset: offset_value, size: size_value, align: align_value, fields: [] };
     return EnumLayoutVariantParse { success: success, variant: variant, diagnostics: diagnostics };
 }
@@ -3001,7 +3137,10 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
     let identifier = tokens[0];
     let dot_index = index_of(identifier, ".");
     let _dot_next = dot_index + 1;
-    if dot_index <= 0 || _dot_next >= identifier.length {
+    let mut _if378 -> boolean = false;
+    if dot_index <= 0 { _if378 = true; }
+    if _dot_next >= identifier.length { _if378 = true; }
+    if _if378 {
         diagnostics.push("enum " + enum_name + " layout payload identifier `" + identifier + "` invalid");
         return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
     }
@@ -3066,7 +3205,19 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
     if !align_found {
         diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing align entry");
     }
-    let success = type_text.length > 0 && offset_found && size_found && align_found && diagnostics.length == 0;
+    let mut _let379 -> boolean = false;
+    if type_text.length > 0 {
+        if offset_found {
+            if size_found {
+                if align_found {
+                    if diagnostics.length == 0 {
+                        _let379 = true;
+                    }
+                }
+            }
+        }
+    }
+    let success = _let379;
     let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value };
     return EnumLayoutPayloadParse { success: success, variant_name: variant_name, field: field, diagnostics: diagnostics };
 }
@@ -3104,7 +3255,11 @@ fn parse_binding_components(text -> string) -> BindingComponents {
             break;
         }
         let ch = text[index];
-        if ch == " " || ch == ":" || ch == "=" {
+        let mut _if380 -> boolean = false;
+        if ch == " " { _if380 = true; }
+        if ch == ":" { _if380 = true; }
+        if ch == "=" { _if380 = true; }
+        if _if380 {
             break;
         }
         name = name + ch;
@@ -3186,7 +3341,11 @@ fn parse_parameter_entry(body -> string, span -> NativeSourceSpan?) -> NativePar
             break;
         }
         let ch = trimmed[index];
-        if ch == " " || ch == "-" || ch == "=" {
+        let mut _if381 -> boolean = false;
+        if ch == " " { _if381 = true; }
+        if ch == "-" { _if381 = true; }
+        if ch == "=" { _if381 = true; }
+        if _if381 {
             break;
         }
         name = name + ch;
@@ -3312,21 +3471,32 @@ fn split_parameter_entries(body -> string) -> string[] {
             continue;
         }
 
-        if ch == "\"" || ch == "'" {
+        let mut _if382 -> boolean = false;
+        if ch == "\"" { _if382 = true; }
+        if ch == "'" { _if382 = true; }
+        if _if382 {
             quote = ch;
             current = current + ch;
             index += 1;
             continue;
         }
 
-        if ch == "(" || ch == "[" || ch == "{" {
+        let mut _if383 -> boolean = false;
+        if ch == "(" { _if383 = true; }
+        if ch == "[" { _if383 = true; }
+        if ch == "{" { _if383 = true; }
+        if _if383 {
             depth += 1;
             current = current + ch;
             index += 1;
             continue;
         }
 
-        if ch == ")" || ch == "]" || ch == "}" {
+        let mut _if384 -> boolean = false;
+        if ch == ")" { _if384 = true; }
+        if ch == "]" { _if384 = true; }
+        if ch == "}" { _if384 = true; }
+        if _if384 {
             if depth > 0 {
                 depth -= 1;
             }
@@ -3379,7 +3549,12 @@ fn split_whitespace(value -> string) -> string[] {
             break;
         }
         let ch = text_char_at(value, index);
-        let is_space = ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
+        let mut _let385 -> boolean = false;
+        if ch == " " { _let385 = true; }
+        if ch == "\t" { _let385 = true; }
+        if ch == "\n" { _let385 = true; }
+        if ch == "\r" { _let385 = true; }
+        let is_space = _let385;
         if is_space {
             if start >= 0 {
                 parts.push(substring(value, start, index));
@@ -3411,7 +3586,10 @@ fn parse_decimal_number(text -> string) -> NumberParseResult {
         }
         let ch = trimmed[index];
         let code = char_code(ch);
-        if code < zero || code > nine {
+        let mut _if386 -> boolean = false;
+        if code < zero { _if386 = true; }
+        if code > nine { _if386 = true; }
+        if _if386 {
             return NumberParseResult { success: false, value: 0 };
         }
         let digit = code - zero;
@@ -3531,8 +3709,10 @@ fn trim_text(value -> string) -> string {
         }
         break;
     }
-    if start == 0 && end == value.length {
-        return value;
+    if start == 0 {
+        if end == value.length {
+            return value;
+        }
     }
     return substring(value, start, end);
 }
@@ -3614,7 +3794,10 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                     }
 
                     // If we hit a new header, stop without consuming it.
-                    if starts_with(field_line, ".layout struct ") || starts_with(field_line, ".layout enum ") {
+                    let mut _if387 -> boolean = false;
+                    if starts_with(field_line, ".layout struct ") { _if387 = true; }
+                    if starts_with(field_line, ".layout enum ") { _if387 = true; }
+                    if _if387 {
                         break;
                     }
 
@@ -3698,8 +3881,10 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                         index += 1;
                         break;
                     }
-                    if !starts_with(variant_line, ".layout variant ") && !starts_with(variant_line, ".layout payload ") {
-                        break;
+                    if !starts_with(variant_line, ".layout variant ") {
+                        if !starts_with(variant_line, ".layout payload ") {
+                            break;
+                        }
                     }
                     
                     if starts_with(variant_line, ".layout variant ") {
@@ -3733,19 +3918,21 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                             _ci += 1;
                         }
 
-                        if payload_result.success && variants.length > 0 {
-                            // Add payload field to last variant
-                            let last_index = variants.length - 1;
-                            let last_variant = variants[last_index];
-                            let updated_fields -> NativeStructLayoutField[] = append_struct_layout_field(last_variant.fields, payload_result.field);
-                            variants[last_index] = NativeEnumVariantLayout {
-                                name: last_variant.name,
-                                tag: last_variant.tag,
-                                offset: last_variant.offset,
-                                size: last_variant.size,
-                                align: last_variant.align,
-                                fields: updated_fields,
-                            };
+                        if payload_result.success {
+                            if variants.length > 0 {
+                                // Add payload field to last variant
+                                let last_index = variants.length - 1;
+                                let last_variant = variants[last_index];
+                                let updated_fields -> NativeStructLayoutField[] = append_struct_layout_field(last_variant.fields, payload_result.field);
+                                variants[last_index] = NativeEnumVariantLayout {
+                                    name: last_variant.name,
+                                    tag: last_variant.tag,
+                                    offset: last_variant.offset,
+                                    size: last_variant.size,
+                                    align: last_variant.align,
+                                    fields: updated_fields,
+                                };
+                            }
                         }
                     }
                     index += 1;
@@ -3782,7 +3969,12 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
 }
 
 fn is_trim_char(ch -> string) -> boolean {
-    return ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
+    let mut _ret388 -> boolean = false;
+    if ch == " " { _ret388 = true; }
+    if ch == "\n" { _ret388 = true; }
+    if ch == "\r" { _ret388 = true; }
+    if ch == "\t" { _ret388 = true; }
+    return _ret388;
 }
 
 fn starts_with(value -> string, prefix -> string) -> boolean {
@@ -3877,9 +4069,24 @@ fn strip_quotes(value -> string) -> string {
     if value.length >= 2 {
         let first = value[0];
         let last = value[value.length - 1];
-        let is_double = first == "\"" && last == "\"";
-        let is_single = first == "'" && last == "'";
-        if is_double || is_single {
+        let mut _let389 -> boolean = false;
+        if first == "\"" {
+            if last == "\"" {
+                _let389 = true;
+            }
+        }
+        let is_double = _let389;
+        let mut _let390 -> boolean = false;
+        if first == "'" {
+            if last == "'" {
+                _let390 = true;
+            }
+        }
+        let is_single = _let390;
+        let mut _if391 -> boolean = false;
+        if is_double { _if391 = true; }
+        if is_single { _if391 = true; }
+        if _if391 {
             return substring(value, 1, value.length - 1);
         }
     }

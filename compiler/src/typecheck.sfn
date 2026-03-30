@@ -833,7 +833,12 @@ fn slice_text(value -> string, start -> number, end -> number) -> string {
 }
 
 fn is_whitespace(ch -> string) -> boolean {
-    return ch == " " || ch == "\n" || ch == "\t" || ch == "\r";
+    let mut _ret438 -> boolean = false;
+    if ch == " " { _ret438 = true; }
+    if ch == "\n" { _ret438 = true; }
+    if ch == "\t" { _ret438 = true; }
+    if ch == "\r" { _ret438 = true; }
+    return _ret438;
 }
 
 fn check_struct_methods(methods -> MethodDeclaration[]) -> Diagnostic[] {
@@ -954,7 +959,11 @@ fn build_effect_diagnostics(program -> Program) -> Diagnostic[] {
             break;
         }
         let violation = violations[violation_index];
-        if violation == null || violation.missing_effects == null || violation.requirements == null {
+        let mut _if439 -> boolean = false;
+        if violation == null { _if439 = true; }
+        if violation.missing_effects == null { _if439 = true; }
+        if violation.requirements == null { _if439 = true; }
+        if _if439 {
             violation_index += 1;
             continue;
         }

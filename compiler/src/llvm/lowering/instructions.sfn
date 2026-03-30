@@ -249,9 +249,11 @@ fn insert_lines_before_index(lines -> string[], index -> number, insert_lines ->
         if line_idx >= lines.length {
             break;
         }
-        if !inserted && line_idx == index {
-            result = extend_string_array(result, insert_lines);
-            inserted = true;
+        if !inserted {
+            if line_idx == index {
+                result = extend_string_array(result, insert_lines);
+                inserted = true;
+            }
         }
         result.push(lines[line_idx]);
         line_idx += 1;
@@ -510,31 +512,41 @@ fn lower_instruction_range(
         print("emit-llvm: lower_instruction_range name=" + function.name + " start=" + number_to_string(start_index) + " end=" + number_to_string(end) + " depth=" + number_to_string(scope_depth));
         print("emit-llvm: lower_instruction_range bindings_len=" + number_to_string(bindings.length) + " current_bindings_len=" + number_to_string(current_bindings.length));
     }
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
-    if trace && start_index == 0 && scope_depth == 0 {
-        print(
-            "test llvm: lower_instruction_range start "
-            + function.name
-            + " end="
-            + number_to_string(end)
-        );
-        let mut preview_index -> number = start_index;
-        let mut preview_limit -> number = start_index + 5;
-        if preview_limit > end {
-            preview_limit = end;
+    let mut _let220 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let220 = true;
         }
-        loop {
-            if preview_index >= preview_limit {
-                break;
+    }
+    let trace = _let220;
+    if trace {
+        if start_index == 0 {
+            if scope_depth == 0 {
+                print(
+                    "test llvm: lower_instruction_range start "
+                    + function.name
+                    + " end="
+                    + number_to_string(end)
+                );
+                let mut preview_index -> number = start_index;
+                let mut preview_limit -> number = start_index + 5;
+                if preview_limit > end {
+                    preview_limit = end;
+                }
+                loop {
+                    if preview_index >= preview_limit {
+                        break;
+                    }
+                    let _preview_tag = get_instruction_tag(function.instructions, preview_index);
+                    print(
+                        "test llvm: instr "
+                        + number_to_string(preview_index)
+                        + " tag="
+                        + number_to_string(_preview_tag)
+                    );
+                    preview_index += 1;
+                }
             }
-            let _preview_tag = get_instruction_tag(function.instructions, preview_index);
-            print(
-                "test llvm: instr "
-                + number_to_string(preview_index)
-                + " tag="
-                + number_to_string(_preview_tag)
-            );
-            preview_index += 1;
         }
     }
 
@@ -564,8 +576,10 @@ fn lower_instruction_range(
         if debug_lowering {
             print("emit-llvm: lir guard=" + number_to_string(guard) + " index=" + number_to_string(index) + " tag=" + number_to_string(_instr_tag) + " fn=" + function.name + " depth=" + number_to_string(scope_depth));
         }
-        if trace && index == start_index {
-            print("test llvm: lower_instruction_range first_tag " + number_to_string(_instr_tag));
+        if trace {
+            if index == start_index {
+                print("test llvm: lower_instruction_range first_tag " + number_to_string(_instr_tag));
+            }
         }
         // Tag constants: Return=0, Expression=1, Let=2, If=3, Else=4, EndIf=5,
         //   For=6, EndFor=7, Loop=8, EndLoop=9, Break=10, Continue=11,
@@ -587,8 +601,10 @@ fn lower_instruction_range(
             let temp_constants = collected_string_constants;
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             active_label = find_last_label(current_lines, active_label);
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Let lines=" + number_to_string(current_lines.length));
+            if trace {
+                if function.name == "infer_effects" {
+                    print("test llvm: infer_effects after Let lines=" + number_to_string(current_lines.length));
+                }
             }
         } else if _instr_tag == 1 {
             if debug_lowering {
@@ -763,8 +779,10 @@ fn lower_instruction_range(
                 }
             }
             active_label = find_last_label(current_lines, active_label);
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Expression lines=" + number_to_string(current_lines.length));
+            if trace {
+                if function.name == "infer_effects" {
+                    print("test llvm: infer_effects after Expression lines=" + number_to_string(current_lines.length));
+                }
             }
         } else if _instr_tag == 0 {
             if debug_lowering {
@@ -902,8 +920,10 @@ fn lower_instruction_range(
             if debug_lowering {
                 print("emit-llvm: lir pre_if fn=" + function.name + " index=" + number_to_string(index) + " depth=" + number_to_string(scope_depth));
             }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects before If lines=" + number_to_string(current_lines.length));
+            if trace {
+                if function.name == "infer_effects" {
+                    print("test llvm: infer_effects before If lines=" + number_to_string(current_lines.length));
+                }
             }
             let lowered = lower_if_instruction(
                 function,
@@ -952,13 +972,17 @@ fn lower_instruction_range(
             if terminated {
                 break;
             }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after If lines=" + number_to_string(current_lines.length));
+            if trace {
+                if function.name == "infer_effects" {
+                    print("test llvm: infer_effects after If lines=" + number_to_string(current_lines.length));
+                }
             }
             continue;
         } else if _instr_tag == 8 {
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects before Loop lines=" + number_to_string(current_lines.length));
+            if trace {
+                if function.name == "infer_effects" {
+                    print("test llvm: infer_effects before Loop lines=" + number_to_string(current_lines.length));
+                }
             }
             let lowered = lower_loop_instruction(
                 function,
@@ -1004,8 +1028,10 @@ fn lower_instruction_range(
             if terminated {
                 break;
             }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Loop lines=" + number_to_string(current_lines.length));
+            if trace {
+                if function.name == "infer_effects" {
+                    print("test llvm: infer_effects after Loop lines=" + number_to_string(current_lines.length));
+                }
             }
             continue;
         } else if _instr_tag == 12 {
@@ -1053,8 +1079,10 @@ fn lower_instruction_range(
             if terminated {
                 break;
             }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Match lines=" + number_to_string(current_lines.length));
+            if trace {
+                if function.name == "infer_effects" {
+                    print("test llvm: infer_effects after Match lines=" + number_to_string(current_lines.length));
+                }
             }
             continue;
         } else if _instr_tag == 15 {
@@ -1102,8 +1130,10 @@ fn lower_instruction_range(
             if terminated {
                 break;
             }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Try lines=" + number_to_string(current_lines.length));
+            if trace {
+                if function.name == "infer_effects" {
+                    print("test llvm: infer_effects after Try lines=" + number_to_string(current_lines.length));
+                }
             }
             continue;
         } else if _instr_tag == 19 {
@@ -1134,11 +1164,22 @@ fn lower_instruction_range(
                 diagnostics.push("llvm lowering: instructions after throw ignored in `" + function.name + "`");
             }
             break;
-        } else if _instr_tag == 4 || _instr_tag == 5 {
-            break;
-        } else if _instr_tag == 9 || _instr_tag == 14 || _instr_tag == 7 {
-            break;
-        } else if _instr_tag == 10 {
+        } else {
+            let mut _elif221 -> boolean = false;
+            if _instr_tag == 4 { _elif221 = true; }
+            if _instr_tag == 5 { _elif221 = true; }
+            if _elif221 {
+                break;
+            } else {
+                let mut _elif222 -> boolean = false;
+                if _instr_tag == 9 { _elif222 = true; }
+                if _instr_tag == 14 { _elif222 = true; }
+                if _instr_tag == 7 { _elif222 = true; }
+                if _elif222 {
+                    break;
+                }
+            }
+        }
             if current_loop_stack.length == 0 {
                 diagnostics.push("llvm lowering: `break` outside loop in `" + function.name + "`");
             } else {
@@ -1147,8 +1188,10 @@ fn lower_instruction_range(
                 terminated = true;
             }
             index += 1;
-            if index < end && terminated {
-                diagnostics.push("llvm lowering: instructions after break ignored in `" + function.name + "`");
+            if index < end {
+                if terminated {
+                    diagnostics.push("llvm lowering: instructions after break ignored in `" + function.name + "`");
+                }
             }
             break;
         } else if _instr_tag == 11 {
@@ -1160,8 +1203,10 @@ fn lower_instruction_range(
                 terminated = true;
             }
             index += 1;
-            if index < end && terminated {
-                diagnostics.push("llvm lowering: instructions after continue ignored in `" + function.name + "`");
+            if index < end {
+                if terminated {
+                    diagnostics.push("llvm lowering: instructions after continue ignored in `" + function.name + "`");
+                }
             }
             break;
         } else if _instr_tag == 6 {
@@ -1219,21 +1264,25 @@ fn lower_instruction_range(
         index += 1;
     }
 
-    if trace && start_index == 0 && scope_depth == 0 {
-        let mut term_label -> string = "false";
-        if terminated {
-            term_label = "true";
+    if trace {
+        if start_index == 0 {
+            if scope_depth == 0 {
+                let mut term_label -> string = "false";
+                if terminated {
+                    term_label = "true";
+                }
+                print(
+                    "test llvm: lower_instruction_range done "
+                    + function.name
+                    + " lines="
+                    + number_to_string(current_lines.length)
+                    + " allocas="
+                    + number_to_string(current_allocas.length)
+                    + " terminated="
+                    + term_label
+                );
+            }
         }
-        print(
-            "test llvm: lower_instruction_range done "
-            + function.name
-            + " lines="
-            + number_to_string(current_lines.length)
-            + " allocas="
-            + number_to_string(current_allocas.length)
-            + " terminated="
-            + term_label
-        );
     }
 
     if scope_depth == 0 {

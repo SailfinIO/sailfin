@@ -166,7 +166,10 @@ import {
 
 fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
-        if artifact == null || artifact.contents.length == 0 {
+        let mut _if206 -> boolean = false;
+        if artifact == null { _if206 = true; }
+        if artifact.contents.length == 0 { _if206 = true; }
+        if _if206 {
             return lower_to_llvm_with_context(native_module, [], [], []);
         }
         let parse = parse_native_artifact_safe(artifact.contents);
@@ -182,7 +185,10 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
 
 fn lower_to_llvm_lines(native_module -> NativeModule) -> LoweredLLVMLinesResult ![io] {
     let ir = lower_to_llvm_ir(native_module);
-        if ir == null || ir.length == 0 {
+        let mut _if207 -> boolean = false;
+        if ir == null { _if207 = true; }
+        if ir.length == 0 { _if207 = true; }
+        if _if207 {
             return LoweredLLVMLinesResult { lines: [], diagnostics: [], trait_metadata: empty_trait_metadata(), function_effects: [], lifetime_regions: [], capability_manifest: empty_capability_manifest(), string_constants: empty_string_constant_set() };
         }
     let lines = split_lines(ir);
@@ -199,7 +205,10 @@ fn lower_to_llvm_lines(native_module -> NativeModule) -> LoweredLLVMLinesResult 
 
 fn lower_to_llvm_lines_only(native_module -> NativeModule) -> string[] ![io] {
     let ir = lower_to_llvm_ir(native_module);
-    if ir == null || ir.length == 0 {
+    let mut _if208 -> boolean = false;
+    if ir == null { _if208 = true; }
+    if ir.length == 0 { _if208 = true; }
+    if _if208 {
         return [];
     }
     return split_lines(ir);
@@ -211,7 +220,10 @@ fn lower_to_llvm_lines_only(native_module -> NativeModule) -> string[] ![io] {
 // has historically caused layout/ABI mismatches and nondeterministic output.
 fn lower_to_llvm_ir(native_module -> NativeModule) -> string ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null || artifact.contents.length == 0 {
+    let mut _if209 -> boolean = false;
+    if artifact == null { _if209 = true; }
+    if artifact.contents.length == 0 { _if209 = true; }
+    if _if209 {
         let lowered = lower_to_llvm_with_context(native_module, [], [], []);
         return lowered.ir;
     }
@@ -282,7 +294,13 @@ fn lower_to_llvm_ir_for_tests_direct(native_module -> NativeModule) -> string ![
     if artifact == null {
         return "";
     }
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let mut _let210 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let210 = true;
+        }
+    }
+    let trace = _let210;
     if trace {
         print("test llvm: direct parse start (bytes=" + number_to_string(artifact.contents.length) + ")");
     }
@@ -309,14 +327,20 @@ fn lower_to_llvm_ir_for_tests_direct(native_module -> NativeModule) -> string ![
         print("test llvm: direct lines=" + number_to_string(lowered_lines.lines.length));
         let mut preview -> number = 0;
         loop {
-            if preview >= lowered_lines.lines.length || preview >= 3 {
+            let mut _if211 -> boolean = false;
+            if preview >= lowered_lines.lines.length { _if211 = true; }
+            if preview >= 3 { _if211 = true; }
+            if _if211 {
                 break;
             }
             print("test llvm: direct line " + number_to_string(preview) + " -> " + lowered_lines.lines[preview]);
             preview += 1;
         }
     }
-    if lowered_lines.lines == null || lowered_lines.lines.length == 0 {
+    let mut _if212 -> boolean = false;
+    if lowered_lines.lines == null { _if212 = true; }
+    if lowered_lines.lines.length == 0 { _if212 = true; }
+    if _if212 {
         return "";
     }
     let ir = _join_llvm_lines_linear(lowered_lines.lines);
@@ -340,17 +364,28 @@ fn lower_to_llvm_ir_for_tests_direct(native_module -> NativeModule) -> string ![
 // Build and write LLVM IR for tests without returning large structs/arrays.
 // This keeps `LoweredLLVMLinesResult` within this module to avoid ABI issues.
 fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) -> boolean ![io] {
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let mut _let213 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let213 = true;
+        }
+    }
+    let trace = _let213;
     let timing = fs.exists("build/sailfin/.test_runner_active");
     let start_ms = monotonic_millis();
     let mut is_test_module = is_test_module_slug(native_module.module_name);
-    if !is_test_module && fs.exists("build/sailfin/.test_runner_active") {
-        is_test_module = true;
+    if !is_test_module {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            is_test_module = true;
+        }
     }
     if trace {
         print("test llvm: write_llvm_ir_for_tests start");
     }
-    if native_module.artifacts == null || native_module.artifacts.length == 0 {
+    let mut _if214 -> boolean = false;
+    if native_module.artifacts == null { _if214 = true; }
+    if native_module.artifacts.length == 0 { _if214 = true; }
+    if _if214 {
         print("test llvm: native module missing artifacts");
         return false;
     }
@@ -373,36 +408,42 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
         print("test llvm: stage=after-parse");
     }
 
-    if !is_test_module && parse.functions != null {
-        let mut scan_index -> number = 0;
-        loop {
-            if scan_index >= parse.functions.length {
-                break;
+    if !is_test_module {
+        if parse.functions != null {
+            let mut scan_index -> number = 0;
+            loop {
+                if scan_index >= parse.functions.length {
+                    break;
+                }
+                let fun = parse.functions[scan_index];
+                if fun.name.length >= 5 {
+                    if substring(fun.name, 0, 5) == "test:" {
+                        is_test_module = true;
+                        break;
+                    }
+                }
+                scan_index += 1;
             }
-            let fun = parse.functions[scan_index];
-            if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
-                is_test_module = true;
-                break;
-            }
-            scan_index += 1;
         }
     }
 
     let mut imported_manifests -> LayoutManifest[] = [];
     let mut imported_native_texts -> string[] = [];
     let mut imported_diagnostics -> string[] = [];
-    if parse.imports != null && parse.imports.length > 0 {
-        let skip_imports = is_test_module;
-        if !skip_imports {
-            let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-            imported_manifests = import_context.manifests;
-            imported_native_texts = import_context.native_texts;
-            imported_diagnostics = import_context.diagnostics;
-            if trace {
-                print("test llvm: collected import context (texts=" + number_to_string(imported_native_texts.length) + ")");
+    if parse.imports != null {
+        if parse.imports.length > 0 {
+            let skip_imports = is_test_module;
+            if !skip_imports {
+                let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
+                imported_manifests = import_context.manifests;
+                imported_native_texts = import_context.native_texts;
+                imported_diagnostics = import_context.diagnostics;
+                if trace {
+                    print("test llvm: collected import context (texts=" + number_to_string(imported_native_texts.length) + ")");
+                }
+            } else if trace {
+                print("test llvm: skipping import context for inlined test module");
             }
-        } else if trace {
-            print("test llvm: skipping import context for inlined test module");
         }
     }
     if timing {
@@ -528,11 +569,18 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     loop {
         if _si1_idx >= combined_structs.length { break; }
         let _si1_s = combined_structs[_si1_idx];
-        if _si1_s.name == null || _si1_s.name.length == 0 {
+        let mut _if215 -> boolean = false;
+        if _si1_s.name == null { _if215 = true; }
+        if _si1_s.name.length == 0 { _if215 = true; }
+        if _if215 {
             _si1_idx += 1;
             continue;
         }
-        if _si1_idx > 0 && _si1_content.length > 0 { _si1_content = _si1_content + "\n"; }
+        if _si1_idx > 0 {
+            if _si1_content.length > 0 {
+                _si1_content = _si1_content + "\n";
+            }
+        }
         let _si1_llvm = "%" + sanitize_symbol(_si1_s.name);
         _si1_content = _si1_content + _si1_s.name + "\t" + _si1_llvm + "\t";
         let mut _fi1 -> number = 0;
@@ -547,8 +595,11 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
                 let mut _ft1 = "i8*";
                 let _ann1 = _sf1.type_annotation;
                 if _ann1 == "number" { _ft1 = "double"; }
-                else if _ann1 == "boolean" || _ann1 == "bool" { _ft1 = "i1"; }
-                else if _ann1 == "i64" || _ann1 == "int" || _ann1 == "usize" { _ft1 = "i64"; }
+                else if _ann1 == "boolean" { _ft1 = "i1"; }
+                else if _ann1 == "bool" { _ft1 = "i1"; }
+                else if _ann1 == "i64" { _ft1 = "i64"; }
+                else if _ann1 == "int" { _ft1 = "i64"; }
+                else if _ann1 == "usize" { _ft1 = "i64"; }
                 else if _ann1 == "i32" { _ft1 = "i32"; }
                 else if _ann1 == "u8" { _ft1 = "i8"; }
                 _si1_content = _si1_content + _fn1 + ":" + _ft1;
@@ -579,7 +630,10 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
                 break;
             }
             let imported_function = imported_functions[imported_index];
-            if index_of(imported_function.name, "parse_native_artifact") >= 0 || index_of(imported_function.name, "parse_native_function_count_from_text") >= 0 {
+            let mut _if216 -> boolean = false;
+            if index_of(imported_function.name, "parse_native_artifact") >= 0 { _if216 = true; }
+            if index_of(imported_function.name, "parse_native_function_count_from_text") >= 0 { _if216 = true; }
+            if _if216 {
                 print("emit-llvm: imported fn sig " + imported_function.name + " -> " + imported_function.return_type);
             }
             imported_index += 1;
@@ -590,7 +644,13 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     // selfhost/native lowering for some modules. Keep disabled by default.
     let skip_effects = true;
     let mut runtime_helpers -> string[] = [];
-    if !is_test_module && !skip_effects {
+    let mut _if217 -> boolean = false;
+    if !is_test_module {
+        if !skip_effects {
+            _if217 = true;
+        }
+    }
+    if _if217 {
         if debug_lowering {
             print("emit-llvm: phase=helpers_start");
         }
@@ -675,8 +735,10 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     }
 
     let mut enum_type_lines -> string[] = [];
-    if type_context.enums != null && type_context.enums.length > 0 {
-        enum_type_lines = render_enum_type_definitions(type_context);
+    if type_context.enums != null {
+        if type_context.enums.length > 0 {
+            enum_type_lines = render_enum_type_definitions(type_context);
+        }
     }
     if enum_type_lines != null {
         if enum_type_lines.length > 0 {
@@ -686,8 +748,10 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     }
 
     let mut interface_type_lines -> string[] = [];
-    if type_context.interfaces != null && type_context.interfaces.length > 0 {
-        interface_type_lines = render_interface_type_definitions(type_context);
+    if type_context.interfaces != null {
+        if type_context.interfaces.length > 0 {
+            interface_type_lines = render_interface_type_definitions(type_context);
+        }
     }
     if interface_type_lines != null {
         if interface_type_lines.length > 0 {
@@ -870,17 +934,21 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
         if fun.name == "main" {
             has_main = true;
         }
-        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
-            tests = tests.push(fun);
+        if fun.name.length >= 5 {
+            if substring(fun.name, 0, 5) == "test:" {
+                tests = tests.push(fun);
+            }
         }
         t_index += 1;
     }
-    if tests.length > 0 && !has_main {
-        let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
-        if lines.length > 0 {
-            lines.push("");
+    if tests.length > 0 {
+        if !has_main {
+            let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
+            if lines.length > 0 {
+                lines.push("");
+            }
+            lines = extend_string_lines(lines, harness);
         }
-        lines = extend_string_lines(lines, harness);
     }
 
     if trace {
@@ -900,7 +968,10 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     }
     ir = ir + "\n";
     let mut target_path -> string = out_path;
-    if target_path.length == 0 || index_of(target_path, ".ll") < 0 {
+    let mut _if218 -> boolean = false;
+    if target_path.length == 0 { _if218 = true; }
+    if index_of(target_path, ".ll") < 0 { _if218 = true; }
+    if _if218 {
         target_path = "build/sailfin/test.ll";
     }
     fs.writeFile(target_path, ir);
@@ -966,7 +1037,10 @@ fn lower_to_llvm_ir_from_text(native_text -> string, module_name -> string) -> s
         true,
         native_text
     );
-    if lowered_lines.lines == null || lowered_lines.lines.length == 0 {
+    let mut _if219 -> boolean = false;
+    if lowered_lines.lines == null { _if219 = true; }
+    if lowered_lines.lines.length == 0 { _if219 = true; }
+    if _if219 {
         print(
             "emit-llvm: no lines from native text (functions="
             + number_to_string(parse.functions.length)
@@ -1057,8 +1131,10 @@ fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_
         if fun.name == "main" {
             has_main = true;
         }
-        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
-            tests = tests.push(fun);
+        if fun.name.length >= 5 {
+            if substring(fun.name, 0, 5) == "test:" {
+                tests = tests.push(fun);
+            }
         }
         index += 1;
     }
@@ -1140,8 +1216,10 @@ fn lower_to_llvm_with_parsed_context_for_tests(native_module -> NativeModule, pa
         if fun.name == "main" {
             has_main = true;
         }
-        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
-            tests = tests.push(fun);
+        if fun.name.length >= 5 {
+            if substring(fun.name, 0, 5) == "test:" {
+                tests = tests.push(fun);
+            }
         }
         index += 1;
     }

@@ -63,7 +63,10 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
 
 fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> number, lines -> string[]) -> ExpressionResult {
     let harmonised = harmonise_operands(left, right, temp_index, lines);
-    if harmonised.left == null || harmonised.right == null {
+    let mut _if121 -> boolean = false;
+    if harmonised.left == null { _if121 = true; }
+    if harmonised.right == null { _if121 = true; }
+    if _if121 {
         return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: harmonised.diagnostics, string_constants: empty_string_constant_set() };
     }
     let left_aligned = coerce_operand_to_type(harmonised.left, "i8*", harmonised.temp_index, harmonised.lines);
@@ -81,7 +84,10 @@ fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
         diagnostics.push(right_aligned.diagnostics[_ci1]);
         _ci1 += 1;
     }
-    if left_aligned.operand == null || right_aligned.operand == null {
+    let mut _if122 -> boolean = false;
+    if left_aligned.operand == null { _if122 = true; }
+    if right_aligned.operand == null { _if122 = true; }
+    if _if122 {
         return ExpressionResult { lines: right_aligned.lines, temp_index: right_aligned.temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_string_constant_set() };
     }
     let temp_name = format_temp_name(right_aligned.temp_index);

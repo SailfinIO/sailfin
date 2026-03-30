@@ -68,7 +68,10 @@ fn number_to_string(value -> number) -> string {
             remaining -= power;
             count += 1;
         }
-        if started || count > 0 {
+        let mut _if123 -> boolean = false;
+        if started { _if123 = true; }
+        if count > 0 { _if123 = true; }
+        if _if123 {
             started = true;
             let ch = substring(digits, count, count + 1);
             output = output + ch;
@@ -87,9 +90,11 @@ fn number_to_string(value -> number) -> string {
 fn lower_char_code(code -> number) -> number {
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
-    if code >= upper_a && code <= upper_z {
-        let lower_a = char_code("a");
-        return code + (lower_a - upper_a);
+    if code >= upper_a {
+        if code <= upper_z {
+            let lower_a = char_code("a");
+            return code + (lower_a - upper_a);
+        }
     }
     return code;
 }
@@ -140,15 +145,22 @@ fn trim_text(value -> string) -> string {
         }
         break;
     }
-    if start == 0 && end == value.length {
-        return value;
+    if start == 0 {
+        if end == value.length {
+            return value;
+        }
     }
     return substring(value, start, end);
 }
 
 fn is_trim_char(ch -> string) -> boolean {
     let code = char_code(ch);
-    return code == char_code(" ") || code == char_code("\n") || code == char_code("\r") || code == char_code("\t");
+    let mut _ret124 -> boolean = false;
+    if code == char_code(" ") { _ret124 = true; }
+    if code == char_code("\n") { _ret124 = true; }
+    if code == char_code("\r") { _ret124 = true; }
+    if code == char_code("\t") { _ret124 = true; }
+    return _ret124;
 }
 
 fn index_of(value -> string, target -> string) -> number {
@@ -356,7 +368,13 @@ fn is_digit_char(ch -> string) -> boolean {
     let code = char_code(ch);
     let zero = char_code("0");
     let nine = char_code("9");
-    return code >= zero && code <= nine;
+    let mut _ret125 -> boolean = false;
+    if code >= zero {
+        if code <= nine {
+            _ret125 = true;
+        }
+    }
+    return _ret125;
 }
 
 fn char_code_at_text(text -> string, index -> number) -> number {
@@ -381,7 +399,18 @@ fn is_integer_literal(text -> string) -> boolean {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
+        let mut _if126 -> boolean = false;
+        if ch == "0" { _if126 = true; }
+        if ch == "1" { _if126 = true; }
+        if ch == "2" { _if126 = true; }
+        if ch == "3" { _if126 = true; }
+        if ch == "4" { _if126 = true; }
+        if ch == "5" { _if126 = true; }
+        if ch == "6" { _if126 = true; }
+        if ch == "7" { _if126 = true; }
+        if ch == "8" { _if126 = true; }
+        if ch == "9" { _if126 = true; }
+        if _if126 {
             has_digit = true;
             index += 1;
             continue;
@@ -410,7 +439,18 @@ fn is_number_literal(text -> string) -> boolean {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
+        let mut _if127 -> boolean = false;
+        if ch == "0" { _if127 = true; }
+        if ch == "1" { _if127 = true; }
+        if ch == "2" { _if127 = true; }
+        if ch == "3" { _if127 = true; }
+        if ch == "4" { _if127 = true; }
+        if ch == "5" { _if127 = true; }
+        if ch == "6" { _if127 = true; }
+        if ch == "7" { _if127 = true; }
+        if ch == "8" { _if127 = true; }
+        if ch == "9" { _if127 = true; }
+        if _if127 {
             has_digit = true;
             index += 1;
             continue;
@@ -484,13 +524,18 @@ fn is_character_literal(text -> string) -> boolean {
     if text.length < 2 {
         return false;
     }
-    if substring(text, 0, 1) != "\"" || substring(text, text.length - 1, text.length) != "\"" {
+    let mut _if128 -> boolean = false;
+    if substring(text, 0, 1) != "\"" { _if128 = true; }
+    if substring(text, text.length - 1, text.length) != "\"" { _if128 = true; }
+    if _if128 {
         return false;
     }
     let inner = substring(text, 1, text.length - 1);
     // Handle escape sequences
-    if inner.length == 2 && substring(inner, 0, 1) == "\\" {
-        return true;
+    if inner.length == 2 {
+        if substring(inner, 0, 1) == "\\" {
+            return true;
+        }
     }
     // Single character
     return inner.length == 1;
@@ -502,21 +547,23 @@ fn get_character_literal_value(text -> string) -> number {
         return 0;
     }
     // Handle escape sequences
-    if inner.length == 2 && substring(inner, 0, 1) == "\\" {
-        let escape = char_at(inner, 1);
-        let escape_code = char_code(escape);
-        if escape_code == char_code("n") {
-            return char_code("\n");
-        } else if escape_code == char_code("r") {
-            return char_code("\r");
-        } else if escape_code == char_code("t") {
-            return char_code("\t");
-        } else if escape_code == char_code("\"") {
-            return char_code("\"");
-        } else if escape_code == char_code("\\") {
-            return char_code("\\");
+    if inner.length == 2 {
+        if substring(inner, 0, 1) == "\\" {
+            let escape = char_at(inner, 1);
+            let escape_code = char_code(escape);
+            if escape_code == char_code("n") {
+                return char_code("\n");
+            } else if escape_code == char_code("r") {
+                return char_code("\r");
+            } else if escape_code == char_code("t") {
+                return char_code("\t");
+            } else if escape_code == char_code("\"") {
+                return char_code("\"");
+            } else if escape_code == char_code("\\") {
+                return char_code("\\");
+            }
+            return char_code(escape);
         }
-        return char_code(escape);
     }
     return char_code(char_at(inner, 0));
 }
@@ -531,7 +578,10 @@ fn make_string_constant_name(content -> string) -> string {
 fn make_string_constant_name_for_module(module_name -> string, content -> string) -> string {
     let base = make_string_constant_name(content);
     let tag = sanitize_symbol(module_name);
-    if tag.length == 0 || tag == "_" {
+    let mut _if129 -> boolean = false;
+    if tag.length == 0 { _if129 = true; }
+    if tag == "_" { _if129 = true; }
+    if _if129 {
         return base;
     }
     // base is @.str.len<LEN>.h<HASH>
@@ -642,33 +692,35 @@ fn unescape_string_literal(literal -> string) -> string {
         }
         let ch = char_at(inner, index);
         let _esc_next = index + 1;
-        if char_code(ch) == char_code("\\") && _esc_next < inner.length {
-            let next = char_at(inner, _esc_next);
-            let next_code = char_code(next);
-            if next_code == char_code("n") {
-                result = result + "\n";
-                index += 2;
-                continue;
-            } else if next_code == char_code("r") {
-                result = result + "\r";
-                index += 2;
-                continue;
-            } else if next_code == char_code("t") {
-                result = result + "\t";
-                index += 2;
-                continue;
-            } else if next_code == char_code("\"") {
-                result = result + "\"";
-                index += 2;
-                continue;
-            } else if next_code == char_code("\\") {
-                result = result + "\\";
+        if char_code(ch) == char_code("\\") {
+            if _esc_next < inner.length {
+                let next = char_at(inner, _esc_next);
+                let next_code = char_code(next);
+                if next_code == char_code("n") {
+                    result = result + "\n";
+                    index += 2;
+                    continue;
+                } else if next_code == char_code("r") {
+                    result = result + "\r";
+                    index += 2;
+                    continue;
+                } else if next_code == char_code("t") {
+                    result = result + "\t";
+                    index += 2;
+                    continue;
+                } else if next_code == char_code("\"") {
+                    result = result + "\"";
+                    index += 2;
+                    continue;
+                } else if next_code == char_code("\\") {
+                    result = result + "\\";
+                    index += 2;
+                    continue;
+                }
+                result = result + next;
                 index += 2;
                 continue;
             }
-            result = result + next;
-            index += 2;
-            continue;
         }
         result = result + ch;
         index += 1;
@@ -687,18 +739,24 @@ fn is_symbol_char(ch -> string) -> boolean {
     let code = char_code(ch);
     let lower_a = char_code("a");
     let lower_z = char_code("z");
-    if code >= lower_a && code <= lower_z {
-        return true;
+    if code >= lower_a {
+        if code <= lower_z {
+            return true;
+        }
     }
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
-    if code >= upper_a && code <= upper_z {
-        return true;
+    if code >= upper_a {
+        if code <= upper_z {
+            return true;
+        }
     }
     let zero = char_code("0");
     let nine = char_code("9");
-    if code >= zero && code <= nine {
-        return true;
+    if code >= zero {
+        if code <= nine {
+            return true;
+        }
     }
     return false;
 }
@@ -726,8 +784,10 @@ fn sanitize_symbol(name -> string) -> string {
     let first_code = char_code(first);
     let zero = char_code("0");
     let nine = char_code("9");
-    if first_code >= zero && first_code <= nine {
-        result = "_" + result;
+    if first_code >= zero {
+        if first_code <= nine {
+            result = "_" + result;
+        }
     }
     return result;
 }

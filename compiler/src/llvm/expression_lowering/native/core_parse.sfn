@@ -188,8 +188,14 @@ fn find_top_level_colon(text -> string) -> number {
             continue;
         }
         if ch == ":" {
-            if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
-                return index;
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if brace_depth == 0 {
+                        if angle_depth == 0 {
+                            return index;
+                        }
+                    }
+                }
             }
         }
         index += 1;
@@ -273,9 +279,13 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
                 angle_depth -= 1;
             }
         } else if ch == "{" {
-            if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
-                open_index = index;
-                break;
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if angle_depth == 0 {
+                        open_index = index;
+                        break;
+                    }
+                }
             }
         }
         index += 1;
@@ -304,49 +314,53 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
     }
 
     let mut fields -> StructLiteralField[] = [];
-    if !fatal && close_index >= 0 {
-        let body = substring(trimmed, open_index + 1, close_index);
-        let entries = split_array_elements(body);
-        let mut seen -> string[] = [];
-        let mut entry_index -> number = 0;
-        loop {
-            if entry_index >= entries.length {
-                break;
+    if !fatal {
+        if close_index >= 0 {
+            let body = substring(trimmed, open_index + 1, close_index);
+            let entries = split_array_elements(body);
+            let mut seen -> string[] = [];
+            let mut entry_index -> number = 0;
+            loop {
+                if entry_index >= entries.length {
+                    break;
+                }
+                let entry = trim_text(entries[entry_index]);
+                entry_index += 1;
+                if entry.length == 0 {
+                    continue;
+                }
+                let colon_index = find_top_level_colon(entry);
+                if colon_index < 0 {
+                    diagnostics.push("llvm lowering: struct literal field `" + entry + "` missing `:`");
+                    continue;
+                }
+                let field_name = trim_text(substring(entry, 0, colon_index));
+                let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
+                if field_name.length == 0 {
+                    diagnostics.push("llvm lowering: struct literal field missing name");
+                    continue;
+                }
+                if string_array_contains(seen, field_name) {
+                    diagnostics.push("llvm lowering: struct literal field `" + field_name + "` repeated");
+                    continue;
+                }
+                if value_text.length == 0 {
+                    diagnostics.push("llvm lowering: struct literal field `" + field_name + "` missing value");
+                    continue;
+                }
+                seen.push(field_name);
+                fields.push(StructLiteralField { name: field_name, value: value_text });
             }
-            let entry = trim_text(entries[entry_index]);
-            entry_index += 1;
-            if entry.length == 0 {
-                continue;
-            }
-            let colon_index = find_top_level_colon(entry);
-            if colon_index < 0 {
-                diagnostics.push("llvm lowering: struct literal field `" + entry + "` missing `:`");
-                continue;
-            }
-            let field_name = trim_text(substring(entry, 0, colon_index));
-            let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
-            if field_name.length == 0 {
-                diagnostics.push("llvm lowering: struct literal field missing name");
-                continue;
-            }
-            if string_array_contains(seen, field_name) {
-                diagnostics.push("llvm lowering: struct literal field `" + field_name + "` repeated");
-                continue;
-            }
-            if value_text.length == 0 {
-                diagnostics.push("llvm lowering: struct literal field `" + field_name + "` missing value");
-                continue;
-            }
-            seen.push(field_name);
-            fields.push(StructLiteralField { name: field_name, value: value_text });
         }
     }
 
-    if !fatal && close_index >= 0 {
-        let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
-        if remainder.length > 0 {
-            diagnostics.push("llvm lowering: struct literal trailing content `" + remainder + "`");
-            fatal = true;
+    if !fatal {
+        if close_index >= 0 {
+            let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
+            if remainder.length > 0 {
+                diagnostics.push("llvm lowering: struct literal trailing content `" + remainder + "`");
+                fatal = true;
+            }
         }
     }
 
@@ -433,9 +447,13 @@ fn parse_struct_pattern(text -> string) -> StructLiteralParse {
                 angle_depth -= 1;
             }
         } else if ch == "{" {
-            if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
-                open_index = index;
-                break;
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if angle_depth == 0 {
+                        open_index = index;
+                        break;
+                    }
+                }
             }
         }
         index += 1;
@@ -457,47 +475,49 @@ fn parse_struct_pattern(text -> string) -> StructLiteralParse {
     }
 
     let mut fields -> StructLiteralField[] = [];
-    if !fatal && close_index >= 0 {
-        let body = substring(trimmed, open_index + 1, close_index);
-        let entries = split_array_elements(body);
-        let mut seen -> string[] = [];
-        let mut entry_index -> number = 0;
-        loop {
-            if entry_index >= entries.length {
-                break;
-            }
-            let entry = trim_text(entries[entry_index]);
-            entry_index += 1;
-            if entry.length == 0 {
-                continue;
-            }
-            let colon_index = find_top_level_colon(entry);
-            if colon_index < 0 {
-                let field_name = trim_text(entry);
+    if !fatal {
+        if close_index >= 0 {
+            let body = substring(trimmed, open_index + 1, close_index);
+            let entries = split_array_elements(body);
+            let mut seen -> string[] = [];
+            let mut entry_index -> number = 0;
+            loop {
+                if entry_index >= entries.length {
+                    break;
+                }
+                let entry = trim_text(entries[entry_index]);
+                entry_index += 1;
+                if entry.length == 0 {
+                    continue;
+                }
+                let colon_index = find_top_level_colon(entry);
+                if colon_index < 0 {
+                    let field_name = trim_text(entry);
+                    if field_name.length == 0 {
+                        continue;
+                    }
+                    if string_array_contains(seen, field_name) {
+                        continue;
+                    }
+                    seen.push(field_name);
+                    // Empty value indicates a binding pattern.
+                    fields.push(StructLiteralField { name: field_name, value: "" });
+                    continue;
+                }
+                let field_name = trim_text(substring(entry, 0, colon_index));
+                let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
                 if field_name.length == 0 {
                     continue;
                 }
                 if string_array_contains(seen, field_name) {
                     continue;
                 }
+                if value_text.length == 0 {
+                    continue;
+                }
                 seen.push(field_name);
-                // Empty value indicates a binding pattern.
-                fields.push(StructLiteralField { name: field_name, value: "" });
-                continue;
+                fields.push(StructLiteralField { name: field_name, value: value_text });
             }
-            let field_name = trim_text(substring(entry, 0, colon_index));
-            let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
-            if field_name.length == 0 {
-                continue;
-            }
-            if string_array_contains(seen, field_name) {
-                continue;
-            }
-            if value_text.length == 0 {
-                continue;
-            }
-            seen.push(field_name);
-            fields.push(StructLiteralField { name: field_name, value: value_text });
         }
     }
 
@@ -595,9 +615,13 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
                 angle_depth -= 1;
             }
         } else if ch == "{" {
-            if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
-                open_index = index;
-                break;
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if angle_depth == 0 {
+                        open_index = index;
+                        break;
+                    }
+                }
             }
         }
         index += 1;
@@ -677,9 +701,13 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
                     angle_depth -= 1;
                 }
             } else if ch == "." {
-                if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
-                    dot_seen = true;
-                    break;
+                if paren_depth == 0 {
+                    if bracket_depth == 0 {
+                        if angle_depth == 0 {
+                            dot_seen = true;
+                            break;
+                        }
+                    }
                 }
             }
             scan_index += 1;
@@ -720,25 +748,41 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
     }
 
     let mut fields -> StructLiteralField[] = [];
-    if !fatal && close_index >= 0 {
-        let body = substring(trimmed, open_index + 1, close_index);
-        let entries = split_array_elements(body);
-        let mut seen -> string[] = [];
-        let mut entry_index -> number = 0;
-        loop {
-            if entry_index >= entries.length {
-                break;
-            }
-            let entry = trim_text(entries[entry_index]);
-            entry_index += 1;
-            if entry.length == 0 {
-                continue;
-            }
-            let colon_index = find_top_level_colon(entry);
-            if colon_index < 0 {
-                // No colon - this might be shorthand syntax for match patterns like { radius }
-                // which means bind the field value to a local variable with the same name
-                let field_name = trim_text(entry);
+    if !fatal {
+        if close_index >= 0 {
+            let body = substring(trimmed, open_index + 1, close_index);
+            let entries = split_array_elements(body);
+            let mut seen -> string[] = [];
+            let mut entry_index -> number = 0;
+            loop {
+                if entry_index >= entries.length {
+                    break;
+                }
+                let entry = trim_text(entries[entry_index]);
+                entry_index += 1;
+                if entry.length == 0 {
+                    continue;
+                }
+                let colon_index = find_top_level_colon(entry);
+                if colon_index < 0 {
+                    // No colon - this might be shorthand syntax for match patterns like { radius }
+                    // which means bind the field value to a local variable with the same name
+                    let field_name = trim_text(entry);
+                    if field_name.length == 0 {
+                        diagnostics.push("llvm lowering: enum literal field missing name");
+                        continue;
+                    }
+                    if string_array_contains(seen, field_name) {
+                        diagnostics.push("llvm lowering: enum literal field `" + field_name + "` repeated");
+                        continue;
+                    }
+                    seen.push(field_name);
+                    // Use empty string as value to indicate this is a binding pattern (not a literal value)
+                    fields.push(StructLiteralField { name: field_name, value: "" });
+                    continue;
+                }
+                let field_name = trim_text(substring(entry, 0, colon_index));
+                let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
                 if field_name.length == 0 {
                     diagnostics.push("llvm lowering: enum literal field missing name");
                     continue;
@@ -747,35 +791,23 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
                     diagnostics.push("llvm lowering: enum literal field `" + field_name + "` repeated");
                     continue;
                 }
+                if value_text.length == 0 {
+                    diagnostics.push("llvm lowering: enum literal field `" + field_name + "` missing value");
+                    continue;
+                }
                 seen.push(field_name);
-                // Use empty string as value to indicate this is a binding pattern (not a literal value)
-                fields.push(StructLiteralField { name: field_name, value: "" });
-                continue;
+                fields.push(StructLiteralField { name: field_name, value: value_text });
             }
-            let field_name = trim_text(substring(entry, 0, colon_index));
-            let value_text = trim_text(substring(entry, colon_index + 1, entry.length));
-            if field_name.length == 0 {
-                diagnostics.push("llvm lowering: enum literal field missing name");
-                continue;
-            }
-            if string_array_contains(seen, field_name) {
-                diagnostics.push("llvm lowering: enum literal field `" + field_name + "` repeated");
-                continue;
-            }
-            if value_text.length == 0 {
-                diagnostics.push("llvm lowering: enum literal field `" + field_name + "` missing value");
-                continue;
-            }
-            seen.push(field_name);
-            fields.push(StructLiteralField { name: field_name, value: value_text });
         }
     }
 
-    if !fatal && close_index >= 0 {
-        let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
-        if remainder.length > 0 {
-            diagnostics.push("llvm lowering: enum literal trailing content `" + remainder + "`");
-            fatal = true;
+    if !fatal {
+        if close_index >= 0 {
+            let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
+            if remainder.length > 0 {
+                diagnostics.push("llvm lowering: enum literal trailing content `" + remainder + "`");
+                fatal = true;
+            }
         }
     }
 
@@ -837,8 +869,12 @@ fn find_top_level_range_separator(value -> string) -> number {
             if _cp_dot_next < value.length {
                 let _cp_dot_next2 = index + 2;
                 if substring(value, _cp_dot_next, _cp_dot_next2) == "." {
-                    if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-                        return index;
+                    if paren_depth == 0 {
+                        if bracket_depth == 0 {
+                            if brace_depth == 0 {
+                                return index;
+                            }
+                        }
                     }
                 }
             }
@@ -884,8 +920,12 @@ fn find_top_level_range_separator_from(value -> string, start_index -> number) -
                 if _cp_rng2_next < value.length {
                     let _cp_rng2_next2 = index + 2;
                     if substring(value, _cp_rng2_next, _cp_rng2_next2) == "." {
-                        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-                            return index;
+                        if paren_depth == 0 {
+                            if bracket_depth == 0 {
+                                if brace_depth == 0 {
+                                    return index;
+                                }
+                            }
                         }
                     }
                 }
@@ -978,34 +1018,38 @@ fn find_member_access_separator(value -> string) -> number {
             index += 1;
             continue;
         }
-        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-            if ch == "." {
-                if index > 0 {
-                    let previous = char_at(value, index - 1);
-                    if previous == "." {
-                        index += 1;
-                        continue;
-                    }
-                    if is_digit_char(previous) {
-                        let _ma_next = index + 1;
-                        if _ma_next < value.length {
-                            let next_digit = char_at(value, _ma_next);
-                            if is_digit_char(next_digit) {
+        if paren_depth == 0 {
+            if bracket_depth == 0 {
+                if brace_depth == 0 {
+                    if ch == "." {
+                        if index > 0 {
+                            let previous = char_at(value, index - 1);
+                            if previous == "." {
+                                index += 1;
+                                continue;
+                            }
+                            if is_digit_char(previous) {
+                                let _ma_next = index + 1;
+                                if _ma_next < value.length {
+                                    let next_digit = char_at(value, _ma_next);
+                                    if is_digit_char(next_digit) {
+                                        index += 1;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                        let _ma_next2 = index + 1;
+                        if _ma_next2 < value.length {
+                            let next_char = char_at(value, _ma_next2);
+                            if next_char == "." {
                                 index += 1;
                                 continue;
                             }
                         }
+                        last_index = index;
                     }
                 }
-                let _ma_next2 = index + 1;
-                if _ma_next2 < value.length {
-                    let next_char = char_at(value, _ma_next2);
-                    if next_char == "." {
-                        index += 1;
-                        continue;
-                    }
-                }
-                last_index = index;
             }
         }
         index += 1;
@@ -1024,7 +1068,10 @@ fn parse_member_access(expression -> string) -> MemberAccessParse {
     }
     let base = trim_text(substring(trimmed, 0, separator));
     let field = trim_text(substring(trimmed, separator + 1, trimmed.length));
-    if base.length == 0 || field.length == 0 {
+    let mut _if112 -> boolean = false;
+    if base.length == 0 { _if112 = true; }
+    if field.length == 0 { _if112 = true; }
+    if _if112 {
         return MemberAccessParse { success: false, base: "", field: "" };
     }
     if !is_simple_identifier(field) {
@@ -1077,7 +1124,10 @@ fn parse_index_expression(expression -> string) -> IndexExpressionParse {
     let base = trim_text(substring(trimmed, 0, index_position));
     let index = trim_text(substring(trimmed, index_position + 1, trimmed.length - 1));
     
-    if base.length == 0 || index.length == 0 {
+    let mut _if113 -> boolean = false;
+    if base.length == 0 { _if113 = true; }
+    if index.length == 0 { _if113 = true; }
+    if _if113 {
         return IndexExpressionParse { success: false, base: "", index: "" };
     }
     
@@ -1112,9 +1162,22 @@ fn parse_range_iterable(iterable -> string) -> RangeIterableParse {
     if end_text.length == 0 {
         diagnostics.push("llvm lowering: `.for` range missing end expression");
     }
-    if has_stride && stride_text.length == 0 {
-        diagnostics.push("llvm lowering: `.for` range missing stride expression");
+    if has_stride {
+        if stride_text.length == 0 {
+            diagnostics.push("llvm lowering: `.for` range missing stride expression");
+        }
     }
-    let success = start_text.length > 0 && end_text.length > 0 && (!has_stride || stride_text.length > 0);
+    let mut _let114 -> boolean = false;
+    if start_text.length > 0 {
+        if end_text.length > 0 {
+            let mut _if115 -> boolean = false;
+            if !has_stride { _if115 = true; }
+            if stride_text.length > 0 { _if115 = true; }
+            if _if115 {
+                _let114 = true;
+            }
+        }
+    }
+    let success = _let114;
     return RangeIterableParse { success: success, start: start_text, end: end_text, stride: stride_text, diagnostics: diagnostics };
 }

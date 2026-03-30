@@ -63,7 +63,10 @@ fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
         } else {
             return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
         }
-        if after_keyword.length == 0 || substring(after_keyword, 0, 1) != "(" {
+        let mut _if116 -> boolean = false;
+        if after_keyword.length == 0 { _if116 = true; }
+        if substring(after_keyword, 0, 1) != "(" { _if116 = true; }
+        if _if116 {
             return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
         }
         remainder = after_keyword;
@@ -82,35 +85,37 @@ fn parse_borrow_expression(expression -> string) -> BorrowParseResult {
         return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: issue };
     }
 
-    if remainder.length > 0 && substring(remainder, 0, 1) == "(" {
-        let argument_parse = extract_borrow_argument(remainder);
-        let mut messages -> string[] = diagnostics;
-        let mut _ci0 -> number = 0;
-        loop {
-            if _ci0 >= argument_parse.diagnostics.length { break; }
-            messages.push(argument_parse.diagnostics[_ci0]);
-            _ci0 += 1;
-        }
-        if !argument_parse.success {
-            return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
-        }
-        let mut argument_text -> string = argument_parse.argument;
-        if starts_with(argument_text, "mut") {
-            let after_mut = substring(argument_text, 3, argument_text.length);
-            let trimmed_after_mut = trim_text(after_mut);
-            if trimmed_after_mut.length > 0 {
-                mutable_flag = true;
-                argument_text = trimmed_after_mut;
+    if remainder.length > 0 {
+        if substring(remainder, 0, 1) == "(" {
+            let argument_parse = extract_borrow_argument(remainder);
+            let mut messages -> string[] = diagnostics;
+            let mut _ci0 -> number = 0;
+            loop {
+                if _ci0 >= argument_parse.diagnostics.length { break; }
+                messages.push(argument_parse.diagnostics[_ci0]);
+                _ci0 += 1;
             }
+            if !argument_parse.success {
+                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+            }
+            let mut argument_text -> string = argument_parse.argument;
+            if starts_with(argument_text, "mut") {
+                let after_mut = substring(argument_text, 3, argument_text.length);
+                let trimmed_after_mut = trim_text(after_mut);
+                if trimmed_after_mut.length > 0 {
+                    mutable_flag = true;
+                    argument_text = trimmed_after_mut;
+                }
+            }
+            if argument_text.length == 0 {
+                messages.push("llvm lowering: borrow expression missing target");
+                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+            }
+            if !is_valid_borrow_target(argument_text) {
+                return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+            }
+            return BorrowParseResult { recognized: true, success: true, target: argument_text, mutable: mutable_flag, diagnostics: messages };
         }
-        if argument_text.length == 0 {
-            messages.push("llvm lowering: borrow expression missing target");
-            return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
-        }
-        if !is_valid_borrow_target(argument_text) {
-            return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
-        }
-        return BorrowParseResult { recognized: true, success: true, target: argument_text, mutable: mutable_flag, diagnostics: messages };
     }
 
     let simple_parse = extract_simple_borrow_target(remainder);
@@ -247,34 +252,51 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
         }
         let ch = substring(trimmed, index, index + 1);
         
-        if ch == "(" || ch == "[" || ch == "{" {
+        let mut _if117 -> boolean = false;
+        if ch == "(" { _if117 = true; }
+        if ch == "[" { _if117 = true; }
+        if ch == "{" { _if117 = true; }
+        if _if117 {
             depth += 1;
             index += 1;
             continue;
         }
-        if ch == ")" || ch == "]" || ch == "}" {
+        let mut _if118 -> boolean = false;
+        if ch == ")" { _if118 = true; }
+        if ch == "]" { _if118 = true; }
+        if ch == "}" { _if118 = true; }
+        if _if118 {
             depth -= 1;
             index += 1;
             continue;
         }
         
         if depth == 0 {
-            if ch == "?" && question_index < 0 {
-                question_index = index;
-                index += 1;
-                continue;
+            if ch == "?" {
+                if question_index < 0 {
+                    question_index = index;
+                    index += 1;
+                    continue;
+                }
             }
-            if ch == ":" && question_index >= 0 && colon_index < 0 {
-                colon_index = index;
-                index += 1;
-                continue;
+            if ch == ":" {
+                if question_index >= 0 {
+                    if colon_index < 0 {
+                        colon_index = index;
+                        index += 1;
+                        continue;
+                    }
+                }
             }
         }
         
         index += 1;
     }
     
-    if question_index < 0 || colon_index < 0 {
+    let mut _if119 -> boolean = false;
+    if question_index < 0 { _if119 = true; }
+    if colon_index < 0 { _if119 = true; }
+    if _if119 {
         return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
     }
     
@@ -450,12 +472,18 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
             continue;
         }
 
-        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
-            let _as_end = index + 4;
-            if _as_end <= trimmed.length {
-                let window = substring(trimmed, index, _as_end);
-                if window == " as " {
-                    match_index = index;
+        if paren_depth == 0 {
+            if bracket_depth == 0 {
+                if brace_depth == 0 {
+                    if angle_depth == 0 {
+                        let _as_end = index + 4;
+                        if _as_end <= trimmed.length {
+                            let window = substring(trimmed, index, _as_end);
+                            if window == " as " {
+                                match_index = index;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -467,7 +495,10 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
     }
     let value = trim_text(substring(trimmed, 0, match_index));
     let annotation = trim_text(substring(trimmed, match_index + 4, trimmed.length));
-    if value.length == 0 || annotation.length == 0 {
+    let mut _if120 -> boolean = false;
+    if value.length == 0 { _if120 = true; }
+    if annotation.length == 0 { _if120 = true; }
+    if _if120 {
         diagnostics.push("llvm lowering: malformed cast expression `" + text + "`");
         return CastParseResult { recognized: true, success: false, value: value, type_annotation: annotation, diagnostics: diagnostics };
     }

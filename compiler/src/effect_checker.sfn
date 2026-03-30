@@ -112,7 +112,11 @@ fn analyze_routine(
             break;
         }
         let decorator_name = names[decorator_index];
-        if decorator_name == "trace" || decorator_name == "logExecution" || decorator_name == "logexecution" {
+        let mut _if15 -> boolean = false;
+        if decorator_name == "trace" { _if15 = true; }
+        if decorator_name == "logExecution" { _if15 = true; }
+        if decorator_name == "logexecution" { _if15 = true; }
+        if _if15 {
             requires_io_from_decorators = true;
             break;
         }
@@ -131,9 +135,11 @@ fn analyze_routine(
         }
         let requirement = required[index];
         let effect = requirement.effect;
-        if effect == "io" && requires_io_from_decorators {
-            index += 1;
-            continue;
+        if effect == "io" {
+            if requires_io_from_decorators {
+                index += 1;
+                continue;
+            }
         }
         if contains_effect(declared, effect) {
             index += 1;
@@ -354,10 +360,16 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
             if root == "fs" {
                 required = append_requirement(required, EffectRequirement { effect: "io", description: "filesystem helper usage" });
             }
-            if root == "print" || root == "console" {
+            let mut _if16 -> boolean = false;
+            if root == "print" { _if16 = true; }
+            if root == "console" { _if16 = true; }
+            if _if16 {
                 required = append_requirement(required, EffectRequirement { effect: "io", description: "print/console helper usage" });
             }
-            if root == "http" || root == "websocket" {
+            let mut _if17 -> boolean = false;
+            if root == "http" { _if17 = true; }
+            if root == "websocket" { _if17 = true; }
+            if _if17 {
                 required = append_requirement(required, EffectRequirement { effect: "net", description: "network helper usage" });
             }
         }
@@ -437,7 +449,10 @@ fn collect_effects_from_text(text -> string) -> EffectRequirement[] {
             EffectRequirement { effect: "io", description: "filesystem helper usage" }
         );
     }
-    if contains_code(text, "print(") || contains_code(text, "print.") {
+    let mut _if18 -> boolean = false;
+    if contains_code(text, "print(") { _if18 = true; }
+    if contains_code(text, "print.") { _if18 = true; }
+    if _if18 {
         required = append_requirement(
             required,
             EffectRequirement { effect: "io", description: "print helper usage" }
@@ -558,7 +573,10 @@ fn contains_code(text -> string, needle -> string) -> boolean {
             index += 2;
             continue;
         }
-        if ch == "\"" || ch == "'" {
+        let mut _if19 -> boolean = false;
+        if ch == "\"" { _if19 = true; }
+        if ch == "'" { _if19 = true; }
+        if _if19 {
             in_string_quote = ch;
             escaped = false;
             index += 1;
@@ -566,8 +584,10 @@ fn contains_code(text -> string, needle -> string) -> boolean {
         }
 
         let _end_pos = index + needle.length;
-        if _end_pos <= text.length && substring(text, index, _end_pos) == needle {
-            return true;
+        if _end_pos <= text.length {
+            if substring(text, index, _end_pos) == needle {
+                return true;
+            }
         }
         index += 1;
     }

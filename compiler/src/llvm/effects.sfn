@@ -65,8 +65,10 @@ fn append_function_effect_entry(values -> FunctionEffectEntry[], entry -> Functi
 }
 
 fn merge_effect_lists(base -> string[], extras -> string[]) -> string[] {
-    if base == null && extras == null {
-        return [];
+    if base == null {
+        if extras == null {
+            return [];
+        }
     }
     if base == null {
         return copy_string_array(extras);
@@ -175,9 +177,11 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
         if ch == "&" {
             let _amp_next = index + 1;
             let _amp_next2 = index + 2;
-            if _amp_next < trimmed.length && substring(trimmed, _amp_next, _amp_next2) == "&" {
-                index += 2;
-                continue;
+            if _amp_next < trimmed.length {
+                if substring(trimmed, _amp_next, _amp_next2) == "&" {
+                    index += 2;
+                    continue;
+                }
             }
             if index > 0 {
                 let prefix = substring(trimmed, index - 1, index);
@@ -194,7 +198,10 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
                 if maybe_mut == "mut" {
                     let after_mut_index = _cursor_plus3;
                     let _after_mut_next = after_mut_index + 1;
-                    if after_mut_index >= trimmed.length || is_effect_delimiter(substring(trimmed, after_mut_index, _after_mut_next)) {
+                    let mut _if44 -> boolean = false;
+                    if after_mut_index >= trimmed.length { _if44 = true; }
+                    if is_effect_delimiter(substring(trimmed, after_mut_index, _after_mut_next)) { _if44 = true; }
+                    if _if44 {
                         mutable_flag = true;
                         cursor = after_mut_index;
                     }
@@ -227,7 +234,10 @@ fn collect_expression_borrow_effects(expression -> string) -> string[] {
             if matches_keyword(trimmed, index, "borrow") {
                 let before_index = index - 1;
                 let _before_next = before_index + 1;
-                if before_index < 0 || is_effect_prefix_char(substring(trimmed, before_index, _before_next)) {
+                let mut _if45 -> boolean = false;
+                if before_index < 0 { _if45 = true; }
+                if is_effect_prefix_char(substring(trimmed, before_index, _before_next)) { _if45 = true; }
+                if _if45 {
                     effects = append_unique_effect(effects, "read");
                     index += 6;
                     continue;
@@ -450,7 +460,10 @@ fn extract_all_call_targets(expression -> string) -> string[] {
                     index += 1;
                     continue;
                 }
-                if current == "." || current == ":" {
+                let mut _if46 -> boolean = false;
+                if current == "." { _if46 = true; }
+                if current == ":" { _if46 = true; }
+                if _if46 {
                     index += 1;
                     continue;
                 }
@@ -519,7 +532,11 @@ fn collect_function_runtime_helper_targets(function -> NativeFunction) -> string
             break;
         }
         let decorator_name = decorators[decorator_index];
-        if matches_case_insensitive(decorator_name, "logExecution") || matches_case_insensitive(decorator_name, "logexecution") || matches_case_insensitive(decorator_name, "trace") {
+        let mut _if47 -> boolean = false;
+        if matches_case_insensitive(decorator_name, "logExecution") { _if47 = true; }
+        if matches_case_insensitive(decorator_name, "logexecution") { _if47 = true; }
+        if matches_case_insensitive(decorator_name, "trace") { _if47 = true; }
+        if _if47 {
             used = append_unique_effect(used, "runtime_log_execution_fn");
         }
         decorator_index += 1;
@@ -615,17 +632,21 @@ fn filter_runtime_helper_targets(targets -> string[]) -> string[] {
         if helper == null {
             let dot_index = find_last_index_of_char(trimmed, ".");
             let _dot_after = dot_index + 1;
-            if dot_index >= 0 && _dot_after < trimmed.length {
-                let suffix = substring(trimmed, _dot_after, trimmed.length);
-                helper = find_runtime_helper(suffix);
+            if dot_index >= 0 {
+                if _dot_after < trimmed.length {
+                    let suffix = substring(trimmed, _dot_after, trimmed.length);
+                    helper = find_runtime_helper(suffix);
+                }
             }
         }
         if helper == null {
             let colon_index = find_last_index_of_char(trimmed, ":");
             let _colon_after = colon_index + 1;
-            if colon_index >= 0 && _colon_after < trimmed.length {
-                let suffix = substring(trimmed, _colon_after, trimmed.length);
-                helper = find_runtime_helper(suffix);
+            if colon_index >= 0 {
+                if _colon_after < trimmed.length {
+                    let suffix = substring(trimmed, _colon_after, trimmed.length);
+                    helper = find_runtime_helper(suffix);
+                }
             }
         }
         if helper == null {
@@ -672,7 +693,10 @@ fn collect_runtime_property_targets(expression -> string) -> string[] {
 fn contains_dot_property(expression -> string, name -> string) -> boolean {
     let suffix = "." + name;
     let suffix_length = suffix.length;
-    if suffix_length == 0 || expression.length < suffix_length {
+    let mut _if48 -> boolean = false;
+    if suffix_length == 0 { _if48 = true; }
+    if expression.length < suffix_length { _if48 = true; }
+    if _if48 {
         return false;
     }
     let mut index -> number = 0;
@@ -727,7 +751,11 @@ fn contains_dot_property(expression -> string, name -> string) -> boolean {
                 let _expr_pos = index + match_index;
                 let expr_char = char_at(expression, _expr_pos);
                 let suffix_char = char_at(suffix, match_index);
-                if expr_char.length == 0 || suffix_char.length == 0 || expr_char != suffix_char {
+                let mut _if49 -> boolean = false;
+                if expr_char.length == 0 { _if49 = true; }
+                if suffix_char.length == 0 { _if49 = true; }
+                if expr_char != suffix_char { _if49 = true; }
+                if _if49 {
                     matches = false;
                     break;
                 }
@@ -753,7 +781,7 @@ fn contains_dot_property(expression -> string, name -> string) -> boolean {
 // Effect Propagation
 // =============================================================================
 
-fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_graph -> FunctionCallEntry[]) -> FunctionEffectEntry[] {
+fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_graph -> FunctionCallEntry[]) -> FunctionEffectEntry[] ![io] {
     let mut aggregated -> FunctionEffectEntry[] = [];
     let mut index -> number = 0;
     loop {
@@ -764,7 +792,13 @@ fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_grap
         index += 1;
     }
 
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let mut _let50 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let50 = true;
+        }
+    }
+    let trace = _let50;
     let mut iteration -> number = 0;
     let max_iterations = call_graph.length * 8 + 16;
 

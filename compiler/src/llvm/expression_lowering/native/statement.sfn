@@ -415,16 +415,20 @@ fn lower_expression_statement(
                     let mut base_pointer_type -> string = base_operand.llvm_type;
                     let mut base_pointer_value -> string = base_operand.value;
                     let base_name = trim_text(member_parse.base);
-                    if !ends_with_pointer_suffix(base_pointer_type) && is_simple_identifier(base_name) {
-                        let local_pointer = find_local_binding(current_locals, base_name);
-                        if local_pointer != null {
-                            base_pointer_type = local_pointer.llvm_type + "*";
-                            base_pointer_value = local_pointer.pointer;
-                        } else {
-                            let parameter_pointer = find_parameter_binding(current_bindings, base_name);
-                            if parameter_pointer != null && ends_with_pointer_suffix(parameter_pointer.llvm_type) {
-                                base_pointer_type = parameter_pointer.llvm_type;
-                                base_pointer_value = parameter_pointer.llvm_name;
+                    if !ends_with_pointer_suffix(base_pointer_type) {
+                        if is_simple_identifier(base_name) {
+                            let local_pointer = find_local_binding(current_locals, base_name);
+                            if local_pointer != null {
+                                base_pointer_type = local_pointer.llvm_type + "*";
+                                base_pointer_value = local_pointer.pointer;
+                            } else {
+                                let parameter_pointer = find_parameter_binding(current_bindings, base_name);
+                                if parameter_pointer != null {
+                                    if ends_with_pointer_suffix(parameter_pointer.llvm_type) {
+                                        base_pointer_type = parameter_pointer.llvm_type;
+                                        base_pointer_value = parameter_pointer.llvm_name;
+                                    }
+                                }
                             }
                         }
                     }
@@ -769,7 +773,10 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             index += 1;
             continue;
         }
-        if paren_depth > 0 || bracket_depth > 0 {
+        let mut _if141 -> boolean = false;
+        if paren_depth > 0 { _if141 = true; }
+        if bracket_depth > 0 { _if141 = true; }
+        if _if141 {
             index += 1;
             continue;
         }
@@ -786,22 +793,38 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             }
             
             // Check for compound assignment operators: +=, -=, *=, /=
-            if previous == "+" || previous == "-" || previous == "*" || previous == "/" {
+            let mut _if142 -> boolean = false;
+            if previous == "+" { _if142 = true; }
+            if previous == "-" { _if142 = true; }
+            if previous == "*" { _if142 = true; }
+            if previous == "/" { _if142 = true; }
+            if _if142 {
                 // This is a compound assignment
                 let target = trim_text(substring(trimmed, 0, index - 1));
                 let value = trim_text(substring(trimmed, index + 1, trimmed.length));
-                if target.length == 0 || value.length == 0 {
+                let mut _if165 -> boolean = false;
+                if target.length == 0 { _if165 = true; }
+                if value.length == 0 { _if165 = true; }
+                if _if165 {
                     return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
                 }
                 return AssignmentParseResult { success: true, target: target, value: value, operator: previous };
             }
             
             // Skip comparison operators and other non-assignment uses of =
-            if previous == "=" || previous == "!" || previous == ">" || previous == "<" {
+            let mut _if143 -> boolean = false;
+            if previous == "=" { _if143 = true; }
+            if previous == "!" { _if143 = true; }
+            if previous == ">" { _if143 = true; }
+            if previous == "<" { _if143 = true; }
+            if _if143 {
                 index += 1;
                 continue;
             }
-            if next_char == "=" || next_char == ">" {
+            let mut _if144 -> boolean = false;
+            if next_char == "=" { _if144 = true; }
+            if next_char == ">" { _if144 = true; }
+            if _if144 {
                 index += 1;
                 continue;
             }
@@ -809,7 +832,10 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             // Simple assignment
             let target = trim_text(substring(trimmed, 0, index));
             let value = trim_text(substring(trimmed, index + 1, trimmed.length));
-            if target.length == 0 || value.length == 0 {
+            let mut _if145 -> boolean = false;
+            if target.length == 0 { _if145 = true; }
+            if value.length == 0 { _if145 = true; }
+            if _if145 {
                 return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
             }
             return AssignmentParseResult { success: true, target: target, value: value, operator: "" };
@@ -850,7 +876,12 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
             break;
         }
         let ch = substring(remainder, index, index + 1);
-        if ch == " " || ch == ":" || ch == "-" || ch == "=" {
+        let mut _if146 -> boolean = false;
+        if ch == " " { _if146 = true; }
+        if ch == ":" { _if146 = true; }
+        if ch == "-" { _if146 = true; }
+        if ch == "=" { _if146 = true; }
+        if _if146 {
             break;
         }
         name = name + ch;
@@ -944,7 +975,13 @@ fn lower_return_instruction(
     let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
     let mut current_next_region -> number = next_region_id;
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let mut _let147 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let147 = true;
+        }
+    }
+    let trace = _let147;
 
     // Read instruction fields from files written by instructions.sfn.
     // The v0.1.1 seed compiles this module with NativeFunction/NativeInstruction
@@ -973,7 +1010,10 @@ fn lower_return_instruction(
         );
     }
 
-    if instr_expression == null || instr_expression.length == 0 {
+    let mut _if148 -> boolean = false;
+    if instr_expression == null { _if148 = true; }
+    if instr_expression.length == 0 { _if148 = true; }
+    if _if148 {
         if safe_llvm_return == "void" {
             current_lines.push("  ret void");
         } else {
@@ -1075,105 +1115,121 @@ fn lower_return_instruction(
     // the pattern in the expression with the temp variable. This bypasses the
     // unreliable lower_member_access path which the seed compiles nondeterministically.
     let mut _ret_expr -> string = instr_expression;
-    if index_of(_ret_expr, "self.") >= 0 && fs.exists("build/sailfin/.struct_info") && fs.exists("build/sailfin/.instr_fn_name") {
-        let _ret_fn = fs.readFile("build/sailfin/.instr_fn_name");
-        let _ret_si = fs.readFile("build/sailfin/.struct_info");
-        // Find struct name from function name prefix
-        let mut _ret_sname -> string = "";
-        let mut _ret_sllvm -> string = "";
-        let mut _ret_sfields -> string = "";
-        let mut _ret_sp -> number = 0;
-        loop {
-            if _ret_sp >= _ret_si.length { break; }
-            let _ret_nl = index_of(substring(_ret_si, _ret_sp, _ret_si.length), "\n");
-            let mut _ret_ln -> string = "";
-            if _ret_nl < 0 { _ret_ln = substring(_ret_si, _ret_sp, _ret_si.length); _ret_sp = _ret_si.length; }
-            else { _ret_ln = substring(_ret_si, _ret_sp, _ret_sp + _ret_nl); _ret_sp = _ret_sp + _ret_nl + 1; }
-            if _ret_ln.length == 0 { continue; }
-            let _ret_t1 = index_of(_ret_ln, "\t");
-            if _ret_t1 < 0 { continue; }
-            let _ret_sn = substring(_ret_ln, 0, _ret_t1);
-            if _ret_sn.length > 0 && _ret_sn.length < _ret_fn.length {
-                if substring(_ret_fn, 0, _ret_sn.length) == _ret_sn {
-                    _ret_sname = _ret_sn;
-                    let _ret_r = substring(_ret_ln, _ret_t1 + 1, _ret_ln.length);
-                    let _ret_t2 = index_of(_ret_r, "\t");
-                    if _ret_t2 > 0 {
-                        _ret_sllvm = substring(_ret_r, 0, _ret_t2);
-                        _ret_sfields = substring(_ret_r, _ret_t2 + 1, _ret_r.length);
+    if index_of(_ret_expr, "self.") >= 0 {
+        if fs.exists("build/sailfin/.struct_info") {
+            if fs.exists("build/sailfin/.instr_fn_name") {
+                let _ret_fn = fs.readFile("build/sailfin/.instr_fn_name");
+                let _ret_si = fs.readFile("build/sailfin/.struct_info");
+                // Find struct name from function name prefix
+                let mut _ret_sname -> string = "";
+                let mut _ret_sllvm -> string = "";
+                let mut _ret_sfields -> string = "";
+                let mut _ret_sp -> number = 0;
+                loop {
+                    if _ret_sp >= _ret_si.length { break; }
+                    let _ret_nl = index_of(substring(_ret_si, _ret_sp, _ret_si.length), "\n");
+                    let mut _ret_ln -> string = "";
+                    if _ret_nl < 0 { _ret_ln = substring(_ret_si, _ret_sp, _ret_si.length); _ret_sp = _ret_si.length; }
+                    else { _ret_ln = substring(_ret_si, _ret_sp, _ret_sp + _ret_nl); _ret_sp = _ret_sp + _ret_nl + 1; }
+                    if _ret_ln.length == 0 { continue; }
+                    let _ret_t1 = index_of(_ret_ln, "\t");
+                    if _ret_t1 < 0 { continue; }
+                    let _ret_sn = substring(_ret_ln, 0, _ret_t1);
+                    if _ret_sn.length > 0 {
+                        if _ret_sn.length < _ret_fn.length {
+                            if substring(_ret_fn, 0, _ret_sn.length) == _ret_sn {
+                                _ret_sname = _ret_sn;
+                                let _ret_r = substring(_ret_ln, _ret_t1 + 1, _ret_ln.length);
+                                let _ret_t2 = index_of(_ret_r, "\t");
+                                if _ret_t2 > 0 {
+                                    _ret_sllvm = substring(_ret_r, 0, _ret_t2);
+                                    _ret_sfields = substring(_ret_r, _ret_t2 + 1, _ret_r.length);
+                                }
+                                break;
+                            }
+                        }
                     }
-                    break;
                 }
-            }
-        }
-        if _ret_sname.length > 0 && _ret_sllvm.length > 0 {
-            // Scan for self.FIELD patterns and replace each one
-            let mut _ret_scan -> number = 0;
-            loop {
-                let _ret_idx = index_of(substring(_ret_expr, _ret_scan, _ret_expr.length), "self.");
-                if _ret_idx < 0 { break; }
-                let _ret_abs = _ret_scan + _ret_idx;
-                let _ret_after = _ret_abs + 5; // after "self."
-                // Extract field name (identifier chars)
-                let mut _ret_end -> number = _ret_after;
-                loop {
-                    if _ret_end >= _ret_expr.length { break; }
-                    let _ret_ch = substring(_ret_expr, _ret_end, _ret_end + 1);
-                    if _ret_ch >= "a" && _ret_ch <= "z" { _ret_end += 1; }
-                    else if _ret_ch >= "A" && _ret_ch <= "Z" { _ret_end += 1; }
-                    else if _ret_ch >= "0" && _ret_ch <= "9" { _ret_end += 1; }
-                    else if _ret_ch == "_" { _ret_end += 1; }
-                    else { break; }
-                }
-                if _ret_end <= _ret_after { _ret_scan = _ret_end + 1; continue; }
-                let _ret_field = substring(_ret_expr, _ret_after, _ret_end);
-                // Check if this is followed by '(' (method call, not field access)
-                let mut _ret_is_call -> boolean = false;
-                let mut _ret_peek -> number = _ret_end;
-                loop {
-                    if _ret_peek >= _ret_expr.length { break; }
-                    let _ret_pk = substring(_ret_expr, _ret_peek, _ret_peek + 1);
-                    if _ret_pk == " " { _ret_peek += 1; continue; }
-                    if _ret_pk == "(" { _ret_is_call = true; }
-                    break;
-                }
-                if _ret_is_call { _ret_scan = _ret_end + 1; continue; }
-                // Find field index and type in struct info
-                let mut _ret_fidx -> number = -1;
-                let mut _ret_ftype -> string = "";
-                let mut _ret_fi -> number = 0;
-                let mut _ret_fp -> number = 0;
-                loop {
-                    if _ret_fp >= _ret_sfields.length { break; }
-                    let _ret_fc = index_of(substring(_ret_sfields, _ret_fp, _ret_sfields.length), ",");
-                    let mut _ret_fe -> string = "";
-                    if _ret_fc < 0 { _ret_fe = substring(_ret_sfields, _ret_fp, _ret_sfields.length); _ret_fp = _ret_sfields.length; }
-                    else { _ret_fe = substring(_ret_sfields, _ret_fp, _ret_fp + _ret_fc); _ret_fp = _ret_fp + _ret_fc + 1; }
-                    let _ret_fk = index_of(_ret_fe, ":");
-                    if _ret_fk < 0 { _ret_fi += 1; continue; }
-                    if substring(_ret_fe, 0, _ret_fk) == _ret_field {
-                        _ret_fidx = _ret_fi;
-                        _ret_ftype = substring(_ret_fe, _ret_fk + 1, _ret_fe.length);
-                        break;
+                if _ret_sname.length > 0 {
+                    if _ret_sllvm.length > 0 {
+                        // Scan for self.FIELD patterns and replace each one
+                        let mut _ret_scan -> number = 0;
+                        loop {
+                            let _ret_idx = index_of(substring(_ret_expr, _ret_scan, _ret_expr.length), "self.");
+                            if _ret_idx < 0 { break; }
+                            let _ret_abs = _ret_scan + _ret_idx;
+                            let _ret_after = _ret_abs + 5; // after "self."
+                            // Extract field name (identifier chars)
+                            let mut _ret_end -> number = _ret_after;
+                            loop {
+                                if _ret_end >= _ret_expr.length { break; }
+                                let _ret_ch = substring(_ret_expr, _ret_end, _ret_end + 1);
+                                if _ret_ch >= "a" {
+                                    if _ret_ch <= "z" {
+                                        _ret_end += 1;
+                                    }
+                                }
+                                else if _ret_ch >= "A" {
+                                    if _ret_ch <= "Z" { _ret_end += 1; }
+                                }
+                                else if _ret_ch >= "0" {
+                                    if _ret_ch <= "9" { _ret_end += 1; }
+                                }
+                                else if _ret_ch == "_" { _ret_end += 1; }
+                                else { break; }
+                            }
+                            if _ret_end <= _ret_after { _ret_scan = _ret_end + 1; continue; }
+                            let _ret_field = substring(_ret_expr, _ret_after, _ret_end);
+                            // Check if this is followed by '(' (method call, not field access)
+                            let mut _ret_is_call -> boolean = false;
+                            let mut _ret_peek -> number = _ret_end;
+                            loop {
+                                if _ret_peek >= _ret_expr.length { break; }
+                                let _ret_pk = substring(_ret_expr, _ret_peek, _ret_peek + 1);
+                                if _ret_pk == " " { _ret_peek += 1; continue; }
+                                if _ret_pk == "(" { _ret_is_call = true; }
+                                break;
+                            }
+                            if _ret_is_call { _ret_scan = _ret_end + 1; continue; }
+                            // Find field index and type in struct info
+                            let mut _ret_fidx -> number = -1;
+                            let mut _ret_ftype -> string = "";
+                            let mut _ret_fi -> number = 0;
+                            let mut _ret_fp -> number = 0;
+                            loop {
+                                if _ret_fp >= _ret_sfields.length { break; }
+                                let _ret_fc = index_of(substring(_ret_sfields, _ret_fp, _ret_sfields.length), ",");
+                                let mut _ret_fe -> string = "";
+                                if _ret_fc < 0 { _ret_fe = substring(_ret_sfields, _ret_fp, _ret_sfields.length); _ret_fp = _ret_sfields.length; }
+                                else { _ret_fe = substring(_ret_sfields, _ret_fp, _ret_fp + _ret_fc); _ret_fp = _ret_fp + _ret_fc + 1; }
+                                let _ret_fk = index_of(_ret_fe, ":");
+                                if _ret_fk < 0 { _ret_fi += 1; continue; }
+                                if substring(_ret_fe, 0, _ret_fk) == _ret_field {
+                                    _ret_fidx = _ret_fi;
+                                    _ret_ftype = substring(_ret_fe, _ret_fk + 1, _ret_fe.length);
+                                    break;
+                                }
+                                _ret_fi += 1;
+                            }
+                            if _ret_fidx < 0 { _ret_scan = _ret_end + 1; continue; }
+                            // Emit GEP instructions
+                            let _ret_ct1 = format_temp_name(current_temp);
+                            current_lines.push("  " + _ret_ct1 + " = bitcast i8* %self to " + _ret_sllvm + "*");
+                            current_temp += 1;
+                            let _ret_ct2 = format_temp_name(current_temp);
+                            current_lines.push("  " + _ret_ct2 + " = getelementptr inbounds " + _ret_sllvm + ", " + _ret_sllvm + "* " + _ret_ct1 + ", i32 0, i32 " + number_to_string(_ret_fidx));
+                            current_temp += 1;
+                            let _ret_ct3 = format_temp_name(current_temp);
+                            current_lines.push("  " + _ret_ct3 + " = load " + _ret_ftype + ", " + _ret_ftype + "* " + _ret_ct2);
+                            current_temp += 1;
+                            // Replace self.FIELD in expression with the temp variable
+                            let _ret_before = substring(_ret_expr, 0, _ret_abs);
+                            let _ret_rest = substring(_ret_expr, _ret_end, _ret_expr.length);
+                            _ret_expr = _ret_before + _ret_ct3 + _ret_rest;
+                            _ret_scan = _ret_abs + _ret_ct3.length;
+                        }
                     }
-                    _ret_fi += 1;
                 }
-                if _ret_fidx < 0 { _ret_scan = _ret_end + 1; continue; }
-                // Emit GEP instructions
-                let _ret_ct1 = format_temp_name(current_temp);
-                current_lines.push("  " + _ret_ct1 + " = bitcast i8* %self to " + _ret_sllvm + "*");
-                current_temp += 1;
-                let _ret_ct2 = format_temp_name(current_temp);
-                current_lines.push("  " + _ret_ct2 + " = getelementptr inbounds " + _ret_sllvm + ", " + _ret_sllvm + "* " + _ret_ct1 + ", i32 0, i32 " + number_to_string(_ret_fidx));
-                current_temp += 1;
-                let _ret_ct3 = format_temp_name(current_temp);
-                current_lines.push("  " + _ret_ct3 + " = load " + _ret_ftype + ", " + _ret_ftype + "* " + _ret_ct2);
-                current_temp += 1;
-                // Replace self.FIELD in expression with the temp variable
-                let _ret_before = substring(_ret_expr, 0, _ret_abs);
-                let _ret_rest = substring(_ret_expr, _ret_end, _ret_expr.length);
-                _ret_expr = _ret_before + _ret_ct3 + _ret_rest;
-                _ret_scan = _ret_abs + _ret_ct3.length;
             }
         }
     }
@@ -1282,19 +1338,27 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
         let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
         let mut inferred_self_type -> boolean = false;
         // Infer `self` parameter type from struct name in method qualified names (e.g., Person::format -> Person)
-        if parameter.type_annotation.length == 0 && parameter.name == "self" && index == 0 {
-            let double_colon_pos = find_last_index_of_char(function.name, ":");
-            if double_colon_pos > 0 && substring(function.name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
-                let struct_name = substring(function.name, 0, double_colon_pos - 1);
-                let struct_type = map_struct_type_annotation(context, struct_name);
-                if struct_type.length > 0 {
-                    llvm_type = struct_type + "*";
-                    inferred_self_type = true;
+        if parameter.type_annotation.length == 0 {
+            if parameter.name == "self" {
+                if index == 0 {
+                    let double_colon_pos = find_last_index_of_char(function.name, ":");
+                    if double_colon_pos > 0 {
+                        if substring(function.name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+                            let struct_name = substring(function.name, 0, double_colon_pos - 1);
+                            let struct_type = map_struct_type_annotation(context, struct_name);
+                            if struct_type.length > 0 {
+                                llvm_type = struct_type + "*";
+                                inferred_self_type = true;
+                            }
+                        }
+                    }
                 }
             }
         }
-        if parameter.type_annotation.length == 0 && !inferred_self_type {
-            diagnostics.push("llvm lowering: parameter `" + parameter.name + "` missing type annotation; defaulting to `" + llvm_type + "`");
+        if parameter.type_annotation.length == 0 {
+            if !inferred_self_type {
+                diagnostics.push("llvm lowering: parameter `" + parameter.name + "` missing type annotation; defaulting to `" + llvm_type + "`");
+            }
         }
         let sanitized = sanitize_symbol(parameter.name);
         let llvm_name = "%" + sanitized;
@@ -1355,13 +1419,19 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if annotation == "number" {
         return "double";
     }
-    if annotation == "boolean" || annotation == "bool" {
+    let mut _if149 -> boolean = false;
+    if annotation == "boolean" { _if149 = true; }
+    if annotation == "bool" { _if149 = true; }
+    if _if149 {
         return "i1";
     }
     if annotation == "usize" {
         return "i64";
     }
-    if annotation == "int" || annotation == "i64" {
+    let mut _if150 -> boolean = false;
+    if annotation == "int" { _if150 = true; }
+    if annotation == "i64" { _if150 = true; }
+    if _if150 {
         return "i64";
     }
     if annotation == "i32" {
@@ -1418,7 +1488,10 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
     }
     // For primitive types and others, use the simple mapper
     let inner_type = map_type_annotation(inner_annotation);
-    if inner_type.length == 0 || inner_type == "void" {
+    let mut _if151 -> boolean = false;
+    if inner_type.length == 0 { _if151 = true; }
+    if inner_type == "void" { _if151 = true; }
+    if _if151 {
         return "i8*";
     }
     // If already a pointer, return as-is, otherwise make it a pointer
@@ -1463,8 +1536,10 @@ fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
     if remainder.length == 0 {
         return "";
     }
-    if substring(remainder, 0, 1) == "(" && substring(remainder, remainder.length - 1, remainder.length) == ")" {
-        remainder = trim_text(substring(remainder, 1, remainder.length - 1));
+    if substring(remainder, 0, 1) == "(" {
+        if substring(remainder, remainder.length - 1, remainder.length) == ")" {
+            remainder = trim_text(substring(remainder, 1, remainder.length - 1));
+        }
     }
     let inner_type = map_reference_inner_type(context, remainder);
     if inner_type.length == 0 {
@@ -1491,10 +1566,14 @@ fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> strin
         // Fallback to generic pointer for unresolved types (e.g., imported structs not in type context)
         element_type = "i8*";
     }
-    if !annotation_is_array(element_annotation) && layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
-        let stripped_element = strip_pointer_suffix(element_type);
-        if stripped_element.length > 0 {
-            element_type = stripped_element;
+    if !annotation_is_array(element_annotation) {
+        if layout_annotation_represents_user_value(element_annotation) {
+            if ends_with_pointer_suffix(element_type) {
+                let stripped_element = strip_pointer_suffix(element_type);
+                if stripped_element.length > 0 {
+                    element_type = stripped_element;
+                }
+            }
         }
     }
     return "{ " + element_type + "*, i64 }*";
@@ -1506,7 +1585,10 @@ fn unwrap_move_wrapper(annotation -> string) -> string {
     if trimmed.length == 0 {
         return trimmed;
     }
-    if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
+    let mut _if152 -> boolean = false;
+    if starts_with(trimmed, "Affine<") { _if152 = true; }
+    if starts_with(trimmed, "Linear<") { _if152 = true; }
+    if _if152 {
         let open_index = index_of(trimmed, "<");
         if open_index >= 0 {
             if substring(trimmed, trimmed.length - 1, trimmed.length) == ">" {
@@ -1620,12 +1702,16 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
             break;
         }
         let local = locals[index];
-        if !local.consumed && local.ownership != null {
-            let details = local.ownership;
-            if details.variant == "Borrow" && details.mutable {
-                let base_name = normalise_borrow_base(details.base);
-                let location = format_suspension_location(keyword, details.span, suspension_span);
-                diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+        if !local.consumed {
+            if local.ownership != null {
+                let details = local.ownership;
+                if details.variant == "Borrow" {
+                    if details.mutable {
+                        let base_name = normalise_borrow_base(details.base);
+                        let location = format_suspension_location(keyword, details.span, suspension_span);
+                        diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+                    }
+                }
             }
         }
         index += 1;
@@ -1792,9 +1878,15 @@ fn find_top_level_union_separator(text -> string) -> number {
             continue;
         }
 
-        if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
-            if ch == "|" {
-                return index;
+        if paren_depth == 0 {
+            if brace_depth == 0 {
+                if bracket_depth == 0 {
+                    if angle_depth == 0 {
+                        if ch == "|" {
+                            return index;
+                        }
+                    }
+                }
             }
         }
         index += 1;
@@ -1851,7 +1943,10 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
             return "";
         }
         let mapped = map_type_annotation(part);
-        if mapped.length == 0 || mapped == "void" {
+        let mut _if153 -> boolean = false;
+        if mapped.length == 0 { _if153 = true; }
+        if mapped == "void" { _if153 = true; }
+        if _if153 {
             return "";
         }
         llvm_parts.push(mapped);
@@ -1864,7 +1959,10 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
 
 fn map_return_type(context -> TypeContext, return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if154 -> boolean = false;
+    if trimmed.length == 0 { _if154 = true; }
+    if trimmed == "void" { _if154 = true; }
+    if _if154 {
         return "void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
@@ -1875,14 +1973,20 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
         if starts_with(remainder, "mut") {
             remainder = trim_text(substring(remainder, 3, remainder.length));
         }
-        if remainder == "opaque" || remainder.length == 0 {
+        let mut _if155 -> boolean = false;
+        if remainder == "opaque" { _if155 = true; }
+        if remainder.length == 0 { _if155 = true; }
+        if _if155 {
             return "i8*";
         }
         let inner = map_return_type(context, remainder);
         if ends_with_pointer_suffix(inner) {
             return inner;
         }
-        if inner.length == 0 || inner == "void" {
+        let mut _if156 -> boolean = false;
+        if inner.length == 0 { _if156 = true; }
+        if inner == "void" { _if156 = true; }
+        if _if156 {
             return "i8*";
         }
         return inner + "*";
@@ -1915,14 +2019,20 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
 
 fn future_pointer_type_for_return_type(return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if157 -> boolean = false;
+    if trimmed.length == 0 { _if157 = true; }
+    if trimmed == "void" { _if157 = true; }
+    if _if157 {
         return "%SailfinFutureVoid*";
     }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
         return "%SailfinFutureNumber*";
     }
-    if normalized == "boolean" || normalized == "bool" {
+    let mut _if158 -> boolean = false;
+    if normalized == "boolean" { _if158 = true; }
+    if normalized == "bool" { _if158 = true; }
+    if _if158 {
         return "%SailfinFutureBool*";
     }
     if normalized == "string" {
@@ -1934,14 +2044,20 @@ fn future_pointer_type_for_return_type(return_type -> string) -> string {
 
 fn spawn_symbol_for_return_type(return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if159 -> boolean = false;
+    if trimmed.length == 0 { _if159 = true; }
+    if trimmed == "void" { _if159 = true; }
+    if _if159 {
         return "sailfin_runtime_spawn_void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
         return "sailfin_runtime_spawn_number";
     }
-    if normalized == "boolean" || normalized == "bool" {
+    let mut _if160 -> boolean = false;
+    if normalized == "boolean" { _if160 = true; }
+    if normalized == "bool" { _if160 = true; }
+    if _if160 {
         return "sailfin_runtime_spawn_bool";
     }
     if normalized == "string" {
@@ -1952,14 +2068,20 @@ fn spawn_symbol_for_return_type(return_type -> string) -> string {
 
 fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if161 -> boolean = false;
+    if trimmed.length == 0 { _if161 = true; }
+    if trimmed == "void" { _if161 = true; }
+    if _if161 {
         return "sailfin_runtime_spawn_void_ctx";
     }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
         return "sailfin_runtime_spawn_number_ctx";
     }
-    if normalized == "boolean" || normalized == "bool" {
+    let mut _if162 -> boolean = false;
+    if normalized == "boolean" { _if162 = true; }
+    if normalized == "bool" { _if162 = true; }
+    if _if162 {
         return "sailfin_runtime_spawn_bool_ctx";
     }
     if normalized == "string" {
@@ -2000,7 +2122,10 @@ fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> strin
         if starts_with(remainder, "mut") {
             remainder = trim_text(substring(remainder, 3, remainder.length));
         }
-        if remainder == "opaque" || remainder.length == 0 {
+        let mut _if163 -> boolean = false;
+        if remainder == "opaque" { _if163 = true; }
+        if remainder.length == 0 { _if163 = true; }
+        if _if163 {
             return "i8*";
         }
         let inner = map_parameter_type(context, remainder);
@@ -2051,7 +2176,10 @@ fn map_local_type(context -> TypeContext, type_annotation -> string) -> string {
         if starts_with(remainder, "mut") {
             remainder = trim_text(substring(remainder, 3, remainder.length));
         }
-        if remainder == "opaque" || remainder.length == 0 {
+        let mut _if164 -> boolean = false;
+        if remainder == "opaque" { _if164 = true; }
+        if remainder.length == 0 { _if164 = true; }
+        if _if164 {
             return "i8*";
         }
         let inner = map_local_type(context, remainder);

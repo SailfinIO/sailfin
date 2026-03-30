@@ -94,7 +94,10 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             continue;
         }
         let mut name = binding.name;
-        if name == null || name.length == 0 {
+        let mut _if276 -> boolean = false;
+        if name == null { _if276 = true; }
+        if name.length == 0 { _if276 = true; }
+        if _if276 {
             diagnostics.push("llvm lowering: module binding missing name; skipping");
             index += 1;
             continue;
@@ -105,11 +108,13 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
         }
         let mut type_annotation = trim_text(raw_type_annotation);
         let mut effective_type_annotation = raw_type_annotation;
-        if type_annotation.length == 0 && binding.value != null {
-            let init_expr = trim_text(binding.value);
-            if is_string_literal(init_expr) {
-                type_annotation = "string";
-                effective_type_annotation = "string";
+        if type_annotation.length == 0 {
+            if binding.value != null {
+                let init_expr = trim_text(binding.value);
+                if is_string_literal(init_expr) {
+                    type_annotation = "string";
+                    effective_type_annotation = "string";
+                }
             }
         }
         if type_annotation.length == 0 {
@@ -135,19 +140,49 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             let mut initializer_text -> string = default_return_literal(llvm_type);
             if binding.value != null {
                 let init_expr = trim_text(binding.value);
-                if llvm_type == "double" && is_number_literal(init_expr) {
-                    initializer_text = normalise_number_literal(init_expr);
-                } else if llvm_type == "i64" && is_integer_literal(init_expr) {
-                    initializer_text = init_expr;
-                } else if llvm_type == "i32" && is_integer_literal(init_expr) {
-                    initializer_text = init_expr;
-                } else if llvm_type == "i1" && is_boolean_literal(init_expr) {
-                    initializer_text = "0";
-                    if matches_case_insensitive(init_expr, "true") {
-                        initializer_text = "1";
+                let mut _if277 -> boolean = false;
+                if llvm_type == "double" {
+                    if is_number_literal(init_expr) {
+                        _if277 = true;
                     }
+                }
+                if _if277 {
+                    initializer_text = normalise_number_literal(init_expr);
                 } else {
-                    needs_init = true;
+                    let mut _elif280 -> boolean = false;
+                    if llvm_type == "i64" {
+                        if is_integer_literal(init_expr) {
+                            _elif280 = true;
+                        }
+                    }
+                    if _elif280 {
+                        initializer_text = init_expr;
+                    } else {
+                        let mut _elif281 -> boolean = false;
+                        if llvm_type == "i32" {
+                            if is_integer_literal(init_expr) {
+                                _elif281 = true;
+                            }
+                        }
+                        if _elif281 {
+                            initializer_text = init_expr;
+                        }
+                    }
+                }
+                    let mut _elif278 -> boolean = false;
+                    if llvm_type == "i1" {
+                        if is_boolean_literal(init_expr) {
+                            _elif278 = true;
+                        }
+                    }
+                    if _elif278 {
+                        initializer_text = "0";
+                        if matches_case_insensitive(init_expr, "true") {
+                            initializer_text = "1";
+                        }
+                    } else {
+                        needs_init = true;
+                    }
                 }
             }
             preamble_lines.push(global_name + " = internal global " + llvm_type + " " + initializer_text);
@@ -196,7 +231,10 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             continue;
         }
         let mut name = binding.name;
-        if name == null || name.length == 0 {
+        let mut _if279 -> boolean = false;
+        if name == null { _if279 = true; }
+        if name.length == 0 { _if279 = true; }
+        if _if279 {
             diagnostics.push("llvm lowering: module init binding missing name; skipping");
             init_index += 1;
             continue;
@@ -206,10 +244,12 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             raw_type_annotation = "";
         }
         let mut type_annotation = trim_text(raw_type_annotation);
-        if type_annotation.length == 0 && binding.value != null {
-            let init_expr = trim_text(binding.value);
-            if is_string_literal(init_expr) {
-                type_annotation = "string";
+        if type_annotation.length == 0 {
+            if binding.value != null {
+                let init_expr = trim_text(binding.value);
+                if is_string_literal(init_expr) {
+                    type_annotation = "string";
+                }
             }
         }
         if type_annotation.length == 0 {
@@ -247,17 +287,25 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             }
         } else {
             let mut should_store -> boolean = true;
-            if llvm_type == "double" && is_number_literal(init_expr) {
-                should_store = false;
+            if llvm_type == "double" {
+                if is_number_literal(init_expr) {
+                    should_store = false;
+                }
             }
-            if llvm_type == "i64" && is_integer_literal(init_expr) {
-                should_store = false;
+            if llvm_type == "i64" {
+                if is_integer_literal(init_expr) {
+                    should_store = false;
+                }
             }
-            if llvm_type == "i32" && is_integer_literal(init_expr) {
-                should_store = false;
+            if llvm_type == "i32" {
+                if is_integer_literal(init_expr) {
+                    should_store = false;
+                }
             }
-            if llvm_type == "i1" && is_boolean_literal(init_expr) {
-                should_store = false;
+            if llvm_type == "i1" {
+                if is_boolean_literal(init_expr) {
+                    should_store = false;
+                }
             }
             if should_store {
                 let lowered = lower_expression(init_expr, [], locals, current_temp, current_lines, [], context, llvm_type);

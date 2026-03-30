@@ -111,11 +111,23 @@ fn split_call_arguments(text -> string) -> string[] {
                 brace_depth -= 1;
             }
             current = current + ch;
-        } else if ch == "," && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-            entries.push(trim_text(current));
-            current = "";
         } else {
-            current = current + ch;
+            let mut _elif67 -> boolean = false;
+            if ch == "," {
+                if paren_depth == 0 {
+                    if bracket_depth == 0 {
+                        if brace_depth == 0 {
+                            _elif67 = true;
+                        }
+                    }
+                }
+            }
+            if _elif67 {
+                entries.push(trim_text(current));
+                current = "";
+            } else {
+                current = current + ch;
+            }
         }
         index += 1;
     }

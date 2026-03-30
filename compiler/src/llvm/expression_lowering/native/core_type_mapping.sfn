@@ -73,13 +73,19 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if annotation == "number" {
         return "double";
     }
-    if annotation == "boolean" || annotation == "bool" {
+    let mut _if130 -> boolean = false;
+    if annotation == "boolean" { _if130 = true; }
+    if annotation == "bool" { _if130 = true; }
+    if _if130 {
         return "i1";
     }
     if annotation == "usize" {
         return "i64";
     }
-    if annotation == "int" || annotation == "i64" {
+    let mut _if131 -> boolean = false;
+    if annotation == "int" { _if131 = true; }
+    if annotation == "i64" { _if131 = true; }
+    if _if131 {
         return "i64";
     }
     if annotation == "i32" {
@@ -136,7 +142,10 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
     }
     // For primitive types and others, use the simple mapper
     let inner_type = map_type_annotation(inner_annotation);
-    if inner_type.length == 0 || inner_type == "void" {
+    let mut _if132 -> boolean = false;
+    if inner_type.length == 0 { _if132 = true; }
+    if inner_type == "void" { _if132 = true; }
+    if _if132 {
         return "i8*";
     }
     // If already a pointer, return as-is, otherwise make it a pointer
@@ -181,8 +190,10 @@ fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
     if remainder.length == 0 {
         return "";
     }
-    if substring(remainder, 0, 1) == "(" && substring(remainder, remainder.length - 1, remainder.length) == ")" {
-        remainder = trim_text(substring(remainder, 1, remainder.length - 1));
+    if substring(remainder, 0, 1) == "(" {
+        if substring(remainder, remainder.length - 1, remainder.length) == ")" {
+            remainder = trim_text(substring(remainder, 1, remainder.length - 1));
+        }
     }
     let inner_type = map_reference_inner_type(context, remainder);
     if inner_type.length == 0 {
@@ -209,10 +220,14 @@ fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> strin
         // Fallback to generic pointer for unresolved types (e.g., imported structs not in type context)
         element_type = "i8*";
     }
-    if !annotation_is_array(element_annotation) && layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
-        let stripped_element = strip_pointer_suffix(element_type);
-        if stripped_element.length > 0 {
-            element_type = stripped_element;
+    if !annotation_is_array(element_annotation) {
+        if layout_annotation_represents_user_value(element_annotation) {
+            if ends_with_pointer_suffix(element_type) {
+                let stripped_element = strip_pointer_suffix(element_type);
+                if stripped_element.length > 0 {
+                    element_type = stripped_element;
+                }
+            }
         }
     }
     return "{ " + element_type + "*, i64 }*";
@@ -223,7 +238,10 @@ fn unwrap_move_wrapper(annotation -> string) -> string {
     if trimmed.length == 0 {
         return trimmed;
     }
-    if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
+    let mut _if133 -> boolean = false;
+    if starts_with(trimmed, "Affine<") { _if133 = true; }
+    if starts_with(trimmed, "Linear<") { _if133 = true; }
+    if _if133 {
         let open_index = index_of(trimmed, "<");
         if open_index >= 0 {
             if substring(trimmed, trimmed.length - 1, trimmed.length) == ">" {
@@ -340,9 +358,15 @@ fn find_top_level_union_separator(text -> string) -> number {
             continue;
         }
 
-        if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
-            if ch == "|" {
-                return index;
+        if paren_depth == 0 {
+            if brace_depth == 0 {
+                if bracket_depth == 0 {
+                    if angle_depth == 0 {
+                        if ch == "|" {
+                            return index;
+                        }
+                    }
+                }
             }
         }
         index += 1;
@@ -399,7 +423,10 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
             return "";
         }
         let mapped = map_type_annotation(part);
-        if mapped.length == 0 || mapped == "void" {
+        let mut _if134 -> boolean = false;
+        if mapped.length == 0 { _if134 = true; }
+        if mapped == "void" { _if134 = true; }
+        if _if134 {
             return "";
         }
         llvm_parts.push(mapped);
@@ -412,7 +439,10 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
 
 fn map_return_type(context -> TypeContext, return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if135 -> boolean = false;
+    if trimmed.length == 0 { _if135 = true; }
+    if trimmed == "void" { _if135 = true; }
+    if _if135 {
         return "void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
@@ -423,14 +453,20 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
         if starts_with(remainder, "mut") {
             remainder = trim_text(substring(remainder, 3, remainder.length));
         }
-        if remainder == "opaque" || remainder.length == 0 {
+        let mut _if136 -> boolean = false;
+        if remainder == "opaque" { _if136 = true; }
+        if remainder.length == 0 { _if136 = true; }
+        if _if136 {
             return "i8*";
         }
         let inner = map_return_type(context, remainder);
         if ends_with_pointer_suffix(inner) {
             return inner;
         }
-        if inner.length == 0 || inner == "void" {
+        let mut _if137 -> boolean = false;
+        if inner.length == 0 { _if137 = true; }
+        if inner == "void" { _if137 = true; }
+        if _if137 {
             return "i8*";
         }
         return inner + "*";
@@ -463,14 +499,20 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
 
 fn future_pointer_type_for_return_type(return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if138 -> boolean = false;
+    if trimmed.length == 0 { _if138 = true; }
+    if trimmed == "void" { _if138 = true; }
+    if _if138 {
         return "%SailfinFutureVoid*";
     }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
         return "%SailfinFutureNumber*";
     }
-    if normalized == "boolean" || normalized == "bool" {
+    let mut _if139 -> boolean = false;
+    if normalized == "boolean" { _if139 = true; }
+    if normalized == "bool" { _if139 = true; }
+    if _if139 {
         return "%SailfinFutureBool*";
     }
     if normalized == "string" {
@@ -512,7 +554,10 @@ fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> strin
         if starts_with(remainder, "mut") {
             remainder = trim_text(substring(remainder, 3, remainder.length));
         }
-        if remainder == "opaque" || remainder.length == 0 {
+        let mut _if140 -> boolean = false;
+        if remainder == "opaque" { _if140 = true; }
+        if remainder.length == 0 { _if140 = true; }
+        if _if140 {
             return "i8*";
         }
         let inner = map_parameter_type(context, remainder);

@@ -24,14 +24,22 @@ fn _toml_trim(text -> string) -> string {
     loop {
         if start >= end { break; }
         let ch = text[start];
-        if ch == " " || ch == "\t" || ch == "\r" {
+        let mut _if434 -> boolean = false;
+        if ch == " " { _if434 = true; }
+        if ch == "\t" { _if434 = true; }
+        if ch == "\r" { _if434 = true; }
+        if _if434 {
             start += 1;
         } else { break; }
     }
     loop {
         if end <= start { break; }
         let ch = text[end - 1];
-        if ch == " " || ch == "\t" || ch == "\r" {
+        let mut _if435 -> boolean = false;
+        if ch == " " { _if435 = true; }
+        if ch == "\t" { _if435 = true; }
+        if ch == "\r" { _if435 = true; }
+        if _if435 {
             end -= 1;
         } else { break; }
     }
@@ -42,7 +50,18 @@ fn _toml_strip_quotes(text -> string) -> string {
     if text.length >= 2 {
         let first = text[0];
         let last = text[text.length - 1];
-        if (first == "\"" && last == "\"") || (first == "'" && last == "'") {
+        let mut _if436 -> boolean = false;
+        if first == "\"" {
+            if last == "\"" {
+                _if436 = true;
+            }
+        }
+        if first == "'" {
+            if last == "'" {
+                _if436 = true;
+            }
+        }
+        if _if436 {
             return substring(text, 1, text.length - 1);
         }
     }
@@ -72,7 +91,10 @@ fn _toml_parse_string_array(value -> string) -> string[] {
     let mut items -> string[] = [];
     let trimmed = _toml_trim(value);
     if trimmed.length < 2 { return items; }
-    if trimmed[0] != "[" || trimmed[trimmed.length - 1] != "]" { return items; }
+    let mut _if437 -> boolean = false;
+    if trimmed[0] != "[" { _if437 = true; }
+    if trimmed[trimmed.length - 1] != "]" { _if437 = true; }
+    if _if437 { return items; }
     let inner = _toml_trim(substring(trimmed, 1, trimmed.length - 1));
     if inner.length == 0 { return items; }
     let mut start -> number = 0;

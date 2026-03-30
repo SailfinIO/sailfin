@@ -22,7 +22,13 @@ fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleC
 }
 
 fn collect_imported_module_context_for_module(imports -> NativeImport[], current_module_slug -> string) -> ImportedModuleContext ![io] {
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let mut _let189 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let189 = true;
+        }
+    }
+    let trace = _let189;
     if trace {
         print("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
     }
@@ -35,8 +41,12 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         if index >= imports.length {
             break;
         }
-        if trace && index > 0 && index % 50 == 0 {
-            print("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")");
+        if trace {
+            if index > 0 {
+                if index % 50 == 0 {
+                    print("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")");
+                }
+            }
         }
         let module_path = imports[index].module;
         let base_slug = resolve_import_module_slug_for_module(module_path, current_module_slug);
@@ -159,32 +169,41 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
                 current_slug = substring(current_slug, runtime_index + 1, current_slug.length);
             }
         }
-        if index_of(current_slug, "/") < 0 && index_of(current_slug, "__") >= 0 {
-            let mut rebuilt -> string = "";
-            let mut idx -> number = 0;
-            loop {
-                if idx >= current_slug.length {
-                    break;
+        if index_of(current_slug, "/") < 0 {
+            if index_of(current_slug, "__") >= 0 {
+                let mut rebuilt -> string = "";
+                let mut idx -> number = 0;
+                loop {
+                    if idx >= current_slug.length {
+                        break;
+                    }
+                    let _imp_next = idx + 1;
+                    let ch = substring(current_slug, idx, _imp_next);
+                    let _imp_next2 = idx + 2;
+                    if ch == "_" {
+                        if _imp_next < current_slug.length {
+                            if substring(current_slug, _imp_next, _imp_next2) == "_" {
+                                rebuilt = rebuilt + "/";
+                                idx += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    rebuilt = rebuilt + ch;
+                    idx += 1;
                 }
-                let _imp_next = idx + 1;
-                let ch = substring(current_slug, idx, _imp_next);
-                let _imp_next2 = idx + 2;
-                if ch == "_" && _imp_next < current_slug.length && substring(current_slug, _imp_next, _imp_next2) == "_" {
-                    rebuilt = rebuilt + "/";
-                    idx += 2;
-                    continue;
-                }
-                rebuilt = rebuilt + ch;
-                idx += 1;
+                current_slug = rebuilt;
             }
-            current_slug = rebuilt;
         }
     }
 
     // Resolve relative imports against the importing module's directory.
     // This is required now that we preserve directory structure for modules
     // (e.g. `parser/mod` importing `./token_utils`).
-    if starts_with(normalized, "./") || starts_with(normalized, "../") {
+    let mut _if190 -> boolean = false;
+    if starts_with(normalized, "./") { _if190 = true; }
+    if starts_with(normalized, "../") { _if190 = true; }
+    if _if190 {
         let base_dir = dirname_for_module_slug(current_slug);
         if base_dir.length > 0 {
             normalized = base_dir + "/" + normalized;
@@ -225,7 +244,10 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
             break;
         }
         let part = parts[index];
-        if part.length == 0 || part == "." {
+        let mut _if191 -> boolean = false;
+        if part.length == 0 { _if191 = true; }
+        if part == "." { _if191 = true; }
+        if _if191 {
             index += 1;
             continue;
         }

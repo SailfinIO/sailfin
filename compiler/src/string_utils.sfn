@@ -30,18 +30,24 @@ fn is_symbol_char(ch -> string) -> boolean {
 	let code = char_code(ch);
 	let lower_a = char_code("a");
 	let lower_z = char_code("z");
-	if code >= lower_a && code <= lower_z {
-		return true;
+	if code >= lower_a {
+	    if code <= lower_z {
+    		return true;
+	    }
 	}
 	let upper_a = char_code("A");
 	let upper_z = char_code("Z");
-	if code >= upper_a && code <= upper_z {
-		return true;
+	if code >= upper_a {
+	    if code <= upper_z {
+    		return true;
+	    }
 	}
 	let zero = char_code("0");
 	let nine = char_code("9");
-	if code >= zero && code <= nine {
-		return true;
+	if code >= zero {
+	    if code <= nine {
+    		return true;
+	    }
 	}
 	return false;
 }
@@ -71,8 +77,10 @@ fn sanitize_symbol(name -> string) -> string {
 	let first_code = char_code(first);
 	let zero = char_code("0");
 	let nine = char_code("9");
-	if first_code >= zero && first_code <= nine {
-		result = "_" + result;
+	if first_code >= zero {
+	    if first_code <= nine {
+    		result = "_" + result;
+	    }
 	}
 	return result;
 }
