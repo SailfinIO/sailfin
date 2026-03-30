@@ -33,7 +33,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SEED="${SEED:-sfn}"
 OUT="${OUT:-build/native/sailfin}"
 OPT="${OPT:--O2}"
@@ -432,7 +432,7 @@ else
         echo "$i ${SOURCES[$i]}"
     done | xargs -P "$JOBS" -L 1 bash -c '
         cd "'"$REPO_ROOT"'"
-        source scripts/build.sh --_build_module_worker "$@"
+        bash scripts/build.sh --_build_module_worker "$@"
     ' _ 2>"$RAW_DIR/build_errors.txt" || FAILED=1
 
     if [[ "$FAILED" -eq 0 ]]; then

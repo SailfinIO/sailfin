@@ -307,19 +307,19 @@ fn compile_to_llvm(source -> string) -> string ![io] {
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, "main");
     if trace_emit {
-        print("emit-llvm: native text bytes=" + number_to_string(native_text.length));
+        print.err("emit-llvm: native text bytes=" + number_to_string(native_text.length));
         if native_text.length > 0 {
             fs.writeFile("build/sailfin/debug-emit-native.sfn-asm", native_text);
-            print("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
+            print.err("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
         }
     }
     if native_text.length > 0 {
         let ir = lower_to_llvm_ir_from_text(native_text, "main");
         if trace_emit {
-            print("emit-llvm: llvm bytes=" + number_to_string(ir.length));
+            print.err("emit-llvm: llvm bytes=" + number_to_string(ir.length));
             if ir.length > 0 {
                 fs.writeFile("build/sailfin/debug-emit-llvm.ll", ir);
-                print("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
+                print.err("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
             }
         }
         return ir;
@@ -327,10 +327,10 @@ fn compile_to_llvm(source -> string) -> string ![io] {
     let native_result = emit_native_with_module_name(program, "main");
     let ir = lower_to_llvm_ir(native_result.module);
     if trace_emit {
-        print("emit-llvm: llvm bytes=" + number_to_string(ir.length));
+        print.err("emit-llvm: llvm bytes=" + number_to_string(ir.length));
         if ir.length > 0 {
             fs.writeFile("build/sailfin/debug-emit-llvm.ll", ir);
-            print("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
+            print.err("emit-llvm: wrote build/sailfin/debug-emit-llvm.ll");
         }
     }
     return ir;
@@ -1203,7 +1203,7 @@ fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
         let message = formatted[index];
         let lines = split_source_lines(message);
         if lines.length == 0 {
-            print(prefix);
+            print.err(prefix);
             index += 1;
             continue;
         }
@@ -1213,9 +1213,9 @@ fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
                 break;
             }
             if line_index == 0 {
-                print(prefix + lines[line_index]);
+                print.err(prefix + lines[line_index]);
             } else {
-                print(padding + lines[line_index]);
+                print.err(padding + lines[line_index]);
             }
             line_index += 1;
         }

@@ -4,8 +4,8 @@
 # Replaces tools/package_native.py.
 #
 # Produces:
-#   dist/sailfin-<target>.tar.gz       — compiler + runtime tarball
-#   dist/installer-<target>.tar.gz     — installer layout
+#   dist/sailfin-<target>.tar.gz       — standalone compiler binary tarball
+#   dist/installer-<target>.tar.gz     — installer layout (compiler + runtime)
 #
 # Usage:
 #   tools/package.sh [--target TARGET] [--out DIR] [--compiler-bin PATH] [--skip-build]
