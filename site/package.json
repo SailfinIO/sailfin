@@ -16,7 +16,7 @@
     "@astrojs/mdx": "^4.2.0",
     "@astrojs/sitemap": "^3.3.0",
     "astro": "^5.7.0",
-    "sharp": "^0.33.0"
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "wrangler": "^4.78.0"
