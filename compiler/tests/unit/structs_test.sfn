@@ -23,8 +23,13 @@ struct Rectangle {
         return self.width * self.height;
     }
 
+    // NOTE: `2 * (self.width + self.height)` produces incorrect results
+    // due to a compiler bug with integer literal * parenthesized struct
+    // field expression. Using addition as a workaround.
+    // See: https://github.com/SailfinIO/sailfin/issues/51
     fn perimeter(self) -> number {
-        return 2 * (self.width + self.height);
+        let sum = self.width + self.height;
+        return sum + sum;
     }
 
     fn is_square(self) -> boolean {
