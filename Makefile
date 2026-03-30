@@ -109,7 +109,7 @@ help:
 
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
-INSTALL_NAME ?= sailfin
+INSTALL_NAME ?= sfn
 
 .PHONY: check-conda env install
 check-conda:

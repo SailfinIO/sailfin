@@ -5,10 +5,9 @@ This document tracks what works today and what is in progress.
 ## Compiler Pipeline (Current)
 
 - The self-hosted native compiler in `compiler/src/` is the primary toolchain; `make compile` produces `build/native/sailfin`.
-- Legacy Python compiler artifacts under `compiler/build/` are kept for emergency recovery only and are slated for removal before 1.0.
 - Experimental LLVM JIT execution remains available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test, and attach release assets.
-- Native compiler tests live in `compiler/tests/{unit,integration,e2e}` and run via `sfn test` (repo-local: `./sfn test .`; build output: `build/native/sailfin test .`; `make test-unit`, `make test-integration`, `make test-e2e`).
+- Native compiler tests live in `compiler/tests/{unit,integration,e2e}` and run via `sfn test` (build output: `build/native/sailfin test .`; installed: `sfn test .`; `make test-unit`, `make test-integration`, `make test-e2e`).
 - The test runner inlines relative imports (including `compiler/src/*`) into a single compilation unit to avoid missing symbols when executing `sfn test`.
 - Native AOT builds do not rely on any `aot-prepare` text rewrite step; the native compiler emits link-safe LLVM IR directly.
 

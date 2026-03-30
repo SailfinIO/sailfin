@@ -132,11 +132,14 @@ For now, experiment, record findings, and propose ideas through pull requests.
 - `make test` — run the suite using the self-hosted native compiler.
 - `make install` — install the built compiler into `PREFIX/bin` (default: `~/.local/bin`).
 
-Tip: use the repo-local wrapper `./sfn` to run the freshly built compiler without relying on PATH:
+Tip: after `make compile`, use the built binary directly or the installed compiler on PATH:
 
 ```sh
-./sfn --version
-./sfn test .
+build/native/sailfin --version
+build/native/sailfin test .
+# or, if installed via `make install`:
+sfn --version
+sfn test .
 ```
 
 The Sailfin registry at `registry.sailfin.dev` is live for experiments; manifest
