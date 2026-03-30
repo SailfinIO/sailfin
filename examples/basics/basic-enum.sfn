@@ -10,6 +10,6 @@ fn main() ![io] {
     let favorite -> Color = Color.Red;
 
     if favorite == Color.Red {
-        print.info("Your favorite color is red!");
+        print("Your favorite color is red!");
     }
 }

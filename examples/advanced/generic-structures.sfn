@@ -23,5 +23,5 @@ fn main() ![io] {
     let numbers -> List<number> = List.new();
     numbers.add(1);
     numbers.add(2);
-    print.info("{{numbers.get(0)}}");
+    print("{{numbers.get(0)}}");
 }

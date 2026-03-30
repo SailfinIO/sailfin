@@ -3,7 +3,7 @@
 import { sleep } from "time";
 
 fn computeTask(id -> number) -> string ![clock, io] {
-    print.info("Task {{id}} started");
+    print("Task {{id}} started");
     sleep(1000);
     return "Result from Task {{id}}";
 }
@@ -15,8 +15,8 @@ fn main() ![clock, io] {
         fn() -> string { return computeTask(3); },
     ];
 
-    print.info("All tasks completed:");
+    print("All tasks completed:");
     for result in results {
-        print.info(result);
+        print(result);
     }
 }

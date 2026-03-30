@@ -552,9 +552,9 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     // FLAT: no nested ifs, no else-if chains.
     // Seed degenerate-if bug drops ALL nested conditions and else-if branches.
     // Every condition check must be a top-level if in the loop body.
-    print.warn("DIAG: recover_native_functions_light input length=" + number_to_string(native_text.length));
+    print("DIAG: recover_native_functions_light input length=" + number_to_string(native_text.length));
     let lines = split_lines_local(native_text);
-    print.warn("DIAG: split_lines_local returned lines=" + number_to_string(lines.length));
+    print("DIAG: split_lines_local returned lines=" + number_to_string(lines.length));
     let mut functions -> NativeFunction[] = [];
     let mut current -> NativeFunction? = null;
     let mut current_struct_name -> string = "";
@@ -624,9 +624,9 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
 
         // --- Flush current on function/method boundaries (FLAT — no nesting) ---
         if is_fn_start && current != null {
-            print.warn("DIAG: flush fn-start current=" + current.name + " functions.len=" + number_to_string(functions.length));
+            print("DIAG: flush fn-start current=" + current.name + " functions.len=" + number_to_string(functions.length));
             functions = append_native_function(functions, current);
-            print.warn("DIAG: after append functions.len=" + number_to_string(functions.length));
+            print("DIAG: after append functions.len=" + number_to_string(functions.length));
             current = null;
         }
         if is_method_start && current_struct_name.length > 0 && current != null {
@@ -634,9 +634,9 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             current = null;
         }
         if is_fn_end && current != null {
-            print.warn("DIAG: flush fn-end current=" + current.name + " functions.len=" + number_to_string(functions.length));
+            print("DIAG: flush fn-end current=" + current.name + " functions.len=" + number_to_string(functions.length));
             functions = append_native_function(functions, current);
-            print.warn("DIAG: after append functions.len=" + number_to_string(functions.length));
+            print("DIAG: after append functions.len=" + number_to_string(functions.length));
             current = null;
             index += 1;
             continue;
@@ -684,7 +684,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             let fn_is_async = recover_function_is_async_from_header(line);
             current = make_native_function_basic(name, fn_is_async);
             fn_count += 1;
-            print.warn("DIAG: found .fn #" + number_to_string(fn_count) + " name=" + name);
+            print("DIAG: found .fn #" + number_to_string(fn_count) + " name=" + name);
             index += 1;
             continue;
         }
@@ -779,7 +779,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     if current != null {
         functions = append_native_function(functions, current);
     }
-    print.warn("DIAG: recover_native_functions_light returning " + number_to_string(functions.length) + " functions");
+    print("DIAG: recover_native_functions_light returning " + number_to_string(functions.length) + " functions");
     return functions;
 }
 
@@ -1040,7 +1040,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
     let initial_function_count = sanitize_collection_length(safe_functions.length, 200000);
     if safe_functions.length != initial_function_count {
         if debug_lowering {
-            print.warn("emit-llvm: invalid function list length; dropping current parsed functions");
+            print("emit-llvm: invalid function list length; dropping current parsed functions");
         }
         safe_functions = [];
     }
@@ -1122,7 +1122,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
                         replacement_functions = light_functions;
                     }
                     if debug_lowering {
-                        print.warn(
+                        print(
                             "emit-llvm: replacing suspicious parsed functions with stable function parse"
                         );
                     }
@@ -1146,7 +1146,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
 
     let direct_count = parse_native_function_count_from_text(recovery_text);
     if debug_lowering {
-        print.warn("emit-llvm: recovery source direct count=" + number_to_string(direct_count));
+        print("emit-llvm: recovery source direct count=" + number_to_string(direct_count));
     }
     if direct_count == 0 && fs.exists("build/sailfin/emit-native.tmp") {
         recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
@@ -1156,7 +1156,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
     let recovered_count = sanitize_collection_length(parsed_recovery.length, 200000);
     if parsed_recovery.length == recovered_count && parsed_recovery.length > 0 {
         if debug_lowering {
-            print.warn("emit-llvm: recovered functions via parse_native_functions_from_text=" + number_to_string(parsed_recovery.length));
+            print("emit-llvm: recovered functions via parse_native_functions_from_text=" + number_to_string(parsed_recovery.length));
         }
         return parsed_recovery;
     }
@@ -1165,7 +1165,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
     let light_recovered_count = sanitize_collection_length(light_recovery.length, 200000);
     if light_recovery.length == light_recovered_count && light_recovery.length > 0 {
         if debug_lowering {
-            print.warn("emit-llvm: recovered functions via light parser=" + number_to_string(light_recovery.length));
+            print("emit-llvm: recovered functions via light parser=" + number_to_string(light_recovery.length));
         }
         return light_recovery;
     }
@@ -1252,24 +1252,24 @@ fn make_native_module_for_emit(module_name -> string, native_text -> string) -> 
 
 fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> string, out_path -> string) -> boolean ![io] {
     if !fs.exists(native_text_path) {
-        print.warn("emit-llvm: native text file missing at " + native_text_path);
+        print("emit-llvm: native text file missing at " + native_text_path);
         return false;
     }
     let native_text = fs.readFile(native_text_path);
     if native_text.length == 0 {
-        print.warn("emit-llvm: native text file empty at " + native_text_path);
+        print("emit-llvm: native text file empty at " + native_text_path);
         return false;
     }
-    print.warn("emit-llvm: compile_native_text_to_llvm_file module=" + module_name + " bytes=" + number_to_string(native_text.length));
+    print("emit-llvm: compile_native_text_to_llvm_file module=" + module_name + " bytes=" + number_to_string(native_text.length));
     let parse = build_parse_result_from_text(native_text);
     // Recover imports separately — field access on parse uses sailfin_runtime_get_field
     // which does not work on plain C structs built by the fixup pass.
     let raw_imports = recover_native_imports_light(native_text);
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
     let import_context = collect_imported_module_context_for_module(raw_imports, module_name);
-    print.warn("emit-llvm: import context collected");
+    print("emit-llvm: import context collected");
     let dummy_module = make_native_module_for_emit(module_name, native_text);
-    print.warn("emit-llvm: module created, entering lowering");
+    print("emit-llvm: module created, entering lowering");
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(
         dummy_module,
         parse,
@@ -1280,20 +1280,20 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
         native_text
     );
     if lowered_lines.lines == null {
-        print.warn("emit-llvm: lowered lines null");
+        print("emit-llvm: lowered lines null");
         return false;
     }
     let lowered_count = lowered_lines.lines.length;
     if lowered_count > 0 {
         let defined = collect_defined_function_symbols(lowered_lines.lines);
-        print.warn("emit-llvm: lowered (defined=" + number_to_string(defined.length) + ")");
+        print("emit-llvm: lowered (defined=" + number_to_string(defined.length) + ")");
         if defined.length == 0 {
             return false;
         }
     }
     let lines = lowered_lines.lines;
     if lines == null || lines.length == 0 {
-        print.warn("emit-llvm: lowering produced no output lines");
+        print("emit-llvm: lowering produced no output lines");
         return false;
     }
     if fs.exists(out_path) {
@@ -1305,25 +1305,25 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
 fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_in -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], diagnostics_in -> string[], mangle_symbols -> boolean, native_text_override_path -> string) -> LoweredLLVMLinesResult ![io] {
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
-        print.warn("emit-llvm: phase=start");
+        print("emit-llvm: phase=start");
     }
     if debug_lowering {
         let mut artifact_count -> number = 0;
         if native_module.artifacts != null {
             artifact_count = native_module.artifacts.length;
         }
-        print.warn("emit-llvm: native artifacts=" + number_to_string(artifact_count));
+        print("emit-llvm: native artifacts=" + number_to_string(artifact_count));
     }
     let mut parse = parse_in;
     if debug_lowering {
-        print.warn("emit-llvm: dbg-A parse_in assigned");
+        print("emit-llvm: dbg-A parse_in assigned");
     }
     // Keep this lowering path dependent on explicit parsed context and optional
     // override text only. Accessing `native_module.artifacts` here has caused
     // stage2 instability on some selfhost paths.
     let artifact_for_stable_parse -> NativeArtifact? = null;
     if debug_lowering {
-        print.warn("emit-llvm: dbg-B before override check path_len=" + number_to_string(native_text_override_path.length));
+        print("emit-llvm: dbg-B before override check path_len=" + number_to_string(native_text_override_path.length));
     }
     if native_text_override_path.length > 0 {
         // Use individual field extractors to avoid struct-return ABI bug
@@ -1347,16 +1347,16 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             parse = reparsed;
         }
         if debug_lowering {
-            print.warn("emit-llvm: reparsed from override text functions=" + number_to_string(parse.functions.length));
-            print.warn("emit-llvm: reparsed from override diagnostics=" + number_to_string(parse.diagnostics.length));
+            print("emit-llvm: reparsed from override text functions=" + number_to_string(parse.functions.length));
+            print("emit-llvm: reparsed from override diagnostics=" + number_to_string(parse.diagnostics.length));
             if parse.diagnostics.length > 0 {
-                print.warn("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
+                print("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
             }
         }
     } else if artifact_for_stable_parse != null && artifact_for_stable_parse.contents.length > 0 {
         if debug_lowering {
-            print.warn("emit-llvm: artifact text bytes=" + number_to_string(artifact_for_stable_parse.contents.length));
-            print.warn("emit-llvm: artifact direct function count=" + number_to_string(parse_native_function_count_from_text(artifact_for_stable_parse.contents)));
+            print("emit-llvm: artifact text bytes=" + number_to_string(artifact_for_stable_parse.contents.length));
+            print("emit-llvm: artifact direct function count=" + number_to_string(parse_native_function_count_from_text(artifact_for_stable_parse.contents)));
         }
         // Use individual field extractors to avoid struct-return ABI bug
         let reparsed_fns = parse_native_functions_from_text(artifact_for_stable_parse.contents);
@@ -1379,15 +1379,15 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             parse = reparsed;
         }
         if debug_lowering {
-            print.warn("emit-llvm: reparsed from artifact text functions=" + number_to_string(parse.functions.length));
-            print.warn("emit-llvm: reparsed from artifact diagnostics=" + number_to_string(parse.diagnostics.length));
+            print("emit-llvm: reparsed from artifact text functions=" + number_to_string(parse.functions.length));
+            print("emit-llvm: reparsed from artifact diagnostics=" + number_to_string(parse.diagnostics.length));
             if parse.diagnostics.length > 0 {
-                print.warn("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
+                print("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
             }
         }
     }
     if debug_lowering {
-        print.warn("emit-llvm: dbg-C after reparse block");
+        print("emit-llvm: dbg-C after reparse block");
     }
     let mut safe_imported_manifests = imported_manifests;
     if safe_imported_manifests == null {
@@ -1397,7 +1397,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_imported_manifests = [];
     }
     if debug_lowering {
-        print.warn("emit-llvm: dbg-D after manifests sanitize");
+        print("emit-llvm: dbg-D after manifests sanitize");
     }
     let mut safe_imported_native_texts = imported_native_texts;
     if safe_imported_native_texts == null {
@@ -1407,7 +1407,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_imported_native_texts = [];
     }
     if debug_lowering {
-        print.warn("emit-llvm: dbg-E after native_texts sanitize");
+        print("emit-llvm: dbg-E after native_texts sanitize");
     }
     let mut safe_imported_diagnostics = diagnostics_in;
     if safe_imported_diagnostics == null {
@@ -1418,7 +1418,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     let mut diagnostics = safe_imported_diagnostics;
     if debug_lowering {
-        print.warn("emit-llvm: dbg-F after diagnostics sanitize");
+        print("emit-llvm: dbg-F after diagnostics sanitize");
     }
     let mut safe_entry_points = native_module.entry_points;
     if safe_entry_points == null {
@@ -1428,7 +1428,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_entry_points = [];
     }
     if debug_lowering {
-        print.warn("emit-llvm: dbg-G after entry_points sanitize");
+        print("emit-llvm: dbg-G after entry_points sanitize");
     }
     let mut safe_imports = parse.imports;
     if safe_imports == null {
@@ -1439,7 +1439,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     if safe_imports.length > 100000 {
         if debug_lowering {
-            print.warn("emit-llvm: import list too large; dropping");
+            print("emit-llvm: import list too large; dropping");
         }
         safe_imports = [];
     }
@@ -1461,14 +1461,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         if safe_enums != null {
             _enum_len_text = number_to_string(safe_enums.length);
         }
-        print.info("enum_trace: parse.enums=" + _enum_len_text);
+        print("enum_trace: parse.enums=" + _enum_len_text);
     }
     if safe_enums == null {
         safe_enums = [];
     }
     if safe_enums.length != sanitize_collection_length(safe_enums.length, 100000) {
         if _trace_enums {
-            print.info("enum_trace: sanitize dropped enums (len=" + number_to_string(safe_enums.length) + " sanitized=" + number_to_string(sanitize_collection_length(safe_enums.length, 100000)) + ")");
+            print("enum_trace: sanitize dropped enums (len=" + number_to_string(safe_enums.length) + " sanitized=" + number_to_string(sanitize_collection_length(safe_enums.length, 100000)) + ")");
         }
         safe_enums = [];
     }
@@ -1477,7 +1477,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_enums = [];
     }
     if _trace_enums {
-        print.info("enum_trace: safe_enums.length=" + number_to_string(safe_enums.length));
+        print("enum_trace: safe_enums.length=" + number_to_string(safe_enums.length));
     }
     let mut safe_interfaces = parse.interfaces;
     if safe_interfaces == null {
@@ -1491,36 +1491,36 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_interfaces = [];
     }
     if debug_lowering {
-        print.warn("emit-llvm: dbg-H after structs/enums/interfaces sanitize");
+        print("emit-llvm: dbg-H after structs/enums/interfaces sanitize");
     }
     if debug_lowering {
-        print.warn("emit-llvm: dbg-H1 before parse.functions access");
+        print("emit-llvm: dbg-H1 before parse.functions access");
     }
     let mut safe_functions = parse.functions;
     if debug_lowering {
-        print.warn("emit-llvm: dbg-H2 after parse.functions access");
+        print("emit-llvm: dbg-H2 after parse.functions access");
     }
     if debug_lowering && safe_functions == null {
-        print.warn("emit-llvm: parse.functions is null");
+        print("emit-llvm: parse.functions is null");
     }
     if safe_functions == null {
         safe_functions = [];
     }
     if debug_lowering {
-        print.warn("emit-llvm: dbg-H3 safe_functions.length=" + number_to_string(safe_functions.length));
+        print("emit-llvm: dbg-H3 safe_functions.length=" + number_to_string(safe_functions.length));
     }
     if safe_functions.length != sanitize_collection_length(safe_functions.length, 200000) {
         if debug_lowering {
-            print.warn("emit-llvm: parse.functions has invalid length; dropping");
+            print("emit-llvm: parse.functions has invalid length; dropping");
         }
         safe_functions = [];
     }
     if debug_lowering {
-        print.warn("emit-llvm: dbg-H4 after sanitize safe_functions.length=" + number_to_string(safe_functions.length));
+        print("emit-llvm: dbg-H4 after sanitize safe_functions.length=" + number_to_string(safe_functions.length));
     }
     if safe_functions.length == 0 {
         if debug_lowering {
-            print.warn("emit-llvm: dbg-R1 safe_functions empty, recovery path");
+            print("emit-llvm: dbg-R1 safe_functions empty, recovery path");
         }
         let mut recovery_text = "";
         if native_text_override_path.length > 0 {
@@ -1529,23 +1529,23 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             recovery_text = artifact_for_stable_parse.contents;
         }
         if debug_lowering {
-            print.warn("emit-llvm: dbg-R2 recovery_text.length=" + number_to_string(recovery_text.length));
+            print("emit-llvm: dbg-R2 recovery_text.length=" + number_to_string(recovery_text.length));
         }
         if recovery_text.length == 0 && fs.exists("build/sailfin/emit-native.tmp") {
             if debug_lowering {
-                print.warn("emit-llvm: dbg-R3 reading emit-native.tmp");
+                print("emit-llvm: dbg-R3 reading emit-native.tmp");
             }
             recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
             if debug_lowering {
-                print.warn("emit-llvm: dbg-R4 read emit-native.tmp bytes=" + number_to_string(recovery_text.length));
+                print("emit-llvm: dbg-R4 read emit-native.tmp bytes=" + number_to_string(recovery_text.length));
             }
         }
         if debug_lowering {
-            print.warn("emit-llvm: dbg-R5 before parse recovery_text.length=" + number_to_string(recovery_text.length));
+            print("emit-llvm: dbg-R5 before parse recovery_text.length=" + number_to_string(recovery_text.length));
         }
         if recovery_text.length > 0 {
             if debug_lowering {
-                print.warn("emit-llvm: dbg-R6 calling parse_native_functions_from_text");
+                print("emit-llvm: dbg-R6 calling parse_native_functions_from_text");
             }
             let mut recovered_functions = parse_native_functions_from_text(recovery_text);
             let mut recovered_has_body = false;
@@ -1583,7 +1583,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             if recovered_functions.length > 0 {
                 safe_functions = recovered_functions;
                 if debug_lowering {
-                    print.warn("emit-llvm: recovered empty parse.functions from artifact text count=" + number_to_string(safe_functions.length));
+                    print("emit-llvm: recovered empty parse.functions from artifact text count=" + number_to_string(safe_functions.length));
                 }
             }
         }
@@ -1593,7 +1593,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_functions = [];
     }
     if debug_lowering {
-        print.warn("emit-llvm: phase=recover_functions_start current=" + number_to_string(safe_functions.length));
+        print("emit-llvm: phase=recover_functions_start current=" + number_to_string(safe_functions.length));
     }
     let mut artifact_text = "";
     if artifact_for_stable_parse != null {
@@ -1602,17 +1602,17 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let recovered_safe = recover_functions_for_lowering(safe_functions, native_text_override_path, artifact_text, debug_lowering);
     safe_functions = recovered_safe;
     if debug_lowering {
-        print.warn("emit-llvm: phase=recover_functions_done current=" + number_to_string(safe_functions.length));
+        print("emit-llvm: phase=recover_functions_done current=" + number_to_string(safe_functions.length));
     }
     if debug_lowering {
         let mut has_artifact_text = "false";
         if artifact_for_stable_parse != null {
             has_artifact_text = "true";
         }
-        print.warn("emit-llvm: fallback precheck has_artifact=" + has_artifact_text + " safe_len=" + number_to_string(safe_functions.length));
-        print.warn("emit-llvm: functions parsed=" + number_to_string(parse.functions.length) + " safe=" + number_to_string(safe_functions.length));
+        print("emit-llvm: fallback precheck has_artifact=" + has_artifact_text + " safe_len=" + number_to_string(safe_functions.length));
+        print("emit-llvm: functions parsed=" + number_to_string(parse.functions.length) + " safe=" + number_to_string(safe_functions.length));
         if parse.functions.length == 0 && parse.diagnostics.length > 0 {
-            print.warn("emit-llvm: parse diagnostic " + parse.diagnostics[0]);
+            print("emit-llvm: parse diagnostic " + parse.diagnostics[0]);
         }
     }
     // Recover struct definitions when the main parser returned empty/corrupt results.
@@ -1683,10 +1683,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_imports = [];
     }
     if trace {
-        print.info("test llvm: lower_to_llvm_lines_with_parsed_context start");
+        print("test llvm: lower_to_llvm_lines_with_parsed_context start");
     }
     if timing {
-        print.info("test llvm: phase=parse ms=" + number_to_string(monotonic_millis() - start_ms));
+        print("test llvm: phase=parse ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     let exported_symbols = collect_exported_symbol_names(safe_imports);
@@ -1707,11 +1707,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             module_enums = [];
         }
         if debug_lowering {
-            print.warn("emit-llvm: phase=manifest");
+            print("emit-llvm: phase=manifest");
         }
     }
     if timing {
-        print.info("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
+        print("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     // Gather imported module context (layout + signatures) to improve lowering fidelity
@@ -1721,7 +1721,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let mut imported_functions -> NativeFunction[] = [];
     let mut imported_struct_methods -> NativeFunction[] = [];
     if debug_lowering {
-        print.warn("emit-llvm: dbg-M1 manifests=" + number_to_string(safe_imported_manifests.length) + " texts=" + number_to_string(safe_imported_native_texts.length));
+        print("emit-llvm: dbg-M1 manifests=" + number_to_string(safe_imported_manifests.length) + " texts=" + number_to_string(safe_imported_native_texts.length));
     }
 
     let manifest_count = safe_imported_manifests.length;
@@ -1785,7 +1785,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     if debug_lowering {
-        print.warn("emit-llvm: phase=imports");
+        print("emit-llvm: phase=imports");
     }
 
     let combined_structs = extend_native_structs(module_structs, imported_structs);
@@ -1794,22 +1794,22 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if is_test_module {
         combined_interfaces = [];
         if trace {
-            print.info("test llvm: skipping interface metadata for inlined tests");
+            print("test llvm: skipping interface metadata for inlined tests");
         }
     }
 
     if trace {
-        print.info("test llvm: trait metadata start");
+        print("test llvm: trait metadata start");
     }
     let trait_metadata = build_trait_metadata(combined_interfaces, combined_structs);
     if debug_lowering {
-        print.warn("emit-llvm: phase=trait_metadata");
+        print("emit-llvm: phase=trait_metadata");
     }
     if debug_lowering {
-        print.warn("emit-llvm: about to fixup_enum_layouts enums=" + number_to_string(combined_enums.length));
+        print("emit-llvm: about to fixup_enum_layouts enums=" + number_to_string(combined_enums.length));
     }
     if trace {
-        print.info("test llvm: enum layout fixup start");
+        print("test llvm: enum layout fixup start");
     }
     // Skip cross-module fixup_enum_layouts call: the seed's struct-returning
     // cross-module ABI segfaults.  Pass enums through; downstream lowering
@@ -1817,10 +1817,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let fixed_enums = EnumLayoutFixupResult { enums: combined_enums, diagnostics: [] };
     diagnostics = extend_string_lines_checked(diagnostics, fixed_enums.diagnostics, "enum layout");
     if debug_lowering {
-        print.warn("emit-llvm: phase=enum_fixup");
+        print("emit-llvm: phase=enum_fixup");
     }
     if trace {
-        print.info("test llvm: type context build start");
+        print("test llvm: type context build start");
     }
     // Write struct info BEFORE the cross-module build_type_context call.
     // combined_structs is local to this module and intact; after crossing the
@@ -1894,8 +1894,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     fs.writeFile("build/sailfin/.enum_info", _ei_content);
     if _trace_enums {
-        print.info("enum_trace: combined_enums=" + number_to_string(combined_enums.length) + " fixed_enums=" + number_to_string(fixed_enums.enums.length));
-        print.info("enum_trace: wrote .enum_info bytes=" + number_to_string(_ei_content.length));
+        print("enum_trace: combined_enums=" + number_to_string(combined_enums.length) + " fixed_enums=" + number_to_string(fixed_enums.enums.length));
+        print("enum_trace: wrote .enum_info bytes=" + number_to_string(_ei_content.length));
     }
     let type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces);
     diagnostics = extend_string_lines_checked(diagnostics, type_build.diagnostics, "type context");
@@ -2009,39 +2009,39 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                     vtables: type_context.vtables
                 };
                 if _trace_enums {
-                    print.info("enum_trace: recovered " + number_to_string(_recovered_enums.length) + " enum(s) from .enum_info");
+                    print("enum_trace: recovered " + number_to_string(_recovered_enums.length) + " enum(s) from .enum_info");
                 }
             }
         }
     }
     if _trace_enums {
-        print.info("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
+        print("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
     }
     if trace {
-        print.info("test llvm: type context built");
+        print("test llvm: type context built");
     }
     if debug_lowering {
-        print.warn("emit-llvm: phase=type_context");
+        print("emit-llvm: phase=type_context");
     }
     if timing {
-        print.info("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
+        print("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     if debug_lowering {
-        print.warn("emit-llvm: phase=struct_methods_start");
+        print("emit-llvm: phase=struct_methods_start");
     }
     let module_struct_methods = flatten_struct_methods(module_structs);
     if debug_lowering {
-        print.warn("emit-llvm: phase=struct_methods_done");
+        print("emit-llvm: phase=struct_methods_done");
     }
     let local_functions = concat_native_functions(safe_functions, module_struct_methods);
     if debug_lowering {
-        print.warn("emit-llvm: phase=local_functions");
+        print("emit-llvm: phase=local_functions");
     }
     let mut context_functions = concat_native_functions(local_functions, imported_functions);
     context_functions = concat_native_functions(context_functions, imported_struct_methods);
     if debug_lowering {
-        print.warn("emit-llvm: phase=context_functions");
+        print("emit-llvm: phase=context_functions");
     }
 
     // Bootstrap guard: effect analysis currently introduces instability in
@@ -2050,14 +2050,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let mut runtime_helpers -> string[] = [];
     if !is_test_module && !skip_effects {
         if debug_lowering {
-            print.warn("emit-llvm: phase=helpers_start");
+            print("emit-llvm: phase=helpers_start");
         }
         runtime_helpers = collect_runtime_helper_targets(local_functions);
         if debug_lowering {
-            print.warn("emit-llvm: phase=helpers_done");
+            print("emit-llvm: phase=helpers_done");
         }
     } else if trace {
-        print.info("test llvm: skipping runtime helper collection for inlined tests");
+        print("test llvm: skipping runtime helper collection for inlined tests");
     }
     // Some lowering paths (e.g. array lowering) emit direct calls to
     // `@sailfin_runtime_copy_bytes` that do not appear in Native IR call targets.
@@ -2093,7 +2093,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let mut aggregated_effects -> FunctionEffectEntry[] = [];
     if !skip_effects {
         if debug_lowering {
-            print.warn("emit-llvm: phase=direct_effects");
+            print("emit-llvm: phase=direct_effects");
         }
         direct_effects = collect_direct_function_effects(context_functions);
         aggregated_effects = direct_effects;
@@ -2101,17 +2101,17 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             let call_graph = collect_function_call_graph(context_functions);
             aggregated_effects = propagate_function_effects(direct_effects, call_graph);
         } else if trace {
-            print.info("test llvm: skipping effect propagation for inlined tests");
+            print("test llvm: skipping effect propagation for inlined tests");
         }
     }
     if trace {
-        print.info("test llvm: runtime helpers collected");
+        print("test llvm: runtime helpers collected");
     }
     if timing {
-        print.info("test llvm: phase=effects ms=" + number_to_string(monotonic_millis() - start_ms));
+        print("test llvm: phase=effects ms=" + number_to_string(monotonic_millis() - start_ms));
     }
     if debug_lowering {
-        print.warn("emit-llvm: phase=effects");
+        print("emit-llvm: phase=effects");
     }
 
     let mut function_effects -> FunctionEffectEntry[] = [];
@@ -2121,7 +2121,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     lines.push("");
 
     if debug_lowering {
-        print.warn("emit-llvm: phase=render_traits");
+        print("emit-llvm: phase=render_traits");
     }
     let trait_lines = render_trait_metadata_comments(trait_metadata);
     if trait_lines.length > 0 {
@@ -2130,8 +2130,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     if debug_lowering {
-        print.warn("emit-llvm: phase=render_structs");
-        print.warn(
+        print("emit-llvm: phase=render_structs");
+        print(
             "emit-llvm: render_structs counts structs="
             + number_to_string(type_context.structs.length)
             + " enums="
@@ -2217,7 +2217,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     if debug_lowering {
-        print.warn("emit-llvm: phase=render_enums");
+        print("emit-llvm: phase=render_enums");
     }
     let enum_type_lines = render_enum_type_definitions(type_context);
     if enum_type_lines.length > 0 {
@@ -2226,7 +2226,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     if debug_lowering {
-        print.warn("emit-llvm: phase=render_interfaces");
+        print("emit-llvm: phase=render_interfaces");
     }
     let interface_type_lines = render_interface_type_definitions(type_context);
     if interface_type_lines.length > 0 {
@@ -2277,7 +2277,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     if debug_lowering {
-        print.warn("emit-llvm: phase=render_helpers");
+        print("emit-llvm: phase=render_helpers");
     }
     let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
     if helper_declarations != null {
@@ -2289,7 +2289,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
 
     // Declare imported functions from other modules (excluding local functions)
     if debug_lowering {
-        print.warn("emit-llvm: phase=render_imports");
+        print("emit-llvm: phase=render_imports");
     }
     let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
     if imported_declarations != null {
@@ -2314,10 +2314,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
 
     // Lower module-level `let` bindings into LLVM globals (and an optional init function).
     if debug_lowering {
-        print.warn("emit-llvm: phase=module_globals");
+        print("emit-llvm: phase=module_globals");
     }
     if debug_lowering {
-        print.warn("emit-llvm: module bindings count=" + number_to_string(safe_bindings.length));
+        print("emit-llvm: module bindings count=" + number_to_string(safe_bindings.length));
     }
     let mut module_globals = ModuleGlobalLoweringResult {
         preamble_lines: [],
@@ -2330,11 +2330,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     };
     if safe_bindings.length == 0 {
         if debug_lowering {
-            print.warn("emit-llvm: module bindings empty; skipping module globals");
+            print("emit-llvm: module bindings empty; skipping module globals");
         }
     } else if fs.exists("build/sailfin/.skip_module_globals") {
         if debug_lowering {
-            print.warn("emit-llvm: skipping module globals");
+            print("emit-llvm: skipping module globals");
         }
     } else {
         module_globals = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
@@ -2378,20 +2378,20 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         lines.push("");
     }
     if trace {
-        print.info("test llvm: module globals lowered");
+        print("test llvm: module globals lowered");
     }
     if timing {
-        print.info("test llvm: phase=globals ms=" + number_to_string(monotonic_millis() - start_ms));
+        print("test llvm: phase=globals ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     let mut index -> number = 0;
     let mut has_add_function -> boolean = false;
     let mut all_string_constants -> StringConstant[] = module_string_constants;
     if trace {
-        print.info("test llvm: lowering functions start (count=" + number_to_string(local_functions.length) + ")");
+        print("test llvm: lowering functions start (count=" + number_to_string(local_functions.length) + ")");
     }
     if debug_lowering {
-        print.warn("emit-llvm: phase=functions");
+        print("emit-llvm: phase=functions");
     }
     loop {
         if index >= local_functions.length {
@@ -2450,7 +2450,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                 }
                 instr_index += 1;
             }
-            print.info(
+            print(
                 "test llvm: function "
                 + number_to_string(index)
                 + "/"
@@ -2476,7 +2476,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             }
         );
         if debug_lowering {
-            print.warn("emit-llvm: function-start " + safe_function_name + " idx=" + number_to_string(index));
+            print("emit-llvm: function-start " + safe_function_name + " idx=" + number_to_string(index));
         }
         // Write NativeFunction field values to disk for emission.sfn to read.
         // The v0.1.1 seed compiles emission.sfn with NativeFunction as i8*,
@@ -2549,13 +2549,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         let _lfn_sc_raw = fs.readFile("build/sailfin/.lowered_fn_string_constants");
         let _lfn_string_constants = _parse_lowered_fn_string_constants(_lfn_sc_raw);
         if debug_lowering {
-            print.warn("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
+            print("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
         }
         if trace {
-            print.info("test llvm: function lowered " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length) + " diagnostics=" + number_to_string(_lfn_diags.length));
+            print("test llvm: function lowered " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length) + " diagnostics=" + number_to_string(_lfn_diags.length));
             if _lfn_lines.length > 0 {
-                print.info("test llvm: function first line " + _lfn_lines[0]);
-                print.info("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
+                print("test llvm: function first line " + _lfn_lines[0]);
+                print("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
                 let mut ret_lines -> number = 0;
                 let mut scan_index -> number = 0;
                 loop {
@@ -2568,7 +2568,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                     }
                     scan_index += 1;
                 }
-                print.info("test llvm: function ret_lines " + number_to_string(ret_lines));
+                print("test llvm: function ret_lines " + number_to_string(ret_lines));
             }
         }
         if sanitize_symbol(current_function.name) == "add" {
@@ -2576,7 +2576,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
         diagnostics = extend_string_lines_checked(diagnostics, _lfn_diags, "function lowering");
         if trace {
-            print.info("test llvm: function diagnostics merged " + safe_function_name);
+            print("test llvm: function diagnostics merged " + safe_function_name);
         }
         let normalized_lowered_lines = _lfn_lines;
         // TODO: Re-enable lifetime region aggregation once native array ABI is fully stable.
@@ -2587,45 +2587,45 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             // Append line-by-line to avoid large array copies.
             lines = append_string_lines(lines, normalized_lowered_lines);
             if trace {
-                print.info("test llvm: function lines merged " + safe_function_name);
+                print("test llvm: function lines merged " + safe_function_name);
             }
             if trace {
-                print.info("test llvm: function post-merge check " + safe_function_name);
+                print("test llvm: function post-merge check " + safe_function_name);
             }
             let _ep_next = index + 1;
             if _ep_next < local_functions.length {
                 lines.push("");
             }
             if trace {
-                print.info("test llvm: function post-merge blank " + safe_function_name);
+                print("test llvm: function post-merge blank " + safe_function_name);
             }
             }
         }
         if _lfn_string_constants != null {
             if _lfn_string_constants.length > 0 {
                 if trace {
-                    print.info("test llvm: merging string constants " + safe_function_name + " count=" + number_to_string(_lfn_string_constants.length));
+                    print("test llvm: merging string constants " + safe_function_name + " count=" + number_to_string(_lfn_string_constants.length));
                 }
                 let existing_constants = all_string_constants;
                 all_string_constants = merge_string_constants(existing_constants, _lfn_string_constants);
                 if trace {
-                    print.info("test llvm: merged string constants " + safe_function_name);
+                    print("test llvm: merged string constants " + safe_function_name);
                 }
             }
         }
         index += 1;
     }
     if trace {
-        print.info("test llvm: lowering functions done");
+        print("test llvm: lowering functions done");
     }
     if debug_lowering {
-        print.warn("emit-llvm: phase=functions_done");
+        print("emit-llvm: phase=functions_done");
     }
     if timing {
-        print.info("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
+        print("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
     }
     if timing {
-        print.info("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
+        print("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     if !has_add_function {
@@ -2649,23 +2649,23 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
     }
     if trace {
-        print.info("test llvm: string constants emitted");
+        print("test llvm: string constants emitted");
     }
     if debug_lowering {
-        print.warn("emit-llvm: phase=string_constants");
+        print("emit-llvm: phase=string_constants");
     }
 
     lines = ensure_intrinsic_declarations(lines);
     if trace {
-        print.info("test llvm: intrinsics ensured");
+        print("test llvm: intrinsics ensured");
     }
     if debug_lowering {
-        print.warn("emit-llvm: phase=intrinsics");
+        print("emit-llvm: phase=intrinsics");
     }
 
     let mut effective_mangle_symbols = false;
     if debug_lowering {
-        print.warn("emit-llvm: skipping mangling (stability fallback)");
+        print("emit-llvm: skipping mangling (stability fallback)");
     }
     if effective_mangle_symbols {
         let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts);
@@ -2678,16 +2678,16 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         lines = mangled.lines;
     }
     if debug_lowering {
-        print.warn("emit-llvm: phase=mangle");
+        print("emit-llvm: phase=mangle");
     }
     if trace {
-        print.info("test llvm: mangling stage done");
+        print("test llvm: mangling stage done");
     }
     if timing {
-        print.info("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
+        print("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
     }
     if timing {
-        print.info("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
+        print("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     let manifest = empty_capability_manifest();
@@ -2707,7 +2707,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             }
             i += 1;
         }
-        print.info(
+        print(
             "test llvm: lowered lines=" + number_to_string(lines.length)
             + " nonempty=" + number_to_string(nonempty)
             + " first_len=" + number_to_string(first_len)
@@ -2718,12 +2718,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             if diag_index >= diagnostics.length {
                 break;
             }
-            print.info("test llvm: diagnostic " + diagnostics[diag_index]);
+            print("test llvm: diagnostic " + diagnostics[diag_index]);
             diag_index += 1;
         }
     }
     if lines.length == 0 {
-        print.warn(
+        print(
             "emit-llvm: lowering produced no lines (functions="
             + number_to_string(local_functions.length)
             + " structs="
@@ -2735,9 +2735,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             + ")"
         );
     }
-    print.warn("emit-llvm: exit lower_to_llvm_lines_with_parsed_context lines=" + number_to_string(lines.length));
+    print("emit-llvm: exit lower_to_llvm_lines_with_parsed_context lines=" + number_to_string(lines.length));
     if debug_lowering {
-        print.warn("emit-llvm: phase=end lines=" + number_to_string(lines.length));
+        print("emit-llvm: phase=end lines=" + number_to_string(lines.length));
     }
     return LoweredLLVMLinesResult {
         lines: lines,

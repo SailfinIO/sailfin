@@ -12,7 +12,19 @@ import { trim_text } from "./utils";
 
 fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     let mut descriptors -> RuntimeHelperDescriptor[] = [];
-    // Console/print intrinsics
+    // Raw print: writes to stdout with no prefix, no decoration.
+    // Used by the compiler itself for artifact output and CLI messages.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "print",
+        symbol: "sailfin_runtime_print_raw",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: ["io"],
+    });
+
+    // Legacy prefixed print variants — kept for backward compatibility with
+    // older compiled binaries and examples. New compiler code should use print().
+    // These will be removed once the log capsule ships.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "print.info",
         symbol: "sailfin_runtime_print_info",
@@ -36,14 +48,14 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "console.info",
-        symbol: "sailfin_intrinsic_io_print",
+        symbol: "sailfin_runtime_print_raw",
         return_type: "void",
         parameter_types: ["i8*"],
         effects: ["io"],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "console.log",
-        symbol: "sailfin_intrinsic_io_print",
+        symbol: "sailfin_runtime_print_raw",
         return_type: "void",
         parameter_types: ["i8*"],
         effects: ["io"],
