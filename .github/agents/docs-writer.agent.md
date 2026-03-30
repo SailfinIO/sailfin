@@ -61,7 +61,7 @@ search compiler/tests/ for related test names
 read docs/status.md
 
 # Run an example to verify it works
-make compile && ./sfn run examples/<category>/<file>.sfn
+make compile && build/native/sailfin run examples/<category>/<file>.sfn
 ```
 
 ## Issue Reporting
