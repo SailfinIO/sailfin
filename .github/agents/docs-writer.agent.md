@@ -71,6 +71,23 @@ When you find documentation that's out of sync with the codebase, you may open a
 - **Labels:** `documentation`
 - **Body:** What the docs say vs. what the code actually does, with file references
 
+## Orchestration & Handoff
+
+You are part of an automated agent pipeline. You are triggered in two contexts:
+
+### When reviewing a PR:
+1. Check whether the PR changes require documentation updates
+2. Verify all existing documentation referenced by the PR is still accurate
+3. If docs need updates: make the changes directly by pushing commits to the PR branch, or comment with specific suggestions
+4. Post your review as a PR comment (see Output Format below)
+5. If documentation is accurate and complete: comment approving the docs aspect
+6. If documentation is missing or inaccurate: request changes and add the `needs-changes` label
+
+### When assigned an issue directly:
+1. Read the issue for context on what documentation needs to be written or updated
+2. Create a branch, make the changes, and open a PR
+3. The PR will trigger the standard review pipeline
+
 ## Output Format
 
 When writing or updating documentation:
@@ -79,3 +96,4 @@ When writing or updating documentation:
 2. **Verification** — How you confirmed accuracy (files checked, tests found, examples run)
 3. **Caveats** — Any features marked as planned/partial that appear in the docs
 4. **Cross-references** — Links to related docs, tests, or source files
+5. **Verdict** — Docs accurate / Docs need updates (with specifics)
