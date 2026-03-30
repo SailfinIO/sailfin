@@ -1638,6 +1638,15 @@ void sailfin_runtime_string_drop(char *text)
     free(text);
 }
 
+void sailfin_runtime_print_raw(char *msg)
+{
+    if (msg)
+    {
+        fputs(msg, stdout);
+        fputc('\n', stdout);
+        fflush(stdout);
+    }
+}
 void sailfin_runtime_print_info(char *msg) { _print_line(stdout, "[info] ", msg); }
 void sailfin_runtime_print_warn(char *msg) { _print_line(stderr, "[warn] ", msg); }
 void sailfin_runtime_print_error(char *msg) { _print_line(stderr, "[error] ", msg); }

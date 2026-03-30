@@ -10,13 +10,13 @@ fn allocate_and_free(size -> usize) ![unsafe, io] -> void {
         let ptr = malloc(size);
 
         if ptr == null {
-            print.info("Allocation failed");
+            print("Allocation failed");
             return;
         }
 
-        print.info("Allocated {{ size }} bytes");
+        print("Allocated {{ size }} bytes");
         free(ptr);
-        print.info("Memory freed");
+        print("Memory freed");
     }
 }
 

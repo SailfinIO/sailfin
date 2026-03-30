@@ -10,5 +10,5 @@ fn double(x -> number) -> number {
 
 fn main() ![io] {
     let result = apply(5, double);
-    print.info("Result: {{result}}");
+    print("Result: {{result}}");
 }

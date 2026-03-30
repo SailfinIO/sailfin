@@ -23,6 +23,7 @@ extern "C"
 
     void sailfin_runtime_mark_persistent(char *ptr);
 
+    void sailfin_runtime_print_raw(char *msg);
     void sailfin_runtime_print_info(char *msg);
     void sailfin_runtime_print_warn(char *msg);
     void sailfin_runtime_print_error(char *msg);

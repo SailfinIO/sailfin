@@ -2,5 +2,5 @@
 
 fn main() ![io] {
     let add = fn(x -> number, y -> number) -> number { return x + y; };
-    print.info(add(3, 4));
+    print(add(3, 4));
 }
