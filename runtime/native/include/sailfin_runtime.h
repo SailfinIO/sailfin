@@ -24,6 +24,7 @@ extern "C"
     void sailfin_runtime_mark_persistent(char *ptr);
 
     void sailfin_runtime_print_raw(char *msg);
+    double print(char *msg);  // weak alias for legacy seed compatibility
     void sailfin_runtime_print_info(char *msg);
     void sailfin_runtime_print_warn(char *msg);
     void sailfin_runtime_print_error(char *msg);
