@@ -127,6 +127,9 @@ jobs:
               run: |
                   git config user.name "Sailfin Release Bot"
                   git config user.email "releases@sailfin.io"
+                  # Register the 'ours' merge driver so .gitattributes merge=ours
+                  # resolves version/changelog conflicts in favour of the target branch.
+                  git config merge.ours.driver true
                   git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git"
 
             - name: Set up Conda
