@@ -47,5 +47,6 @@ sailfin v0.1.1-alpha
 
 ## Next Steps
 
+- [Editor Setup](/docs/getting-started/editor-setup) — Install the Sailfin VS Code extension
 - [Hello, World!](/docs/getting-started/hello-world) — Write your first Sailfin program
 - [Tour of Sailfin](/docs/getting-started/tour) — A guided introduction to the language
