@@ -322,6 +322,8 @@ Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
 
 ## v0.2.0 (2026-03-29)
 
+## v0.2.0-rc.1 (2026-03-29)
+
 ### Chores
 
 - Add .github/copilot-instructions.md for GitHub Copilot coding agent
