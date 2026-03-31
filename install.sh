@@ -83,7 +83,7 @@ api() {
   # $1 = url
   local auth_args=()
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    auth_args=(-H "Authorization: token ${GITHUB_TOKEN}")
+    auth_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   fi
   curl --fail -sSL \
     "${auth_args[@]}" \
@@ -150,7 +150,7 @@ log "Downloading asset via GitHub API (id=${asset_id})…"
 
 DL_AUTH_ARGS=()
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-  DL_AUTH_ARGS=(-H "Authorization: token ${GITHUB_TOKEN}")
+  DL_AUTH_ARGS=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 fi
 curl --fail -sSL \
   "${DL_AUTH_ARGS[@]}" \
