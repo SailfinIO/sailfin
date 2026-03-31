@@ -12,6 +12,11 @@ Sailfin is a pre-1.0 open-source project developed in the open. The self-hosted 
 
 ## Learn More
 
-- [sailfin.dev](https://sailfin.dev) — language documentation and guides
+- [sailfin.dev](https://sailfin.dev) — official language website, documentation, and guides
 - [GitHub Discussions](https://github.com/SailfinIO/sailfin/discussions) — questions and community
 - [Contributing](https://github.com/SailfinIO/sailfin/blob/main/CONTRIBUTING.md) — how to get involved
+
+## Connect
+
+- [LinkedIn](https://www.linkedin.com/company/sailfin)
+- [Instagram](https://www.instagram.com/sailfin.io/)
