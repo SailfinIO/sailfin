@@ -24,7 +24,8 @@ assets = []
 
 [tool.semantic_release.branches.main]
 match = "main"
-prerelease = false
+prerelease = true
+prerelease_token = "alpha"
 
 [tool.semantic_release.branches.rc]
 match = "rc"
@@ -35,8 +36,3 @@ prerelease_token = "rc"
 match = "beta"
 prerelease = true
 prerelease_token = "beta"
-
-[tool.semantic_release.branches.alpha]
-match = "alpha"
-prerelease = true
-prerelease_token = "alpha"
