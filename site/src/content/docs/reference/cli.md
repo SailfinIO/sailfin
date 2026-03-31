@@ -135,7 +135,7 @@ sfn --version
 **Example output:**
 
 ```
-sailfin v0.4.0
+sfn v0.4.0
 ```
 
 The version string follows semantic versioning: `v<major>.<minor>.<patch>` for stable releases, `v<major>.<minor>.<patch>-alpha.<n>` for pre-releases.
