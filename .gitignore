@@ -74,6 +74,9 @@ scratch/
 # should never be committed; use dist/ for release packaging instead.
 /build/
 
+# Compiled runtime object files (generated during build)
+runtime/native/obj/
+
 # Stage1 bootstrap compiler (checked-in Python).
 # We want CI to have the stage1 llvm support modules, but we do NOT want to
 # commit bytecode caches.
