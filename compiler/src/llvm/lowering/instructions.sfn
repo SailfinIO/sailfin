@@ -555,7 +555,27 @@ fn lower_instruction_range(
             if debug_lowering {
                 print("emit-llvm: loop-exit index=" + number_to_string(index) + " end=" + number_to_string(end) + " fn=" + function.name);
             }
-            break;
+            // Write block results and return directly from inside the loop.
+            // The v0.1.1 seed generates unconditional `br label %loop.body` for
+            // loop.header20, meaning `break` never actually exits. Using `return`
+            // instead bypasses the broken loop header entirely.
+            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants);
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: terminated,
+                next_local_id: current_next_local,
+                lifetime_regions: collected_lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: index,
+                mutations: current_mutations,
+                string_constants: collected_string_constants,
+            };
         }
         if guard > max_guard {
             diagnostics = append_string(
@@ -569,7 +589,24 @@ fn lower_instruction_range(
                     + " end=" + number_to_string(end)
                 );
             }
-            break;
+            // Return directly (same loop-break workaround as index>=end case)
+            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants);
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: terminated,
+                next_local_id: current_next_local,
+                lifetime_regions: collected_lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: index,
+                mutations: current_mutations,
+                string_constants: collected_string_constants,
+            };
         }
         guard += 1;
 
@@ -675,6 +712,8 @@ fn lower_instruction_range(
                     print("test llvm: infer_effects after Let lines=" + number_to_string(current_lines.length));
                 }
             }
+            index += 1;
+            continue;
         } else if _instr_tag == 1 {
             if debug_lowering {
                 print("emit-llvm: lir Expression pre_trim fn=" + function.name + " depth=" + number_to_string(scope_depth));
@@ -832,16 +871,10 @@ fn lower_instruction_range(
                     print("emit-llvm: lir Expression post_lower_expr_stmt fn=" + function.name);
                 }
                 // The v0.1.1 seed compiles ExpressionStatementResult as i8* null
-                // for cross-module struct returns.  Read results from files instead.
-                let _expr_delta_count_str = fs.readFile("build/sailfin/.expr_stmt_delta_count");
-                let _expr_delta_count = _parse_int_from_string(_expr_delta_count_str);
-                let mut _expr_delta_i -> number = 0;
-                loop {
-                    if _expr_delta_i >= _expr_delta_count { break; }
-                    let _line = fs.readFile("build/sailfin/.expr_stmt_delta_" + number_to_string(_expr_delta_i));
-                    current_lines.push(_line);
-                    _expr_delta_i += 1;
-                }
+                // for cross-module struct returns.  Read scalar results from files.
+                // NOTE: Do NOT read delta lines here — lower_expression already pushed
+                // them to current_lines via pass-by-reference (arrays are shared).
+                // Reading deltas again would duplicate the body lines.
                 let _expr_temp_str = fs.readFile("build/sailfin/.expr_stmt_temp_index");
                 current_temp = _parse_int_from_string(_expr_temp_str);
                 let _expr_region_str = fs.readFile("build/sailfin/.expr_stmt_next_region_id");
@@ -910,6 +943,10 @@ fn lower_instruction_range(
                     print("test llvm: infer_effects after Expression lines=" + number_to_string(current_lines.length));
                 }
             }
+            // Explicitly increment and continue to prevent falling into wrong else-if
+            // branch due to seed compiler's miscompiled else-if chains.
+            index += 1;
+            continue;
         } else if _instr_tag == 0 {
             if debug_lowering {
                 print("emit-llvm: lir pre_return fn=" + function.name + " depth=" + number_to_string(scope_depth) + " llvm_return=" + llvm_return);
@@ -988,16 +1025,9 @@ fn lower_instruction_range(
                 print("emit-llvm: lir post_return fn=" + function.name + " depth=" + number_to_string(scope_depth));
             }
             // The v0.1.1 seed compiles ExpressionStatementResult as i8* null
-            // for cross-module struct returns.  Read results from files instead.
-            let _ret_delta_count_str = fs.readFile("build/sailfin/.expr_stmt_delta_count");
-            let _ret_delta_count = _parse_int_from_string(_ret_delta_count_str);
-            let mut _ret_delta_i -> number = 0;
-            loop {
-                if _ret_delta_i >= _ret_delta_count { break; }
-                let _line = fs.readFile("build/sailfin/.expr_stmt_delta_" + number_to_string(_ret_delta_i));
-                current_lines.push(_line);
-                _ret_delta_i += 1;
-            }
+            // for cross-module struct returns.  Read scalar results from files.
+            // NOTE: Do NOT read delta lines — lower_return_instruction already pushed
+            // them to current_lines via pass-by-reference (arrays are shared).
             let _ret_temp_str = fs.readFile("build/sailfin/.expr_stmt_temp_index");
             current_temp = _parse_int_from_string(_ret_temp_str);
             let _ret_region_str = fs.readFile("build/sailfin/.expr_stmt_next_region_id");
@@ -1387,9 +1417,15 @@ fn lower_instruction_range(
             diagnostics.push("llvm lowering: unsupported instruction tag=" + number_to_string(_instr_tag) + " in `" + function.name + "`");
         }
 
+        if debug_lowering {
+            print("emit-llvm: lir pre-index-inc index=" + number_to_string(index) + " fn=" + function.name);
+        }
         index += 1;
     }
 
+    if debug_lowering {
+        print("emit-llvm: lir loop-done fn=" + function.name + " current_lines=" + number_to_string(current_lines.length));
+    }
     if trace {
         if start_index == 0 {
             if scope_depth == 0 {
