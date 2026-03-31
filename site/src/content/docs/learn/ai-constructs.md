@@ -112,19 +112,14 @@ fn summarize(text: String) -> String {
 The compiler will produce:
 
 ```
-error[E0301]: function `summarize` uses a prompt block, which requires ![model],
-              but `summarize` has no effect annotation
-  --> src/main.sfn:2:5
-   |
- 2 |     prompt system { "Summarize." }
-   |     ^^^^^^ requires ![model]
-   |
-   = help: add `model` to the effect list: `fn summarize(text: String) -> String ![model]`
+effects.missing: function `summarize` uses a prompt block, which requires ![model],
+                 but `summarize` has no effect annotation
+  = help: add `model` to the effect list: `fn summarize(text: String) -> String ![model]`
 ```
 
 This enforcement is active now because it is a property of the _syntax_, not the runtime. Even though no inference happens today, any code that declares a `prompt` must be clearly marked as requiring model capabilities.
 
-Transitive enforcement also applies: if `summarize` is called from another function, that caller must also declare `![model]`:
+If `summarize` is called from another function that also uses model-related APIs, that caller must declare `![model]` as well:
 
 ```sfn
 fn analyze(doc: Document) -> Report ![io, model] {

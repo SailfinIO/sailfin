@@ -26,7 +26,7 @@ Compile and execute a Sailfin source file in a single step. The file is compiled
 **Usage:**
 
 ```bash
-sfn run <file.sfn> [-- program-args...]
+sfn run <file.sfn>
 ```
 
 **Examples:**
@@ -34,13 +34,13 @@ sfn run <file.sfn> [-- program-args...]
 ```bash
 sfn run hello.sfn
 sfn run examples/basics/hello-world.sfn
-sfn run src/main.sfn -- --port 8080
+sfn run src/main.sfn
 ```
 
 **Behavior:**
 
 - Compiles the source file from scratch on each invocation.
-- Effect annotations are checked at compile time; missing effects produce diagnostics with source spans and fix-it hints.
+- Effect annotations are checked at compile time; missing effects produce `effects.missing` diagnostics with fix-it hints.
 - The program runs in the same terminal session; stdout and stderr are connected to the calling terminal.
 - Exit code of `sfn run` reflects the exit code of the program.
 
@@ -53,14 +53,8 @@ Discover and run Sailfin test files. Test files follow the `*_test.sfn` naming c
 **Usage:**
 
 ```bash
-sfn test [path] [--filter <pattern>]
+sfn test [path]
 ```
-
-**Options:**
-
-| Flag | Description |
-|---|---|
-| `--filter <pattern>` | Run only tests whose name matches `pattern` (substring match) |
 
 **Examples:**
 
@@ -68,8 +62,9 @@ sfn test [path] [--filter <pattern>]
 sfn test                                  # run all *_test.sfn files found
 sfn test compiler/tests/unit/             # run tests in a specific directory
 sfn test compiler/tests/unit/arrays_test.sfn  # run a single test file
-sfn test --filter "substring"             # run tests whose name contains "substring"
 ```
+
+> **Note:** `--filter` is not yet supported. To narrow test scope, pass a specific file or directory path.
 
 **Test file conventions:**
 
@@ -87,14 +82,14 @@ test "addition is commutative" {
 
 ---
 
-### `sfn compile <file>`
+### `sfn build <file>`
 
 Compile a Sailfin source file without running it. Writes an executable to the output path (default: the source filename without `.sfn` in the current directory).
 
 **Usage:**
 
 ```bash
-sfn compile <file.sfn> [-o <output>]
+sfn build <file.sfn> [-o <output>]
 ```
 
 **Options:**
@@ -106,8 +101,8 @@ sfn compile <file.sfn> [-o <output>]
 **Examples:**
 
 ```bash
-sfn compile src/main.sfn
-sfn compile src/main.sfn -o build/myapp
+sfn build src/main.sfn
+sfn build src/main.sfn -o build/myapp
 ```
 
 **Subcommand: `emit native`**
@@ -135,10 +130,10 @@ sfn --version
 **Example output:**
 
 ```
-sfn v0.4.0
+sfn 0.4.0
 ```
 
-The version string follows semantic versioning: `v<major>.<minor>.<patch>` for stable releases, `v<major>.<minor>.<patch>-alpha.<n>` for pre-releases.
+The version string follows semantic versioning: `<major>.<minor>.<patch>` for stable releases, `<major>.<minor>.<patch>-alpha.<n>` for pre-releases.
 
 ---
 
@@ -314,10 +309,10 @@ make install
 make rebuild
 ```
 
-**Run only unit tests with a name filter:**
+**Run only unit tests in a specific directory:**
 
 ```bash
-build/native/sailfin test compiler/tests/unit/ --filter "substring"
+build/native/sailfin test compiler/tests/unit/
 ```
 
 **Run the CI validation gate locally:**

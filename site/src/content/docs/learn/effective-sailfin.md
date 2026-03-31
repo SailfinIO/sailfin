@@ -563,7 +563,7 @@ Each effectful call has overhead. When writing to a file or making a network req
 // Slow: one filesystem write per line
 fn write_log_lines(lines: Array<String>, path: String) ![io] {
     for line in lines {
-        fs.append(path, line + "\n");
+        fs.appendFile(path, line + "\n");
     }
 }
 
@@ -720,14 +720,9 @@ Slow tests get skipped. Separate pure unit tests from integration tests that tou
 The most common error for new Sailfin programmers. The compiler message includes the missing effect and a fix-it hint:
 
 ```
-error[E0301]: function `process` calls `fetch` which requires ![net],
-              but `process` only declares ![io]
-  --> src/handler.sfn:14:5
-   |
-14 |     let data = fetch(url);
-   |                ^^^^^ requires ![net]
-   |
-   = help: add `net` to the effect list: `fn process(url: String) ![io, net]`
+effects.missing: function `process` calls `fetch` which requires ![net],
+                 but `process` only declares ![io]
+  = help: add `net` to the effect list: `fn process(url: String) ![io, net]`
 ```
 
 The fix: add the missing effect to the function signature.

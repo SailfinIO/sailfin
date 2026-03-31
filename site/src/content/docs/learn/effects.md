@@ -237,40 +237,27 @@ The effect requirement on tests is intentional: it makes it visible at a glance 
 A `pipeline` declaration aggregates the effects of all its steps. Each step declares its own effects; the pipeline itself declares the union:
 
 ```sfn
-pipeline analyze_feedback ![io, model] {
-    step load(path: string) -> string ![io] {
-        return fs.read(path);
-    }
-
-    step classify(text: string) -> Category ![model] {
-        return prompt gpt4o ![model] {
-            system "Classify this feedback as: positive, negative, or neutral."
-            user "{{text}}"
-        };
-    }
-
-    step save_result(result: Category, path: string) ![io] {
-        fs.write(path, result.to_string());
-    }
+pipeline analyze_feedback(path: string) ![io, model] {
+    let text = fs.read(path);
+    let result = prompt gpt4o {
+        system "Classify this feedback as: positive, negative, or neutral."
+        user "{{text}}"
+    };
+    fs.write(path + ".result", result);
 }
 ```
 
 ### Tools
 
-Tool declarations expose functions to model invocation. The `execute` function inside a tool declares its effects like any ordinary function:
+Tool declarations expose typed functions to model invocation. A `tool` block looks like a function declaration with the `tool` keyword:
 
 ```sfn
-tool lookup_order {
-    description "Look up an order by ID"
-    param id: string "The order ID to retrieve"
-
-    fn execute(id: string) -> Order ![io] {
-        return db.find_order(id);
-    }
+tool lookup_order(id: string) -> Order ![io] {
+    return db.find_order(id);
 }
 ```
 
-A model that calls this tool must declare `![model, io]` — the effects of the tool's `execute` function propagate to the calling context.
+A function that invokes a tool with a `prompt` block must declare `![model]`; any additional effects used inside the tool body (like `![io]` above) must also appear on the calling context.
 
 ---
 
@@ -294,51 +281,37 @@ If a closure escapes its declaring scope and is stored for later invocation in a
 
 ## Compiler Diagnostics
 
-The effect checker produces structured error messages with source spans and fix-it hints. Here is what to expect when an effect is missing.
+The effect checker produces diagnostics when a required effect is missing. Diagnostics use the code `effects.missing` and include a fix-it hint showing what to add to the function signature.
+
+> **Note:** Effect diagnostics are currently spanless — they report the function name and missing effect but do not yet include a precise source line/column pointer. Source span support is planned.
 
 ### Missing effect on a direct call
 
 ```
-error[E0301]: function `save_report` calls `fs.write` which requires ![io],
-              but `save_report` declares no effects
-  --> src/reports.sfn:22:5
-   |
-22 |     fs.write("report.txt", content);
-   |     ^^^^^^^^ requires ![io]
-   |
-   = help: add `io` to the function signature: `fn save_report(content: string) ![io]`
+effects.missing: function `save_report` calls `fs.write` which requires ![io],
+                 but `save_report` declares no effects
+  = help: add `io` to the function signature: `fn save_report(content: string) ![io]`
 ```
 
 ### Missing effect from a callee
 
 ```
-error[E0301]: function `run_query` calls `http.post` which requires ![net],
-              but `run_query` only declares ![io]
-  --> src/db.sfn:47:14
-   |
-47 |     let res = http.post(endpoint, payload);
-   |               ^^^^^^^^^ requires ![net]
-   |
-   = help: add `net` to the effect list: `fn run_query(...) ![io, net]`
+effects.missing: function `run_query` calls `http.post` which requires ![net],
+                 but `run_query` only declares ![io]
+  = help: add `net` to the effect list: `fn run_query(...) ![io, net]`
 ```
 
 ### Missing effect for a prompt block
 
 ```
-error[E0301]: `prompt` block requires the `model` effect,
-              but `summarize` declares no effects
-  --> src/ai.sfn:11:5
-   |
-11 |     prompt gpt4o {
-   |     ^^^^^^^^^^^^^ requires ![model]
-   |
-   = help: add `model` to the function signature: `fn summarize(text: string) -> string ![model]`
+effects.missing: `prompt` block requires the `model` effect,
+                 but `summarize` declares no effects
+  = help: add `model` to the function signature: `fn summarize(text: string) -> string ![model]`
 ```
 
 ### How to read the diagnostic
 
-- **Error code** `E0301` identifies the class of problem (effect violation).
-- **Source span** pins the exact call or expression that requires the missing effect.
+- **Diagnostic code** `effects.missing` identifies the class of problem (effect violation).
 - **Fix-it hint** shows exactly what to add to the signature. In most cases you can copy the suggestion directly.
 
 ---
@@ -356,7 +329,7 @@ fn process_order(order_id: string) -> boolean ![io, net] {
     let order = Order.parse(raw);
     if order.total > 1000.0 {
         print("High-value order: {{order_id}}");
-        fs.append("high_value.log", order_id);
+        fs.appendFile("high_value.log", order_id);
     }
     let discount = order.total * 0.1;
     http.post("https://api.example.com/orders/{{order_id}}/discount",

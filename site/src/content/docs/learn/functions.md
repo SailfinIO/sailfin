@@ -138,13 +138,13 @@ fn run_experiment(prompt_text: String) ![io, model, clock] {
 }
 ```
 
-### Transitive Enforcement
+### Effect Enforcement
 
-If function `A` calls function `B`, then `A` must declare every effect that `B` declares. This is checked across the full call graph:
+If function `A` directly calls an effectful API (like `fs.write` or `http.get`), `A` must declare the required effect. The compiler checks direct API usage — if you call a helper function `B` that uses `![io]`, you must also declare `![io]` on `A`:
 
 ```sfn
 fn write_log(msg: String) ![io] {
-    fs.append("app.log", msg + "\n");
+    fs.appendFile("app.log", msg + "\n");
 }
 
 fn process(data: String) ![io] {
@@ -165,14 +165,9 @@ fn save(url: String, data: String) ![net] {
 When a required effect is missing, the compiler produces a precise diagnostic with a suggested fix:
 
 ```
-error[E0301]: function `save` calls `write_log` which requires ![io],
-              but `save` only declares ![net]
-  --> src/main.sfn:18:5
-   |
-18 |     write_log("Saved to {{url}}");
-   |     ^^^^^^^^^ requires ![io]
-   |
-   = help: add `io` to the effect list: `fn save(url: String, data: String) ![io, net]`
+effects.missing: function `save` calls `write_log` which requires ![io],
+                 but `save` only declares ![net]
+  = help: add `io` to the effect list: `fn save(url: String, data: String) ![io, net]`
 ```
 
 Apply the fix, recompile, and the error is gone. The compiler never guesses — it tells you exactly which call site is the problem and which effect to add.

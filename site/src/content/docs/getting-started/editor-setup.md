@@ -120,7 +120,7 @@ root:
     {
       "label": "Sailfin: Compile",
       "type": "shell",
-      "command": "sfn compile .",
+      "command": "sfn build ${file}",
       "group": {
         "kind": "build",
         "isDefault": true

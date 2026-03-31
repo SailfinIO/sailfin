@@ -34,14 +34,9 @@ Let's break this down word by word.
 Try removing `![io]`:
 
 ```
-error[E0301]: function `main` calls `print` which requires ![io],
-              but `main` declares no effects
-  --> hello.sfn:2:5
-   |
-2  |     print("Hello, World!");
-   |     ^^^^^ requires ![io]
-   |
-   = help: add `io` to the effect list: `fn main() ![io]`
+effects.missing: function `main` calls `print` which requires ![io],
+                 but `main` declares no effects
+  = help: add `io` to the effect list: `fn main() ![io]`
 ```
 
 Sailfin is telling you exactly what went wrong and how to fix it. This is the effect system in action.
@@ -63,20 +58,19 @@ count = count + 1;             // OK
 Type inference works for all of these. You can add an explicit type annotation when you want to be precise or when inference cannot determine the type:
 
 ```sfn
-let x: Int = 42;
-let ratio: Float = 0.75;
-let active: Bool = true;
-let label: String = "processing";
+let x: number = 42;
+let ratio: number = 0.75;
+let active: boolean = true;
+let label: string = "processing";
 ```
 
 **Primitive types at a glance:**
 
 | Type | Description | Example |
 |------|-------------|---------|
-| `Int` | 64-bit signed integer | `42`, `-7` |
-| `Float` | 64-bit floating point | `3.14`, `-0.5` |
-| `Bool` | Boolean | `true`, `false` |
-| `String` | UTF-8 string | `"hello"` |
+| `number` | 64-bit float (primary numeric type) | `42`, `3.14`, `-7` |
+| `boolean` | Boolean | `true`, `false` |
+| `string` | UTF-8 string | `"hello"` |
 
 ---
 
@@ -85,7 +79,7 @@ let label: String = "processing";
 A function declares its name, parameters, return type, and effects:
 
 ```sfn
-fn add(a: Int, b: Int) -> Int {
+fn add(a: number, b: number) -> number {
     return a + b;
 }
 ```
@@ -95,7 +89,7 @@ fn add(a: Int, b: Int) -> Int {
 Add an effect when the function needs one:
 
 ```sfn
-fn greet(name: String) ![io] {
+fn greet(name: string) ![io] {
     print("Hello, {{name}}!");
 }
 ```
@@ -103,7 +97,7 @@ fn greet(name: String) ![io] {
 The double-brace syntax `{{ expression }}` is Sailfin's string interpolation. Any expression can appear inside the braces.
 
 ```sfn
-fn describe_temperature(celsius: Float) -> String {
+fn describe_temperature(celsius: number) -> string {
     return "{{celsius}}°C is {{celsius * 9.0 / 5.0 + 32.0}}°F";
 }
 ```
@@ -111,7 +105,7 @@ fn describe_temperature(celsius: Float) -> String {
 A function that calls an effectful function must itself declare that effect:
 
 ```sfn
-fn greet_twice(name: String) ![io] {
+fn greet_twice(name: string) ![io] {
     greet(name);   // greet requires ![io], so this function must declare it too
     greet(name);
 }
@@ -125,8 +119,8 @@ Structs group related data together. Fields use `name -> Type;` syntax:
 
 ```sfn
 struct Point {
-    x -> Float;
-    y -> Float;
+    x -> number;
+    y -> number;
 }
 ```
 
@@ -147,11 +141,11 @@ Add methods in an `impl` block:
 
 ```sfn
 impl Point {
-    fn distance_from_origin(&self) -> Float {
+    fn distance_from_origin(&self) -> number {
         return (self.x * self.x + self.y * self.y).sqrt();
     }
 
-    fn translate(&mut self, dx: Float, dy: Float) {
+    fn translate(&mut self, dx: number, dy: number) {
         self.x = self.x + dx;
         self.y = self.y + dy;
     }
@@ -183,9 +177,9 @@ Enum variants can carry data:
 
 ```sfn
 enum Shape {
-    Circle { radius -> Float },
-    Rectangle { width -> Float, height -> Float },
-    Triangle { base -> Float, height -> Float },
+    Circle { radius -> number },
+    Rectangle { width -> number, height -> number },
+    Triangle { base -> number, height -> number },
 }
 
 let c = Shape.Circle { radius: 5.0 };
@@ -213,7 +207,7 @@ enum Result<T, E> {
 `match` evaluates an expression against a series of patterns. It is exhaustive — the compiler ensures every possible variant is covered.
 
 ```sfn
-fn area(shape: Shape) -> Float {
+fn area(shape: Shape) -> number {
     match shape {
         Circle { radius }         => 3.14159 * radius * radius,
         Rectangle { width, height } => width * height,
@@ -227,7 +221,7 @@ If you add a new variant to `Shape` and forget to update `area`, the compiler pr
 Use guard conditions to add extra constraints on a matched pattern:
 
 ```sfn
-fn classify_score(score: Int) -> String {
+fn classify_score(score: number) -> string {
     match score {
         s if s >= 90 => "A",
         s if s >= 80 => "B",
@@ -267,7 +261,7 @@ The effect system is Sailfin's defining feature. Every function that reaches out
 A function can declare multiple effects:
 
 ```sfn
-fn fetch_and_log(url: String) -> String ![io, net] {
+fn fetch_and_log(url: string) -> string ![io, net] {
     let response = http.get(url);
     print("Status: {{response.status}}");
     return response.body;
@@ -289,20 +283,15 @@ fn caller() ![io] {
 ```
 
 ```
-error[E0301]: function `caller` calls `helper` which requires ![net],
-              but `caller` only declares ![io]
-  --> src/main.sfn:8:5
-   |
-8  |     helper();
-   |     ^^^^^^ requires ![net]
-   |
-   = help: add `net` to the effect list: `fn caller() ![io, net]`
+effects.missing: function `caller` calls `helper` which requires ![net],
+                 but `caller` only declares ![io]
+  = help: add `net` to the effect list: `fn caller() ![io, net]`
 ```
 
 **Pure functions have no annotation at all.** They cannot call effectful code and they cannot produce side effects. This is a guarantee you can rely on.
 
 ```sfn
-fn square(n: Int) -> Int {
+fn square(n: number) -> number {
     return n * n;    // pure — no effects possible
 }
 ```
@@ -346,7 +335,7 @@ Generics work with interfaces to express constraints — a generic function can 
 
 ```sfn
 interface Displayable {
-    fn display(&self) -> String;
+    fn display(&self) -> string;
 }
 
 fn print_all<T: Displayable>(items: Array<T>) ![io] {
@@ -369,11 +358,11 @@ Use `Result<T, E>` when failure is a normal part of a function's contract — so
 ```sfn
 enum ParseError {
     EmptyInput,
-    InvalidCharacter { pos -> Int, char -> String },
+    InvalidCharacter { pos -> number, char -> string },
     Overflow,
 }
 
-fn parse_int(s: String) -> Result<Int, ParseError> {
+fn parse_int(s: string) -> Result<number, ParseError> {
     if s.length == 0 {
         return Result.Err(ParseError.EmptyInput);
     }
@@ -394,7 +383,7 @@ match parse_int(input) {
 Use `try/catch` for failures that are not part of normal operation and cannot easily be threaded through return types:
 
 ```sfn
-fn load_config(path: String) -> Config ![io] {
+fn load_config(path: string) -> Config ![io] {
     try {
         let content = fs.read(path);
         return Config.parse(content);
@@ -417,21 +406,21 @@ An interface defines a set of methods that a type must provide. Any struct that 
 
 ```sfn
 interface Serializable {
-    fn to_json(&self) -> String;
-    fn from_json(s: String) -> Self;
+    fn to_json(&self) -> string;
+    fn from_json(s: string) -> Self;
 }
 
 struct User {
-    name -> String;
-    email -> String;
+    name -> string;
+    email -> string;
 }
 
 impl Serializable for User {
-    fn to_json(&self) -> String {
+    fn to_json(&self) -> string {
         return "{\"name\":\"{{self.name}}\",\"email\":\"{{self.email}}\"}";
     }
 
-    fn from_json(s: String) -> Self {
+    fn from_json(s: string) -> Self {
         // parse s and return a User
     }
 }
@@ -440,7 +429,7 @@ impl Serializable for User {
 Use an interface as a parameter type to write code that works with any conforming type:
 
 ```sfn
-fn write_record<T: Serializable>(record: T, path: String) ![io] {
+fn write_record<T: Serializable>(record: T, path: string) ![io] {
     let json = record.to_json();
     fs.write(path, json);
 }
@@ -455,7 +444,7 @@ Now `write_record` works for `User`, `Order`, `Config`, or anything else that im
 The `test` keyword is built into the language. No imports, no framework.
 
 ```sfn
-fn add(a: Int, b: Int) -> Int {
+fn add(a: number, b: number) -> number {
     return a + b;
 }
 
@@ -503,9 +492,9 @@ Marks a value as PII. Future runtime enforcement will require explicit declassif
 
 ```sfn
 struct UserProfile {
-    display_name -> String;
-    email -> PII<String>;          // cannot be logged without declassification
-    date_of_birth -> PII<String>;
+    display_name -> string;
+    email -> PII<string>;          // cannot be logged without declassification
+    date_of_birth -> PII<string>;
 }
 ```
 
@@ -514,7 +503,7 @@ struct UserProfile {
 Similar to `PII<T>` but for credentials and tokens. Prevents secrets from appearing in logs, error messages, or network responses.
 
 ```sfn
-let api_key: Secret<String> = Secret.wrap("sk-abc123");
+let api_key: Secret<string> = Secret.wrap("sk-abc123");
 ```
 
 ### `Affine<T>` — May be dropped, not duplicated
@@ -568,7 +557,7 @@ model gpt4o = openai:"gpt-4o";
 A `prompt` block composes a structured request to a model:
 
 ```sfn
-fn summarize(text: String) -> String ![model] {
+fn summarize(text: string) -> string ![model] {
     let result = prompt claude ![model] {
         system "You are a concise summarizer. Respond in two to three sentences."
         user "Summarize the following:\n\n{{text}}"
@@ -585,14 +574,14 @@ A pipeline chains steps into a reusable unit, each step declaring its own effect
 
 ```sfn
 pipeline analyze_feedback {
-    step classify(input: String) -> Category ![model] {
+    step classify(input: string) -> Category ![model] {
         return prompt claude ![model] {
             system "Classify this feedback as: positive, negative, or neutral."
             user "{{input}}"
         };
     }
 
-    step extract_themes(input: String) -> Array<String> ![model] {
+    step extract_themes(input: string) -> Array<string> ![model] {
         return prompt claude ![model] {
             system "Extract the key themes from this feedback as a list."
             user "{{input}}"
@@ -608,9 +597,9 @@ Tools expose Sailfin functions to models for function calling:
 ```sfn
 tool lookup_user {
     description "Look up a user by their unique identifier"
-    param id: String "The user ID to look up"
+    param id: string "The user ID to look up"
 
-    fn execute(id: String) -> User ![io] {
+    fn execute(id: string) -> User ![io] {
         return db.find_user(id);
     }
 }

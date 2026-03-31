@@ -36,9 +36,11 @@ fn allocate_buffer(bytes: Int) ![unsafe] -> *u8 {
 }
 ```
 
-The `![unsafe]` effect on the function signature is not optional: **any function that contains an unsafe block must declare `![unsafe]`**. The effect propagates upward — if a function calls `allocate_buffer`, that caller must also declare `![unsafe]` unless it wraps the call in a safe abstraction that handles all unsafe invariants internally and returns a safe type.
+The `![unsafe]` effect on the function signature is the designed annotation for functions that contain unsafe blocks. Once fully enforced, the effect will propagate upward — callers of `allocate_buffer` must also declare `![unsafe]` unless they wrap the call in a safe abstraction that handles all unsafe invariants internally and returns a safe type.
 
-This propagation is intentional. It ensures that `![unsafe]` in a call graph visibly marks every function that directly or indirectly performs unsafe operations. Auditors can grep for `![unsafe]` to find the full unsafe surface of a codebase.
+> **Current enforcement status:** `unsafe` blocks are parsed by the compiler today. Full runtime enforcement of `![unsafe]` propagation — preventing calls to unsafe functions from safe contexts — is **planned for 1.0**. Write code to the specification now; enforcement will be activated as part of the 1.0 compiler hardening work.
+
+The design goal is that `![unsafe]` in a call graph visibly marks every function that directly or indirectly performs unsafe operations. Auditors can grep for `![unsafe]` to find the full unsafe surface of a codebase.
 
 ### Operations restricted to `unsafe` blocks
 
@@ -72,7 +74,7 @@ Note the parameter syntax: `name -> Type` (with `->`) is the convention for stru
 Key properties of `unsafe extern fn` declarations:
 
 - **C ABI by default.** Parameters are passed using the platform C calling convention.
-- **Cannot be called outside an `unsafe` block.** The compiler enforces this.
+- **Cannot be called outside an `unsafe` block.** The compiler will enforce this once unsafe enforcement is fully active (planned for 1.0).
 - **Raw pointer types are permitted.** The `*T`, `*mut T`, and `*opaque` types are only valid in extern declarations and unsafe blocks.
 - **Must be linked.** The native library providing these functions must be linked into the final binary. Use `[build]` or linker flags to specify the library.
 - **No safety guarantees.** The compiler trusts extern declarations. An incorrect declaration — wrong parameter types, wrong return type — is undefined behavior.

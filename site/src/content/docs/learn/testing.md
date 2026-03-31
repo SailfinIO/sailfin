@@ -228,8 +228,8 @@ sfn test src/parser_test.sfn
 # Run tests in a directory (recursive)
 sfn test tests/unit/
 
-# Run tests whose names contain a substring
-sfn test --filter "factorial"
+# Note: --filter is not yet supported; run a specific file to narrow scope
+sfn test src/math_test.sfn
 ```
 
 ### With Make targets
