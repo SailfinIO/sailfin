@@ -150,7 +150,7 @@ test: test-unit test-integration test-e2e
 # =============================================================================
 
 # Install a released seed compiler into the workspace.
-# Requires a GitHub token in GITHUB_TOKEN.
+# GITHUB_TOKEN is optional; it increases API rate limits and enables access to private repos.
 SEED_REPO ?= SailfinIO/sailfin
 SEED_VERSION ?= latest
 SEED_EXCLUDE_TAG ?=

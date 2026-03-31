@@ -146,7 +146,11 @@ cleanup() {
 trap cleanup EXIT
 
 ARCHIVE_PATH="${TMPDIR}/${ASSET}"
-log "Downloading asset via GitHub API (id=${asset_id})…"
+
+# Use the direct browser download URL for public repos (no auth required).
+# Pass GITHUB_TOKEN as a bearer header if set, which also handles private repos.
+DIRECT_DL_URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
+log "Downloading ${ASSET}…"
 
 DL_AUTH_ARGS=()
 if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -154,8 +158,7 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 fi
 curl --fail -sSL \
   "${DL_AUTH_ARGS[@]}" \
-  -H "Accept: application/octet-stream" \
-  "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" \
+  "$DIRECT_DL_URL" \
   -o "$ARCHIVE_PATH"
 
 # Validate archive

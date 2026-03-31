@@ -123,21 +123,21 @@ if (-not $AssetObj) {
     Die "Could not find asset '$Asset' in release '$Tag'."
 }
 
-$AssetId = $AssetObj.id
 $TmpDir  = Join-Path ([System.IO.Path]::GetTempPath()) "sailfin-install-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
 
 $ArchivePath = Join-Path $TmpDir $Asset
-Log "Downloading asset via GitHub API (id=$AssetId)..."
 
-$DownloadHeaders = @{
-    "Accept" = "application/octet-stream"
-}
+# Use the direct browser download URL for public repos (no auth required).
+# Pass the token if available, which also handles private repos.
+$DirectDlUrl = "https://github.com/$Repo/releases/download/$Tag/$Asset"
+Log "Downloading $Asset..."
+
+$DownloadHeaders = @{}
 if ($Token) {
     $DownloadHeaders["Authorization"] = "token $Token"
 }
-$DownloadUrl = "https://api.github.com/repos/$Repo/releases/assets/$AssetId"
-Invoke-WebRequest -Uri $DownloadUrl -Headers $DownloadHeaders -OutFile $ArchivePath
+Invoke-WebRequest -Uri $DirectDlUrl -Headers $DownloadHeaders -OutFile $ArchivePath
 
 # --- Extract archive ---------------------------------------------------------
 
