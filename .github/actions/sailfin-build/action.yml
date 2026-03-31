@@ -32,8 +32,6 @@ runs:
   steps:
     - name: Fetch released seed compiler
       shell: bash -l {0}
-      env:
-        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
         seed_version="${{ inputs.seed_version }}"
