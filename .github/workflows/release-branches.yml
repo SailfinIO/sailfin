@@ -14,6 +14,8 @@ on:
         paths-ignore:
             - CHANGELOG.md
             - compiler/src/version.sfn
+            - 'site/**'
+            - 'capsules/**/capsule.toml'
 
 concurrency:
     group: release-branch-${{ github.ref }}
