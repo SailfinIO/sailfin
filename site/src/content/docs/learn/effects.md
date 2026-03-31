@@ -281,7 +281,7 @@ Closures capture the effect context of their enclosing scope. A lambda used insi
 ```sfn
 fn process_files(paths: Array<string>) ![io] {
     // This lambda is used in an ![io] context — it can call fs.read
-    let contents = paths.map(|path| fs.read(path));
+    let contents = paths.map(fn(path) -> string { fs.read(path) });
     for content in contents {
         print(content);
     }
