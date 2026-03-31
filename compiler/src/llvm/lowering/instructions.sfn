@@ -189,8 +189,11 @@ import {
     lower_condition_to_i1,
     lower_if_instruction,
     sanitize_if_condition_text,
-    lower_let_instruction,
 } from "./instructions_match";
+
+import {
+    lower_let_instruction,
+} from "./instructions_let";
 
 fn clone_local_bindings(values -> LocalBinding[]) -> LocalBinding[] {
     let mut result -> LocalBinding[] = [];
@@ -383,7 +386,16 @@ fn _write_block_result_files(
     allocas -> string[],
     terminated -> boolean,
     diagnostics -> string[],
-    string_constants -> StringConstant[]
+    string_constants -> StringConstant[],
+    locals -> LocalBinding[],
+    bindings -> ParameterBinding[],
+    temp_index -> number,
+    block_counter -> number,
+    next_local_id -> number,
+    next_lifetime_region_id -> number,
+    next_index -> number,
+    mutations -> LocalMutation[],
+    lifetime_regions -> LifetimeRegionMetadata[]
 ) ![io] {
     let mut joined_lines -> string = "";
     let mut li -> number = 0;
@@ -440,6 +452,78 @@ fn _write_block_result_files(
         si = si + 1;
     }
     fs.writeFile("build/sailfin/.block_result_string_constants", joined_sc);
+
+    // Scalar state fields needed by callers in other modules (instructions_match, instructions_loops).
+    fs.writeFile("build/sailfin/.block_result_temp_index", number_to_string(temp_index));
+    fs.writeFile("build/sailfin/.block_result_block_counter", number_to_string(block_counter));
+    fs.writeFile("build/sailfin/.block_result_next_local_id", number_to_string(next_local_id));
+    fs.writeFile("build/sailfin/.block_result_next_lifetime_region_id", number_to_string(next_lifetime_region_id));
+    fs.writeFile("build/sailfin/.block_result_next_index", number_to_string(next_index));
+
+    // Locals array.
+    fs.writeFile("build/sailfin/.block_result_locals_count", number_to_string(locals.length));
+    let mut loc_i -> number = 0;
+    loop {
+        if loc_i >= locals.length { break; }
+        let lp = "build/sailfin/.block_result_local_" + number_to_string(loc_i);
+        fs.writeFile(lp + "_name", locals[loc_i].name);
+        fs.writeFile(lp + "_pointer", locals[loc_i].pointer);
+        fs.writeFile(lp + "_llvm_type", locals[loc_i].llvm_type);
+        fs.writeFile(lp + "_type_annotation", locals[loc_i].type_annotation);
+        fs.writeFile(lp + "_scope_id", locals[loc_i].scope_id);
+        fs.writeFile(lp + "_scope_depth", number_to_string(locals[loc_i].scope_depth));
+        loc_i = loc_i + 1;
+    }
+
+    // Parameter bindings array.
+    fs.writeFile("build/sailfin/.block_result_bindings_count", number_to_string(bindings.length));
+    let mut bin_i -> number = 0;
+    loop {
+        if bin_i >= bindings.length { break; }
+        let bp = "build/sailfin/.block_result_binding_" + number_to_string(bin_i);
+        fs.writeFile(bp + "_name", bindings[bin_i].name);
+        fs.writeFile(bp + "_llvm_name", bindings[bin_i].llvm_name);
+        fs.writeFile(bp + "_llvm_type", bindings[bin_i].llvm_type);
+        fs.writeFile(bp + "_type_annotation", bindings[bin_i].type_annotation);
+        bin_i = bin_i + 1;
+    }
+
+    // Mutations array.
+    fs.writeFile("build/sailfin/.block_result_mut_count", number_to_string(mutations.length));
+    let mut mut_i -> number = 0;
+    loop {
+        if mut_i >= mutations.length { break; }
+        let mp = "build/sailfin/.block_result_mut_" + number_to_string(mut_i);
+        fs.writeFile(mp + "_name", mutations[mut_i].name);
+        fs.writeFile(mp + "_llvm_type", mutations[mut_i].llvm_type);
+        fs.writeFile(mp + "_value", mutations[mut_i].value_name);
+        fs.writeFile(mp + "_label", mutations[mut_i].originating_label);
+        mut_i = mut_i + 1;
+    }
+
+    // Lifetime regions array.
+    fs.writeFile("build/sailfin/.block_result_lr_count", number_to_string(lifetime_regions.length));
+    let mut lr_i -> number = 0;
+    loop {
+        if lr_i >= lifetime_regions.length { break; }
+        let lrp = "build/sailfin/.block_result_lr_" + number_to_string(lr_i);
+        fs.writeFile(lrp + "_id", number_to_string(lifetime_regions[lr_i].id));
+        fs.writeFile(lrp + "_binding", lifetime_regions[lr_i].binding);
+        fs.writeFile(lrp + "_base", lifetime_regions[lr_i].base);
+        let mut lr_mut_val -> string = "0";
+        if lifetime_regions[lr_i].mutable { lr_mut_val = "1"; }
+        fs.writeFile(lrp + "_mutable", lr_mut_val);
+        fs.writeFile(lrp + "_scope_id", lifetime_regions[lr_i].scope_id);
+        fs.writeFile(lrp + "_scope_depth", number_to_string(lifetime_regions[lr_i].scope_depth));
+        fs.writeFile(lrp + "_base_scope_id", lifetime_regions[lr_i].base_scope_id);
+        fs.writeFile(lrp + "_base_scope_depth", number_to_string(lifetime_regions[lr_i].base_scope_depth));
+        fs.writeFile(lrp + "_end_scope_id", lifetime_regions[lr_i].end_scope_id);
+        fs.writeFile(lrp + "_end_scope_depth", number_to_string(lifetime_regions[lr_i].end_scope_depth));
+        let mut lr_rel_val -> string = "0";
+        if lifetime_regions[lr_i].released { lr_rel_val = "1"; }
+        fs.writeFile(lrp + "_released", lr_rel_val);
+        lr_i = lr_i + 1;
+    }
 }
 
 fn _parse_int_from_string(text -> string) -> number {
@@ -559,7 +643,7 @@ fn lower_instruction_range(
             // The v0.1.1 seed generates unconditional `br label %loop.body` for
             // loop.header20, meaning `break` never actually exits. Using `return`
             // instead bypasses the broken loop header entirely.
-            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants);
+            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, index, current_mutations, collected_lifetime_regions);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -590,7 +674,7 @@ fn lower_instruction_range(
                 );
             }
             // Return directly (same loop-break workaround as index>=end case)
-            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants);
+            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, index, current_mutations, collected_lifetime_regions);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -1101,6 +1185,13 @@ fn lower_instruction_range(
                 scope_depth,
                 active_label
             );
+            // Cross-module ABI: scalar fields are corrupted; read from file IPC instead.
+            let _if_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+            let _if_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+            let _if_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+            let _if_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+            let _if_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+            let _if_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
             if debug_lowering {
                 print("emit-llvm: lir post_if fn=" + function.name + " index=" + number_to_string(index) + " depth=" + number_to_string(scope_depth));
             }
@@ -1115,15 +1206,15 @@ fn lower_instruction_range(
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
             current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
+            current_temp = _if_temp;
+            current_block_counter = _if_blkctr;
+            current_next_local = _if_nextloc;
+            current_next_region = _if_nextreg;
             current_mutations = extend_mutations(current_mutations, lowered.mutations);
             let temp_constants = collected_string_constants;
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
+            terminated = _if_term;
+            index = _if_nextidx;
             active_label = find_last_label(current_lines, active_label);
             if terminated {
                 break;
@@ -1160,6 +1251,13 @@ fn lower_instruction_range(
                 scope_depth,
                 active_label
             );
+            // Cross-module ABI: scalar fields are corrupted; read from file IPC instead.
+            let _lp_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+            let _lp_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+            let _lp_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+            let _lp_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+            let _lp_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+            let _lp_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
             let mut _ci1 -> number = 0;
             loop {
                 if _ci1 >= lowered.diagnostics.length { break; }
@@ -1171,15 +1269,15 @@ fn lower_instruction_range(
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
             current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
+            current_temp = _lp_temp;
+            current_block_counter = _lp_blkctr;
+            current_next_local = _lp_nextloc;
+            current_next_region = _lp_nextreg;
             current_mutations = extend_mutations(current_mutations, lowered.mutations);
             let temp_constants = collected_string_constants;
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
+            terminated = _lp_term;
+            index = _lp_nextidx;
             active_label = find_last_label(current_lines, active_label);
             if terminated {
                 break;
@@ -1222,15 +1320,22 @@ fn lower_instruction_range(
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
             current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
+            // Cross-module ABI: scalar fields corrupted; read from file IPC.
+            let _ma_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+            let _ma_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+            let _ma_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+            let _ma_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+            let _ma_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+            let _ma_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+            current_temp = _ma_temp;
+            current_block_counter = _ma_blkctr;
+            current_next_local = _ma_nextloc;
+            current_next_region = _ma_nextreg;
             current_mutations = extend_mutations(current_mutations, lowered.mutations);
             let temp_constants = collected_string_constants;
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
+            terminated = _ma_term;
+            index = _ma_nextidx;
             active_label = find_last_label(current_lines, active_label);
             if terminated {
                 break;
@@ -1273,15 +1378,22 @@ fn lower_instruction_range(
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
             current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
+            // Cross-module ABI: scalar fields corrupted; read from file IPC.
+            let _tr_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+            let _tr_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+            let _tr_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+            let _tr_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+            let _tr_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+            let _tr_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+            current_temp = _tr_temp;
+            current_block_counter = _tr_blkctr;
+            current_next_local = _tr_nextloc;
+            current_next_region = _tr_nextreg;
             current_mutations = extend_mutations(current_mutations, lowered.mutations);
             let temp_constants = collected_string_constants;
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
+            terminated = _tr_term;
+            index = _tr_nextidx;
             active_label = find_last_label(current_lines, active_label);
             if terminated {
                 break;
@@ -1311,7 +1423,8 @@ fn lower_instruction_range(
                 _ci4 += 1;
             }
             current_lines = lowered.lines;
-            current_temp = lowered.temp_index;
+            // Cross-module ABI: temp_index corrupted; read from file IPC.
+            current_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
             let temp_constants = collected_string_constants;
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             terminated = true;
@@ -1397,15 +1510,22 @@ fn lower_instruction_range(
             current_allocas = lowered.allocas;
             current_locals = lowered.locals;
             current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
+            // Cross-module ABI: scalar fields corrupted; read from file IPC.
+            let _fo_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+            let _fo_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+            let _fo_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+            let _fo_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+            let _fo_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+            let _fo_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+            current_temp = _fo_temp;
+            current_block_counter = _fo_blkctr;
+            current_next_local = _fo_nextloc;
+            current_next_region = _fo_nextreg;
             current_mutations = extend_mutations(current_mutations, lowered.mutations);
             let temp_constants = collected_string_constants;
             collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
+            terminated = _fo_term;
+            index = _fo_nextidx;
             active_label = find_last_label(current_lines, active_label);
             if terminated {
                 break;
@@ -1455,7 +1575,7 @@ fn lower_instruction_range(
             print("emit-llvm: pre-write-block line[0]=" + current_lines[0]);
         }
     }
-    _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants);
+    _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, index, current_mutations, collected_lifetime_regions);
 
     return BlockLoweringResult {
         lines: current_lines,
