@@ -20,7 +20,7 @@ The specification is organized in two parts:
 
 ### §1 Lexical Structure
 
-**Identifiers** begin with a letter and may contain ASCII letters, digits, or `_`.
+**Identifiers** begin with a letter or `_` and may contain ASCII letters, digits, or `_`.
 Identifiers are case-sensitive. Reserved keywords may not be used as identifiers.
 
 **Keywords** — see [Keywords Reference](/docs/reference/keywords) for the full list with descriptions.
@@ -46,7 +46,7 @@ Time literals (`1s`, `150ms`) are **not yet parsed** — use numeric millisecond
 **Effect annotations** — `![effect, ...]` after a function/test/pipeline signature:
 
 ```sfn
-fn fetch(url: String) -> String ![io, net] { ... }
+fn fetch(url: string) -> string ![io, net] { ... }
 ```
 
 ### §2 Modules and Imports
@@ -73,8 +73,8 @@ Modules may re-export items from other modules. Specifiers support aliasing with
 
 ```sfn
 let name = "Sailfin";             // immutable, type inferred
-let x: Int = 42;                  // immutable, explicit type
-let x -> Int = 42;                // alternative annotation syntax
+let x: int = 42;                  // immutable, explicit type
+let x -> int = 42;                // alternative annotation syntax
 let mut counter = 0;              // mutable
 counter = counter + 1;            // OK
 // name = "Other";                // ERROR: immutable binding
@@ -86,19 +86,19 @@ Uninitialized bindings default to `null`.
 #### §3.2 Functions
 
 ```sfn
-fn add(x: Int, y: Int) -> Int {
+fn add(x: int, y: int) -> int {
     return x + y;
 }
 
-fn greet(name: String) -> String {
+fn greet(name: string) -> string {
     return "Hello, {{ name }}!";   // implicit return also works
 }
 
-fn save(path: String, data: String) ![io] {
+fn save(path: string, data: string) ![io] {
     fs.write(path, data);
 }
 
-async fn fetch(url: String) -> String ![net] {
+async fn fetch(url: string) -> string ![net] {
     // await is planned — see Part B
     return http.get(url);
 }
@@ -107,7 +107,7 @@ async fn fetch(url: String) -> String ![net] {
 - Effect annotations `![...]` come after the parameter list and optional return type
 - `async fn` records the `is_async` flag; `await` is not yet parsed (Part B)
 - Decorators `@name` are parsed as metadata (no semantic enforcement today)
-- Default parameter values: `fn f(x: Int = 0)`
+- Default parameter values: `fn f(x: int = 0)`
 - Generic functions: `fn first<T>(items: Vec<T>) -> T?`
 
 #### §3.3 Structs
@@ -119,14 +119,14 @@ struct Point {
 }
 
 struct User implements Greeter {
-    id   -> Int;
-    name -> String;
+    id   -> int;
+    name -> string;
 
-    fn greet(self) -> String {
+    fn greet(self) -> string {
         return "Hi, {{ self.name }}!";
     }
 
-    fn rename(&mut self, new_name: String) {
+    fn rename(&mut self, new_name: string) {
         self.name = new_name;
     }
 }
@@ -144,9 +144,9 @@ struct User implements Greeter {
 enum Direction { North, South, East, West }
 
 enum Response {
-    Ok { value -> String },
+    Ok { value -> string },
     NotFound,
-    Error { code -> Int, message -> String },
+    Error { code -> int, message -> string },
 }
 ```
 
@@ -157,12 +157,12 @@ matched exhaustively with `match`.
 
 ```sfn
 interface Serializable {
-    fn serialize(self) -> String;
+    fn serialize(self) -> string;
 }
 
 interface Container<T> {
-    fn get(self, index: Int) -> T?;
-    fn len(self) -> Int;
+    fn get(self, index: int) -> T?;
+    fn len(self) -> int;
 }
 ```
 
@@ -172,7 +172,7 @@ by implementing all its methods and declaring `implements InterfaceName`.
 #### §3.6 Type Aliases
 
 ```sfn
-type UserId = String;
+type UserId = string;
 type Result<T> = Response | T;
 type Matrix = Vec<Vec<Float>>;
 ```
@@ -208,7 +208,7 @@ model Summarizer : Model<Text, Summary> {
 > No network calls are made — prompt execution is planned post-1.0.
 
 ```sfn
-fn summarize(doc: String) -> Summary ![model] {
+fn summarize(doc: string) -> Summary ![model] {
     prompt system { "You are a precise technical summarizer." }
     prompt user   { "Summarize:\n{{ doc }}" }
     // Summarizer.call() — execution planned
@@ -223,7 +223,7 @@ Prompt blocks execute in source order. Canonical channel names: `system`, `user`
 > **Status**: Parsed as plain functions. The `|>` operator is not yet implemented.
 
 ```sfn
-pipeline process_docs(docs: Vec<String>) ![io] {
+pipeline process_docs(docs: Vec<string>) ![io] {
     // Use function calls until |> is implemented
     let chunked = chunk(docs);
     let embedded = embed(chunked);
@@ -236,7 +236,7 @@ pipeline process_docs(docs: Vec<String>) ![io] {
 > **Status**: Parsed and recorded as metadata. No dispatcher yet.
 
 ```sfn
-tool FetchUser(id: String) -> User ![net] {
+tool FetchUser(id: string) -> User ![net] {
     return http.get("/users/{{ id }}");
 }
 ```
@@ -288,7 +288,7 @@ let result = loop {
     }
 };
 
-// Match
+// Match — see stability note below
 match status {
     "active"  => activate(),
     "paused"  => pause(),
@@ -308,6 +308,8 @@ try {
 ```
 
 **Assignment operators**: `=`, `+=`, `-=`, `*=`, `/=`
+
+> **Note on `match` stability**: `match` is parsed and emits IR, but LLVM lowering of common match patterns (number literals, enum variants) may trigger crashes or incorrect codegen in the current compiler. String pattern matching (as shown above) is more reliable. Move complex match expressions to Part B patterns or use `if`/`else if` chains until lowering stabilizes.
 
 ### §5 Expressions and Operators
 
@@ -371,10 +373,10 @@ Operator precedence: unary > multiplicative > additive > comparison > equality >
 Every function that performs side effects must declare them with `![...]`:
 
 ```sfn
-fn pure(x: Int) -> Int { x * 2 }           // no effects — guaranteed pure
-fn read_file(path: String) ![io] { ... }    // requires io capability
-fn fetch(url: String) ![net] { ... }        // requires net capability
-fn analyze(text: String) ![io, model] { }  // multiple effects
+fn pure(x: int) -> int { x * 2 }           // no effects — guaranteed pure
+fn read_file(path: string) ![io] { ... }    // requires io capability
+fn fetch(url: string) ![net] { ... }        // requires net capability
+fn analyze(text: string) ![io, model] { }  // multiple effects
 ```
 
 **Canonical effects**:
@@ -397,6 +399,8 @@ fn analyze(text: String) ![io, model] { }  // multiple effects
 See [Effect System Reference](/docs/reference/effects) for the complete API surface per effect.
 
 ### §8 Pattern Matching
+
+> **Note**: `match` is parsed by the compiler and emits IR, but LLVM lowering of numeric and enum variant patterns may be unreliable in the current release. String and wildcard patterns are more stable. See the stability note in §4.
 
 ```sfn
 match value {
@@ -479,12 +483,12 @@ are tracked as 1.0 or post-1.0 milestones in [`docs/roadmap.md`](https://github.
 ```sfn
 // All of these are planned — not yet parsed by the compiler
 
-async fn fetch(url: String) -> String ![net] {
+async fn fetch(url: string) -> string ![net] {
     return await http.get(url);   // await not yet implemented
 }
 
 fn process_batch(items: Vec<Item>) ![io] {
-    let messages: Channel<String> = channel(capacity: 32);
+    let messages: Channel<string> = channel(capacity: 32);
 
     routine {                      // routine not yet implemented
         messages.send("hello");
@@ -501,7 +505,7 @@ fn process_batch(items: Vec<Item>) ![io] {
 ```sfn
 // model.call() parses today but performs no execution
 
-fn summarize(text: String) -> Summary ![io, model] {
+fn summarize(text: string) -> Summary ![io, model] {
     prompt system { "You are a precise summarizer." }
     prompt user   { "Summarize: {{ text }}" }
     let gen = Summarizer.call();   // planned: executes against model provider
@@ -517,7 +521,7 @@ fn summarize(text: String) -> Summary ![io, model] {
 ```sfn
 // |> is not yet implemented; use function calls
 
-pipeline index_corpus(docs: Vec<String>) ![io, gpu] {
+pipeline index_corpus(docs: Vec<string>) ![io, gpu] {
     docs
         |> chunk(by: "semantic", target_tokens: 512)   // planned
         |> embed(with: "e5-large")

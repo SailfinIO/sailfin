@@ -176,9 +176,10 @@ AssertStatement    = "assert" Expression ";" ;
 IfStatement        = "if" Expression Block [ "else" ( IfStatement | Block ) ] ;
 
 MatchStatement     = "match" Expression "{" { MatchCase [ "," ] } "}" ;
-MatchCase          = Pattern [ "if" Expression ] "->"
+MatchCase          = Pattern [ "if" Expression ] MatchSeparator
                      ( Block | InlineExpression ) ;
 InlineExpression   = Expression [ ";" ] ;
+MatchSeparator     = "=>" | "->" ;
 
 TryStatement       = "try" Block [ "catch" [ "(" Identifier ")" ] Block ]
                      [ "finally" Block ] ;
@@ -205,7 +206,7 @@ ExpressionStatement = Expression ";" ;
 
 ```ebnf
 PromptStatement    = "prompt" PromptChannel Block ;
-PromptChannel      = Identifier ;
+PromptChannel      = Identifier | StringLiteral ;
 ```
 
 Canonical channel names are `system`, `user`, `assistant`, and `tool`. Any identifier is accepted; channel vocabulary enforcement is planned.

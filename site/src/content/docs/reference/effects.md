@@ -7,7 +7,7 @@ order: 4
 
 ## Overview
 
-The effect system is a compile-time capability mechanism. Every function declares what side effects it may perform via `![effect, ...]` annotations on its signature, and the compiler enforces these declarations transitively across the entire call graph. A function that calls any operation requiring effect `E` must declare `E`; failing to do so is a compile error, not a warning. This makes side effects explicit, auditable, and verifiable without runtime overhead.
+The effect system is a compile-time capability mechanism. Every function declares what side effects it may perform via `![effect, ...]` annotations on its signature, and the compiler currently enforces these declarations based on direct usage of effectful operations (e.g., filesystem, printing, HTTP, `prompt` blocks). A function that directly performs any operation requiring effect `E` must declare `E`; failing to do so is a compile error, not a warning. Call-graph–transitive enforcement based on callee signatures is planned but not yet implemented. This makes direct side effects explicit, auditable, and verifiable without runtime overhead.
 
 ---
 
@@ -30,23 +30,23 @@ Effect annotations appear after the parameter list and optional return type, bef
 
 ```sfn
 // No effects declared — guaranteed pure
-fn pure_fn(x: Int) -> Int {
+fn pure_fn(x: int) -> int {
     x * 2
 }
 
 // Single effect
-fn log_value(x: Int) ![io] {
+fn log_value(x: int) ![io] {
     print(x);
 }
 
 // Multiple effects
-fn fetch_and_log(url: String) ![io, net] {
+fn fetch_and_log(url: string) ![io, net] {
     let body = http.get(url);
     print(body);
 }
 
 // Full signature with return type and multiple effects
-fn fetch_order(url: String) -> String ![io, net, model] {
+fn fetch_order(url: string) -> string ![io, net, model] {
     // ...
 }
 ```
@@ -57,12 +57,12 @@ Effect tokens are comma-separated within `![...]`. Order within the list is not 
 
 ## Enforcement Rules
 
-1. A function that calls an operation requiring effect `E` must declare `E`.
-2. If function `A` calls function `B`, `A` must declare every effect `B` declares (transitive closure over the call graph).
+1. A function that directly calls an operation requiring effect `E` must declare `E`.
+2. Call-graph–transitive enforcement (where calling function `A` must declare every effect that callee `B` declares) is **planned** but not yet implemented. The current checker enforces direct-usage rules only.
 3. Test blocks follow the same rules as functions — a test that performs IO must declare `![io]`.
 4. Closures inherit the effect scope of their enclosing function; a closure defined inside an `![io]` function may call IO operations without redeclaring the effect.
 5. Missing effects are a **compile error**, not a warning. The build will not proceed.
-6. The compiler emits fix-it hints suggesting the corrected function signature alongside every missing-effect diagnostic.
+6. The compiler emits missing-effect diagnostics with textual hints describing how to update the function signature; automatic signature rewrite fix-its are planned tooling.
 
 ---
 
@@ -109,7 +109,7 @@ Required for any function containing a `prompt` block. Model execution via `.cal
 | `model.call()` | Planned — parses today, does not execute |
 
 ```sfn
-fn summarize(text: String) -> String ![model] {
+fn summarize(text: string) -> string ![model] {
     prompt user {
         "Summarize the following: {{ text }}"
     }
@@ -151,29 +151,24 @@ Declared in signatures and parsed by the compiler but not yet checked at call si
 
 ## Diagnostic Format
 
-When a required effect is missing, the compiler emits an error with a source span and a fix-it hint:
+When a required effect is missing, the compiler emits an error with a textual hint:
 
 ```
-error[E0301]: function `process` calls `fetch` which requires ![net],
-              but `process` only declares ![io]
+error[effects.missing]: function `process` uses `![net]` operation but does not declare net
   --> src/main.sfn:12:5
    |
-12 |     let data = fetch(url);
-   |                ^^^^^ requires ![net]
-   |
-   = help: add `net` to the effect list: `fn process(url: String) ![io, net]`
+   = hint: add `net` to the effect list of `process`
 ```
 
 Diagnostic fields:
 
 | Field | Description |
 |-------|-------------|
-| Error code | `E0301` — missing effect declaration |
+| Error code | `effects.missing` — missing effect declaration |
 | Calling function | The function whose signature is incomplete |
-| Called function | The function that requires the missing effect |
 | Effect required | The specific effect token that must be added |
-| Source span | File, line, and column of the offending call site |
-| Fix-it hint | The corrected function signature |
+| Source location | File and approximate location of the diagnostic |
+| Hint | Textual description of the required signature change (automatic rewrite fix-its are planned) |
 
 ---
 
@@ -184,7 +179,7 @@ Declare the narrowest set of effects possible. Functions that mix pure computati
 ```sfn
 // Preferred: pure logic separated from IO
 fn compute_total(items: List<Item>) -> Float {
-    items.map(|i| i.price).sum()
+    items.map(fn(i) -> Float { i.price }).sum()
 }
 
 fn print_total(items: List<Item>) ![io] {

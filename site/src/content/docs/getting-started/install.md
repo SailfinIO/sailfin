@@ -20,16 +20,15 @@ use the Linux install path.
 
 ### LLVM
 
-LLVM 17+ is required by the Sailfin compiler. **The installer bundles a compatible
-LLVM build** — you do not need to install LLVM separately unless you are building
-the compiler from source. When building from source, see the
-[Building from source](#building-from-source) section below.
+LLVM 17+ is required by the Sailfin compiler. **The installer and release binaries do not bundle LLVM/clang** — you must have them installed on your system even when installing via the script. If you are building the compiler from source, see the [Building from source](#building-from-source) section below for additional details.
 
-### C linker
+### C toolchain / linker
 
-A C linker (`gcc` or `clang`) is needed **only when building from source** on
-Linux or macOS. Users installing via the script or downloading a release binary
-do not need a C linker.
+To install Sailfin via the script or a prebuilt release binary, you do **not** need a C toolchain; the installer does not invoke `gcc` or `clang`.
+
+However, the Sailfin CLI uses a C toolchain (typically `clang` plus a system linker) to produce native executables. If you plan to compile, run, or test Sailfin programs on Linux or macOS, you must have a working `clang`/LLVM toolchain installed.
+
+A C linker is also required when building the Sailfin compiler itself from source. See [Building from source](#building-from-source) for details.
 
 ---
 
@@ -272,10 +271,10 @@ You can also run the binary directly without installing:
 build/native/sailfin --version
 ```
 
-> **Note:** `make compile` uses the Python stabilization script
-> (`scripts/selfhost_native.py`) by default. This is the same build path used in
-> CI. The pure shell build (`scripts/build.sh`) is the 1.0 target and does not yet
-> succeed.
+> **Note:** `make compile` uses the shell build driver by default
+> (`BUILD_DRIVER=sh`), which runs `scripts/build.sh`. To match CI's Python
+> self-host path (`scripts/selfhost_native.py`), set `BUILD_DRIVER=py`, for
+> example: `BUILD_DRIVER=py make compile`.
 
 ---
 

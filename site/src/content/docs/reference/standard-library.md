@@ -22,7 +22,7 @@ The prelude (`runtime/prelude.sfn`) is automatically available in every Sailfin 
 Write a value to stdout followed by a newline. Accepts any type; non-string values are converted to their debug representation.
 
 ```sfn
-fn greet(name: String) ![io] {
+fn greet(name: string) ![io] {
     print("Hello, " + name + "!");
 }
 ```
@@ -32,7 +32,7 @@ fn greet(name: String) ![io] {
 Write a value to stderr followed by a newline. Use for diagnostics, errors, and warnings that should not mix with normal stdout output.
 
 ```sfn
-fn validate(path: String) -> Boolean ![io] {
+fn validate(path: string) -> boolean ![io] {
     if path.length == 0 {
         print.err("validation error: path must not be empty");
         return false;
@@ -58,7 +58,7 @@ The following functions are still recognized by the runtime for backward compati
 
 These functions operate on Sailfin strings using Unicode grapheme clusters as the unit of indexing. "Index" always means a grapheme-cluster index, not a byte offset or code-unit index.
 
-#### `substring(text: String, start: Int, end: Int) -> String`
+#### `substring(text: string, start: int, end: int) -> string`
 
 Extract the substring from grapheme index `start` (inclusive) to `end` (exclusive). Both bounds are clamped to `[0, text.length]`. Returns `""` when the resulting range is empty or inverted.
 
@@ -77,7 +77,7 @@ let clamped = substring(s, 0, 999); // "Hello, world!" (end clamped)
 
 ---
 
-#### `find_char(text: String, character: String, start: Int = 0) -> Int`
+#### `find_char(text: string, character: string, start: int = 0) -> int`
 
 Find the first occurrence of a single grapheme `character` in `text`, beginning the search at grapheme index `start`. Returns the index of the first match, or `-1` if not found.
 
@@ -100,7 +100,7 @@ let missing = find_char("abc", "z");       // -1
 
 ---
 
-#### `grapheme_count(text: String) -> Int`
+#### `grapheme_count(text: string) -> int`
 
 Return the number of Unicode grapheme clusters in `text`. For ASCII strings this equals the byte length. For strings containing multi-byte characters, emoji, or combined sequences this may differ from `.length`.
 
@@ -119,7 +119,7 @@ grapheme_count(empty);       // 0
 
 ---
 
-#### `grapheme_at(text: String, index: Int) -> String`
+#### `grapheme_at(text: string, index: int) -> string`
 
 Return the grapheme cluster at the given index. Returns `""` for an out-of-range index (negative or beyond the end of the string). Never panics.
 
@@ -132,7 +132,7 @@ grapheme_at(s, 99); // ""
 
 ---
 
-#### `char_code(character: String) -> Int`
+#### `char_code(character: string) -> int`
 
 Return the Unicode code point of the first grapheme cluster in `character`. Returns `-1` for an empty string or an invalid input.
 
@@ -147,7 +147,7 @@ char_code("");     // -1
 
 ---
 
-#### `strings_equal(left: String, right: String) -> Boolean`
+#### `strings_equal(left: string, right: string) -> boolean`
 
 Return `true` if two strings have the same length and each grapheme cluster matches at every position. This performs a grapheme-by-grapheme comparison using `char_code` internally.
 
@@ -160,7 +160,7 @@ strings_equal("hello", "Hello");  // false
 
 ---
 
-#### `clamp(value: Int, minimum: Int, maximum: Int) -> Int`
+#### `clamp(value: int, minimum: int, maximum: int) -> int`
 
 Return `value` clamped to the range `[minimum, maximum]`. Works with both integers and floating-point numbers.
 
@@ -174,7 +174,7 @@ clamp(15, 0, 10);   // 10
 
 ### Struct and Debug Utilities
 
-#### `struct_field(name: String, value: any) -> StructField`
+#### `struct_field(name: string, value: any) -> StructField`
 
 Construct a `StructField` record with a name and a value. Used as a building block for `struct_repr`.
 
@@ -182,17 +182,17 @@ Construct a `StructField` record with a name and a value. Used as a building blo
 let field = struct_field("age", 30);
 ```
 
-#### `struct_repr(name: String, fields: StructField[]) -> String`
+#### `struct_repr(name: string, fields: StructField[]) -> string`
 
 Produce a human-readable debug representation of a struct. The output format is `Name(field1=value1, field2=value2, ...)`.
 
 ```sfn
 struct Point {
-    x -> Int;
-    y -> Int;
+    x -> int;
+    y -> int;
 }
 
-fn point_repr(p: Point) -> String {
+fn point_repr(p: Point) -> string {
     return struct_repr("Point", [
         struct_field("x", p.x),
         struct_field("y", p.y),
@@ -202,7 +202,7 @@ fn point_repr(p: Point) -> String {
 // point_repr(Point { x: 3, y: 7 }) => "Point(x=3, y=7)"
 ```
 
-#### `to_debug_string(value: any) -> String`
+#### `to_debug_string(value: any) -> string`
 
 Convert any value to its debug string representation. Used internally by `struct_repr` and string interpolation.
 
@@ -219,7 +219,7 @@ to_debug_string("hello");  // "hello"
 
 These functions are used internally by the compiler-generated type guards. They are available in user code but are most commonly used via the `check_type` wrapper.
 
-#### `check_type(value: any, descriptor: String) -> Boolean`
+#### `check_type(value: any, descriptor: string) -> boolean`
 
 Return `true` if `value` conforms to the type described by the descriptor string. Descriptor syntax mirrors Sailfin type notation: `"string"`, `"number"`, `"boolean"`, `"string[]"`, `"string | null"`, etc.
 
@@ -247,7 +247,7 @@ You should not call this function directly. It appears in generated code and in 
 
 > **Status:** The concurrency primitives below are present in the prelude and parseable, but full structured-concurrency semantics are planned for a future release. `spawn` and `channel` are available today as runtime-level hooks; `routine`/`scope`/`await` are planned language keywords.
 
-#### `sleep(milliseconds: Int) ![clock]`
+#### `sleep(milliseconds: int) ![clock]`
 
 Suspend the current execution context for at least `milliseconds` milliseconds. Requires the `clock` effect.
 
@@ -257,7 +257,7 @@ fn wait_a_bit() ![clock] {
 }
 ```
 
-#### `monotonic_millis() -> Int ![clock]`
+#### `monotonic_millis() -> int ![clock]`
 
 Return the current value of a monotonic clock in milliseconds. Useful for measuring elapsed time. The absolute value is not meaningful; only differences between two calls are useful.
 
@@ -270,13 +270,13 @@ fn timed_operation() ![io, clock] {
 }
 ```
 
-#### `channel<T>(capacity: Int = 0) -> Channel<T> ![io]`
+#### `channel<T>(capacity: int = 0) -> Channel<T> ![io]`
 
 Create a buffered or unbuffered channel for passing values between concurrent tasks. `capacity = 0` produces an unbuffered (synchronous) channel. Requires the `io` effect.
 
 > **Planned:** Full channel API with typed send/receive operations. Current behavior delegates to the runtime channel primitive.
 
-#### `spawn(task: () -> void, name: String = "") -> void ![io]`
+#### `spawn(task: () -> void, name: string = "") -> void ![io]`
 
 Spawn a concurrent task. `name` is used for diagnostics. Requires the `io` effect.
 
@@ -287,8 +287,8 @@ Spawn a concurrent task. `name` is used for diagnostics. Requires the `io` effec
 Run an array of zero-argument callables concurrently and collect their return values. Requires the `io` effect.
 
 ```sfn
-fn fetch_all(urls: String[]) -> String[] ![io, net] {
-    let tasks = array_map(urls, fn(url: String) -> any {
+fn fetch_all(urls: string[]) -> string[] ![io, net] {
+    let tasks = array_map(urls, fn(url: string) -> any {
         return fn() -> any ![net] { return http.get(url); };
     });
     return parallel(tasks);
@@ -305,17 +305,17 @@ Apply `mapper` to each element and return a new array of results.
 
 ```sfn
 let numbers = [1, 2, 3, 4];
-let doubled = array_map(numbers, fn(n: Int) -> Int { return n * 2; });
+let doubled = array_map(numbers, fn(n: int) -> int { return n * 2; });
 // [2, 4, 6, 8]
 ```
 
-#### `array_filter(items: any[], predicate: (any) -> Boolean) -> any[]`
+#### `array_filter(items: any[], predicate: (any) -> boolean) -> any[]`
 
 Return a new array containing only the elements for which `predicate` returns `true`.
 
 ```sfn
 let numbers = [1, 2, 3, 4, 5];
-let evens = array_filter(numbers, fn(n: Int) -> Boolean { return n % 2 == 0; });
+let evens = array_filter(numbers, fn(n: int) -> boolean { return n % 2 == 0; });
 // [2, 4]
 ```
 
@@ -325,7 +325,7 @@ Fold `items` into a single value using `reducer`, starting from `initial`.
 
 ```sfn
 let numbers = [1, 2, 3, 4, 5];
-let sum = array_reduce(numbers, 0, fn(acc: Int, n: Int) -> Int { return acc + n; });
+let sum = array_reduce(numbers, 0, fn(acc: int, n: int) -> int { return acc + n; });
 // 15
 ```
 
@@ -335,23 +335,23 @@ let sum = array_reduce(numbers, 0, fn(acc: Int, n: Int) -> Int { return acc + n;
 
 These functions are generated by the compiler for enum types and are available for use in custom enum-handling code. They are primarily an implementation detail of the compiler's enum lowering.
 
-#### `enum_type(name: String) -> EnumType`
+#### `enum_type(name: string) -> EnumType`
 
 Create a new `EnumType` descriptor with no variants defined yet.
 
-#### `enum_define_variant(enum_type: EnumType, variant_name: String, field_names: String[]) -> EnumType`
+#### `enum_define_variant(enum_type: EnumType, variant_name: string, field_names: string[]) -> EnumType`
 
 Return a new `EnumType` with the named variant added.
 
-#### `enum_field(name: String, value: any) -> EnumField`
+#### `enum_field(name: string, value: any) -> EnumField`
 
 Construct a single `EnumField`.
 
-#### `enum_instantiate(enum_type: EnumType, variant_name: String, provided: EnumField[]) -> EnumInstance`
+#### `enum_instantiate(enum_type: EnumType, variant_name: string, provided: EnumField[]) -> EnumInstance`
 
 Create an `EnumInstance` for the named variant, filling in `null` for any fields not in `provided`.
 
-#### `enum_get_field(instance: EnumInstance, name: String) -> any`
+#### `enum_get_field(instance: EnumInstance, name: string) -> any`
 
 Look up a field value by name on an `EnumInstance`. Returns `null` if not found.
 
@@ -365,7 +365,7 @@ These structs are defined in the prelude and may appear in user-facing APIs or d
 
 ```sfn
 struct StructField {
-    name -> String;
+    name -> string;
     value -> any;
 }
 ```
@@ -374,7 +374,7 @@ struct StructField {
 
 ```sfn
 struct EnumField {
-    name -> String;
+    name -> string;
     value -> any;
 }
 ```
@@ -383,8 +383,8 @@ struct EnumField {
 
 ```sfn
 struct EnumVariantDefinition {
-    name -> String;
-    field_names -> String[];
+    name -> string;
+    field_names -> string[];
 }
 ```
 
@@ -392,7 +392,7 @@ struct EnumVariantDefinition {
 
 ```sfn
 struct EnumType {
-    name -> String;
+    name -> string;
     variants -> EnumVariantDefinition[];
 }
 ```
@@ -402,7 +402,7 @@ struct EnumType {
 ```sfn
 struct EnumInstance {
     type -> EnumType;
-    variant -> String;
+    variant -> string;
     fields -> EnumField[];
 }
 ```
@@ -411,8 +411,8 @@ struct EnumInstance {
 
 ```sfn
 struct TypeDescriptor {
-    kind -> String;
-    name -> String?;
+    kind -> string;
+    name -> string?;
     items -> TypeDescriptor[];
 }
 ```
@@ -427,12 +427,12 @@ The `fs` module provides filesystem access. All operations require the `![io]` e
 
 ---
 
-#### `fs.read(path: String) -> String ![io]`
+#### `fs.read(path: string) -> string ![io]`
 
 Read the entire contents of the file at `path` and return them as a string. Raises a runtime error if the file does not exist or cannot be read.
 
 ```sfn
-fn load_config(path: String) -> String ![io] {
+fn load_config(path: string) -> string ![io] {
     return fs.read(path);
 }
 ```
@@ -444,36 +444,36 @@ fn load_config(path: String) -> String ![io] {
 
 ---
 
-#### `fs.write(path: String, content: String) ![io]`
+#### `fs.write(path: string, content: string) ![io]`
 
 Write `content` to the file at `path`, creating the file if it does not exist and overwriting it completely if it does. Parent directories must already exist.
 
 ```sfn
-fn save_result(path: String, data: String) ![io] {
+fn save_result(path: string, data: string) ![io] {
     fs.write(path, data);
 }
 ```
 
 ---
 
-#### `fs.appendFile(path: String, content: String) ![io]`
+#### `fs.appendFile(path: string, content: string) ![io]`
 
 Append `content` to the file at `path`. If the file does not exist it is created. Existing content is preserved; the new content is added at the end.
 
 ```sfn
-fn log_to_file(path: String, message: String) ![io] {
+fn log_to_file(path: string, message: string) ![io] {
     fs.appendFile(path, message + "\n");
 }
 ```
 
 ---
 
-#### `fs.exists(path: String) -> Boolean ![io]`
+#### `fs.exists(path: string) -> boolean ![io]`
 
 Return `true` if a file or directory exists at `path`, `false` otherwise. Does not distinguish between files and directories.
 
 ```sfn
-fn ensure_config(path: String) ![io] {
+fn ensure_config(path: string) ![io] {
     if !fs.exists(path) {
         fs.write(path, "{}");
     }
@@ -482,12 +482,12 @@ fn ensure_config(path: String) ![io] {
 
 ---
 
-#### `fs.writeLines(path: String, lines: String[]) ![io]`
+#### `fs.writeLines(path: string, lines: string[]) ![io]`
 
 Write an array of strings to `path`, one per line, overwriting any existing file. Each element is written with a trailing newline.
 
 ```sfn
-fn write_report(path: String, lines: String[]) ![io] {
+fn write_report(path: string, lines: string[]) ![io] {
     fs.writeLines(path, lines);
 }
 ```
@@ -498,12 +498,12 @@ fn write_report(path: String, lines: String[]) ![io] {
 
 The following filesystem helpers are planned for a future release and are not available today:
 
-- `fs.readLines(path: String) -> String[] ![io]` — read file as an array of lines
-- `fs.delete(path: String) ![io]` — delete a file
-- `fs.listDir(path: String) -> String[] ![io]` — list directory contents
-- `fs.makeDir(path: String) ![io]` — create a directory (and parents)
-- `fs.move(src: String, dst: String) ![io]` — rename or move a file
-- `fs.copy(src: String, dst: String) ![io]` — copy a file
+- `fs.readLines(path: string) -> string[] ![io]` — read file as an array of lines
+- `fs.delete(path: string) ![io]` — delete a file
+- `fs.listDir(path: string) -> string[] ![io]` — list directory contents
+- `fs.makeDir(path: string) ![io]` — create a directory (and parents)
+- `fs.move(src: string, dst: string) ![io]` — rename or move a file
+- `fs.copy(src: string, dst: string) ![io]` — copy a file
 
 ---
 
@@ -513,12 +513,12 @@ The `http` module provides outbound HTTP client functionality. All operations re
 
 ---
 
-#### `http.get(url: String) -> Response ![net]`
+#### `http.get(url: string) -> Response ![net]`
 
 Perform an HTTP GET request to `url` and return a `Response`. Blocks until the response is received or the request fails.
 
 ```sfn
-fn fetch_json(url: String) -> String ![net] {
+fn fetch_json(url: string) -> string ![net] {
     let response = http.get(url);
     return response.body;
 }
@@ -526,12 +526,12 @@ fn fetch_json(url: String) -> String ![net] {
 
 ---
 
-#### `http.post(url: String, body: String) -> Response ![net]`
+#### `http.post(url: string, body: string) -> Response ![net]`
 
 Perform an HTTP POST request to `url` with the given string `body`. Returns a `Response`. The `Content-Type` is not set automatically; include it in a custom header when required (see planned headers API below).
 
 ```sfn
-fn submit(url: String, payload: String) -> String ![net] {
+fn submit(url: string, payload: string) -> string ![net] {
     let response = http.post(url, payload);
     return response.body;
 }
@@ -545,8 +545,8 @@ The `Response` object returned by `http.get` and `http.post` has the following f
 
 | Field | Type | Description |
 |---|---|---|
-| `body` | `String` | Response body as a UTF-8 string |
-| `status` | `Int` | HTTP status code (e.g. `200`, `404`) |
+| `body` | `string` | Response body as a UTF-8 string |
+| `status` | `int` | HTTP status code (e.g. `200`, `404`) |
 
 > **Note:** The full response shape (headers, streaming body, redirect policy, timeouts) is planned. The current `Response` exposes `body` and `status` only.
 
@@ -579,24 +579,24 @@ All `log` functions require the `![io]` effect.
 
 ---
 
-#### `log.info(message: String) ![io]`
+#### `log.info(message: string) ![io]`
 
 Write an informational message to stdout with an `[INFO]` prefix. Use for routine operational messages.
 
 ```sfn
-fn start_server(port: Int) ![io] {
+fn start_server(port: int) ![io] {
     log.info("Server starting on port " + port);
 }
 ```
 
 ---
 
-#### `log.warn(message: String) ![io]`
+#### `log.warn(message: string) ![io]`
 
 Write a warning message to **stderr** with a `[WARN]` prefix. Use when something unexpected occurred but execution can continue.
 
 ```sfn
-fn load_optional(path: String) -> String ![io] {
+fn load_optional(path: string) -> string ![io] {
     if !fs.exists(path) {
         log.warn("optional config not found: " + path);
         return "";
@@ -607,12 +607,12 @@ fn load_optional(path: String) -> String ![io] {
 
 ---
 
-#### `log.error(message: String) ![io]`
+#### `log.error(message: string) ![io]`
 
 Write an error message to **stderr** with an `[ERROR]` prefix. Use for failures that require attention.
 
 ```sfn
-fn connect(host: String) ![io, net] {
+fn connect(host: string) ![io, net] {
     let response = http.get("http://" + host + "/health");
     if response.status != 200 {
         log.error("health check failed: status " + response.status);
@@ -622,12 +622,12 @@ fn connect(host: String) ![io, net] {
 
 ---
 
-#### `log.debug(message: String) ![io]`
+#### `log.debug(message: string) ![io]`
 
 Write a debug message to stdout with a `[DEBUG]` prefix. Use for verbose diagnostic output that is typically suppressed in production. Whether debug output appears may be controlled by runtime log-level configuration in a future release.
 
 ```sfn
-fn parse_token(raw: String) -> String ![io] {
+fn parse_token(raw: string) -> string ![io] {
     log.debug("parsing token: " + raw);
     // ...
     return raw;
@@ -647,12 +647,12 @@ fn parse_token(raw: String) -> String ![io] {
 Vec<T>.new() -> Vec<T>
 Vec<T>.push(item: T) -> void
 Vec<T>.pop() -> T?
-Vec<T>.get(index: Int) -> T?
-Vec<T>.len() -> Int
-Vec<T>.is_empty() -> Boolean
-Vec<T>.contains(item: T) -> Boolean
-Vec<T>.remove(index: Int) -> T
-Vec<T>.slice(start: Int, end: Int) -> Vec<T>
+Vec<T>.get(index: int) -> T?
+Vec<T>.len() -> int
+Vec<T>.is_empty() -> boolean
+Vec<T>.contains(item: T) -> boolean
+Vec<T>.remove(index: int) -> T
+Vec<T>.slice(start: int, end: int) -> Vec<T>
 ```
 
 ### Planned `Map<K, V>`
@@ -662,11 +662,11 @@ Vec<T>.slice(start: Int, end: Int) -> Vec<T>
 Map<K, V>.new() -> Map<K, V>
 Map<K, V>.set(key: K, value: V) -> void
 Map<K, V>.get(key: K) -> V?
-Map<K, V>.has(key: K) -> Boolean
+Map<K, V>.has(key: K) -> boolean
 Map<K, V>.delete(key: K) -> void
 Map<K, V>.keys() -> K[]
 Map<K, V>.values() -> V[]
-Map<K, V>.len() -> Int
+Map<K, V>.len() -> int
 ```
 
 ### Planned `Set<T>`
@@ -675,9 +675,9 @@ Map<K, V>.len() -> Int
 // Planned API — not yet implemented
 Set<T>.new() -> Set<T>
 Set<T>.add(item: T) -> void
-Set<T>.has(item: T) -> Boolean
+Set<T>.has(item: T) -> boolean
 Set<T>.delete(item: T) -> void
-Set<T>.size() -> Int
+Set<T>.size() -> int
 ```
 
 ---
@@ -694,9 +694,9 @@ Random number generation. All functions require the `![rand]` effect.
 
 ```sfn
 // Planned — not yet implemented
-rand.int(min: Int, max: Int) -> Int ![rand]
+rand.int(min: int, max: int) -> int ![rand]
 rand.float() -> Float ![rand]          // uniform in [0.0, 1.0)
-rand.bool() -> Boolean ![rand]
+rand.bool() -> boolean ![rand]
 rand.shuffle<T>(items: T[]) -> T[] ![rand]
 rand.choice<T>(items: T[]) -> T? ![rand]
 ```
@@ -711,8 +711,8 @@ Wall-clock access and date/time utilities. The `sleep` and `monotonic_millis` pr
 // Planned — not yet implemented
 clock.now() -> Timestamp ![clock]
 clock.utc_now() -> Timestamp ![clock]
-Timestamp.unix_millis() -> Int
-Timestamp.format(pattern: String) -> String
+Timestamp.unix_millis() -> int
+Timestamp.format(pattern: string) -> string
 ```
 
 ---
@@ -723,13 +723,13 @@ Subprocess execution and process lifecycle. Requires `![io]`.
 
 ```sfn
 // Planned — not yet implemented
-process.exec(command: String) -> ProcessResult ![io]
-process.exit(code: Int) -> never ![io]
+process.exec(command: string) -> ProcessResult ![io]
+process.exit(code: int) -> never ![io]
 
 struct ProcessResult {
-    stdout -> String;
-    stderr -> String;
-    exit_code -> Int;
+    stdout -> string;
+    stderr -> string;
+    exit_code -> int;
 }
 ```
 
@@ -741,7 +741,7 @@ Structured concurrency primitives to complement the `routine`/`scope` keywords.
 
 ```sfn
 // Planned — not yet implemented
-channel<T>(capacity: Int = 0) -> Channel<T> ![io]
+channel<T>(capacity: int = 0) -> Channel<T> ![io]
 Channel<T>.send(value: T) -> void ![io]
 Channel<T>.recv() -> T ![io]
 Channel<T>.close() -> void ![io]
@@ -761,7 +761,7 @@ model MyModel {
     max_tokens: 1024;
 }
 
-fn classify(text: String) -> String ![model] {
+fn classify(text: string) -> string ![model] {
     prompt MyModel {
         user: "Classify the following: " + text;
     }
