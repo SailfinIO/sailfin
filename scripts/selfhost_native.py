@@ -7341,6 +7341,65 @@ def _fix_misplaced_continue_targets(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), fixes
 
 
+def _fix_null_struct_loads(llvm_ir: str) -> tuple[str, int]:
+    """Replace `bitcast i8* null to %T*` + `load %T, %T* %tmp` with zeroinitializer.
+
+    The seed compiler lowers nullable struct fields set to null by bitcasting
+    null to a typed pointer and loading from it — a null dereference that LLVM
+    turns into a trap instruction.  Replace the bitcast+load pair with a direct
+    use of zeroinitializer.
+    """
+    import re as _re_nsl
+    lines = llvm_ir.split("\n")
+    fixes = 0
+    i = 0
+    while i < len(lines) - 1:
+        line = lines[i].strip()
+        # Match: %tmp1 = bitcast i8* null to %TYPE*
+        m = _re_nsl.match(
+            r"(%[\w.]+)\s*=\s*bitcast\s+i8\*\s+null\s+to\s+(.+)\*\s*$", line
+        )
+        if m:
+            bitcast_reg = m.group(1)
+            struct_type = m.group(2).strip()
+            # Next line should be: %tmp2 = load %TYPE, %TYPE* %tmp1
+            next_line = lines[i + 1].strip()
+            m2 = _re_nsl.match(
+                r"(%[\w.]+)\s*=\s*load\s+" + _re_nsl.escape(struct_type)
+                + r",\s*" + _re_nsl.escape(struct_type) + r"\*\s+"
+                + _re_nsl.escape(bitcast_reg) + r"\s*$",
+                next_line,
+            )
+            if m2:
+                load_reg = m2.group(1)
+                indent = "  "
+                # Replace both lines: remove bitcast, make load_reg = zeroinitializer
+                # We can't assign zeroinitializer directly, so replace all uses
+                # of load_reg with zeroinitializer in subsequent lines.
+                lines[i] = indent + "; [fixup] removed: bitcast i8* null to " + struct_type + "*"
+                lines[i + 1] = indent + "; [fixup] removed: load from null pointer"
+                # Replace uses of load_reg with zeroinitializer.
+                # Use regex with a negative lookahead to avoid partial matches
+                # (e.g. %t55 matching inside %t552).
+                _esc_reg = _re_nsl.escape(load_reg)
+                _esc_type = _re_nsl.escape(struct_type)
+                _replace_pat = _re_nsl.compile(
+                    _esc_type + r"\s+" + _esc_reg + r"(?![0-9a-zA-Z_.])"
+                )
+                for j in range(i + 2, len(lines)):
+                    if load_reg in lines[j]:
+                        lines[j] = _replace_pat.sub(
+                            struct_type + " zeroinitializer", lines[j]
+                        )
+                fixes += 1
+                i += 2
+                continue
+        i += 1
+    if not fixes:
+        return llvm_ir, 0
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), fixes
+
+
 def _fix_unconditional_loop_headers(llvm_ir: str) -> tuple[str, int]:
     """Convert do-while loops to while loops by adding a zero-trip guard.
 
@@ -12840,6 +12899,28 @@ def main(argv: list[str]) -> int:
         if total_loop_fixes:
             print(
                 f"[selfhost] total unconditional loop header fixes: {total_loop_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix null-pointer loads for nullable struct fields ---
+        # The seed compiler lowers `field: null` for nullable struct types by
+        # emitting `bitcast i8* null to %Type*` + `load %Type, %Type* %temp`
+        # which is a null dereference (UB). LLVM optimizes subsequent code into
+        # trap (brk) instructions. Replace with zeroinitializer.
+        total_null_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], null_changes = _fix_null_struct_loads(ll_texts[idx])
+            if null_changes:
+                total_null_fixes += null_changes
+                print(
+                    f"[selfhost] fixed {null_changes} null-struct-load(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_null_fixes:
+            print(
+                f"[selfhost] total null-struct-load fixes: {total_null_fixes}",
                 file=sys.stderr,
                 flush=True,
             )

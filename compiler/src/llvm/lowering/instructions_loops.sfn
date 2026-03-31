@@ -174,6 +174,7 @@ import {
 import {
     allocate_block_label,
     lower_condition_to_i1,
+    sanitize_if_condition_text,
 } from "./instructions_match";
 
 import {
@@ -822,6 +823,28 @@ fn lower_loop_instruction(
     if debug_loop {
         print("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
     }
+
+    // Detect exit-condition-at-top pattern: loop { if COND { break; } ... }
+    // If the first instruction in the body is If, followed by Break, followed by EndIf,
+    // extract the condition so we can emit a conditional branch in the loop header.
+    let mut loop_exit_condition -> string = "";
+    if structure.body_start + 2 <= structure.body_end {
+        let first_body_tag = get_instruction_tag(function.instructions, structure.body_start);
+        if first_body_tag == 3 {
+            let second_body_tag = get_instruction_tag(function.instructions, structure.body_start + 1);
+            if second_body_tag == 10 {
+                let third_body_tag = get_instruction_tag(function.instructions, structure.body_start + 2);
+                if third_body_tag == 5 {
+                    let raw_exit_cond = trim_text(function.instructions[structure.body_start].condition);
+                    loop_exit_condition = sanitize_if_condition_text(raw_exit_cond);
+                    if debug_loop {
+                        print("emit-llvm: lower_loop detected exit condition: " + loop_exit_condition);
+                    }
+                }
+            }
+        }
+    }
+
     let mut _ci6 -> number = 0;
     loop {
         if _ci6 >= structure.diagnostics.length { break; }
@@ -951,8 +974,39 @@ fn lower_loop_instruction(
 
     // Note: We'll generate phi nodes after we know the latch load values
 
-    // For a simple loop, always branch to body (no condition check)
-    current_lines.push("  br label %" + body_label);
+    // Emit header branch: conditional if we detected an exit condition at the
+    // top of the loop body, otherwise fall back to unconditional (original behavior).
+    if loop_exit_condition.length > 0 {
+        let header_cond = lower_condition_to_i1(
+            function.name,
+            loop_exit_condition,
+            bindings,
+            current_locals,
+            current_temp,
+            current_lines,
+            functions,
+            context
+        );
+        current_lines = header_cond.lines;
+        current_temp = header_cond.temp_index;
+        collected_string_constants = merge_string_constants(collected_string_constants, header_cond.string_constants);
+        let mut _hc_diag_idx -> number = 0;
+        loop {
+            if _hc_diag_idx >= header_cond.diagnostics.length { break; }
+            diagnostics.push(header_cond.diagnostics[_hc_diag_idx]);
+            _hc_diag_idx += 1;
+        }
+
+        if header_cond.operand != null {
+            current_lines.push("  br i1 " + header_cond.operand.value + ", label %" + exit_label + ", label %" + body_label);
+        } else {
+            // Condition lowering failed — fall back to unconditional
+            current_lines.push("  br label %" + body_label);
+        }
+    } else {
+        // No exit condition detected at top of loop body
+        current_lines.push("  br label %" + body_label);
+    }
     current_lines.push(body_label + ":");
 
     // Append body lines

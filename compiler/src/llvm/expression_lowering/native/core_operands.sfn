@@ -655,6 +655,12 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
             if starts_with(target, "%") { _if87 = true; }
             if starts_with(target, "{") { _if87 = true; }
             if _if87 {
+                // When the operand is null, use zeroinitializer instead of
+                // bitcast-null-to-ptr + load (which is a null dereference / UB).
+                if operand.value == "null" {
+                    let coerced = LLVMOperand { llvm_type: target, value: "zeroinitializer" };
+                    return CoercionResult { lines: current_lines, temp_index: temp_index, operand: coerced, diagnostics: diagnostics };
+                }
                 let typed_ptr_temp = format_temp_name(temp_index);
                 let load_temp = format_temp_name(temp_index + 1);
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + operand.value + " to " + target + "*");
