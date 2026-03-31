@@ -241,6 +241,20 @@ fn find_function_by_name_or_import_suffix(functions -> NativeFunction[], target 
     return match_result;
 }
 
+fn _write_call_result_lines(current_lines -> string[], current_temp -> number) ![io] {
+    if fs.exists("build/sailfin/.trace_lowering") {
+        print("call_lowering: _write_call_result_lines count=" + number_to_string(current_lines.length));
+    }
+    fs.writeFile("build/sailfin/.call_result_lines_count", number_to_string(current_lines.length));
+    let mut _wl_i -> number = 0;
+    loop {
+        if _wl_i >= current_lines.length { break; }
+        fs.writeFile("build/sailfin/.call_result_line_" + number_to_string(_wl_i), current_lines[_wl_i]);
+        _wl_i += 1;
+    }
+    fs.writeFile("build/sailfin/.call_result_temp", number_to_string(current_temp));
+}
+
 fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics -> string[] = [];
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
@@ -803,6 +817,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             function_entry = null;
         } else if _file_fn_found {
             trimmed_target = _file_fn_name;
+            function_entry = null;
             if _file_fn_is_async {
                 let future_return = future_pointer_type_for_return_type(_file_fn_return_type);
                 if future_return.length == 0 {
@@ -1097,6 +1112,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         print("call_lowering: post-coerce operands=" + number_to_string(operands.length));
     }
 
+    if _trace_ccl {
+        print("call_lowering: checkpoint-A is_concat=" + number_to_string(0) + " is_push=" + number_to_string(0));
+    }
     if is_array_concat {
         if array_concat_element_type.length > 0 {
             if !ends_with_pointer_suffix(array_concat_element_type) {
@@ -1160,23 +1178,38 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
     }
 
+    if _trace_ccl {
+        print("call_lowering: checkpoint-B fn_entry_null=" + number_to_string(0));
+    }
     let mut _if56 -> boolean = false;
     if function_entry != null { _if56 = true; }
     if helper_descriptor != null { _if56 = true; }
+    if _trace_ccl {
+        print("call_lowering: checkpoint-C _if56=" + number_to_string(0));
+    }
     if _if56 {
         if expected_params.length != operands.length {
             diagnostics.push("llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(operands.length));
         }
     }
 
+    if _trace_ccl {
+        print("call_lowering: checkpoint-D rendering args");
+    }
     let mut rendered_args -> string[] = [];
     index = 0;
     loop {
         if index >= operands.length {
             break;
         }
+        if _trace_ccl {
+            print("call_lowering: render-arg idx=" + number_to_string(index));
+        }
         rendered_args.push(format_typed_operand(operands[index]));
         index += 1;
+    }
+    if _trace_ccl {
+        print("call_lowering: checkpoint-E args rendered");
     }
     let argument_text = join_with_separator(rendered_args, ", ");
 
@@ -1282,24 +1315,47 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
     }
 
+    if _trace_ccl {
+        print("call_lowering: checkpoint-F call_symbol target=" + trimmed_target);
+    }
     let mut call_symbol = sanitize_symbol(trimmed_target);
     if helper_descriptor != null {
         call_symbol = helper_descriptor.symbol;
     }
+    if _trace_ccl {
+        print("call_lowering: checkpoint-G llvm_return=" + llvm_return + " call_symbol=" + call_symbol);
+    }
     if llvm_return == "void" {
         let call_line = "  call void @" + call_symbol + "(" + argument_text + ")";
         current_lines.push(call_line);
+        if _trace_ccl {
+            print("call_lowering: checkpoint-H void return");
+        }
+        // Serialize lines/temp to files — ExpressionResult gets ABI-corrupted crossing module boundaries
+        _write_call_result_lines(current_lines, current_temp);
+        fs.writeFile("build/sailfin/.call_result_type", "");
+        fs.writeFile("build/sailfin/.call_result_value", "");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let temp_name = format_temp_name(current_temp);
+    if _trace_ccl {
+        print("call_lowering: checkpoint-I temp_name=" + temp_name);
+    }
     let call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")";
     current_lines.push(call_line);
     let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
+    if _trace_ccl {
+        print("call_lowering: checkpoint-J writing result files");
+    }
     // Write call result metadata to files so callers can recover when
     // the ExpressionResult struct fields get corrupted crossing module boundaries.
+    _write_call_result_lines(current_lines, current_temp + 1);
     fs.writeFile("build/sailfin/.call_result_type", llvm_return);
     fs.writeFile("build/sailfin/.call_result_value", temp_name);
+    if _trace_ccl {
+        print("call_lowering: checkpoint-K returning");
+    }
     return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 

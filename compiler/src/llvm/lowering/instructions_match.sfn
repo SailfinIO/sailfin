@@ -2001,7 +2001,7 @@ fn lower_let_instruction(
     scope_id -> string,
     scope_depth -> number,
     current_label -> string
-) -> LetLoweringResult {
+) -> LetLoweringResult ![io] {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
     let mut current_allocas -> string[] = allocas;
@@ -2107,35 +2107,74 @@ fn lower_let_instruction(
     if _if230 {
         diagnostics.push("llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
+    if fs.exists("build/sailfin/.trace_lowering") {
+            print("let-lowering: pre-lower_expression name=" + instruction.name + " value=" + instruction.value);
+        }
     let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
+        if fs.exists("build/sailfin/.trace_lowering") {
+            print("let-lowering: post-lower_expression name=" + instruction.name);
+        }
+        // Read lines/temp from files to bypass ExpressionResult struct corruption
+        if fs.exists("build/sailfin/.call_result_type") {
+            if fs.exists("build/sailfin/.trace_lowering") {
+                print("let-lowering: call_result_type file exists");
+            }
+        }
+        if fs.exists("build/sailfin/.trace_lowering") {
+            print("let-lowering: accessing lowered.diagnostics");
+        }
         let mut _ci19 -> number = 0;
         loop {
             if _ci19 >= lowered.diagnostics.length { break; }
             diagnostics.push(lowered.diagnostics[_ci19]);
             _ci19 += 1;
         }
+        if fs.exists("build/sailfin/.trace_lowering") {
+            print("let-lowering: accessing lowered.lines");
+        }
         current_lines = lowered.lines;
+        if fs.exists("build/sailfin/.trace_lowering") {
+            print("let-lowering: got lines, accessing temp_index");
+        }
         current_temp = lowered.temp_index;
+        if fs.exists("build/sailfin/.trace_lowering") {
+            print("let-lowering: got temp_index=" + number_to_string(current_temp) + ", accessing operand");
+        }
         operand = lowered.operand;
+        if fs.exists("build/sailfin/.trace_lowering") {
+            print("let-lowering: got operand, accessing string_constants");
+        }
     string_constants = lowered.string_constants;
+        if fs.exists("build/sailfin/.trace_lowering") {
+            print("let-lowering: got string_constants, done with lowered");
+        }
     }
 
+    if fs.exists("build/sailfin/.trace_lowering") {
+        print("let-lowering: checking llvm_type len=" + number_to_string(llvm_type.length));
+    }
     if llvm_type.length == 0 {
+        // Try file-based fallback FIRST, since operand.llvm_type may be
+        // a corrupted pointer that crashes on access.
+        if fs.exists("build/sailfin/.call_result_type") {
+            let _crt = fs.readFile("build/sailfin/.call_result_type");
+            if _crt.length > 0 {
+                llvm_type = _crt;
+                if fs.exists("build/sailfin/.trace_lowering") {
+                    print("let-lowering: llvm_type from file=" + llvm_type);
+                }
+            }
+        }
+        if llvm_type.length == 0 {
         if operand != null {
+            if fs.exists("build/sailfin/.trace_lowering") {
+                print("let-lowering: operand not null, trimming type");
+            }
             let operand_type = trim_text(operand.llvm_type);
             if operand_type.length > 0 {
                 llvm_type = operand_type;
-            } else {
-                // Fallback: the operand's llvm_type may be corrupted after
-                // crossing module boundaries. Read from file written by
-                // lower_call_expression.
-                if fs.exists("build/sailfin/.call_result_type") {
-                    let _crt = fs.readFile("build/sailfin/.call_result_type");
-                    if _crt.length > 0 {
-                        llvm_type = _crt;
-                    }
-                }
             }
+        }
         }
     }
 
@@ -2195,37 +2234,67 @@ fn lower_let_instruction(
 
     let mut stored_value -> string = default_return_literal(llvm_type);
     // Fix operand if its llvm_type was corrupted crossing module boundaries.
+    // Always try file-based reconstruction first — the operand's fields may be
+    // corrupted pointers that crash on access.
     if operand != null {
-        if operand.llvm_type.length == 0 {
-            if fs.exists("build/sailfin/.call_result_type") {
-                let _fixup_type = fs.readFile("build/sailfin/.call_result_type");
-                if _fixup_type.length > 0 {
-                    let mut _fixup_value -> string = operand.value;
-                    if _fixup_value.length == 0 {
-                        if fs.exists("build/sailfin/.call_result_value") {
-                            _fixup_value = fs.readFile("build/sailfin/.call_result_value");
-                        }
-                    }
-                    operand = LLVMOperand { llvm_type: _fixup_type, value: _fixup_value };
+        if fs.exists("build/sailfin/.call_result_type") {
+            let _fixup_type = fs.readFile("build/sailfin/.call_result_type");
+            if _fixup_type.length > 0 {
+                let mut _fixup_value -> string = "";
+                if fs.exists("build/sailfin/.call_result_value") {
+                    _fixup_value = fs.readFile("build/sailfin/.call_result_value");
+                }
+                operand = LLVMOperand { llvm_type: _fixup_type, value: _fixup_value };
+                if fs.exists("build/sailfin/.trace_lowering") {
+                    print("let-lowering: operand reconstructed type=" + _fixup_type + " value=" + _fixup_value);
                 }
             }
         }
-        let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines);
-        let mut _ci20 -> number = 0;
-        loop {
-            if _ci20 >= coerced.diagnostics.length { break; }
-            diagnostics.push(coerced.diagnostics[_ci20]);
-            _ci20 += 1;
-        }
-        current_lines = coerced.lines;
-        current_temp = coerced.temp_index;
-        if coerced.operand == null {
-            diagnostics.push("llvm lowering: unable to coerce initializer for `" + instruction.name + "` to `" + llvm_type + "`");
-            current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
+        // Avoid calling coerce_operand_to_type across module boundaries when
+        // types already match — the returned CoercionResult struct gets ABI-corrupted.
+        if operand.llvm_type == llvm_type {
+            // Identity coercion — use operand directly
+            stored_value = operand.value;
+            current_lines.push("  store " + llvm_type + " " + operand.value + ", " + llvm_type + "* " + pointer);
+            if fs.exists("build/sailfin/.trace_lowering") {
+                print("let-lowering: identity coerce type=" + llvm_type + " value=" + operand.value);
+            }
         } else {
-            let stored = coerced.operand;
-            stored_value = stored.value;
-            current_lines.push("  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer);
+            // Types differ — need coercion. Since coerce_operand_to_type returns
+            // a struct across module boundaries (ABI corruption risk), we write
+            // the result to files from inside coerce_operand_to_type and read back.
+            let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines);
+            // Try file-based result first
+            if fs.exists("build/sailfin/.coerce_result_type") {
+                let _cr_type = fs.readFile("build/sailfin/.coerce_result_type");
+                let _cr_value = fs.readFile("build/sailfin/.coerce_result_value");
+                if _cr_type.length > 0 {
+                    stored_value = _cr_value;
+                    current_lines.push("  store " + llvm_type + " " + _cr_value + ", " + llvm_type + "* " + pointer);
+                } else {
+                    diagnostics.push("llvm lowering: unable to coerce initializer for `" + instruction.name + "` to `" + llvm_type + "`");
+                    current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
+                }
+                fs.deleteFile("build/sailfin/.coerce_result_type");
+            } else {
+                // Fallback: try struct fields (may crash if corrupted)
+                let mut _ci20 -> number = 0;
+                loop {
+                    if _ci20 >= coerced.diagnostics.length { break; }
+                    diagnostics.push(coerced.diagnostics[_ci20]);
+                    _ci20 += 1;
+                }
+                current_lines = coerced.lines;
+                current_temp = coerced.temp_index;
+                if coerced.operand == null {
+                    diagnostics.push("llvm lowering: unable to coerce initializer for `" + instruction.name + "` to `" + llvm_type + "`");
+                    current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
+                } else {
+                    let stored = coerced.operand;
+                    stored_value = stored.value;
+                    current_lines.push("  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer);
+                }
+            }
         }
     } else {
         current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
@@ -2242,6 +2311,45 @@ fn lower_let_instruction(
     };
     mutations.push(mutation);
 
+    if fs.exists("build/sailfin/.trace_lowering") {
+        print("let-lowering: returning LetLoweringResult for name=" + instruction.name);
+    }
+    // Serialize key scalar results to files so the caller can recover
+    // when LetLoweringResult struct fields are corrupted crossing module boundaries.
+    fs.writeFile("build/sailfin/.let_result_temp_index", number_to_string(current_temp));
+    fs.writeFile("build/sailfin/.let_result_next_local_id", number_to_string(next_local_id + 1));
+    fs.writeFile("build/sailfin/.let_result_next_region_id", number_to_string(current_next_region));
+    fs.writeFile("build/sailfin/.let_result_diag_count", number_to_string(diagnostics.length));
+    let mut _diag_i -> number = 0;
+    loop {
+        if _diag_i >= diagnostics.length { break; }
+        fs.writeFile("build/sailfin/.let_result_diag_" + number_to_string(_diag_i), diagnostics[_diag_i]);
+        _diag_i += 1;
+    }
+    // Serialize lines array
+    fs.writeFile("build/sailfin/.let_result_lines_count", number_to_string(current_lines.length));
+    let mut _li_i -> number = 0;
+    loop {
+        if _li_i >= current_lines.length { break; }
+        fs.writeFile("build/sailfin/.let_result_line_" + number_to_string(_li_i), current_lines[_li_i]);
+        _li_i += 1;
+    }
+    // Serialize allocas array
+    fs.writeFile("build/sailfin/.let_result_allocas_count", number_to_string(current_allocas.length));
+    let mut _ai_i -> number = 0;
+    loop {
+        if _ai_i >= current_allocas.length { break; }
+        fs.writeFile("build/sailfin/.let_result_alloca_" + number_to_string(_ai_i), current_allocas[_ai_i]);
+        _ai_i += 1;
+    }
+    // Serialize the new local binding (last one added)
+    if current_locals.length > 0 {
+        let _last_local = current_locals[current_locals.length - 1];
+        fs.writeFile("build/sailfin/.let_result_local_name", _last_local.name);
+        fs.writeFile("build/sailfin/.let_result_local_pointer", _last_local.pointer);
+        fs.writeFile("build/sailfin/.let_result_local_llvm_type", _last_local.llvm_type);
+        fs.writeFile("build/sailfin/.let_result_local_type_ann", _last_local.type_annotation);
+    }
     return LetLoweringResult {
         lines: current_lines,
         allocas: current_allocas,

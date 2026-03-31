@@ -737,16 +737,51 @@ fn lower_expression_statement(
     }
     let consumption = ownership_analysis.consumption;
 
+    let _pre_call_lines_len = current_lines.length;
     let lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-    let mut _ci15 -> number = 0;
-    loop {
-        if _ci15 >= lowered.diagnostics.length { break; }
-        diagnostics.push(lowered.diagnostics[_ci15]);
-        _ci15 += 1;
+    // ExpressionResult struct fields may be ABI-corrupted crossing module boundaries.
+    // Read lines/temp from files written by lower_call_expression instead.
+    if debug_lowering {
+        let _cr_exists_check = fs.exists("build/sailfin/.call_result_lines_count");
+        if _cr_exists_check {
+            print("stmt-lowering: call_result_lines_count EXISTS");
+        } else {
+            print("stmt-lowering: call_result_lines_count NOT FOUND");
+        }
     }
-    let string_constants = lowered.string_constants;
-    current_lines = lowered.lines;
-    current_temp = lowered.temp_index;
+    if fs.exists("build/sailfin/.call_result_lines_count") {
+        let _cr_lines_count_str = fs.readFile("build/sailfin/.call_result_lines_count");
+        let _cr_lines_count = _parse_int_local(_cr_lines_count_str);
+        let mut _new_lines -> string[] = [];
+        let mut _cr_li -> number = 0;
+        loop {
+            if _cr_li >= _cr_lines_count { break; }
+            let _cr_line_path = "build/sailfin/.call_result_line_" + number_to_string(_cr_li);
+            if fs.exists(_cr_line_path) {
+                _new_lines.push(fs.readFile(_cr_line_path));
+            }
+            _cr_li += 1;
+        }
+        current_lines = _new_lines;
+        if debug_lowering {
+            print("stmt-lowering: read " + number_to_string(_new_lines.length) + " lines from call_result files, current_lines.length=" + number_to_string(current_lines.length));
+        }
+        let _cr_temp_str = fs.readFile("build/sailfin/.call_result_temp");
+        current_temp = _parse_int_local(_cr_temp_str);
+        // Clean up sentinel
+        fs.deleteFile("build/sailfin/.call_result_lines_count");
+    } else {
+        // Fallback: try struct fields
+        let mut _ci15 -> number = 0;
+        loop {
+            if _ci15 >= lowered.diagnostics.length { break; }
+            diagnostics.push(lowered.diagnostics[_ci15]);
+            _ci15 += 1;
+        }
+        string_constants = lowered.string_constants;
+        current_lines = lowered.lines;
+        current_temp = lowered.temp_index;
+    }
     if consumption != null {
         if consumption.kind == "local" {
             current_locals = mark_local_consumed(current_locals, consumption.name);
@@ -754,7 +789,10 @@ fn lower_expression_statement(
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
-    _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
+    if debug_lowering {
+        print("stmt-lowering: pre-write _pre_call_lines_len=" + number_to_string(_pre_call_lines_len) + " current_lines.length=" + number_to_string(current_lines.length) + " delta=" + number_to_string(current_lines.length - _pre_call_lines_len));
+    }
+    _write_expr_stmt_result_files_with_constants(_pre_call_lines_len, current_lines, current_temp, mutations, current_next_region, string_constants);
                 return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
 }
 
