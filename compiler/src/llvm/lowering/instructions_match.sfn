@@ -165,6 +165,22 @@ import {
     collect_if_structure,
 } from "./instructions_loops";
 
+// Helper: build a LocalBinding for match arm payload extraction.
+// Kept as a separate function so loops never have inline struct literals at the loop
+// body top level — the v0.1.1 seed misidentifies `identifier {` as a loop-body closer.
+fn _match_make_local_binding(name -> string, pointer -> string, llvm_type -> string, scope_id -> string, scope_depth -> number) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: pointer,
+        llvm_type: llvm_type,
+        type_annotation: "",
+        ownership: null,
+        consumed: false,
+        scope_id: scope_id,
+        scope_depth: scope_depth,
+    };
+}
+
 fn collect_match_structure(
     instructions -> NativeInstruction[],
     start_index -> number,
@@ -593,16 +609,7 @@ fn lower_match_instruction(
                             current_lines.push("  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp);
 
                             // 8. Add to locals so the match arm body can reference it
-                            base_locals.push(LocalBinding {
-                                name: field_binding.field_name,
-                                pointer: local_alloca_temp,
-                                llvm_type: field_binding.field_type,
-                                type_annotation: "",
-                                ownership: null,
-                                consumed: false,
-                                scope_id: make_child_scope_id(scope_id, body_labels[index]),
-                                scope_depth: scope_depth + 1,
-                            });
+                            base_locals.push(_match_make_local_binding(field_binding.field_name, local_alloca_temp, field_binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth + 1));
 
                             base_local_id += 1;
                             binding_idx += 1;
@@ -657,16 +664,7 @@ fn lower_match_instruction(
                         current_lines.push("  " + local_alloca_temp + " = alloca " + binding.field_type);
                         current_lines.push("  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp);
 
-                        base_locals.push(LocalBinding {
-                            name: binding.field_name,
-                            pointer: local_alloca_temp,
-                            llvm_type: binding.field_type,
-                            type_annotation: "",
-                            ownership: null,
-                            consumed: false,
-                            scope_id: make_child_scope_id(scope_id, body_labels[index]),
-                            scope_depth: scope_depth + 1,
-                        });
+                        base_locals.push(_match_make_local_binding(binding.field_name, local_alloca_temp, binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth + 1));
                         base_local_id += 1;
                         binding_idx += 1;
                     }

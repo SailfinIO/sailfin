@@ -700,6 +700,21 @@ fn append_parameter_binding(bindings -> ParameterBinding[], binding -> Parameter
     return out;
 }
 
+// Helper: copy a ParameterBinding with an updated consumed flag.
+// Kept as a separate function so the loop in merge_parameter_bindings never has an
+// inline struct literal at the top level — the v0.1.1 seed misidentifies `identifier {`
+// as a loop-body closer, causing premature `.endloop` emission.
+fn _merge_copy_parameter_binding(primary -> ParameterBinding, consumed_flag -> boolean) -> ParameterBinding {
+    return ParameterBinding {
+        name: primary.name,
+        llvm_name: primary.llvm_name,
+        llvm_type: primary.llvm_type,
+        type_annotation: primary.type_annotation,
+        consumed: consumed_flag,
+        span: primary.span,
+    };
+}
+
 fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBinding[]) -> ParameterBinding[] {
     let mut result -> ParameterBinding[] = [];
     let mut index -> number = 0;
@@ -716,14 +731,7 @@ fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBind
             if counterpart.consumed { _asgn341 = true; }
             consumed_flag = _asgn341;
         }
-        result = append_parameter_binding(result, ParameterBinding {
-            name: primary.name,
-            llvm_name: primary.llvm_name,
-            llvm_type: primary.llvm_type,
-            type_annotation: primary.type_annotation,
-            consumed: consumed_flag,
-            span: primary.span,
-        });
+        result = append_parameter_binding(result, _merge_copy_parameter_binding(primary, consumed_flag));
         index += 1;
     }
     return result;

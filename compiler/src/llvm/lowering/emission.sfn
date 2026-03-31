@@ -180,6 +180,20 @@ fn parse_simple_integer(text -> string) -> number {
     return result;
 }
 
+// Helper: build a ParameterBinding for the file-IPC loop in prepare_parameters_from_files.
+// Kept as a separate function so the loop never has an inline struct literal at the top level
+// of the loop body — the v0.1.1 seed misidentifies `identifier {` as a loop-body closer.
+fn _emit_make_parameter_binding(name -> string, llvm_name -> string, llvm_type -> string, type_annotation -> string) -> ParameterBinding {
+    return ParameterBinding {
+        name: name,
+        llvm_name: llvm_name,
+        llvm_type: llvm_type,
+        type_annotation: type_annotation,
+        consumed: false,
+        span: null,
+    };
+}
+
 // Build ParameterPreparation from files written by entrypoints.sfn.
 // This bypasses calling prepare_parameters in the statement module which
 // the v0.1.1 seed compiles with i8* for NativeFunction, preventing
@@ -205,14 +219,7 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
         let sanitized = sanitize_symbol(param_name);
         let llvm_name = "%" + sanitized;
         signature.push(llvm_type + " " + llvm_name);
-        bindings = append_parameter_binding(bindings, ParameterBinding {
-            name: param_name,
-            llvm_name: llvm_name,
-            llvm_type: llvm_type,
-            type_annotation: param_type,
-            consumed: false,
-            span: null,
-        });
+        bindings = append_parameter_binding(bindings, _emit_make_parameter_binding(param_name, llvm_name, llvm_type, param_type));
         index += 1;
     }
     return ParameterPreparation { signature: signature, bindings: bindings, diagnostics: diagnostics };

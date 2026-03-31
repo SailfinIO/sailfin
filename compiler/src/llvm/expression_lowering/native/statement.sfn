@@ -247,6 +247,34 @@ fn _parse_int_local(text -> string) -> number {
     return result;
 }
 
+// Helpers: build binding structs for the IPC read-back loops.
+// Kept as separate functions so the loops never have inline struct literals `{ ... }`
+// at the loop body's top level — the v0.1.1 seed misidentifies such `{...}` as
+// loop-body closers, causing premature `.endloop` emission in the .sfn-asm output.
+fn _ipc_make_parameter_binding(name -> string, llvm_name -> string, llvm_type -> string, type_annotation -> string) -> ParameterBinding {
+    return ParameterBinding {
+        name: name,
+        llvm_name: llvm_name,
+        llvm_type: llvm_type,
+        type_annotation: type_annotation,
+        consumed: false,
+        span: null,
+    };
+}
+
+fn _ipc_make_local_binding(name -> string, pointer -> string, llvm_type -> string, type_annotation -> string, scope_id -> string, scope_depth -> number) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: pointer,
+        llvm_type: llvm_type,
+        type_annotation: type_annotation,
+        ownership: null,
+        consumed: false,
+        scope_id: scope_id,
+        scope_depth: scope_depth,
+    };
+}
+
 fn lower_expression_statement(
     function_name -> string,
     instruction -> NativeInstruction,
@@ -278,10 +306,7 @@ fn lower_expression_statement(
         let ebr_llvm_name = fs.readFile(ebr_prefix + "_llvm_name");
         let ebr_llvm_type = fs.readFile(ebr_prefix + "_llvm_type");
         let ebr_type_annotation = fs.readFile(ebr_prefix + "_type_annotation");
-        current_bindings = append_parameter_binding(current_bindings, ParameterBinding {
-            name: ebr_name, llvm_name: ebr_llvm_name, llvm_type: ebr_llvm_type,
-            type_annotation: ebr_type_annotation, consumed: false, span: null,
-        });
+        current_bindings = append_parameter_binding(current_bindings, _ipc_make_parameter_binding(ebr_name, ebr_llvm_name, ebr_llvm_type, ebr_type_annotation));
         ebr_i += 1;
     }
     let mut current_locals -> LocalBinding[] = [];
@@ -295,11 +320,7 @@ fn lower_expression_statement(
         let elr_type_annotation = fs.readFile(elr_prefix + "_type_annotation");
         let elr_scope_id = fs.readFile(elr_prefix + "_scope_id");
         let mut elr_scope_depth -> number = 0;
-        current_locals = append_local_binding(current_locals, LocalBinding {
-            name: elr_name, pointer: elr_pointer, llvm_type: elr_llvm_type,
-            type_annotation: elr_type_annotation, ownership: null,
-            consumed: false, scope_id: elr_scope_id, scope_depth: elr_scope_depth,
-        });
+        current_locals = append_local_binding(current_locals, _ipc_make_local_binding(elr_name, elr_pointer, elr_llvm_type, elr_type_annotation, elr_scope_id, elr_scope_depth));
         elr_i += 1;
     }
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
@@ -1098,10 +1119,7 @@ fn lower_return_instruction(
         let br_llvm_name = fs.readFile(br_prefix + "_llvm_name");
         let br_llvm_type = fs.readFile(br_prefix + "_llvm_type");
         let br_type_annotation = fs.readFile(br_prefix + "_type_annotation");
-        current_bindings = append_parameter_binding(current_bindings, ParameterBinding {
-            name: br_name, llvm_name: br_llvm_name, llvm_type: br_llvm_type,
-            type_annotation: br_type_annotation, consumed: false, span: null,
-        });
+        current_bindings = append_parameter_binding(current_bindings, _ipc_make_parameter_binding(br_name, br_llvm_name, br_llvm_type, br_type_annotation));
         br_i += 1;
     }
 
@@ -1119,11 +1137,7 @@ fn lower_return_instruction(
         // scope_depth is written as a string number but we need it as double.
         // For the return instruction, scope_depth is typically 0 so a default of 0 is safe.
         let mut lr_scope_depth -> number = 0;
-        current_locals = append_local_binding(current_locals, LocalBinding {
-            name: lr_name, pointer: lr_pointer, llvm_type: lr_llvm_type,
-            type_annotation: lr_type_annotation, ownership: null,
-            consumed: false, scope_id: lr_scope_id, scope_depth: lr_scope_depth,
-        });
+        current_locals = append_local_binding(current_locals, _ipc_make_local_binding(lr_name, lr_pointer, lr_llvm_type, lr_type_annotation, lr_scope_id, lr_scope_depth));
         lr_i += 1;
     }
 
@@ -1420,14 +1434,8 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
         let sanitized = sanitize_symbol(parameter.name);
         let llvm_name = "%" + sanitized;
         signature.push(llvm_type + " " + llvm_name);
-        bindings = append_parameter_binding(bindings, ParameterBinding {
-            name: parameter.name,
-            llvm_name: llvm_name,
-            llvm_type: llvm_type,
-            type_annotation: parameter.type_annotation,
-            consumed: false,
-            span: parameter.span,
-        });
+        let prep_binding = _ipc_make_parameter_binding(parameter.name, llvm_name, llvm_type, parameter.type_annotation);
+        bindings = append_parameter_binding(bindings, prep_binding);
         index += 1;
     }
     return ParameterPreparation { signature: signature, bindings: bindings, diagnostics: diagnostics };
