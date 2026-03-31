@@ -257,11 +257,13 @@ The compiler must always compile itself. Breaking changes require:
 - **Release automation:** GitHub Actions + `python-semantic-release`
 - **Artifacts:** `dist/` is used for packaged artifacts as part of release tooling
 
-## Current Branch Strategy
+## Branch Strategy (trunk-based)
 
-- `main`: Stable releases (pre-1.0: breaking changes allowed)
-- `alpha`: Prerelease builds with `-alpha` suffix
-- Active development typically happens on feature branches merged to `alpha`
+- `main`: Primary development branch — all feature work merges here. Produces `-alpha.N` prereleases via semantic-release.
+- `beta`: Short-lived, cut from `main` when ready for beta testing. Produces `-beta.N` prereleases. Delete after merging back to main.
+- `rc`: Short-lived, cut from `main` (or beta) for release candidates. Produces `-rc.N` prereleases. Delete after merging back to main.
+- Fixes always land on `main` first, then cherry-pick or merge forward to beta/rc if needed.
+- When ready for a stable release, toggle `prerelease = false` on main's branch config in `pyproject.toml`.
 
 ## Key Terminology
 
