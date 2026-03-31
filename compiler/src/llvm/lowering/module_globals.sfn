@@ -58,6 +58,24 @@ fn module_user_main_symbol(module_name -> string) -> string {
     return "sailfin_user_main__" + sanitize_symbol(module_name);
 }
 
+// Helper: build a LocalBinding for a module-level global.
+// Kept as a separate function so the first loop in lower_module_bindings_to_globals
+// never has an inline struct literal `{ ... }` at the loop body's top level.
+// (The seed's emit_native.sfn misidentifies such `{...}` as loop-body closers,
+//  causing the loop to be prematurely terminated in the .sfn-asm output.)
+fn _make_module_local_binding(name -> string, pointer -> string, llvm_type -> string, type_annotation -> string, scope_id -> string) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: pointer,
+        llvm_type: llvm_type,
+        type_annotation: type_annotation,
+        ownership: null,
+        consumed: false,
+        scope_id: scope_id,
+        scope_depth: 0,
+    };
+}
+
 fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> TypeContext, module_name -> string) -> ModuleGlobalLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut preamble_lines -> string[] = [];
@@ -68,6 +86,9 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
     let mut needs_init -> boolean = false;
 
     if bindings.length == 0 {
+        // File IPC: write needs_init_call=false so caller reads correct value
+        // (the v0.1.1 seed corrupts boolean scalar fields in cross-module struct returns)
+        fs.writeFile("build/sailfin/.module_globals_needs_init", "0");
         return ModuleGlobalLoweringResult {
             preamble_lines: [],
             init_function_lines: [],
@@ -188,21 +209,15 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
             preamble_lines.push(global_name + " = internal global " + llvm_type + " " + initializer_text);
         }
 
-        locals = append_local_binding(locals, LocalBinding {
-            name: name,
-            pointer: global_name,
-            llvm_type: llvm_type,
-            type_annotation: effective_type_annotation,
-            ownership: null,
-            consumed: false,
-            scope_id: scope_id,
-            scope_depth: scope_depth,
-        });
-
+        // Use helper to avoid inline struct literal at loop top level — see _make_module_local_binding.
+        locals = append_local_binding(locals, _make_module_local_binding(name, global_name, llvm_type, effective_type_annotation, scope_id));
         index += 1;
     }
 
     if !needs_init {
+        // File IPC: write needs_init_call=false so caller reads correct value
+        // (the v0.1.1 seed corrupts boolean scalar fields in cross-module struct returns)
+        fs.writeFile("build/sailfin/.module_globals_needs_init", "0");
         return ModuleGlobalLoweringResult {
             preamble_lines: preamble_lines,
             init_function_lines: [],
@@ -341,6 +356,9 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
     current_lines.push("  ret void");
     current_lines.push("}");
 
+    // File IPC: write needs_init_call=true so caller reads correct value
+    // (the v0.1.1 seed corrupts boolean scalar fields in cross-module struct returns)
+    fs.writeFile("build/sailfin/.module_globals_needs_init", "1");
     return ModuleGlobalLoweringResult {
         preamble_lines: preamble_lines,
         init_function_lines: current_lines,

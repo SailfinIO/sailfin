@@ -2596,6 +2596,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         string_constants: empty_string_constant_set(),
         diagnostics: [],
     };
+    // File IPC: default false; updated in else branch after lower_module_bindings_to_globals
+    // (the v0.1.1 seed corrupts boolean scalar fields in cross-module struct returns)
+    let mut module_globals_needs_init_call -> boolean = false;
     if safe_bindings.length == 0 {
         if debug_lowering {
             print("emit-llvm: module bindings empty; skipping module globals");
@@ -2606,6 +2609,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
     } else {
         module_globals = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
+        // File IPC: read needs_init_call from file written by lower_module_bindings_to_globals
+        // (the v0.1.1 seed corrupts boolean scalar fields in cross-module struct returns)
+        let _mg_needs_init_raw = fs.readFile("build/sailfin/.module_globals_needs_init");
+        module_globals_needs_init_call = _mg_needs_init_raw == "1";
         if module_globals == null {
             diagnostics.push("llvm lowering: module globals returned null; using empty defaults");
             module_globals = ModuleGlobalLoweringResult {
@@ -2805,7 +2812,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             imported_functions,
             module_global_locals,
             module_globals.init_function_symbol,
-            module_globals.needs_init_call
+            module_globals_needs_init_call
         );
         // The v0.1.1 seed corrupts cross-module struct returns. Read the
         // LoweredLLVMFunction result from files written by emit_llvm_function
