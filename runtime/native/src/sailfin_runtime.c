@@ -1647,19 +1647,38 @@ void sailfin_runtime_print_raw(char *msg)
         fflush(stdout);
     }
 }
+void sailfin_runtime_print_err(char *msg)
+{
+    if (msg)
+    {
+        fputs(msg, stderr);
+        fputc('\n', stderr);
+        fflush(stderr);
+    }
+}
 // Bridge: older seeds (< v0.5) that don't have the "print" runtime helper
 // descriptor emit bare `@print` calls when compiling `print("text")`.
-// This alias ensures the linker resolves them to the raw print implementation.
+// The seed may emit `call double @print(i8*)` (default return type), so this
+// returns double for ABI compatibility. The return value is unused.
 // Can be removed once all seeds include the "print" → "sailfin_runtime_print_raw" mapping.
-double print(char *msg) { sailfin_runtime_print_raw(msg); return 0.0; }
+#if !defined(_WIN32) && !defined(__MINGW32__)
+__attribute__((weak))
+#endif
+double print(char *msg)
+{
+    sailfin_runtime_print_raw(msg);
+    return 0.0;
+}
 void sailfin_runtime_print_info(char *msg) { _print_line(stdout, "[info] ", msg); }
 void sailfin_runtime_print_warn(char *msg) { _print_line(stderr, "[warn] ", msg); }
 void sailfin_runtime_print_error(char *msg) { _print_line(stderr, "[error] ", msg); }
 
 // Debug: print a pointer value as hex to stderr
-void sailfin_runtime_debug_ptr(const char *label, const void *ptr) {
+void sailfin_runtime_debug_ptr(const char *label, const void *ptr)
+{
     fprintf(stderr, "[dbg] %s = %p", label ? label : "ptr", ptr);
-    if (ptr && (uintptr_t)ptr >= 4096u) {
+    if (ptr && (uintptr_t)ptr >= 4096u)
+    {
         // Try to read first 8 bytes
         const unsigned char *p = (const unsigned char *)ptr;
         fprintf(stderr, " bytes=[%02x %02x %02x %02x %02x %02x %02x %02x]",
@@ -5345,21 +5364,33 @@ static char *_popen_read_all(const char *cmd)
     size_t cap = 4096;
     size_t len = 0;
     char *buf = (char *)malloc(cap);
-    if (!buf) { pclose(fp); return NULL; }
+    if (!buf)
+    {
+        pclose(fp);
+        return NULL;
+    }
 
     size_t n;
-    while ((n = fread(buf + len, 1, cap - len - 1, fp)) > 0) {
+    while ((n = fread(buf + len, 1, cap - len - 1, fp)) > 0)
+    {
         len += n;
-        if (len + 1 >= cap) {
+        if (len + 1 >= cap)
+        {
             cap *= 2;
             char *tmp = (char *)realloc(buf, cap);
-            if (!tmp) { free(buf); pclose(fp); return NULL; }
+            if (!tmp)
+            {
+                free(buf);
+                pclose(fp);
+                return NULL;
+            }
             buf = tmp;
         }
     }
 
     int status = pclose(fp);
-    if (status != 0) {
+    if (status != 0)
+    {
         free(buf);
         return NULL;
     }
@@ -5372,17 +5403,26 @@ static char *_popen_read_all(const char *cmd)
  * Caller must free the result. */
 static char *_shell_escape(const char *s)
 {
-    if (!s) return NULL;
+    if (!s)
+        return NULL;
     size_t len = strlen(s);
     /* Worst case: every char is a single quote → replace with '\'' (4 chars) */
     char *out = (char *)malloc(len * 4 + 3); /* + quotes + NUL */
-    if (!out) return NULL;
+    if (!out)
+        return NULL;
     size_t j = 0;
     out[j++] = '\'';
-    for (size_t i = 0; i < len; i++) {
-        if (s[i] == '\'') {
-            out[j++] = '\''; out[j++] = '\\'; out[j++] = '\''; out[j++] = '\'';
-        } else {
+    for (size_t i = 0; i < len; i++)
+    {
+        if (s[i] == '\'')
+        {
+            out[j++] = '\'';
+            out[j++] = '\\';
+            out[j++] = '\'';
+            out[j++] = '\'';
+        }
+        else
+        {
             out[j++] = s[i];
         }
     }
@@ -5393,14 +5433,20 @@ static char *_shell_escape(const char *s)
 
 char *sailfin_runtime_http_get(const char *url)
 {
-    if (!url) return NULL;
+    if (!url)
+        return NULL;
     char *esc_url = _shell_escape(url);
-    if (!esc_url) return NULL;
+    if (!esc_url)
+        return NULL;
 
     /* curl -sfS: silent, fail on HTTP errors, show errors on stderr */
     size_t cmd_len = strlen(esc_url) + 64;
     char *cmd = (char *)malloc(cmd_len);
-    if (!cmd) { free(esc_url); return NULL; }
+    if (!cmd)
+    {
+        free(esc_url);
+        return NULL;
+    }
     snprintf(cmd, cmd_len, "curl -sfS %s", esc_url);
     free(esc_url);
 
@@ -5410,41 +5456,63 @@ char *sailfin_runtime_http_get(const char *url)
 }
 
 char *sailfin_runtime_http_post_json(const char *url, const char *json_body,
-                                      const char *auth_header)
+                                     const char *auth_header)
 {
-    if (!url || !json_body) return NULL;
+    if (!url || !json_body)
+        return NULL;
 
     /* Write JSON body to a temp file to avoid shell-escaping issues */
     char tmppath[] = "/tmp/sfn_publish_XXXXXX";
     int fd = mkstemp(tmppath);
-    if (fd < 0) return NULL;
+    if (fd < 0)
+        return NULL;
 
     size_t body_len = strlen(json_body);
     ssize_t written = write(fd, json_body, body_len);
     close(fd);
-    if (written < 0 || (size_t)written != body_len) {
+    if (written < 0 || (size_t)written != body_len)
+    {
         unlink(tmppath);
         return NULL;
     }
 
     char *esc_url = _shell_escape(url);
-    if (!esc_url) { unlink(tmppath); return NULL; }
+    if (!esc_url)
+    {
+        unlink(tmppath);
+        return NULL;
+    }
 
     size_t cmd_len = strlen(esc_url) + strlen(tmppath) + 256;
-    if (auth_header) cmd_len += strlen(auth_header) + 32;
+    if (auth_header)
+        cmd_len += strlen(auth_header) + 32;
 
     char *cmd = (char *)malloc(cmd_len);
-    if (!cmd) { free(esc_url); unlink(tmppath); return NULL; }
+    if (!cmd)
+    {
+        free(esc_url);
+        unlink(tmppath);
+        return NULL;
+    }
 
-    if (auth_header && auth_header[0]) {
+    if (auth_header && auth_header[0])
+    {
         char *esc_auth = _shell_escape(auth_header);
-        if (!esc_auth) { free(cmd); free(esc_url); unlink(tmppath); return NULL; }
+        if (!esc_auth)
+        {
+            free(cmd);
+            free(esc_url);
+            unlink(tmppath);
+            return NULL;
+        }
         snprintf(cmd, cmd_len,
                  "curl -sfS -X POST -H 'Content-Type: application/json' "
                  "-H 'Authorization: '%s -d @%s %s",
                  esc_auth, tmppath, esc_url);
         free(esc_auth);
-    } else {
+    }
+    else
+    {
         snprintf(cmd, cmd_len,
                  "curl -sfS -X POST -H 'Content-Type: application/json' "
                  "-d @%s %s",
@@ -5460,18 +5528,26 @@ char *sailfin_runtime_http_post_json(const char *url, const char *json_body,
 
 char *sailfin_runtime_http_download(const char *url, const char *output_path)
 {
-    if (!url || !output_path) return NULL;
+    if (!url || !output_path)
+        return NULL;
 
     char *esc_url = _shell_escape(url);
     char *esc_path = _shell_escape(output_path);
-    if (!esc_url || !esc_path) {
-        free(esc_url); free(esc_path);
+    if (!esc_url || !esc_path)
+    {
+        free(esc_url);
+        free(esc_path);
         return NULL;
     }
 
     size_t cmd_len = strlen(esc_url) + strlen(esc_path) + 64;
     char *cmd = (char *)malloc(cmd_len);
-    if (!cmd) { free(esc_url); free(esc_path); return NULL; }
+    if (!cmd)
+    {
+        free(esc_url);
+        free(esc_path);
+        return NULL;
+    }
     snprintf(cmd, cmd_len, "curl -sfS -o %s %s", esc_path, esc_url);
     free(esc_url);
     free(esc_path);
@@ -5479,9 +5555,15 @@ char *sailfin_runtime_http_download(const char *url, const char *output_path)
     int status = system(cmd);
     free(cmd);
 
-    if (status == 0) {
+    if (status == 0)
+    {
         char *ok = (char *)malloc(3);
-        if (ok) { ok[0] = 'o'; ok[1] = 'k'; ok[2] = '\0'; }
+        if (ok)
+        {
+            ok[0] = 'o';
+            ok[1] = 'k';
+            ok[2] = '\0';
+        }
         return ok;
     }
     return NULL;
@@ -5491,9 +5573,11 @@ char *sailfin_runtime_http_download(const char *url, const char *output_path)
 
 char *sailfin_runtime_getenv(const char *name)
 {
-    if (!name) return NULL;
+    if (!name)
+        return NULL;
     const char *val = getenv(name);
-    if (!val) return NULL;
+    if (!val)
+        return NULL;
     return strdup(val);
 }
 
@@ -5504,25 +5588,36 @@ char *sailfin_runtime_home_dir(void)
 #else
     const char *home = getenv("HOME");
 #endif
-    if (!home) return NULL;
+    if (!home)
+        return NULL;
     return strdup(home);
 }
 
 char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length)
 {
-    if (!path || !out_length) return NULL;
+    if (!path || !out_length)
+        return NULL;
 
     FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
+    if (!f)
+        return NULL;
 
     fseek(f, 0, SEEK_END);
     long n = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    if (n < 0) { fclose(f); return NULL; }
+    if (n < 0)
+    {
+        fclose(f);
+        return NULL;
+    }
 
     char *buf = (char *)malloc((size_t)n + 1);
-    if (!buf) { fclose(f); return NULL; }
+    if (!buf)
+    {
+        fclose(f);
+        return NULL;
+    }
 
     size_t read_n = fread(buf, 1, (size_t)n, f);
     fclose(f);

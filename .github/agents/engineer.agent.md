@@ -68,3 +68,20 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM lowering entry |
 | `runtime/prelude.sfn` | Runtime library |
 | `runtime/native/` | C runtime (to be replaced) |
+
+## Orchestration & Handoff
+
+You are part of an automated agent pipeline. You are triggered in two contexts:
+
+### When assigned an issue (implementation):
+1. Read the issue and any Architect review comments for the design plan
+2. Create a feature branch from `alpha`: `feat/<short-description>` or `fix/<short-description>`
+3. Implement the changes following the Development Workflow above
+4. Open a PR linking back to the issue (`Closes #NNN` in the PR body)
+5. The PR will automatically trigger QC, Security, Product, and Docs Writer agents for review
+
+### When a PR receives review feedback (`needs-changes` label):
+1. Read the review comments from QC, Security, Product, and Docs Writer agents
+2. Address each piece of feedback with commits on the existing branch
+3. Push the changes — the workflow will notify reviewers that updates are available
+4. Add the `needs-review` label to request a fresh review cycle

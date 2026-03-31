@@ -24,7 +24,12 @@ extern "C"
     void sailfin_runtime_mark_persistent(char *ptr);
 
     void sailfin_runtime_print_raw(char *msg);
-    double print(char *msg);  // weak alias for legacy seed compatibility
+    void sailfin_runtime_print_err(char *msg);
+#if !defined(_WIN32) && !defined(__MINGW32__)
+    double print(char *msg) __attribute__((weak)); // weak alias for legacy seed compatibility
+#else
+    double print(char *msg); // strong on Windows (mingw ld does not support weak)
+#endif
     void sailfin_runtime_print_info(char *msg);
     void sailfin_runtime_print_warn(char *msg);
     void sailfin_runtime_print_error(char *msg);
@@ -166,7 +171,7 @@ extern "C"
     // Package-manager HTTP helpers (curl subprocess).
     char *sailfin_runtime_http_get(const char *url);
     char *sailfin_runtime_http_post_json(const char *url, const char *json_body,
-                                          const char *auth_header);
+                                         const char *auth_header);
     char *sailfin_runtime_http_download(const char *url, const char *output_path);
 
     // Environment & path helpers.

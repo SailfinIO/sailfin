@@ -1,4 +1,1 @@
-# Avoid recurring conflicts from per-branch prerelease version bumps.
-# The version string is owned by the target branch's release channel.
-compiler/src/version.sfn merge=ours
-CHANGELOG.md merge=ours
+.github/workflows/*.lock.yml linguist-generated=true merge=ours

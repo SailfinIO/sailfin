@@ -33,7 +33,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SEED="${SEED:-sfn}"
 OUT="${OUT:-build/native/sailfin}"
 OPT="${OPT:--O2}"
@@ -42,12 +42,16 @@ CLANG="${CLANG:-clang}"
 SEED_TIMEOUT="${SEED_TIMEOUT:-180}"
 MAX_TOTAL="${MAX_TOTAL:-1200}"
 VERBOSE="${VERBOSE:-0}"
+BUILD_MODULE_WORKER=0
+WORKER_INDEX=""
+WORKER_SRC=""
 
 # Build directories
 WORK_DIR="build/selfhost/native"
 RAW_DIR="$WORK_DIR/raw"
 OBJ_DIR="$WORK_DIR/obj"
 SEED_CWD="$WORK_DIR/seed_cwd"
+IMPORT_CACHE="$SEED_CWD/build/native/import-context"
 
 # Clang flags shared across all compilations
 CLANG_FLAGS="$OPT -Wno-override-module -fno-delete-null-pointer-checks"
@@ -68,6 +72,12 @@ while [[ $# -gt 0 ]]; do
         --timeout)  SEED_TIMEOUT="$2"; shift 2 ;;
         --max-total) MAX_TOTAL="$2"; shift 2 ;;
         --verbose)  VERBOSE=1; shift ;;
+        --_build_module_worker)
+            BUILD_MODULE_WORKER=1
+            WORKER_INDEX="$2"
+            WORKER_SRC="$3"
+            shift 3
+            ;;
         *)          echo "[build] unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -270,60 +280,8 @@ slug_from_path() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 1: Prepare directories
+# Module build worker (used for parallel builds)
 # ---------------------------------------------------------------------------
-log "preparing build directories..."
-cd "$REPO_ROOT"
-mkdir -p "$RAW_DIR" "$OBJ_DIR" "$OBJ_DIR/runtime"
-mkdir -p "$SEED_CWD/build/native/import-context"
-
-# Clean stale objects
-find "$OBJ_DIR" -name '*.o' -delete 2>/dev/null || true
-
-# ---------------------------------------------------------------------------
-# Step 2: Stage import-context artifacts
-# ---------------------------------------------------------------------------
-log "staging import-context artifacts..."
-IMPORT_CACHE="$SEED_CWD/build/native/import-context"
-
-stage_import_context() {
-    local src="$1"
-    local slug
-    slug="$(slug_from_path "$src")"
-    local asm_dest="$IMPORT_CACHE/${slug}.sfn-asm"
-    local manifest_dest="$IMPORT_CACHE/${slug}.layout-manifest"
-
-    mkdir -p "$(dirname "$asm_dest")"
-
-    # Emit native text (.sfn-asm)
-    local native_text
-    if ! native_text="$(seed_run "$SEED" emit native "$src" 2>/dev/null)"; then
-        warn "failed to emit native for $slug"
-        return 0
-    fi
-
-    echo "$native_text" > "$asm_dest"
-
-    # Extract .layout lines for the manifest
-    grep '^\.\(layout\)' "$asm_dest" > "$manifest_dest" 2>/dev/null || true
-}
-
-# Stage import context (sequential for safety with older seeds)
-for src in "${SOURCES[@]}"; do
-    check_budget
-    stage_import_context "$src"
-done
-
-log "staged import-context for ${#SOURCES[@]} modules"
-
-# ---------------------------------------------------------------------------
-# Step 3: Per-module emit + compile
-# ---------------------------------------------------------------------------
-log "building ${#SOURCES[@]} modules (jobs=$JOBS)..."
-
-MODULE_NAMES=()
-FAILED=0
-
 build_module() {
     local idx="$1"
     local src="$2"
@@ -394,6 +352,68 @@ build_module() {
     return 0
 }
 
+if [[ "$BUILD_MODULE_WORKER" -eq 1 ]]; then
+    mkdir -p "$RAW_DIR" "$OBJ_DIR"
+    result="$(build_module "$WORKER_INDEX" "$WORKER_SRC")" || exit 1
+    : "${MODULES_LIST:="$RAW_DIR/modules_built.txt"}"
+    echo "$result" >> "$MODULES_LIST"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Step 1: Prepare directories
+# ---------------------------------------------------------------------------
+log "preparing build directories..."
+cd "$REPO_ROOT"
+mkdir -p "$RAW_DIR" "$OBJ_DIR" "$OBJ_DIR/runtime"
+mkdir -p "$SEED_CWD/build/native/import-context"
+
+# Clean stale objects
+find "$OBJ_DIR" -name '*.o' -delete 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Step 2: Stage import-context artifacts
+# ---------------------------------------------------------------------------
+log "staging import-context artifacts..."
+
+stage_import_context() {
+    local src="$1"
+    local slug
+    slug="$(slug_from_path "$src")"
+    local asm_dest="$IMPORT_CACHE/${slug}.sfn-asm"
+    local manifest_dest="$IMPORT_CACHE/${slug}.layout-manifest"
+
+    mkdir -p "$(dirname "$asm_dest")"
+
+    # Emit native text (.sfn-asm)
+    local native_text
+    if ! native_text="$(seed_run "$SEED" emit native "$src" 2>/dev/null)"; then
+        warn "failed to emit native for $slug"
+        return 0
+    fi
+
+    echo "$native_text" > "$asm_dest"
+
+    # Extract .layout lines for the manifest
+    grep '^\.\(layout\)' "$asm_dest" > "$manifest_dest" 2>/dev/null || true
+}
+
+# Stage import context (sequential for safety with older seeds)
+for src in "${SOURCES[@]}"; do
+    check_budget
+    stage_import_context "$src"
+done
+
+log "staged import-context for ${#SOURCES[@]} modules"
+
+# ---------------------------------------------------------------------------
+# Step 3: Per-module emit + compile
+# ---------------------------------------------------------------------------
+log "building ${#SOURCES[@]} modules (jobs=$JOBS)..."
+
+MODULE_NAMES=()
+FAILED=0
+
 # Build modules (with optional parallelism)
 if [[ "$JOBS" -le 1 ]]; then
     for i in "${!SOURCES[@]}"; do
@@ -406,12 +426,13 @@ else
     # Parallel build using GNU parallel or xargs
     MODULES_LIST="$RAW_DIR/modules_built.txt"
     > "$MODULES_LIST"
+    export MODULES_LIST
 
     for i in "${!SOURCES[@]}"; do
         echo "$i ${SOURCES[$i]}"
     done | xargs -P "$JOBS" -L 1 bash -c '
         cd "'"$REPO_ROOT"'"
-        source scripts/build.sh --_build_module_worker "$@"
+        bash scripts/build.sh --_build_module_worker "$@"
     ' _ 2>"$RAW_DIR/build_errors.txt" || FAILED=1
 
     if [[ "$FAILED" -eq 0 ]]; then

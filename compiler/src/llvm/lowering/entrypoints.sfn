@@ -672,6 +672,7 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     }
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
     runtime_helpers = append_unique_effect(runtime_helpers, "print");
+    runtime_helpers = append_unique_effect(runtime_helpers, "print.err");
     runtime_helpers = append_unique_effect(runtime_helpers, "print.info");
     runtime_helpers = append_unique_effect(runtime_helpers, "print.warn");
     runtime_helpers = append_unique_effect(runtime_helpers, "print.error");

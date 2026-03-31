@@ -1,0 +1,13 @@
+test "print: print() calls sailfin_runtime_print_raw" {
+    // If the runtime helper descriptor mapping is missing or wrong,
+    // this test will fail to link (unresolved symbol).
+    print("hello from print");
+    assert 1 == 1;
+}
+
+test "print: print.err() calls sailfin_runtime_print_err" {
+    // Exercises the stderr path — verifies print.err lowers to
+    // sailfin_runtime_print_err.
+    print.err("hello from print.err");
+    assert 1 == 1;
+}

@@ -21,7 +21,7 @@ The language features effect types (`![io, net, model, gpu, rand, clock]`), owne
 ### Environment Setup
 
 ```bash
-make env              # Create/update the 'sailfin' Conda environment
+make env              # Create/update the 'sailfin' Conda environment (only needed for BUILD_DRIVER=py; the default shell driver has no Conda requirement)
 ```
 
 ### Development Workflow
@@ -252,16 +252,18 @@ The compiler must always compile itself. Breaking changes require:
 
 ## Versioning & Releases
 
-- **Semantic versioning:** `v0.1.1-alpha.32` (alpha branch), `v0.x.y` (main branch)
+- **Semantic versioning:** `v0.1.1-alpha.32` (main branch prerelease), `v0.x.y` (main branch stable release)
 - **Version source:** `compiler/src/version.sfn:__version__` (drives `sfn --version`)
 - **Release automation:** GitHub Actions + `python-semantic-release`
 - **Artifacts:** `dist/` is used for packaged artifacts as part of release tooling
 
-## Current Branch Strategy
+## Branch Strategy (trunk-based)
 
-- `main`: Stable releases (pre-1.0: breaking changes allowed)
-- `alpha`: Prerelease builds with `-alpha` suffix
-- Active development typically happens on feature branches merged to `alpha`
+- `main`: Primary development branch — all feature work merges here. Produces `-alpha.N` prereleases via semantic-release. `main` is the source of truth for `compiler/src/version.sfn` and `CHANGELOG.md`.
+- `beta`: Short-lived, cut from `main` when ready for beta testing. Produces `-beta.N` prereleases. Do **not** merge `beta` back into `main`; delete the branch after the beta cycle completes.
+- `rc`: Short-lived, cut from `main` (or `beta`) for release candidates. Produces `-rc.N` prereleases. Do **not** merge `rc` back into `main`; delete the branch after the RC cycle completes.
+- Fixes always land on `main` first, then cherry-pick or merge forward from `main` to `beta`/`rc` if needed. If a change made on `beta`/`rc` must be kept, cherry-pick only the non-release commits back to `main` (avoid commits that modify `compiler/src/version.sfn` or `CHANGELOG.md`).
+- When ready for a stable release, toggle `prerelease = false` on `main`'s branch config in `pyproject.toml`; no merge back from `beta`/`rc` is required.
 
 ## Key Terminology
 

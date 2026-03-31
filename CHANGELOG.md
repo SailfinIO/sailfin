@@ -1,6 +1,98 @@
 # CHANGELOG
 
 
+## v0.4.0 (2026-03-30)
+
+### Bug Fixes
+
+- Apply PR review comments - stderr routing, parallel build fix, comment accuracy
+  ([`6ebc8e0`](https://github.com/SailfinIO/sailfin/commit/6ebc8e0817a71b0e3970c516202f91d759c06916))
+
+- scripts/build.sh: compute REPO_ROOT from BASH_SOURCE[0] so it works when both executed and
+  sourced; use `bash scripts/build.sh` (not `source`) for the parallel worker invocation to avoid $0
+  / REPO_ROOT resolution issues - compiler/src/parser/mod.sfn: route 'no progress' diagnostic to
+  print.err() to keep stdout clean - compiler/src/main.sfn (compile_to_llvm): route all trace/debug
+  output to print.err() so LLVM IR returned on stdout is not interleaved with trace lines -
+  compiler/src/main.sfn (report_typecheck_errors): route all typecheck error output to print.err()
+  so errors go to stderr - tools/package.sh: fix inaccurate header comment — sailfin-<target>.tar.gz
+  contains only the compiler binary; installer-<target>.tar.gz has compiler + runtime
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/ac2c69e1-e6f6-44e1-9efc-dd140d1d755e
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Chores
+
+- Merge main into rc, resolve version/changelog conflicts
+  ([`9ae54a8`](https://github.com/SailfinIO/sailfin/commit/9ae54a8c6f6f0bbefc4fef5fd6962a8e56da291f))
+
+- Sync version/changelog to main [skip ci]
+  ([`2b7a243`](https://github.com/SailfinIO/sailfin/commit/2b7a2437703aae0fd245e988f76d17e9a2229b01))
+
+
+## v0.3.3 (2026-03-30)
+
+### Chores
+
+- Merge rc into beta, resolve version/changelog conflicts
+  ([`61ca244`](https://github.com/SailfinIO/sailfin/commit/61ca2442760ee00ecbcf2f40408c0891a35c2693))
+
+
+## v0.2.0-rc.1 (2026-03-29)
+
+
+## v0.4.0-beta.1 (2026-03-30)
+
+### Chores
+
+- Docs, changelog and pr-review tool level
+  ([`29ec5a3`](https://github.com/SailfinIO/sailfin/commit/29ec5a34537642c6eff1edd979b0185d8f19b6fe))
+
+- Regenerate lockfile for awe
+  ([`26f9736`](https://github.com/SailfinIO/sailfin/commit/26f9736e215e76e0c476be1d1c18e46a444fc95b))
+
+
+## v0.4.0-alpha.3 (2026-03-30)
+
+### Bug Fixes
+
+- Mingw cross compilation
+  ([`349c050`](https://github.com/SailfinIO/sailfin/commit/349c0504c210061b75f6c4d7bbc5317cb75df4a4))
+
+
+## v0.4.0-alpha.2 (2026-03-30)
+
+### Bug Fixes
+
+- Make non weak for mingw
+  ([`c8dc473`](https://github.com/SailfinIO/sailfin/commit/c8dc47307d5d464029ace64d744462fb6edd8d78))
+
+- Need to add raw print
+  ([`518d193`](https://github.com/SailfinIO/sailfin/commit/518d19375abe8304b99ab7f356de0d3fcda5102c))
+
+- Need weak alias for backwards compatibility
+  ([`a65065a`](https://github.com/SailfinIO/sailfin/commit/a65065acd132a0263079ea112f423e3aee8d2f98))
+
+### Chores
+
+- Revert to pages
+  ([`4768255`](https://github.com/SailfinIO/sailfin/commit/4768255158477573fbdaa92f9b4539a8d29cf5e2))
+
+### Continuous Integration
+
+- Auto-resolve version/CHANGELOG conflicts on PRs
+  ([`c374847`](https://github.com/SailfinIO/sailfin/commit/c374847e68bad225691e4d0dde23203d8a8f7ac6))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/a3cdb0f4-7818-434b-a70f-e7dd06e13953
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Features
+
+- Add shell build, smoke, and package scripts
+  ([`a94c202`](https://github.com/SailfinIO/sailfin/commit/a94c202793ef3a86ad39a3d2cc593401e6c920ef))
+
+
 ## v0.4.0-alpha.1 (2026-03-30)
 
 ### Bug Fixes

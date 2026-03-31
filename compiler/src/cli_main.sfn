@@ -29,22 +29,22 @@ import {
 
 fn _usage() -> string {
     return "usage:\n" +
-        "  sfn --version\n" +
-        "  sfn version\n" +
-        "  sfn emit [--timing] llvm|sailfin|native <file.sfn>\n" +
-        "  sfn emit-llvm-file [--timing] <file.sfn> <out.ll>\n" +
-        "  sfn build [-o OUTPUT] <file.sfn>\n" +
-        "  sfn run <file.sfn>\n" +
-        "  sfn run <exe>\n" +
+    "  sfn --version\n" +
+    "  sfn version\n" +
+    "  sfn emit [--timing] llvm|sailfin|native <file.sfn>\n" +
+    "  sfn emit-llvm-file [--timing] <file.sfn> <out.ll>\n" +
+    "  sfn build [-o OUTPUT] <file.sfn>\n" +
+    "  sfn run <file.sfn>\n" +
+    "  sfn run <exe>\n" +
     "  sfn test [path]\n" +
     "  sfn init\n" +
     "  sfn publish\n" +
     "  sfn add [--dev] <capsule>\n" +
-        "\n" +
-        "examples:\n" +
-        "  sfn emit llvm examples/basics/hello-world.sfn\n" +
-        "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" +
-        "  sfn run examples/basics/hello-world.sfn\n" +
+    "\n" +
+    "examples:\n" +
+    "  sfn emit llvm examples/basics/hello-world.sfn\n" +
+    "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" +
+    "  sfn run examples/basics/hello-world.sfn\n" +
     "  sfn run build/native/examples/hello\n" +
     "  sfn test .\n" +
     "  sfn init\n" +
@@ -973,10 +973,10 @@ fn _clang_compile_runtime_objects(runtime_root -> string, out_dir -> string, opt
     // Build (or reuse) cached runtime object files so repeated `test` invocations
     // don't recompile the runtime C sources per test file.
     if runtime_root.length == 0 {
-        return ["", "", ""]; 
+        return ["", "", ""];
     }
     if !_runtime_bundle_exists(runtime_root) {
-        return ["", "", ""]; 
+        return ["", "", ""];
     }
 
     let include_dir = _path_join(runtime_root, "native/include");
@@ -989,32 +989,32 @@ fn _clang_compile_runtime_objects(runtime_root -> string, out_dir -> string, opt
 
     if !fs.exists(runtime_obj) {
         let rc = process.run([
-            "clang",
-            opt_flag,
-            "-Wno-override-module",
-            "-I" + include_dir,
-            "-c",
-            runtime_src,
-            "-o",
-            runtime_obj,
+                "clang",
+                opt_flag,
+                "-Wno-override-module",
+                "-I" + include_dir,
+                "-c",
+                runtime_src,
+                "-o",
+                runtime_obj,
         ]);
         if rc != 0 {
-            return ["", "", ""]; 
+            return ["", "", ""];
         }
     }
 
     if !fs.exists(globals_obj) {
         let rc2 = process.run([
-            "clang",
-            opt_flag,
-            "-Wno-override-module",
-            "-c",
-            runtime_ir,
-            "-o",
-            globals_obj,
+                "clang",
+                opt_flag,
+                "-Wno-override-module",
+                "-c",
+                runtime_ir,
+                "-o",
+                globals_obj,
         ]);
         if rc2 != 0 {
-            return ["", "", ""]; 
+            return ["", "", ""];
         }
     }
 
@@ -1028,6 +1028,7 @@ fn _clang_link_with_opt(ll_path -> string, out_path -> string, runtime_root -> s
     }
     if !_runtime_bundle_exists(runtime_root) {
         print("runtime bundle missing expected files under: " + runtime_root);
+
         return 1;
     }
 
@@ -1046,6 +1047,7 @@ fn _clang_link_with_opt(ll_path -> string, out_path -> string, runtime_root -> s
     if prelude_obj.length == 0 { _if3 = true; }
     if _if3 {
         print("failed to build cached runtime objects");
+
         return 1;
     }
 
@@ -1092,6 +1094,7 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
     }
     if !_runtime_bundle_exists(runtime_root) {
         print("runtime bundle missing expected files under: " + runtime_root);
+
         return 1;
     }
 
@@ -1109,6 +1112,7 @@ fn _clang_link_test(ll_path -> string, out_path -> string, runtime_root -> strin
     if prelude_obj.length == 0 { _if4 = true; }
     if _if4 {
         print("failed to build cached runtime objects");
+
         return 1;
     }
 
@@ -1318,13 +1322,13 @@ fn _curl_get(url -> string) -> string ![io] {
 fn _curl_post_json(url -> string, body_path -> string, auth_header -> string) -> string ![io] {
     let tmp = "/tmp/.sfn_curl_response_tmp";
     let rc = process.run([
-        "curl", "-sfS",
-        "-X", "POST",
-        "-H", "Content-Type: application/json",
-        "-H", "Authorization: " + auth_header,
-        "-d", "@" + body_path,
-        "-o", tmp,
-        url,
+            "curl", "-sfS",
+            "-X", "POST",
+            "-H", "Content-Type: application/json",
+            "-H", "Authorization: " + auth_header,
+            "-d", "@" + body_path,
+            "-o", tmp,
+            url,
     ]);
     if rc != 0 {
         return "";
@@ -1481,6 +1485,7 @@ fn _extract_sfnpkg(content -> string, dest_dir -> string) -> void ![io] {
     let header = _toml_trim_str(lines[0]);
     if !strings_equal(header, "SFNPKG/1") {
         print("invalid .sfnpkg format — expected SFNPKG/1 header");
+
         return;
     }
     let mut current_path -> string = "";
@@ -1653,6 +1658,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     if is_version {
         if args.length != 1 {
             print(_usage());
+
             return 2;
         }
         print("sfn " + sailfin_version());
@@ -1671,6 +1677,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let _expected_args = base_index + 2;
         if args.length != _expected_args {
             print(_usage());
+
             return 2;
         }
         let mode = args[base_index];
@@ -1678,6 +1685,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let path = args[_path_idx];
         if !fs.exists(path) {
             print("file not found: " + path);
+
             return 1;
         }
         let source = fs.readFile(path);
@@ -1699,6 +1707,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             return 0;
         }
         print("unknown emit mode: " + mode);
+
         return 2;
     }
 
@@ -1714,6 +1723,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let _expected_args2 = base_index + 2;
         if args.length != _expected_args2 {
             print(_usage());
+
             return 2;
         }
 
@@ -1722,6 +1732,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let out_path = args[_path_idx2];
         if !fs.exists(path) {
             print("file not found: " + path);
+
             return 1;
         }
         let source = fs.readFile(path);
@@ -1756,11 +1767,13 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             }
         } else {
             print(_usage());
+
             return 2;
         }
 
         if !fs.exists(input_path) {
             print("file not found: " + input_path);
+
             return 1;
         }
 
@@ -1773,6 +1786,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let ok = compile_to_llvm_file_with_module(source, module_name, ll_path);
         if !ok {
             print("failed to compile LLVM for: " + input_path);
+
             return 1;
         }
 
@@ -1780,6 +1794,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let rc = _clang_link(ll_path, exe_path, runtime_root);
         if rc != 0 {
             print("link failed (clang exit=" + number_to_string(rc) + ")");
+
             return rc;
         }
         print("built: " + exe_path);
@@ -1789,6 +1804,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     if is_run {
         if args.length != 2 {
             print(_usage());
+
             return 2;
         }
         let input_path = args[1];
@@ -1800,6 +1816,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
         if !fs.exists(input_path) {
             print("file not found: " + input_path);
+
             return 1;
         }
 
@@ -1815,6 +1832,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let ok = compile_to_llvm_file_with_module(source, module_name, ll_path);
         if !ok {
             print("failed to compile LLVM for: " + input_path);
+
             return 1;
         }
 
@@ -1822,6 +1840,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         if link_rc != 0 {
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
             print("run: native link failed; attempting seed fallback via `sfn run`");
+
             let fallback_rc = process.run(["sfn", "run", input_path]);
             if fallback_rc == 0 {
                 return 0;
@@ -1840,6 +1859,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             root = args[1];
         } else if args.length != 1 {
             print(_usage());
+
             return 2;
         }
 
@@ -1857,6 +1877,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let test_files = _collect_test_files(root, 25);
         if test_files.length == 0 {
             print("no Sailfin test files found under: " + root);
+
             fs.deleteFile(test_runner_active_path);
             return 1;
         }
@@ -1906,6 +1927,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             let _compiled = compile_tests_to_llvm_file_with_module(combined_source, module_name, ll_path);
             if !_compiled {
                 print("test runner: compile failed for " + path);
+
                 fs.deleteFile(test_runner_active_path);
                 return 1;
             }
@@ -1924,6 +1946,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             let link_rc = _clang_link_test(ll_path, exe_path, runtime_root);
             if link_rc != 0 {
                 print("link failed (clang exit=" + number_to_string(link_rc) + ")");
+
                 fs.deleteFile(test_runner_active_path);
                 return link_rc;
             }
@@ -1937,6 +1960,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             }
             if run_rc != 0 {
                 print("test failed: " + path);
+
                 fs.deleteFile(test_runner_active_path);
                 return run_rc;
             }
@@ -1960,6 +1984,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         if fs.exists("capsule.toml") {
             print("capsule.toml already exists in this directory");
+
             return 1;
         }
         // Derive package name from current directory
@@ -2003,6 +2028,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         if !fs.exists("capsule.toml") {
             print("no capsule.toml found — run `sfn init` first");
+
             return 1;
         }
         let toml_text = fs.readFile("capsule.toml");
@@ -2014,6 +2040,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         if pkg_version.length == 0 {
             print("capsule.toml: missing package version");
+
             return 1;
         }
 
@@ -2034,6 +2061,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
         if token.length == 0 {
             print("no auth token found — set SFN_TOKEN or create ~/.sfn/credentials");
+
             return 1;
         }
 
@@ -2062,6 +2090,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
         if digest.length == 0 {
             print("failed to compute digest");
+
             process.run(["rm", "-f", payload_tmp]);
             return 1;
         }
@@ -2070,15 +2099,16 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         // limits with the large base64 content
         let body_tmp = "/tmp/.sfn_publish_body_tmp";
         let build_json_rc = process.run(["sh", "-c",
-            "printf '{\"type\":\"capsule\",\"capsule\":\"" + pkg_name
-            + "\",\"version\":\"" + pkg_version
-            + "\",\"digest\":\"" + digest
-            + "\",\"content_b64\":\"' > " + body_tmp
-            + " && base64 -w0 '" + payload_tmp + "' >> " + body_tmp
-            + " && printf '\",\"meta\":{}}' >> " + body_tmp
+                "printf '{\"type\":\"capsule\",\"capsule\":\"" + pkg_name
+                + "\",\"version\":\"" + pkg_version
+                + "\",\"digest\":\"" + digest
+                + "\",\"content_b64\":\"' > " + body_tmp
+                + " && base64 -w0 '" + payload_tmp + "' >> " + body_tmp
+                + " && printf '\",\"meta\":{}}' >> " + body_tmp
         ]);
         if build_json_rc != 0 {
             print("failed to build publish payload");
+
             process.run(["rm", "-f", payload_tmp]);
             return 1;
         }
@@ -2091,6 +2121,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         process.run(["rm", "-f", body_tmp]);
         if response.length == 0 {
             print("publish failed — check your token and network connection");
+
             return 1;
         }
         print(response);
@@ -2113,11 +2144,13 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             }
         } else {
             print("usage: sfn add [--dev] <capsule>");
+
             return 2;
         }
 
         if !fs.exists("capsule.toml") {
             print("no capsule.toml found — run `sfn init` first");
+
             return 1;
         }
 
@@ -2134,6 +2167,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         );
         if latest_version.length == 0 {
             print("capsule not found in registry: " + registry_name);
+
             return 1;
         }
 
@@ -2141,6 +2175,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let slash_pos = find_char(registry_name, "/", 0);
         if slash_pos < 0 {
             print("invalid capsule id — expected scope/name format: " + registry_name);
+
             return 1;
         }
         let scope = substring(registry_name, 0, slash_pos);
@@ -2150,6 +2185,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let home = _get_home();
         if home.length == 0 {
             print("could not determine home directory");
+
             return 1;
         }
         let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + latest_version;
@@ -2166,6 +2202,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         let dl_rc = _curl_download(download_url, pkg_path);
         if dl_rc != 0 {
             print("failed to download: " + download_url);
+
             return 1;
         }
 
@@ -2192,6 +2229,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
     print("unknown command: " + cmd);
     print(_usage());
+
     return 2;
 }
 

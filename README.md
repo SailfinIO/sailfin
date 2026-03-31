@@ -127,7 +127,7 @@ For now, experiment, record findings, and propose ideas through pull requests.
 
 ### Local Development
 
-- `make env` — create or update the `sailfin` Conda environment defined in `environment.yml`.
+- `make env` — create or update the `sailfin` Conda environment defined in `environment.yml`. Only needed for `BUILD_DRIVER=py`; the default shell driver has no Conda requirement.
 - `make compile` — build the native compiler by self-hosting from a released seed.
 - `make test` — run the suite using the self-hosted native compiler.
 - `make install` — install the built compiler into `PREFIX/bin` (default: `~/.local/bin`).
