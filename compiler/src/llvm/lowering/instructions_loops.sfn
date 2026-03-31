@@ -705,7 +705,7 @@ fn lower_try_instruction(
     }
     current_lines.push(continue_label + ":");
 
-    _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index, [], lifetime_regions);
+    _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index);
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
@@ -1243,7 +1243,7 @@ fn lower_loop_instruction(
 
     collected_mutations = extend_mutations(body_scoped_mutations, exit_mutations);
 
-    _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1, collected_mutations, lifetime_regions);
+    _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
@@ -1310,7 +1310,7 @@ fn lower_for_instruction(
     raw_target = strip_mut_prefix(raw_target);
     if raw_target.length == 0 {
         diagnostics.push("llvm lowering: `.for` loop missing iteration binding in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -1330,7 +1330,7 @@ fn lower_for_instruction(
 
     if !is_simple_identifier(raw_target) {
         diagnostics.push("llvm lowering: `.for` loop target `" + raw_target + "` is not a simple identifier in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -1350,7 +1350,7 @@ fn lower_for_instruction(
 
     if find_local_binding(current_locals, raw_target) != null {
         diagnostics.push("llvm lowering: `.for` loop target `" + raw_target + "` shadows existing local in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -1389,7 +1389,7 @@ fn lower_for_instruction(
 
         if start_result.operand == null {
             diagnostics.push("llvm lowering: unable to lower `.for` range start in `" + function.name + "`");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -1419,7 +1419,7 @@ fn lower_for_instruction(
 
         if end_result.operand == null {
             diagnostics.push("llvm lowering: unable to lower `.for` range end in `" + function.name + "`");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -1448,7 +1448,7 @@ fn lower_for_instruction(
         current_temp = start_coerced.temp_index;
         if start_coerced.operand == null {
             diagnostics.push("llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -1478,7 +1478,7 @@ fn lower_for_instruction(
         current_temp = end_coerced.temp_index;
         if end_coerced.operand == null {
             diagnostics.push("llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -1512,7 +1512,7 @@ fn lower_for_instruction(
 
             if stride_result.operand == null {
                 diagnostics.push("llvm lowering: `.for` stride expression did not produce a value in `" + function.name + "`");
-                _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+                _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
                 return BlockLoweringResult {
                     lines: current_lines,
                     allocas: current_allocas,
@@ -1541,7 +1541,7 @@ fn lower_for_instruction(
             current_temp = stride_coerced.temp_index;
             if stride_coerced.operand == null {
                 diagnostics.push("llvm lowering: `.for` stride expression must evaluate to `number` in `" + function.name + "`");
-                _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+                _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
                 return BlockLoweringResult {
                     lines: current_lines,
                     allocas: current_allocas,
@@ -1612,7 +1612,7 @@ fn lower_for_instruction(
             diagnostics.push("llvm lowering: internal error loading `.for` iteration value in `" + function.name + "`");
             current_lines.push("  br label %" + loop_exit_label);
             current_lines.push(loop_exit_label + ":");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -1656,7 +1656,7 @@ fn lower_for_instruction(
             diagnostics.push("llvm lowering: unable to compare `.for` range bounds in `" + function.name + "`");
             current_lines.push("  br label %" + loop_exit_label);
             current_lines.push(loop_exit_label + ":");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -1688,7 +1688,7 @@ fn lower_for_instruction(
             diagnostics.push("llvm lowering: unable to compare descending `.for` range bounds in `" + function.name + "`");
             current_lines.push("  br label %" + loop_exit_label);
             current_lines.push(loop_exit_label + ":");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -1863,7 +1863,7 @@ fn lower_for_instruction(
 
         current_locals = locals;
 
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -1899,7 +1899,7 @@ fn lower_for_instruction(
             _ci22 += 1;
         }
         diagnostics.push("llvm lowering: unable to lower `.for` iterable in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -1927,7 +1927,7 @@ fn lower_for_instruction(
             _ci23 += 1;
         }
         diagnostics.push("llvm lowering: `.for` iterable must resolve to an array value in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -2152,7 +2152,7 @@ fn lower_for_instruction(
         current_locals = locals;
 
     let empty_constants = empty_string_constant_set();
-    _write_block_result_files(current_lines, current_allocas, false, diagnostics, empty_constants, current_locals, current_bindings, current_temp, current_block_counter, current_next_local, current_next_region, next_index, collected_mutations, lifetime_regions);
+    _write_block_result_files(current_lines, current_allocas, false, diagnostics, empty_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
