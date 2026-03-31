@@ -1,71 +1,773 @@
 ---
 title: Standard Library
-description: Sailfin's standard library and prelude.
+description: Complete reference for Sailfin's standard library, prelude functions, and built-in modules.
 section: reference
 order: 5
 ---
 
+The Sailfin standard library is divided into the **prelude** (always in scope, no import required) and named modules imported on demand. This page documents every available function, struct, and module with full signatures, behavior notes, and examples.
+
+---
+
 ## Prelude
 
-The prelude (`runtime/prelude.sfn`) is automatically available in every Sailfin program. It provides:
+The prelude (`runtime/prelude.sfn`) is automatically available in every Sailfin program. No import statement is needed.
 
-### Printing & Logging
+---
+
+### Output
+
+#### `print(value: any) ![io]`
+
+Write a value to stdout followed by a newline. Accepts any type; non-string values are converted to their debug representation.
 
 ```sfn
-print.info(message: String) ![io]
-print.warn(message: String) ![io]
-print.error(message: String) ![io]
-print.debug(message: String) ![io]
+fn greet(name: String) ![io] {
+    print("Hello, " + name + "!");
+}
 ```
 
-### Strings
+#### `print.err(value: any) ![io]`
+
+Write a value to stderr followed by a newline. Use for diagnostics, errors, and warnings that should not mix with normal stdout output.
 
 ```sfn
-String.length -> Int
-String.split(delimiter: String) -> Array<String>
-String.substring(start: Int, end: Int) -> String
-String.contains(s: String) -> Bool
-String.trim() -> String
-String.to_upper() -> String
-String.to_lower() -> String
+fn validate(path: String) -> Boolean ![io] {
+    if path.length == 0 {
+        print.err("validation error: path must not be empty");
+        return false;
+    }
+    return true;
+}
 ```
 
-### Collections
+#### Deprecated output functions
+
+The following functions are still recognized by the runtime for backward compatibility. Prefer `print()` and `print.err()` in new code.
+
+| Deprecated | Preferred replacement |
+|---|---|
+| `print.info(message)` | `print(message)` |
+| `print.warn(message)` | `print.err(message)` |
+| `print.error(message)` | `print.err(message)` |
+| `print.debug(message)` | `print(message)` |
+
+---
+
+### String Utilities
+
+These functions operate on Sailfin strings using Unicode grapheme clusters as the unit of indexing. "Index" always means a grapheme-cluster index, not a byte offset or code-unit index.
+
+#### `substring(text: String, start: Int, end: Int) -> String`
+
+Extract the substring from grapheme index `start` (inclusive) to `end` (exclusive). Both bounds are clamped to `[0, text.length]`. Returns `""` when the resulting range is empty or inverted.
 
 ```sfn
-Array<T>.length -> Int
-Array<T>.map(fn: (T) -> U) -> Array<U>
-Array<T>.filter(fn: (T) -> Bool) -> Array<T>
-Array<T>.reduce(fn: (T, T) -> T) -> T
-
-Vec<T>.new() -> Vec<T>
-Vec<T>.push(item: T)
-Vec<T>.pop() -> Option<T>
-Vec<T>.len() -> Int
+let s = "Hello, world!";
+let hello = substring(s, 0, 5);   // "Hello"
+let world = substring(s, 7, 12);  // "world"
+let empty = substring(s, 5, 5);   // ""
+let clamped = substring(s, 0, 999); // "Hello, world!" (end clamped)
 ```
 
-### Filesystem
+**Notes:**
+- Does not panic on out-of-range bounds — bounds are silently clamped.
+- Safe to call on empty strings; always returns `""`.
+- Works correctly with multi-byte Unicode characters because it indexes by grapheme cluster.
+
+---
+
+#### `find_char(text: String, character: String, start: Int = 0) -> Int`
+
+Find the first occurrence of a single grapheme `character` in `text`, beginning the search at grapheme index `start`. Returns the index of the first match, or `-1` if not found.
+
+The `start` parameter defaults to `0`. Negative values are treated as `0`. A `start` beyond the end of the string returns `-1` immediately.
+
+Escape sequences are recognized when passed as two-character strings: `"\\n"` matches a literal newline, `"\\r"` matches a carriage return, and `"\\t"` matches a tab.
 
 ```sfn
-fs.read(path: String) -> String ![io]
-fs.write(path: String, content: String) ![io]
-fs.exists(path: String) -> Bool ![io]
-```
+let path = "/usr/local/bin";
+let last_slash = find_char(path, "/", 1);  // 4
 
-### HTTP
+let csv = "name,age,city";
+let first_comma = find_char(csv, ",");     // 4
 
-```sfn
-http.get(url: String) -> Response ![net]
-http.post(url: String, body: String) -> Response ![net]
-```
+let line = "hello\nworld";
+let newline = find_char(line, "\\n");      // 5
 
-### Process
-
-```sfn
-process.exec(command: String) -> ProcessResult ![io]
-process.exit(code: Int) ![io]
+let missing = find_char("abc", "z");       // -1
 ```
 
 ---
 
-*The standard library is actively expanding as the runtime migrates from C to Sailfin. See [Runtime Audit](/docs/reference/runtime-abi) for migration status.*
+#### `grapheme_count(text: String) -> Int`
+
+Return the number of Unicode grapheme clusters in `text`. For ASCII strings this equals the byte length. For strings containing multi-byte characters, emoji, or combined sequences this may differ from `.length`.
+
+```sfn
+let ascii = "hello";
+grapheme_count(ascii);       // 5
+
+let emoji = "hi 👋";
+grapheme_count(emoji);       // 4  (h, i, space, 👋)
+
+let empty = "";
+grapheme_count(empty);       // 0
+```
+
+**Note:** Use `grapheme_count` when you need the number of visible characters a user would perceive. Use `.length` only when operating on raw bytes or code units.
+
+---
+
+#### `grapheme_at(text: String, index: Int) -> String`
+
+Return the grapheme cluster at the given index. Returns `""` for an out-of-range index (negative or beyond the end of the string). Never panics.
+
+```sfn
+let s = "café";
+grapheme_at(s, 0);  // "c"
+grapheme_at(s, 3);  // "é"  (single grapheme, may be multiple bytes)
+grapheme_at(s, 99); // ""
+```
+
+---
+
+#### `char_code(character: String) -> Int`
+
+Return the Unicode code point of the first grapheme cluster in `character`. Returns `-1` for an empty string or an invalid input.
+
+```sfn
+char_code("A");    // 65
+char_code("a");    // 97
+char_code("€");    // 8364
+char_code("");     // -1
+```
+
+**Note:** Only the first grapheme cluster of the argument is examined. Pass a single character for predictable results.
+
+---
+
+#### `strings_equal(left: String, right: String) -> Boolean`
+
+Return `true` if two strings have the same length and each grapheme cluster matches at every position. This performs a grapheme-by-grapheme comparison using `char_code` internally.
+
+```sfn
+strings_equal("hello", "hello");  // true
+strings_equal("hello", "Hello");  // false
+```
+
+**Note:** The `==` operator compares strings by value in most contexts; `strings_equal` is available as an explicit alternative.
+
+---
+
+#### `clamp(value: Int, minimum: Int, maximum: Int) -> Int`
+
+Return `value` clamped to the range `[minimum, maximum]`. Works with both integers and floating-point numbers.
+
+```sfn
+clamp(5, 0, 10);    // 5
+clamp(-3, 0, 10);   // 0
+clamp(15, 0, 10);   // 10
+```
+
+---
+
+### Struct and Debug Utilities
+
+#### `struct_field(name: String, value: any) -> StructField`
+
+Construct a `StructField` record with a name and a value. Used as a building block for `struct_repr`.
+
+```sfn
+let field = struct_field("age", 30);
+```
+
+#### `struct_repr(name: String, fields: StructField[]) -> String`
+
+Produce a human-readable debug representation of a struct. The output format is `Name(field1=value1, field2=value2, ...)`.
+
+```sfn
+struct Point {
+    x -> Int;
+    y -> Int;
+}
+
+fn point_repr(p: Point) -> String {
+    return struct_repr("Point", [
+        struct_field("x", p.x),
+        struct_field("y", p.y),
+    ]);
+}
+
+// point_repr(Point { x: 3, y: 7 }) => "Point(x=3, y=7)"
+```
+
+#### `to_debug_string(value: any) -> String`
+
+Convert any value to its debug string representation. Used internally by `struct_repr` and string interpolation.
+
+```sfn
+to_debug_string(42);       // "42"
+to_debug_string(true);     // "true"
+to_debug_string(null);     // "null"
+to_debug_string("hello");  // "hello"
+```
+
+---
+
+### Type Checking Utilities
+
+These functions are used internally by the compiler-generated type guards. They are available in user code but are most commonly used via the `check_type` wrapper.
+
+#### `check_type(value: any, descriptor: String) -> Boolean`
+
+Return `true` if `value` conforms to the type described by the descriptor string. Descriptor syntax mirrors Sailfin type notation: `"string"`, `"number"`, `"boolean"`, `"string[]"`, `"string | null"`, etc.
+
+```sfn
+check_type("hello", "string");           // true
+check_type(42, "number");                // true
+check_type(null, "string?");             // true  (? => union with void/null)
+check_type([1, 2], "number[]");          // true
+check_type("x", "string | number");      // true
+```
+
+---
+
+### Runtime Utilities
+
+#### `match_exhaustive_failed(value: any) -> never`
+
+Runtime backstop invoked by compiler-generated code when a `match` expression fails to cover all cases at runtime. Raises a `ValueError` with a message including the unmatched value. This function is never called when all match arms are genuinely exhaustive.
+
+You should not call this function directly. It appears in generated code and in documentation so that stack traces referencing it can be understood.
+
+---
+
+### Concurrency and Async Utilities
+
+> **Status:** The concurrency primitives below are present in the prelude and parseable, but full structured-concurrency semantics are planned for a future release. `spawn` and `channel` are available today as runtime-level hooks; `routine`/`scope`/`await` are planned language keywords.
+
+#### `sleep(milliseconds: Int) ![clock]`
+
+Suspend the current execution context for at least `milliseconds` milliseconds. Requires the `clock` effect.
+
+```sfn
+fn wait_a_bit() ![clock] {
+    sleep(500);  // pause for 500 ms
+}
+```
+
+#### `monotonic_millis() -> Int ![clock]`
+
+Return the current value of a monotonic clock in milliseconds. Useful for measuring elapsed time. The absolute value is not meaningful; only differences between two calls are useful.
+
+```sfn
+fn timed_operation() ![io, clock] {
+    let start = monotonic_millis();
+    do_work();
+    let elapsed = monotonic_millis() - start;
+    print("elapsed: " + elapsed + " ms");
+}
+```
+
+#### `channel<T>(capacity: Int = 0) -> Channel<T> ![io]`
+
+Create a buffered or unbuffered channel for passing values between concurrent tasks. `capacity = 0` produces an unbuffered (synchronous) channel. Requires the `io` effect.
+
+> **Planned:** Full channel API with typed send/receive operations. Current behavior delegates to the runtime channel primitive.
+
+#### `spawn(task: () -> void, name: String = "") -> void ![io]`
+
+Spawn a concurrent task. `name` is used for diagnostics. Requires the `io` effect.
+
+> **Planned:** Structured concurrency via `routine`/`scope`.
+
+#### `parallel(tasks: (() -> any)[]) -> any[] ![io]`
+
+Run an array of zero-argument callables concurrently and collect their return values. Requires the `io` effect.
+
+```sfn
+fn fetch_all(urls: String[]) -> String[] ![io, net] {
+    let tasks = array_map(urls, fn(url: String) -> any {
+        return fn() -> any ![net] { return http.get(url); };
+    });
+    return parallel(tasks);
+}
+```
+
+---
+
+### Array Utilities
+
+#### `array_map(items: any[], mapper: (any) -> any) -> any[]`
+
+Apply `mapper` to each element and return a new array of results.
+
+```sfn
+let numbers = [1, 2, 3, 4];
+let doubled = array_map(numbers, fn(n: Int) -> Int { return n * 2; });
+// [2, 4, 6, 8]
+```
+
+#### `array_filter(items: any[], predicate: (any) -> Boolean) -> any[]`
+
+Return a new array containing only the elements for which `predicate` returns `true`.
+
+```sfn
+let numbers = [1, 2, 3, 4, 5];
+let evens = array_filter(numbers, fn(n: Int) -> Boolean { return n % 2 == 0; });
+// [2, 4]
+```
+
+#### `array_reduce(items: any[], initial: any, reducer: (any, any) -> any) -> any`
+
+Fold `items` into a single value using `reducer`, starting from `initial`.
+
+```sfn
+let numbers = [1, 2, 3, 4, 5];
+let sum = array_reduce(numbers, 0, fn(acc: Int, n: Int) -> Int { return acc + n; });
+// 15
+```
+
+---
+
+### Enum Utilities
+
+These functions are generated by the compiler for enum types and are available for use in custom enum-handling code. They are primarily an implementation detail of the compiler's enum lowering.
+
+#### `enum_type(name: String) -> EnumType`
+
+Create a new `EnumType` descriptor with no variants defined yet.
+
+#### `enum_define_variant(enum_type: EnumType, variant_name: String, field_names: String[]) -> EnumType`
+
+Return a new `EnumType` with the named variant added.
+
+#### `enum_field(name: String, value: any) -> EnumField`
+
+Construct a single `EnumField`.
+
+#### `enum_instantiate(enum_type: EnumType, variant_name: String, provided: EnumField[]) -> EnumInstance`
+
+Create an `EnumInstance` for the named variant, filling in `null` for any fields not in `provided`.
+
+#### `enum_get_field(instance: EnumInstance, name: String) -> any`
+
+Look up a field value by name on an `EnumInstance`. Returns `null` if not found.
+
+---
+
+### Prelude Structs
+
+These structs are defined in the prelude and may appear in user-facing APIs or diagnostics.
+
+#### `StructField`
+
+```sfn
+struct StructField {
+    name -> String;
+    value -> any;
+}
+```
+
+#### `EnumField`
+
+```sfn
+struct EnumField {
+    name -> String;
+    value -> any;
+}
+```
+
+#### `EnumVariantDefinition`
+
+```sfn
+struct EnumVariantDefinition {
+    name -> String;
+    field_names -> String[];
+}
+```
+
+#### `EnumType`
+
+```sfn
+struct EnumType {
+    name -> String;
+    variants -> EnumVariantDefinition[];
+}
+```
+
+#### `EnumInstance`
+
+```sfn
+struct EnumInstance {
+    type -> EnumType;
+    variant -> String;
+    fields -> EnumField[];
+}
+```
+
+#### `TypeDescriptor`
+
+```sfn
+struct TypeDescriptor {
+    kind -> String;
+    name -> String?;
+    items -> TypeDescriptor[];
+}
+```
+
+Used internally by `check_type` and `parse_type_descriptor`.
+
+---
+
+## `fs` module
+
+The `fs` module provides filesystem access. All operations require the `![io]` effect. The module is bound from `runtime.fs` in the prelude — no import statement is needed.
+
+---
+
+#### `fs.read(path: String) -> String ![io]`
+
+Read the entire contents of the file at `path` and return them as a string. Raises a runtime error if the file does not exist or cannot be read.
+
+```sfn
+fn load_config(path: String) -> String ![io] {
+    return fs.read(path);
+}
+```
+
+**Notes:**
+- The returned string includes all bytes decoded as UTF-8.
+- No line-ending normalization is performed.
+- For large files, the entire content is loaded into memory.
+
+---
+
+#### `fs.write(path: String, content: String) ![io]`
+
+Write `content` to the file at `path`, creating the file if it does not exist and overwriting it completely if it does. Parent directories must already exist.
+
+```sfn
+fn save_result(path: String, data: String) ![io] {
+    fs.write(path, data);
+}
+```
+
+---
+
+#### `fs.appendFile(path: String, content: String) ![io]`
+
+Append `content` to the file at `path`. If the file does not exist it is created. Existing content is preserved; the new content is added at the end.
+
+```sfn
+fn log_to_file(path: String, message: String) ![io] {
+    fs.appendFile(path, message + "\n");
+}
+```
+
+---
+
+#### `fs.exists(path: String) -> Boolean ![io]`
+
+Return `true` if a file or directory exists at `path`, `false` otherwise. Does not distinguish between files and directories.
+
+```sfn
+fn ensure_config(path: String) ![io] {
+    if !fs.exists(path) {
+        fs.write(path, "{}");
+    }
+}
+```
+
+---
+
+#### `fs.writeLines(path: String, lines: String[]) ![io]`
+
+Write an array of strings to `path`, one per line, overwriting any existing file. Each element is written with a trailing newline.
+
+```sfn
+fn write_report(path: String, lines: String[]) ![io] {
+    fs.writeLines(path, lines);
+}
+```
+
+---
+
+### Filesystem — Planned
+
+The following filesystem helpers are planned for a future release and are not available today:
+
+- `fs.readLines(path: String) -> String[] ![io]` — read file as an array of lines
+- `fs.delete(path: String) ![io]` — delete a file
+- `fs.listDir(path: String) -> String[] ![io]` — list directory contents
+- `fs.makeDir(path: String) ![io]` — create a directory (and parents)
+- `fs.move(src: String, dst: String) ![io]` — rename or move a file
+- `fs.copy(src: String, dst: String) ![io]` — copy a file
+
+---
+
+## `http` module
+
+The `http` module provides outbound HTTP client functionality. All operations require the `![net]` effect. The module is bound from `runtime.http` in the prelude.
+
+---
+
+#### `http.get(url: String) -> Response ![net]`
+
+Perform an HTTP GET request to `url` and return a `Response`. Blocks until the response is received or the request fails.
+
+```sfn
+fn fetch_json(url: String) -> String ![net] {
+    let response = http.get(url);
+    return response.body;
+}
+```
+
+---
+
+#### `http.post(url: String, body: String) -> Response ![net]`
+
+Perform an HTTP POST request to `url` with the given string `body`. Returns a `Response`. The `Content-Type` is not set automatically; include it in a custom header when required (see planned headers API below).
+
+```sfn
+fn submit(url: String, payload: String) -> String ![net] {
+    let response = http.post(url, payload);
+    return response.body;
+}
+```
+
+---
+
+### Response type
+
+The `Response` object returned by `http.get` and `http.post` has the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `body` | `String` | Response body as a UTF-8 string |
+| `status` | `Int` | HTTP status code (e.g. `200`, `404`) |
+
+> **Note:** The full response shape (headers, streaming body, redirect policy, timeouts) is planned. The current `Response` exposes `body` and `status` only.
+
+---
+
+### HTTP — Planned
+
+The following HTTP features are planned for a future release:
+
+- Request headers and custom `Content-Type`
+- Authentication helpers (Bearer, Basic)
+- Timeout and retry configuration
+- `http.put`, `http.delete`, `http.patch`
+- Streaming response bodies
+- `websocket.connect` for WebSocket support
+
+---
+
+## `sfn/log` capsule
+
+The `sfn/log` capsule provides structured log output with severity levels. Unlike `print`, log functions include a level prefix and route warnings and errors to stderr automatically.
+
+Import the capsule before use:
+
+```sfn
+import { log } from "sfn/log";
+```
+
+All `log` functions require the `![io]` effect.
+
+---
+
+#### `log.info(message: String) ![io]`
+
+Write an informational message to stdout with an `[INFO]` prefix. Use for routine operational messages.
+
+```sfn
+fn start_server(port: Int) ![io] {
+    log.info("Server starting on port " + port);
+}
+```
+
+---
+
+#### `log.warn(message: String) ![io]`
+
+Write a warning message to **stderr** with a `[WARN]` prefix. Use when something unexpected occurred but execution can continue.
+
+```sfn
+fn load_optional(path: String) -> String ![io] {
+    if !fs.exists(path) {
+        log.warn("optional config not found: " + path);
+        return "";
+    }
+    return fs.read(path);
+}
+```
+
+---
+
+#### `log.error(message: String) ![io]`
+
+Write an error message to **stderr** with an `[ERROR]` prefix. Use for failures that require attention.
+
+```sfn
+fn connect(host: String) ![io, net] {
+    let response = http.get("http://" + host + "/health");
+    if response.status != 200 {
+        log.error("health check failed: status " + response.status);
+    }
+}
+```
+
+---
+
+#### `log.debug(message: String) ![io]`
+
+Write a debug message to stdout with a `[DEBUG]` prefix. Use for verbose diagnostic output that is typically suppressed in production. Whether debug output appears may be controlled by runtime log-level configuration in a future release.
+
+```sfn
+fn parse_token(raw: String) -> String ![io] {
+    log.debug("parsing token: " + raw);
+    // ...
+    return raw;
+}
+```
+
+---
+
+## Collections — Planned
+
+> **Status:** The collections API described below reflects the planned design. `Vec<T>`, `Map<K, V>`, and `Set<T>` are not yet available as generic types. Array literals (`[1, 2, 3]`) and the prelude array utilities (`array_map`, `array_filter`, `array_reduce`) are available today.
+
+### Planned `Vec<T>`
+
+```sfn
+// Planned API — not yet implemented
+Vec<T>.new() -> Vec<T>
+Vec<T>.push(item: T) -> void
+Vec<T>.pop() -> T?
+Vec<T>.get(index: Int) -> T?
+Vec<T>.len() -> Int
+Vec<T>.is_empty() -> Boolean
+Vec<T>.contains(item: T) -> Boolean
+Vec<T>.remove(index: Int) -> T
+Vec<T>.slice(start: Int, end: Int) -> Vec<T>
+```
+
+### Planned `Map<K, V>`
+
+```sfn
+// Planned API — not yet implemented
+Map<K, V>.new() -> Map<K, V>
+Map<K, V>.set(key: K, value: V) -> void
+Map<K, V>.get(key: K) -> V?
+Map<K, V>.has(key: K) -> Boolean
+Map<K, V>.delete(key: K) -> void
+Map<K, V>.keys() -> K[]
+Map<K, V>.values() -> V[]
+Map<K, V>.len() -> Int
+```
+
+### Planned `Set<T>`
+
+```sfn
+// Planned API — not yet implemented
+Set<T>.new() -> Set<T>
+Set<T>.add(item: T) -> void
+Set<T>.has(item: T) -> Boolean
+Set<T>.delete(item: T) -> void
+Set<T>.size() -> Int
+```
+
+---
+
+## Planned modules
+
+The modules below are on the roadmap and are documented here to give a preview of the planned API. None are available in the current release.
+
+---
+
+### `rand` module — Planned (`![rand]` effect)
+
+Random number generation. All functions require the `![rand]` effect.
+
+```sfn
+// Planned — not yet implemented
+rand.int(min: Int, max: Int) -> Int ![rand]
+rand.float() -> Float ![rand]          // uniform in [0.0, 1.0)
+rand.bool() -> Boolean ![rand]
+rand.shuffle<T>(items: T[]) -> T[] ![rand]
+rand.choice<T>(items: T[]) -> T? ![rand]
+```
+
+---
+
+### `time` / `clock` module — Planned (`![clock]` effect)
+
+Wall-clock access and date/time utilities. The `sleep` and `monotonic_millis` prelude functions are available today; the structured date/time API is planned.
+
+```sfn
+// Planned — not yet implemented
+clock.now() -> Timestamp ![clock]
+clock.utc_now() -> Timestamp ![clock]
+Timestamp.unix_millis() -> Int
+Timestamp.format(pattern: String) -> String
+```
+
+---
+
+### `process` module — Planned (`![io]` effect)
+
+Subprocess execution and process lifecycle. Requires `![io]`.
+
+```sfn
+// Planned — not yet implemented
+process.exec(command: String) -> ProcessResult ![io]
+process.exit(code: Int) -> never ![io]
+
+struct ProcessResult {
+    stdout -> String;
+    stderr -> String;
+    exit_code -> Int;
+}
+```
+
+---
+
+### Concurrency module — Planned
+
+Structured concurrency primitives to complement the `routine`/`scope` keywords.
+
+```sfn
+// Planned — not yet implemented
+channel<T>(capacity: Int = 0) -> Channel<T> ![io]
+Channel<T>.send(value: T) -> void ![io]
+Channel<T>.recv() -> T ![io]
+Channel<T>.close() -> void ![io]
+```
+
+---
+
+### AI / Model adapters — Planned (`![model]` effect)
+
+First-class model invocation. `model` and `prompt` blocks are parsed and emit metadata today; actual `.call()` execution is planned.
+
+```sfn
+// Planned — not yet implemented
+model MyModel {
+    provider: "anthropic";
+    model_id: "claude-3-5-sonnet-20241022";
+    max_tokens: 1024;
+}
+
+fn classify(text: String) -> String ![model] {
+    prompt MyModel {
+        user: "Classify the following: " + text;
+    }
+}
+```
+
+---
+
+*The standard library is actively expanding as the runtime migrates from C to Sailfin. See [Runtime ABI](/docs/reference/runtime-abi) for migration status.*
