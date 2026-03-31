@@ -3,7 +3,7 @@
 // Import handling and layout manifest management for LLVM lowering.
 // Resolves imported module paths and applies layout metadata.
 
-import { NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest } from "../native_ir";
+import { NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest, parse_native_imports_for_import } from "../native_ir";
 import { substring } from "../string_utils";
 import { ImportedModuleContext, LayoutManifestApplication } from "./types";
 import { trim_text, append_string, string_array_contains, number_to_string, starts_with, ends_with, join_with_separator, index_of } from "./utils";
@@ -36,27 +36,45 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
     let mut native_texts -> string[] = [];
     let mut diagnostics -> string[] = [];
     let mut seen -> string[] = [];
-    let mut index -> number = 0;
+
+    // BFS queue: parallel arrays for (module_path, parent_slug).
+    // Seeded with the direct imports of the current module.
+    let mut queue_paths -> string[] = [];
+    let mut queue_parent_slugs -> string[] = [];
+
+    let mut init_index -> number = 0;
     loop {
-        if index >= imports.length {
+        if init_index >= imports.length {
+            break;
+        }
+        queue_paths.push(imports[init_index].module);
+        queue_parent_slugs.push(current_module_slug);
+        init_index += 1;
+    }
+
+    let mut queue_index -> number = 0;
+    loop {
+        if queue_index >= queue_paths.length {
             break;
         }
         if trace {
-            if index > 0 {
-                if index % 50 == 0 {
-                    print("test llvm: collect_imported_module_context progress (index=" + number_to_string(index) + ")");
+            if queue_index > 0 {
+                if queue_index % 50 == 0 {
+                    print("test llvm: collect_imported_module_context progress (index=" + number_to_string(queue_index) + " queued=" + number_to_string(queue_paths.length) + ")");
                 }
             }
         }
-        let module_path = imports[index].module;
-        let base_slug = resolve_import_module_slug_for_module(module_path, current_module_slug);
+
+        let module_path = queue_paths[queue_index];
+        let parent_slug = queue_parent_slugs[queue_index];
+        queue_index += 1;
+
+        let base_slug = resolve_import_module_slug_for_module(module_path, parent_slug);
         let slug = resolve_import_artifact_slug(base_slug);
         if slug.length == 0 {
-            index += 1;
             continue;
         }
         if string_array_contains(seen, slug) {
-            index += 1;
             continue;
         }
         seen.push(slug);
@@ -92,7 +110,26 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         let mut updated_texts = native_texts;
         updated_texts = updated_texts.push(native_text);
         native_texts = updated_texts;
-        index += 1;
+
+        // Transitively enqueue the imports of the just-loaded module so that
+        // re-exported functions (e.g. find_char re-exported through string_utils
+        // from runtime/prelude) have their signatures available to the LLVM
+        // lowering pass when emitting declare statements.
+        if native_text.length > 0 {
+            let transitive_imports = parse_native_imports_for_import(native_text);
+            let mut ti -> number = 0;
+            loop {
+                if ti >= transitive_imports.length {
+                    break;
+                }
+                let ti_entry = transitive_imports[ti];
+                if ti_entry.kind == "import" {
+                    queue_paths.push(ti_entry.module);
+                    queue_parent_slugs.push(slug);
+                }
+                ti += 1;
+            }
+        }
     }
 
     if trace {

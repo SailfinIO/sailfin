@@ -810,6 +810,9 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
         lines.push("");
     }
 
+    if find_function_by_name(context_functions, "calloc") == null {
+        lines.push("declare noalias i8* @calloc(i64, i64)");
+    }
     if find_function_by_name(context_functions, "malloc") == null {
         lines.push("declare noalias i8* @malloc(i64)");
     }

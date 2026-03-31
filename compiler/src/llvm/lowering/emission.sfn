@@ -418,7 +418,7 @@ fn emit_llvm_function(
                     wrapper_lines.push("  " + size_i64 + " = ptrtoint " + ctx_ptr_type + " " + size_ptr + " to i64");
                     let ctx_raw = format_temp_name(wrap_temp);
                     wrap_temp += 1;
-                    wrapper_lines.push("  " + ctx_raw + " = call noalias i8* @malloc(i64 " + size_i64 + ")");
+                    wrapper_lines.push("  " + ctx_raw + " = call noalias i8* @calloc(i64 1, i64 " + size_i64 + ")");
                     let ctx_typed = format_temp_name(wrap_temp);
                     wrap_temp += 1;
                     wrapper_lines.push("  " + ctx_typed + " = bitcast i8* " + ctx_raw + " to " + ctx_ptr_type);

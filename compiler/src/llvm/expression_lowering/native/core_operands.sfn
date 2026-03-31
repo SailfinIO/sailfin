@@ -394,7 +394,7 @@ fn coerce_numeric_primitive(operand -> LLVMOperand, operand_type -> string, targ
     if target == "i8*" {
         if operand_type == "i8" {
             let malloc_temp = format_temp_name(temp_index);
-            current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 2)");
+            current_lines.push("  " + malloc_temp + " = call noalias i8* @calloc(i64 1, i64 2)");
             let char_ptr = format_temp_name(temp_index + 1);
             current_lines.push("  " + char_ptr + " = getelementptr i8, i8* " + malloc_temp + ", i64 0");
             current_lines.push("  store i8 " + operand.value + ", i8* " + char_ptr);
@@ -461,7 +461,7 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
                     let typed_ptr_temp = format_temp_name(temp_index + 3);
                     current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
                     current_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
-                    current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                    current_lines.push("  " + malloc_temp + " = call noalias i8* @calloc(i64 1, i64 " + size_temp + ")");
                     current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
                     current_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
                     current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
@@ -503,7 +503,7 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
         let typed_ptr_temp = format_temp_name(temp_index + 3);
         current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
         current_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
-        current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+        current_lines.push("  " + malloc_temp + " = call noalias i8* @calloc(i64 1, i64 " + size_temp + ")");
         current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
         current_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
         current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
@@ -549,7 +549,7 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
                     let typed_ptr_temp = format_temp_name(temp_index + 3);
                     current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
                     current_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
-                    current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                    current_lines.push("  " + malloc_temp + " = call noalias i8* @calloc(i64 1, i64 " + size_temp + ")");
                     current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
                     current_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
                     current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
@@ -590,7 +590,7 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
                         let typed_ptr_temp = format_temp_name(local_temp + 3);
                         local_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
                         local_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
-                        local_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                        local_lines.push("  " + malloc_temp + " = call noalias i8* @calloc(i64 1, i64 " + size_temp + ")");
                         local_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
                         local_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
                         local_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
@@ -616,7 +616,7 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
                             let typed_ptr_temp = format_temp_name(local_temp + 3);
                             local_lines.push("  " + size_ptr_temp + " = getelementptr " + operand_type + ", " + operand_type + "* null, i32 1");
                             local_lines.push("  " + size_temp + " = ptrtoint " + operand_type + "* " + size_ptr_temp + " to i64");
-                            local_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                            local_lines.push("  " + malloc_temp + " = call noalias i8* @calloc(i64 1, i64 " + size_temp + ")");
                             local_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand_type + "*");
                             local_lines.push("  store " + operand_type + " " + operand.value + ", " + operand_type + "* " + typed_ptr_temp);
                             local_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
@@ -690,7 +690,7 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
                 let typed_ptr_temp = format_temp_name(temp_index + 3);
                 current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand.llvm_type + ", " + operand.llvm_type + "* null, i32 1");
                 current_lines.push("  " + size_temp + " = ptrtoint " + operand.llvm_type + "* " + size_ptr_temp + " to i64");
-                current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                current_lines.push("  " + malloc_temp + " = call noalias i8* @calloc(i64 1, i64 " + size_temp + ")");
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*");
                 current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp);
                 current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
@@ -717,7 +717,7 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
                 let typed_ptr_temp = format_temp_name(temp_index + 3);
                 current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand.llvm_type + ", " + operand.llvm_type + "* null, i32 1");
                 current_lines.push("  " + size_temp + " = ptrtoint " + operand.llvm_type + "* " + size_ptr_temp + " to i64");
-                current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + size_temp + ")");
+                current_lines.push("  " + malloc_temp + " = call noalias i8* @calloc(i64 1, i64 " + size_temp + ")");
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*");
                 current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp);
                 current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");

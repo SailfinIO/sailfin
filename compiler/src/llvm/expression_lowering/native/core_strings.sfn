@@ -45,7 +45,7 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
 
     let mut current_lines -> string[] = lines;
     let malloc_temp = format_temp_name(temp_index);
-    current_lines.push("  " + malloc_temp + " = call i8* @malloc(i64 " + number_to_string(array_length) + ")");
+    current_lines.push("  " + malloc_temp + " = call i8* @calloc(i64 1, i64 " + number_to_string(array_length) + ")");
     let cast_temp = format_temp_name(temp_index + 1);
     current_lines.push("  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + array_type + "*");
     current_lines.push("  store " + array_type + " c\"" + escaped + "\\00\", " + array_type + "* " + cast_temp);

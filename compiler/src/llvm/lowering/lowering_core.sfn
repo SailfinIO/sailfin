@@ -2565,6 +2565,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     // Provide libc declarations for common helpers when not declared in the module.
+    if find_function_by_name(context_functions, "calloc") == null {
+        lines.push("declare noalias i8* @calloc(i64, i64)");
+    }
     if find_function_by_name(context_functions, "malloc") == null {
         lines.push("declare noalias i8* @malloc(i64)");
     }
