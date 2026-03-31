@@ -228,6 +228,25 @@ fn _write_expr_stmt_result_files_with_constants(
     fs.writeFile("build/sailfin/.expr_stmt_string_constants", joined_sc);
 }
 
+fn _parse_int_local(text -> string) -> number {
+    let len = text.length;
+    if len == 0 { return 0; }
+    let mut result -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= len { break; }
+        let ch = char_at(text, i);
+        let code = char_code(ch);
+        if code >= 48 {
+            if code <= 57 {
+                result = result * 10 + (code - 48);
+            }
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
 fn lower_expression_statement(
     function_name -> string,
     instruction -> NativeInstruction,

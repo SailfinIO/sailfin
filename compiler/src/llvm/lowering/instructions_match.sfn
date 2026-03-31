@@ -2125,6 +2125,16 @@ fn lower_let_instruction(
             let operand_type = trim_text(operand.llvm_type);
             if operand_type.length > 0 {
                 llvm_type = operand_type;
+            } else {
+                // Fallback: the operand's llvm_type may be corrupted after
+                // crossing module boundaries. Read from file written by
+                // lower_call_expression.
+                if fs.exists("build/sailfin/.call_result_type") {
+                    let _crt = fs.readFile("build/sailfin/.call_result_type");
+                    if _crt.length > 0 {
+                        llvm_type = _crt;
+                    }
+                }
             }
         }
     }
@@ -2184,7 +2194,22 @@ fn lower_let_instruction(
     current_allocas.push("  " + pointer + " = alloca " + llvm_type);
 
     let mut stored_value -> string = default_return_literal(llvm_type);
+    // Fix operand if its llvm_type was corrupted crossing module boundaries.
     if operand != null {
+        if operand.llvm_type.length == 0 {
+            if fs.exists("build/sailfin/.call_result_type") {
+                let _fixup_type = fs.readFile("build/sailfin/.call_result_type");
+                if _fixup_type.length > 0 {
+                    let mut _fixup_value -> string = operand.value;
+                    if _fixup_value.length == 0 {
+                        if fs.exists("build/sailfin/.call_result_value") {
+                            _fixup_value = fs.readFile("build/sailfin/.call_result_value");
+                        }
+                    }
+                    operand = LLVMOperand { llvm_type: _fixup_type, value: _fixup_value };
+                }
+            }
+        }
         let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines);
         let mut _ci20 -> number = 0;
         loop {

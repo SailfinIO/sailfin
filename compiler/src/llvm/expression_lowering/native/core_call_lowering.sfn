@@ -2,7 +2,7 @@
 //
 // Call lowering extracted from core.sfn.
 
-import { NativeFunction } from "../../../native_ir";
+import { NativeFunction, NativeParameter } from "../../../native_ir";
 
 import {
     TypeContext,
@@ -26,7 +26,7 @@ import {
     join_with_separator,
 } from "../../utils";
 
-import { substring, index_of, find_last_index_of_char } from "../../../string_utils";
+import { substring, index_of, find_last_index_of_char, char_at, char_code } from "../../../string_utils";
 
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 
@@ -81,6 +81,7 @@ import {
 
 import {
     map_return_type,
+    map_parameter_type,
     future_pointer_type_for_return_type,
 } from "./core_type_mapping";
 
@@ -97,7 +98,126 @@ fn get_string_at(arr -> string[], idx -> number) -> string {
     return arr[idx];
 }
 
-fn find_function_by_name_or_import_suffix(functions -> NativeFunction[], target -> string) -> NativeFunction? {
+fn _parse_int_ccl(text -> string) -> number {
+    let len = text.length;
+    if len == 0 { return 0; }
+    let mut result -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= len { break; }
+        let ch = char_at(text, i);
+        let code = char_code(ch);
+        if code >= 48 {
+            if code <= 57 {
+                result = result * 10 + (code - 48);
+            }
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// File-based function lookup that bypasses ABI-corrupted NativeFunction[]
+// parameters. Reads from build/sailfin/.ctx_func_* files written by
+// lowering_core.sfn where the data is still clean (local variable, not
+// passed through cross-module function boundaries).
+fn _find_function_from_files(target -> string) -> NativeFunction? ![io] {
+    if !fs.exists("build/sailfin/.ctx_func_count") {
+        return null;
+    }
+    let count_str = fs.readFile("build/sailfin/.ctx_func_count");
+    let count = _parse_int_ccl(count_str);
+    let mut exact_match -> NativeFunction? = null;
+    let mut suffix_match -> NativeFunction? = null;
+    let mut suffix_match_count -> number = 0;
+    let suffix_prefix = target + "__";
+    let mut idx -> number = 0;
+    loop {
+        if idx >= count { break; }
+        let prefix = "build/sailfin/.ctx_func_" + number_to_string(idx);
+        if !fs.exists(prefix + "_name") { break; }
+        let fname = fs.readFile(prefix + "_name");
+        let mut is_match -> boolean = false;
+        if fname == target {
+            is_match = true;
+        }
+        let mut is_suffix_match -> boolean = false;
+        if !is_match {
+            if starts_with(fname, suffix_prefix) {
+                is_suffix_match = true;
+            }
+        }
+        if is_match {
+            let ret_type = fs.readFile(prefix + "_return_type");
+            let is_async_str = fs.readFile(prefix + "_is_async");
+            let is_async = is_async_str == "1";
+            let pc_str = fs.readFile(prefix + "_param_count");
+            let pc = _parse_int_ccl(pc_str);
+            let mut params -> NativeParameter[] = [];
+            let mut j -> number = 0;
+            loop {
+                if j >= pc { break; }
+                let pp = prefix + "_param_" + number_to_string(j);
+                let pname = fs.readFile(pp + "_name");
+                let ptype = fs.readFile(pp + "_type");
+                params = params.concat([NativeParameter {
+                    name: pname, type_annotation: ptype,
+                    mutable: false, default_value: null, span: null,
+                }]);
+                j += 1;
+            }
+            exact_match = NativeFunction {
+                name: fname, return_type: ret_type,
+                is_async: is_async, parameters: params,
+                effects: [], decorators: [], is_extern: false,
+                instructions: [],
+            };
+            return exact_match;
+        }
+        if is_suffix_match {
+            suffix_match_count += 1;
+            if suffix_match_count == 1 {
+                let ret_type = fs.readFile(prefix + "_return_type");
+                let is_async_str = fs.readFile(prefix + "_is_async");
+                let is_async = is_async_str == "1";
+                let pc_str = fs.readFile(prefix + "_param_count");
+                let pc = _parse_int_ccl(pc_str);
+                let mut params -> NativeParameter[] = [];
+                let mut j -> number = 0;
+                loop {
+                    if j >= pc { break; }
+                    let pp = prefix + "_param_" + number_to_string(j);
+                    let pname = fs.readFile(pp + "_name");
+                    let ptype = fs.readFile(pp + "_type");
+                    params = params.concat([NativeParameter {
+                        name: pname, type_annotation: ptype,
+                        mutable: false, default_value: null, span: null,
+                    }]);
+                    j += 1;
+                }
+                suffix_match = NativeFunction {
+                    name: fname, return_type: ret_type,
+                    is_async: is_async, parameters: params,
+                    effects: [], decorators: [], is_extern: false,
+                    instructions: [],
+                };
+            }
+        }
+        idx += 1;
+    }
+    if suffix_match_count == 1 {
+        return suffix_match;
+    }
+    return null;
+}
+
+fn find_function_by_name_or_import_suffix(functions -> NativeFunction[], target -> string) -> NativeFunction? ![io] {
+    // Try file-based lookup first (bypasses ABI-corrupted functions parameter).
+    let file_result = _find_function_from_files(target);
+    if file_result != null {
+        return file_result;
+    }
+    // Fallback to array-based lookup (may fail if functions is corrupted).
     let exact = find_function_by_name(functions, target);
     if exact != null {
         return exact;
@@ -594,12 +714,112 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         helper_descriptor = find_runtime_helper(trimmed_target);
     }
 
+    // File-based function resolution: read return type and parameter types
+    // directly from files written by lowering_core.sfn. This bypasses the
+    // ABI corruption in the `functions` array (NativeFunction[] fields are
+    // misaligned when passed across function boundaries by the v0.1.1 seed).
+    let mut _file_fn_name -> string = "";
+    let mut _file_fn_return_type -> string = "";
+    let mut _file_fn_is_async -> boolean = false;
+    let mut _file_fn_param_types -> string[] = [];
+    let mut _file_fn_found -> boolean = false;
+    let _trace_ccl = fs.exists("build/sailfin/.trace_lowering");
+    if _trace_ccl {
+        print("call_lowering: file-lookup-start target=" + trimmed_target + " is_trait=" + number_to_string(0) + " helper_null=" + number_to_string(0));
+    }
+    if !is_trait_dispatch {
+        if helper_descriptor == null {
+            if fs.exists("build/sailfin/.ctx_func_count") {
+                let _fl_count_str = fs.readFile("build/sailfin/.ctx_func_count");
+                let _fl_count = _parse_int_ccl(_fl_count_str);
+                if _trace_ccl {
+                    print("call_lowering: file-lookup count=" + number_to_string(_fl_count));
+                }
+                let _fl_suffix_prefix = trimmed_target + "__";
+                let mut _fl_suffix_idx -> number = -1;
+                let mut _fl_suffix_count -> number = 0;
+                let mut _fl_i -> number = 0;
+                loop {
+                    if _fl_i >= _fl_count { break; }
+                    let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_i);
+                    if !fs.exists(_fl_prefix + "_name") { break; }
+                    let _fl_name = fs.readFile(_fl_prefix + "_name");
+                    if _fl_name == trimmed_target {
+                        _file_fn_name = _fl_name;
+                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
+                        let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
+                        _file_fn_is_async = _fl_async_str == "1";
+                        let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
+                        let _fl_pc = _parse_int_ccl(_fl_pc_str);
+                        let mut _fl_j -> number = 0;
+                        loop {
+                            if _fl_j >= _fl_pc { break; }
+                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
+                            let _fl_mapped = map_parameter_type(context, _fl_ptype);
+                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
+                            _fl_j += 1;
+                        }
+                        _file_fn_found = true;
+                        if _trace_ccl {
+                            print("call_lowering: file-lookup FOUND name=" + _file_fn_name + " return_type=" + _file_fn_return_type + " params=" + number_to_string(_file_fn_param_types.length));
+                        }
+                        break;
+                    }
+                    if starts_with(_fl_name, _fl_suffix_prefix) {
+                        _fl_suffix_idx = _fl_i;
+                        _fl_suffix_count += 1;
+                    }
+                    _fl_i += 1;
+                }
+                if !_file_fn_found {
+                    if _fl_suffix_count == 1 {
+                        let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_suffix_idx);
+                        _file_fn_name = fs.readFile(_fl_prefix + "_name");
+                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
+                        let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
+                        _file_fn_is_async = _fl_async_str == "1";
+                        let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
+                        let _fl_pc = _parse_int_ccl(_fl_pc_str);
+                        let mut _fl_j -> number = 0;
+                        loop {
+                            if _fl_j >= _fl_pc { break; }
+                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
+                            let _fl_mapped = map_parameter_type(context, _fl_ptype);
+                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
+                            _fl_j += 1;
+                        }
+                        _file_fn_found = true;
+                    }
+                }
+            }
+        }
+    }
+
     if !is_trait_dispatch {
         if helper_descriptor != null {
             let descriptor = helper_descriptor;
             llvm_return = descriptor.return_type;
             expected_params = descriptor.parameter_types;
             function_entry = null;
+        } else if _file_fn_found {
+            trimmed_target = _file_fn_name;
+            if _file_fn_is_async {
+                let future_return = future_pointer_type_for_return_type(_file_fn_return_type);
+                if future_return.length == 0 {
+                    diagnostics.push("llvm lowering: async function `" + trimmed_target + "` has unsupported return type `" + _file_fn_return_type + "`");
+                    llvm_return = "i8*";
+                } else {
+                    llvm_return = future_return;
+                }
+                expected_params = _file_fn_param_types;
+            } else {
+                llvm_return = map_return_type(context, _file_fn_return_type);
+                if llvm_return.length == 0 {
+                    diagnostics.push("llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
+                    llvm_return = "i8*";
+                }
+                expected_params = _file_fn_param_types;
+            }
         } else if function_entry != null {
             trimmed_target = function_entry.name;
             if function_entry.is_async {
@@ -830,6 +1050,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
     }
 
+    if _trace_ccl {
+        print("call_lowering: pre-coerce operands=" + number_to_string(operands.length) + " expected_params=" + number_to_string(expected_params.length) + " llvm_return=" + llvm_return);
+    }
     let mut coerced_operands -> LLVMOperand[] = [];
     index = 0;
     loop {
@@ -837,6 +1060,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             break;
         }
         let operand = operands[index];
+        if _trace_ccl {
+            print("call_lowering: coerce-loop idx=" + number_to_string(index) + " operand_type=" + operand.llvm_type + " operand_value=" + operand.value);
+        }
         let mut target_type -> string = "";
         if expected_params.length > index {
             target_type = expected_params[index];
@@ -867,6 +1093,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         index += 1;
     }
     operands = coerced_operands;
+    if _trace_ccl {
+        print("call_lowering: post-coerce operands=" + number_to_string(operands.length));
+    }
 
     if is_array_concat {
         if array_concat_element_type.length > 0 {
@@ -1067,6 +1296,10 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")";
     current_lines.push(call_line);
     let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
+    // Write call result metadata to files so callers can recover when
+    // the ExpressionResult struct fields get corrupted crossing module boundaries.
+    fs.writeFile("build/sailfin/.call_result_type", llvm_return);
+    fs.writeFile("build/sailfin/.call_result_value", temp_name);
     return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 

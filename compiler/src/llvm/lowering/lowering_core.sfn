@@ -2243,6 +2243,62 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("emit-llvm: phase=context_functions");
     }
 
+    // Serialize context_functions to individual files so downstream call
+    // resolution can read clean data instead of ABI-corrupted NativeFunction[]
+    // params passed across function boundaries.
+    // Clean up stale files first.
+    let mut _cfc_i -> number = 0;
+    loop {
+        let _cfc_prefix = "build/sailfin/.ctx_func_" + number_to_string(_cfc_i);
+        if !fs.exists(_cfc_prefix + "_name") { break; }
+        fs.deleteFile(_cfc_prefix + "_name");
+        fs.deleteFile(_cfc_prefix + "_return_type");
+        fs.deleteFile(_cfc_prefix + "_is_async");
+        fs.deleteFile(_cfc_prefix + "_param_count");
+        // Clean up param files
+        let mut _cfc_j -> number = 0;
+        loop {
+            let _cfc_pp = _cfc_prefix + "_param_" + number_to_string(_cfc_j);
+            if !fs.exists(_cfc_pp + "_name") { break; }
+            fs.deleteFile(_cfc_pp + "_name");
+            fs.deleteFile(_cfc_pp + "_type");
+            _cfc_j += 1;
+        }
+        _cfc_i += 1;
+    }
+    // Write fresh function metadata
+    fs.writeFile("build/sailfin/.ctx_func_count", number_to_string(context_functions.length));
+    let mut _cfw_i -> number = 0;
+    loop {
+        if _cfw_i >= context_functions.length { break; }
+        let _cfw_fn = context_functions[_cfw_i];
+        let _cfw_prefix = "build/sailfin/.ctx_func_" + number_to_string(_cfw_i);
+        fs.writeFile(_cfw_prefix + "_name", _cfw_fn.name);
+        fs.writeFile(_cfw_prefix + "_return_type", _cfw_fn.return_type);
+        let mut _cfw_async_flag -> string = "0";
+        if _cfw_fn.is_async {
+            _cfw_async_flag = "1";
+        }
+        fs.writeFile(_cfw_prefix + "_is_async", _cfw_async_flag);
+        let mut _cfw_params = _cfw_fn.parameters;
+        if _cfw_params == null {
+            _cfw_params = [];
+        }
+        fs.writeFile(_cfw_prefix + "_param_count", number_to_string(_cfw_params.length));
+        let mut _cfw_j -> number = 0;
+        loop {
+            if _cfw_j >= _cfw_params.length { break; }
+            let _cfw_pp = _cfw_prefix + "_param_" + number_to_string(_cfw_j);
+            fs.writeFile(_cfw_pp + "_name", _cfw_params[_cfw_j].name);
+            fs.writeFile(_cfw_pp + "_type", _cfw_params[_cfw_j].type_annotation);
+            _cfw_j += 1;
+        }
+        _cfw_i += 1;
+    }
+    if debug_lowering {
+        print("emit-llvm: serialized context_functions count=" + number_to_string(context_functions.length));
+    }
+
     // Bootstrap guard: effect analysis currently introduces instability in
     // selfhost/native lowering for some modules. Keep disabled by default.
     let skip_effects = true;
