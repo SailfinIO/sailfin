@@ -1,7 +1,7 @@
 # Sailfin Language Specification
 
-Version: 0.2.1 (design preview)
-Date: October 2025
+Version: 0.2.2 (design preview)
+Date: March 2026
 
 Sailfin is an AI-native, expression-oriented programming language that combines
 Rust-grade safety, Swift-like ergonomics, and runtime observability. This
@@ -227,6 +227,12 @@ type Result<T> = Response | T;
 
 ### 3.6 Model Declarations
 
+> **Current status**: `model` blocks are parsed and emit a `.model` directive in
+> `.sfn-asm` IR. However, **model execution is not yet implemented** — `.call()`
+> parses as a method call but no model runtime exists. Generation cards and
+> evaluators are design-stage. This entire section describes the planned
+> semantics; see `docs/status.md` for implementation state.
+
 Models are first-class program artefacts. A `model` block declares metadata,
 versions, schemas, and evaluator suites, producing a `Model<Input, Output>`
 value.
@@ -243,7 +249,8 @@ model Summarizer : Model<Text, Summary> {
 
 Calling a model requires the `model` effect, returns a typed output, and yields
 a signed **generation card** containing provenance (engine, params, seeds,
-input hashes, latency, cost).
+input hashes, latency, cost). Both the call mechanism and generation cards are
+planned for the post-1.0 AI milestone.
 
 ### 3.6.1 Model Block Schema
 
@@ -381,18 +388,26 @@ adapter boundaries.
 
 ## 5. Concurrency and Performance
 
-- **Async & routines** – `async fn` enables `await`; `routine { … }` launches a
-  concurrent task. The current runtime maps routines to the runtime scheduler.
-- **Structured scopes** – The design introduces `scope` values that carry
-  cancellation, deadlines, and determinism knobs (`seed`, `temperature`). These
-  are partially stubbed today and will be fully enforced in the native runtime.
-- **Channels** – In the current runtime, channels are unbounded by default
-  unless a capacity is provided. Use `channel(capacity: N)` to enable
-  backpressure. The native runtime will prefer bounded channels by default.
-- **Accelerators** – Operations requiring GPUs/TPUs must declare the `gpu`
-  effect. The runtime batches compatible tensor work automatically.
+> **Current status**: Concurrency primitives are in progress. `async fn` is
+> parsed and the `is_async` flag is recorded on function declarations, but
+> `await`, `routine { }` blocks, `spawn`, and `channel()` as a concurrency
+> primitive are **not yet implemented** in the parser or lowering. The design
+> below describes the planned semantics; use ordinary function calls in current
+> code.
+
+- **Async & routines (planned)** – `async fn` will enable `await`; `routine { … }` will launch a
+  concurrent task mapped to the runtime scheduler.
+- **Structured scopes (planned)** – `scope` values will carry cancellation, deadlines, and
+  determinism knobs (`seed`, `temperature`).
+- **Channels (planned)** – `channel(capacity: N)` will create a bounded channel with backpressure.
+  The native runtime will prefer bounded channels by default.
+- **Accelerators (planned)** – Operations requiring GPUs/TPUs must declare the `gpu`
+  effect. The runtime will batch compatible tensor work automatically.
+
+Planned syntax (not accepted by the current compiler):
 
 ```sfn
+// Planned concurrency syntax — not yet implemented
 async fn main() ![io, model] {
   // Planned: `1s` time literal and `scope.with_timeout(...)` API.
   let scope = scope.with_timeout(1s);
@@ -403,9 +418,8 @@ async fn main() ![io, model] {
   }
 
   let result = await messages.receive();
-  print.info("Received: {{ result }}");
+  print("Received: {{ result }}");
 }
-
 ```
 
 ### 5.1 is operator (type / pattern guard)
