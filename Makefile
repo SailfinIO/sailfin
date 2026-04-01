@@ -613,8 +613,10 @@ ci-cross-windows:
 	done; \
 	\
 	echo "[cross-windows] linking IR modules..."; \
-	$$LLVM_LINK -o "$$WIN_OBJ/sailfin.linked.bc" $$LL_FILES 2>&1 || \
-		$$LLVM_LINK --opaque-pointers -o "$$WIN_OBJ/sailfin.linked.bc" $$LL_FILES; \
+	LINK_FILES="$$LL_FILES"; \
+	if [ -n "$$PRELUDE_LL" ]; then LINK_FILES="$$LINK_FILES $$PRELUDE_LL"; fi; \
+	$$LLVM_LINK -o "$$WIN_OBJ/sailfin.linked.bc" $$LINK_FILES 2>&1 || \
+		$$LLVM_LINK --opaque-pointers -o "$$WIN_OBJ/sailfin.linked.bc" $$LINK_FILES; \
 	\
 	echo "[cross-windows] compiling linked bitcode -> .o"; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
