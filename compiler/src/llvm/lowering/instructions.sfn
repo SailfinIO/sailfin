@@ -487,6 +487,22 @@ fn _parse_int_from_string(text -> string) -> number {
     return result;
 }
 
+fn _instr_append_mutation(mutations -> LocalMutation[], name -> string, llvm_type -> string, value_name -> string, originating_label -> string) -> LocalMutation[] {
+    let new_entry -> LocalMutation[] = [LocalMutation {
+        name: name,
+        llvm_type: llvm_type,
+        value_name: value_name,
+        span: null,
+        originating_label: originating_label,
+    }];
+    return extend_mutations(mutations, new_entry);
+}
+
+fn _instr_append_string_constant(constants -> StringConstant[], name -> string, content -> string, byte_count -> number) -> StringConstant[] {
+    let new_entry -> StringConstant[] = [StringConstant { name: name, content: content, byte_count: byte_count }];
+    return merge_string_constants(constants, new_entry);
+}
+
 fn lower_instruction_range(
     function -> NativeFunction,
     start_index -> number,
@@ -907,14 +923,7 @@ fn lower_instruction_range(
                     let _m_type = fs.readFile(_m_prefix + "_type");
                     let _m_value = fs.readFile(_m_prefix + "_value");
                     let _m_label = fs.readFile(_m_prefix + "_label");
-                    let _mutation = LocalMutation {
-                        name: _m_name,
-                        llvm_type: _m_type,
-                        value_name: _m_value,
-                        span: null,
-                        originating_label: _m_label,
-                    };
-                    current_mutations = extend_mutations(current_mutations, [_mutation]);
+                    current_mutations = _instr_append_mutation(current_mutations, _m_name, _m_type, _m_value, _m_label);
                     _expr_mut_i += 1;
                 }
                 // Read string constants written by expression statement handler.
@@ -943,7 +952,7 @@ fn lower_instruction_range(
                             let _esc_ct = substring(_esc_r2, 0, _et2);
                             let _esc_bct = substring(_esc_r2, _et2 + 1, _esc_r2.length);
                             let _esc_bc = _parse_int_from_string(_esc_bct);
-                            collected_string_constants = merge_string_constants(collected_string_constants, [StringConstant { name: _esc_nm, content: _esc_ct, byte_count: _esc_bc }]);
+                            collected_string_constants = _instr_append_string_constant(collected_string_constants, _esc_nm, _esc_ct, _esc_bc);
                         }
                     }
                     fs.writeFile("build/sailfin/.expr_stmt_string_constants", "");
@@ -1078,7 +1087,7 @@ fn lower_instruction_range(
                         let _sc_content = substring(_sc_rest, 0, _tab2);
                         let _sc_bc_text = substring(_sc_rest, _tab2 + 1, _sc_rest.length);
                         let _sc_bc = _parse_int_from_string(_sc_bc_text);
-                        collected_string_constants = merge_string_constants(collected_string_constants, [StringConstant { name: _sc_name, content: _sc_content, byte_count: _sc_bc }]);
+                        collected_string_constants = _instr_append_string_constant(collected_string_constants, _sc_name, _sc_content, _sc_bc);
                     }
                 }
                 // Clear the file so stale constants don't leak to the next function.
