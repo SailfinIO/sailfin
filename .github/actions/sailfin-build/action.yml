@@ -74,6 +74,7 @@ runs:
         scripts/build.sh \
           --seed build/native/sailfin \
           --out build/native/sailfin-bs \
+          --work-dir build/selfhost/native-bs \
           --clang "${{ inputs.clang }}" \
           --jobs 2 \
           --timeout 120 \
