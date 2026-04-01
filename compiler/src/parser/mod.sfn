@@ -61,7 +61,7 @@ fn parse_tokens(tokens -> Token[]) -> Program {
         statements = append_statement(statements, result.statement);
         parser = skip_trivia(parser);
         if parser.index == prev_index {
-            print.err("parser: no progress; aborting to avoid infinite loop");
+            print("parser: no progress; aborting to avoid infinite loop");
             break;
         }
     }

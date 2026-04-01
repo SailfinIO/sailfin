@@ -73,7 +73,10 @@ fn merge_string_constants(existing -> StringConstant[], new_constants -> StringC
             break;
         }
         let candidate = safe_new_constants[index];
-        if candidate == null || candidate.name == null {
+        let mut _if298 -> boolean = false;
+        if candidate == null { _if298 = true; }
+        if candidate.name == null { _if298 = true; }
+        if _if298 {
             index += 1;
             continue;
         }
@@ -86,7 +89,10 @@ fn merge_string_constants(existing -> StringConstant[], new_constants -> StringC
                     break;
                 }
                 let merge_candidate = safe_new_constants[merge_index];
-                if merge_candidate == null || merge_candidate.name == null {
+                let mut _if299 -> boolean = false;
+                if merge_candidate == null { _if299 = true; }
+                if merge_candidate.name == null { _if299 = true; }
+                if _if299 {
                     merge_index += 1;
                     continue;
                 }
@@ -117,8 +123,10 @@ fn find_string_constant(constants -> StringConstant[], content -> string) -> Str
             break;
         }
         let candidate = constants[index];
-        if candidate != null && candidate.content == content {
-            return candidate;
+        if candidate != null {
+            if candidate.content == content {
+                return candidate;
+            }
         }
         index += 1;
     }
@@ -135,8 +143,10 @@ fn find_string_constant_by_name(constants -> StringConstant[], name -> string) -
             break;
         }
         let candidate = constants[index];
-        if candidate != null && candidate.name == name {
-            return candidate;
+        if candidate != null {
+            if candidate.name == name {
+                return candidate;
+            }
         }
         index += 1;
     }
@@ -158,11 +168,15 @@ fn render_string_constants(constants -> StringConstant[]) -> string[] {
             break;
         }
         let constant = constants[index];
-        if constant != null && constant.name != null && constant.content != null {
-            let escaped = escape_string_for_llvm(constant.content);
-            let length_str = number_to_string(constant.byte_count + 1);
-            let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\"";
-            lines.push(declaration);
+        if constant != null {
+            if constant.name != null {
+                if constant.content != null {
+                    let escaped = escape_string_for_llvm(constant.content);
+                    let length_str = number_to_string(constant.byte_count + 1);
+                    let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\"";
+                    lines.push(declaration);
+                }
+            }
         }
         index += 1;
     }

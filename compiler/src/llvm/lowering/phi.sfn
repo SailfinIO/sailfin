@@ -28,8 +28,10 @@ fn find_preloaded_value(locals -> LocalBinding[], preloaded_values -> string[], 
             break;
         }
         let check_local = locals[local_index];
-        if check_local.name == name && local_index < preloaded_values.length {
-            return preloaded_values[local_index];
+        if check_local.name == name {
+            if local_index < preloaded_values.length {
+                return preloaded_values[local_index];
+            }
         }
         local_index += 1;
     }
@@ -96,8 +98,10 @@ fn find_mutation_for_name_at_label(
         }
         index -= 1;
         let mutation = mutations[index];
-        if mutation.name == name && mutation.originating_label == label {
-            return mutation;
+        if mutation.name == name {
+            if mutation.originating_label == label {
+                return mutation;
+            }
         }
     }
 
@@ -180,9 +184,11 @@ fn insert_lines_before_index(lines -> string[], index -> number, insert_lines ->
         if line_idx >= lines.length {
             break;
         }
-        if !inserted && line_idx == index {
-            result = extend_string_array(result, insert_lines);
-            inserted = true;
+        if !inserted {
+            if line_idx == index {
+                result = extend_string_array(result, insert_lines);
+                inserted = true;
+            }
         }
         result.push(lines[line_idx]);
         line_idx += 1;
@@ -400,19 +406,25 @@ fn emit_phi_merges_for_straight_if(
                 mutation = find_mutation_for_name(mutations, name);
             }
 
-            if mutation != null && preloaded_value != null && preloaded_value.length > 0 && allow_preloaded_fallback {
-                let mut then_source_label -> string = then_exit_label;
-                if then_source_label.length == 0 {
-                    then_source_label = then_label;
+            if mutation != null {
+                if preloaded_value != null {
+                    if preloaded_value.length > 0 {
+                        if allow_preloaded_fallback {
+                            let mut then_source_label -> string = then_exit_label;
+                            if then_source_label.length == 0 {
+                                then_source_label = then_label;
+                            }
+                            let phi_inputs -> string[] = [
+                                "[ " + mutation.value_name + ", %" + then_source_label + " ]",
+                                "[ " + preloaded_value + ", %" + base_label + " ]",
+                            ];
+                            let entry = build_phi_and_store(local, mutation.llvm_type, phi_inputs, current_temp);
+                            phi_lines.push(entry.phi_line);
+                            store_lines.push(entry.store_line);
+                            current_temp += 1;
+                        }
+                    }
                 }
-                let phi_inputs -> string[] = [
-                    "[ " + mutation.value_name + ", %" + then_source_label + " ]",
-                    "[ " + preloaded_value + ", %" + base_label + " ]",
-                ];
-                let entry = build_phi_and_store(local, mutation.llvm_type, phi_inputs, current_temp);
-                phi_lines.push(entry.phi_line);
-                store_lines.push(entry.store_line);
-                current_temp += 1;
             }
         }
 
@@ -498,8 +510,10 @@ fn emit_phi_merges_for_if_else(
             if then_mutation != null {
                 llvm_type = then_mutation.llvm_type;
             }
-            if else_mutation != null && else_mutation.llvm_type.length > 0 {
-                llvm_type = else_mutation.llvm_type;
+            if else_mutation != null {
+                if else_mutation.llvm_type.length > 0 {
+                    llvm_type = else_mutation.llvm_type;
+                }
             }
 
             // Build phi inputs, skipping terminated branches
@@ -516,12 +530,20 @@ fn emit_phi_merges_for_if_else(
                         }
                     }
                     phi_inputs.push("[ " + then_mutation.value_name + ", %" + then_source_label + " ]");
-                } else if preloaded_value != null && allow_preloaded_fallback {
-                    let mut fallback_label -> string = then_exit_label;
-                    if fallback_label.length == 0 {
-                        fallback_label = then_label;
+                } else {
+                    let mut _elif282 -> boolean = false;
+                    if preloaded_value != null {
+                        if allow_preloaded_fallback {
+                            _elif282 = true;
+                        }
                     }
-                    phi_inputs.push("[ " + preloaded_value + ", %" + fallback_label + " ]");
+                    if _elif282 {
+                        let mut fallback_label -> string = then_exit_label;
+                        if fallback_label.length == 0 {
+                            fallback_label = then_label;
+                        }
+                        phi_inputs.push("[ " + preloaded_value + ", %" + fallback_label + " ]");
+                    }
                 }
             }
 
@@ -536,12 +558,20 @@ fn emit_phi_merges_for_if_else(
                         }
                     }
                     phi_inputs.push("[ " + else_mutation.value_name + ", %" + else_source_label + " ]");
-                } else if preloaded_value != null && allow_preloaded_fallback {
-                    let mut fallback_label -> string = else_exit_label;
-                    if fallback_label.length == 0 {
-                        fallback_label = else_label;
+                } else {
+                    let mut _elif283 -> boolean = false;
+                    if preloaded_value != null {
+                        if allow_preloaded_fallback {
+                            _elif283 = true;
+                        }
                     }
-                    phi_inputs.push("[ " + preloaded_value + ", %" + fallback_label + " ]");
+                    if _elif283 {
+                        let mut fallback_label -> string = else_exit_label;
+                        if fallback_label.length == 0 {
+                            fallback_label = else_label;
+                        }
+                        phi_inputs.push("[ " + preloaded_value + ", %" + fallback_label + " ]");
+                    }
                 }
             }
 
@@ -644,8 +674,16 @@ fn emit_phi_merges_for_match(
                             llvm_type = arm_mutation.llvm_type;
                         }
                         phi_inputs.push("[ " + arm_mutation.value_name + ", %" + arm.label + " ]");
-                    } else if preloaded_value != null && allow_preloaded_fallback {
-                        phi_inputs.push("[ " + preloaded_value + ", %" + arm.label + " ]");
+                    } else {
+                        let mut _elif284 -> boolean = false;
+                        if preloaded_value != null {
+                            if allow_preloaded_fallback {
+                                _elif284 = true;
+                            }
+                        }
+                        if _elif284 {
+                            phi_inputs.push("[ " + preloaded_value + ", %" + arm.label + " ]");
+                        }
                     }
                 }
 

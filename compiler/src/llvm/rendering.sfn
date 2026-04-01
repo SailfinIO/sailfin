@@ -69,8 +69,10 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
         index += 1;
     }
 
-    if interface_lines.length == 0 && struct_lines.length == 0 {
-        return [];
+    if interface_lines.length == 0 {
+        if struct_lines.length == 0 {
+            return [];
+        }
     }
 
     let mut lines -> string[] = [];
@@ -81,8 +83,10 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
         lines.push(interface_lines[_ci0]);
         _ci0 += 1;
     }
-    if interface_lines.length > 0 && struct_lines.length > 0 {
-        lines.push(";");
+    if interface_lines.length > 0 {
+        if struct_lines.length > 0 {
+            lines.push(";");
+        }
     }
     let mut _ci1 -> number = 0;
     loop {
@@ -193,7 +197,10 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
         let function = imported_functions[index];
         let sanitized_name = sanitize_symbol(function.name);
         // Skip if this function is already declared as a runtime helper or defined locally
-        if string_array_contains(helper_symbols, sanitized_name) || string_array_contains(local_symbols, sanitized_name) {
+        let mut _if285 -> boolean = false;
+        if string_array_contains(helper_symbols, sanitized_name) { _if285 = true; }
+        if string_array_contains(local_symbols, sanitized_name) { _if285 = true; }
+        if _if285 {
             index += 1;
             continue;
         }
@@ -221,10 +228,16 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
 // =============================================================================
 
 fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFunction[]) -> string[] {
-    if context.structs == null || context.enums == null {
+    let mut _if286 -> boolean = false;
+    if context.structs == null { _if286 = true; }
+    if context.enums == null { _if286 = true; }
+    if _if286 {
         return [];
     }
-    if context.structs.length > 10000 || context.enums.length > 10000 {
+    let mut _if287 -> boolean = false;
+    if context.structs.length > 10000 { _if287 = true; }
+    if context.enums.length > 10000 { _if287 = true; }
+    if _if287 {
         return [];
     }
     if functions == null {
@@ -253,8 +266,10 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
             }
             let field_type = info.fields[field_index].llvm_type;
             let extracted = extract_struct_type_from_llvm(field_type);
-            if extracted.length > 0 && !string_array_contains(referenced_types, extracted) {
-                referenced_types.push(extracted);
+            if extracted.length > 0 {
+                if !string_array_contains(referenced_types, extracted) {
+                    referenced_types.push(extracted);
+                }
             }
             field_index += 1;
         }
@@ -285,8 +300,10 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
                 }
                 let field_type = variant.fields[variant_field_index].llvm_type;
                 let extracted = extract_struct_type_from_llvm(field_type);
-                if extracted.length > 0 && !string_array_contains(referenced_types, extracted) {
-                    referenced_types.push(extracted);
+                if extracted.length > 0 {
+                    if !string_array_contains(referenced_types, extracted) {
+                        referenced_types.push(extracted);
+                    }
                 }
                 variant_field_index += 1;
             }
@@ -318,8 +335,10 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
         // Check return type
         let return_llvm_type = map_return_type(context, safe_return_type);
         let extracted_return = extract_struct_type_from_llvm(return_llvm_type);
-        if extracted_return.length > 0 && !string_array_contains(referenced_types, extracted_return) {
-            referenced_types.push(extracted_return);
+        if extracted_return.length > 0 {
+            if !string_array_contains(referenced_types, extracted_return) {
+                referenced_types.push(extracted_return);
+            }
         }
         // Check each parameter type
         let mut param_index -> number = 0;
@@ -329,8 +348,10 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
             }
             let param_llvm_type = map_parameter_type(context, safe_params[param_index].type_annotation);
             let extracted_param = extract_struct_type_from_llvm(param_llvm_type);
-            if extracted_param.length > 0 && !string_array_contains(referenced_types, extracted_param) {
-                referenced_types.push(extracted_param);
+            if extracted_param.length > 0 {
+                if !string_array_contains(referenced_types, extracted_param) {
+                    referenced_types.push(extracted_param);
+                }
             }
             param_index += 1;
         }
@@ -658,8 +679,10 @@ fn render_interface_signature(signature -> NativeInterfaceSignature) -> string {
         line = line + "<" + join_with_separator(signature.type_parameters, ", ") + ">";
     }
     line = line + "(" + render_interface_parameters(signature.parameters) + ")";
-    if signature.return_type.length > 0 && signature.return_type != "void" {
-        line = line + " -> " + signature.return_type;
+    if signature.return_type.length > 0 {
+        if signature.return_type != "void" {
+            line = line + " -> " + signature.return_type;
+        }
     }
     if signature.effects.length > 0 {
         line = line + " ![" + join_with_separator(signature.effects, ", ") + "]";
@@ -723,7 +746,13 @@ fn extract_struct_type_from_llvm(llvm_type -> string) -> string {
                 }
                 let end_ch = substring(llvm_type, end_index, end_index + 1);
                 // Struct name ends at space, comma, *, }, or >
-                if end_ch == " " || end_ch == "," || end_ch == "*" || end_ch == "}" || end_ch == ">" {
+                let mut _if288 -> boolean = false;
+                if end_ch == " " { _if288 = true; }
+                if end_ch == "," { _if288 = true; }
+                if end_ch == "*" { _if288 = true; }
+                if end_ch == "}" { _if288 = true; }
+                if end_ch == ">" { _if288 = true; }
+                if _if288 {
                     break;
                 }
                 end_index += 1;
@@ -750,13 +779,19 @@ fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter
         let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
 
         // Mirror `prepare_parameters`: infer method receiver type when `self` is unannotated.
-        if parameter.type_annotation.length == 0 && parameter.name == "self" && index == 0 {
-            let double_colon_pos = find_last_index_of_char(function_name, ":");
-            if double_colon_pos > 0 && substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
-                let struct_name = substring(function_name, 0, double_colon_pos - 1);
-                let struct_type = map_struct_type_annotation(struct_name);
-                if struct_type.length > 0 {
-                    llvm_type = struct_type + "*";
+        if parameter.type_annotation.length == 0 {
+            if parameter.name == "self" {
+                if index == 0 {
+                    let double_colon_pos = find_last_index_of_char(function_name, ":");
+                    if double_colon_pos > 0 {
+                        if substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+                            let struct_name = substring(function_name, 0, double_colon_pos - 1);
+                            let struct_type = map_struct_type_annotation(struct_name);
+                            if struct_type.length > 0 {
+                                llvm_type = struct_type + "*";
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -837,8 +872,12 @@ fn collect_exported_symbol_names(imports -> NativeImport[]) -> string[] {
                 let spec = specifiers[spec_index];
                 if spec != null {
                     let exported = spec.name;
-                    if exported != null && exported.length > 0 && !string_array_contains(names, exported) {
-                        names.push(exported);
+                    if exported != null {
+                        if exported.length > 0 {
+                            if !string_array_contains(names, exported) {
+                                names.push(exported);
+                            }
+                        }
                     }
                 }
                 spec_index += 1;
@@ -881,37 +920,66 @@ fn should_internalize_function(function -> NativeFunction, entry_points -> strin
 
     // Preserve native driver API surface expected by selfhost/release linking.
     let sanitized = sanitize_symbol(function.name);
-    if function.name == "compile_to_llvm" || sanitized == "compile_to_llvm" {
+    let mut _if289 -> boolean = false;
+    if function.name == "compile_to_llvm" { _if289 = true; }
+    if sanitized == "compile_to_llvm" { _if289 = true; }
+    if _if289 {
         return false;
     }
-    if function.name == "compile_to_sailfin" || sanitized == "compile_to_sailfin" {
+    let mut _if290 -> boolean = false;
+    if function.name == "compile_to_sailfin" { _if290 = true; }
+    if sanitized == "compile_to_sailfin" { _if290 = true; }
+    if _if290 {
         return false;
     }
-    if function.name == "cli_main" || sanitized == "sailfin_cli_main__cli_main" {
+    let mut _if291 -> boolean = false;
+    if function.name == "cli_main" { _if291 = true; }
+    if sanitized == "sailfin_cli_main__cli_main" { _if291 = true; }
+    if _if291 {
         return false;
     }
-    if function.name == "sailfin_cli_main" || sanitized == "sailfin_cli_main" {
+    let mut _if292 -> boolean = false;
+    if function.name == "sailfin_cli_main" { _if292 = true; }
+    if sanitized == "sailfin_cli_main" { _if292 = true; }
+    if _if292 {
         return false;
     }
-    if function.name == "native_cli_main" || sanitized == "native_cli_main" {
+    let mut _if293 -> boolean = false;
+    if function.name == "native_cli_main" { _if293 = true; }
+    if sanitized == "native_cli_main" { _if293 = true; }
+    if _if293 {
         return false;
     }
-    if function.name == "append_match_arm_mutations" || sanitized == "append_match_arm_mutations" {
+    let mut _if294 -> boolean = false;
+    if function.name == "append_match_arm_mutations" { _if294 = true; }
+    if sanitized == "append_match_arm_mutations" { _if294 = true; }
+    if _if294 {
         return false;
     }
-    if function.name == "append_match_arm_mutations_impl" || sanitized == "append_match_arm_mutations_impl" {
+    let mut _if295 -> boolean = false;
+    if function.name == "append_match_arm_mutations_impl" { _if295 = true; }
+    if sanitized == "append_match_arm_mutations_impl" { _if295 = true; }
+    if _if295 {
         return false;
     }
-    if function.name == "text_char_at" || sanitized == "text_char_at" {
+    let mut _if296 -> boolean = false;
+    if function.name == "text_char_at" { _if296 = true; }
+    if sanitized == "text_char_at" { _if296 = true; }
+    if _if296 {
         return false;
     }
-    if function.name == "string_char_at" || sanitized == "string_char_at" {
+    let mut _if297 -> boolean = false;
+    if function.name == "string_char_at" { _if297 = true; }
+    if sanitized == "string_char_at" { _if297 = true; }
+    if _if297 {
         return false;
     }
 
     // Treat leading-underscore helpers as module-local.
-    if sanitized.length > 0 && substring(sanitized, 0, 1) == "_" {
-        return true;
+    if sanitized.length > 0 {
+        if substring(sanitized, 0, 1) == "_" {
+            return true;
+        }
     }
 
     // Collision-prone local helper names observed across compiler modules.

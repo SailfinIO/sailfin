@@ -86,7 +86,7 @@ fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_typ
 
     let new_raw_buffer = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + new_raw_buffer + " = call noalias i8* @malloc(i64 " + total_bytes + ")");
+    current_lines.push("  " + new_raw_buffer + " = call noalias i8* @calloc(i64 1, i64 " + total_bytes + ")");
     let new_data_ptr = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer + " to " + data_pointer_type);
@@ -125,7 +125,7 @@ fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_typ
 
     let new_struct_raw = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + new_struct_raw + " = call i8* @malloc(i64 " + struct_size_value + ")");
+    current_lines.push("  " + new_struct_raw + " = call i8* @calloc(i64 1, i64 " + struct_size_value + ")");
     let new_struct_ptr = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + new_struct_ptr + " = bitcast i8* " + new_struct_raw + " to " + array_struct_type + "*");

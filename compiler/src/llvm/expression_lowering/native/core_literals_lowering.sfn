@@ -214,8 +214,10 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
 
     let mut operands -> LLVMOperand[] = [];
     let mut inferred_element_type -> string = metadata.element_type;
-    if inferred_element_type.length == 0 && expected_element_type.length > 0 {
-        inferred_element_type = expected_element_type;
+    if inferred_element_type.length == 0 {
+        if expected_element_type.length > 0 {
+            inferred_element_type = expected_element_type;
+        }
     }
     let mut index -> number = metadata.start_index;
     loop {
@@ -243,8 +245,10 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     }
 
     if operands.length == 0 {
-        if inferred_element_type.length == 0 && expected_element_type.length > 0 {
-            inferred_element_type = expected_element_type;
+        if inferred_element_type.length == 0 {
+            if expected_element_type.length > 0 {
+                inferred_element_type = expected_element_type;
+            }
         }
         if inferred_element_type.length == 0 {
             inferred_element_type = "double";
@@ -267,17 +271,24 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
         let operand = operands[index];
         let mut prepared_operand = operand;
         let trimmed_operand_type = trim_text(operand.llvm_type);
-        let operand_is_aggregate = starts_with(trimmed_operand_type, "%") || starts_with(trimmed_operand_type, "{");
-        if ends_with_pointer_suffix(element_type) && !ends_with_pointer_suffix(operand.llvm_type) && operand_is_aggregate {
-            let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
-            diagnostics = extend_string_array(diagnostics, boxed.diagnostics);
-            current_lines = boxed.lines;
-            current_temp = boxed.temp_index;
-            if boxed.operand == null {
-                diagnostics.push("llvm lowering: array literal element could not be boxed to `" + element_type + "`");
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        let mut _let68 -> boolean = false;
+        if starts_with(trimmed_operand_type, "%") { _let68 = true; }
+        if starts_with(trimmed_operand_type, "{") { _let68 = true; }
+        let operand_is_aggregate = _let68;
+        if ends_with_pointer_suffix(element_type) {
+            if !ends_with_pointer_suffix(operand.llvm_type) {
+                if operand_is_aggregate {
+                    let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
+                    diagnostics = extend_string_array(diagnostics, boxed.diagnostics);
+                    current_lines = boxed.lines;
+                    current_temp = boxed.temp_index;
+                    if boxed.operand == null {
+                        diagnostics.push("llvm lowering: array literal element could not be boxed to `" + element_type + "`");
+                        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+                    }
+                    prepared_operand = boxed.operand;
+                }
             }
-            prepared_operand = boxed.operand;
         }
         let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines);
         diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
@@ -320,7 +331,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     current_temp += 1;
 
     let raw_array_ptr = format_temp_name(current_temp);
-    current_lines.push("  " + raw_array_ptr + " = call i8* @malloc(i64 " + adjusted_array_bytes + ")");
+    current_lines.push("  " + raw_array_ptr + " = call i8* @calloc(i64 1, i64 " + adjusted_array_bytes + ")");
     current_temp += 1;
 
     let data_pointer = format_temp_name(current_temp);
@@ -340,8 +351,10 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     }
 
     let mut struct_type = array_struct_type_for_element(element_type);
-    if operands.length == 0 && expected_struct_type.length > 0 {
-        struct_type = expected_struct_type;
+    if operands.length == 0 {
+        if expected_struct_type.length > 0 {
+            struct_type = expected_struct_type;
+        }
     }
     let struct_size_ptr = format_temp_name(current_temp);
     current_lines.push("  " + struct_size_ptr + " = getelementptr " + struct_type + ", " + struct_type + "* null, i32 1");
@@ -352,7 +365,7 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     current_temp += 1;
 
     let raw_struct_ptr = format_temp_name(current_temp);
-    current_lines.push("  " + raw_struct_ptr + " = call i8* @malloc(i64 " + struct_bytes + ")");
+    current_lines.push("  " + raw_struct_ptr + " = call i8* @calloc(i64 1, i64 " + struct_bytes + ")");
     current_temp += 1;
 
     let struct_pointer = format_temp_name(current_temp);
@@ -385,71 +398,75 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
     // File-based fallback: when the cross-module TypeContext is corrupt
     // (v0.1.1 seed ABI issue), resolve_struct_info_for_literal returns null.
     // Read the struct info from the file written by lower_instruction_range.
-    if info == null && parse.type_name.length > 0 && fs.exists("build/sailfin/.struct_info") {
-        let _si_raw = fs.readFile("build/sailfin/.struct_info");
-        if _si_raw.length > 0 {
-            let mut _si_pos -> number = 0;
-            loop {
-                if _si_pos >= _si_raw.length { break; }
-                let _si_nl = index_of(substring(_si_raw, _si_pos, _si_raw.length), "\n");
-                let mut _si_line -> string = "";
-                if _si_nl < 0 {
-                    _si_line = substring(_si_raw, _si_pos, _si_raw.length);
-                    _si_pos = _si_raw.length;
-                } else {
-                    _si_line = substring(_si_raw, _si_pos, _si_pos + _si_nl);
-                    _si_pos = _si_pos + _si_nl + 1;
-                }
-                if _si_line.length == 0 { continue; }
-                // Format: struct_name\tllvm_name\tfield1_name:field1_type,...
-                let _t1 = index_of(_si_line, "\t");
-                if _t1 < 0 { continue; }
-                let _si_name = substring(_si_line, 0, _t1);
-                if _si_name != parse.type_name { continue; }
-                let _si_rest = substring(_si_line, _t1 + 1, _si_line.length);
-                let _t2 = index_of(_si_rest, "\t");
-                if _t2 < 0 { continue; }
-                let _si_llvm = substring(_si_rest, 0, _t2);
-                let _si_fields_str = substring(_si_rest, _t2 + 1, _si_rest.length);
-                let mut _si_fields -> StructFieldInfo[] = [];
-                if _si_fields_str.length > 0 {
-                    // Parse comma-separated field entries: name:type
-                    let mut _fp -> number = 0;
-                    let mut _fi -> number = 0;
+    if info == null {
+        if parse.type_name.length > 0 {
+            if fs.exists("build/sailfin/.struct_info") {
+                let _si_raw = fs.readFile("build/sailfin/.struct_info");
+                if _si_raw.length > 0 {
+                    let mut _si_pos -> number = 0;
                     loop {
-                        if _fp >= _si_fields_str.length { break; }
-                        let _fc = index_of(substring(_si_fields_str, _fp, _si_fields_str.length), ",");
-                        let mut _f_entry -> string = "";
-                        if _fc < 0 {
-                            _f_entry = substring(_si_fields_str, _fp, _si_fields_str.length);
-                            _fp = _si_fields_str.length;
+                        if _si_pos >= _si_raw.length { break; }
+                        let _si_nl = index_of(substring(_si_raw, _si_pos, _si_raw.length), "\n");
+                        let mut _si_line -> string = "";
+                        if _si_nl < 0 {
+                            _si_line = substring(_si_raw, _si_pos, _si_raw.length);
+                            _si_pos = _si_raw.length;
                         } else {
-                            _f_entry = substring(_si_fields_str, _fp, _fp + _fc);
-                            _fp = _fp + _fc + 1;
+                            _si_line = substring(_si_raw, _si_pos, _si_pos + _si_nl);
+                            _si_pos = _si_pos + _si_nl + 1;
                         }
-                        if _f_entry.length == 0 { _fi += 1; continue; }
-                        let _colon = index_of(_f_entry, ":");
-                        if _colon < 0 { _fi += 1; continue; }
-                        let _f_name = substring(_f_entry, 0, _colon);
-                        let _f_type = substring(_f_entry, _colon + 1, _f_entry.length);
-                        _si_fields.push(StructFieldInfo {
-                            name: _f_name,
-                            llvm_type: _f_type,
-                            type_annotation: "",
-                            index: _fi,
-                            offset: 0,
-                        });
-                        _fi += 1;
+                        if _si_line.length == 0 { continue; }
+                        // Format: struct_name\tllvm_name\tfield1_name:field1_type,...
+                        let _t1 = index_of(_si_line, "\t");
+                        if _t1 < 0 { continue; }
+                        let _si_name = substring(_si_line, 0, _t1);
+                        if _si_name != parse.type_name { continue; }
+                        let _si_rest = substring(_si_line, _t1 + 1, _si_line.length);
+                        let _t2 = index_of(_si_rest, "\t");
+                        if _t2 < 0 { continue; }
+                        let _si_llvm = substring(_si_rest, 0, _t2);
+                        let _si_fields_str = substring(_si_rest, _t2 + 1, _si_rest.length);
+                        let mut _si_fields -> StructFieldInfo[] = [];
+                        if _si_fields_str.length > 0 {
+                            // Parse comma-separated field entries: name:type
+                            let mut _fp -> number = 0;
+                            let mut _fi -> number = 0;
+                            loop {
+                                if _fp >= _si_fields_str.length { break; }
+                                let _fc = index_of(substring(_si_fields_str, _fp, _si_fields_str.length), ",");
+                                let mut _f_entry -> string = "";
+                                if _fc < 0 {
+                                    _f_entry = substring(_si_fields_str, _fp, _si_fields_str.length);
+                                    _fp = _si_fields_str.length;
+                                } else {
+                                    _f_entry = substring(_si_fields_str, _fp, _fp + _fc);
+                                    _fp = _fp + _fc + 1;
+                                }
+                                if _f_entry.length == 0 { _fi += 1; continue; }
+                                let _colon = index_of(_f_entry, ":");
+                                if _colon < 0 { _fi += 1; continue; }
+                                let _f_name = substring(_f_entry, 0, _colon);
+                                let _f_type = substring(_f_entry, _colon + 1, _f_entry.length);
+                                _si_fields.push(StructFieldInfo {
+                                    name: _f_name,
+                                    llvm_type: _f_type,
+                                    type_annotation: "",
+                                    index: _fi,
+                                    offset: 0,
+                                });
+                                _fi += 1;
+                            }
+                        }
+                        info = StructTypeInfo {
+                            name: _si_name,
+                            llvm_name: _si_llvm,
+                            fields: _si_fields,
+                            size: 0,
+                            align: 0,
+                        };
+                        break;
                     }
                 }
-                info = StructTypeInfo {
-                    name: _si_name,
-                    llvm_name: _si_llvm,
-                    fields: _si_fields,
-                    size: 0,
-                    align: 0,
-                };
-                break;
             }
         }
     }
@@ -583,7 +600,7 @@ fn box_aggregate_operand(operand -> LLVMOperand, expected_pointer_type -> string
 
     let malloc_temp = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + malloc_temp + " = call noalias i8* @malloc(i64 " + number_to_string(allocation.size) + ")");
+    current_lines.push("  " + malloc_temp + " = call noalias i8* @calloc(i64 1, i64 " + number_to_string(allocation.size) + ")");
 
     let typed_ptr_temp = format_temp_name(current_temp);
     current_temp += 1;
@@ -593,11 +610,13 @@ fn box_aggregate_operand(operand -> LLVMOperand, expected_pointer_type -> string
 
     let mut pointer_operand = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
     let trimmed_expected = trim_text(expected_pointer_type);
-    if trimmed_expected.length > 0 && trimmed_expected != "i8*" {
-        let cast_temp = format_temp_name(current_temp);
-        current_temp += 1;
-        current_lines.push("  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + trimmed_expected);
-        pointer_operand = LLVMOperand { llvm_type: trimmed_expected, value: cast_temp };
+    if trimmed_expected.length > 0 {
+        if trimmed_expected != "i8*" {
+            let cast_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines.push("  " + cast_temp + " = bitcast i8* " + malloc_temp + " to " + trimmed_expected);
+            pointer_operand = LLVMOperand { llvm_type: trimmed_expected, value: cast_temp };
+        }
     }
 
     return HeapBoxResult { lines: current_lines, temp_index: current_temp, operand: pointer_operand, diagnostics: diagnostics };
@@ -694,18 +713,25 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                 if lowered.operand != null {
                     let mut field_operand = lowered.operand;
                     let trimmed_field_type = trim_text(field_operand.llvm_type);
-                    let field_is_aggregate = starts_with(trimmed_field_type, "%") || starts_with(trimmed_field_type, "{");
-                    if ends_with_pointer_suffix(expected.llvm_type) && !ends_with_pointer_suffix(field_operand.llvm_type) && field_is_aggregate {
-                        let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
-                        let _ci8 = 0;
-                        while _ci8 < boxed.diagnostics.length {
-                            diagnostics.push(boxed.diagnostics[_ci8]);
-                            _ci8 += 1;
-                        }
-                        current_lines = boxed.lines;
-                        current_temp = boxed.temp_index;
-                        if boxed.operand != null {
-                            field_operand = boxed.operand;
+                    let mut _let69 -> boolean = false;
+                    if starts_with(trimmed_field_type, "%") { _let69 = true; }
+                    if starts_with(trimmed_field_type, "{") { _let69 = true; }
+                    let field_is_aggregate = _let69;
+                    if ends_with_pointer_suffix(expected.llvm_type) {
+                        if !ends_with_pointer_suffix(field_operand.llvm_type) {
+                            if field_is_aggregate {
+                                let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
+                                let _ci8 = 0;
+                                while _ci8 < boxed.diagnostics.length {
+                                    diagnostics.push(boxed.diagnostics[_ci8]);
+                                    _ci8 += 1;
+                                }
+                                current_lines = boxed.lines;
+                                current_temp = boxed.temp_index;
+                                if boxed.operand != null {
+                                    field_operand = boxed.operand;
+                                }
+                            }
                         }
                     }
                     let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines);
@@ -716,34 +742,38 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                     }
                     current_lines = coerced.lines;
                     current_temp = coerced.temp_index;
-                    if coerced.operand != null && alloca_ptr != null {
-                        let payload_ptr_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        let mut payload_field_index -> number = 1;
-                        if enum_info.max_payload_size > 0 && enum_info.align > enum_info.tag_size {
-                            payload_field_index = 2;
-                        }
-                        current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 " + number_to_string(payload_field_index));
-
-                        let byte_array_ptr_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + byte_array_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
-
-                        let field_absolute_offset = variant_info.fields[field_index].offset;
-                        let field_offset_in_payload = field_absolute_offset - variant_info.offset;
-                        let mut field_byte_ptr_temp -> string = byte_array_ptr_temp;
-                        if field_offset_in_payload > 0 {
-                            let offset_ptr_temp = format_temp_name(current_temp);
+                    if coerced.operand != null {
+                        if alloca_ptr != null {
+                            let payload_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
-                            field_byte_ptr_temp = offset_ptr_temp;
+                            let mut payload_field_index -> number = 1;
+                            if enum_info.max_payload_size > 0 {
+                                if enum_info.align > enum_info.tag_size {
+                                    payload_field_index = 2;
+                                }
+                            }
+                            current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 " + number_to_string(payload_field_index));
+    
+                            let byte_array_ptr_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines.push("  " + byte_array_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
+    
+                            let field_absolute_offset = variant_info.fields[field_index].offset;
+                            let field_offset_in_payload = field_absolute_offset - variant_info.offset;
+                            let mut field_byte_ptr_temp -> string = byte_array_ptr_temp;
+                            if field_offset_in_payload > 0 {
+                                let offset_ptr_temp = format_temp_name(current_temp);
+                                current_temp += 1;
+                                current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+                                field_byte_ptr_temp = offset_ptr_temp;
+                            }
+    
+                            let field_ptr_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines.push("  " + field_ptr_temp + " = bitcast ptr " + field_byte_ptr_temp + " to ptr");
+    
+                            current_lines.push("  store " + expected.llvm_type + " " + coerced.operand.value + ", ptr " + field_ptr_temp);
                         }
-
-                        let field_ptr_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + field_ptr_temp + " = bitcast ptr " + field_byte_ptr_temp + " to ptr");
-
-                        current_lines.push("  store " + expected.llvm_type + " " + coerced.operand.value + ", ptr " + field_ptr_temp);
                     }
                 }
                 if !string_array_contains(used_names, expected.name) {
@@ -811,22 +841,32 @@ fn lower_cast_expression(parse -> CastParseResult, bindings -> ParameterBinding[
     let cast_name = format_temp_name(current_temp);
     current_temp += 1;
 
-    if ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) {
-        current_lines.push("  " + cast_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type);
-        let casted = LLVMOperand { llvm_type: target_type, value: cast_name };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: casted, diagnostics: diagnostics, string_constants: lowered.string_constants };
+    if ends_with_pointer_suffix(operand.llvm_type) {
+        if ends_with_pointer_suffix(target_type) {
+            current_lines.push("  " + cast_name + " = bitcast " + operand.llvm_type + " " + operand.value + " to " + target_type);
+            let casted = LLVMOperand { llvm_type: target_type, value: cast_name };
+            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: casted, diagnostics: diagnostics, string_constants: lowered.string_constants };
+        }
     }
 
-    if !ends_with_pointer_suffix(operand.llvm_type) && ends_with_pointer_suffix(target_type) && starts_with(operand.llvm_type, "i") {
-        current_lines.push("  " + cast_name + " = inttoptr " + operand.llvm_type + " " + operand.value + " to " + target_type);
-        let casted = LLVMOperand { llvm_type: target_type, value: cast_name };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: casted, diagnostics: diagnostics, string_constants: lowered.string_constants };
+    if !ends_with_pointer_suffix(operand.llvm_type) {
+        if ends_with_pointer_suffix(target_type) {
+            if starts_with(operand.llvm_type, "i") {
+                current_lines.push("  " + cast_name + " = inttoptr " + operand.llvm_type + " " + operand.value + " to " + target_type);
+                let casted = LLVMOperand { llvm_type: target_type, value: cast_name };
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: casted, diagnostics: diagnostics, string_constants: lowered.string_constants };
+            }
+        }
     }
 
-    if ends_with_pointer_suffix(operand.llvm_type) && !ends_with_pointer_suffix(target_type) && starts_with(target_type, "i") {
-        current_lines.push("  " + cast_name + " = ptrtoint " + operand.llvm_type + " " + operand.value + " to " + target_type);
-        let casted = LLVMOperand { llvm_type: target_type, value: cast_name };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: casted, diagnostics: diagnostics, string_constants: lowered.string_constants };
+    if ends_with_pointer_suffix(operand.llvm_type) {
+        if !ends_with_pointer_suffix(target_type) {
+            if starts_with(target_type, "i") {
+                current_lines.push("  " + cast_name + " = ptrtoint " + operand.llvm_type + " " + operand.value + " to " + target_type);
+                let casted = LLVMOperand { llvm_type: target_type, value: cast_name };
+                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: casted, diagnostics: diagnostics, string_constants: lowered.string_constants };
+            }
+        }
     }
 
     diagnostics.push("llvm lowering: unsupported cast from `" + operand.llvm_type + "` to `" + target_type + "`");

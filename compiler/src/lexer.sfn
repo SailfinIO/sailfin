@@ -91,7 +91,10 @@ fn lex(source -> string) -> Token[] {
                         break;
                     }
                     let scan_character = byte_at(state.source, scan_index);
-                    if scan_character == "\n" || scan_character == "\r" {
+                    let mut _if35 -> boolean = false;
+                    if scan_character == "\n" { _if35 = true; }
+                    if scan_character == "\r" { _if35 = true; }
+                    if _if35 {
                         comment_end = scan_index;
                         break;
                     }
@@ -123,10 +126,14 @@ fn lex(source -> string) -> Token[] {
                         break;
                     }
                     let _next_idx = state.index + 1;
-                    if byte_at(state.source, state.index) == "*" && _next_idx < state.source_len && byte_at(state.source, _next_idx) == "/" {
-                        state.index += 2;
-                        state.column += 2;
-                        break;
+                    if byte_at(state.source, state.index) == "*" {
+                        if _next_idx < state.source_len {
+                            if byte_at(state.source, _next_idx) == "/" {
+                                state.index += 2;
+                                state.column += 2;
+                                break;
+                            }
+                        }
                     }
                     if byte_at(state.source, state.index) == "\n" {
                         state.index += 1;
@@ -168,16 +175,20 @@ fn lex(source -> string) -> Token[] {
                     break;
                 }
                 let current = byte_at(state.source, state.index);
-                if !escaped && is_double_quote(current) {
-                    state.index += 1;
-                    state.column += 1;
-                    break;
+                if !escaped {
+                    if is_double_quote(current) {
+                        state.index += 1;
+                        state.column += 1;
+                        break;
+                    }
                 }
-                if !escaped && is_backslash(current) {
-                    escaped = true;
-                    state.index += 1;
-                    state.column += 1;
-                    continue;
+                if !escaped {
+                    if is_backslash(current) {
+                        escaped = true;
+                        state.index += 1;
+                        state.column += 1;
+                        continue;
+                    }
                 }
                 if escaped {
                     escaped = false;
@@ -222,20 +233,28 @@ fn lex(source -> string) -> Token[] {
                 state.column += 1;
             }
 
-            if state.index < state.source_len && byte_at(state.source, state.index) == "." {
-                let next_is_digit = state.index + 1 < state.source_len && is_digit(byte_at(state.source, state.index + 1));
-                if next_is_digit {
-                    state.index += 1;
-                    state.column += 1;
-                    loop {
-                        if state.index >= state.source_len {
-                            break;
+            if state.index < state.source_len {
+                if byte_at(state.source, state.index) == "." {
+                    let mut _let43 -> boolean = false;
+                    if state.index + 1 < state.source_len {
+                        if is_digit(byte_at(state.source, state.index + 1)) {
+                            _let43 = true;
                         }
-                        if !is_digit(byte_at(state.source, state.index)) {
-                            break;
-                        }
+                    }
+                    let next_is_digit = _let43;
+                    if next_is_digit {
                         state.index += 1;
                         state.column += 1;
+                        loop {
+                            if state.index >= state.source_len {
+                                break;
+                            }
+                            if !is_digit(byte_at(state.source, state.index)) {
+                                break;
+                            }
+                            state.index += 1;
+                            state.column += 1;
+                        }
                     }
                 }
             }
@@ -267,7 +286,10 @@ fn lex(source -> string) -> Token[] {
                 state.column += 1;
             }
             let value = slice(state.source, start, state.index);
-            if value == "true" || value == "false" {
+            let mut _if36 -> boolean = false;
+            if value == "true" { _if36 = true; }
+            if value == "false" { _if36 = true; }
+            if _if36 {
                 tokens = append(tokens, Token {
                     kind: TokenKind.BooleanLiteral(),
                     lexeme: value,
@@ -293,7 +315,10 @@ fn lex(source -> string) -> Token[] {
         if _lex_next < state.source_len {
             let pair = slice(state.source, state.index, _lex_next2);
             // Fast-path: keep <= / >= stable.
-            if pair == "<=" || pair == ">=" {
+            let mut _if37 -> boolean = false;
+            if pair == "<=" { _if37 = true; }
+            if pair == ">=" { _if37 = true; }
+            if _if37 {
                 lexeme = pair;
                 state.index += 2;
                 state.column += 2;
@@ -340,25 +365,53 @@ fn lex(source -> string) -> Token[] {
 }
 
 fn is_whitespace(ch -> string) -> boolean {
-    return ch == " " || ch == "\t" || ch == "\n" || ch == "\r";
+    let mut _ret38 -> boolean = false;
+    if ch == " " { _ret38 = true; }
+    if ch == "\t" { _ret38 = true; }
+    if ch == "\n" { _ret38 = true; }
+    if ch == "\r" { _ret38 = true; }
+    return _ret38;
 }
 
 fn is_identifier_start(ch -> string) -> boolean {
-    return is_letter(ch) || ch == "_";
+    let mut _ret39 -> boolean = false;
+    if is_letter(ch) { _ret39 = true; }
+    if ch == "_" { _ret39 = true; }
+    return _ret39;
 }
 
 fn is_identifier_part(ch -> string) -> boolean {
-    return is_identifier_start(ch) || is_digit(ch);
+    let mut _ret40 -> boolean = false;
+    if is_identifier_start(ch) { _ret40 = true; }
+    if is_digit(ch) { _ret40 = true; }
+    return _ret40;
 }
 
 fn is_letter(ch -> string) -> boolean {
     let c = char_code(ch);
-    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+    let mut _ret41 -> boolean = false;
+    if c >= 65 {
+        if c <= 90 {
+            _ret41 = true;
+        }
+    }
+    if c >= 97 {
+        if c <= 122 {
+            _ret41 = true;
+        }
+    }
+    return _ret41;
 }
 
 fn is_digit(ch -> string) -> boolean {
     let c = char_code(ch);
-    return c >= 48 && c <= 57;
+    let mut _ret42 -> boolean = false;
+    if c >= 48 {
+        if c <= 57 {
+            _ret42 = true;
+        }
+    }
+    return _ret42;
 }
 
 fn is_double_quote(ch -> string) -> boolean {

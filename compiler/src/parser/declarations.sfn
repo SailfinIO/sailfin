@@ -87,7 +87,10 @@ import { parse_block } from "./statements";
 
 fn consume_type_separator(parser -> Parser) -> TypeSeparatorParseResult {
     let token = parser_peek_raw(parser);
-    if symbol_matches(token, ":") || symbol_matches(token, "->") {
+    let mut _if394 -> boolean = false;
+    if symbol_matches(token, ":") { _if394 = true; }
+    if symbol_matches(token, "->") { _if394 = true; }
+    if _if394 {
         return TypeSeparatorParseResult { parser: parser_advance_raw(parser), found: true };
     }
     // Tolerate a lexer/runtime bug where `->` is split into `-` and `>`.
@@ -152,32 +155,52 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
                         let sym = tok.lexeme;
                         if strings_equal(sym, "<") {
                             angle += 1;
-                        } else if strings_equal(sym, ">") && angle > 0 {
-                            angle -= 1;
+                        } else if strings_equal(sym, ">") {
+                            if angle > 0 {
+                                angle -= 1;
+                            }
                         } else if strings_equal(sym, "(") {
                             paren += 1;
-                        } else if strings_equal(sym, ")") && paren > 0 {
-                            paren -= 1;
+                        } else if strings_equal(sym, ")") {
+                            if paren > 0 {
+                                paren -= 1;
+                            }
                         } else if strings_equal(sym, "{") {
                             brace += 1;
-                        } else if strings_equal(sym, "}") && brace > 0 {
-                            brace -= 1;
+                        } else if strings_equal(sym, "}") {
+                            if brace > 0 {
+                                brace -= 1;
+                            }
                         } else if strings_equal(sym, "[") {
                             bracket += 1;
-                        } else if strings_equal(sym, "]") && bracket > 0 {
-                            bracket -= 1;
+                        } else if strings_equal(sym, "]") {
+                            if bracket > 0 {
+                                bracket -= 1;
+                            }
                         }
 
-                        let at_top_level = angle == 0 && paren == 0 && brace == 0 && bracket == 0;
-                        if strings_equal(sym, ",") && at_top_level {
-                            let trimmed_tokens = trim_token_edges(segment_tokens);
-                            let argument = parse_decorator_argument(trimmed_tokens);
-                            if argument != null {
-                                decorator_arguments = append_decorator_argument(decorator_arguments, argument);
+                        let mut _let397 -> boolean = false;
+                        if angle == 0 {
+                            if paren == 0 {
+                                if brace == 0 {
+                                    if bracket == 0 {
+                                        _let397 = true;
+                                    }
+                                }
                             }
-                            segment_tokens = [];
-                            index += 1;
-                            continue;
+                        }
+                        let at_top_level = _let397;
+                        if strings_equal(sym, ",") {
+                            if at_top_level {
+                                let trimmed_tokens = trim_token_edges(segment_tokens);
+                                let argument = parse_decorator_argument(trimmed_tokens);
+                                if argument != null {
+                                    decorator_arguments = append_decorator_argument(decorator_arguments, argument);
+                                }
+                                segment_tokens = [];
+                                index += 1;
+                                continue;
+                            }
                         }
                     }
                     segment_tokens = append_token(segment_tokens, tok);
@@ -232,7 +255,15 @@ fn parse_decorator_argument(tokens -> Token[]) -> DecoratorArgument? {
     let mut expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens));
     if expr.variant == "Raw" {
         let raw_text = trim_text(tokens_to_text(value_tokens));
-        if raw_text.length >= 2 && char_at(raw_text, 0) == "\"" && char_at(raw_text, raw_text.length - 1) == "\"" {
+        let mut _if398 -> boolean = false;
+        if raw_text.length >= 2 {
+            if char_at(raw_text, 0) == "\"" {
+                if char_at(raw_text, raw_text.length - 1) == "\"" {
+                    _if398 = true;
+                }
+            }
+        }
+        if _if398 {
             let literal = strip_surrounding_quotes(raw_text);
             expr = Expression.StringLiteral { value: literal };
         } else if raw_text == "true" {
@@ -347,8 +378,10 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
             if name_text.length > 0 {
                 let mut bound -> TypeAnnotation? = null;
                 let bound_text = trim_text(tokens_to_text(bound_tokens));
-                if bound_tokens.length > 0 && bound_text.length > 0 {
-                    bound = TypeAnnotation { text: bound_text };
+                if bound_tokens.length > 0 {
+                    if bound_text.length > 0 {
+                        bound = TypeAnnotation { text: bound_text };
+                    }
                 }
                 let name_span = source_span_from_tokens(name_tokens);
                 let parameter = TypeParameter { name: name_text, bound: bound, span: name_span };
@@ -510,7 +543,13 @@ fn parse_import(initial_parser -> Parser) -> StatementParseResult {
     let mut source = "";
     let token = parser_peek_raw(parser);
     let text = token.lexeme;
-    if text.length > 0 && strings_equal(char_at(text, 0), "\"") {
+    let mut _if399 -> boolean = false;
+    if text.length > 0 {
+        if strings_equal(char_at(text, 0), "\"") {
+            _if399 = true;
+        }
+    }
+    if _if399 {
         source = string_literal_value(token);
         parser = parser_advance_raw(parser);
     } else {
@@ -548,7 +587,13 @@ fn parse_export(initial_parser -> Parser) -> StatementParseResult {
     let mut source = "";
     let token = parser_peek_raw(parser);
     let text = token.lexeme;
-    if text.length > 0 && strings_equal(char_at(text, 0), "\"") {
+    let mut _if400 -> boolean = false;
+    if text.length > 0 {
+        if strings_equal(char_at(text, 0), "\"") {
+            _if400 = true;
+        }
+    }
+    if _if400 {
         source = string_literal_value(token);
         parser = parser_advance_raw(parser);
     } else {
@@ -976,12 +1021,14 @@ fn parse_struct(initial_parser -> Parser, decorators -> Decorator[]) -> Statemen
         }
 
         let field_result = parse_struct_field(parser);
-        if field_result.success && member_decorators.length == 0 {
-            if field_result.field != null {
-                fields = append_field(fields, field_result.field);
+        if field_result.success {
+            if member_decorators.length == 0 {
+                if field_result.field != null {
+                    fields = append_field(fields, field_result.field);
+                }
+                parser = field_result.parser;
+                continue;
             }
-            parser = field_result.parser;
-            continue;
         }
 
         let method_result = parse_struct_method(parser, member_decorators);
@@ -1596,10 +1643,12 @@ fn parse_model(initial_parser -> Parser, decorators -> Decorator[]) -> Statement
 
         let entry_start = parser;
         let property_result = parse_model_property(parser);
-        if property_result.success && property_result.property != null {
-            parser = property_result.parser;
-            properties = append_model_property(properties, property_result.property);
-            continue;
+        if property_result.success {
+            if property_result.property != null {
+                parser = property_result.parser;
+                properties = append_model_property(properties, property_result.property);
+                continue;
+            }
         }
 
         parser = skip_struct_member(entry_start);
@@ -1889,9 +1938,17 @@ fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
                 current = parser_advance_raw(current);
                 break;
             }
-        } else if depth == 0 && symbol_matches(tok, ";") {
-            current = parser_advance_raw(current);
-            break;
+        } else {
+            let mut _elif401 -> boolean = false;
+            if depth == 0 {
+                if symbol_matches(tok, ";") {
+                    _elif401 = true;
+                }
+            }
+            if _elif401 {
+                current = parser_advance_raw(current);
+                break;
+            }
         }
 
         if is_end_of_file(current, tok) {

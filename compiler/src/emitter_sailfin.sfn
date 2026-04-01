@@ -95,8 +95,19 @@ fn emit_program(program -> Program) -> string {
         // If we emitted anything before this statement (either the injected
         // runtime import, or a prior program statement), insert a blank line
         // unless we are in a compact import/export block.
-        let already_emitted_something = (!has_runtime_import) || (index > 0);
-        let should_insert_blank = already_emitted_something && !(last_emitted_was_import && is_import);
+        let mut _let26 -> boolean = false;
+        if !has_runtime_import { _let26 = true; }
+        if index > 0 { _let26 = true; }
+        let already_emitted_something = _let26;
+        let mut _let27 -> boolean = false;
+        if already_emitted_something {
+            if !last_emitted_was_import {
+                _let27 = true;
+            } else if !is_import {
+                _let27 = true;
+            }
+        }
+        let should_insert_blank = _let27;
         builder = maybe_emit_blank(builder, should_insert_blank);
         builder = emit_statement(builder, statement);
         last_emitted_was_import = is_import;
@@ -268,7 +279,10 @@ fn format_export_specifiers(specifiers -> ExportSpecifier[]) -> string {
 }
 
 fn format_specifier_entry(name -> string, alias -> string?) -> string {
-    if alias == null || alias.length == 0 {
+    let mut _if28 -> boolean = false;
+    if alias == null { _if28 = true; }
+    if alias.length == 0 { _if28 = true; }
+    if _if28 {
         return name;
     }
     return name + " as " + alias;
@@ -352,8 +366,10 @@ fn emit_struct(builder -> TextBuilder, statement -> Statement) -> TextBuilder {
         method_index += 1;
     }
 
-    if statement.fields.length == 0 && statement.methods.length == 0 {
-        current = builder_emit_line(current, "// empty struct");
+    if statement.fields.length == 0 {
+        if statement.methods.length == 0 {
+            current = builder_emit_line(current, "// empty struct");
+        }
     }
 
     current = emit_block_end(current);
@@ -614,7 +630,10 @@ fn format_decorator_argument(argument -> DecoratorArgument) -> string {
 fn format_for_clause(clause -> ForClause) -> string {
     let target = format_expression(clause.target);
     let iterable = format_expression(clause.iterable);
-    if target.length == 0 || iterable.length == 0 {
+    let mut _if29 -> boolean = false;
+    if target.length == 0 { _if29 = true; }
+    if iterable.length == 0 { _if29 = true; }
+    if _if29 {
         return tokens_to_source(clause.tokens);
     }
     return target + " in " + iterable;
@@ -1034,8 +1053,18 @@ fn is_identifier_start(ch -> string) -> boolean {
         return true;
     }
     let code = char_code(ch);
-    return (code >= char_code("a") && code <= char_code("z"))
-        || (code >= char_code("A") && code <= char_code("Z"));
+    let mut _ret30 -> boolean = false;
+    if code >= char_code("a") {
+        if code <= char_code("z") {
+            _ret30 = true;
+        }
+    }
+    if code >= char_code("A") {
+        if code <= char_code("Z") {
+            _ret30 = true;
+        }
+    }
+    return _ret30;
 }
 
 fn is_identifier_part(ch -> string) -> boolean {
@@ -1043,7 +1072,13 @@ fn is_identifier_part(ch -> string) -> boolean {
         return true;
     }
     let code = char_code(ch);
-    return code >= char_code("0") && code <= char_code("9");
+    let mut _ret31 -> boolean = false;
+    if code >= char_code("0") {
+        if code <= char_code("9") {
+            _ret31 = true;
+        }
+    }
+    return _ret31;
 }
 
 fn trim_block_body(text -> string) -> string {
@@ -1051,8 +1086,10 @@ fn trim_block_body(text -> string) -> string {
     if trimmed.length == 0 {
         return trimmed;
     }
-    if char_at(trimmed, 0) == "{" && char_at(trimmed, trimmed.length - 1) == "}" {
-        return trim_text(substring(trimmed, 1, trimmed.length - 1));
+    if char_at(trimmed, 0) == "{" {
+        if char_at(trimmed, trimmed.length - 1) == "}" {
+            return trim_text(substring(trimmed, 1, trimmed.length - 1));
+        }
     }
     return trimmed;
 }
@@ -1066,7 +1103,12 @@ fn collapse_whitespace(value -> string) -> string {
             break;
         }
         let ch = char_at(value, index);
-        let is_space = ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
+        let mut _let32 -> boolean = false;
+        if ch == " " { _let32 = true; }
+        if ch == "\n" { _let32 = true; }
+        if ch == "\r" { _let32 = true; }
+        if ch == "\t" { _let32 = true; }
+        let is_space = _let32;
         if is_space {
             if !last_space {
                 result = result + " ";
@@ -1150,7 +1192,10 @@ fn trim_right(value -> string) -> string {
             break;
         }
         let ch = char_at(value, end - 1);
-        if ch == " " || ch == "\t" {
+        let mut _if33 -> boolean = false;
+        if ch == " " { _if33 = true; }
+        if ch == "\t" { _if33 = true; }
+        if _if33 {
             end -= 1;
             continue;
         }
@@ -1208,12 +1253,19 @@ fn trim_text(value -> string) -> string {
         }
         break;
     }
-    if start == 0 && end == value.length {
-        return value;
+    if start == 0 {
+        if end == value.length {
+            return value;
+        }
     }
     return substring(value, start, end);
 }
 
 fn is_trim_char(ch -> string) -> boolean {
-    return ch == " " || ch == "\n" || ch == "\r" || ch == "\t";
+    let mut _ret34 -> boolean = false;
+    if ch == " " { _ret34 = true; }
+    if ch == "\n" { _ret34 = true; }
+    if ch == "\r" { _ret34 = true; }
+    if ch == "\t" { _ret34 = true; }
+    return _ret34;
 }

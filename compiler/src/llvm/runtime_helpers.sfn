@@ -15,11 +15,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // Raw print: writes to stdout with no prefix, no decoration.
     // Used by the compiler itself for artifact output and CLI messages.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-            target: "print",
-            symbol: "sailfin_runtime_print_raw",
-            return_type: "void",
-            parameter_types: ["i8*"],
-            effects: ["io"],
+        target: "print",
+        symbol: "sailfin_runtime_print_raw",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: ["io"],
     });
     // Raw stderr print: writes to stderr with no prefix, no decoration.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {

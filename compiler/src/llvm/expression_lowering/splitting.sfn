@@ -88,7 +88,17 @@ fn split_array_elements(text -> string) -> string[] {
             }
         }
 
-        if ch == "," && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+        let mut _if166 -> boolean = false;
+        if ch == "," {
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if brace_depth == 0 {
+                        _if166 = true;
+                    }
+                }
+            }
+        }
+        if _if166 {
             entries.push(trim_text(current));
             current = "";
         } else {

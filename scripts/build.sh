@@ -26,6 +26,7 @@
 #   --clang CMD        Clang executable (default: clang)
 #   --timeout SECS     Per-module seed timeout in seconds (default: 180)
 #   --max-total SECS   Max total wall time (default: 1200)
+#   --work-dir DIR     Working directory for intermediate artifacts (default: build/selfhost/native)
 #   --verbose          Print each command as it runs
 
 set -euo pipefail
@@ -46,12 +47,8 @@ BUILD_MODULE_WORKER=0
 WORKER_INDEX=""
 WORKER_SRC=""
 
-# Build directories
-WORK_DIR="build/selfhost/native"
-RAW_DIR="$WORK_DIR/raw"
-OBJ_DIR="$WORK_DIR/obj"
-SEED_CWD="$WORK_DIR/seed_cwd"
-IMPORT_CACHE="$SEED_CWD/build/native/import-context"
+# Build directories (overridable via --work-dir)
+WORK_DIR="${WORK_DIR:-build/selfhost/native}"
 
 # Clang flags shared across all compilations
 CLANG_FLAGS="$OPT -Wno-override-module -fno-delete-null-pointer-checks"
@@ -71,6 +68,7 @@ while [[ $# -gt 0 ]]; do
         --clang)    CLANG="$2"; shift 2 ;;
         --timeout)  SEED_TIMEOUT="$2"; shift 2 ;;
         --max-total) MAX_TOTAL="$2"; shift 2 ;;
+        --work-dir) WORK_DIR="$2"; shift 2 ;;
         --verbose)  VERBOSE=1; shift ;;
         --_build_module_worker)
             BUILD_MODULE_WORKER=1
@@ -81,6 +79,12 @@ while [[ $# -gt 0 ]]; do
         *)          echo "[build] unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+# Derived build directories (set after argument parsing so --work-dir takes effect)
+RAW_DIR="$WORK_DIR/raw"
+OBJ_DIR="$WORK_DIR/obj"
+SEED_CWD="$WORK_DIR/seed_cwd"
+IMPORT_CACHE="$SEED_CWD/build/native/import-context"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -432,7 +436,7 @@ else
         echo "$i ${SOURCES[$i]}"
     done | xargs -P "$JOBS" -L 1 bash -c '
         cd "'"$REPO_ROOT"'"
-        bash scripts/build.sh --_build_module_worker "$@"
+        bash scripts/build.sh --seed "'"$SEED"'" --work-dir "'"$WORK_DIR"'" --_build_module_worker "$@"
     ' _ 2>"$RAW_DIR/build_errors.txt" || FAILED=1
 
     if [[ "$FAILED" -eq 0 ]]; then

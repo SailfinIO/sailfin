@@ -107,21 +107,35 @@ fn is_safe_llvm_type_text(value -> string) -> boolean {
         return false;
     }
     let trimmed = trim_text(value);
-    if trimmed.length == 0 || trimmed.length > 256 {
+    let mut _if194 -> boolean = false;
+    if trimmed.length == 0 { _if194 = true; }
+    if trimmed.length > 256 { _if194 = true; }
+    if _if194 {
         return false;
     }
     // Fast-path for well-known primitive types.
     // The character-level check below relies on single-char indexing + index_of
     // which can be miscompiled by older seeds. These explicit checks bypass the
     // loop entirely for the types that matter most.
-    if trimmed == "double" || trimmed == "i1" || trimmed == "i8*" || trimmed == "void"
-        || trimmed == "i32" || trimmed == "i64" || trimmed == "i8" || trimmed == "i16"
-        || trimmed == "float" {
+    let mut _if195 -> boolean = false;
+    if trimmed == "double" { _if195 = true; }
+    if trimmed == "i1" { _if195 = true; }
+    if trimmed == "i8*" { _if195 = true; }
+    if trimmed == "void" { _if195 = true; }
+    if trimmed == "i32" { _if195 = true; }
+    if trimmed == "i64" { _if195 = true; }
+    if trimmed == "i8" { _if195 = true; }
+    if trimmed == "i16" { _if195 = true; }
+    if trimmed == "float" { _if195 = true; }
+    if _if195 {
         return true;
     }
     // Also accept pointer-to-named-struct patterns (%Foo*) and common aggregate
     // syntax so that complex return types are not rejected.
-    if starts_with(trimmed, "%") || starts_with(trimmed, "{") {
+    let mut _if196 -> boolean = false;
+    if starts_with(trimmed, "%") { _if196 = true; }
+    if starts_with(trimmed, "{") { _if196 = true; }
+    if _if196 {
         return true;
     }
     let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_%*{}[],(). x-";
@@ -166,6 +180,20 @@ fn parse_simple_integer(text -> string) -> number {
     return result;
 }
 
+// Helper: build a ParameterBinding for the file-IPC loop in prepare_parameters_from_files.
+// Kept as a separate function so the loop never has an inline struct literal at the top level
+// of the loop body — the v0.1.1 seed misidentifies `identifier {` as a loop-body closer.
+fn _emit_make_parameter_binding(name -> string, llvm_name -> string, llvm_type -> string, type_annotation -> string) -> ParameterBinding {
+    return ParameterBinding {
+        name: name,
+        llvm_name: llvm_name,
+        llvm_type: llvm_type,
+        type_annotation: type_annotation,
+        consumed: false,
+        span: null,
+    };
+}
+
 // Build ParameterPreparation from files written by entrypoints.sfn.
 // This bypasses calling prepare_parameters in the statement module which
 // the v0.1.1 seed compiles with i8* for NativeFunction, preventing
@@ -191,14 +219,7 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
         let sanitized = sanitize_symbol(param_name);
         let llvm_name = "%" + sanitized;
         signature.push(llvm_type + " " + llvm_name);
-        bindings = append_parameter_binding(bindings, ParameterBinding {
-            name: param_name,
-            llvm_name: llvm_name,
-            llvm_type: llvm_type,
-            type_annotation: param_type,
-            consumed: false,
-            span: null,
-        });
+        bindings = append_parameter_binding(bindings, _emit_make_parameter_binding(param_name, llvm_name, llvm_type, param_type));
         index += 1;
     }
     return ParameterPreparation { signature: signature, bindings: bindings, diagnostics: diagnostics };
@@ -239,205 +260,212 @@ fn emit_llvm_function(
 
     // Async lowering (minimal): async functions spawn a background thread and return
     // an opaque Future pointer. Await joins and extracts the value.
-    if fn_is_async && !fn_is_extern && fn_name != "main" {
-        let future_return = future_pointer_type_for_return_type(fn_return_type);
-        let mut impl_return = map_return_type(context, fn_return_type);
-        if future_return.length == 0 || impl_return.length == 0 {
-            diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
-            let empty_constants = empty_string_constant_set();
-            let _empty_lines -> string[] = [];
-            _write_lowered_function_files(_empty_lines, diagnostics, empty_constants);
-            return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
-        }
-
-        // FuturePtr is an opaque pointer future. For non-pointer/aggregate returns (e.g. structs),
-        // we force the async implementation to box the value and return `i8*`.
-        let mut impl_return_type_annotation -> string = fn_return_type;
-        if future_return == "%SailfinFuturePtr*" {
-            impl_return = "i8*";
-            impl_return_type_annotation = "any";
-        }
-
-        let impl_name = fn_name + "__async_impl";
-        // Write modified field values for the async implementation before recursing.
-        fs.writeFile("build/sailfin/.fn_name", impl_name);
-        fs.writeFile("build/sailfin/.fn_return_type", impl_return_type_annotation);
-        fs.writeFile("build/sailfin/.fn_is_async", "0");
-        let impl_lowered = emit_llvm_function(
-            function_name_hint,
-            functions,
-            effects,
-            context,
-            module_name,
-            entry_points,
-            exported_symbols,
-            imported_functions,
-            module_globals,
-            module_init_symbol,
-            needs_module_init_call
-        );
-
-        diagnostics = extend_string_array(diagnostics, impl_lowered.diagnostics);
-
-        let preparation = prepare_parameters_from_files(fn_name, fn_param_count, context);
-        diagnostics = extend_string_array(diagnostics, preparation.diagnostics);
-
-        let mut wrapper_lines -> string[] = [];
-        let mut linkage -> string = "";
-
-        let wrapper_symbol = sanitize_symbol(fn_name);
-        let impl_symbol = sanitize_symbol(impl_name);
-        let mut signature -> string = join_with_separator(preparation.signature, ", ");
-        if signature.length == 0 {
-            signature = "";
-        }
-
-        // Zero-parameter async functions use the simple spawn ABI.
-        if fn_param_count == 0 {
-            let spawn_symbol = spawn_symbol_for_return_type(fn_return_type);
-            if spawn_symbol.length == 0 {
-                diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
-                let empty_constants = empty_string_constant_set();
-                let _empty_lines -> string[] = [];
-                _write_lowered_function_files(_empty_lines, diagnostics, empty_constants);
-                return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
-            }
-            wrapper_lines.push("define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {");
-            wrapper_lines.push("block.entry:");
-            let t0 = format_temp_name(0);
-            wrapper_lines.push("  " + t0 + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " ()* @" + impl_symbol + ")");
-            wrapper_lines.push("  ret " + future_return + " " + t0);
-            wrapper_lines.push("}");
-        } else {
-            // Parameterized async functions allocate a heap context and spawn a trampoline
-            // that unpacks arguments and invokes the synchronous implementation.
-            let spawn_symbol = spawn_ctx_symbol_for_return_type(fn_return_type);
-            if spawn_symbol.length == 0 {
-                diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
-                let empty_constants = empty_string_constant_set();
-                let _empty_lines -> string[] = [];
-                _write_lowered_function_files(_empty_lines, diagnostics, empty_constants);
-                return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
-            }
-
-            let ctx_type = "%SailfinAsyncCtx." + wrapper_symbol;
-            let ctx_ptr_type = ctx_type + "*";
-            let trampoline_symbol = wrapper_symbol + "__async_trampoline";
-
-            let mut param_llvm_types -> string[] = [];
-            let mut param_index -> number = 0;
-            loop {
-                if param_index >= preparation.bindings.length {
-                    break;
+    if fn_is_async {
+        if !fn_is_extern {
+            if fn_name != "main" {
+                let future_return = future_pointer_type_for_return_type(fn_return_type);
+                let mut impl_return = map_return_type(context, fn_return_type);
+                let mut _if205 -> boolean = false;
+                if future_return.length == 0 { _if205 = true; }
+                if impl_return.length == 0 { _if205 = true; }
+                if _if205 {
+                    diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
+                    let empty_constants = empty_string_constant_set();
+                    let _empty_lines -> string[] = [];
+                    _write_lowered_function_files(_empty_lines, diagnostics, empty_constants);
+                    return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
                 }
-                param_llvm_types.push(preparation.bindings[param_index].llvm_type);
-                param_index += 1;
-            }
-            wrapper_lines.push(ctx_type + " = type { " + join_with_separator(param_llvm_types, ", ") + " }");
-            wrapper_lines.push("");
-
-            // Trampoline: (i8* ctx_raw) -> impl_return
-            wrapper_lines.push("define internal " + impl_return + " @" + trampoline_symbol + "(i8* %ctx_raw) {");
-            wrapper_lines.push("block.entry:");
-
-            let mut tramp_temp -> number = 0;
-            let tramp_ctx = format_temp_name(tramp_temp);
-            tramp_temp += 1;
-            wrapper_lines.push("  " + tramp_ctx + " = bitcast i8* %ctx_raw to " + ctx_ptr_type);
-
-            let mut loaded_args -> LLVMOperand[] = [];
-            let mut load_index -> number = 0;
-            loop {
-                if load_index >= preparation.bindings.length {
-                    break;
+        
+                // FuturePtr is an opaque pointer future. For non-pointer/aggregate returns (e.g. structs),
+                // we force the async implementation to box the value and return `i8*`.
+                let mut impl_return_type_annotation -> string = fn_return_type;
+                if future_return == "%SailfinFuturePtr*" {
+                    impl_return = "i8*";
+                    impl_return_type_annotation = "any";
                 }
-                let binding = preparation.bindings[load_index];
-                let field_ptr = format_temp_name(tramp_temp);
-                tramp_temp += 1;
-                wrapper_lines.push("  " + field_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " " + tramp_ctx + ", i32 0, i32 " + number_to_string(load_index));
-                let loaded = format_temp_name(tramp_temp);
-                tramp_temp += 1;
-                wrapper_lines.push("  " + loaded + " = load " + binding.llvm_type + ", " + binding.llvm_type + "* " + field_ptr);
-                loaded_args.push(LLVMOperand { llvm_type: binding.llvm_type, value: loaded });
-                load_index += 1;
-            }
-
-            let mut arg_texts -> string[] = [];
-            let mut arg_i -> number = 0;
-            loop {
-                if arg_i >= loaded_args.length {
-                    break;
+        
+                let impl_name = fn_name + "__async_impl";
+                // Write modified field values for the async implementation before recursing.
+                fs.writeFile("build/sailfin/.fn_name", impl_name);
+                fs.writeFile("build/sailfin/.fn_return_type", impl_return_type_annotation);
+                fs.writeFile("build/sailfin/.fn_is_async", "0");
+                let impl_lowered = emit_llvm_function(
+                    function_name_hint,
+                    functions,
+                    effects,
+                    context,
+                    module_name,
+                    entry_points,
+                    exported_symbols,
+                    imported_functions,
+                    module_globals,
+                    module_init_symbol,
+                    needs_module_init_call
+                );
+        
+                diagnostics = extend_string_array(diagnostics, impl_lowered.diagnostics);
+        
+                let preparation = prepare_parameters_from_files(fn_name, fn_param_count, context);
+                diagnostics = extend_string_array(diagnostics, preparation.diagnostics);
+        
+                let mut wrapper_lines -> string[] = [];
+                let mut linkage -> string = "";
+        
+                let wrapper_symbol = sanitize_symbol(fn_name);
+                let impl_symbol = sanitize_symbol(impl_name);
+                let mut signature -> string = join_with_separator(preparation.signature, ", ");
+                if signature.length == 0 {
+                    signature = "";
                 }
-                arg_texts.push(loaded_args[arg_i].llvm_type + " " + loaded_args[arg_i].value);
-                arg_i += 1;
-            }
-            let call_args = join_with_separator(arg_texts, ", ");
-
-            if impl_return == "void" {
-                wrapper_lines.push("  call void @" + impl_symbol + "(" + call_args + ")");
-                wrapper_lines.push("  call void @free(i8* %ctx_raw)");
-                wrapper_lines.push("  ret void");
-            } else {
-                let tramp_result = format_temp_name(tramp_temp);
-                tramp_temp += 1;
-                wrapper_lines.push("  " + tramp_result + " = call " + impl_return + " @" + impl_symbol + "(" + call_args + ")");
-                wrapper_lines.push("  call void @free(i8* %ctx_raw)");
-                wrapper_lines.push("  ret " + impl_return + " " + tramp_result);
-            }
-            wrapper_lines.push("}");
-            wrapper_lines.push("");
-
-            // Wrapper: allocate ctx, store params, spawn trampoline
-            wrapper_lines.push("define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {");
-            wrapper_lines.push("block.entry:");
-            let mut wrap_temp -> number = 0;
-            let size_ptr = format_temp_name(wrap_temp);
-            wrap_temp += 1;
-            wrapper_lines.push("  " + size_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " null, i32 1");
-            let size_i64 = format_temp_name(wrap_temp);
-            wrap_temp += 1;
-            wrapper_lines.push("  " + size_i64 + " = ptrtoint " + ctx_ptr_type + " " + size_ptr + " to i64");
-            let ctx_raw = format_temp_name(wrap_temp);
-            wrap_temp += 1;
-            wrapper_lines.push("  " + ctx_raw + " = call noalias i8* @malloc(i64 " + size_i64 + ")");
-            let ctx_typed = format_temp_name(wrap_temp);
-            wrap_temp += 1;
-            wrapper_lines.push("  " + ctx_typed + " = bitcast i8* " + ctx_raw + " to " + ctx_ptr_type);
-
-            let mut store_index -> number = 0;
-            loop {
-                if store_index >= preparation.bindings.length {
-                    break;
+        
+                // Zero-parameter async functions use the simple spawn ABI.
+                if fn_param_count == 0 {
+                    let spawn_symbol = spawn_symbol_for_return_type(fn_return_type);
+                    if spawn_symbol.length == 0 {
+                        diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
+                        let empty_constants = empty_string_constant_set();
+                        let _empty_lines -> string[] = [];
+                        _write_lowered_function_files(_empty_lines, diagnostics, empty_constants);
+                        return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+                    }
+                    wrapper_lines.push("define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {");
+                    wrapper_lines.push("block.entry:");
+                    let t0 = format_temp_name(0);
+                    wrapper_lines.push("  " + t0 + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " ()* @" + impl_symbol + ")");
+                    wrapper_lines.push("  ret " + future_return + " " + t0);
+                    wrapper_lines.push("}");
+                } else {
+                    // Parameterized async functions allocate a heap context and spawn a trampoline
+                    // that unpacks arguments and invokes the synchronous implementation.
+                    let spawn_symbol = spawn_ctx_symbol_for_return_type(fn_return_type);
+                    if spawn_symbol.length == 0 {
+                        diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
+                        let empty_constants = empty_string_constant_set();
+                        let _empty_lines -> string[] = [];
+                        _write_lowered_function_files(_empty_lines, diagnostics, empty_constants);
+                        return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+                    }
+        
+                    let ctx_type = "%SailfinAsyncCtx." + wrapper_symbol;
+                    let ctx_ptr_type = ctx_type + "*";
+                    let trampoline_symbol = wrapper_symbol + "__async_trampoline";
+        
+                    let mut param_llvm_types -> string[] = [];
+                    let mut param_index -> number = 0;
+                    loop {
+                        if param_index >= preparation.bindings.length {
+                            break;
+                        }
+                        param_llvm_types.push(preparation.bindings[param_index].llvm_type);
+                        param_index += 1;
+                    }
+                    wrapper_lines.push(ctx_type + " = type { " + join_with_separator(param_llvm_types, ", ") + " }");
+                    wrapper_lines.push("");
+        
+                    // Trampoline: (i8* ctx_raw) -> impl_return
+                    wrapper_lines.push("define internal " + impl_return + " @" + trampoline_symbol + "(i8* %ctx_raw) {");
+                    wrapper_lines.push("block.entry:");
+        
+                    let mut tramp_temp -> number = 0;
+                    let tramp_ctx = format_temp_name(tramp_temp);
+                    tramp_temp += 1;
+                    wrapper_lines.push("  " + tramp_ctx + " = bitcast i8* %ctx_raw to " + ctx_ptr_type);
+        
+                    let mut loaded_args -> LLVMOperand[] = [];
+                    let mut load_index -> number = 0;
+                    loop {
+                        if load_index >= preparation.bindings.length {
+                            break;
+                        }
+                        let binding = preparation.bindings[load_index];
+                        let field_ptr = format_temp_name(tramp_temp);
+                        tramp_temp += 1;
+                        wrapper_lines.push("  " + field_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " " + tramp_ctx + ", i32 0, i32 " + number_to_string(load_index));
+                        let loaded = format_temp_name(tramp_temp);
+                        tramp_temp += 1;
+                        wrapper_lines.push("  " + loaded + " = load " + binding.llvm_type + ", " + binding.llvm_type + "* " + field_ptr);
+                        loaded_args.push(LLVMOperand { llvm_type: binding.llvm_type, value: loaded });
+                        load_index += 1;
+                    }
+        
+                    let mut arg_texts -> string[] = [];
+                    let mut arg_i -> number = 0;
+                    loop {
+                        if arg_i >= loaded_args.length {
+                            break;
+                        }
+                        arg_texts.push(loaded_args[arg_i].llvm_type + " " + loaded_args[arg_i].value);
+                        arg_i += 1;
+                    }
+                    let call_args = join_with_separator(arg_texts, ", ");
+        
+                    if impl_return == "void" {
+                        wrapper_lines.push("  call void @" + impl_symbol + "(" + call_args + ")");
+                        wrapper_lines.push("  call void @free(i8* %ctx_raw)");
+                        wrapper_lines.push("  ret void");
+                    } else {
+                        let tramp_result = format_temp_name(tramp_temp);
+                        tramp_temp += 1;
+                        wrapper_lines.push("  " + tramp_result + " = call " + impl_return + " @" + impl_symbol + "(" + call_args + ")");
+                        wrapper_lines.push("  call void @free(i8* %ctx_raw)");
+                        wrapper_lines.push("  ret " + impl_return + " " + tramp_result);
+                    }
+                    wrapper_lines.push("}");
+                    wrapper_lines.push("");
+        
+                    // Wrapper: allocate ctx, store params, spawn trampoline
+                    wrapper_lines.push("define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {");
+                    wrapper_lines.push("block.entry:");
+                    let mut wrap_temp -> number = 0;
+                    let size_ptr = format_temp_name(wrap_temp);
+                    wrap_temp += 1;
+                    wrapper_lines.push("  " + size_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " null, i32 1");
+                    let size_i64 = format_temp_name(wrap_temp);
+                    wrap_temp += 1;
+                    wrapper_lines.push("  " + size_i64 + " = ptrtoint " + ctx_ptr_type + " " + size_ptr + " to i64");
+                    let ctx_raw = format_temp_name(wrap_temp);
+                    wrap_temp += 1;
+                    wrapper_lines.push("  " + ctx_raw + " = call noalias i8* @calloc(i64 1, i64 " + size_i64 + ")");
+                    let ctx_typed = format_temp_name(wrap_temp);
+                    wrap_temp += 1;
+                    wrapper_lines.push("  " + ctx_typed + " = bitcast i8* " + ctx_raw + " to " + ctx_ptr_type);
+        
+                    let mut store_index -> number = 0;
+                    loop {
+                        if store_index >= preparation.bindings.length {
+                            break;
+                        }
+                        let binding = preparation.bindings[store_index];
+                        let field_ptr = format_temp_name(wrap_temp);
+                        wrap_temp += 1;
+                        wrapper_lines.push("  " + field_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " " + ctx_typed + ", i32 0, i32 " + number_to_string(store_index));
+                        wrapper_lines.push("  store " + binding.llvm_type + " " + binding.llvm_name + ", " + binding.llvm_type + "* " + field_ptr);
+                        store_index += 1;
+                    }
+        
+                    let out_future = format_temp_name(wrap_temp);
+                    wrap_temp += 1;
+                    wrapper_lines.push("  " + out_future + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " (i8*)* @" + trampoline_symbol + ", i8* " + ctx_raw + ")");
+                    wrapper_lines.push("  ret " + future_return + " " + out_future);
+                    wrapper_lines.push("}");
                 }
-                let binding = preparation.bindings[store_index];
-                let field_ptr = format_temp_name(wrap_temp);
-                wrap_temp += 1;
-                wrapper_lines.push("  " + field_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " " + ctx_typed + ", i32 0, i32 " + number_to_string(store_index));
-                wrapper_lines.push("  store " + binding.llvm_type + " " + binding.llvm_name + ", " + binding.llvm_type + "* " + field_ptr);
-                store_index += 1;
+        
+                let mut merged_lines -> string[] = wrapper_lines;
+                if impl_lowered.lines.length > 0 {
+                    let mut with_spacer = impl_lowered.lines;
+                    with_spacer.push("");
+                    merged_lines = extend_string_array(with_spacer, wrapper_lines);
+                }
+                let merged_constants = merge_string_constants(impl_lowered.string_constants, empty_string_constant_set());
+                _write_lowered_function_files(merged_lines, diagnostics, merged_constants);
+                return LoweredLLVMFunction {
+                    lines: merged_lines,
+                    diagnostics: diagnostics,
+                    lifetime_regions: impl_lowered.lifetime_regions,
+                    string_constants: merged_constants,
+                };
             }
-
-            let out_future = format_temp_name(wrap_temp);
-            wrap_temp += 1;
-            wrapper_lines.push("  " + out_future + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " (i8*)* @" + trampoline_symbol + ", i8* " + ctx_raw + ")");
-            wrapper_lines.push("  ret " + future_return + " " + out_future);
-            wrapper_lines.push("}");
         }
-
-        let mut merged_lines -> string[] = wrapper_lines;
-        if impl_lowered.lines.length > 0 {
-            let mut with_spacer = impl_lowered.lines;
-            with_spacer.push("");
-            merged_lines = extend_string_array(with_spacer, wrapper_lines);
-        }
-        let merged_constants = merge_string_constants(impl_lowered.string_constants, empty_string_constant_set());
-        _write_lowered_function_files(merged_lines, diagnostics, merged_constants);
-        return LoweredLLVMFunction {
-            lines: merged_lines,
-            diagnostics: diagnostics,
-            lifetime_regions: impl_lowered.lifetime_regions,
-            string_constants: merged_constants,
-        };
     }
 
     let mut sanitized = sanitize_symbol(fn_name);
@@ -449,7 +477,10 @@ fn emit_llvm_function(
     // Override return type for specific parse_native functions that return
     // opaque types the LLVM backend cannot resolve. Use == instead of
     // index_of which is miscompiled by older seeds.
-    if sanitized == "parse_native_artifact" || sanitized == "parse_native_functions_from_text" {
+    let mut _if197 -> boolean = false;
+    if sanitized == "parse_native_artifact" { _if197 = true; }
+    if sanitized == "parse_native_functions_from_text" { _if197 = true; }
+    if _if197 {
         if debug_lowering {
             print("emit-llvm: ret_type override parse_native fn=" + fn_name);
         }
@@ -475,11 +506,13 @@ fn emit_llvm_function(
         return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
     }
 
-    if !fn_is_extern && fn_name == "main" {
-        // Emit the Sailfin-level main under a stable internal symbol and provide
-        // a C-compatible `main(argc, argv)` wrapper.
-        sanitized = module_user_main_symbol(module_name);
-        emit_main_wrapper = true;
+    if !fn_is_extern {
+        if fn_name == "main" {
+            // Emit the Sailfin-level main under a stable internal symbol and provide
+            // a C-compatible `main(argc, argv)` wrapper.
+            sanitized = module_user_main_symbol(module_name);
+            emit_main_wrapper = true;
+        }
     }
 
     let preparation = prepare_parameters_from_files(fn_name, fn_param_count, context);
@@ -499,7 +532,13 @@ fn emit_llvm_function(
         return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
     }
 
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let mut _let198 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let198 = true;
+        }
+    }
+    let trace = _let198;
     if trace {
         print(
             "test llvm: emit_llvm_function preview "
@@ -553,7 +592,11 @@ fn emit_llvm_function(
             break;
         }
         let decorator_name = fs.readFile("build/sailfin/.fn_decorator_" + number_to_string(decorator_index));
-        if matches_case_insensitive(decorator_name, "logExecution") || matches_case_insensitive(decorator_name, "logexecution") || matches_case_insensitive(decorator_name, "trace") {
+        let mut _if199 -> boolean = false;
+        if matches_case_insensitive(decorator_name, "logExecution") { _if199 = true; }
+        if matches_case_insensitive(decorator_name, "logexecution") { _if199 = true; }
+        if matches_case_insensitive(decorator_name, "trace") { _if199 = true; }
+        if _if199 {
             let content = fn_name;
             let constant_name = make_string_constant_name_for_module(module_name, content);
             let constant = StringConstant { name: constant_name, content: content, byte_count: content.length };
@@ -656,9 +699,13 @@ fn emit_llvm_function(
         loop {
             if _eb_ti >= _eb_body.length { break; }
             let _eb_tl = trim_text(_eb_body[_eb_ti]);
-            if starts_with(_eb_tl, "ret ") || _eb_tl == "ret void"
-                || starts_with(_eb_tl, "br ") || starts_with(_eb_tl, "switch ")
-                || _eb_tl == "unreachable" {
+            let mut _if200 -> boolean = false;
+            if starts_with(_eb_tl, "ret ") { _if200 = true; }
+            if _eb_tl == "ret void" { _if200 = true; }
+            if starts_with(_eb_tl, "br ") { _if200 = true; }
+            if starts_with(_eb_tl, "switch ") { _if200 = true; }
+            if _eb_tl == "unreachable" { _if200 = true; }
+            if _if200 {
                 _eb_has_terminator = true;
                 break;
             }
@@ -666,7 +713,10 @@ fn emit_llvm_function(
         }
     }
 
-    if !_eb_terminated || !_eb_has_terminator {
+    let mut _if201 -> boolean = false;
+    if !_eb_terminated { _if201 = true; }
+    if !_eb_has_terminator { _if201 = true; }
+    if _if201 {
         if llvm_return == "void" {
             lines.push("  ret void");
         } else {
@@ -746,7 +796,13 @@ fn emit_body(
     if debug_body {
         print("emit-llvm: emit_body start fn=" + fn_name + " llvm_return=" + llvm_return + " bindings_len=" + number_to_string(bindings.length));
     }
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let mut _let202 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let202 = true;
+        }
+    }
+    let trace = _let202;
     if trace {
         print(
             "test llvm: emit_body start "
@@ -821,18 +877,23 @@ fn emit_body(
             break;
         }
         let trimmed_line = trim_text(lines[terminator_index]);
-        if starts_with(trimmed_line, "ret ")
-            || trimmed_line == "ret void"
-            || starts_with(trimmed_line, "br ")
-            || starts_with(trimmed_line, "switch ")
-            || trimmed_line == "unreachable" {
+        let mut _if203 -> boolean = false;
+        if starts_with(trimmed_line, "ret ") { _if203 = true; }
+        if trimmed_line == "ret void" { _if203 = true; }
+        if starts_with(trimmed_line, "br ") { _if203 = true; }
+        if starts_with(trimmed_line, "switch ") { _if203 = true; }
+        if trimmed_line == "unreachable" { _if203 = true; }
+        if _if203 {
             has_terminator = true;
             break;
         }
         terminator_index += 1;
     }
 
-    if !_blk_terminated || !has_terminator {
+    let mut _if204 -> boolean = false;
+    if !_blk_terminated { _if204 = true; }
+    if !has_terminator { _if204 = true; }
+    if _if204 {
         if llvm_return == "void" {
             lines.push("  ret void");
         } else {

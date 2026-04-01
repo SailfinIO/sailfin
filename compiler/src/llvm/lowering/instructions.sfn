@@ -1,9 +1,15 @@
 // compiler/src/llvm/lowering/instructions.sfn
 //
-// Instruction lowering: dispatch and shared utilities.
+// Instruction lowering: main dispatch loop.
+//
+// Helper functions (clone_local_bindings, extend_lifetime_regions,
+// extend_mutations, insert_lines_before_index, _write_block_result_files,
+// _parse_int_from_string) live in instructions_helpers.sfn so that
+// lower_instruction_range is at source position 1 — within the v0.1.1
+// seed's per-module streaming emission limit.
 
-import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { substring, char_code, grapheme_at } from "../../string_utils";
+import { NativeFunction, NativeInstruction } from "../../native_ir";
+import { substring } from "../../string_utils";
 
 import {
     TypeContext,
@@ -14,27 +20,8 @@ import {
     LetLoweringResult,
     LoopContext,
     LifetimeRegionMetadata,
-    LifetimeReleaseEvent,
-    OwnershipInfo,
-    OwnershipConsumption,
-    ScopeMetadata,
     LocalMutation,
     StringConstant,
-    IfStructure,
-    TryStructure,
-    LoopStructure,
-    MatchStructure,
-    MatchCaseStructure,
-    MatchCaseCondition,
-    MatchFieldBinding,
-    MatchStructFieldBinding,
-    EnumTypeInfo,
-    EnumVariantInfo,
-    StructTypeInfo,
-    StructFieldInfo,
-    ConditionConversion,
-    BlockLabelResult,
-    MatchArmMutations,
 } from "../types";
 
 import {
@@ -43,12 +30,19 @@ import {
     extend_string_array,
     number_to_string,
     index_of,
-    starts_with,
-    strip_mut_prefix,
-    is_simple_identifier,
-    merge_parameter_bindings,
-    copy_string_array,
 } from "../utils";
+
+import {
+    extend_lifetime_regions,
+    extend_mutations,
+    _write_block_result_files,
+    _parse_int_from_string,
+    write_bindings_to_files,
+    write_locals_to_files,
+    read_expr_string_constants,
+    read_let_result_from_files,
+    read_expr_mutations,
+} from "./instructions_helpers";
 
 import {
     empty_string_constant_set,
@@ -56,122 +50,26 @@ import {
 } from "../strings";
 
 import {
-    find_struct_info_by_name,
-    find_interface_info_by_name,
-    find_enum_info_by_llvm_type,
-    resolve_enum_info_for_literal,
-    resolve_enum_variant_info,
-    find_struct_info_by_llvm_type,
-    find_vtable_for_struct_interface,
-} from "../type_context";
-
-import {
-    ends_with_pointer_suffix,
-    strip_pointer_suffix,
-    layout_annotation_represents_user_value,
-    map_struct_field_annotation,
-    map_return_type,
-    map_type_with_context,
-    render_default_value,
-    array_struct_type_for_element,
-} from "../type_mapping";
-
-import {
-    is_number_literal,
-    normalise_number_literal,
-    find_local_binding,
-    find_parameter_binding,
-    mark_local_consumed,
-    mark_parameter_consumed,
-    default_return_literal,
-    format_local_pointer_name,
-    format_temp_name,
-} from "../expressions";
-
-import {
-    lower_expression,
-    analyze_value_ownership,
-    detect_borrow_conflicts,
-    append_match_arm_mutations,
-    format_block_entry_label,
-} from "../expression_lowering/native/core";
-
-import {
-    coerce_operand_to_type,
-    emit_boolean_and,
-    emit_comparison_instruction,
-    harmonise_operands,
-    load_local_operand,
-    operand_to_value,
-} from "../expression_lowering/native/core_operands";
-
-import {
     append_local_binding,
-    format_scope_id,
-    push_scope_metadata,
-    pop_scope_metadata,
 } from "../expression_lowering/native/core_scopes";
 
 import {
-    parse_enum_literal,
-    parse_range_iterable,
-    parse_struct_pattern,
-    extract_operand_type,
-    llvm_operand_type,
-} from "../expression_lowering/native/core_parse";
-
-import {
-    extract_simple_identifier,
-    is_union_llvm_type,
-    parse_union_payload_types,
-    sanitize_text_for_llvm,
-} from "../expression_lowering/native/core_text";
-
-import {
-    detect_suspension_conflicts,
     lower_expression_statement,
     lower_return_instruction,
-    lower_expression_for_statement,
-    map_local_type,
     parse_inline_let_expression,
 } from "../expression_lowering/native/statement";
 
 import {
-    array_pointer_element_type,
-    lower_array_literal_to_value,
-} from "../expression_lowering/arrays";
-
-import {
-    infer_borrow_base_scope,
-    append_lifetime_region,
-    append_lifetime_release_event,
-    mark_lifetime_region_released,
     apply_lifetime_release_events,
-    make_lifetime_region_metadata,
-    format_root_scope_id,
-    make_child_scope_id,
-    validate_borrow_lifetimes,
 } from "../lifetime";
 
 import {
-    emit_phi_merges_for_match,
-    emit_phi_merges_for_straight_if,
-    emit_phi_merges_for_if_else,
     find_last_label,
-    retarget_recent_mutations,
-    materialize_mutation_values_at_label,
-    collect_mutation_names,
-    find_mutation_for_name,
-    emit_phi_merge_block,
-    emit_phi_nodes_for_merge,
 } from "./phi";
 
 import {
-    collect_if_structure,
     lower_throw_instruction,
-    collect_try_structure,
     lower_try_instruction,
-    collect_loop_structure,
     append_loop_context,
     last_loop_context,
     lower_loop_instruction,
@@ -179,293 +77,19 @@ import {
 } from "./instructions_loops";
 
 import {
-    collect_match_structure,
-    append_match_case,
-    finalize_match_case,
-    is_default_pattern,
     lower_match_instruction,
-    lower_match_case_condition,
-    allocate_block_label,
-    lower_condition_to_i1,
     lower_if_instruction,
-    sanitize_if_condition_text,
-    lower_let_instruction,
 } from "./instructions_match";
 
-fn clone_local_bindings(values -> LocalBinding[]) -> LocalBinding[] {
-    let mut result -> LocalBinding[] = [];
-    let mut index -> number = 0;
-    loop {
-        if index >= values.length {
-            break;
-        }
-        result.push(values[index]);
-        index += 1;
-    }
-    return result;
-}
-
-fn extend_lifetime_regions(values -> LifetimeRegionMetadata[], extras -> LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
-    if extras.length == 0 {
-        return values;
-    }
-    let mut out = values;
-    let mut index -> number = 0;
-    loop {
-        if index >= extras.length {
-            break;
-        }
-        out = out.push(extras[index]);
-        index += 1;
-    }
-    return out;
-}
-
-fn extend_mutations(values -> LocalMutation[], extras -> LocalMutation[]) -> LocalMutation[] {
-    if extras.length == 0 {
-        return values;
-    }
-    let mut out = values;
-    let mut index -> number = 0;
-    loop {
-        if index >= extras.length {
-            break;
-        }
-        out = out.push(extras[index]);
-        index += 1;
-    }
-    return out;
-}
-
-fn insert_lines_before_index(lines -> string[], index -> number, insert_lines -> string[]) -> string[] {
-    if insert_lines.length == 0 {
-        return lines;
-    }
-
-    let mut result -> string[] = [];
-    let mut line_idx -> number = 0;
-    let mut inserted -> boolean = false;
-    loop {
-        if line_idx >= lines.length {
-            break;
-        }
-        if !inserted && line_idx == index {
-            result = extend_string_array(result, insert_lines);
-            inserted = true;
-        }
-        result.push(lines[line_idx]);
-        line_idx += 1;
-    }
-
-    if !inserted {
-        result = extend_string_array(result, insert_lines);
-    }
-
-    return result;
-}
-
 import {
-    empty_string_constant_set,
-    merge_string_constants,
-} from "../strings";
-
-import {
-    find_struct_info_by_name,
-    find_interface_info_by_name,
-    find_enum_info_by_llvm_type,
-    resolve_enum_info_for_literal,
-    resolve_enum_variant_info,
-    find_struct_info_by_llvm_type,
-    find_vtable_for_struct_interface,
-} from "../type_context";
-
-import {
-    ends_with_pointer_suffix,
-    strip_pointer_suffix,
-    layout_annotation_represents_user_value,
-    map_struct_field_annotation,
-} from "../type_mapping";
-
-import {
-    is_number_literal,
-    normalise_number_literal,
-} from "../expressions";
-
-import {
-    lower_expression,
-    analyze_value_ownership,
-    detect_borrow_conflicts,
-    append_match_arm_mutations,
-} from "../expression_lowering/native/core";
-
-import {
-    coerce_operand_to_type,
-    emit_boolean_and,
-    emit_comparison_instruction,
-    harmonise_operands,
-    load_local_operand,
-} from "../expression_lowering/native/core_operands";
-
-import {
-    append_local_binding,
-} from "../expression_lowering/native/core_scopes";
-
-import {
-    parse_enum_literal,
-    parse_range_iterable,
-    parse_struct_pattern,
-} from "../expression_lowering/native/core_parse";
-
-import {
-    extract_simple_identifier,
-    is_union_llvm_type,
-    parse_union_payload_types,
-} from "../expression_lowering/native/core_text";
-
-import {
-    detect_suspension_conflicts,
-    lower_expression_statement,
-    lower_return_instruction,
-    map_local_type,
-    parse_inline_let_expression,
-} from "../expression_lowering/native/statement";
-
-import {
-    array_pointer_element_type,
-} from "../expression_lowering/arrays";
-
-import {
-    array_struct_type_for_element,
-} from "../type_mapping";
-
-import {
-    find_local_binding,
-    find_parameter_binding,
-    mark_local_consumed,
-    mark_parameter_consumed,
-    default_return_literal,
-    format_local_pointer_name,
-    format_temp_name,
-} from "../expressions";
-
-import {
-    infer_borrow_base_scope,
-    append_lifetime_region,
-    append_lifetime_release_event,
-    mark_lifetime_region_released,
-    apply_lifetime_release_events,
-    make_lifetime_region_metadata,
-    format_root_scope_id,
-    make_child_scope_id,
-} from "../lifetime";
-
-import {
-    emit_phi_merges_for_match,
-    emit_phi_merges_for_straight_if,
-    emit_phi_merges_for_if_else,
-    find_last_label,
-    retarget_recent_mutations,
-    materialize_mutation_values_at_label,
-    collect_mutation_names,
-    find_mutation_for_name,
-} from "./phi";
+    lower_let_instruction,
+} from "./instructions_let";
 
 import {
     get_instruction_tag,
     get_instruction_text,
     get_instruction_condition,
 } from "./lowering_core";
-
-fn _write_block_result_files(
-    lines -> string[],
-    allocas -> string[],
-    terminated -> boolean,
-    diagnostics -> string[],
-    string_constants -> StringConstant[]
-) ![io] {
-    let mut joined_lines -> string = "";
-    let mut li -> number = 0;
-    loop {
-        if li >= lines.length { break; }
-        if li > 0 {
-            joined_lines = joined_lines + "\n";
-        }
-        joined_lines = joined_lines + lines[li];
-        li = li + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_lines", joined_lines);
-
-    let mut joined_allocas -> string = "";
-    let mut ai -> number = 0;
-    loop {
-        if ai >= allocas.length { break; }
-        if ai > 0 {
-            joined_allocas = joined_allocas + "\n";
-        }
-        joined_allocas = joined_allocas + allocas[ai];
-        ai = ai + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_allocas", joined_allocas);
-
-    let mut term_val -> string = "0";
-    if terminated {
-        term_val = "1";
-    }
-    fs.writeFile("build/sailfin/.block_result_terminated", term_val);
-
-    let mut joined_diags -> string = "";
-    let mut di -> number = 0;
-    loop {
-        if di >= diagnostics.length { break; }
-        if di > 0 {
-            joined_diags = joined_diags + "\n";
-        }
-        joined_diags = joined_diags + diagnostics[di];
-        di = di + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_diagnostics", joined_diags);
-
-    // Serialize string constants so emit_body can read them back.
-    // Format: one constant per line as "name\tcontent\tbyte_count".
-    let mut joined_sc -> string = "";
-    let mut si -> number = 0;
-    loop {
-        if si >= string_constants.length { break; }
-        if si > 0 {
-            joined_sc = joined_sc + "\n";
-        }
-        joined_sc = joined_sc + string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count);
-        si = si + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_string_constants", joined_sc);
-}
-
-fn _parse_int_from_string(text -> string) -> number {
-    let len = text.length;
-    if len == 0 { return 0; }
-    let mut result -> number = 0;
-    let mut i -> number = 0;
-    let first_ch = grapheme_at(text, 0);
-    if first_ch == "-" {
-        i = 1;
-    }
-    loop {
-        if i >= len { break; }
-        let ch = grapheme_at(text, i);
-        if ch == "." { break; }
-        let code = char_code(ch);
-        if code >= 48 {
-            if code <= 57 {
-                result = result * 10 + (code - 48);
-            }
-        }
-        i = i + 1;
-    }
-    if first_ch == "-" {
-        return 0 - result;
-    }
-    return result;
-}
 
 fn lower_instruction_range(
     function -> NativeFunction,
@@ -510,37 +134,70 @@ fn lower_instruction_range(
         print("emit-llvm: lower_instruction_range name=" + function.name + " start=" + number_to_string(start_index) + " end=" + number_to_string(end) + " depth=" + number_to_string(scope_depth));
         print("emit-llvm: lower_instruction_range bindings_len=" + number_to_string(bindings.length) + " current_bindings_len=" + number_to_string(current_bindings.length));
     }
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
-    if trace && start_index == 0 && scope_depth == 0 {
-        print(
-            "test llvm: lower_instruction_range start "
-            + function.name
-            + " end="
-            + number_to_string(end)
-        );
-        let mut preview_index -> number = start_index;
-        let mut preview_limit -> number = start_index + 5;
-        if preview_limit > end {
-            preview_limit = end;
+    let mut _let220 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let220 = true;
         }
-        loop {
-            if preview_index >= preview_limit {
-                break;
+    }
+    let trace = _let220;
+    if trace {
+        if start_index == 0 {
+            if scope_depth == 0 {
+                print(
+                    "test llvm: lower_instruction_range start "
+                    + function.name
+                    + " end="
+                    + number_to_string(end)
+                );
+                let mut preview_index -> number = start_index;
+                let mut preview_limit -> number = start_index + 5;
+                if preview_limit > end {
+                    preview_limit = end;
+                }
+                loop {
+                    if preview_index >= preview_limit {
+                        break;
+                    }
+                    let _preview_tag = get_instruction_tag(function.instructions, preview_index);
+                    print(
+                        "test llvm: instr "
+                        + number_to_string(preview_index)
+                        + " tag="
+                        + number_to_string(_preview_tag)
+                    );
+                    preview_index += 1;
+                }
             }
-            let _preview_tag = get_instruction_tag(function.instructions, preview_index);
-            print(
-                "test llvm: instr "
-                + number_to_string(preview_index)
-                + " tag="
-                + number_to_string(_preview_tag)
-            );
-            preview_index += 1;
         }
     }
 
     loop {
         if index >= end {
-            break;
+            if debug_lowering {
+                print("emit-llvm: loop-exit index=" + number_to_string(index) + " end=" + number_to_string(end) + " fn=" + function.name);
+            }
+            // Write block results and return directly from inside the loop.
+            // The v0.1.1 seed generates unconditional `br label %loop.body` for
+            // loop.header20, meaning `break` never actually exits. Using `return`
+            // instead bypasses the broken loop header entirely.
+            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: terminated,
+                next_local_id: current_next_local,
+                lifetime_regions: collected_lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: index,
+                mutations: current_mutations,
+                string_constants: collected_string_constants,
+            };
         }
         if guard > max_guard {
             diagnostics = append_string(
@@ -554,7 +211,24 @@ fn lower_instruction_range(
                     + " end=" + number_to_string(end)
                 );
             }
-            break;
+            // Return directly (same loop-break workaround as index>=end case)
+            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: terminated,
+                next_local_id: current_next_local,
+                lifetime_regions: collected_lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: index,
+                mutations: current_mutations,
+                string_constants: collected_string_constants,
+            };
         }
         guard += 1;
 
@@ -564,681 +238,426 @@ fn lower_instruction_range(
         if debug_lowering {
             print("emit-llvm: lir guard=" + number_to_string(guard) + " index=" + number_to_string(index) + " tag=" + number_to_string(_instr_tag) + " fn=" + function.name + " depth=" + number_to_string(scope_depth));
         }
-        if trace && index == start_index {
-            print("test llvm: lower_instruction_range first_tag " + number_to_string(_instr_tag));
+        if trace {
+            if index == start_index {
+                print("test llvm: lower_instruction_range first_tag " + number_to_string(_instr_tag));
+            }
         }
+        // Tag dispatch: flat if-blocks with continue/break to avoid deep else-if
+        // chains that the v0.1.1 seed miscompiles.
         // Tag constants: Return=0, Expression=1, Let=2, If=3, Else=4, EndIf=5,
         //   For=6, EndFor=7, Loop=8, EndLoop=9, Break=10, Continue=11,
         //   Match=12, Case=13, EndMatch=14, Try=15, Catch=16, Finally=17,
         //   EndTry=18, Throw=19, Noop=20, Unknown=21
+        let mut _tag_handled -> boolean = false;
         if _instr_tag == 2 {
             let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
-            diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
-            collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-            collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
-            current_lines = lowered.lines;
-            current_allocas = lowered.allocas;
-            current_locals = lowered.locals;
-            current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_region_id;
-            current_mutations = extend_mutations(current_mutations, lowered.mutations);
-            let temp_constants = collected_string_constants;
-            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+            current_locals = read_let_result_from_files(diagnostics, current_locals, current_lines, current_allocas, scope_id, scope_depth);
+            if fs.readFile("build/sailfin/.let_ipc_used") == "1" {
+                current_temp = _parse_int_from_string(fs.readFile("build/sailfin/.let_ipc_temp"));
+                current_next_local = _parse_int_from_string(fs.readFile("build/sailfin/.let_ipc_next_local"));
+                current_next_region = _parse_int_from_string(fs.readFile("build/sailfin/.let_ipc_next_region"));
+            } else {
+                diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
+                current_lines = lowered.lines;
+                current_allocas = lowered.allocas;
+                current_locals = lowered.locals;
+                current_bindings = lowered.bindings;
+                current_temp = lowered.temp_index;
+                current_next_local = lowered.next_local_id;
+                current_next_region = lowered.next_region_id;
+                current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                let temp_constants = collected_string_constants;
+                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+            }
             active_label = find_last_label(current_lines, active_label);
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Let lines=" + number_to_string(current_lines.length));
-            }
-        } else if _instr_tag == 1 {
-            if debug_lowering {
-                print("emit-llvm: lir Expression pre_trim fn=" + function.name + " depth=" + number_to_string(scope_depth));
-            }
-            let _raw_expr = get_instruction_text(function.instructions, index);
-            let trimmed_expression = trim_text(_raw_expr);
-            if debug_lowering {
-                print("emit-llvm: lir Expression post_trim fn=" + function.name + " expr=" + trimmed_expression);
-            }
-            let mut handled_inline_let -> boolean = false;
-            if trimmed_expression.length >= 4 {
-                let prefix = substring(trimmed_expression, 0, 4);
-                if prefix == "let " {
-                    let inline_parse = parse_inline_let_expression(trimmed_expression);
-                    diagnostics = extend_string_array(diagnostics, inline_parse.diagnostics);
-                    if inline_parse.success {
-                        let inline_instruction = NativeInstruction.Let {
-                            name: inline_parse.name,
-                            mutable: inline_parse.mutable,
-                            type_annotation: inline_parse.type_annotation,
-                            value: inline_parse.initializer,
-                            span: null,
-                            value_span: null,
-                        };
-                        let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
-                        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
-                        collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-                        collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
-                        current_lines = lowered.lines;
-                        current_allocas = lowered.allocas;
-                        current_locals = lowered.locals;
-                        current_bindings = lowered.bindings;
-                        current_temp = lowered.temp_index;
-                        current_next_local = lowered.next_local_id;
-                        current_next_region = lowered.next_region_id;
-                        current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                        let temp_constants = collected_string_constants;
-                        collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-                        handled_inline_let = true;
-                    }
-                }
-            }
-            if !handled_inline_let {
-                if debug_lowering {
-                    print("emit-llvm: lir Expression pre_call fn=" + function.name + " expr=" + trimmed_expression);
-                }
-                // Write instruction span marker for statement.sfn file-based access.
-                // instruction.span access goes through get_field stub (returns null-like)
-                // For now, always report no span.
-                fs.writeFile("build/sailfin/.instr_has_span", "0");
-                // Write bindings to files for statement.sfn to read.
-                // The ABI fixup replaces struct params with i8* null, which can
-                // corrupt subsequent array parameters (bindings, locals) on ARM64.
-                let mut ebc_i -> number = 0;
-                loop {
-                    let ebc_prefix = "build/sailfin/.instr_binding_" + number_to_string(ebc_i);
-                    if !fs.exists(ebc_prefix + "_name") { break; }
-                    fs.deleteFile(ebc_prefix + "_name");
-                    fs.deleteFile(ebc_prefix + "_llvm_name");
-                    fs.deleteFile(ebc_prefix + "_llvm_type");
-                    fs.deleteFile(ebc_prefix + "_type_annotation");
-                    ebc_i += 1;
-                }
-                let mut ebw_i -> number = 0;
-                loop {
-                    if ebw_i >= current_bindings.length { break; }
-                    let ebw_prefix = "build/sailfin/.instr_binding_" + number_to_string(ebw_i);
-                    fs.writeFile(ebw_prefix + "_name", current_bindings[ebw_i].name);
-                    fs.writeFile(ebw_prefix + "_llvm_name", current_bindings[ebw_i].llvm_name);
-                    fs.writeFile(ebw_prefix + "_llvm_type", current_bindings[ebw_i].llvm_type);
-                    fs.writeFile(ebw_prefix + "_type_annotation", current_bindings[ebw_i].type_annotation);
-                    ebw_i += 1;
-                }
-                // Write locals to files for statement.sfn to read.
-                let mut elc_i -> number = 0;
-                loop {
-                    let elc_prefix = "build/sailfin/.instr_local_" + number_to_string(elc_i);
-                    if !fs.exists(elc_prefix + "_name") { break; }
-                    fs.deleteFile(elc_prefix + "_name");
-                    fs.deleteFile(elc_prefix + "_pointer");
-                    fs.deleteFile(elc_prefix + "_llvm_type");
-                    fs.deleteFile(elc_prefix + "_type_annotation");
-                    fs.deleteFile(elc_prefix + "_scope_id");
-                    fs.deleteFile(elc_prefix + "_scope_depth");
-                    elc_i += 1;
-                }
-                let mut elw_i -> number = 0;
-                loop {
-                    if elw_i >= current_locals.length { break; }
-                    let elw_prefix = "build/sailfin/.instr_local_" + number_to_string(elw_i);
-                    fs.writeFile(elw_prefix + "_name", current_locals[elw_i].name);
-                    fs.writeFile(elw_prefix + "_pointer", current_locals[elw_i].pointer);
-                    fs.writeFile(elw_prefix + "_llvm_type", current_locals[elw_i].llvm_type);
-                    fs.writeFile(elw_prefix + "_type_annotation", current_locals[elw_i].type_annotation);
-                    fs.writeFile(elw_prefix + "_scope_id", current_locals[elw_i].scope_id);
-                    fs.writeFile(elw_prefix + "_scope_depth", number_to_string(current_locals[elw_i].scope_depth));
-                    elw_i += 1;
-                }
-                if debug_lowering {
-                    print("emit-llvm: lir Expression pre_lower_expr_stmt fn=" + function.name + " locals_written=" + number_to_string(current_locals.length));
-                }
-                let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
-                if debug_lowering {
-                    print("emit-llvm: lir Expression post_lower_expr_stmt fn=" + function.name);
-                }
-                // The v0.1.1 seed compiles ExpressionStatementResult as i8* null
-                // for cross-module struct returns.  Read results from files instead.
-                let _expr_delta_count_str = fs.readFile("build/sailfin/.expr_stmt_delta_count");
-                let _expr_delta_count = _parse_int_from_string(_expr_delta_count_str);
-                let mut _expr_delta_i -> number = 0;
-                loop {
-                    if _expr_delta_i >= _expr_delta_count { break; }
-                    let _line = fs.readFile("build/sailfin/.expr_stmt_delta_" + number_to_string(_expr_delta_i));
-                    current_lines.push(_line);
-                    _expr_delta_i += 1;
-                }
-                let _expr_temp_str = fs.readFile("build/sailfin/.expr_stmt_temp_index");
-                current_temp = _parse_int_from_string(_expr_temp_str);
-                let _expr_region_str = fs.readFile("build/sailfin/.expr_stmt_next_region_id");
-                current_next_region = _parse_int_from_string(_expr_region_str);
-                let _expr_mut_count_str = fs.readFile("build/sailfin/.expr_stmt_mut_count");
-                let _expr_mut_count = _parse_int_from_string(_expr_mut_count_str);
-                let mut _expr_mut_i -> number = 0;
-                loop {
-                    if _expr_mut_i >= _expr_mut_count { break; }
-                    let _m_prefix = "build/sailfin/.expr_stmt_mut_" + number_to_string(_expr_mut_i);
-                    let _m_name = fs.readFile(_m_prefix + "_name");
-                    let _m_type = fs.readFile(_m_prefix + "_type");
-                    let _m_value = fs.readFile(_m_prefix + "_value");
-                    let _m_label = fs.readFile(_m_prefix + "_label");
-                    let _mutation = LocalMutation {
-                        name: _m_name,
-                        llvm_type: _m_type,
-                        value_name: _m_value,
-                        span: null,
-                        originating_label: _m_label,
-                    };
-                    current_mutations = extend_mutations(current_mutations, [_mutation]);
-                    _expr_mut_i += 1;
-                }
-                // Read string constants written by expression statement handler.
-                if fs.exists("build/sailfin/.expr_stmt_string_constants") {
-                    let _esc_raw = fs.readFile("build/sailfin/.expr_stmt_string_constants");
-                    if _esc_raw.length > 0 {
-                        let mut _esc_pos -> number = 0;
-                        loop {
-                            if _esc_pos >= _esc_raw.length { break; }
-                            let _enl_pos = index_of(substring(_esc_raw, _esc_pos, _esc_raw.length), "\n");
-                            let mut _esc_line -> string = "";
-                            if _enl_pos < 0 {
-                                _esc_line = substring(_esc_raw, _esc_pos, _esc_raw.length);
-                                _esc_pos = _esc_raw.length;
+            index += 1;
+            _tag_handled = true;
+        }
+        if !_tag_handled {
+            if _instr_tag == 1 {
+                let _raw_expr = get_instruction_text(function.instructions, index);
+                let trimmed_expression = trim_text(_raw_expr);
+                let mut handled_inline_let -> boolean = false;
+                if trimmed_expression.length >= 4 {
+                    let prefix = substring(trimmed_expression, 0, 4);
+                    if prefix == "let " {
+                        let inline_parse = parse_inline_let_expression(trimmed_expression);
+                        diagnostics = extend_string_array(diagnostics, inline_parse.diagnostics);
+                        if inline_parse.success {
+                            let inline_instruction = NativeInstruction.Let {
+                                name: inline_parse.name,
+                                mutable: inline_parse.mutable,
+                                type_annotation: inline_parse.type_annotation,
+                                value: inline_parse.initializer,
+                                span: null,
+                                value_span: null,
+                            };
+                            let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
+                            current_locals = read_let_result_from_files(diagnostics, current_locals, current_lines, current_allocas, scope_id, scope_depth);
+                            if fs.readFile("build/sailfin/.let_ipc_used") == "1" {
+                                current_temp = _parse_int_from_string(fs.readFile("build/sailfin/.let_ipc_temp"));
+                                current_next_local = _parse_int_from_string(fs.readFile("build/sailfin/.let_ipc_next_local"));
+                                current_next_region = _parse_int_from_string(fs.readFile("build/sailfin/.let_ipc_next_region"));
                             } else {
-                                _esc_line = substring(_esc_raw, _esc_pos, _esc_pos + _enl_pos);
-                                _esc_pos = _esc_pos + _enl_pos + 1;
+                                diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+                                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                                collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
+                                current_lines = lowered.lines;
+                                current_allocas = lowered.allocas;
+                                current_locals = lowered.locals;
+                                current_bindings = lowered.bindings;
+                                current_temp = lowered.temp_index;
+                                current_next_local = lowered.next_local_id;
+                                current_next_region = lowered.next_region_id;
+                                current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                                let temp_constants = collected_string_constants;
+                                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
                             }
-                            if _esc_line.length == 0 { continue; }
-                            let _et1 = index_of(_esc_line, "\t");
-                            if _et1 < 0 { continue; }
-                            let _esc_nm = substring(_esc_line, 0, _et1);
-                            let _esc_r2 = substring(_esc_line, _et1 + 1, _esc_line.length);
-                            let _et2 = index_of(_esc_r2, "\t");
-                            if _et2 < 0 { continue; }
-                            let _esc_ct = substring(_esc_r2, 0, _et2);
-                            let _esc_bct = substring(_esc_r2, _et2 + 1, _esc_r2.length);
-                            let _esc_bc = _parse_int_from_string(_esc_bct);
-                            collected_string_constants = merge_string_constants(collected_string_constants, [StringConstant { name: _esc_nm, content: _esc_ct, byte_count: _esc_bc }]);
+                            handled_inline_let = true;
                         }
                     }
-                    fs.writeFile("build/sailfin/.expr_stmt_string_constants", "");
                 }
-            }
-            active_label = find_last_label(current_lines, active_label);
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Expression lines=" + number_to_string(current_lines.length));
-            }
-        } else if _instr_tag == 0 {
-            if debug_lowering {
-                print("emit-llvm: lir pre_return fn=" + function.name + " depth=" + number_to_string(scope_depth) + " llvm_return=" + llvm_return);
-            }
-            if trace {
-                print("test llvm: lower_instruction_range hit return in " + function.name);
-            }
-            // Write instruction fields to files for statement.sfn to read.
-            // The v0.1.1 seed compiles statement.sfn with NativeFunction/NativeInstruction
-            // as i8*, using sailfin_runtime_get_field which can't access raw struct fields.
-            let _ret_expr = get_instruction_text(function.instructions, index);
-            let mut safe_instr_expr -> string = "";
-            if _ret_expr != null {
-                safe_instr_expr = _ret_expr;
-            }
-            fs.writeFile("build/sailfin/.instr_fn_name", function.name);
-            fs.writeFile("build/sailfin/.instr_expression", safe_instr_expr);
-            fs.writeFile("build/sailfin/.instr_llvm_return", llvm_return);
-            // Write bindings to files for statement.sfn to read.
-            // The declare in instructions.ll uses %NativeFunction/%NativeInstruction (struct by value)
-            // but the define in statement.ll uses i8* for params 1-2. This ABI mismatch
-            // causes all subsequent params (including bindings at param 4) to be read from
-            // wrong registers. File-based passing avoids this.
-            // First, clean up any stale binding files from a previous function
-            let mut bc_i -> number = 0;
-            loop {
-                let bc_prefix = "build/sailfin/.instr_binding_" + number_to_string(bc_i);
-                if !fs.exists(bc_prefix + "_name") { break; }
-                fs.deleteFile(bc_prefix + "_name");
-                fs.deleteFile(bc_prefix + "_llvm_name");
-                fs.deleteFile(bc_prefix + "_llvm_type");
-                fs.deleteFile(bc_prefix + "_type_annotation");
-                bc_i += 1;
-            }
-            let mut bw_i -> number = 0;
-            loop {
-                if bw_i >= current_bindings.length {
-                    break;
+                if !handled_inline_let {
+                    fs.writeFile("build/sailfin/.instr_has_span", "0");
+                    write_bindings_to_files(current_bindings);
+                    write_locals_to_files(current_locals);
+                    let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
+                    current_temp = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_temp_index"));
+                    current_next_region = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_next_region_id"));
+                    current_mutations = read_expr_mutations(current_mutations);
+                    collected_string_constants = read_expr_string_constants(collected_string_constants);
                 }
-                let bw_prefix = "build/sailfin/.instr_binding_" + number_to_string(bw_i);
-                fs.writeFile(bw_prefix + "_name", current_bindings[bw_i].name);
-                fs.writeFile(bw_prefix + "_llvm_name", current_bindings[bw_i].llvm_name);
-                fs.writeFile(bw_prefix + "_llvm_type", current_bindings[bw_i].llvm_type);
-                fs.writeFile(bw_prefix + "_type_annotation", current_bindings[bw_i].type_annotation);
-                bw_i += 1;
+                active_label = find_last_label(current_lines, active_label);
+                index += 1;
+                _tag_handled = true;
             }
-            // Also clean up and write locals for the same ABI reason
-            let mut lc_i -> number = 0;
-            loop {
-                let lc_prefix = "build/sailfin/.instr_local_" + number_to_string(lc_i);
-                if !fs.exists(lc_prefix + "_name") { break; }
-                fs.deleteFile(lc_prefix + "_name");
-                fs.deleteFile(lc_prefix + "_pointer");
-                fs.deleteFile(lc_prefix + "_llvm_type");
-                fs.deleteFile(lc_prefix + "_type_annotation");
-                fs.deleteFile(lc_prefix + "_scope_id");
-                fs.deleteFile(lc_prefix + "_scope_depth");
-                lc_i += 1;
-            }
-            let mut lw_i -> number = 0;
-            loop {
-                if lw_i >= current_locals.length {
-                    break;
-                }
-                let lw_prefix = "build/sailfin/.instr_local_" + number_to_string(lw_i);
-                fs.writeFile(lw_prefix + "_name", current_locals[lw_i].name);
-                fs.writeFile(lw_prefix + "_pointer", current_locals[lw_i].pointer);
-                fs.writeFile(lw_prefix + "_llvm_type", current_locals[lw_i].llvm_type);
-                fs.writeFile(lw_prefix + "_type_annotation", current_locals[lw_i].type_annotation);
-                fs.writeFile(lw_prefix + "_scope_id", current_locals[lw_i].scope_id);
-                fs.writeFile(lw_prefix + "_scope_depth", number_to_string(current_locals[lw_i].scope_depth));
-                lw_i += 1;
-            }
-            let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
-            if debug_lowering {
-                print("emit-llvm: lir post_return fn=" + function.name + " depth=" + number_to_string(scope_depth));
-            }
-            // The v0.1.1 seed compiles ExpressionStatementResult as i8* null
-            // for cross-module struct returns.  Read results from files instead.
-            let _ret_delta_count_str = fs.readFile("build/sailfin/.expr_stmt_delta_count");
-            let _ret_delta_count = _parse_int_from_string(_ret_delta_count_str);
-            let mut _ret_delta_i -> number = 0;
-            loop {
-                if _ret_delta_i >= _ret_delta_count { break; }
-                let _line = fs.readFile("build/sailfin/.expr_stmt_delta_" + number_to_string(_ret_delta_i));
-                current_lines.push(_line);
-                _ret_delta_i += 1;
-            }
-            let _ret_temp_str = fs.readFile("build/sailfin/.expr_stmt_temp_index");
-            current_temp = _parse_int_from_string(_ret_temp_str);
-            let _ret_region_str = fs.readFile("build/sailfin/.expr_stmt_next_region_id");
-            current_next_region = _parse_int_from_string(_ret_region_str);
-            // Read string constants written by the return instruction handler.
-            if fs.exists("build/sailfin/.expr_stmt_string_constants") {
-                let _sc_raw = fs.readFile("build/sailfin/.expr_stmt_string_constants");
-                if _sc_raw.length > 0 {
-                    // Parse tab-separated lines without needing a split_lines helper.
-                    let mut _sc_pos -> number = 0;
-                    loop {
-                        if _sc_pos >= _sc_raw.length { break; }
-                        // Find end of this line.
-                        let _nl_pos = index_of(substring(_sc_raw, _sc_pos, _sc_raw.length), "\n");
-                        let mut _sc_line -> string = "";
-                        if _nl_pos < 0 {
-                            _sc_line = substring(_sc_raw, _sc_pos, _sc_raw.length);
-                            _sc_pos = _sc_raw.length;
-                        } else {
-                            _sc_line = substring(_sc_raw, _sc_pos, _sc_pos + _nl_pos);
-                            _sc_pos = _sc_pos + _nl_pos + 1;
-                        }
-                        if _sc_line.length == 0 { continue; }
-                        let _tab1 = index_of(_sc_line, "\t");
-                        if _tab1 < 0 { continue; }
-                        let _sc_name = substring(_sc_line, 0, _tab1);
-                        let _sc_rest = substring(_sc_line, _tab1 + 1, _sc_line.length);
-                        let _tab2 = index_of(_sc_rest, "\t");
-                        if _tab2 < 0 { continue; }
-                        let _sc_content = substring(_sc_rest, 0, _tab2);
-                        let _sc_bc_text = substring(_sc_rest, _tab2 + 1, _sc_rest.length);
-                        let _sc_bc = _parse_int_from_string(_sc_bc_text);
-                        collected_string_constants = merge_string_constants(collected_string_constants, [StringConstant { name: _sc_name, content: _sc_content, byte_count: _sc_bc }]);
-                    }
-                }
-                // Clear the file so stale constants don't leak to the next function.
-                fs.writeFile("build/sailfin/.expr_stmt_string_constants", "");
-            }
-            terminated = true;
-            index += 1;
-            if index < end {
-                diagnostics.push("llvm lowering: instructions after return ignored in `" + function.name + "`");
-            }
-            break;
-        } else if _instr_tag == 3 {
-            if debug_lowering {
-                print("emit-llvm: lir pre_if fn=" + function.name + " index=" + number_to_string(index) + " depth=" + number_to_string(scope_depth));
-            }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects before If lines=" + number_to_string(current_lines.length));
-            }
-            let lowered = lower_if_instruction(
-                function,
-                index,
-                llvm_return,
-                current_bindings,
-                current_locals,
-                current_allocas,
-                current_lines,
-                current_temp,
-                current_block_counter,
-                current_next_local,
-                current_next_region,
-                functions,
-                current_loop_stack,
-                end,
-                context,
-                scope_id,
-                scope_depth,
-                active_label
-            );
-            if debug_lowering {
-                print("emit-llvm: lir post_if fn=" + function.name + " index=" + number_to_string(index) + " depth=" + number_to_string(scope_depth));
-            }
-            let mut _ci0 -> number = 0;
-            loop {
-                if _ci0 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci0]);
-                _ci0 += 1;
-            }
-            collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-            current_lines = lowered.lines;
-            current_allocas = lowered.allocas;
-            current_locals = lowered.locals;
-            current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
-            current_mutations = extend_mutations(current_mutations, lowered.mutations);
-            let temp_constants = collected_string_constants;
-            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
-            active_label = find_last_label(current_lines, active_label);
-            if terminated {
-                break;
-            }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after If lines=" + number_to_string(current_lines.length));
-            }
-            continue;
-        } else if _instr_tag == 8 {
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects before Loop lines=" + number_to_string(current_lines.length));
-            }
-            let lowered = lower_loop_instruction(
-                function,
-                index,
-                llvm_return,
-                current_bindings,
-                current_locals,
-                current_allocas,
-                current_lines,
-                current_temp,
-                current_block_counter,
-                current_next_local,
-                current_next_region,
-                functions,
-                current_loop_stack,
-                end,
-                context,
-                scope_id,
-                scope_depth,
-                active_label
-            );
-            let mut _ci1 -> number = 0;
-            loop {
-                if _ci1 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci1]);
-                _ci1 += 1;
-            }
-            collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-            current_lines = lowered.lines;
-            current_allocas = lowered.allocas;
-            current_locals = lowered.locals;
-            current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
-            current_mutations = extend_mutations(current_mutations, lowered.mutations);
-            let temp_constants = collected_string_constants;
-            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
-            active_label = find_last_label(current_lines, active_label);
-            if terminated {
-                break;
-            }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Loop lines=" + number_to_string(current_lines.length));
-            }
-            continue;
-        } else if _instr_tag == 12 {
-            let lowered = lower_match_instruction(
-                function,
-                index,
-                llvm_return,
-                current_bindings,
-                current_locals,
-                current_allocas,
-                current_lines,
-                current_temp,
-                current_block_counter,
-                current_next_local,
-                current_next_region,
-                functions,
-                current_loop_stack,
-                end,
-                context,
-                scope_id,
-                scope_depth,
-                active_label
-            );
-            let mut _ci2 -> number = 0;
-            loop {
-                if _ci2 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci2]);
-                _ci2 += 1;
-            }
-            collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-            current_lines = lowered.lines;
-            current_allocas = lowered.allocas;
-            current_locals = lowered.locals;
-            current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
-            current_mutations = extend_mutations(current_mutations, lowered.mutations);
-            let temp_constants = collected_string_constants;
-            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
-            active_label = find_last_label(current_lines, active_label);
-            if terminated {
-                break;
-            }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Match lines=" + number_to_string(current_lines.length));
-            }
-            continue;
-        } else if _instr_tag == 15 {
-            let lowered = lower_try_instruction(
-                function,
-                index,
-                llvm_return,
-                current_bindings,
-                current_locals,
-                current_allocas,
-                current_lines,
-                current_temp,
-                current_block_counter,
-                current_next_local,
-                current_next_region,
-                functions,
-                current_loop_stack,
-                end,
-                context,
-                scope_id,
-                scope_depth,
-                active_label
-            );
-            let mut _ci3 -> number = 0;
-            loop {
-                if _ci3 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci3]);
-                _ci3 += 1;
-            }
-            collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-            current_lines = lowered.lines;
-            current_allocas = lowered.allocas;
-            current_locals = lowered.locals;
-            current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
-            current_mutations = extend_mutations(current_mutations, lowered.mutations);
-            let temp_constants = collected_string_constants;
-            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
-            active_label = find_last_label(current_lines, active_label);
-            if terminated {
-                break;
-            }
-            if trace && function.name == "infer_effects" {
-                print("test llvm: infer_effects after Try lines=" + number_to_string(current_lines.length));
-            }
-            continue;
-        } else if _instr_tag == 19 {
-            let lowered = lower_throw_instruction(
-                function.name,
-                instruction,
-                llvm_return,
-                current_bindings,
-                current_locals,
-                current_temp,
-                current_lines,
-                functions,
-                context
-            );
-            let mut _ci4 -> number = 0;
-            loop {
-                if _ci4 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci4]);
-                _ci4 += 1;
-            }
-            current_lines = lowered.lines;
-            current_temp = lowered.temp_index;
-            let temp_constants = collected_string_constants;
-            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = true;
-            index += 1;
-            if index < end {
-                diagnostics.push("llvm lowering: instructions after throw ignored in `" + function.name + "`");
-            }
-            break;
-        } else if _instr_tag == 4 || _instr_tag == 5 {
-            break;
-        } else if _instr_tag == 9 || _instr_tag == 14 || _instr_tag == 7 {
-            break;
-        } else if _instr_tag == 10 {
-            if current_loop_stack.length == 0 {
-                diagnostics.push("llvm lowering: `break` outside loop in `" + function.name + "`");
-            } else {
-                let loop_context = last_loop_context(current_loop_stack);
-                current_lines.push("  br label %" + loop_context.break_label);
-                terminated = true;
-            }
-            index += 1;
-            if index < end && terminated {
-                diagnostics.push("llvm lowering: instructions after break ignored in `" + function.name + "`");
-            }
-            break;
-        } else if _instr_tag == 11 {
-            if current_loop_stack.length == 0 {
-                diagnostics.push("llvm lowering: `continue` outside loop in `" + function.name + "`");
-            } else {
-                let loop_context = last_loop_context(current_loop_stack);
-                current_lines.push("  br label %" + loop_context.continue_label);
-                terminated = true;
-            }
-            index += 1;
-            if index < end && terminated {
-                diagnostics.push("llvm lowering: instructions after continue ignored in `" + function.name + "`");
-            }
-            break;
-        } else if _instr_tag == 6 {
-            let lowered = lower_for_instruction(
-                function,
-                index,
-                llvm_return,
-                current_bindings,
-                current_locals,
-                current_allocas,
-                current_lines,
-                current_temp,
-                current_block_counter,
-                current_next_local,
-                current_next_region,
-                functions,
-                current_loop_stack,
-                end,
-                context,
-                scope_id,
-                scope_depth,
-                active_label
-            );
-            let mut _ci5 -> number = 0;
-            loop {
-                if _ci5 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci5]);
-                _ci5 += 1;
-            }
-            collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-            current_lines = lowered.lines;
-            current_allocas = lowered.allocas;
-            current_locals = lowered.locals;
-            current_bindings = lowered.bindings;
-            current_temp = lowered.temp_index;
-            current_block_counter = lowered.block_counter;
-            current_next_local = lowered.next_local_id;
-            current_next_region = lowered.next_lifetime_region_id;
-            current_mutations = extend_mutations(current_mutations, lowered.mutations);
-            let temp_constants = collected_string_constants;
-            collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
-            terminated = lowered.terminated;
-            index = lowered.next_index;
-            active_label = find_last_label(current_lines, active_label);
-            if terminated {
-                break;
-            }
-            continue;
-        } else if _instr_tag == 20 {
-            // ignore placeholder instruction (Noop)
-        } else {
-            diagnostics.push("llvm lowering: unsupported instruction tag=" + number_to_string(_instr_tag) + " in `" + function.name + "`");
         }
-
-        index += 1;
-    }
-
-    if trace && start_index == 0 && scope_depth == 0 {
-        let mut term_label -> string = "false";
+        if !_tag_handled {
+            if _instr_tag == 0 {
+                let _ret_expr = get_instruction_text(function.instructions, index);
+                let mut safe_instr_expr -> string = "";
+                if _ret_expr != null {
+                    safe_instr_expr = _ret_expr;
+                }
+                fs.writeFile("build/sailfin/.instr_fn_name", function.name);
+                fs.writeFile("build/sailfin/.instr_expression", safe_instr_expr);
+                fs.writeFile("build/sailfin/.instr_llvm_return", llvm_return);
+                write_bindings_to_files(current_bindings);
+                write_locals_to_files(current_locals);
+                let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
+                current_temp = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_temp_index"));
+                current_next_region = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_next_region_id"));
+                collected_string_constants = read_expr_string_constants(collected_string_constants);
+                terminated = true;
+                index += 1;
+                _tag_handled = true;
+            }
+        }
+        if !_tag_handled {
+            if _instr_tag == 3 {
+                let lowered = lower_if_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let _if_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+                let _if_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+                let _if_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+                let _if_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+                let _if_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+                let _if_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                let mut _ci0 -> number = 0;
+                loop {
+                    if _ci0 >= lowered.diagnostics.length { break; }
+                    diagnostics.push(lowered.diagnostics[_ci0]);
+                    _ci0 += 1;
+                }
+                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                current_lines = lowered.lines;
+                current_allocas = lowered.allocas;
+                current_locals = lowered.locals;
+                current_bindings = lowered.bindings;
+                current_temp = _if_temp;
+                current_block_counter = _if_blkctr;
+                current_next_local = _if_nextloc;
+                current_next_region = _if_nextreg;
+                current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                let temp_constants = collected_string_constants;
+                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                terminated = _if_term;
+                index = _if_nextidx;
+                active_label = find_last_label(current_lines, active_label);
+                _tag_handled = true;
+            }
+        }
+        if !_tag_handled {
+            if _instr_tag == 8 {
+                let lowered = lower_loop_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let _lp_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+                let _lp_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+                let _lp_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+                let _lp_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+                let _lp_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+                let _lp_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                let mut _ci1 -> number = 0;
+                loop {
+                    if _ci1 >= lowered.diagnostics.length { break; }
+                    diagnostics.push(lowered.diagnostics[_ci1]);
+                    _ci1 += 1;
+                }
+                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                current_lines = lowered.lines;
+                current_allocas = lowered.allocas;
+                current_locals = lowered.locals;
+                current_bindings = lowered.bindings;
+                current_temp = _lp_temp;
+                current_block_counter = _lp_blkctr;
+                current_next_local = _lp_nextloc;
+                current_next_region = _lp_nextreg;
+                current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                let temp_constants = collected_string_constants;
+                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                terminated = _lp_term;
+                index = _lp_nextidx;
+                active_label = find_last_label(current_lines, active_label);
+                _tag_handled = true;
+            }
+        }
+        if !_tag_handled {
+            if _instr_tag == 12 {
+                let lowered = lower_match_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let _ma_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+                let _ma_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+                let _ma_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+                let _ma_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+                let _ma_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+                let _ma_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                let mut _ci2 -> number = 0;
+                loop {
+                    if _ci2 >= lowered.diagnostics.length { break; }
+                    diagnostics.push(lowered.diagnostics[_ci2]);
+                    _ci2 += 1;
+                }
+                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                current_lines = lowered.lines;
+                current_allocas = lowered.allocas;
+                current_locals = lowered.locals;
+                current_bindings = lowered.bindings;
+                current_temp = _ma_temp;
+                current_block_counter = _ma_blkctr;
+                current_next_local = _ma_nextloc;
+                current_next_region = _ma_nextreg;
+                current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                let temp_constants = collected_string_constants;
+                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                terminated = _ma_term;
+                index = _ma_nextidx;
+                active_label = find_last_label(current_lines, active_label);
+                _tag_handled = true;
+            }
+        }
+        if !_tag_handled {
+            if _instr_tag == 15 {
+                let lowered = lower_try_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let mut _ci3 -> number = 0;
+                loop {
+                    if _ci3 >= lowered.diagnostics.length { break; }
+                    diagnostics.push(lowered.diagnostics[_ci3]);
+                    _ci3 += 1;
+                }
+                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                current_lines = lowered.lines;
+                current_allocas = lowered.allocas;
+                current_locals = lowered.locals;
+                current_bindings = lowered.bindings;
+                let _tr_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+                let _tr_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+                let _tr_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+                let _tr_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+                let _tr_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+                let _tr_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                current_temp = _tr_temp;
+                current_block_counter = _tr_blkctr;
+                current_next_local = _tr_nextloc;
+                current_next_region = _tr_nextreg;
+                current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                let temp_constants = collected_string_constants;
+                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                terminated = _tr_term;
+                index = _tr_nextidx;
+                active_label = find_last_label(current_lines, active_label);
+                _tag_handled = true;
+            }
+        }
+        if !_tag_handled {
+            if _instr_tag == 19 {
+                let lowered = lower_throw_instruction(function.name, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, functions, context);
+                let mut _ci4 -> number = 0;
+                loop {
+                    if _ci4 >= lowered.diagnostics.length { break; }
+                    diagnostics.push(lowered.diagnostics[_ci4]);
+                    _ci4 += 1;
+                }
+                current_lines = lowered.lines;
+                current_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+                let temp_constants = collected_string_constants;
+                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                terminated = true;
+                index += 1;
+                _tag_handled = true;
+            }
+        }
+        if !_tag_handled {
+            if _instr_tag == 6 {
+                let lowered = lower_for_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let mut _ci5 -> number = 0;
+                loop {
+                    if _ci5 >= lowered.diagnostics.length { break; }
+                    diagnostics.push(lowered.diagnostics[_ci5]);
+                    _ci5 += 1;
+                }
+                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                current_lines = lowered.lines;
+                current_allocas = lowered.allocas;
+                current_locals = lowered.locals;
+                current_bindings = lowered.bindings;
+                let _fo_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
+                let _fo_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
+                let _fo_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
+                let _fo_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+                let _fo_nextidx = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_index"));
+                let _fo_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                current_temp = _fo_temp;
+                current_block_counter = _fo_blkctr;
+                current_next_local = _fo_nextloc;
+                current_next_region = _fo_nextreg;
+                current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                let temp_constants = collected_string_constants;
+                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                terminated = _fo_term;
+                index = _fo_nextidx;
+                active_label = find_last_label(current_lines, active_label);
+                _tag_handled = true;
+            }
+        }
+        if !_tag_handled {
+            if _instr_tag == 10 {
+                if current_loop_stack.length == 0 {
+                    diagnostics.push("llvm lowering: `break` outside loop in `" + function.name + "`");
+                } else {
+                    let loop_context = last_loop_context(current_loop_stack);
+                    current_lines.push("  br label %" + loop_context.break_label);
+                    terminated = true;
+                }
+                index += 1;
+                _tag_handled = true;
+            }
+        }
+        if !_tag_handled {
+            if _instr_tag == 11 {
+                if current_loop_stack.length == 0 {
+                    diagnostics.push("llvm lowering: `continue` outside loop in `" + function.name + "`");
+                } else {
+                    let loop_context = last_loop_context(current_loop_stack);
+                    current_lines.push("  br label %" + loop_context.continue_label);
+                    terminated = true;
+                }
+                index += 1;
+                _tag_handled = true;
+            }
+        }
+        // Else/EndIf, EndLoop, EndMatch, EndFor are block terminators — break out.
+        if !_tag_handled {
+            let mut _is_terminator -> boolean = false;
+            if _instr_tag == 4 { _is_terminator = true; }
+            if _instr_tag == 5 { _is_terminator = true; }
+            if _instr_tag == 7 { _is_terminator = true; }
+            if _instr_tag == 9 { _is_terminator = true; }
+            if _instr_tag == 14 { _is_terminator = true; }
+            if _is_terminator {
+                // Return directly to avoid seed loop-break bug.
+                _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
+                return BlockLoweringResult {
+                    lines: current_lines,
+                    allocas: current_allocas,
+                    locals: current_locals,
+                    bindings: current_bindings,
+                    temp_index: current_temp,
+                    block_counter: current_block_counter,
+                    diagnostics: diagnostics,
+                    terminated: terminated,
+                    next_local_id: current_next_local,
+                    lifetime_regions: collected_lifetime_regions,
+                    next_lifetime_region_id: current_next_region,
+                    next_index: index,
+                    mutations: current_mutations,
+                    string_constants: collected_string_constants,
+                };
+            }
+        }
+        if !_tag_handled {
+            if _instr_tag != 20 {
+                diagnostics.push("llvm lowering: unsupported instruction tag=" + number_to_string(_instr_tag) + " in `" + function.name + "`");
+            }
+        }
+        // For terminated instructions (return, throw, break, continue), exit loop.
         if terminated {
-            term_label = "true";
+            // Return directly to avoid seed loop-break bug.
+            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
+            return BlockLoweringResult {
+                lines: current_lines,
+                allocas: current_allocas,
+                locals: current_locals,
+                bindings: current_bindings,
+                temp_index: current_temp,
+                block_counter: current_block_counter,
+                diagnostics: diagnostics,
+                terminated: terminated,
+                next_local_id: current_next_local,
+                lifetime_regions: collected_lifetime_regions,
+                next_lifetime_region_id: current_next_region,
+                next_index: index,
+                mutations: current_mutations,
+                string_constants: collected_string_constants,
+            };
         }
-        print(
-            "test llvm: lower_instruction_range done "
-            + function.name
-            + " lines="
-            + number_to_string(current_lines.length)
-            + " allocas="
-            + number_to_string(current_allocas.length)
-            + " terminated="
-            + term_label
-        );
+        if !_tag_handled {
+            index += 1;
+        }
     }
 
-    if scope_depth == 0 {
-        _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants);
+    if debug_lowering {
+        print("emit-llvm: lir loop-done fn=" + function.name + " current_lines=" + number_to_string(current_lines.length));
     }
+    if trace {
+        if start_index == 0 {
+            if scope_depth == 0 {
+                let mut term_label -> string = "false";
+                if terminated {
+                    term_label = "true";
+                }
+                print(
+                    "test llvm: lower_instruction_range done "
+                    + function.name
+                    + " lines="
+                    + number_to_string(current_lines.length)
+                    + " allocas="
+                    + number_to_string(current_allocas.length)
+                    + " terminated="
+                    + term_label
+                );
+            }
+        }
+    }
+
+    // Always write block result files. The scope_depth == 0 check was unreliable
+    // because the v0.1.1 seed can miscompile the comparison.
+    if debug_lowering {
+        print("emit-llvm: pre-write-block current_lines.length=" + number_to_string(current_lines.length) + " scope_depth=" + number_to_string(scope_depth));
+        if current_lines.length > 0 {
+            print("emit-llvm: pre-write-block line[0]=" + current_lines[0]);
+        }
+    }
+    _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
 
     return BlockLoweringResult {
         lines: current_lines,

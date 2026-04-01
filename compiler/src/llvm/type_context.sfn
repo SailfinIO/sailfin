@@ -180,7 +180,11 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
     // but corrupted lengths from cross-module ABI issues can be arbitrarily large.
     // A lower limit (e.g. 10000) incorrectly triggers on valid counts that appear
     // corrupted due to number_to_string bugs in the seed.
-    if structs.length > 1000000 || enums.length > 1000000 || interfaces.length > 1000000 {
+    let mut _if300 -> boolean = false;
+    if structs.length > 1000000 { _if300 = true; }
+    if enums.length > 1000000 { _if300 = true; }
+    if interfaces.length > 1000000 { _if300 = true; }
+    if _if300 {
         return TypeContextBuild {
             context: empty_type_context(),
             diagnostics: [
@@ -225,10 +229,12 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             } else if ends_with_pointer_suffix(llvm_field_type) {
                 let layout_base_type = layout_annotation_base_type(layout_field.type_annotation);
                 let references_self_type = layout_base_type == definition.name;
-                if layout_annotation_represents_user_value(layout_field.type_annotation) && !references_self_type {
-                    let stripped = strip_pointer_suffix(llvm_field_type);
-                    if stripped.length > 0 {
-                        llvm_field_type = stripped;
+                if layout_annotation_represents_user_value(layout_field.type_annotation) {
+                    if !references_self_type {
+                        let stripped = strip_pointer_suffix(llvm_field_type);
+                        if stripped.length > 0 {
+                            llvm_field_type = stripped;
+                        }
                     }
                 }
             }
@@ -280,10 +286,12 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                 } else if ends_with_pointer_suffix(llvm_variant_field_type) {
                     let variant_base_type = layout_annotation_base_type(variant_field.type_annotation);
                     let references_declaring_enum = variant_base_type == enum_def.name;
-                    if layout_annotation_represents_user_value(variant_field.type_annotation) && !references_declaring_enum {
-                        let stripped_variant = strip_pointer_suffix(llvm_variant_field_type);
-                        if stripped_variant.length > 0 {
-                            llvm_variant_field_type = stripped_variant;
+                    if layout_annotation_represents_user_value(variant_field.type_annotation) {
+                        if !references_declaring_enum {
+                            let stripped_variant = strip_pointer_suffix(llvm_variant_field_type);
+                            if stripped_variant.length > 0 {
+                                llvm_variant_field_type = stripped_variant;
+                            }
                         }
                     }
                 }
@@ -669,8 +677,10 @@ fn find_vtable_for_struct_interface(context -> TypeContext, struct_name -> strin
             break;
         }
         let vtable = context.vtables[index];
-        if vtable.struct_name == struct_name && vtable.interface_name == interface_name {
-            return vtable;
+        if vtable.struct_name == struct_name {
+            if vtable.interface_name == interface_name {
+                return vtable;
+            }
         }
         index += 1;
     }
@@ -746,7 +756,10 @@ fn lookup_allocation_info(context -> TypeContext, llvm_type -> string) -> TypeAl
     if trimmed == "double" {
         return TypeAllocationInfo { llvm_type: trimmed, size: 8, align: 8 };
     }
-    if trimmed == "i64" || trimmed == "int" {
+    let mut _if301 -> boolean = false;
+    if trimmed == "i64" { _if301 = true; }
+    if trimmed == "int" { _if301 = true; }
+    if _if301 {
         return TypeAllocationInfo { llvm_type: trimmed, size: 8, align: 8 };
     }
     if trimmed == "i32" {
@@ -795,10 +808,12 @@ fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBi
             }
             // Fallback: when the LLVM type is i8* (opaque pointer from async/await
             // or runtime functions), check the source type_annotation instead.
-            if parameter.type_annotation != null && parameter.type_annotation.length > 0 {
-                let by_annotation = find_struct_info_by_name(context, parameter.type_annotation);
-                if by_annotation != null {
-                    return by_annotation;
+            if parameter.type_annotation != null {
+                if parameter.type_annotation.length > 0 {
+                    let by_annotation = find_struct_info_by_name(context, parameter.type_annotation);
+                    if by_annotation != null {
+                        return by_annotation;
+                    }
                 }
             }
         }
@@ -809,10 +824,12 @@ fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBi
                 return info;
             }
             // Fallback: check source type_annotation when llvm_type is i8*.
-            if local.type_annotation != null && local.type_annotation.length > 0 {
-                let by_annotation = find_struct_info_by_name(context, local.type_annotation);
-                if by_annotation != null {
-                    return by_annotation;
+            if local.type_annotation != null {
+                if local.type_annotation.length > 0 {
+                    let by_annotation = find_struct_info_by_name(context, local.type_annotation);
+                    if by_annotation != null {
+                        return by_annotation;
+                    }
                 }
             }
         }

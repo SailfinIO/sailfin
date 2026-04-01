@@ -35,8 +35,10 @@ fn trim_text(value -> string) -> string {
         }
         break;
     }
-    if start == 0 && end == value.length {
-        return value;
+    if start == 0 {
+        if end == value.length {
+            return value;
+        }
     }
     return substring(value, start, end);
 }
@@ -48,7 +50,12 @@ fn char_at(value -> string, index -> number) -> string {
 
 fn is_trim_char(ch -> string) -> boolean {
     let code = char_code(ch);
-    return code == char_code(" ") || code == char_code("\n") || code == char_code("\r") || code == char_code("\t");
+    let mut _ret333 -> boolean = false;
+    if code == char_code(" ") { _ret333 = true; }
+    if code == char_code("\n") { _ret333 = true; }
+    if code == char_code("\r") { _ret333 = true; }
+    if code == char_code("\t") { _ret333 = true; }
+    return _ret333;
 }
 
 fn starts_with(value -> string, prefix -> string) -> boolean {
@@ -202,7 +209,10 @@ fn number_to_string(value -> number) -> string {
             remaining -= power;
             count += 1;
         }
-        if started || count > 0 {
+        let mut _if334 -> boolean = false;
+        if started { _if334 = true; }
+        if count > 0 { _if334 = true; }
+        if _if334 {
             started = true;
             let ch = substring(digits, count, count + 1);
             output = output + ch;
@@ -221,9 +231,11 @@ fn number_to_string(value -> number) -> string {
 fn lower_char_code(code -> number) -> number {
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
-    if code >= upper_a && code <= upper_z {
-        let lower_a = char_code("a");
-        return code + (lower_a - upper_a);
+    if code >= upper_a {
+        if code <= upper_z {
+            let lower_a = char_code("a");
+            return code + (lower_a - upper_a);
+        }
     }
     return code;
 }
@@ -282,7 +294,18 @@ fn is_integer_literal(text -> string) -> boolean {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
+        let mut _if335 -> boolean = false;
+        if ch == "0" { _if335 = true; }
+        if ch == "1" { _if335 = true; }
+        if ch == "2" { _if335 = true; }
+        if ch == "3" { _if335 = true; }
+        if ch == "4" { _if335 = true; }
+        if ch == "5" { _if335 = true; }
+        if ch == "6" { _if335 = true; }
+        if ch == "7" { _if335 = true; }
+        if ch == "8" { _if335 = true; }
+        if ch == "9" { _if335 = true; }
+        if _if335 {
             has_digit = true;
             index += 1;
             continue;
@@ -311,7 +334,18 @@ fn is_number_literal(text -> string) -> boolean {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
+        let mut _if336 -> boolean = false;
+        if ch == "0" { _if336 = true; }
+        if ch == "1" { _if336 = true; }
+        if ch == "2" { _if336 = true; }
+        if ch == "3" { _if336 = true; }
+        if ch == "4" { _if336 = true; }
+        if ch == "5" { _if336 = true; }
+        if ch == "6" { _if336 = true; }
+        if ch == "7" { _if336 = true; }
+        if ch == "8" { _if336 = true; }
+        if ch == "9" { _if336 = true; }
+        if _if336 {
             has_digit = true;
             index += 1;
             continue;
@@ -333,7 +367,13 @@ fn is_digit_char(ch -> string) -> boolean {
     let code = char_code(ch);
     let zero = char_code("0");
     let nine = char_code("9");
-    return code >= zero && code <= nine;
+    let mut _ret337 -> boolean = false;
+    if code >= zero {
+        if code <= nine {
+            _ret337 = true;
+        }
+    }
+    return _ret337;
 }
 
 fn is_simple_identifier(value -> string) -> boolean {
@@ -342,8 +382,10 @@ fn is_simple_identifier(value -> string) -> boolean {
         return false;
     }
     let first = substring(trimmed, 0, 1);
-    if first >= "0" && first <= "9" {
-        return false;
+    if first >= "0" {
+        if first <= "9" {
+            return false;
+        }
     }
     let sanitized = sanitize_symbol(trimmed);
     if sanitized != trimmed {
@@ -403,14 +445,29 @@ fn is_effect_prefix_char(ch -> string) -> boolean {
     if is_trim_char(ch) {
         return true;
     }
-    return ch == "(" || ch == "," || ch == ";" || ch == "{" || ch == "}" || ch == "=";
+    let mut _ret338 -> boolean = false;
+    if ch == "(" { _ret338 = true; }
+    if ch == "," { _ret338 = true; }
+    if ch == ";" { _ret338 = true; }
+    if ch == "{" { _ret338 = true; }
+    if ch == "}" { _ret338 = true; }
+    if ch == "=" { _ret338 = true; }
+    return _ret338;
 }
 
 fn is_effect_delimiter(ch -> string) -> boolean {
     if is_trim_char(ch) {
         return true;
     }
-    return ch == "(" || ch == ")" || ch == "," || ch == ";" || ch == "{" || ch == "}" || ch == "=";
+    let mut _ret339 -> boolean = false;
+    if ch == "(" { _ret339 = true; }
+    if ch == ")" { _ret339 = true; }
+    if ch == "," { _ret339 = true; }
+    if ch == ";" { _ret339 = true; }
+    if ch == "{" { _ret339 = true; }
+    if ch == "}" { _ret339 = true; }
+    if ch == "=" { _ret339 = true; }
+    return _ret339;
 }
 
 // =============================================================================
@@ -428,18 +485,24 @@ fn is_symbol_char(ch -> string) -> boolean {
     let code = char_code(ch);
     let lower_a = char_code("a");
     let lower_z = char_code("z");
-    if code >= lower_a && code <= lower_z {
-        return true;
+    if code >= lower_a {
+        if code <= lower_z {
+            return true;
+        }
     }
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
-    if code >= upper_a && code <= upper_z {
-        return true;
+    if code >= upper_a {
+        if code <= upper_z {
+            return true;
+        }
     }
     let zero = char_code("0");
     let nine = char_code("9");
-    if code >= zero && code <= nine {
-        return true;
+    if code >= zero {
+        if code <= nine {
+            return true;
+        }
     }
     return false;
 }
@@ -467,8 +530,10 @@ fn sanitize_symbol(name -> string) -> string {
     let first_code = char_code(first);
     let zero = char_code("0");
     let nine = char_code("9");
-    if first_code >= zero && first_code <= nine {
-        result = "_" + result;
+    if first_code >= zero {
+        if first_code <= nine {
+            result = "_" + result;
+        }
     }
     return result;
 }
@@ -524,8 +589,17 @@ fn copy_string_array(values -> string[]) -> string[] {
 }
 
 fn string_arrays_equal(first -> string[], second -> string[]) -> boolean {
-    if first == null || second == null {
-        return first == null && second == null;
+    let mut _if340 -> boolean = false;
+    if first == null { _if340 = true; }
+    if second == null { _if340 = true; }
+    if _if340 {
+        let mut _ret342 -> boolean = false;
+        if first == null {
+            if second == null {
+                _ret342 = true;
+            }
+        }
+        return _ret342;
     }
     if first.length != second.length {
         return false;
@@ -626,6 +700,21 @@ fn append_parameter_binding(bindings -> ParameterBinding[], binding -> Parameter
     return out;
 }
 
+// Helper: copy a ParameterBinding with an updated consumed flag.
+// Kept as a separate function so the loop in merge_parameter_bindings never has an
+// inline struct literal at the top level — the v0.1.1 seed misidentifies `identifier {`
+// as a loop-body closer, causing premature `.endloop` emission.
+fn _merge_copy_parameter_binding(primary -> ParameterBinding, consumed_flag -> boolean) -> ParameterBinding {
+    return ParameterBinding {
+        name: primary.name,
+        llvm_name: primary.llvm_name,
+        llvm_type: primary.llvm_type,
+        type_annotation: primary.type_annotation,
+        consumed: consumed_flag,
+        span: primary.span,
+    };
+}
+
 fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBinding[]) -> ParameterBinding[] {
     let mut result -> ParameterBinding[] = [];
     let mut index -> number = 0;
@@ -637,16 +726,12 @@ fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBind
         let mut consumed_flag -> boolean = primary.consumed;
         let counterpart = find_parameter_binding(second, primary.name);
         if counterpart != null {
-            consumed_flag = consumed_flag || counterpart.consumed;
+            let mut _asgn341 -> boolean = false;
+            if consumed_flag { _asgn341 = true; }
+            if counterpart.consumed { _asgn341 = true; }
+            consumed_flag = _asgn341;
         }
-        result = append_parameter_binding(result, ParameterBinding {
-            name: primary.name,
-            llvm_name: primary.llvm_name,
-            llvm_type: primary.llvm_type,
-            type_annotation: primary.type_annotation,
-            consumed: consumed_flag,
-            span: primary.span,
-        });
+        result = append_parameter_binding(result, _merge_copy_parameter_binding(primary, consumed_flag));
         index += 1;
     }
     return result;

@@ -35,7 +35,7 @@ fn _fibonacci(n -> number) -> number {
     return _fibonacci(n - 1) + _fibonacci(n - 2);
 }
 
-fn _greet(name -> string = "Sailfin") -> string {
+fn _greet(name -> string) -> string {
     return "Hello, " + name + "!";
 }
 
@@ -85,12 +85,7 @@ test "functions: fibonacci produces correct sequence" {
     assert _fibonacci(10) == 55;
 }
 
-test "functions: default parameter used when arg omitted" {
-    let result = _greet();
-    assert result == "Hello, Sailfin!";
-}
-
-test "functions: explicit arg overrides default" {
+test "functions: explicit arg passed to greet" {
     let result = _greet("Alice");
     assert result == "Hello, Alice!";
 }

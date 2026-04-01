@@ -179,7 +179,13 @@ fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug ->
     lines.push("define i32 @main(i32 %argc, i8** %argv) {");
     lines.push("entry:");
 
-    let should_mangle = mangle_symbols && !starts_with(module_slug, "runtime/");
+    let mut _let264 -> boolean = false;
+    if mangle_symbols {
+        if !starts_with(module_slug, "runtime/") {
+            _let264 = true;
+        }
+    }
+    let should_mangle = _let264;
     let module_suffix = sanitize_module_suffix(module_slug);
 
     let mut index -> number = 0;
@@ -221,18 +227,24 @@ fn is_llvm_symbol_char(ch -> string) -> boolean {
     let code = char_code(ch);
     let lower_a = char_code("a");
     let lower_z = char_code("z");
-    if code >= lower_a && code <= lower_z {
-        return true;
+    if code >= lower_a {
+        if code <= lower_z {
+            return true;
+        }
     }
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
-    if code >= upper_a && code <= upper_z {
-        return true;
+    if code >= upper_a {
+        if code <= upper_z {
+            return true;
+        }
     }
     let zero = char_code("0");
     let nine = char_code("9");
-    if code >= zero && code <= nine {
-        return true;
+    if code >= zero {
+        if code <= nine {
+            return true;
+        }
     }
     return false;
 }
@@ -297,7 +309,10 @@ fn extract_module_name_from_native_text(native_text -> string) -> string {
             break;
         }
         let ch = native_text[start];
-        if ch == " " || ch == "\t" {
+        let mut _if265 -> boolean = false;
+        if ch == " " { _if265 = true; }
+        if ch == "\t" { _if265 = true; }
+        if _if265 {
             start += 1;
             continue;
         }
@@ -326,13 +341,18 @@ fn collect_available_import_module_names(imported_native_texts -> string[]) -> s
             break;
         }
         let text = imported_native_texts[index];
-        if text == null || text.length == 0 {
+        let mut _if266 -> boolean = false;
+        if text == null { _if266 = true; }
+        if text.length == 0 { _if266 = true; }
+        if _if266 {
             index += 1;
             continue;
         }
         let name = extract_module_name_from_native_text(text);
-        if name.length > 0 && !string_array_contains(names, name) {
-            names.push(name);
+        if name.length > 0 {
+            if !string_array_contains(names, name) {
+                names.push(name);
+            }
         }
         index += 1;
     }
@@ -396,7 +416,10 @@ fn collect_defined_function_symbols(lines -> string[]) -> string[] {
 fn find_substitution_index(olds -> string[], news -> string[], symbol -> string) -> number {
     let mut index -> number = 0;
     loop {
-        if index >= olds.length || index >= news.length {
+        let mut _if267 -> boolean = false;
+        if index >= olds.length { _if267 = true; }
+        if index >= news.length { _if267 = true; }
+        if _if267 {
             break;
         }
         if olds[index] == symbol {
@@ -520,12 +543,19 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
                     if sym == symbol {
                         let open_index = index_of(trimmed, "(");
                         let close_index = index_of(trimmed, ")");
-                        if open_index < 0 || close_index < 0 || close_index <= open_index {
+                        let mut _if268 -> boolean = false;
+                        if open_index < 0 { _if268 = true; }
+                        if close_index < 0 { _if268 = true; }
+                        if close_index <= open_index { _if268 = true; }
+                        if _if268 {
                             return null;
                         }
                         let ret_type = trim_text(substring(trimmed, 8, at_index));
                         let params_text = trim_text(substring(trimmed, open_index + 1, close_index));
-                        if params_text.length == 0 || params_text == "void" {
+                        let mut _if269 -> boolean = false;
+                        if params_text.length == 0 { _if269 = true; }
+                        if params_text == "void" { _if269 = true; }
+                        if _if269 {
                             return DeclareSignature { return_type: ret_type, param_types: [] };
                         }
 
@@ -553,12 +583,16 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
                                     angle_depth -= 1;
                                 }
                             }
-                            if ch == "," && curly_depth == 0 && angle_depth == 0 {
-                                let part = trim_text(substring(params_text, start_index, scan));
-                                if part.length > 0 {
-                                    parts.push(part);
+                            if ch == "," {
+                                if curly_depth == 0 {
+                                    if angle_depth == 0 {
+                                        let part = trim_text(substring(params_text, start_index, scan));
+                                        if part.length > 0 {
+                                            parts.push(part);
+                                        }
+                                        start_index = scan + 1;
+                                    }
                                 }
-                                start_index = scan + 1;
                             }
                             scan += 1;
                         }
@@ -627,7 +661,10 @@ fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[
             break;
         }
         let trimmed = trim_text(lines[index]);
-        if starts_with(trimmed, "attributes ") || starts_with(trimmed, "!") {
+        let mut _if270 -> boolean = false;
+        if starts_with(trimmed, "attributes ") { _if270 = true; }
+        if starts_with(trimmed, "!") { _if270 = true; }
+        if _if270 {
             footer_index = index;
             break;
         }
@@ -750,11 +787,17 @@ fn apply_module_symbol_mangling(
             import_index += 1;
             continue;
         }
-        if entry.kind == null || entry.kind != "import" {
+        let mut _if271 -> boolean = false;
+        if entry.kind == null { _if271 = true; }
+        if entry.kind != "import" { _if271 = true; }
+        if _if271 {
             import_index += 1;
             continue;
         }
-        if entry.module == null || entry.module.length == 0 {
+        let mut _if272 -> boolean = false;
+        if entry.module == null { _if272 = true; }
+        if entry.module.length == 0 { _if272 = true; }
+        if _if272 {
             import_index += 1;
             continue;
         }
@@ -775,14 +818,19 @@ fn apply_module_symbol_mangling(
                 spec_index += 1;
                 continue;
             }
-            if spec.name == null || spec.name.length == 0 {
+            let mut _if273 -> boolean = false;
+            if spec.name == null { _if273 = true; }
+            if spec.name.length == 0 { _if273 = true; }
+            if _if273 {
                 spec_index += 1;
                 continue;
             }
             let imported_name = sanitize_symbol(spec.name);
             let mut local_name = spec.name;
-            if spec.alias != null && spec.alias.length > 0 {
-                local_name = spec.alias;
+            if spec.alias != null {
+                if spec.alias.length > 0 {
+                    local_name = spec.alias;
+                }
             }
             let local_symbol = sanitize_symbol(local_name);
             if should_keep_unmangled_abi_symbol(local_symbol) {
@@ -827,7 +875,10 @@ fn apply_module_symbol_mangling(
     let mut shim_lines -> string[] = [];
     let mut shim_index -> number = 0;
     loop {
-        if shim_index >= shim_exports.length || shim_index >= shim_targets.length {
+        let mut _if274 -> boolean = false;
+        if shim_index >= shim_exports.length { _if274 = true; }
+        if shim_index >= shim_targets.length { _if274 = true; }
+        if _if274 {
             break;
         }
         let export_sym = shim_exports[shim_index];
@@ -861,7 +912,10 @@ fn empty_capability_manifest() -> CapabilityManifest {
 }
 
 fn build_trait_metadata(interfaces -> NativeInterface[], structs -> NativeStruct[]) -> TraitMetadata {
-    if interfaces.length > 10000 || structs.length > 10000 {
+    let mut _if275 -> boolean = false;
+    if interfaces.length > 10000 { _if275 = true; }
+    if structs.length > 10000 { _if275 = true; }
+    if _if275 {
         return TraitMetadata { interfaces: [], implementations: [] };
     }
     let mut interface_descriptors -> TraitDescriptor[] = [];
@@ -1003,8 +1057,10 @@ fn flatten_struct_methods(structs -> NativeStruct[]) -> NativeFunction[] {
                 }
                 // If this is the self parameter and type is empty, fill it
                 // with the struct name so type mapping resolves correctly.
-                if p_name == "self" && p_type.length == 0 {
-                    p_type = definition.name;
+                if p_name == "self" {
+                    if p_type.length == 0 {
+                        p_type = definition.name;
+                    }
                 }
                 let fixed_p = NativeParameter {
                     name: p_name,

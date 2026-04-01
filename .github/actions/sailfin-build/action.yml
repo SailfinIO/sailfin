@@ -65,6 +65,30 @@ runs:
             BUILD_ARGS="--max-attempts ${{ inputs.max_attempts }} --max-total-seconds 1800" \
             SEED_NATIVE="build/seed/bin/sailfin"
 
+    - name: Validate build.sh (no Python fixups) [informational]
+      shell: bash -l {0}
+      continue-on-error: true
+      run: |
+        set -euo pipefail
+        echo "[ci] validating build.sh with newly built binary as seed..."
+        scripts/build.sh \
+          --seed build/native/sailfin \
+          --out build/native/sailfin-bs \
+          --work-dir build/selfhost/native-bs \
+          --clang "${{ inputs.clang }}" \
+          --jobs 2 \
+          --timeout 120 \
+          --max-total 900 \
+          --verbose 2>&1 | tee /tmp/buildsh-output.txt
+        if [ -f build/native/sailfin-bs ]; then
+          echo "[ci] build.sh succeeded - binary produced without Python fixups"
+          ls -lh build/native/sailfin-bs
+          build/native/sailfin-bs version || true
+        else
+          echo "[ci] build.sh did not produce output binary"
+          grep -E "error|Error|FAIL|missing|undefined" /tmp/buildsh-output.txt | tail -30 || true
+        fi
+
     - name: Prepare test artifacts
       shell: bash -l {0}
       run: |

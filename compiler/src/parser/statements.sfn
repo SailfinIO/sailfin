@@ -324,7 +324,10 @@ fn parse_for_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStat
 
     let target_tokens = trim_token_edges(token_slice(clause_tokens, 0, in_index));
     let iterable_tokens = trim_token_edges(token_slice(clause_tokens, in_index + 1, clause_tokens.length));
-    if target_tokens.length == 0 || iterable_tokens.length == 0 {
+    let mut _if410 -> boolean = false;
+    if target_tokens.length == 0 { _if410 = true; }
+    if iterable_tokens.length == 0 { _if410 = true; }
+    if _if410 {
         return BlockStatementParseResult { parser: original, statement: null, success: false };
     }
 
@@ -575,7 +578,10 @@ fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
         }
 
         let case_result = parse_match_case(current);
-        if !case_result.success || case_result.case == null {
+        let mut _if411 -> boolean = false;
+        if !case_result.success { _if411 = true; }
+        if case_result.case == null { _if411 = true; }
+        if _if411 {
             return MatchCasesParseResult { parser: parser, cases: [], success: false };
         }
         current = case_result.parser;
@@ -1099,7 +1105,10 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
     }
     if start.kind.variant == "Symbol" {
         let sym = start.lexeme;
-        if strings_equal(sym, "}") || strings_equal(sym, "{") {
+        let mut _if412 -> boolean = false;
+        if strings_equal(sym, "}") { _if412 = true; }
+        if strings_equal(sym, "{") { _if412 = true; }
+        if _if412 {
             return BlockStatementParseResult { parser: parser, statement: null, success: false };
         }
     }
@@ -1183,9 +1192,17 @@ fn parse_unknown_statement(initial_parser -> Parser) -> StatementParseResult {
                 current = parser_advance_raw(current);
                 break;
             }
-        } else if depth == 0 && symbol_matches(tok, ";") {
-            current = parser_advance_raw(current);
-            break;
+        } else {
+            let mut _elif413 -> boolean = false;
+            if depth == 0 {
+                if symbol_matches(tok, ";") {
+                    _elif413 = true;
+                }
+            }
+            if _elif413 {
+                current = parser_advance_raw(current);
+                break;
+            }
         }
 
         if is_end_of_file_local(current, tok) {

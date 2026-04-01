@@ -22,7 +22,13 @@ fn is_ascii_uppercase(ch -> string) -> boolean {
         return false;
     }
     let code = char_code(ch);
-    return code >= char_code("A") && code <= char_code("Z");
+    let mut _ret302 -> boolean = false;
+    if code >= char_code("A") {
+        if code <= char_code("Z") {
+            _ret302 = true;
+        }
+    }
+    return _ret302;
 }
 
 // =============================================================================
@@ -36,18 +42,35 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
     }
     // Fast-path: well-known primitives that are never pointers.
     // Avoids character-level indexing which is miscompiled by older seeds.
-    if trimmed == "double" || trimmed == "i1" || trimmed == "i8" || trimmed == "i16"
-        || trimmed == "i32" || trimmed == "i64" || trimmed == "void" || trimmed == "float" {
+    let mut _if303 -> boolean = false;
+    if trimmed == "double" { _if303 = true; }
+    if trimmed == "i1" { _if303 = true; }
+    if trimmed == "i8" { _if303 = true; }
+    if trimmed == "i16" { _if303 = true; }
+    if trimmed == "i32" { _if303 = true; }
+    if trimmed == "i64" { _if303 = true; }
+    if trimmed == "void" { _if303 = true; }
+    if trimmed == "float" { _if303 = true; }
+    if _if303 {
         return false;
     }
     // Fast-path: well-known pointer types.
-    if trimmed == "i8*" || trimmed == "i8**" || trimmed == "i32*" || trimmed == "i64*"
-        || trimmed == "double*" || trimmed == "i1*" {
+    let mut _if304 -> boolean = false;
+    if trimmed == "i8*" { _if304 = true; }
+    if trimmed == "i8**" { _if304 = true; }
+    if trimmed == "i32*" { _if304 = true; }
+    if trimmed == "i64*" { _if304 = true; }
+    if trimmed == "double*" { _if304 = true; }
+    if trimmed == "i1*" { _if304 = true; }
+    if _if304 {
         return true;
     }
     // Fast-path: aggregate pointer types starting with { or % and ending with *.
     // Use starts_with (safe) instead of character indexing.
-    if starts_with(trimmed, "{") || starts_with(trimmed, "%") {
+    let mut _if305 -> boolean = false;
+    if starts_with(trimmed, "{") { _if305 = true; }
+    if starts_with(trimmed, "%") { _if305 = true; }
+    if _if305 {
         // Check if the last few characters end with }* or )* or just *.
         // We use a simple heuristic: if it starts with { or % AND
         // the string length > 1, check by building a test string without *.
@@ -81,7 +104,10 @@ fn unwrap_move_wrapper(annotation -> string) -> string {
     if trimmed.length == 0 {
         return trimmed;
     }
-    if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
+    let mut _if306 -> boolean = false;
+    if starts_with(trimmed, "Affine<") { _if306 = true; }
+    if starts_with(trimmed, "Linear<") { _if306 = true; }
+    if _if306 {
         let open_index = index_of(trimmed, "<");
         if open_index >= 0 {
             if substring(trimmed, trimmed.length - 1, trimmed.length) == ">" {
@@ -107,10 +133,12 @@ fn looks_like_user_type(annotation -> string) -> boolean {
         return true;
     }
     // Allow internal/user types prefixed with an underscore, e.g. `_Foo`.
-    if first == "_" && trimmed.length > 1 {
-        let second = substring(trimmed, 1, 2);
-        if is_ascii_uppercase(second) {
-            return true;
+    if first == "_" {
+        if trimmed.length > 1 {
+            let second = substring(trimmed, 1, 2);
+            if is_ascii_uppercase(second) {
+                return true;
+            }
         }
     }
     let mut index -> number = 1;
@@ -120,17 +148,21 @@ fn looks_like_user_type(annotation -> string) -> boolean {
         }
         let _tm_next = index + 1;
         let current = substring(trimmed, index, _tm_next);
-        if current == "." && _tm_next < trimmed.length {
-            let _tm_next2 = index + 2;
-            let next = substring(trimmed, _tm_next, _tm_next2);
-            if is_ascii_uppercase(next) {
-                return true;
-            }
-            let _tm_next3 = index + 3;
-            if next == "_" && _tm_next2 < trimmed.length {
-                let after = substring(trimmed, _tm_next2, _tm_next3);
-                if is_ascii_uppercase(after) {
+        if current == "." {
+            if _tm_next < trimmed.length {
+                let _tm_next2 = index + 2;
+                let next = substring(trimmed, _tm_next, _tm_next2);
+                if is_ascii_uppercase(next) {
                     return true;
+                }
+                let _tm_next3 = index + 3;
+                if next == "_" {
+                    if _tm_next2 < trimmed.length {
+                        let after = substring(trimmed, _tm_next2, _tm_next3);
+                        if is_ascii_uppercase(after) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
@@ -150,10 +182,16 @@ fn annotation_is_array(annotation -> string) -> boolean {
 
 fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
     let trimmed = trim_text(type_annotation);
-    if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
+    let mut _if307 -> boolean = false;
+    if starts_with(trimmed, "Affine<") { _if307 = true; }
+    if starts_with(trimmed, "Linear<") { _if307 = true; }
+    if _if307 {
         return false;
     }
-    if trimmed == "Affine" || trimmed == "Linear" {
+    let mut _if308 -> boolean = false;
+    if trimmed == "Affine" { _if308 = true; }
+    if trimmed == "Linear" { _if308 = true; }
+    if _if308 {
         return false;
     }
     if llvm_type == "double" {
@@ -269,7 +307,10 @@ fn layout_annotation_represents_user_value(annotation -> string) -> boolean {
     if base == "number" {
         return false;
     }
-    if base == "boolean" || base == "bool" {
+    let mut _if309 -> boolean = false;
+    if base == "boolean" { _if309 = true; }
+    if base == "bool" { _if309 = true; }
+    if _if309 {
         return false;
     }
     if base == "string" {
@@ -281,7 +322,13 @@ fn layout_annotation_represents_user_value(annotation -> string) -> boolean {
     if base == "any" {
         return false;
     }
-    if base == "i64" || base == "i32" || base == "i1" || base == "i8" || base == "usize" {
+    let mut _if310 -> boolean = false;
+    if base == "i64" { _if310 = true; }
+    if base == "i32" { _if310 = true; }
+    if base == "i1" { _if310 = true; }
+    if base == "i8" { _if310 = true; }
+    if base == "usize" { _if310 = true; }
+    if _if310 {
         return false;
     }
     if looks_like_user_type(base) {
@@ -329,7 +376,10 @@ fn map_type_annotation(annotation -> string) -> string {
             return "i8*";
         }
         let inner = map_type_annotation(remainder);
-        if inner.length == 0 || inner == "void" {
+        let mut _if311 -> boolean = false;
+        if inner.length == 0 { _if311 = true; }
+        if inner == "void" { _if311 = true; }
+        if _if311 {
             return "i8*";
         }
         if substring(inner, inner.length - 1, inner.length) == "*" {
@@ -346,11 +396,16 @@ fn map_type_annotation(annotation -> string) -> string {
                 return "i8*";
             }
             let inner_type = map_type_annotation(inner_annotation);
-            if inner_type.length == 0 || inner_type == "void" {
+            let mut _if312 -> boolean = false;
+            if inner_type.length == 0 { _if312 = true; }
+            if inner_type == "void" { _if312 = true; }
+            if _if312 {
                 return "i8*";
             }
-            if inner_type.length > 0 && substring(inner_type, inner_type.length - 1, inner_type.length) == "*" {
-                return inner_type;
+            if inner_type.length > 0 {
+                if substring(inner_type, inner_type.length - 1, inner_type.length) == "*" {
+                    return inner_type;
+                }
             }
             return inner_type + "*";
         }
@@ -358,13 +413,19 @@ fn map_type_annotation(annotation -> string) -> string {
     if normalized == "number" {
         return "double";
     }
-    if normalized == "boolean" || normalized == "bool" {
+    let mut _if313 -> boolean = false;
+    if normalized == "boolean" { _if313 = true; }
+    if normalized == "bool" { _if313 = true; }
+    if _if313 {
         return "i1";
     }
     if normalized == "usize" {
         return "i64";
     }
-    if normalized == "int" || normalized == "i64" {
+    let mut _if314 -> boolean = false;
+    if normalized == "int" { _if314 = true; }
+    if normalized == "i64" { _if314 = true; }
+    if _if314 {
         return "i64";
     }
     if normalized == "i32" {
@@ -390,8 +451,10 @@ fn map_type_annotation(annotation -> string) -> string {
             // Arrays of user-value types (enums + inline structs) store the value inline.
             // `map_type_annotation` defaults user types to pointers, so strip that layer
             // when the surface syntax represents a value type.
-            if layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
-                element_type = strip_pointer_suffix(element_type);
+            if layout_annotation_represents_user_value(element_annotation) {
+                if ends_with_pointer_suffix(element_type) {
+                    element_type = strip_pointer_suffix(element_type);
+                }
             }
             let aggregate = array_struct_type_for_element(element_type);
             return aggregate + "*";
@@ -458,7 +521,10 @@ fn map_local_type(context -> TypeContext, annotation -> string) -> string {
 
 fn map_return_type(context -> TypeContext, return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if315 -> boolean = false;
+    if trimmed.length == 0 { _if315 = true; }
+    if trimmed == "void" { _if315 = true; }
+    if _if315 {
         return "void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
@@ -469,14 +535,20 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
         if starts_with(remainder, "mut") {
             remainder = trim_text(substring(remainder, 3, remainder.length));
         }
-        if remainder == "opaque" || remainder.length == 0 {
+        let mut _if316 -> boolean = false;
+        if remainder == "opaque" { _if316 = true; }
+        if remainder.length == 0 { _if316 = true; }
+        if _if316 {
             return "i8*";
         }
         let inner = map_return_type(context, remainder);
         if ends_with_pointer_suffix(inner) {
             return inner;
         }
-        if inner.length == 0 || inner == "void" {
+        let mut _if317 -> boolean = false;
+        if inner.length == 0 { _if317 = true; }
+        if inner == "void" { _if317 = true; }
+        if _if317 {
             return "i8*";
         }
         return inner + "*";
@@ -566,15 +638,33 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        if ch == "<" || ch == "(" || ch == "[" {
+        let mut _if318 -> boolean = false;
+        if ch == "<" { _if318 = true; }
+        if ch == "(" { _if318 = true; }
+        if ch == "[" { _if318 = true; }
+        if _if318 {
             depth += 1;
-        } else if ch == ">" || ch == ")" || ch == "]" {
-            if depth > 0 {
-                depth -= 1;
+        } else {
+            let mut _elif331 -> boolean = false;
+            if ch == ">" { _elif331 = true; }
+            if ch == ")" { _elif331 = true; }
+            if ch == "]" { _elif331 = true; }
+            if _elif331 {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            } else {
+                let mut _elif332 -> boolean = false;
+                if ch == "|" {
+                    if depth == 0 {
+                        _elif332 = true;
+                    }
+                }
+                if _elif332 {
+                    // Found a union separator at top level
+                    return "i8*";
+                }
             }
-        } else if ch == "|" && depth == 0 {
-            // Found a union separator at top level
-            return "i8*";
         }
         index += 1;
     }
@@ -594,7 +684,10 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
         return "i8*";
     }
     let inner_type = map_type_annotation(inner);
-    if inner_type.length == 0 || inner_type == "void" {
+    let mut _if319 -> boolean = false;
+    if inner_type.length == 0 { _if319 = true; }
+    if inner_type == "void" { _if319 = true; }
+    if _if319 {
         return "i8*";
     }
     if ends_with_pointer_suffix(inner_type) {
@@ -619,7 +712,10 @@ fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
         return "i8*";
     }
     let inner_type = map_type_annotation(remainder);
-    if inner_type.length == 0 || inner_type == "void" {
+    let mut _if320 -> boolean = false;
+    if inner_type.length == 0 { _if320 = true; }
+    if inner_type == "void" { _if320 = true; }
+    if _if320 {
         return "i8*";
     }
     if ends_with_pointer_suffix(inner_type) {
@@ -643,8 +739,10 @@ fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> strin
         return "i8*";
     }
     // Arrays of user-value types store the value inline.
-    if layout_annotation_represents_user_value(element_annotation) && ends_with_pointer_suffix(element_type) {
-        element_type = strip_pointer_suffix(element_type);
+    if layout_annotation_represents_user_value(element_annotation) {
+        if ends_with_pointer_suffix(element_type) {
+            element_type = strip_pointer_suffix(element_type);
+        }
     }
     return array_pointer_type_for_element(element_type);
 }
@@ -654,7 +752,10 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if trimmed == "number" {
         return "double";
     }
-    if trimmed == "boolean" || trimmed == "bool" {
+    let mut _if321 -> boolean = false;
+    if trimmed == "boolean" { _if321 = true; }
+    if trimmed == "bool" { _if321 = true; }
+    if _if321 {
         return "i1";
     }
     if trimmed == "string" {
@@ -666,7 +767,10 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if trimmed == "any" {
         return "i8*";
     }
-    if trimmed == "int" || trimmed == "i64" {
+    let mut _if322 -> boolean = false;
+    if trimmed == "int" { _if322 = true; }
+    if trimmed == "i64" { _if322 = true; }
+    if _if322 {
         return "i64";
     }
     if trimmed == "i32" {
@@ -675,7 +779,10 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if trimmed == "usize" {
         return "i64";
     }
-    if trimmed == "u8" || trimmed == "i8" {
+    let mut _if323 -> boolean = false;
+    if trimmed == "u8" { _if323 = true; }
+    if trimmed == "i8" { _if323 = true; }
+    if _if323 {
         return "i8";
     }
     return "";
@@ -687,14 +794,20 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
 
 fn future_pointer_type_for_return_type(return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if324 -> boolean = false;
+    if trimmed.length == 0 { _if324 = true; }
+    if trimmed == "void" { _if324 = true; }
+    if _if324 {
         return "%SailfinFutureVoid*";
     }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
         return "%SailfinFutureNumber*";
     }
-    if normalized == "boolean" || normalized == "bool" {
+    let mut _if325 -> boolean = false;
+    if normalized == "boolean" { _if325 = true; }
+    if normalized == "bool" { _if325 = true; }
+    if _if325 {
         return "%SailfinFutureBool*";
     }
     if normalized == "string" {
@@ -706,14 +819,20 @@ fn future_pointer_type_for_return_type(return_type -> string) -> string {
 
 fn spawn_symbol_for_return_type(return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if326 -> boolean = false;
+    if trimmed.length == 0 { _if326 = true; }
+    if trimmed == "void" { _if326 = true; }
+    if _if326 {
         return "sailfin_runtime_spawn_void";
     }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
         return "sailfin_runtime_spawn_number";
     }
-    if normalized == "boolean" || normalized == "bool" {
+    let mut _if327 -> boolean = false;
+    if normalized == "boolean" { _if327 = true; }
+    if normalized == "bool" { _if327 = true; }
+    if _if327 {
         return "sailfin_runtime_spawn_bool";
     }
     if normalized == "string" {
@@ -724,14 +843,20 @@ fn spawn_symbol_for_return_type(return_type -> string) -> string {
 
 fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
     let trimmed = trim_text(return_type);
-    if trimmed.length == 0 || trimmed == "void" {
+    let mut _if328 -> boolean = false;
+    if trimmed.length == 0 { _if328 = true; }
+    if trimmed == "void" { _if328 = true; }
+    if _if328 {
         return "sailfin_runtime_spawn_void_ctx";
     }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
         return "sailfin_runtime_spawn_number_ctx";
     }
-    if normalized == "boolean" || normalized == "bool" {
+    let mut _if329 -> boolean = false;
+    if normalized == "boolean" { _if329 = true; }
+    if normalized == "bool" { _if329 = true; }
+    if _if329 {
         return "sailfin_runtime_spawn_bool_ctx";
     }
     if normalized == "string" {
@@ -749,7 +874,12 @@ fn default_value_for_llvm_type(llvm_type -> string) -> string {
     if trimmed == "double" {
         return "0.0";
     }
-    if trimmed == "i64" || trimmed == "i32" || trimmed == "i1" || trimmed == "i8" {
+    let mut _if330 -> boolean = false;
+    if trimmed == "i64" { _if330 = true; }
+    if trimmed == "i32" { _if330 = true; }
+    if trimmed == "i1" { _if330 = true; }
+    if trimmed == "i8" { _if330 = true; }
+    if _if330 {
         return "0";
     }
     if ends_with_pointer_suffix(llvm_type) {

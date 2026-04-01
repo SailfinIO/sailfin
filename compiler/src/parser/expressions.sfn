@@ -84,12 +84,14 @@ fn expression_tokens_consume_type_separator(state -> ExpressionTokens, accept_co
         return ExpressionTypeSeparatorParseResult { state: state, used_separator: "", found: false };
     }
 
-    if accept_colon && symbol_matches(token, ":") {
-        return ExpressionTypeSeparatorParseResult {
-            state: expression_tokens_advance(state),
-            used_separator: ":",
-            found: true,
-        };
+    if accept_colon {
+        if symbol_matches(token, ":") {
+            return ExpressionTypeSeparatorParseResult {
+                state: expression_tokens_advance(state),
+                used_separator: ":",
+                found: true,
+            };
+        }
     }
 
     if accept_arrow {
@@ -104,8 +106,10 @@ fn expression_tokens_consume_type_separator(state -> ExpressionTokens, accept_co
             let mut next_state = expression_tokens_advance(state);
             if !expression_tokens_is_at_end(next_state) {
                 let maybe_gt = expression_tokens_peek(next_state);
-                if maybe_gt.kind.variant == "Symbol" && symbol_matches(maybe_gt, ">") {
-                    next_state = expression_tokens_advance(next_state);
+                if maybe_gt.kind.variant == "Symbol" {
+                    if symbol_matches(maybe_gt, ">") {
+                        next_state = expression_tokens_advance(next_state);
+                    }
                 }
             }
             return ExpressionTypeSeparatorParseResult {
@@ -136,9 +140,23 @@ fn expression_tokens_collect_until(state -> ExpressionTokens, terminators -> str
             return ExpressionCollectResult { state: current, tokens: collected, success: false };
         }
         let token = expression_tokens_peek(current);
-        let at_top = angle == 0 && paren == 0 && brace == 0 && bracket == 0;
-        if at_top && token.kind.variant == "Symbol" && string_array_contains(terminators, token.lexeme) {
-            break;
+        let mut _let402 -> boolean = false;
+        if angle == 0 {
+            if paren == 0 {
+                if brace == 0 {
+                    if bracket == 0 {
+                        _let402 = true;
+                    }
+                }
+            }
+        }
+        let at_top = _let402;
+        if at_top {
+            if token.kind.variant == "Symbol" {
+                if string_array_contains(terminators, token.lexeme) {
+                    break;
+                }
+            }
         }
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
@@ -334,7 +352,10 @@ fn parse_prefix_expression(state -> ExpressionTokens) -> ExpressionParseResult {
     let token = expression_tokens_peek(state);
     if token.kind.variant == "Symbol" {
         let sym = token.lexeme;
-        if strings_equal(sym, "-") || strings_equal(sym, "!") {
+        let mut _if403 -> boolean = false;
+        if strings_equal(sym, "-") { _if403 = true; }
+        if strings_equal(sym, "!") { _if403 = true; }
+        if _if403 {
             let advanced = expression_tokens_advance(state);
             let operand_result = parse_expression_bp(advanced, unary_precedence());
             if !operand_result.success {
@@ -351,10 +372,12 @@ fn parse_prefix_expression(state -> ExpressionTokens) -> ExpressionParseResult {
         }
     }
 
-    if token.kind.variant == "Identifier" && identifier_matches(token, "fn") {
-        let lambda_result = parse_lambda_expression(state);
-        if lambda_result.success {
-            return lambda_result;
+    if token.kind.variant == "Identifier" {
+        if identifier_matches(token, "fn") {
+            let lambda_result = parse_lambda_expression(state);
+            if lambda_result.success {
+                return lambda_result;
+            }
         }
     }
 
@@ -571,10 +594,11 @@ fn parse_call_arguments(state -> ExpressionTokens) -> CallArgumentsParseResult {
     }
 
     let closing_token = expression_tokens_peek(current);
-    if closing_token.kind.variant == "Symbol"
-        && symbol_matches(closing_token, ")") {
-        current = expression_tokens_advance(current);
-        return CallArgumentsParseResult { state: current, arguments: arguments, success: true };
+    if closing_token.kind.variant == "Symbol" {
+        if symbol_matches(closing_token, ")") {
+            current = expression_tokens_advance(current);
+            return CallArgumentsParseResult { state: current, arguments: arguments, success: true };
+        }
     }
 
     loop {
@@ -615,10 +639,11 @@ fn parse_array_literal(state -> ExpressionTokens) -> ArrayLiteralParseResult {
     }
 
     let closing_bracket = expression_tokens_peek(current);
-    if closing_bracket.kind.variant == "Symbol"
-        && symbol_matches(closing_bracket, "]") {
-        current = expression_tokens_advance(current);
-        return ArrayLiteralParseResult { state: current, elements: elements, success: true };
+    if closing_bracket.kind.variant == "Symbol" {
+        if symbol_matches(closing_bracket, "]") {
+            current = expression_tokens_advance(current);
+            return ArrayLiteralParseResult { state: current, elements: elements, success: true };
+        }
     }
 
     loop {
@@ -669,10 +694,11 @@ fn parse_object_literal(state -> ExpressionTokens) -> ObjectLiteralParseResult {
     }
 
     let closing_brace = expression_tokens_peek(current);
-    if closing_brace.kind.variant == "Symbol"
-        && symbol_matches(closing_brace, "}") {
-        current = expression_tokens_advance(current);
-        return ObjectLiteralParseResult { state: current, fields: fields, success: true };
+    if closing_brace.kind.variant == "Symbol" {
+        if symbol_matches(closing_brace, "}") {
+            current = expression_tokens_advance(current);
+            return ObjectLiteralParseResult { state: current, fields: fields, success: true };
+        }
     }
 
     loop {
@@ -790,7 +816,10 @@ fn parse_lambda_expression(state -> ExpressionTokens) -> ExpressionParseResult {
         return expression_parse_failure(state);
     }
     let token = expression_tokens_peek(current);
-    if token.kind.variant != "Identifier" || !identifier_matches(token, "fn") {
+    let mut _if404 -> boolean = false;
+    if token.kind.variant != "Identifier" { _if404 = true; }
+    if !identifier_matches(token, "fn") { _if404 = true; }
+    if _if404 {
         return expression_parse_failure(state);
     }
 
@@ -869,11 +898,13 @@ fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResu
     let start_index = current.index;
     let mut is_mutable = false;
     let token = expression_tokens_peek(current);
-    if token.kind.variant == "Identifier" && identifier_matches(token, "mut") {
-        is_mutable = true;
-        current = expression_tokens_advance(current);
-        if expression_tokens_is_at_end(current) {
-            return LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false, span: null }, success: false };
+    if token.kind.variant == "Identifier" {
+        if identifier_matches(token, "mut") {
+            is_mutable = true;
+            current = expression_tokens_advance(current);
+            if expression_tokens_is_at_end(current) {
+                return LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false, span: null }, success: false };
+            }
         }
     }
 
@@ -984,16 +1015,31 @@ fn binary_precedence(op -> string) -> number {
     if op == "&&" {
         return 2;
     }
-    if op == "==" || op == "!=" {
+    let mut _if405 -> boolean = false;
+    if op == "==" { _if405 = true; }
+    if op == "!=" { _if405 = true; }
+    if _if405 {
         return 3;
     }
-    if op == "<" || op == "<=" || op == ">" || op == ">=" {
+    let mut _if406 -> boolean = false;
+    if op == "<" { _if406 = true; }
+    if op == "<=" { _if406 = true; }
+    if op == ">" { _if406 = true; }
+    if op == ">=" { _if406 = true; }
+    if _if406 {
         return 4;
     }
-    if op == "+" || op == "-" {
+    let mut _if407 -> boolean = false;
+    if op == "+" { _if407 = true; }
+    if op == "-" { _if407 = true; }
+    if _if407 {
         return 5;
     }
-    if op == "*" || op == "/" || op == "%" {
+    let mut _if408 -> boolean = false;
+    if op == "*" { _if408 = true; }
+    if op == "/" { _if408 = true; }
+    if op == "%" { _if408 = true; }
+    if _if408 {
         return 6;
     }
     return -1;
@@ -1023,9 +1069,13 @@ fn normalize_expression(tokens -> Token[], expr -> Expression) -> Expression {
             }
         }
         let raw_text = trim_text(expr.text);
-        if raw_text.length >= 2 && char_at(raw_text, 0) == "\"" && char_at(raw_text, raw_text.length - 1) == "\"" {
-            let literal = strip_surrounding_quotes_expr(raw_text);
-            return Expression.StringLiteral { value: literal };
+        if raw_text.length >= 2 {
+            if char_at(raw_text, 0) == "\"" {
+                if char_at(raw_text, raw_text.length - 1) == "\"" {
+                    let literal = strip_surrounding_quotes_expr(raw_text);
+                    return Expression.StringLiteral { value: literal };
+                }
+            }
         }
         if raw_text == "true" {
             return Expression.BooleanLiteral { value: "true" };
@@ -1046,8 +1096,10 @@ fn strip_surrounding_quotes_expr(text -> string) -> string {
     }
     let first = char_code(char_at(text, 0));
     let last = char_code(char_at(text, text.length - 1));
-    if first == 34 && last == 34 {
-        return substring(text, 1, text.length - 1);
+    if first == 34 {
+        if last == 34 {
+            return substring(text, 1, text.length - 1);
+        }
     }
     return text;
 }
@@ -1086,16 +1138,18 @@ fn looks_like_number_expr(text -> string) -> boolean {
 }
 
 fn is_decimal_digit_expr(ch -> string) -> boolean {
-    return ch == "0"
-        || ch == "1"
-        || ch == "2"
-        || ch == "3"
-        || ch == "4"
-        || ch == "5"
-        || ch == "6"
-        || ch == "7"
-        || ch == "8"
-        || ch == "9";
+    let mut _ret409 -> boolean = false;
+    if ch == "0" { _ret409 = true; }
+    if ch == "1" { _ret409 = true; }
+    if ch == "2" { _ret409 = true; }
+    if ch == "3" { _ret409 = true; }
+    if ch == "4" { _ret409 = true; }
+    if ch == "5" { _ret409 = true; }
+    if ch == "6" { _ret409 = true; }
+    if ch == "7" { _ret409 = true; }
+    if ch == "8" { _ret409 = true; }
+    if ch == "9" { _ret409 = true; }
+    return _ret409;
 }
 
 // ============================================================================

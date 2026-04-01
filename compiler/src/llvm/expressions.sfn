@@ -157,7 +157,13 @@ fn is_digit_char(ch -> string) -> boolean {
     let code = char_code(ch);
     let zero = char_code("0");
     let nine = char_code("9");
-    return code >= zero && code <= nine;
+    let mut _ret167 -> boolean = false;
+    if code >= zero {
+        if code <= nine {
+            _ret167 = true;
+        }
+    }
+    return _ret167;
 }
 
 fn char_code_at_text(text -> string, index -> number) -> number {
@@ -182,7 +188,18 @@ fn is_integer_literal(text -> string) -> boolean {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
+        let mut _if168 -> boolean = false;
+        if ch == "0" { _if168 = true; }
+        if ch == "1" { _if168 = true; }
+        if ch == "2" { _if168 = true; }
+        if ch == "3" { _if168 = true; }
+        if ch == "4" { _if168 = true; }
+        if ch == "5" { _if168 = true; }
+        if ch == "6" { _if168 = true; }
+        if ch == "7" { _if168 = true; }
+        if ch == "8" { _if168 = true; }
+        if ch == "9" { _if168 = true; }
+        if _if168 {
             has_digit = true;
             index += 1;
             continue;
@@ -211,7 +228,18 @@ fn is_number_literal(text -> string) -> boolean {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        if ch == "0" || ch == "1" || ch == "2" || ch == "3" || ch == "4" || ch == "5" || ch == "6" || ch == "7" || ch == "8" || ch == "9" {
+        let mut _if169 -> boolean = false;
+        if ch == "0" { _if169 = true; }
+        if ch == "1" { _if169 = true; }
+        if ch == "2" { _if169 = true; }
+        if ch == "3" { _if169 = true; }
+        if ch == "4" { _if169 = true; }
+        if ch == "5" { _if169 = true; }
+        if ch == "6" { _if169 = true; }
+        if ch == "7" { _if169 = true; }
+        if ch == "8" { _if169 = true; }
+        if ch == "9" { _if169 = true; }
+        if _if169 {
             has_digit = true;
             index += 1;
             continue;
@@ -284,13 +312,18 @@ fn is_character_literal(text -> string) -> boolean {
     if text.length < 2 {
         return false;
     }
-    if substring(text, 0, 1) != "\"" || substring(text, text.length - 1, text.length) != "\"" {
+    let mut _if170 -> boolean = false;
+    if substring(text, 0, 1) != "\"" { _if170 = true; }
+    if substring(text, text.length - 1, text.length) != "\"" { _if170 = true; }
+    if _if170 {
         return false;
     }
     let inner = substring(text, 1, text.length - 1);
     // Handle escape sequences
-    if inner.length == 2 && substring(inner, 0, 1) == "\\" {
-        return true;
+    if inner.length == 2 {
+        if substring(inner, 0, 1) == "\\" {
+            return true;
+        }
     }
     // Single character
     return inner.length == 1;
@@ -302,23 +335,25 @@ fn get_character_literal_value(text -> string) -> number {
         return 0;
     }
     // Handle escape sequences
-    if inner.length == 2 && substring(inner, 0, 1) == "\\" {
-        let escape = char_at(inner, 1);
-        let escape_code = char_code(escape);
-        if escape_code == char_code("n") {
-            return char_code("\n");
-        } else if escape_code == char_code("r") {
-            return char_code("\r");
-        } else if escape_code == char_code("t") {
-            return char_code("\t");
-        } else if escape_code == char_code("\"") {
-            return char_code("\"");
-        } else if escape_code == char_code("\\") {
-            return char_code("\\");
-        } else if escape_code == char_code("0") {
-            return 0;
+    if inner.length == 2 {
+        if substring(inner, 0, 1) == "\\" {
+            let escape = char_at(inner, 1);
+            let escape_code = char_code(escape);
+            if escape_code == char_code("n") {
+                return char_code("\n");
+            } else if escape_code == char_code("r") {
+                return char_code("\r");
+            } else if escape_code == char_code("t") {
+                return char_code("\t");
+            } else if escape_code == char_code("\"") {
+                return char_code("\"");
+            } else if escape_code == char_code("\\") {
+                return char_code("\\");
+            } else if escape_code == char_code("0") {
+                return 0;
+            }
+            return escape_code;
         }
-        return escape_code;
     }
     // Single character
     return char_code(char_at(inner, 0));
@@ -337,11 +372,15 @@ fn matches_case_insensitive(text -> string, target -> string) -> boolean {
         let target_ch = char_code(char_at(target, index));
         let mut text_lower = ch;
         let mut target_lower = target_ch;
-        if ch >= 65 && ch <= 90 {
-            text_lower = ch + 32;
+        if ch >= 65 {
+            if ch <= 90 {
+                text_lower = ch + 32;
+            }
         }
-        if target_ch >= 65 && target_ch <= 90 {
-            target_lower = target_ch + 32;
+        if target_ch >= 65 {
+            if target_ch <= 90 {
+                target_lower = target_ch + 32;
+            }
         }
         if text_lower != target_lower {
             return false;
@@ -361,8 +400,10 @@ fn is_simple_identifier(value -> string) -> boolean {
         return false;
     }
     let first = substring(trimmed, 0, 1);
-    if first >= "0" && first <= "9" {
-        return false;
+    if first >= "0" {
+        if first <= "9" {
+            return false;
+        }
     }
     let sanitized = sanitize_symbol(trimmed);
     if sanitized != trimmed {
@@ -372,7 +413,10 @@ fn is_simple_identifier(value -> string) -> boolean {
 }
 
 fn is_effect_delimiter(ch -> string) -> boolean {
-    if ch == "!" || ch == "?" {
+    let mut _if171 -> boolean = false;
+    if ch == "!" { _if171 = true; }
+    if ch == "?" { _if171 = true; }
+    if _if171 {
         return true;
     }
     return false;
@@ -383,7 +427,10 @@ fn strip_enclosing_parentheses(expression -> string) -> string {
     if trimmed.length < 2 {
         return trimmed;
     }
-    if substring(trimmed, 0, 1) != "(" || substring(trimmed, trimmed.length - 1, trimmed.length) != ")" {
+    let mut _if172 -> boolean = false;
+    if substring(trimmed, 0, 1) != "(" { _if172 = true; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != ")" { _if172 = true; }
+    if _if172 {
         return trimmed;
     }
     let mut depth -> number = 0;
@@ -450,10 +497,16 @@ fn contains_text(haystack -> string, needle -> string) -> boolean {
 
 fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
     let trimmed = trim_text(type_annotation);
-    if starts_with(trimmed, "Affine<") || starts_with(trimmed, "Linear<") {
+    let mut _if173 -> boolean = false;
+    if starts_with(trimmed, "Affine<") { _if173 = true; }
+    if starts_with(trimmed, "Linear<") { _if173 = true; }
+    if _if173 {
         return false;
     }
-    if trimmed == "Affine" || trimmed == "Linear" {
+    let mut _if174 -> boolean = false;
+    if trimmed == "Affine" { _if174 = true; }
+    if trimmed == "Linear" { _if174 = true; }
+    if _if174 {
         return false;
     }
     if llvm_type == "double" {
@@ -495,18 +548,35 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
     }
     // Fast-path: well-known primitives that are never pointers.
     // Avoids character-level indexing which is miscompiled by older seeds.
-    if trimmed == "double" || trimmed == "i1" || trimmed == "i8" || trimmed == "i16"
-        || trimmed == "i32" || trimmed == "i64" || trimmed == "void" || trimmed == "float" {
+    let mut _if175 -> boolean = false;
+    if trimmed == "double" { _if175 = true; }
+    if trimmed == "i1" { _if175 = true; }
+    if trimmed == "i8" { _if175 = true; }
+    if trimmed == "i16" { _if175 = true; }
+    if trimmed == "i32" { _if175 = true; }
+    if trimmed == "i64" { _if175 = true; }
+    if trimmed == "void" { _if175 = true; }
+    if trimmed == "float" { _if175 = true; }
+    if _if175 {
         return false;
     }
     // Fast-path: well-known pointer types.
-    if trimmed == "i8*" || trimmed == "i8**" || trimmed == "i32*" || trimmed == "i64*"
-        || trimmed == "double*" || trimmed == "i1*" {
+    let mut _if176 -> boolean = false;
+    if trimmed == "i8*" { _if176 = true; }
+    if trimmed == "i8**" { _if176 = true; }
+    if trimmed == "i32*" { _if176 = true; }
+    if trimmed == "i64*" { _if176 = true; }
+    if trimmed == "double*" { _if176 = true; }
+    if trimmed == "i1*" { _if176 = true; }
+    if _if176 {
         return true;
     }
     // Fast-path: aggregate pointer types starting with { or % and ending with *.
     // Use starts_with (safe) instead of character indexing.
-    if starts_with(trimmed, "{") || starts_with(trimmed, "%") {
+    let mut _if177 -> boolean = false;
+    if starts_with(trimmed, "{") { _if177 = true; }
+    if starts_with(trimmed, "%") { _if177 = true; }
+    if _if177 {
         let without_star = substring(trimmed, 0, trimmed.length - 1);
         if without_star + "*" == trimmed {
             return true;
@@ -666,23 +736,29 @@ fn find_top_level_operator(expression -> string, operators -> string) -> Operato
             index += 1;
             continue;
         }
-        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
-            // Check for multi-character operators first
-            let _op_next2 = index + 2;
-            if _op_next2 <= expression.length {
-                let two_char = substring(expression, index, _op_next2);
-                if contains_text(operators, two_char) {
-                    // Prefer rightmost occurrence for left-associativity
-                    candidate_index = index;
-                    candidate_symbol = two_char;
-                    index += 2;
-                    continue;
+        if paren_depth == 0 {
+            if bracket_depth == 0 {
+                if brace_depth == 0 {
+                    if angle_depth == 0 {
+                        // Check for multi-character operators first
+                        let _op_next2 = index + 2;
+                        if _op_next2 <= expression.length {
+                            let two_char = substring(expression, index, _op_next2);
+                            if contains_text(operators, two_char) {
+                                // Prefer rightmost occurrence for left-associativity
+                                candidate_index = index;
+                                candidate_symbol = two_char;
+                                index += 2;
+                                continue;
+                            }
+                        }
+                        // Check single character
+                        if contains_text(operators, ch) {
+                            candidate_index = index;
+                            candidate_symbol = ch;
+                        }
+                    }
                 }
-            }
-            // Check single character
-            if contains_text(operators, ch) {
-                candidate_index = index;
-                candidate_symbol = ch;
             }
         }
         index += 1;
@@ -698,13 +774,19 @@ fn is_binary_minus(expression -> string, index -> number) -> boolean {
         return false;
     }
     let prev_char = char_at(expression, index - 1);
-    if prev_char == " " || prev_char == "\t" {
+    let mut _if178 -> boolean = false;
+    if prev_char == " " { _if178 = true; }
+    if prev_char == "\t" { _if178 = true; }
+    if _if178 {
         return true;
     }
     if is_identifier_part_char(prev_char) {
         return true;
     }
-    if prev_char == ")" || prev_char == "]" {
+    let mut _if179 -> boolean = false;
+    if prev_char == ")" { _if179 = true; }
+    if prev_char == "]" { _if179 = true; }
+    if _if179 {
         return true;
     }
     return false;
@@ -715,13 +797,19 @@ fn is_binary_star(expression -> string, index -> number) -> boolean {
         return false;
     }
     let prev_char = char_at(expression, index - 1);
-    if prev_char == " " || prev_char == "\t" {
+    let mut _if180 -> boolean = false;
+    if prev_char == " " { _if180 = true; }
+    if prev_char == "\t" { _if180 = true; }
+    if _if180 {
         return true;
     }
     if is_identifier_part_char(prev_char) {
         return true;
     }
-    if prev_char == ")" || prev_char == "]" {
+    let mut _if181 -> boolean = false;
+    if prev_char == ")" { _if181 = true; }
+    if prev_char == "]" { _if181 = true; }
+    if _if181 {
         return true;
     }
     return false;
@@ -782,8 +870,12 @@ fn find_top_level_range_separator(value -> string) -> number {
             if _dot_next < value.length {
                 let _dot_next2 = index + 2;
                 if substring(value, _dot_next, _dot_next2) == "." {
-                    if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-                        return index;
+                    if paren_depth == 0 {
+                        if bracket_depth == 0 {
+                            if brace_depth == 0 {
+                                return index;
+                            }
+                        }
                     }
                 }
             }
@@ -868,8 +960,14 @@ fn find_top_level_union_separator(text -> string) -> number {
                 angle_depth -= 1;
             }
         } else if ch == "|" {
-            if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 && angle_depth == 0 {
-                return index;
+            if paren_depth == 0 {
+                if brace_depth == 0 {
+                    if bracket_depth == 0 {
+                        if angle_depth == 0 {
+                            return index;
+                        }
+                    }
+                }
             }
         }
         index += 1;
@@ -977,14 +1075,20 @@ fn parse_member_access(expression -> string) -> MemberAccessParse {
             continue;
         }
         if ch == "." {
-            if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-                // Skip ".." range operators
-                let _rng_next = index + 1;
-                if _rng_next < trimmed.length && char_at(trimmed, _rng_next) == "." {
-                    index += 2;
-                    continue;
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if brace_depth == 0 {
+                        // Skip ".." range operators
+                        let _rng_next = index + 1;
+                        if _rng_next < trimmed.length {
+                            if char_at(trimmed, _rng_next) == "." {
+                                index += 2;
+                                continue;
+                            }
+                        }
+                        last_dot = index;
+                    }
                 }
-                last_dot = index;
             }
         }
         index += 1;
@@ -1094,9 +1198,13 @@ fn parse_index_expression(expression -> string) -> IndexExpressionParse {
         if ch == "[" {
             if bracket_depth > 0 {
                 bracket_depth -= 1;
-                if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 {
-                    open_bracket = index;
-                    break;
+                if bracket_depth == 0 {
+                    if paren_depth == 0 {
+                        if brace_depth == 0 {
+                            open_bracket = index;
+                            break;
+                        }
+                    }
                 }
             }
             index -= 1;
@@ -1211,26 +1319,35 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             index += 1;
             continue;
         }
-        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-            if ch == "=" {
-                // Check for ==, !=, <=, >=
-                if index > 0 {
-                    let prev = char_at(trimmed, index - 1);
-                    if prev == "=" || prev == "!" || prev == "<" || prev == ">" {
-                        index += 1;
-                        continue;
+        if paren_depth == 0 {
+            if bracket_depth == 0 {
+                if brace_depth == 0 {
+                    if ch == "=" {
+                        // Check for ==, !=, <=, >=
+                        if index > 0 {
+                            let prev = char_at(trimmed, index - 1);
+                            let mut _if187 -> boolean = false;
+                            if prev == "=" { _if187 = true; }
+                            if prev == "!" { _if187 = true; }
+                            if prev == "<" { _if187 = true; }
+                            if prev == ">" { _if187 = true; }
+                            if _if187 {
+                                index += 1;
+                                continue;
+                            }
+                        }
+                        let _eq_next = index + 1;
+                        if _eq_next < trimmed.length {
+                            let next = char_at(trimmed, _eq_next);
+                            if next == "=" {
+                                index += 2;
+                                continue;
+                            }
+                        }
+                        equals_index = index;
+                        break;
                     }
                 }
-                let _eq_next = index + 1;
-                if _eq_next < trimmed.length {
-                    let next = char_at(trimmed, _eq_next);
-                    if next == "=" {
-                        index += 2;
-                        continue;
-                    }
-                }
-                equals_index = index;
-                break;
             }
         }
         index += 1;
@@ -1359,12 +1476,20 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
             index += 1;
             continue;
         }
-        if ch == "(" || ch == "[" || ch == "{" {
+        let mut _if182 -> boolean = false;
+        if ch == "(" { _if182 = true; }
+        if ch == "[" { _if182 = true; }
+        if ch == "{" { _if182 = true; }
+        if _if182 {
             depth += 1;
             index += 1;
             continue;
         }
-        if ch == ")" || ch == "]" || ch == "}" {
+        let mut _if183 -> boolean = false;
+        if ch == ")" { _if183 = true; }
+        if ch == "]" { _if183 = true; }
+        if ch == "}" { _if183 = true; }
+        if _if183 {
             if depth > 0 {
                 depth -= 1;
             }
@@ -1372,17 +1497,36 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
             continue;
         }
         if depth == 0 {
-            if ch == "?" && question_index < 0 {
+            let mut _if184 -> boolean = false;
+            if ch == "?" {
+                if question_index < 0 {
+                    _if184 = true;
+                }
+            }
+            if _if184 {
                 question_index = index;
-            } else if ch == ":" && question_index >= 0 && colon_index < 0 {
-                colon_index = index;
-                break;
+            } else {
+                let mut _elif188 -> boolean = false;
+                if ch == ":" {
+                    if question_index >= 0 {
+                        if colon_index < 0 {
+                            _elif188 = true;
+                        }
+                    }
+                }
+                if _elif188 {
+                    colon_index = index;
+                    break;
+                }
             }
         }
         index += 1;
     }
 
-    if question_index < 0 || colon_index < 0 {
+    let mut _if185 -> boolean = false;
+    if question_index < 0 { _if185 = true; }
+    if colon_index < 0 { _if185 = true; }
+    if _if185 {
         return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
     }
 
@@ -1530,12 +1674,18 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
             continue;
         }
 
-        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 && angle_depth == 0 {
-            let _as_end = index + 4;
-            if _as_end <= trimmed.length {
-                let window = substring(trimmed, index, _as_end);
-                if window == " as " {
-                    match_index = index;
+        if paren_depth == 0 {
+            if bracket_depth == 0 {
+                if brace_depth == 0 {
+                    if angle_depth == 0 {
+                        let _as_end = index + 4;
+                        if _as_end <= trimmed.length {
+                            let window = substring(trimmed, index, _as_end);
+                            if window == " as " {
+                                match_index = index;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1548,7 +1698,10 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
 
     let value = trim_text(substring(trimmed, 0, match_index));
     let annotation = trim_text(substring(trimmed, match_index + 4, trimmed.length));
-    if value.length == 0 || annotation.length == 0 {
+    let mut _if186 -> boolean = false;
+    if value.length == 0 { _if186 = true; }
+    if annotation.length == 0 { _if186 = true; }
+    if _if186 {
         diagnostics.push("llvm lowering: malformed cast expression `" + text + "`");
         return CastParseResult { recognized: true, success: false, value: value, type_annotation: annotation, diagnostics: diagnostics };
     }

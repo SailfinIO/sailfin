@@ -55,6 +55,7 @@ import {
     CapabilityManifest,
     EnumTypeInfo,
     EnumVariantInfo,
+    LocalBinding,
 } from "../types";
 
 import {
@@ -419,7 +420,12 @@ fn get_struct_field_type_at(fields -> NativeStructField[], idx -> number) -> str
 
 fn is_trim_char_local(ch -> string) -> boolean {
     let code = char_code(ch);
-    return code == char_code(" ") || code == char_code("\n") || code == char_code("\r") || code == char_code("\t");
+    let mut _ret236 -> boolean = false;
+    if code == char_code(" ") { _ret236 = true; }
+    if code == char_code("\n") { _ret236 = true; }
+    if code == char_code("\r") { _ret236 = true; }
+    if code == char_code("\t") { _ret236 = true; }
+    return _ret236;
 }
 
 fn trim_text_local(value -> string) -> string {
@@ -548,6 +554,63 @@ fn _parse_lowered_fn_string_constants(raw -> string) -> StringConstant[] {
     return result;
 }
 
+// Parse the tab-separated locals file written by _write_module_globals_files.
+// Format: name\tpointer\tllvm_type\ttype_annotation\tscope_id
+fn _parse_module_globals_locals(raw -> string) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    if raw.length == 0 {
+        return result;
+    }
+    let file_lines = split_lines_local(raw);
+    let mut i -> number = 0;
+    loop {
+        if i >= file_lines.length {
+            break;
+        }
+        let line = file_lines[i];
+        i += 1;
+        if line.length == 0 {
+            continue;
+        }
+        let tab1 = index_of_char_local(line, "\t");
+        if tab1 < 0 {
+            continue;
+        }
+        let name = substring(line, 0, tab1);
+        let rest1 = substring(line, tab1 + 1, line.length);
+        let tab2 = index_of_char_local(rest1, "\t");
+        if tab2 < 0 {
+            continue;
+        }
+        let pointer = substring(rest1, 0, tab2);
+        let rest2 = substring(rest1, tab2 + 1, rest1.length);
+        let tab3 = index_of_char_local(rest2, "\t");
+        if tab3 < 0 {
+            continue;
+        }
+        let llvm_type = substring(rest2, 0, tab3);
+        let rest3 = substring(rest2, tab3 + 1, rest2.length);
+        let tab4 = index_of_char_local(rest3, "\t");
+        if tab4 < 0 {
+            continue;
+        }
+        let type_annotation = substring(rest3, 0, tab4);
+        let scope_id = substring(rest3, tab4 + 1, rest3.length);
+        let binding = LocalBinding {
+            name: name,
+            pointer: pointer,
+            llvm_type: llvm_type,
+            type_annotation: type_annotation,
+            ownership: null,
+            consumed: false,
+            scope_id: scope_id,
+            scope_depth: 0,
+        };
+        result = result.push(binding);
+    }
+    return result;
+}
+
 fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     // FLAT: no nested ifs, no else-if chains.
     // Seed degenerate-if bug drops ALL nested conditions and else-if branches.
@@ -565,7 +628,11 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             break;
         }
         let line = trim_text_local(lines[index]);
-        if line.length == 0 || starts_with_local(line, ";") || starts_with_local(line, ".module ") {
+        let mut _if237 -> boolean = false;
+        if line.length == 0 { _if237 = true; }
+        if starts_with_local(line, ";") { _if237 = true; }
+        if starts_with_local(line, ".module ") { _if237 = true; }
+        if _if237 {
             index += 1;
             continue;
         }
@@ -575,12 +642,18 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let is_method_start = starts_with_local(line, ".method ");
         let is_method_end = starts_with_local(line, ".endmethod");
         let is_fn_start = starts_with_local(line, ".fn ");
-        let is_fn_end = starts_with_local(line, ".endfn") || starts_with_local(line, ".endtest");
+        let mut _let238 -> boolean = false;
+        if starts_with_local(line, ".endfn") { _let238 = true; }
+        if starts_with_local(line, ".endtest") { _let238 = true; }
+        let is_fn_end = _let238;
         let is_meta_return = starts_with_local(line, ".meta return ");
         let is_meta_effects = starts_with_local(line, ".meta effects ");
         let is_meta_other = starts_with_local(line, ".meta ");
         let is_param = starts_with_local(line, ".param ");
-        let is_span = starts_with_local(line, ".span ") || starts_with_local(line, ".init-span ");
+        let mut _let239 -> boolean = false;
+        if starts_with_local(line, ".span ") { _let239 = true; }
+        if starts_with_local(line, ".init-span ") { _let239 = true; }
+        let is_span = _let239;
         let is_eval = starts_with_local(line, "eval ");
         let is_dotreturn = starts_with_local(line, ".return");
         let is_ret_space = starts_with_local(line, "ret ");
@@ -623,33 +696,43 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
 
         // --- Flush current on function/method boundaries (FLAT — no nesting) ---
-        if is_fn_start && current != null {
-            print("DIAG: flush fn-start current=" + current.name + " functions.len=" + number_to_string(functions.length));
-            functions = append_native_function(functions, current);
-            print("DIAG: after append functions.len=" + number_to_string(functions.length));
-            current = null;
+        if is_fn_start {
+            if current != null {
+                print("DIAG: flush fn-start current=" + current.name + " functions.len=" + number_to_string(functions.length));
+                functions = append_native_function(functions, current);
+                print("DIAG: after append functions.len=" + number_to_string(functions.length));
+                current = null;
+            }
         }
-        if is_method_start && current_struct_name.length > 0 && current != null {
-            functions = append_native_function(functions, current);
-            current = null;
+        if is_method_start {
+            if current_struct_name.length > 0 {
+                if current != null {
+                    functions = append_native_function(functions, current);
+                    current = null;
+                }
+            }
         }
-        if is_fn_end && current != null {
-            print("DIAG: flush fn-end current=" + current.name + " functions.len=" + number_to_string(functions.length));
-            functions = append_native_function(functions, current);
-            print("DIAG: after append functions.len=" + number_to_string(functions.length));
-            current = null;
-            index += 1;
-            continue;
+        if is_fn_end {
+            if current != null {
+                print("DIAG: flush fn-end current=" + current.name + " functions.len=" + number_to_string(functions.length));
+                functions = append_native_function(functions, current);
+                print("DIAG: after append functions.len=" + number_to_string(functions.length));
+                current = null;
+                index += 1;
+                continue;
+            }
         }
         if is_fn_end {
             index += 1;
             continue;
         }
-        if is_method_end && current != null {
-            functions = append_native_function(functions, current);
-            current = null;
-            index += 1;
-            continue;
+        if is_method_end {
+            if current != null {
+                functions = append_native_function(functions, current);
+                current = null;
+                index += 1;
+                continue;
+            }
         }
         if is_method_end {
             index += 1;
@@ -657,25 +740,37 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
 
         // --- Method start with paren and arrow (full parse) ---
-        if is_method_start && current_struct_name.length > 0 && method_paren_idx >= 0 && method_arrow_idx >= 0 {
-            let full_name = current_struct_name + method_name_from_paren;
-            current = make_native_function_method(full_name, current_struct_name, method_ret_from_arrow);
-            index += 1;
-            continue;
+        if is_method_start {
+            if current_struct_name.length > 0 {
+                if method_paren_idx >= 0 {
+                    if method_arrow_idx >= 0 {
+                        let full_name = current_struct_name + method_name_from_paren;
+                        current = make_native_function_method(full_name, current_struct_name, method_ret_from_arrow);
+                        index += 1;
+                        continue;
+                    }
+                }
+            }
         }
         // --- Method start with paren but no arrow ---
-        if is_method_start && current_struct_name.length > 0 && method_paren_idx >= 0 {
-            let full_name = current_struct_name + method_name_from_paren;
-            current = make_native_function_method(full_name, current_struct_name, "void");
-            index += 1;
-            continue;
+        if is_method_start {
+            if current_struct_name.length > 0 {
+                if method_paren_idx >= 0 {
+                    let full_name = current_struct_name + method_name_from_paren;
+                    current = make_native_function_method(full_name, current_struct_name, "void");
+                    index += 1;
+                    continue;
+                }
+            }
         }
         // --- Method start without paren ---
-        if is_method_start && current_struct_name.length > 0 {
-            let full_name = current_struct_name + method_header;
-            current = make_native_function_method(full_name, current_struct_name, "void");
-            index += 1;
-            continue;
+        if is_method_start {
+            if current_struct_name.length > 0 {
+                let full_name = current_struct_name + method_header;
+                current = make_native_function_method(full_name, current_struct_name, "void");
+                index += 1;
+                continue;
+            }
         }
 
         // --- .fn start ---
@@ -696,19 +791,25 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
 
         // --- .meta return (FLAT — combined condition) ---
-        if is_meta_return && ret_type_raw.length > 0 {
-            current = update_function_return_type(current, ret_type_raw);
-            index += 1;
-            continue;
+        if is_meta_return {
+            if ret_type_raw.length > 0 {
+                current = update_function_return_type(current, ret_type_raw);
+                index += 1;
+                continue;
+            }
         }
 
         // --- .meta effects (FLAT — combined condition) ---
-        if is_meta_effects && effects_text_raw != "none" && effects_text_raw.length > 0 {
-            let mut parsed_effects -> string[] = [];
-            parsed_effects.push(effects_text_raw);
-            current = update_function_effects(current, parsed_effects);
-            index += 1;
-            continue;
+        if is_meta_effects {
+            if effects_text_raw != "none" {
+                if effects_text_raw.length > 0 {
+                    let mut parsed_effects -> string[] = [];
+                    parsed_effects.push(effects_text_raw);
+                    current = update_function_effects(current, parsed_effects);
+                    index += 1;
+                    continue;
+                }
+            }
         }
 
         // --- Other .meta lines ---
@@ -718,11 +819,17 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
 
         // --- .param (FLAT — all conditions combined) ---
-        if is_param && param_arrow_idx >= 0 && param_name_raw.length > 0 && param_type_raw.length > 0 {
-            let new_param = make_native_parameter(param_name_raw, param_type_raw);
-            current = append_param_to_function(current, new_param);
-            index += 1;
-            continue;
+        if is_param {
+            if param_arrow_idx >= 0 {
+                if param_name_raw.length > 0 {
+                    if param_type_raw.length > 0 {
+                        let new_param = make_native_parameter(param_name_raw, param_type_raw);
+                        current = append_param_to_function(current, new_param);
+                        index += 1;
+                        continue;
+                    }
+                }
+            }
         }
         if is_param {
             index += 1;
@@ -803,9 +910,13 @@ fn recover_native_imports_light(native_text -> string) -> NativeImport[] {
         let after_quote = substring(rest, quote1 + 1, rest.length);
         let quote2 = index_of_char_local(after_quote, "\"");
         let module_path = substring(after_quote, 0, quote2);
-        if is_import && quote1 >= 0 && quote2 > 0 {
-            let imp = make_native_import(module_path);
-            imports = append_native_import(imports, imp);
+        if is_import {
+            if quote1 >= 0 {
+                if quote2 > 0 {
+                    let imp = make_native_import(module_path);
+                    imports = append_native_import(imports, imp);
+                }
+            }
         }
         index += 1;
     }
@@ -846,7 +957,10 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
             break;
         }
         let line = trim_text_local(lines[index]);
-        if line.length == 0 || starts_with_local(line, ";") {
+        let mut _if240 -> boolean = false;
+        if line.length == 0 { _if240 = true; }
+        if starts_with_local(line, ";") { _if240 = true; }
+        if _if240 {
             index += 1;
             continue;
         }
@@ -856,7 +970,10 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
         let is_field = starts_with_local(line, ".field ");
         let is_layout_struct = starts_with_local(line, ".layout struct ");
         let is_layout_field = starts_with_local(line, ".layout field ");
-        let is_method_line = starts_with_local(line, ".method ") || starts_with_local(line, ".endmethod");
+        let mut _let241 -> boolean = false;
+        if starts_with_local(line, ".method ") { _let241 = true; }
+        if starts_with_local(line, ".endmethod") { _let241 = true; }
+        let is_method_line = _let241;
 
         // --- Pre-compute field parsing values ---
         let field_text = trim_text_local(substring(line, 7, line.length));
@@ -896,7 +1013,18 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
         }
 
         // --- .endstruct with layout (FLAT — combined condition) ---
-        if is_struct_end && in_struct && (layout_size > 0 || layout_fields.length > 0) {
+        let mut _if242 -> boolean = false;
+        if is_struct_end {
+            if in_struct {
+                let mut _if259 -> boolean = false;
+                if layout_size > 0 { _if259 = true; }
+                if layout_fields.length > 0 { _if259 = true; }
+                if _if259 {
+                    _if242 = true;
+                }
+            }
+        }
+        if _if242 {
             struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields);
             structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, struct_layout));
             in_struct = false;
@@ -904,11 +1032,13 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
             continue;
         }
         // --- .endstruct without layout ---
-        if is_struct_end && in_struct {
-            structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, null));
-            in_struct = false;
-            index += 1;
-            continue;
+        if is_struct_end {
+            if in_struct {
+                structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, null));
+                in_struct = false;
+                index += 1;
+                continue;
+            }
         }
         if is_struct_end {
             index += 1;
@@ -922,10 +1052,12 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
         }
 
         // --- .field (FLAT — combined condition) ---
-        if is_field && field_arrow_idx >= 0 {
-            struct_fields = struct_fields.push(make_native_struct_field(f_name, f_type));
-            index += 1;
-            continue;
+        if is_field {
+            if field_arrow_idx >= 0 {
+                struct_fields = struct_fields.push(make_native_struct_field(f_name, f_type));
+                index += 1;
+                continue;
+            }
         }
         if is_field {
             index += 1;
@@ -933,11 +1065,15 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
         }
 
         // --- .layout struct (FLAT — separate top-level ifs) ---
-        if is_layout_struct && ls_size_idx >= 0 {
-            layout_size = ls_size_val;
+        if is_layout_struct {
+            if ls_size_idx >= 0 {
+                layout_size = ls_size_val;
+            }
         }
-        if is_layout_struct && ls_align_idx >= 0 {
-            layout_align = ls_align_val;
+        if is_layout_struct {
+            if ls_align_idx >= 0 {
+                layout_align = ls_align_val;
+            }
         }
         if is_layout_struct {
             index += 1;
@@ -945,10 +1081,12 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
         }
 
         // --- .layout field (FLAT — all pre-computed) ---
-        if is_layout_field && lf_name_end >= 0 {
-            layout_fields = layout_fields.push(make_native_struct_layout_field(lf_name_val, lf_type_val, lf_offset_val, lf_size_val, lf_align_val));
-            index += 1;
-            continue;
+        if is_layout_field {
+            if lf_name_end >= 0 {
+                layout_fields = layout_fields.push(make_native_struct_layout_field(lf_name_val, lf_type_val, lf_offset_val, lf_size_val, lf_align_val));
+                index += 1;
+                continue;
+            }
         }
         if is_layout_field {
             layout_fields = layout_fields.push(make_native_struct_layout_field("", lf_type_val, lf_offset_val, lf_size_val, lf_align_val));
@@ -964,12 +1102,25 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
         index += 1;
     }
     // Final flush (FLAT — two separate checks)
-    if in_struct && (layout_size > 0 || layout_fields.length > 0) {
+    let mut _if243 -> boolean = false;
+    if in_struct {
+        let mut _if260 -> boolean = false;
+        if layout_size > 0 { _if260 = true; }
+        if layout_fields.length > 0 { _if260 = true; }
+        if _if260 {
+            _if243 = true;
+        }
+    }
+    if _if243 {
         struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields);
         structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, struct_layout));
     }
-    if in_struct && layout_size == 0 && layout_fields.length == 0 {
-        structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, null));
+    if in_struct {
+        if layout_size == 0 {
+            if layout_fields.length == 0 {
+                structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, null));
+            }
+        }
     }
     return structs;
 }
@@ -988,7 +1139,10 @@ fn parse_number_local(text -> string) -> number {
         let ch = trimmed[i];
         let code = char_code(ch);
         let digit = code - char_code("0");
-        if digit < 0 || digit > 9 {
+        let mut _if244 -> boolean = false;
+        if digit < 0 { _if244 = true; }
+        if digit > 9 { _if244 = true; }
+        if _if244 {
             break;
         }
         result = result * 10 + digit;
@@ -1046,11 +1200,15 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
     }
     if safe_functions.length > 0 {
         let mut expected_source_text = artifact_text;
-        if expected_source_text.length == 0 && native_text_override_path.length > 0 {
-            expected_source_text = native_text_override_path;
+        if expected_source_text.length == 0 {
+            if native_text_override_path.length > 0 {
+                expected_source_text = native_text_override_path;
+            }
         }
-        if expected_source_text.length == 0 && fs.exists("build/sailfin/emit-native.tmp") {
-            expected_source_text = fs.readFile("build/sailfin/emit-native.tmp");
+        if expected_source_text.length == 0 {
+            if fs.exists("build/sailfin/emit-native.tmp") {
+                expected_source_text = fs.readFile("build/sailfin/emit-native.tmp");
+            }
         }
 
         if expected_source_text.length > 0 {
@@ -1069,9 +1227,13 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
                         break;
                     }
                     let function = safe_functions[body_index];
-                    if !function.is_extern && function.instructions != null && function.instructions.length > 0 {
-                        has_body_instructions = true;
-                        break;
+                    if !function.is_extern {
+                        if function.instructions != null {
+                            if function.instructions.length > 0 {
+                                has_body_instructions = true;
+                                break;
+                            }
+                        }
                     }
                     body_index += 1;
                 }
@@ -1081,12 +1243,18 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
 
                 let mut index -> number = 0;
                 loop {
-                    if index >= initial_function_count || index >= expected_count {
+                    let mut _if245 -> boolean = false;
+                    if index >= initial_function_count { _if245 = true; }
+                    if index >= expected_count { _if245 = true; }
+                    if _if245 {
                         break;
                     }
                     let safe_name = trim_text_local(safe_functions[index].name);
                     let expected_name = trim_text_local(expected_functions[index].name);
-                    if safe_name.length == 0 || safe_name == "_" {
+                    let mut _if246 -> boolean = false;
+                    if safe_name.length == 0 { _if246 = true; }
+                    if safe_name == "_" { _if246 = true; }
+                    if _if246 {
                         use_expected = true;
                         break;
                     }
@@ -1112,9 +1280,13 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
                             break;
                         }
                         let function = light_functions[light_index];
-                        if !function.is_extern && function.instructions != null && function.instructions.length > 0 {
-                            light_has_body = true;
-                            break;
+                        if !function.is_extern {
+                            if function.instructions != null {
+                                if function.instructions.length > 0 {
+                                    light_has_body = true;
+                                    break;
+                                }
+                            }
                         }
                         light_index += 1;
                     }
@@ -1137,37 +1309,47 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
     if native_text_override_path.length > 0 {
         recovery_text = native_text_override_path;
     }
-    if recovery_text.length == 0 && artifact_text.length > 0 {
-        recovery_text = artifact_text;
+    if recovery_text.length == 0 {
+        if artifact_text.length > 0 {
+            recovery_text = artifact_text;
+        }
     }
-    if recovery_text.length == 0 && fs.exists("build/sailfin/emit-native.tmp") {
-        recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+    if recovery_text.length == 0 {
+        if fs.exists("build/sailfin/emit-native.tmp") {
+            recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+        }
     }
 
     let direct_count = parse_native_function_count_from_text(recovery_text);
     if debug_lowering {
         print("emit-llvm: recovery source direct count=" + number_to_string(direct_count));
     }
-    if direct_count == 0 && fs.exists("build/sailfin/emit-native.tmp") {
-        recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+    if direct_count == 0 {
+        if fs.exists("build/sailfin/emit-native.tmp") {
+            recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+        }
     }
 
     let parsed_recovery = parse_native_functions_from_text(recovery_text);
     let recovered_count = sanitize_collection_length(parsed_recovery.length, 200000);
-    if parsed_recovery.length == recovered_count && parsed_recovery.length > 0 {
-        if debug_lowering {
-            print("emit-llvm: recovered functions via parse_native_functions_from_text=" + number_to_string(parsed_recovery.length));
+    if parsed_recovery.length == recovered_count {
+        if parsed_recovery.length > 0 {
+            if debug_lowering {
+                print("emit-llvm: recovered functions via parse_native_functions_from_text=" + number_to_string(parsed_recovery.length));
+            }
+            return parsed_recovery;
         }
-        return parsed_recovery;
     }
 
     let light_recovery = recover_native_functions_light(recovery_text);
     let light_recovered_count = sanitize_collection_length(light_recovery.length, 200000);
-    if light_recovery.length == light_recovered_count && light_recovery.length > 0 {
-        if debug_lowering {
-            print("emit-llvm: recovered functions via light parser=" + number_to_string(light_recovery.length));
+    if light_recovery.length == light_recovered_count {
+        if light_recovery.length > 0 {
+            if debug_lowering {
+                print("emit-llvm: recovered functions via light parser=" + number_to_string(light_recovery.length));
+            }
+            return light_recovery;
         }
-        return light_recovery;
     }
 
     if fs.exists("build/sailfin/emit-native.tmp") {
@@ -1199,8 +1381,10 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
         if fun.name == "main" {
             has_main = true;
         }
-        if fun.name.length >= 5 && substring(fun.name, 0, 5) == "test:" {
-            tests = tests.push(fun);
+        if fun.name.length >= 5 {
+            if substring(fun.name, 0, 5) == "test:" {
+                tests = tests.push(fun);
+            }
         }
         index += 1;
     }
@@ -1292,7 +1476,10 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
         }
     }
     let lines = lowered_lines.lines;
-    if lines == null || lines.length == 0 {
+    let mut _if247 -> boolean = false;
+    if lines == null { _if247 = true; }
+    if lines.length == 0 { _if247 = true; }
+    if _if247 {
         print("emit-llvm: lowering produced no output lines");
         return false;
     }
@@ -1326,24 +1513,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("emit-llvm: dbg-B before override check path_len=" + number_to_string(native_text_override_path.length));
     }
     if native_text_override_path.length > 0 {
-        // Use individual field extractors to avoid struct-return ABI bug
-        let reparsed_fns = parse_native_functions_from_text(native_text_override_path);
-        if reparsed_fns.length >= parse.functions.length {
-            let reparsed_imports = parse_native_imports_from_text(native_text_override_path);
-            let reparsed_structs = parse_native_structs_from_text(native_text_override_path);
-            let reparsed_interfaces = parse_native_interfaces_from_text(native_text_override_path);
-            let reparsed_enums = parse_native_enums_from_text(native_text_override_path);
-            let reparsed_bindings = parse_native_bindings_from_text(native_text_override_path);
-            let reparsed_diagnostics = parse_native_diagnostics_from_text(native_text_override_path);
-            let reparsed = ParseNativeResult {
-                functions: reparsed_fns,
-                imports: reparsed_imports,
-                structs: reparsed_structs,
-                interfaces: reparsed_interfaces,
-                enums: reparsed_enums,
-                bindings: reparsed_bindings,
-                diagnostics: reparsed_diagnostics,
-            };
+        // Use light recovery to avoid hanging on parse_native_artifact_impl
+        // which has deeply nested if/else chains the seed cannot compile correctly.
+        // The emit-llvm-file path only needs functions, imports, and structs —
+        // interfaces, enums, bindings are not used during module compilation.
+        let reparsed = build_parse_result_from_text(native_text_override_path);
+        if reparsed.functions.length >= parse.functions.length {
             parse = reparsed;
         }
         if debug_lowering {
@@ -1353,36 +1528,44 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                 print("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
             }
         }
-    } else if artifact_for_stable_parse != null && artifact_for_stable_parse.contents.length > 0 {
-        if debug_lowering {
-            print("emit-llvm: artifact text bytes=" + number_to_string(artifact_for_stable_parse.contents.length));
-            print("emit-llvm: artifact direct function count=" + number_to_string(parse_native_function_count_from_text(artifact_for_stable_parse.contents)));
+    } else {
+        let mut _elif248 -> boolean = false;
+        if artifact_for_stable_parse != null {
+            if artifact_for_stable_parse.contents.length > 0 {
+                _elif248 = true;
+            }
         }
-        // Use individual field extractors to avoid struct-return ABI bug
-        let reparsed_fns = parse_native_functions_from_text(artifact_for_stable_parse.contents);
-        if reparsed_fns.length >= parse.functions.length {
-            let reparsed_imports = parse_native_imports_from_text(artifact_for_stable_parse.contents);
-            let reparsed_structs = parse_native_structs_from_text(artifact_for_stable_parse.contents);
-            let reparsed_interfaces = parse_native_interfaces_from_text(artifact_for_stable_parse.contents);
-            let reparsed_enums = parse_native_enums_from_text(artifact_for_stable_parse.contents);
-            let reparsed_bindings = parse_native_bindings_from_text(artifact_for_stable_parse.contents);
-            let reparsed_diagnostics = parse_native_diagnostics_from_text(artifact_for_stable_parse.contents);
-            let reparsed = ParseNativeResult {
-                functions: reparsed_fns,
-                imports: reparsed_imports,
-                structs: reparsed_structs,
-                interfaces: reparsed_interfaces,
-                enums: reparsed_enums,
-                bindings: reparsed_bindings,
-                diagnostics: reparsed_diagnostics,
-            };
-            parse = reparsed;
-        }
-        if debug_lowering {
-            print("emit-llvm: reparsed from artifact text functions=" + number_to_string(parse.functions.length));
-            print("emit-llvm: reparsed from artifact diagnostics=" + number_to_string(parse.diagnostics.length));
-            if parse.diagnostics.length > 0 {
-                print("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
+        if _elif248 {
+            if debug_lowering {
+                print("emit-llvm: artifact text bytes=" + number_to_string(artifact_for_stable_parse.contents.length));
+                print("emit-llvm: artifact direct function count=" + number_to_string(parse_native_function_count_from_text(artifact_for_stable_parse.contents)));
+            }
+            // Use individual field extractors to avoid struct-return ABI bug
+            let reparsed_fns = parse_native_functions_from_text(artifact_for_stable_parse.contents);
+            if reparsed_fns.length >= parse.functions.length {
+                let reparsed_imports = parse_native_imports_from_text(artifact_for_stable_parse.contents);
+                let reparsed_structs = parse_native_structs_from_text(artifact_for_stable_parse.contents);
+                let reparsed_interfaces = parse_native_interfaces_from_text(artifact_for_stable_parse.contents);
+                let reparsed_enums = parse_native_enums_from_text(artifact_for_stable_parse.contents);
+                let reparsed_bindings = parse_native_bindings_from_text(artifact_for_stable_parse.contents);
+                let reparsed_diagnostics = parse_native_diagnostics_from_text(artifact_for_stable_parse.contents);
+                let reparsed = ParseNativeResult {
+                    functions: reparsed_fns,
+                    imports: reparsed_imports,
+                    structs: reparsed_structs,
+                    interfaces: reparsed_interfaces,
+                    enums: reparsed_enums,
+                    bindings: reparsed_bindings,
+                    diagnostics: reparsed_diagnostics,
+                };
+                parse = reparsed;
+            }
+            if debug_lowering {
+                print("emit-llvm: reparsed from artifact text functions=" + number_to_string(parse.functions.length));
+                print("emit-llvm: reparsed from artifact diagnostics=" + number_to_string(parse.diagnostics.length));
+                if parse.diagnostics.length > 0 {
+                    print("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
+                }
             }
         }
     }
@@ -1500,8 +1683,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if debug_lowering {
         print("emit-llvm: dbg-H2 after parse.functions access");
     }
-    if debug_lowering && safe_functions == null {
-        print("emit-llvm: parse.functions is null");
+    if debug_lowering {
+        if safe_functions == null {
+            print("emit-llvm: parse.functions is null");
+        }
     }
     if safe_functions == null {
         safe_functions = [];
@@ -1531,13 +1716,15 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         if debug_lowering {
             print("emit-llvm: dbg-R2 recovery_text.length=" + number_to_string(recovery_text.length));
         }
-        if recovery_text.length == 0 && fs.exists("build/sailfin/emit-native.tmp") {
-            if debug_lowering {
-                print("emit-llvm: dbg-R3 reading emit-native.tmp");
-            }
-            recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
-            if debug_lowering {
-                print("emit-llvm: dbg-R4 read emit-native.tmp bytes=" + number_to_string(recovery_text.length));
+        if recovery_text.length == 0 {
+            if fs.exists("build/sailfin/emit-native.tmp") {
+                if debug_lowering {
+                    print("emit-llvm: dbg-R3 reading emit-native.tmp");
+                }
+                recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+                if debug_lowering {
+                    print("emit-llvm: dbg-R4 read emit-native.tmp bytes=" + number_to_string(recovery_text.length));
+                }
             }
         }
         if debug_lowering {
@@ -1555,13 +1742,20 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                     break;
                 }
                 let recovered_function = recovered_functions[recovered_index];
-                if !recovered_function.is_extern && recovered_function.instructions != null && recovered_function.instructions.length > 0 {
-                    recovered_has_body = true;
-                    break;
+                if !recovered_function.is_extern {
+                    if recovered_function.instructions != null {
+                        if recovered_function.instructions.length > 0 {
+                            recovered_has_body = true;
+                            break;
+                        }
+                    }
                 }
                 recovered_index += 1;
             }
-            if recovered_functions.length == 0 || !recovered_has_body {
+            let mut _if249 -> boolean = false;
+            if recovered_functions.length == 0 { _if249 = true; }
+            if !recovered_has_body { _if249 = true; }
+            if _if249 {
                 let light_recovered = recover_native_functions_light(recovery_text);
                 let mut light_has_body = false;
                 recovered_index = 0;
@@ -1570,13 +1764,20 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                         break;
                     }
                     let recovered_function = light_recovered[recovered_index];
-                    if !recovered_function.is_extern && recovered_function.instructions != null && recovered_function.instructions.length > 0 {
-                        light_has_body = true;
-                        break;
+                    if !recovered_function.is_extern {
+                        if recovered_function.instructions != null {
+                            if recovered_function.instructions.length > 0 {
+                                light_has_body = true;
+                                break;
+                            }
+                        }
                     }
                     recovered_index += 1;
                 }
-                if light_has_body || recovered_functions.length == 0 {
+                let mut _if261 -> boolean = false;
+                if light_has_body { _if261 = true; }
+                if recovered_functions.length == 0 { _if261 = true; }
+                if _if261 {
                     recovered_functions = light_recovered;
                 }
             }
@@ -1611,8 +1812,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
         print("emit-llvm: fallback precheck has_artifact=" + has_artifact_text + " safe_len=" + number_to_string(safe_functions.length));
         print("emit-llvm: functions parsed=" + number_to_string(parse.functions.length) + " safe=" + number_to_string(safe_functions.length));
-        if parse.functions.length == 0 && parse.diagnostics.length > 0 {
-            print("emit-llvm: parse diagnostic " + parse.diagnostics[0]);
+        if parse.functions.length == 0 {
+            if parse.diagnostics.length > 0 {
+                print("emit-llvm: parse diagnostic " + parse.diagnostics[0]);
+            }
         }
     }
     // Recover struct definitions when the main parser returned empty/corrupt results.
@@ -1620,22 +1823,27 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     // but the actual field data is garbage.  Validate that each struct has a
     // non-empty name; if any struct looks corrupt, replace with light recovery.
     let mut structs_look_corrupt -> boolean = safe_structs.length == 0;
-    if !structs_look_corrupt && safe_structs.length > 0 {
-        let mut check_i -> number = 0;
-        loop {
-            if check_i >= safe_structs.length {
-                break;
+    if !structs_look_corrupt {
+        if safe_structs.length > 0 {
+            let mut check_i -> number = 0;
+            loop {
+                if check_i >= safe_structs.length {
+                    break;
+                }
+                let check_struct = safe_structs[check_i];
+                let mut _if262 -> boolean = false;
+                if check_struct.name == null { _if262 = true; }
+                if check_struct.name.length == 0 { _if262 = true; }
+                if _if262 {
+                    structs_look_corrupt = true;
+                    break;
+                }
+                if check_struct.fields == null {
+                    structs_look_corrupt = true;
+                    break;
+                }
+                check_i += 1;
             }
-            let check_struct = safe_structs[check_i];
-            if check_struct.name == null || check_struct.name.length == 0 {
-                structs_look_corrupt = true;
-                break;
-            }
-            if check_struct.fields == null {
-                structs_look_corrupt = true;
-                break;
-            }
-            check_i += 1;
         }
     }
     if structs_look_corrupt {
@@ -1664,6 +1872,21 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         diagnostics.push("llvm lowering: binding list too large (" + number_to_string(safe_bindings.length) + "); dropping");
         safe_bindings = [];
     }
+    // Recovery: if bindings empty (seed struct-return ABI may drop this field),
+    // re-parse directly from the native text written to emit-native.tmp.
+    if safe_bindings.length == 0 {
+        if fs.exists("build/sailfin/emit-native.tmp") {
+            let _reparse_native = fs.readFile("build/sailfin/emit-native.tmp");
+            if _reparse_native.length > 0 {
+                let _reparsed_bindings = parse_native_bindings_from_text(_reparse_native);
+                if _reparsed_bindings != null {
+                    if _reparsed_bindings.length > 0 {
+                        safe_bindings = _reparsed_bindings;
+                    }
+                }
+            }
+        }
+    }
     let mut safe_parse_diagnostics = parse.diagnostics;
     if safe_parse_diagnostics == null {
         safe_parse_diagnostics = [];
@@ -1672,12 +1895,20 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         safe_parse_diagnostics = [];
     }
     diagnostics = extend_string_lines_checked(diagnostics, safe_parse_diagnostics, "parse");
-    let trace = fs.exists("build/sailfin/.trace_test_runner") && fs.exists("build/sailfin/.test_runner_active");
+    let mut _let250 -> boolean = false;
+    if fs.exists("build/sailfin/.trace_test_runner") {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            _let250 = true;
+        }
+    }
+    let trace = _let250;
     let timing = fs.exists("build/sailfin/.test_runner_active");
     let start_ms = monotonic_millis();
     let mut is_test_module = is_test_module_slug(native_module.module_name);
-    if !is_test_module && fs.exists("build/sailfin/.test_runner_active") {
-        is_test_module = true;
+    if !is_test_module {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            is_test_module = true;
+        }
     }
     if is_test_module {
         safe_imports = [];
@@ -1830,11 +2061,18 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     loop {
         if _si2_idx >= combined_structs.length { break; }
         let _si2_name = get_struct_name_at(combined_structs, _si2_idx);
-        if _si2_name == null || _si2_name.length == 0 {
+        let mut _if251 -> boolean = false;
+        if _si2_name == null { _if251 = true; }
+        if _si2_name.length == 0 { _if251 = true; }
+        if _if251 {
             _si2_idx += 1;
             continue;
         }
-        if _si2_idx > 0 && _si2_content.length > 0 { _si2_content = _si2_content + "\n"; }
+        if _si2_idx > 0 {
+            if _si2_content.length > 0 {
+                _si2_content = _si2_content + "\n";
+            }
+        }
         let _si2_llvm = "%" + sanitize_symbol(_si2_name);
         _si2_content = _si2_content + _si2_name + "\t" + _si2_llvm + "\t";
         let mut _fi2 -> number = 0;
@@ -1848,8 +2086,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                 let mut _ft2 = "i8*";
                 let _ann2 = get_struct_field_type_at(_si2_fields, _fi2);
                 if _ann2 == "number" { _ft2 = "double"; }
-                else if _ann2 == "boolean" || _ann2 == "bool" { _ft2 = "i1"; }
-                else if _ann2 == "i64" || _ann2 == "int" || _ann2 == "usize" { _ft2 = "i64"; }
+                else if _ann2 == "boolean" { _ft2 = "i1"; }
+                else if _ann2 == "bool" { _ft2 = "i1"; }
+                else if _ann2 == "i64" { _ft2 = "i64"; }
+                else if _ann2 == "int" { _ft2 = "i64"; }
+                else if _ann2 == "usize" { _ft2 = "i64"; }
                 else if _ann2 == "i32" { _ft2 = "i32"; }
                 else if _ann2 == "u8" { _ft2 = "i8"; }
                 _si2_content = _si2_content + _fn2 + ":" + _ft2;
@@ -1866,11 +2107,18 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     loop {
         if _ei_idx >= fixed_enums.enums.length { break; }
         let _ei_name = get_enum_name_at(fixed_enums.enums, _ei_idx);
-        if _ei_name == null || _ei_name.length == 0 {
+        let mut _if252 -> boolean = false;
+        if _ei_name == null { _if252 = true; }
+        if _ei_name.length == 0 { _if252 = true; }
+        if _if252 {
             _ei_idx += 1;
             continue;
         }
-        if _ei_idx > 0 && _ei_content.length > 0 { _ei_content = _ei_content + "\n"; }
+        if _ei_idx > 0 {
+            if _ei_content.length > 0 {
+                _ei_content = _ei_content + "\n";
+            }
+        }
         // For now assume unit-enum defaults (the fixup_enum_layouts was skipped).
         let _ei_tag_type = "i32";
         let _ei_tag_size = "4";
@@ -1906,9 +2154,21 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     // Also recover when enums have empty names (get_field stub returns "").
     let mut _enum_names_empty -> boolean = false;
     if type_context.enums.length > 0 {
-        _enum_names_empty = type_context.enums[0].name == null || type_context.enums[0].name.length == 0;
+        let mut _asgn253 -> boolean = false;
+        if type_context.enums[0].name == null { _asgn253 = true; }
+        if type_context.enums[0].name.length == 0 { _asgn253 = true; }
+        _enum_names_empty = _asgn253;
     }
-    if (type_context.enums.length == 0 || _enum_names_empty) && fs.exists("build/sailfin/.enum_info") {
+    let mut _if254 -> boolean = false;
+    let mut _if263 -> boolean = false;
+    if type_context.enums.length == 0 { _if263 = true; }
+    if _enum_names_empty { _if263 = true; }
+    if _if263 {
+        if fs.exists("build/sailfin/.enum_info") {
+            _if254 = true;
+        }
+    }
+    if _if254 {
         let _ei_raw = fs.readFile("build/sailfin/.enum_info");
         if _ei_raw.length > 0 {
             let _ei_lines = split_lines_local(_ei_raw);
@@ -2044,11 +2304,73 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("emit-llvm: phase=context_functions");
     }
 
+    // Serialize context_functions to individual files so downstream call
+    // resolution can read clean data instead of ABI-corrupted NativeFunction[]
+    // params passed across function boundaries.
+    // Clean up stale files first.
+    let mut _cfc_i -> number = 0;
+    loop {
+        let _cfc_prefix = "build/sailfin/.ctx_func_" + number_to_string(_cfc_i);
+        if !fs.exists(_cfc_prefix + "_name") { break; }
+        fs.deleteFile(_cfc_prefix + "_name");
+        fs.deleteFile(_cfc_prefix + "_return_type");
+        fs.deleteFile(_cfc_prefix + "_is_async");
+        fs.deleteFile(_cfc_prefix + "_param_count");
+        // Clean up param files
+        let mut _cfc_j -> number = 0;
+        loop {
+            let _cfc_pp = _cfc_prefix + "_param_" + number_to_string(_cfc_j);
+            if !fs.exists(_cfc_pp + "_name") { break; }
+            fs.deleteFile(_cfc_pp + "_name");
+            fs.deleteFile(_cfc_pp + "_type");
+            _cfc_j += 1;
+        }
+        _cfc_i += 1;
+    }
+    // Write fresh function metadata
+    fs.writeFile("build/sailfin/.ctx_func_count", number_to_string(context_functions.length));
+    let mut _cfw_i -> number = 0;
+    loop {
+        if _cfw_i >= context_functions.length { break; }
+        let _cfw_fn = context_functions[_cfw_i];
+        let _cfw_prefix = "build/sailfin/.ctx_func_" + number_to_string(_cfw_i);
+        fs.writeFile(_cfw_prefix + "_name", _cfw_fn.name);
+        fs.writeFile(_cfw_prefix + "_return_type", _cfw_fn.return_type);
+        let mut _cfw_async_flag -> string = "0";
+        if _cfw_fn.is_async {
+            _cfw_async_flag = "1";
+        }
+        fs.writeFile(_cfw_prefix + "_is_async", _cfw_async_flag);
+        let mut _cfw_params = _cfw_fn.parameters;
+        if _cfw_params == null {
+            _cfw_params = [];
+        }
+        fs.writeFile(_cfw_prefix + "_param_count", number_to_string(_cfw_params.length));
+        let mut _cfw_j -> number = 0;
+        loop {
+            if _cfw_j >= _cfw_params.length { break; }
+            let _cfw_pp = _cfw_prefix + "_param_" + number_to_string(_cfw_j);
+            fs.writeFile(_cfw_pp + "_name", _cfw_params[_cfw_j].name);
+            fs.writeFile(_cfw_pp + "_type", _cfw_params[_cfw_j].type_annotation);
+            _cfw_j += 1;
+        }
+        _cfw_i += 1;
+    }
+    if debug_lowering {
+        print("emit-llvm: serialized context_functions count=" + number_to_string(context_functions.length));
+    }
+
     // Bootstrap guard: effect analysis currently introduces instability in
     // selfhost/native lowering for some modules. Keep disabled by default.
     let skip_effects = true;
     let mut runtime_helpers -> string[] = [];
-    if !is_test_module && !skip_effects {
+    let mut _if255 -> boolean = false;
+    if !is_test_module {
+        if !skip_effects {
+            _if255 = true;
+        }
+    }
+    if _if255 {
         if debug_lowering {
             print("emit-llvm: phase=helpers_start");
         }
@@ -2162,59 +2484,61 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     // Supplement struct type definitions from .struct_info file when the cross-module
     // render_struct_type_definitions produced nothing or corrupted output.
-    if !_stl_valid && fs.exists("build/sailfin/.struct_info") {
-        let _std_raw = fs.readFile("build/sailfin/.struct_info");
-        if _std_raw.length > 0 {
-            let mut _std_pos -> number = 0;
-            loop {
-                if _std_pos >= _std_raw.length { break; }
-                let _std_nl = index_of(substring(_std_raw, _std_pos, _std_raw.length), "\n");
-                let mut _std_line -> string = "";
-                if _std_nl < 0 {
-                    _std_line = substring(_std_raw, _std_pos, _std_raw.length);
-                    _std_pos = _std_raw.length;
-                } else {
-                    _std_line = substring(_std_raw, _std_pos, _std_pos + _std_nl);
-                    _std_pos = _std_pos + _std_nl + 1;
-                }
-                if _std_line.length == 0 { continue; }
-                let _std_t1 = index_of(_std_line, "\t");
-                if _std_t1 < 0 { continue; }
-                let _std_rest = substring(_std_line, _std_t1 + 1, _std_line.length);
-                let _std_t2 = index_of(_std_rest, "\t");
-                if _std_t2 < 0 { continue; }
-                let _std_llvm = substring(_std_rest, 0, _std_t2);
-                let _std_fields_str = substring(_std_rest, _std_t2 + 1, _std_rest.length);
-                if _std_llvm.length == 0 { continue; }
-                // Skip if this type is already defined in existing lines
-                if index_of(_existing_types, _std_llvm + " = type") >= 0 { continue; }
-                // Build field type list
-                let mut _std_ftypes -> string = "";
-                if _std_fields_str.length > 0 {
-                    let mut _std_fpos -> number = 0;
-                    let mut _std_first -> boolean = true;
-                    loop {
-                        if _std_fpos >= _std_fields_str.length { break; }
-                        let _std_comma = index_of(substring(_std_fields_str, _std_fpos, _std_fields_str.length), ",");
-                        let mut _std_fentry -> string = "";
-                        if _std_comma < 0 {
-                            _std_fentry = substring(_std_fields_str, _std_fpos, _std_fields_str.length);
-                            _std_fpos = _std_fields_str.length;
-                        } else {
-                            _std_fentry = substring(_std_fields_str, _std_fpos, _std_fpos + _std_comma);
-                            _std_fpos = _std_fpos + _std_comma + 1;
-                        }
-                        let _std_colon = index_of(_std_fentry, ":");
-                        if _std_colon < 0 { continue; }
-                        let _std_ftype = substring(_std_fentry, _std_colon + 1, _std_fentry.length);
-                        if !_std_first { _std_ftypes = _std_ftypes + ", "; }
-                        _std_ftypes = _std_ftypes + _std_ftype;
-                        _std_first = false;
+    if !_stl_valid {
+        if fs.exists("build/sailfin/.struct_info") {
+            let _std_raw = fs.readFile("build/sailfin/.struct_info");
+            if _std_raw.length > 0 {
+                let mut _std_pos -> number = 0;
+                loop {
+                    if _std_pos >= _std_raw.length { break; }
+                    let _std_nl = index_of(substring(_std_raw, _std_pos, _std_raw.length), "\n");
+                    let mut _std_line -> string = "";
+                    if _std_nl < 0 {
+                        _std_line = substring(_std_raw, _std_pos, _std_raw.length);
+                        _std_pos = _std_raw.length;
+                    } else {
+                        _std_line = substring(_std_raw, _std_pos, _std_pos + _std_nl);
+                        _std_pos = _std_pos + _std_nl + 1;
                     }
+                    if _std_line.length == 0 { continue; }
+                    let _std_t1 = index_of(_std_line, "\t");
+                    if _std_t1 < 0 { continue; }
+                    let _std_rest = substring(_std_line, _std_t1 + 1, _std_line.length);
+                    let _std_t2 = index_of(_std_rest, "\t");
+                    if _std_t2 < 0 { continue; }
+                    let _std_llvm = substring(_std_rest, 0, _std_t2);
+                    let _std_fields_str = substring(_std_rest, _std_t2 + 1, _std_rest.length);
+                    if _std_llvm.length == 0 { continue; }
+                    // Skip if this type is already defined in existing lines
+                    if index_of(_existing_types, _std_llvm + " = type") >= 0 { continue; }
+                    // Build field type list
+                    let mut _std_ftypes -> string = "";
+                    if _std_fields_str.length > 0 {
+                        let mut _std_fpos -> number = 0;
+                        let mut _std_first -> boolean = true;
+                        loop {
+                            if _std_fpos >= _std_fields_str.length { break; }
+                            let _std_comma = index_of(substring(_std_fields_str, _std_fpos, _std_fields_str.length), ",");
+                            let mut _std_fentry -> string = "";
+                            if _std_comma < 0 {
+                                _std_fentry = substring(_std_fields_str, _std_fpos, _std_fields_str.length);
+                                _std_fpos = _std_fields_str.length;
+                            } else {
+                                _std_fentry = substring(_std_fields_str, _std_fpos, _std_fpos + _std_comma);
+                                _std_fpos = _std_fpos + _std_comma + 1;
+                            }
+                            let _std_colon = index_of(_std_fentry, ":");
+                            if _std_colon < 0 { continue; }
+                            let _std_ftype = substring(_std_fentry, _std_colon + 1, _std_fentry.length);
+                            if !_std_first { _std_ftypes = _std_ftypes + ", "; }
+                            _std_ftypes = _std_ftypes + _std_ftype;
+                            _std_first = false;
+                        }
+                    }
+                    lines.push(_std_llvm + " = type { " + _std_ftypes + " }");
                 }
-                lines.push(_std_llvm + " = type { " + _std_ftypes + " }");
+                lines.push("");
             }
-            lines.push("");
         }
     }
 
@@ -2302,6 +2626,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     // Provide libc declarations for common helpers when not declared in the module.
+    if find_function_by_name(context_functions, "calloc") == null {
+        lines.push("declare noalias i8* @calloc(i64, i64)");
+    }
     if find_function_by_name(context_functions, "malloc") == null {
         lines.push("declare noalias i8* @malloc(i64)");
     }
@@ -2330,6 +2657,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         string_constants: empty_string_constant_set(),
         diagnostics: [],
     };
+    // File IPC: default false; updated in else branch after lower_module_bindings_to_globals
+    // (the v0.1.1 seed corrupts boolean scalar fields in cross-module struct returns)
+    let mut module_globals_needs_init_call -> boolean = false;
     if safe_bindings.length == 0 {
         if debug_lowering {
             print("emit-llvm: module bindings empty; skipping module globals");
@@ -2340,36 +2670,37 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
     } else {
         module_globals = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
-        if module_globals == null {
-            diagnostics.push("llvm lowering: module globals returned null; using empty defaults");
-            module_globals = ModuleGlobalLoweringResult {
-                preamble_lines: [],
-                init_function_lines: [],
-                init_function_symbol: "",
-                needs_init_call: false,
-                locals: [],
-                string_constants: empty_string_constant_set(),
-                diagnostics: [],
-            };
+        // File IPC: the v0.1.1 seed corrupts cross-module struct returns (zeroinitializer).
+        // Read ALL results from files written by _write_module_globals_files.
+        let _mg_needs_init_raw = fs.readFile("build/sailfin/.module_globals_needs_init");
+        module_globals_needs_init_call = _mg_needs_init_raw == "1";
+    }
+    // File IPC: read module globals results from files (ignoring struct return which is zeroinitializer)
+    let mut module_global_locals -> LocalBinding[] = [];
+    let mut module_preamble_lines -> string[] = [];
+    let mut module_init_lines -> string[] = [];
+    let mut module_init_symbol -> string = "";
+    let mut module_string_constants -> StringConstant[] = empty_string_constant_set();
+    if safe_bindings.length > 0 {
+        let _mg_preamble_raw = fs.readFile("build/sailfin/.module_globals_preamble");
+        if _mg_preamble_raw.length > 0 {
+            module_preamble_lines = split_lines_local(_mg_preamble_raw);
+        }
+        let _mg_init_raw = fs.readFile("build/sailfin/.module_globals_init");
+        if _mg_init_raw.length > 0 {
+            module_init_lines = split_lines_local(_mg_init_raw);
+        }
+        module_init_symbol = fs.readFile("build/sailfin/.module_globals_init_symbol");
+        let _mg_locals_raw = fs.readFile("build/sailfin/.module_globals_locals");
+        if _mg_locals_raw.length > 0 {
+            module_global_locals = _parse_module_globals_locals(_mg_locals_raw);
+        }
+        let _mg_diags_raw = fs.readFile("build/sailfin/.module_globals_diagnostics");
+        if _mg_diags_raw.length > 0 {
+            let _mg_diags = split_lines_local(_mg_diags_raw);
+            diagnostics = extend_string_lines_checked(diagnostics, _mg_diags, "module globals");
         }
     }
-    let mut module_global_locals = module_globals.locals;
-    if module_global_locals == null {
-        module_global_locals = [];
-    }
-    let mut module_preamble_lines = module_globals.preamble_lines;
-    if module_preamble_lines == null {
-        module_preamble_lines = [];
-    }
-    let mut module_init_lines = module_globals.init_function_lines;
-    if module_init_lines == null {
-        module_init_lines = [];
-    }
-    let mut module_string_constants = module_globals.string_constants;
-    if module_string_constants == null {
-        module_string_constants = empty_string_constant_set();
-    }
-    diagnostics = extend_string_lines_checked(diagnostics, module_globals.diagnostics, "module globals");
     if module_preamble_lines.length > 0 {
         lines = extend_string_lines(lines, module_preamble_lines);
         lines.push("");
@@ -2538,8 +2869,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             exported_symbols,
             imported_functions,
             module_global_locals,
-            module_globals.init_function_symbol,
-            module_globals.needs_init_call
+            module_init_symbol,
+            module_globals_needs_init_call
         );
         // The v0.1.1 seed corrupts cross-module struct returns. Read the
         // LoweredLLVMFunction result from files written by emit_llvm_function
@@ -2565,7 +2896,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                         break;
                     }
                     let line = _lfn_lines[scan_index];
-                    if starts_with(trim_text(line), "ret ") || trim_text(line) == "ret void" {
+                    let mut _if256 -> boolean = false;
+                    if starts_with(trim_text(line), "ret ") { _if256 = true; }
+                    if trim_text(line) == "ret void" { _if256 = true; }
+                    if _if256 {
                         ret_lines += 1;
                     }
                     scan_index += 1;
@@ -2782,7 +3116,61 @@ fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
 }
 
 fn write_llvm_lines_chunked(path -> string, lines -> string[]) -> boolean ![io] {
-    if lines == null || lines.length == 0 {
+    let mut _if257 -> boolean = false;
+    if lines == null { _if257 = true; }
+    if lines.length == 0 { _if257 = true; }
+    if _if257 {
+        fs.writeFile(path, "");
+        return fs.exists(path);
+    }
+
+    // Join lines using a two-level strategy to avoid O(n^2) string concatenation.
+    // Build small chunks (~200 lines each), collect them, then join the chunks.
+    // This reduces total copies from O(n^2) to O(n * chunk_size).
+    let chunk_size = 200;
+    let mut chunks -> string[] = [];
+    let mut buffer -> string = "";
+    let mut lines_in_chunk -> number = 0;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        buffer = buffer + lines[index] + "\n";
+        lines_in_chunk += 1;
+        if lines_in_chunk >= chunk_size {
+            chunks.push(buffer);
+            buffer = "";
+            lines_in_chunk = 0;
+        }
+        index += 1;
+    }
+    if buffer.length > 0 {
+        chunks.push(buffer);
+    }
+
+    // Join chunks into final output
+    let mut output -> string = "";
+    let mut ci -> number = 0;
+    loop {
+        if ci >= chunks.length {
+            break;
+        }
+        output = output + chunks[ci];
+        ci += 1;
+    }
+
+    fs.writeFile(path, output);
+    return fs.exists(path);
+}
+
+fn _write_llvm_lines_chunked_unused(path -> string, lines -> string[]) -> boolean ![io] {
+    // Preserved for compatibility — original implementation that used appendFile
+    let mut _if257 -> boolean = false;
+    if lines == null { _if257 = true; }
+    if lines.length == 0 { _if257 = true; }
+    if _if257 {
         fs.writeFile(path, "");
         return fs.exists(path);
     }
@@ -2792,26 +3180,28 @@ fn write_llvm_lines_chunked(path -> string, lines -> string[]) -> boolean ![io] 
     let mut buffered -> number = 0;
     let mut wrote -> boolean = false;
 
-    let mut index -> number = 0;
+    let mut index2 -> number = 0;
     loop {
-        if index >= lines.length {
+        if index2 >= lines.length {
             break;
         }
-        let line = lines[index] + "\n";
-        let next_len = buffered + line.length;
-        if next_len > chunk_limit && buffer.length > 0 {
-            if wrote {
-                fs.appendFile(path, buffer);
-            } else {
-                fs.writeFile(path, buffer);
-                wrote = true;
+        let line2 = lines[index2] + "\n";
+        let next_len = buffered + line2.length;
+        if next_len > chunk_limit {
+            if buffer.length > 0 {
+                if wrote {
+                    fs.appendFile(path, buffer);
+                } else {
+                    fs.writeFile(path, buffer);
+                    wrote = true;
+                }
+                buffer = "";
+                buffered = 0;
             }
-            buffer = "";
-            buffered = 0;
         }
-        buffer = buffer + line;
-        buffered += line.length;
-        index += 1;
+        buffer = buffer + line2;
+        buffered += line2.length;
+        index2 += 1;
     }
 
     if buffer.length > 0 {
@@ -2916,7 +3306,10 @@ fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
         index += 1;
     }
 
-    if !uses_round || has_round_decl {
+    let mut _if258 -> boolean = false;
+    if !uses_round { _if258 = true; }
+    if has_round_decl { _if258 = true; }
+    if _if258 {
         return lines;
     }
 
