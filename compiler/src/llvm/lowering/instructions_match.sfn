@@ -153,13 +153,16 @@ import {
 
 import {
     lower_instruction_range,
+} from "./instructions";
+
+import {
     clone_local_bindings,
     extend_lifetime_regions,
     extend_mutations,
     insert_lines_before_index,
     _write_block_result_files,
     _parse_int_from_string,
-} from "./instructions";
+} from "./instructions_helpers";
 
 import {
     collect_if_structure,

@@ -451,6 +451,9 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             if future_operand.llvm_type == "%SailfinFutureVoid*" {
                 let mut awaited_lines = append_string(lowered.lines, "  call void @" + await_symbol + "(%SailfinFutureVoid* " + future_operand.value + ")");
                 let out_operand = LLVMOperand { llvm_type: "void", value: "" };
+                // Overwrite stale call-result files from the inner spawn call
+                fs.writeFile("build/sailfin/.call_result_type", "void");
+                fs.writeFile("build/sailfin/.call_result_value", "");
                 return ExpressionResult { lines: awaited_lines, temp_index: lowered.temp_index, operand: out_operand, diagnostics: diagnostics, string_constants: lowered.string_constants };
             }
 
@@ -477,6 +480,9 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
                             awaited_lines2.push("  " + load_temp + " = load " + trimmed_expected + ", " + trimmed_expected + "* " + typed_ptr_temp);
                             awaited_lines2.push("  call void @free(i8* " + result_temp + ")");
                             let out_operand_unboxed = LLVMOperand { llvm_type: trimmed_expected, value: load_temp };
+                            // Overwrite stale call-result files from the inner spawn call
+                            fs.writeFile("build/sailfin/.call_result_type", trimmed_expected);
+                            fs.writeFile("build/sailfin/.call_result_value", load_temp);
                             return ExpressionResult { lines: awaited_lines2, temp_index: lowered.temp_index + 3, operand: out_operand_unboxed, diagnostics: diagnostics, string_constants: lowered.string_constants };
                         }
                     }
@@ -484,6 +490,9 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             }
 
             let out_operand2 = LLVMOperand { llvm_type: result_type, value: result_temp };
+            // Overwrite stale call-result files from the inner spawn call
+            fs.writeFile("build/sailfin/.call_result_type", result_type);
+            fs.writeFile("build/sailfin/.call_result_value", result_temp);
             return ExpressionResult { lines: awaited_lines2, temp_index: lowered.temp_index + 1, operand: out_operand2, diagnostics: diagnostics, string_constants: lowered.string_constants };
         }
     }

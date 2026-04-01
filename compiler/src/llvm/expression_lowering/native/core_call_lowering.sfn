@@ -1129,8 +1129,14 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                     current_lines = concat_result.lines;
                     current_temp = concat_result.temp_index;
                     if concat_result.operand == null {
+                        _write_call_result_lines(current_lines, current_temp);
+                        fs.writeFile("build/sailfin/.call_result_type", "");
+                        fs.writeFile("build/sailfin/.call_result_value", "");
                         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
                     }
+                    _write_call_result_lines(current_lines, current_temp);
+                    fs.writeFile("build/sailfin/.call_result_type", concat_result.operand.llvm_type);
+                    fs.writeFile("build/sailfin/.call_result_value", concat_result.operand.value);
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: concat_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
                 } else {
                     diagnostics.push("llvm lowering: concat requires two operands");
@@ -1153,6 +1159,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                 current_lines = push_result.lines;
                 current_temp = push_result.temp_index;
                 if push_result.operand == null {
+                    _write_call_result_lines(current_lines, current_temp);
+                    fs.writeFile("build/sailfin/.call_result_type", "");
+                    fs.writeFile("build/sailfin/.call_result_value", "");
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
                 }
                 // CRITICAL: For i8* string arrays, sailfin_runtime_append_string may
@@ -1170,6 +1179,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                         }
                     }
                 }
+                _write_call_result_lines(current_lines, current_temp);
+                fs.writeFile("build/sailfin/.call_result_type", push_result.operand.llvm_type);
+                fs.writeFile("build/sailfin/.call_result_value", push_result.operand.value);
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: push_result.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
             } else {
                 diagnostics.push("llvm lowering: push requires two operands");

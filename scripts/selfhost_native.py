@@ -254,6 +254,29 @@ double extend_native_functions(void* a, double b) {
     (void)a; (void)b;
     return 0.0;
 }
+
+/* ---- Mangled .push() stubs ----
+ * The seed concatenates variable names with method names, so
+ * `arr.push(val)` becomes a call to `@arrpush(val)`.
+ * These stubs silently drop the push (diagnostics/formatting only).
+ */
+__attribute__((weak))
+double diagnosticspush(const char* val) { (void)val; return 0.0; }
+
+__attribute__((weak))
+double updateddiagnosticspush(const char* val) { (void)val; return 0.0; }
+
+__attribute__((weak))
+double updatedlinespush(const char* val) { (void)val; return 0.0; }
+
+__attribute__((weak))
+double with_spacerpush(const char* val) { (void)val; return 0.0; }
+
+__attribute__((weak))
+double current_linespush(const char* val) { (void)val; return 0.0; }
+
+__attribute__((weak))
+double combinedpush(const char* val) { (void)val; return 0.0; }
 """
 
 
@@ -1777,6 +1800,506 @@ def _fix_bare_zero_lines(llvm_ir: str) -> tuple[str, int]:
     if removed:
         return "\n".join(new_lines), removed
     return llvm_ir, 0
+
+
+def _fix_mangled_push_calls(llvm_ir: str) -> tuple[str, int]:
+    r"""Fix mangled ``.push()`` calls where seed concatenated variable+method names.
+
+    The v0.1.1 seed compiles ``array.push(value)`` as a call to a function
+    named ``@<variable_name>push(i8* %value)`` instead of properly lowering
+    it to ``sailfin_runtime_append_string``.  The variable name is baked into
+    the function name and the array argument is missing.
+
+    We detect these patterns and rewrite them to proper append_string calls::
+
+        Before:  %tN = call double @current_linespush(i8* %val)
+        After:   %tN_arr_push = call { i8**, i64 }* @sailfin_runtime_append_string(
+                     { i8**, i64 }* %ARRAY, i8* %val)
+
+    The array variable is found by matching the push name prefix to parameter
+    names or the most recently loaded ``{ i8**, i64 }*`` alloca in scope.
+    """
+    # Detect mangled push declarations
+    push_decl_re = re.compile(
+        r"^declare\s+double\s+@(\w+push)\(i8\*\)\s*$", re.MULTILINE
+    )
+    push_names: set[str] = set()
+    for m in push_decl_re.finditer(llvm_ir):
+        name = m.group(1)
+        # Only treat as mangled if it ends with "push" and the prefix is a
+        # plausible variable name (not a real function name)
+        if name == "push" or name.endswith("push"):
+            push_names.add(name)
+
+    if not push_names:
+        return llvm_ir, 0
+
+    lines = llvm_ir.split("\n")
+    new_lines: list[str] = []
+    fixes = 0
+
+    # --- Per-function state ---
+    # When we enter a define, we scan for { i8**, i64 }* parameters named
+    # "lines" or "diagnostics" and track array-typed allocas.
+    func_array_params: dict[str, str] = {}
+    # Maps variable prefix (e.g. "current_lines") to the LLVM parameter/temp
+    func_array_allocas: list[str] = []
+    in_function = False
+    first_array_alloca: str | None = None
+
+    # Build a prefix→target mapping for known push names.
+    # The push name minus "push" suffix gives us the source variable name.
+    # Common mappings:
+    #   current_lines → %lines parameter
+    #   diagnostics → first { i8**, i64 }* alloca or %diagnostics param
+    #   updateddiagnostics → { i8**, i64 }* alloca
+    #   updatedlines → { i8**, i64 }* alloca
+    #   with_spacer → { i8**, i64 }* alloca
+
+    define_re = re.compile(r"^define\s+")
+    param_array_re = re.compile(
+        r"\{\s*i8\*\*,\s*i64\s*\}\*\s+%(\w+)"
+    )
+    alloca_array_re = re.compile(
+        r"^\s+(%l\d+)\s*=\s*alloca\s+\{\s*i8\*\*,\s*i64\s*\}\*"
+    )
+    store_array_re = re.compile(
+        r"^\s+store\s+\{\s*i8\*\*,\s*i64\s*\}\*\s+(%\S+),\s*\{\s*i8\*\*,\s*i64\s*\}\*\*\s+(%l\d+)"
+    )
+    load_array_re = re.compile(
+        r"^\s+(%\S+)\s*=\s*load\s+\{\s*i8\*\*,\s*i64\s*\}\*,\s*\{\s*i8\*\*,\s*i64\s*\}\*\*\s+(%l\d+)"
+    )
+
+    # Track the most recently loaded array temp → alloca
+    temp_to_alloca: dict[str, str] = {}
+    # Track which alloca stores which parameter
+    param_to_alloca: dict[str, str] = {}
+    # Track last alloca that received a store of { i8**, i64 }*
+    last_stored_array_alloca: str | None = None
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Track function entry
+        if define_re.match(stripped):
+            in_function = True
+            func_array_params.clear()
+            func_array_allocas.clear()
+            temp_to_alloca.clear()
+            param_to_alloca.clear()
+            first_array_alloca = None
+            last_stored_array_alloca = None
+            # Extract { i8**, i64 }* parameters
+            for pm in param_array_re.finditer(stripped):
+                func_array_params[pm.group(1)] = "%" + pm.group(1)
+
+        # Track array allocas
+        am = alloca_array_re.match(line)
+        if am:
+            alloca_name = am.group(1)
+            func_array_allocas.append(alloca_name)
+            if first_array_alloca is None:
+                first_array_alloca = alloca_name
+
+        # Track stores: store { i8**, i64 }* %param, { i8**, i64 }** %lN
+        sm = store_array_re.match(line)
+        if sm:
+            stored_val = sm.group(1)
+            target_alloca = sm.group(2)
+            last_stored_array_alloca = target_alloca
+            # If the stored value is a parameter, record the mapping
+            for pname, pval in func_array_params.items():
+                if stored_val == pval:
+                    param_to_alloca[pname] = target_alloca
+
+        # Track loads from array allocas
+        lm = load_array_re.match(line)
+        if lm:
+            temp_to_alloca[lm.group(1)] = lm.group(2)
+
+        # Reset at block boundaries
+        if stripped.endswith(":") and not stripped.startswith(";") and not stripped.startswith("source_"):
+            temp_to_alloca.clear()
+
+        # Check for mangled push calls
+        push_call_match = None
+        for pname in push_names:
+            pattern = f"call double @{pname}(i8* "
+            if pattern in line:
+                # Extract: %tN = call double @XXXpush(i8* %val)
+                push_re = re.compile(
+                    rf"^(\s+)(%\S+)\s*=\s*call\s+double\s+@{re.escape(pname)}\(i8\*\s+(%\S+)\)"
+                )
+                push_call_match = push_re.match(line)
+                if push_call_match:
+                    break
+                # Also match void call (no result): call double @XXXpush(i8* %val)
+                push_void_re = re.compile(
+                    rf"^(\s+)call\s+double\s+@{re.escape(pname)}\(i8\*\s+(%\S+)\)"
+                )
+                push_void_match = push_void_re.match(line)
+                if push_void_match:
+                    push_call_match = push_void_match
+                    break
+
+        if push_call_match:
+            groups = push_call_match.groups()
+            indent = groups[0]
+            if len(groups) == 3:
+                result_temp = groups[1]
+                val_temp = groups[2]
+            else:
+                result_temp = None
+                val_temp = groups[1]
+
+            # Find the correct array to push to.
+            # Strategy: determine which { i8**, i64 }* parameter or alloca
+            # corresponds to the push target.
+            target_alloca = None
+
+            # The push name prefix hints at the source variable name
+            prefix = pname[:-4]  # remove "push"
+            if not prefix:
+                prefix = "current_lines"
+
+            # Map known prefixes to parameter names
+            prefix_to_param = {
+                "current_lines": "lines",
+                "": "lines",
+                "diagnostics": "diagnostics",
+                "updateddiagnostics": "diagnostics",
+                "updatedlines": "lines",
+                "with_spacer": None,  # local variable
+                "combined": None,  # local variable
+            }
+            mapped_param = prefix_to_param.get(prefix)
+
+            if mapped_param and mapped_param in param_to_alloca:
+                target_alloca = param_to_alloca[mapped_param]
+            elif mapped_param and mapped_param in func_array_params:
+                # Parameter exists but wasn't stored to alloca — use directly
+                target_alloca = None  # will need special handling
+            elif first_array_alloca:
+                # Fallback: use the first array alloca
+                target_alloca = first_array_alloca
+
+            if target_alloca:
+                # Load the array, call append_string, store back
+                suffix = f"_push_{fixes}"
+                load_temp = f"%_push_arr_{fixes}"
+                result = f"%_push_res_{fixes}"
+                new_lines.append(
+                    f"{indent}{load_temp} = load {{ i8**, i64 }}*, {{ i8**, i64 }}** {target_alloca}"
+                )
+                new_lines.append(
+                    f"{indent}{result} = call {{ i8**, i64 }}* @sailfin_runtime_append_string("
+                    f"{{ i8**, i64 }}* {load_temp}, i8* {val_temp})"
+                )
+                new_lines.append(
+                    f"{indent}store {{ i8**, i64 }}* {result}, {{ i8**, i64 }}** {target_alloca}"
+                )
+                fixes += 1
+                continue  # skip original line
+            elif mapped_param and mapped_param in func_array_params:
+                # The parameter wasn't stored to alloca, pass it directly
+                result = f"%_push_res_{fixes}"
+                new_lines.append(
+                    f"{indent}{result} = call {{ i8**, i64 }}* @sailfin_runtime_append_string("
+                    f"{{ i8**, i64 }}* %{mapped_param}, i8* {val_temp})"
+                )
+                fixes += 1
+                continue
+            # else: couldn't resolve, leave the call as-is (will fail at link)
+
+        new_lines.append(line)
+
+    if fixes == 0:
+        return llvm_ir, 0
+
+    # Remove the mangled push declarations since we replaced all calls
+    result_text = "\n".join(new_lines)
+    for pname in push_names:
+        result_text = result_text.replace(
+            f"declare double @{pname}(i8*)\n", ""
+        )
+
+    return result_text, fixes
+
+
+def _fix_null_args_from_double_encoded_pointers(llvm_ir: str) -> tuple[str, int]:
+    r"""Fix call sites where seed passes ``i8* null`` instead of a pointer.
+
+    The seed double-encodes pointer return values (ptrtoint→sitofp→store as
+    double) but then fails to convert them back when passing them as arguments
+    to subsequent calls.  The pattern::
+
+        %ptr = call TYPE @func(...)
+        %i64 = ptrtoint TYPE %ptr to i64
+        %dbl = sitofp i64 %i64 to double
+        store double %dbl, double* %lN
+        %loaded = load double, double* %lN
+        ... = call RTYPE @other(i8* null)   ; ← should be @other(TYPE %ptr)
+
+    We detect the null argument and replace it with the original pointer.
+    """
+    if "i8* null)" not in llvm_ir:
+        return llvm_ir, 0
+
+    lines = llvm_ir.split("\n")
+    new_lines: list[str] = []
+    fixes = 0
+
+    # Track the most recent pointer that was double-encoded
+    recent_ptr: str | None = None     # the original pointer value
+    recent_ptr_type: str | None = None  # its LLVM type
+
+    ptrtoint_re = re.compile(
+        r"^\s+(%[A-Za-z0-9_.]+)\s*=\s*ptrtoint\s+(.+?)\s+(%[A-Za-z0-9_.]+)\s+to\s+i64"
+    )
+    sitofp_re = re.compile(
+        r"^\s+(%[A-Za-z0-9_.]+)\s*=\s*sitofp\s+i64\s+(%[A-Za-z0-9_.]+)\s+to\s+double"
+    )
+    call_null_re = re.compile(
+        r"^(\s+.+=\s*call\s+\S+\s+@\S+\()(.*)(\)\s*)$"
+    )
+
+    # Track ptrtoint source: i64_name → (ptr_name, ptr_type)
+    ptrtoint_map: dict[str, tuple[str, str]] = {}
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Reset at block boundaries
+        if stripped.endswith(":") and not stripped.startswith(";"):
+            recent_ptr = None
+            recent_ptr_type = None
+            ptrtoint_map.clear()
+
+        # Track: %i64 = ptrtoint TYPE %ptr to i64
+        m = ptrtoint_re.match(line)
+        if m:
+            i64_name = m.group(1)
+            ptr_type = m.group(2)
+            ptr_name = m.group(3)
+            ptrtoint_map[i64_name] = (ptr_name, ptr_type)
+
+        # Track: %dbl = sitofp i64 %i64 to double
+        m = sitofp_re.match(line)
+        if m:
+            i64_name = m.group(2)
+            info = ptrtoint_map.get(i64_name)
+            if info:
+                recent_ptr, recent_ptr_type = info
+
+        # Check for calls with i8* null
+        if recent_ptr and "i8* null" in line:
+            m = call_null_re.match(line)
+            if m:
+                prefix = m.group(1)
+                args = m.group(2)
+                suffix = m.group(3)
+                # Replace the FIRST "i8* null" with the pointer
+                # Need to bitcast if types differ
+                if recent_ptr_type and recent_ptr_type.strip() != "i8*":
+                    new_arg = f"{recent_ptr_type} {recent_ptr}"
+                else:
+                    new_arg = f"i8* {recent_ptr}"
+                new_args = args.replace("i8* null", new_arg, 1)
+                if new_args != args:
+                    new_lines.append(f"{prefix}{new_args}{suffix}")
+                    fixes += 1
+                    recent_ptr = None
+                    recent_ptr_type = None
+                    continue
+
+        new_lines.append(line)
+
+    if fixes:
+        return "\n".join(new_lines), fixes
+    return llvm_ir, 0
+
+
+def _fix_double_deref_via_inttoptr(llvm_ir: str) -> tuple[str, int]:
+    r"""Fix null-dereference when seed treats numeric fields as pointers.
+
+    The seed generates this pattern for numeric struct fields:
+
+        %dv = load double, double* %field_ptr
+        %db = bitcast double %dv to i64
+        %ptr = inttoptr i64 %db to i8*
+        %iptr = bitcast i8* %ptr to i64*
+        %ival = load i64, i64* %iptr          ; CRASH: deref of number-as-ptr
+        %dptr = bitcast i8* %ptr to double*
+        %dval = load double, double* %dptr    ; CRASH: deref of number-as-ptr
+
+    For double 0.0, the pointer is null and this crashes immediately.
+    Fix: replace the deref loads with the original double value.
+    """
+    if "inttoptr" not in llvm_ir:
+        return llvm_ir, 0
+
+    lines = llvm_ir.split("\n")
+    new_lines: list[str] = []
+    fixes = 0
+
+    # Track: inttoptr result → original double value
+    inttoptr_to_double: dict[str, str] = {}
+    # Track: bitcast double %X to i64 → %X
+    bitcast_double_to_i64: dict[str, str] = {}
+
+    bitcast_double_re = re.compile(
+        r"^\s+(%\S+)\s*=\s*bitcast\s+double\s+(%\S+)\s+to\s+i64"
+    )
+    inttoptr_re = re.compile(
+        r"^\s+(%[A-Za-z0-9_.]+)\s*=\s*inttoptr\s+i64\s+(%[A-Za-z0-9_.]+)\s+to\s+i8\*"
+    )
+    # Pattern: %X = bitcast i8* %ptr to i64*
+    bitcast_to_iptr_re = re.compile(
+        r"^\s+(%\S+)\s*=\s*bitcast\s+i8\*\s+(%[A-Za-z0-9_.]+)\s+to\s+i64\*"
+    )
+    # Pattern: %X = load i64, i64* %iptr[, align N]
+    load_i64_re = re.compile(
+        r"^(\s+)(%\S+)\s*=\s*load\s+i64,\s*i64\*\s+(%[A-Za-z0-9_.]+)"
+    )
+    # Pattern: %X = bitcast i8* %ptr to double*
+    bitcast_to_dptr_re = re.compile(
+        r"^\s+(%\S+)\s*=\s*bitcast\s+i8\*\s+(%[A-Za-z0-9_.]+)\s+to\s+double\*"
+    )
+    # Pattern: %X = load double, double* %dptr[, align N]
+    load_double_re = re.compile(
+        r"^(\s+)(%\S+)\s*=\s*load\s+double,\s*double\*\s+(%[A-Za-z0-9_.]+)"
+    )
+
+    # Track which i8* pointers came from inttoptr of a double bitcast
+    ptr_to_original_double: dict[str, str] = {}
+    # Track bitcast i8* → i64* mappings
+    iptr_to_src_ptr: dict[str, str] = {}
+    # Track bitcast i8* → double* mappings
+    dptr_to_src_ptr: dict[str, str] = {}
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Reset tracking at block boundaries
+        if stripped.endswith(":") and not stripped.startswith(";") and not stripped.startswith("source_"):
+            inttoptr_to_double.clear()
+            bitcast_double_to_i64.clear()
+            ptr_to_original_double.clear()
+            iptr_to_src_ptr.clear()
+            dptr_to_src_ptr.clear()
+
+        # Track: %B = bitcast double %A to i64
+        m = bitcast_double_re.match(line)
+        if m:
+            bitcast_double_to_i64[m.group(1)] = m.group(2)
+
+        # Track: %C = inttoptr i64 %B to i8*
+        m = inttoptr_re.match(line)
+        if m:
+            ptr_name = m.group(1)
+            i64_val = m.group(2)
+            orig_double = bitcast_double_to_i64.get(i64_val)
+            if orig_double:
+                ptr_to_original_double[ptr_name] = orig_double
+
+        # Track: %D = bitcast i8* %C to i64*
+        m = bitcast_to_iptr_re.match(line)
+        if m:
+            iptr_to_src_ptr[m.group(1)] = m.group(2)
+
+        # Track: %F = bitcast i8* %C to double*
+        m = bitcast_to_dptr_re.match(line)
+        if m:
+            dptr_to_src_ptr[m.group(1)] = m.group(2)
+
+        # Fix: %E = load i64, i64* %D → bitcast double %orig to i64
+        m = load_i64_re.match(line)
+        if m:
+            indent = m.group(1)
+            result = m.group(2)
+            src_iptr = m.group(3)
+            src_ptr = iptr_to_src_ptr.get(src_iptr)
+            if src_ptr:
+                orig_double = ptr_to_original_double.get(src_ptr)
+                if orig_double:
+                    new_lines.append(
+                        f"{indent}{result} = bitcast double {orig_double} to i64"
+                    )
+                    fixes += 1
+                    continue
+
+        # Fix: %G = load double, double* %F → use %orig directly
+        m = load_double_re.match(line)
+        if m:
+            indent = m.group(1)
+            result = m.group(2)
+            src_dptr = m.group(3)
+            src_ptr = dptr_to_src_ptr.get(src_dptr)
+            if src_ptr:
+                orig_double = ptr_to_original_double.get(src_ptr)
+                if orig_double:
+                    # Can't directly alias — emit fadd 0.0 to create a copy
+                    new_lines.append(
+                        f"{indent}{result} = fadd double {orig_double}, 0.0"
+                    )
+                    fixes += 1
+                    continue
+
+        new_lines.append(line)
+
+    if fixes:
+        return "\n".join(new_lines), fixes
+    return llvm_ir, 0
+
+
+def _fix_srem_on_pointers(llvm_ir: str) -> tuple[str, int]:
+    r"""Fix arithmetic instructions on ``i8*`` operands produced by seed type confusion.
+
+    The v0.1.1 seed sometimes types number locals as ``i8*`` instead of
+    ``double``.  When arithmetic operators (+, -, *, /, %) are applied, the
+    compiler emits the correct opcode but with pointer operands, yielding
+    invalid IR like::
+
+        %t271 = srem i8* %t269, %t270
+        %t294 = sub i8* %t292, %t293
+
+    We rewrite these to cast the pointer operands to ``i64``, perform the
+    integer operation, then cast back to ``i8*``.
+    """
+    import re
+    # Match add, sub, mul, sdiv, srem, udiv, urem on i8* operands.
+    pattern = re.compile(
+        r"^(\s*)(%[\w.]+)\s*=\s*(add|sub|mul|sdiv|srem|udiv|urem)\s+i8\*\s+(%[\w.]+),\s*(%[\w.]+)\s*$",
+        re.MULTILINE,
+    )
+
+    matches = list(pattern.finditer(llvm_ir))
+    if not matches:
+        return llvm_ir, 0
+
+    # Process in reverse order to keep offsets valid.
+    lines = llvm_ir.split("\n")
+    fixed = 0
+    for m in reversed(matches):
+        indent = m.group(1)
+        dest = m.group(2)
+        op = m.group(3)
+        lhs = m.group(4)
+        rhs = m.group(5)
+
+        # Find the line number for this match.
+        line_start = llvm_ir.count("\n", 0, m.start())
+
+        replacement = [
+            f"{indent}{dest}.lhs.i64 = ptrtoint i8* {lhs} to i64",
+            f"{indent}{dest}.rhs.i64 = ptrtoint i8* {rhs} to i64",
+            f"{indent}{dest}.i64 = {op} i64 {dest}.lhs.i64, {dest}.rhs.i64",
+            f"{indent}{dest} = inttoptr i64 {dest}.i64 to i8*",
+        ]
+        lines[line_start : line_start + 1] = replacement
+        fixed += 1
+
+    return "\n".join(lines), fixed
 
 
 def _fix_broken_phi_nodes(llvm_ir: str) -> tuple[str, int]:
@@ -11905,6 +12428,15 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
+                    # Fix srem on pointer operands (seed types numbers as i8*).
+                    candidate, srem_fixes = _fix_srem_on_pointers(candidate)
+                    if srem_fixes:
+                        print(
+                            f"[selfhost] fixed {srem_fixes} srem-on-pointer(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
                     # Promote declare→define for local functions missing bodies.
                     _asm_path = import_cache / f"{module_slug}.sfn-asm"
                     if _asm_path.exists():
@@ -12715,6 +13247,27 @@ def main(argv: list[str]) -> int:
                 flush=True,
             )
 
+        # --- Fix mangled .push() calls ---
+        # The seed concatenates variable names with "push" for .push() calls,
+        # e.g. current_lines.push(x) becomes @current_linespush(x).
+        # Rewrite to sailfin_runtime_append_string calls.
+        total_push_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], push_fixes = _fix_mangled_push_calls(ll_texts[idx])
+            if push_fixes:
+                total_push_fixes += push_fixes
+                print(
+                    f"[selfhost] fixed {push_fixes} mangled push call(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_push_fixes:
+            print(
+                f"[selfhost] total mangled push fixes: {total_push_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
         # --- Insert store-backs after append_string ---
         total_wb_fixes = 0
         for idx, name in enumerate(module_names):
@@ -12751,6 +13304,64 @@ def main(argv: list[str]) -> int:
                 flush=True,
             )
 
+        # --- Fix null args from double-encoded pointers ---
+        # The seed double-encodes pointer return values and then forgets to
+        # pass them to subsequent calls, passing null instead.
+        total_null_arg_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], null_fixes = _fix_null_args_from_double_encoded_pointers(ll_texts[idx])
+            if null_fixes:
+                total_null_arg_fixes += null_fixes
+                print(
+                    f"[selfhost] fixed {null_fixes} null-arg-from-double-encoded-ptr in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_null_arg_fixes:
+            print(
+                f"[selfhost] total null-arg-from-double-encoded-ptr fixes: {total_null_arg_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix double-deref via inttoptr ---
+        # The seed treats numeric struct fields as pointers (bitcast double→i64→
+        # inttoptr→load), which crashes for values like 0.0 (null deref).
+        total_deref_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], deref_fixes = _fix_double_deref_via_inttoptr(ll_texts[idx])
+            if deref_fixes:
+                total_deref_fixes += deref_fixes
+                print(
+                    f"[selfhost] fixed {deref_fixes} double-deref-via-inttoptr in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_deref_fixes:
+            print(
+                f"[selfhost] total double-deref-via-inttoptr fixes: {total_deref_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # --- Fix srem on pointer operands ---
+        total_srem_fixes = 0
+        for idx, name in enumerate(module_names):
+            ll_texts[idx], srem_fixes = _fix_srem_on_pointers(ll_texts[idx])
+            if srem_fixes:
+                total_srem_fixes += srem_fixes
+                print(
+                    f"[selfhost] fixed {srem_fixes} srem-on-pointer(s) in {name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if total_srem_fixes:
+            print(
+                f"[selfhost] total srem-on-pointer fixes: {total_srem_fixes}",
+                file=sys.stderr,
+                flush=True,
+            )
+
         # --- Promote local declares to stub defines ---
         # The first-pass binary sometimes fails to emit `define` for local
         # functions, leaving only `declare`.  Promote these to stub `define`s
@@ -12781,6 +13392,7 @@ def main(argv: list[str]) -> int:
         # `@varfunc` instead of `@func`.  Detect and rename these.
         _varfunc_renames = {
             "descriptorsappend_runtime_helper": "append_runtime_helper",
+            "find_char__string_utils": "find_char",
         }
         for idx, name in enumerate(module_names):
             for bad, good in _varfunc_renames.items():
@@ -12789,6 +13401,29 @@ def main(argv: list[str]) -> int:
                     ll_texts[idx] = ll_texts[idx].replace(f"@{bad}", f"@{good}")
                     print(
                         f"[selfhost] renamed @{bad} → @{good} ({count_before}x) in {name}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+            # After renaming, remove degenerate wrapper defines that now shadow
+            # a declare of the same name (e.g. @find_char wrapper in string_utils
+            # that just calls itself after the rename).
+            import re as _re
+            _degen_pat = _re.compile(
+                r'define\s+(?:internal\s+)?(\S+)\s+@(\w+)\(([^)]*)\)\s*\{\s*\n'
+                r'entry:\s*\n'
+                r'\s*%\w+\s*=\s*call\s+\S+\s+@\2\([^)]*\)\s*\n'
+                r'\s*ret\s+\S+\s+%\w+\s*\n'
+                r'\}\s*\n',
+                _re.MULTILINE,
+            )
+            for m in list(_degen_pat.finditer(ll_texts[idx])):
+                fn_name = m.group(2)
+                # Only remove if there's also a declare for this function
+                if _re.search(rf'declare\s+\S+\s+@{_re.escape(fn_name)}\b', ll_texts[idx]):
+                    ll_texts[idx] = ll_texts[idx][:m.start()] + ll_texts[idx][m.end():]
+                    print(
+                        f"[selfhost] removed degenerate wrapper define @{fn_name} in {name}",
                         file=sys.stderr,
                         flush=True,
                     )
@@ -12995,6 +13630,25 @@ def main(argv: list[str]) -> int:
                     flush=True,
                 )
             break
+
+        # Final type injection pass: cross-module return-type and param-type
+        # fixes can introduce new struct type references that were not present
+        # during the earlier normalization pass.  Re-run injection + patching.
+        _final_type_fixes = 0
+        for idx, p in enumerate(ll_paths):
+            text = ll_texts[idx]
+            text, _s1 = _inject_missing_named_type_stubs(text)
+            text, _p1 = _patch_opaque_named_types(text, canonical_defs)
+            text, _s2 = _inject_missing_named_type_stubs(text)
+            _total = _s1 + _p1 + _s2
+            if _total:
+                _final_type_fixes += _total
+                ll_texts[idx] = text
+        if _final_type_fixes:
+            print(
+                f"[selfhost] ({pass_name}) final type injection pass: {_final_type_fixes} fix(es)",
+                flush=True,
+            )
 
         for idx, p in enumerate(ll_paths):
             p.write_text(ll_texts[idx], encoding="utf-8")

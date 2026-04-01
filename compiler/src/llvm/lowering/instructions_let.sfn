@@ -188,6 +188,14 @@ fn lower_let_instruction(
     if _if230 {
         diagnostics.push("llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
+    // Clear stale call-result files before expression lowering so that only
+    // a call from THIS let's initializer can populate them.
+    if fs.exists("build/sailfin/.call_result_type") {
+        fs.deleteFile("build/sailfin/.call_result_type");
+    }
+    if fs.exists("build/sailfin/.call_result_value") {
+        fs.deleteFile("build/sailfin/.call_result_value");
+    }
     if fs.exists("build/sailfin/.trace_lowering") {
             print("let-lowering: pre-lower_expression name=" + instruction.name + " value=" + instruction.value);
         }

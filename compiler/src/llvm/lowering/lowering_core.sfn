@@ -55,6 +55,7 @@ import {
     CapabilityManifest,
     EnumTypeInfo,
     EnumVariantInfo,
+    LocalBinding,
 } from "../types";
 
 import {
@@ -549,6 +550,63 @@ fn _parse_lowered_fn_string_constants(raw -> string) -> StringConstant[] {
         let byte_count = parse_number_local(byte_text);
         result = result.push(StringConstant { name: name, content: content, byte_count: byte_count });
         i += 1;
+    }
+    return result;
+}
+
+// Parse the tab-separated locals file written by _write_module_globals_files.
+// Format: name\tpointer\tllvm_type\ttype_annotation\tscope_id
+fn _parse_module_globals_locals(raw -> string) -> LocalBinding[] {
+    let mut result -> LocalBinding[] = [];
+    if raw.length == 0 {
+        return result;
+    }
+    let file_lines = split_lines_local(raw);
+    let mut i -> number = 0;
+    loop {
+        if i >= file_lines.length {
+            break;
+        }
+        let line = file_lines[i];
+        i += 1;
+        if line.length == 0 {
+            continue;
+        }
+        let tab1 = index_of_char_local(line, "\t");
+        if tab1 < 0 {
+            continue;
+        }
+        let name = substring(line, 0, tab1);
+        let rest1 = substring(line, tab1 + 1, line.length);
+        let tab2 = index_of_char_local(rest1, "\t");
+        if tab2 < 0 {
+            continue;
+        }
+        let pointer = substring(rest1, 0, tab2);
+        let rest2 = substring(rest1, tab2 + 1, rest1.length);
+        let tab3 = index_of_char_local(rest2, "\t");
+        if tab3 < 0 {
+            continue;
+        }
+        let llvm_type = substring(rest2, 0, tab3);
+        let rest3 = substring(rest2, tab3 + 1, rest2.length);
+        let tab4 = index_of_char_local(rest3, "\t");
+        if tab4 < 0 {
+            continue;
+        }
+        let type_annotation = substring(rest3, 0, tab4);
+        let scope_id = substring(rest3, tab4 + 1, rest3.length);
+        let binding = LocalBinding {
+            name: name,
+            pointer: pointer,
+            llvm_type: llvm_type,
+            type_annotation: type_annotation,
+            ownership: null,
+            consumed: false,
+            scope_id: scope_id,
+            scope_depth: 0,
+        };
+        result = result.push(binding);
     }
     return result;
 }
@@ -1826,6 +1884,21 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         diagnostics.push("llvm lowering: binding list too large (" + number_to_string(safe_bindings.length) + "); dropping");
         safe_bindings = [];
     }
+    // Recovery: if bindings empty (seed struct-return ABI may drop this field),
+    // re-parse directly from the native text written to emit-native.tmp.
+    if safe_bindings.length == 0 {
+        if fs.exists("build/sailfin/emit-native.tmp") {
+            let _reparse_native = fs.readFile("build/sailfin/emit-native.tmp");
+            if _reparse_native.length > 0 {
+                let _reparsed_bindings = parse_native_bindings_from_text(_reparse_native);
+                if _reparsed_bindings != null {
+                    if _reparsed_bindings.length > 0 {
+                        safe_bindings = _reparsed_bindings;
+                    }
+                }
+            }
+        }
+    }
     let mut safe_parse_diagnostics = parse.diagnostics;
     if safe_parse_diagnostics == null {
         safe_parse_diagnostics = [];
@@ -2609,40 +2682,37 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
     } else {
         module_globals = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
-        // File IPC: read needs_init_call from file written by lower_module_bindings_to_globals
-        // (the v0.1.1 seed corrupts boolean scalar fields in cross-module struct returns)
+        // File IPC: the v0.1.1 seed corrupts cross-module struct returns (zeroinitializer).
+        // Read ALL results from files written by _write_module_globals_files.
         let _mg_needs_init_raw = fs.readFile("build/sailfin/.module_globals_needs_init");
         module_globals_needs_init_call = _mg_needs_init_raw == "1";
-        if module_globals == null {
-            diagnostics.push("llvm lowering: module globals returned null; using empty defaults");
-            module_globals = ModuleGlobalLoweringResult {
-                preamble_lines: [],
-                init_function_lines: [],
-                init_function_symbol: "",
-                needs_init_call: false,
-                locals: [],
-                string_constants: empty_string_constant_set(),
-                diagnostics: [],
-            };
+    }
+    // File IPC: read module globals results from files (ignoring struct return which is zeroinitializer)
+    let mut module_global_locals -> LocalBinding[] = [];
+    let mut module_preamble_lines -> string[] = [];
+    let mut module_init_lines -> string[] = [];
+    let mut module_init_symbol -> string = "";
+    let mut module_string_constants -> StringConstant[] = empty_string_constant_set();
+    if safe_bindings.length > 0 {
+        let _mg_preamble_raw = fs.readFile("build/sailfin/.module_globals_preamble");
+        if _mg_preamble_raw.length > 0 {
+            module_preamble_lines = split_lines_local(_mg_preamble_raw);
+        }
+        let _mg_init_raw = fs.readFile("build/sailfin/.module_globals_init");
+        if _mg_init_raw.length > 0 {
+            module_init_lines = split_lines_local(_mg_init_raw);
+        }
+        module_init_symbol = fs.readFile("build/sailfin/.module_globals_init_symbol");
+        let _mg_locals_raw = fs.readFile("build/sailfin/.module_globals_locals");
+        if _mg_locals_raw.length > 0 {
+            module_global_locals = _parse_module_globals_locals(_mg_locals_raw);
+        }
+        let _mg_diags_raw = fs.readFile("build/sailfin/.module_globals_diagnostics");
+        if _mg_diags_raw.length > 0 {
+            let _mg_diags = split_lines_local(_mg_diags_raw);
+            diagnostics = extend_string_lines_checked(diagnostics, _mg_diags, "module globals");
         }
     }
-    let mut module_global_locals = module_globals.locals;
-    if module_global_locals == null {
-        module_global_locals = [];
-    }
-    let mut module_preamble_lines = module_globals.preamble_lines;
-    if module_preamble_lines == null {
-        module_preamble_lines = [];
-    }
-    let mut module_init_lines = module_globals.init_function_lines;
-    if module_init_lines == null {
-        module_init_lines = [];
-    }
-    let mut module_string_constants = module_globals.string_constants;
-    if module_string_constants == null {
-        module_string_constants = empty_string_constant_set();
-    }
-    diagnostics = extend_string_lines_checked(diagnostics, module_globals.diagnostics, "module globals");
     if module_preamble_lines.length > 0 {
         lines = extend_string_lines(lines, module_preamble_lines);
         lines.push("");
@@ -2811,7 +2881,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             exported_symbols,
             imported_functions,
             module_global_locals,
-            module_globals.init_function_symbol,
+            module_init_symbol,
             module_globals_needs_init_call
         );
         // The v0.1.1 seed corrupts cross-module struct returns. Read the

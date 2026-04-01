@@ -1,0 +1,404 @@
+// compiler/src/llvm/lowering/instructions_dispatch.sfn
+//
+// Extracted Expression (tag 1) and Return (tag 0) instruction handlers.
+// These are the two largest code blocks from lower_instruction_range.
+// Splitting them into a separate module keeps lower_instruction_range
+// within the v0.1.1 seed's per-function LLVM IR emission threshold.
+//
+// Each handler writes results to file IPC so the caller can read them back.
+
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
+import { substring, char_code, grapheme_at } from "../../string_utils";
+
+import {
+    TypeContext,
+    LocalBinding,
+    ParameterBinding,
+    LLVMOperand,
+    BlockLoweringResult,
+    LetLoweringResult,
+    LoopContext,
+    LifetimeRegionMetadata,
+    LocalMutation,
+    StringConstant,
+} from "../types";
+
+import {
+    trim_text,
+    append_string,
+    extend_string_array,
+    number_to_string,
+    index_of,
+    starts_with,
+} from "../utils";
+
+import {
+    merge_string_constants,
+} from "../strings";
+
+import {
+    _parse_int_from_string,
+    extend_mutations,
+} from "./instructions_helpers";
+
+import {
+    lower_expression,
+} from "../expression_lowering/native/core";
+
+import {
+    detect_suspension_conflicts,
+    lower_expression_statement,
+    lower_return_instruction,
+    lower_expression_for_statement,
+    map_local_type,
+    parse_inline_let_expression,
+} from "../expression_lowering/native/statement";
+
+import {
+    append_local_binding,
+} from "../expression_lowering/native/core_scopes";
+
+import {
+    lower_let_instruction,
+} from "./instructions_let";
+
+import {
+    extend_lifetime_regions,
+} from "./instructions_helpers";
+
+import {
+    apply_lifetime_release_events,
+} from "../lifetime";
+
+import {
+    get_instruction_tag,
+    get_instruction_text,
+    get_instruction_condition,
+} from "./lowering_core";
+
+// Write bindings to files for statement.sfn to read.
+// Extracted from the Expression and Return handlers where this pattern
+// appeared twice.
+fn _write_bindings_to_files(bindings -> ParameterBinding[]) ![io] {
+    let mut bc_i -> number = 0;
+    loop {
+        let bc_prefix = "build/sailfin/.instr_binding_" + number_to_string(bc_i);
+        if !fs.exists(bc_prefix + "_name") { break; }
+        fs.deleteFile(bc_prefix + "_name");
+        fs.deleteFile(bc_prefix + "_llvm_name");
+        fs.deleteFile(bc_prefix + "_llvm_type");
+        fs.deleteFile(bc_prefix + "_type_annotation");
+        bc_i += 1;
+    }
+    let mut bw_i -> number = 0;
+    loop {
+        if bw_i >= bindings.length { break; }
+        let bw_prefix = "build/sailfin/.instr_binding_" + number_to_string(bw_i);
+        fs.writeFile(bw_prefix + "_name", bindings[bw_i].name);
+        fs.writeFile(bw_prefix + "_llvm_name", bindings[bw_i].llvm_name);
+        fs.writeFile(bw_prefix + "_llvm_type", bindings[bw_i].llvm_type);
+        fs.writeFile(bw_prefix + "_type_annotation", bindings[bw_i].type_annotation);
+        bw_i += 1;
+    }
+}
+
+// Write locals to files for statement.sfn to read.
+fn _write_locals_to_files(locals -> LocalBinding[]) ![io] {
+    let mut lc_i -> number = 0;
+    loop {
+        let lc_prefix = "build/sailfin/.instr_local_" + number_to_string(lc_i);
+        if !fs.exists(lc_prefix + "_name") { break; }
+        fs.deleteFile(lc_prefix + "_name");
+        fs.deleteFile(lc_prefix + "_pointer");
+        fs.deleteFile(lc_prefix + "_llvm_type");
+        fs.deleteFile(lc_prefix + "_type_annotation");
+        fs.deleteFile(lc_prefix + "_scope_id");
+        fs.deleteFile(lc_prefix + "_scope_depth");
+        lc_i += 1;
+    }
+    let mut lw_i -> number = 0;
+    loop {
+        if lw_i >= locals.length { break; }
+        let lw_prefix = "build/sailfin/.instr_local_" + number_to_string(lw_i);
+        fs.writeFile(lw_prefix + "_name", locals[lw_i].name);
+        fs.writeFile(lw_prefix + "_pointer", locals[lw_i].pointer);
+        fs.writeFile(lw_prefix + "_llvm_type", locals[lw_i].llvm_type);
+        fs.writeFile(lw_prefix + "_type_annotation", locals[lw_i].type_annotation);
+        fs.writeFile(lw_prefix + "_scope_id", locals[lw_i].scope_id);
+        fs.writeFile(lw_prefix + "_scope_depth", number_to_string(locals[lw_i].scope_depth));
+        lw_i += 1;
+    }
+}
+
+// Read string constants from the expr_stmt_string_constants file.
+// Returns the merged string constants.
+fn _read_expr_string_constants(existing -> StringConstant[]) -> StringConstant[] ![io] {
+    let mut result = existing;
+    if fs.exists("build/sailfin/.expr_stmt_string_constants") {
+        let _raw = fs.readFile("build/sailfin/.expr_stmt_string_constants");
+        if _raw.length > 0 {
+            let mut _pos -> number = 0;
+            loop {
+                if _pos >= _raw.length { break; }
+                let _nl = index_of(substring(_raw, _pos, _raw.length), "\n");
+                let mut _line -> string = "";
+                if _nl < 0 {
+                    _line = substring(_raw, _pos, _raw.length);
+                    _pos = _raw.length;
+                } else {
+                    _line = substring(_raw, _pos, _pos + _nl);
+                    _pos = _pos + _nl + 1;
+                }
+                if _line.length == 0 { continue; }
+                let _t1 = index_of(_line, "\t");
+                if _t1 < 0 { continue; }
+                let _nm = substring(_line, 0, _t1);
+                let _r2 = substring(_line, _t1 + 1, _line.length);
+                let _t2 = index_of(_r2, "\t");
+                if _t2 < 0 { continue; }
+                let _ct = substring(_r2, 0, _t2);
+                let _bct = substring(_r2, _t2 + 1, _r2.length);
+                let _bc = _parse_int_from_string(_bct);
+                result = merge_string_constants(result, [StringConstant { name: _nm, content: _ct, byte_count: _bc }]);
+            }
+        }
+        fs.writeFile("build/sailfin/.expr_stmt_string_constants", "");
+    }
+    return result;
+}
+
+// Read Let result from files and apply to caller's state.
+// Sets file IPC markers for the caller to detect.
+// Writes updated temp/local/region to dispatch_* files.
+fn _apply_let_result_from_files(
+    diagnostics -> string[],
+    current_locals -> LocalBinding[],
+    scope_id -> string,
+    scope_depth -> number
+) -> LocalBinding[] ![io] {
+    let mut result_locals = current_locals;
+    if fs.exists("build/sailfin/.let_result_temp_index") {
+        // Read diagnostics
+        let _diag_count = _parse_int_from_string(fs.readFile("build/sailfin/.let_result_diag_count"));
+        let mut _di -> number = 0;
+        loop {
+            if _di >= _diag_count { break; }
+            let _diag_path = "build/sailfin/.let_result_diag_" + number_to_string(_di);
+            if fs.exists(_diag_path) {
+                diagnostics.push(fs.readFile(_diag_path));
+            }
+            _di += 1;
+        }
+        // Read lines
+        let _lines_count = _parse_int_from_string(fs.readFile("build/sailfin/.let_result_lines_count"));
+        let mut _new_lines -> string[] = [];
+        let mut _li -> number = 0;
+        loop {
+            if _li >= _lines_count { break; }
+            let _line_path = "build/sailfin/.let_result_line_" + number_to_string(_li);
+            if fs.exists(_line_path) {
+                _new_lines.push(fs.readFile(_line_path));
+            }
+            _li += 1;
+        }
+        // Write joined lines for caller
+        let mut _joined -> string = "";
+        let mut _ji -> number = 0;
+        loop {
+            if _ji >= _new_lines.length { break; }
+            if _ji > 0 { _joined = _joined + "\n"; }
+            _joined = _joined + _new_lines[_ji];
+            _ji += 1;
+        }
+        fs.writeFile("build/sailfin/.dispatch_lines", _joined);
+        // Read allocas
+        let _allocas_count = _parse_int_from_string(fs.readFile("build/sailfin/.let_result_allocas_count"));
+        let mut _new_allocas -> string[] = [];
+        let mut _ai -> number = 0;
+        loop {
+            if _ai >= _allocas_count { break; }
+            let _alloca_path = "build/sailfin/.let_result_alloca_" + number_to_string(_ai);
+            if fs.exists(_alloca_path) {
+                _new_allocas.push(fs.readFile(_alloca_path));
+            }
+            _ai += 1;
+        }
+        let mut _joined_a -> string = "";
+        let mut _jai -> number = 0;
+        loop {
+            if _jai >= _new_allocas.length { break; }
+            if _jai > 0 { _joined_a = _joined_a + "\n"; }
+            _joined_a = _joined_a + _new_allocas[_jai];
+            _jai += 1;
+        }
+        fs.writeFile("build/sailfin/.dispatch_allocas", _joined_a);
+        // Write scalar results
+        fs.writeFile("build/sailfin/.dispatch_temp", fs.readFile("build/sailfin/.let_result_temp_index"));
+        fs.writeFile("build/sailfin/.dispatch_next_local", fs.readFile("build/sailfin/.let_result_next_local_id"));
+        fs.writeFile("build/sailfin/.dispatch_next_region", fs.readFile("build/sailfin/.let_result_next_region_id"));
+        fs.writeFile("build/sailfin/.dispatch_used_file_ipc", "1");
+        // New local binding
+        if fs.exists("build/sailfin/.let_result_local_name") {
+            let _name = fs.readFile("build/sailfin/.let_result_local_name");
+            let _pointer = fs.readFile("build/sailfin/.let_result_local_pointer");
+            let _type = fs.readFile("build/sailfin/.let_result_local_llvm_type");
+            let _ann = fs.readFile("build/sailfin/.let_result_local_type_ann");
+            result_locals = append_local_binding(result_locals, LocalBinding { name: _name, pointer: _pointer, llvm_type: _type, type_annotation: _ann, ownership: null, consumed: false, scope_id: scope_id, scope_depth: scope_depth });
+        }
+        // Clean up
+        fs.deleteFile("build/sailfin/.let_result_temp_index");
+        if fs.exists("build/sailfin/.let_result_local_name") {
+            fs.deleteFile("build/sailfin/.let_result_local_name");
+        }
+    } else {
+        fs.writeFile("build/sailfin/.dispatch_used_file_ipc", "0");
+    }
+    return result_locals;
+}
+
+// Handle Expression instruction (tag 1).
+// Writes results via file IPC for the caller to read back.
+fn dispatch_expression_instruction(
+    function -> NativeFunction,
+    index -> number,
+    instruction -> NativeInstruction,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    lines -> string[],
+    allocas -> string[],
+    temp_index -> number,
+    next_region_id -> number,
+    scope_id -> string,
+    scope_depth -> number,
+    functions -> NativeFunction[],
+    context -> TypeContext,
+    active_label -> string,
+    diagnostics -> string[],
+    string_constants -> StringConstant[],
+    mutations -> LocalMutation[],
+    lifetime_regions -> LifetimeRegionMetadata[],
+    debug_lowering -> boolean
+) -> LocalBinding[] ![io] {
+    let mut result_locals = locals;
+    let mut current_mutations = mutations;
+    let mut current_string_constants = string_constants;
+    let mut current_lifetime_regions = lifetime_regions;
+    let _raw_expr = get_instruction_text(function.instructions, index);
+    let trimmed_expression = trim_text(_raw_expr);
+    let mut handled_inline_let -> boolean = false;
+    if trimmed_expression.length >= 4 {
+        let prefix = substring(trimmed_expression, 0, 4);
+        if prefix == "let " {
+            let inline_parse = parse_inline_let_expression(trimmed_expression);
+            diagnostics = extend_string_array(diagnostics, inline_parse.diagnostics);
+            if inline_parse.success {
+                let inline_instruction = NativeInstruction.Let {
+                    name: inline_parse.name,
+                    mutable: inline_parse.mutable,
+                    type_annotation: inline_parse.type_annotation,
+                    value: inline_parse.initializer,
+                    span: null,
+                    value_span: null,
+                };
+                let lowered = lower_let_instruction(function, inline_instruction, bindings, result_locals, allocas, lines, temp_index, next_region_id, next_region_id, functions, context, scope_id, scope_depth, active_label);
+                result_locals = _apply_let_result_from_files(diagnostics, result_locals, scope_id, scope_depth);
+                if fs.readFile("build/sailfin/.dispatch_used_file_ipc") != "1" {
+                    diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+                    current_lifetime_regions = extend_lifetime_regions(current_lifetime_regions, lowered.lifetime_regions);
+                    current_lifetime_regions = apply_lifetime_release_events(current_lifetime_regions, lowered.lifetime_releases);
+                }
+                handled_inline_let = true;
+            }
+        }
+    }
+    if !handled_inline_let {
+        fs.writeFile("build/sailfin/.instr_has_span", "0");
+        _write_bindings_to_files(bindings);
+        _write_locals_to_files(result_locals);
+        let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, bindings, result_locals, temp_index, lines, next_region_id, scope_id, scope_depth, functions, context, active_label);
+        // Read scalar results from files
+        let _expr_temp = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_temp_index"));
+        let _expr_region = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_next_region_id"));
+        fs.writeFile("build/sailfin/.dispatch_temp", number_to_string(_expr_temp));
+        fs.writeFile("build/sailfin/.dispatch_next_region", number_to_string(_expr_region));
+        fs.writeFile("build/sailfin/.dispatch_used_file_ipc", "1");
+        // Read mutations
+        let _mut_count = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_mut_count"));
+        let mut _mi -> number = 0;
+        loop {
+            if _mi >= _mut_count { break; }
+            let _mp = "build/sailfin/.expr_stmt_mut_" + number_to_string(_mi);
+            let _mn = fs.readFile(_mp + "_name");
+            let _mt = fs.readFile(_mp + "_type");
+            let _mv = fs.readFile(_mp + "_value");
+            let _ml = fs.readFile(_mp + "_label");
+            current_mutations = extend_mutations(current_mutations, [LocalMutation {
+                name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml,
+            }]);
+            _mi += 1;
+        }
+        current_string_constants = _read_expr_string_constants(current_string_constants);
+    }
+    // Write mutation count for caller
+    fs.writeFile("build/sailfin/.dispatch_mutation_count", number_to_string(current_mutations.length));
+    let mut _wmi -> number = 0;
+    loop {
+        if _wmi >= current_mutations.length { break; }
+        let _wp = "build/sailfin/.dispatch_mut_" + number_to_string(_wmi);
+        fs.writeFile(_wp + "_name", current_mutations[_wmi].name);
+        fs.writeFile(_wp + "_type", current_mutations[_wmi].llvm_type);
+        fs.writeFile(_wp + "_value", current_mutations[_wmi].value_name);
+        fs.writeFile(_wp + "_label", current_mutations[_wmi].originating_label);
+        _wmi += 1;
+    }
+    return result_locals;
+}
+
+// Handle Return instruction (tag 0).
+// Writes results via file IPC.
+fn dispatch_return_instruction(
+    function -> NativeFunction,
+    index -> number,
+    instruction -> NativeInstruction,
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    lines -> string[],
+    temp_index -> number,
+    next_region_id -> number,
+    scope_id -> string,
+    scope_depth -> number,
+    llvm_return -> string,
+    functions -> NativeFunction[],
+    context -> TypeContext,
+    string_constants -> StringConstant[],
+    debug_lowering -> boolean
+) ![io] {
+    let _ret_expr = get_instruction_text(function.instructions, index);
+    let mut safe_instr_expr -> string = "";
+    if _ret_expr != null {
+        safe_instr_expr = _ret_expr;
+    }
+    fs.writeFile("build/sailfin/.instr_fn_name", function.name);
+    fs.writeFile("build/sailfin/.instr_expression", safe_instr_expr);
+    fs.writeFile("build/sailfin/.instr_llvm_return", llvm_return);
+    _write_bindings_to_files(bindings);
+    _write_locals_to_files(locals);
+    let lowered = lower_return_instruction(function, instruction, llvm_return, bindings, locals, temp_index, lines, next_region_id, scope_id, scope_depth, functions, context);
+    // Read scalar results
+    let _ret_temp = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_temp_index"));
+    let _ret_region = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_next_region_id"));
+    fs.writeFile("build/sailfin/.dispatch_temp", number_to_string(_ret_temp));
+    fs.writeFile("build/sailfin/.dispatch_next_region", number_to_string(_ret_region));
+    // Read string constants
+    let result_sc = _read_expr_string_constants(string_constants);
+    // Write string constants count for caller
+    let mut _joined_sc -> string = "";
+    let mut _si -> number = 0;
+    loop {
+        if _si >= result_sc.length { break; }
+        if _si > 0 { _joined_sc = _joined_sc + "\n"; }
+        _joined_sc = _joined_sc + result_sc[_si].name + "\t" + result_sc[_si].content + "\t" + number_to_string(result_sc[_si].byte_count);
+        _si += 1;
+    }
+    fs.writeFile("build/sailfin/.dispatch_string_constants", _joined_sc);
+}
