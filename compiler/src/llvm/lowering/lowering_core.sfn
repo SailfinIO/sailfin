@@ -1513,24 +1513,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("emit-llvm: dbg-B before override check path_len=" + number_to_string(native_text_override_path.length));
     }
     if native_text_override_path.length > 0 {
-        // Use individual field extractors to avoid struct-return ABI bug
-        let reparsed_fns = parse_native_functions_from_text(native_text_override_path);
-        if reparsed_fns.length >= parse.functions.length {
-            let reparsed_imports = parse_native_imports_from_text(native_text_override_path);
-            let reparsed_structs = parse_native_structs_from_text(native_text_override_path);
-            let reparsed_interfaces = parse_native_interfaces_from_text(native_text_override_path);
-            let reparsed_enums = parse_native_enums_from_text(native_text_override_path);
-            let reparsed_bindings = parse_native_bindings_from_text(native_text_override_path);
-            let reparsed_diagnostics = parse_native_diagnostics_from_text(native_text_override_path);
-            let reparsed = ParseNativeResult {
-                functions: reparsed_fns,
-                imports: reparsed_imports,
-                structs: reparsed_structs,
-                interfaces: reparsed_interfaces,
-                enums: reparsed_enums,
-                bindings: reparsed_bindings,
-                diagnostics: reparsed_diagnostics,
-            };
+        // Use light recovery to avoid hanging on parse_native_artifact_impl
+        // which has deeply nested if/else chains the seed cannot compile correctly.
+        // The emit-llvm-file path only needs functions, imports, and structs —
+        // interfaces, enums, bindings are not used during module compilation.
+        let reparsed = build_parse_result_from_text(native_text_override_path);
+        if reparsed.functions.length >= parse.functions.length {
             parse = reparsed;
         }
         if debug_lowering {
@@ -3136,18 +3124,69 @@ fn write_llvm_lines_chunked(path -> string, lines -> string[]) -> boolean ![io] 
         return fs.exists(path);
     }
 
-    let chunk_limit = 100000000;
+    // Join lines using a two-level strategy to avoid O(n^2) string concatenation.
+    // Build small chunks (~200 lines each), collect them, then join the chunks.
+    // This reduces total copies from O(n^2) to O(n * chunk_size).
+    let chunk_size = 200;
+    let mut chunks -> string[] = [];
     let mut buffer -> string = "";
-    let mut buffered -> number = 0;
-    let mut wrote -> boolean = false;
+    let mut lines_in_chunk -> number = 0;
 
     let mut index -> number = 0;
     loop {
         if index >= lines.length {
             break;
         }
-        let line = lines[index] + "\n";
-        let next_len = buffered + line.length;
+        buffer = buffer + lines[index] + "\n";
+        lines_in_chunk += 1;
+        if lines_in_chunk >= chunk_size {
+            chunks.push(buffer);
+            buffer = "";
+            lines_in_chunk = 0;
+        }
+        index += 1;
+    }
+    if buffer.length > 0 {
+        chunks.push(buffer);
+    }
+
+    // Join chunks into final output
+    let mut output -> string = "";
+    let mut ci -> number = 0;
+    loop {
+        if ci >= chunks.length {
+            break;
+        }
+        output = output + chunks[ci];
+        ci += 1;
+    }
+
+    fs.writeFile(path, output);
+    return fs.exists(path);
+}
+
+fn _write_llvm_lines_chunked_unused(path -> string, lines -> string[]) -> boolean ![io] {
+    // Preserved for compatibility — original implementation that used appendFile
+    let mut _if257 -> boolean = false;
+    if lines == null { _if257 = true; }
+    if lines.length == 0 { _if257 = true; }
+    if _if257 {
+        fs.writeFile(path, "");
+        return fs.exists(path);
+    }
+
+    let chunk_limit = 100000000;
+    let mut buffer -> string = "";
+    let mut buffered -> number = 0;
+    let mut wrote -> boolean = false;
+
+    let mut index2 -> number = 0;
+    loop {
+        if index2 >= lines.length {
+            break;
+        }
+        let line2 = lines[index2] + "\n";
+        let next_len = buffered + line2.length;
         if next_len > chunk_limit {
             if buffer.length > 0 {
                 if wrote {
@@ -3160,9 +3199,9 @@ fn write_llvm_lines_chunked(path -> string, lines -> string[]) -> boolean ![io] 
                 buffered = 0;
             }
         }
-        buffer = buffer + line;
-        buffered += line.length;
-        index += 1;
+        buffer = buffer + line2;
+        buffered += line2.length;
+        index2 += 1;
     }
 
     if buffer.length > 0 {

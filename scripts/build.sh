@@ -436,7 +436,7 @@ else
         echo "$i ${SOURCES[$i]}"
     done | xargs -P "$JOBS" -L 1 bash -c '
         cd "'"$REPO_ROOT"'"
-        bash scripts/build.sh --_build_module_worker "$@"
+        bash scripts/build.sh --seed "'"$SEED"'" --work-dir "'"$WORK_DIR"'" --_build_module_worker "$@"
     ' _ 2>"$RAW_DIR/build_errors.txt" || FAILED=1
 
     if [[ "$FAILED" -eq 0 ]]; then
