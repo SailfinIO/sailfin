@@ -219,6 +219,9 @@ test-e2e:
 	fi; \
 	for f in $$files; do \
 		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
+	done; \
+	for f in $$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); do \
+		bash "$$f" $(NATIVE_BIN); \
 	done
 
 # Run the full Sailfin-native test suite using the *self-hosted* compiler.
