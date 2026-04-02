@@ -38,14 +38,12 @@ fn leaky_relu(x -> number, alpha -> number = 0.01) -> number {
     return alpha * x;
 }
 
-fn sigmoid_approx(x -> number) -> number {
-    // Fast sigmoid approximation using piecewise linear.
-    // True sigmoid requires exp() which needs runtime support.
-    // This approximation is reasonable for |x| < 5.
-    if x >= 5 { return 1; }
-    if x <= -5 { return 0; }
-    return 0.5 + x * 0.1;
-}
+// sigmoid is not yet implemented.
+// Requires exp() runtime support (math intrinsic) for a correct implementation.
+// A piecewise linear placeholder was removed because its error bounds
+// (up to 0.12 absolute error, wrong curvature everywhere) make it
+// unsuitable as an activation function — it would produce incorrect
+// gradients and misleading outputs.
 
 fn step(x -> number) -> number {
     // Heaviside step function.

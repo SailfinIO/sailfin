@@ -90,30 +90,10 @@ fn hinge(predictions -> number[], targets -> number[]) -> number {
     return total / predictions.length;
 }
 
-fn binary_cross_entropy_approx(predictions -> number[], targets -> number[]) -> number {
-    // Approximate binary cross-entropy without log().
-    // Uses a piecewise linear approximation of -log(x).
-    // True implementation requires log() runtime support.
-    if predictions.length == 0 || targets.length == 0 { return 0; }
-    let n = predictions.length;
-    if targets.length < n { return 0; }
-    let mut total -> number = 0;
-    let mut i -> number = 0;
-    loop {
-        if i >= n { break; }
-        // Clamp predictions to avoid division issues.
-        let mut p -> number = predictions[i];
-        if p < 0.001 { p = 0.001; }
-        if p > 0.999 { p = 0.999; }
-        // Approximate -log(x) as (1 - x) / x for values near 1,
-        // and a linear ramp for small values.
-        let neg_log_p = (1 - p) / p;
-        let neg_log_1mp = p / (1 - p);
-        total = total + targets[i] * neg_log_p + (1 - targets[i]) * neg_log_1mp;
-        i += 1;
-    }
-    return total / predictions.length;
-}
+// binary_cross_entropy is not yet implemented.
+// Requires log() runtime support (math intrinsic) for a correct implementation.
+// A placeholder with an incorrect approximation was removed to avoid
+// silently producing wrong training signals.
 
 // ---- Utility ----
 
