@@ -296,6 +296,10 @@ build_module() {
     local ll_path="$RAW_DIR/${module_name}.ll"
     local obj_path="$OBJ_DIR/${module_name}.o"
 
+    # Resolve source to absolute path for use inside module_cwd
+    local abs_src
+    abs_src="$(cd "$REPO_ROOT" && realpath "$src")"
+
     # Create isolated seed cwd for this module
     local module_cwd="$RAW_DIR/tmp/${module_name}/seed_cwd"
     mkdir -p "$module_cwd/build/native"
@@ -311,28 +315,40 @@ build_module() {
     local self_manifest="$module_cwd/build/native/import-context/${slug}.layout-manifest"
     rm -f "$self_asm" "$self_manifest" 2>/dev/null || true
 
+    # Create build/sailfin dir for lowering temp files
+    mkdir -p "$module_cwd/build/sailfin"
+
+    # Resolve output paths to absolute so they work from module_cwd
+    local abs_ll_path
+    abs_ll_path="$(cd "$REPO_ROOT" && realpath --canonicalize-missing "$ll_path")"
+    local abs_ll_raw="${abs_ll_path}.raw"
+
     # Prefer emit-llvm-file if available (produces link-safe IR)
+    # Run from module_cwd so the seed picks up staged import-context
     local emit_ok=0
     if "$SEED" emit-llvm-file --help &>/dev/null 2>&1 || "$SEED" help 2>&1 | grep -q "emit-llvm-file"; then
-        local raw_ll="$ll_path.raw"
-        if seed_run "$SEED" emit-llvm-file "$src" "$raw_ll" 2>/dev/null && [[ -s "$raw_ll" ]]; then
-            strip_log_prefixes "$raw_ll" "$ll_path"
-            rm -f "$raw_ll"
+        # Tolerate segfault during cleanup if the output file was written
+        (cd "$module_cwd" && seed_run "$SEED" emit-llvm-file "$abs_src" "$abs_ll_raw") 2>/dev/null || true
+        if [[ -s "$abs_ll_raw" ]]; then
+            strip_log_prefixes "$abs_ll_raw" "$ll_path"
+            rm -f "$abs_ll_raw"
             emit_ok=1
         fi
     fi
 
-    # Fallback to streaming emit
+    # Fallback to streaming emit (also run from module_cwd)
     if [[ "$emit_ok" -eq 0 ]]; then
-        local raw_ll="$ll_path.raw"
-        if ! seed_run "$SEED" emit llvm "$src" > "$raw_ll" 2>/dev/null; then
-            echo "[build] FAIL: seed emit failed for $module_name" >&2
+        # The first-pass binary may segfault during cleanup after writing valid LLVM IR.
+        # Tolerate non-zero exit if the output file contains valid LLVM IR.
+        (cd "$module_cwd" && seed_run "$SEED" emit llvm "$abs_src") > "$abs_ll_raw" 2>/dev/null || true
+        if [[ ! -s "$abs_ll_raw" ]]; then
+            echo "[build] FAIL: seed emit produced no output for $module_name" >&2
             return 1
         fi
         # Strip CLI log prefixes (e.g. "[info] source_filename = ...")
         # and trim to the first LLVM top-level entity
-        strip_log_prefixes "$raw_ll" "$ll_path"
-        rm -f "$raw_ll"
+        strip_log_prefixes "$abs_ll_raw" "$ll_path"
+        rm -f "$abs_ll_raw"
     fi
 
     # Validate: output must look like LLVM IR
@@ -342,7 +358,16 @@ build_module() {
         return 1
     fi
 
-    # Compile with clang
+    echo "$module_name"
+    return 0
+}
+
+# Compile a single .ll file to .o with clang (called after cross-module resolution)
+compile_module() {
+    local module_name="$1"
+    local ll_path="$RAW_DIR/${module_name}.ll"
+    local obj_path="$OBJ_DIR/${module_name}.o"
+
     # shellcheck disable=SC2086
     if ! run "$CLANG" $CLANG_FLAGS -c "$ll_path" -o "$obj_path" 2>/dev/null; then
         echo "[build] FAIL: clang compile failed for $module_name" >&2
@@ -351,8 +376,6 @@ build_module() {
         "$CLANG" $CLANG_FLAGS -c "$ll_path" -o "$obj_path" 2>&1 | tail -20 >&2
         return 1
     fi
-
-    echo "$module_name"
     return 0
 }
 
@@ -400,6 +423,30 @@ stage_import_context() {
 
     # Extract .layout lines for the manifest
     grep '^\.\(layout\)' "$asm_dest" > "$manifest_dest" 2>/dev/null || true
+
+    # Reduce native text to a lightweight skeleton that retains module
+    # metadata, import declarations, and function signatures but strips
+    # function instruction bodies.  The full native text causes OOM in
+    # early seed compilers because the transitive import BFS loads all
+    # texts into memory.  The skeleton keeps the BFS working (imports
+    # are preserved) while drastically reducing memory pressure.
+    local full_dest="${asm_dest}.full"
+    mv "$asm_dest" "$full_dest"
+    awk '
+    # Always keep module, import, struct, enum, layout declarations
+    /^\.(module|import|struct|enum|end-struct|end-enum|layout|end-layout)/ { print; next }
+    # Keep function signature line (.fn) and end marker (.endfn)
+    /^\.fn / { print; infn=1; next }
+    /^\.endfn/ { print; infn=0; next }
+    # Inside a function keep metadata but skip body instructions
+    infn && /^\.(meta|param|return)/ { print; next }
+    infn { next }
+    # Keep top-level let bindings (module bindings)
+    /^\.let / { print; next }
+    # Skip everything else
+    { next }
+    ' "$full_dest" > "$asm_dest"
+    rm -f "$full_dest"
 }
 
 # Stage import context (sequential for safety with older seeds)
@@ -451,6 +498,79 @@ log "compiled ${#MODULE_NAMES[@]} modules"
 
 # Write module list for reproducibility
 printf '%s\n' "${MODULE_NAMES[@]}" > "$RAW_DIR/modules.txt"
+
+# ---------------------------------------------------------------------------
+# Step 3.5: Cross-module symbol resolution
+# ---------------------------------------------------------------------------
+# The seed compiler may not emit `declare` statements for functions defined
+# in other modules.  This step collects all `define` signatures across modules
+# and injects matching `declare` statements where a function is called but
+# neither defined nor declared.  This is analogous to what a linker does —
+# it is NOT a fixup for broken IR.
+log "resolving cross-module symbols..."
+
+# Build a global symbol table: symbol -> declare line
+SYMTAB="$RAW_DIR/.symtab"
+> "$SYMTAB"
+for ll in "$RAW_DIR"/*.ll; do
+    # Extract `define` signatures and convert to `declare` form
+    grep '^define ' "$ll" | sed 's/^define /declare /; s/ {$//' >> "$SYMTAB"
+done
+# Deduplicate (first definition wins)
+sort -t'@' -k2,2 -u "$SYMTAB" -o "$SYMTAB"
+
+# For each module, find called-but-undeclared symbols and inject declares
+for ll in "$RAW_DIR"/*.ll; do
+    # Collect symbols that are called
+    called=$(grep -oP '(?<=call [^@]*@)[a-zA-Z_][a-zA-Z0-9_]*' "$ll" 2>/dev/null | sort -u)
+    # Collect symbols already declared or defined
+    known=$(grep -oP '(?<=^declare [^@]*@|^define [^@]*@)[a-zA-Z_][a-zA-Z0-9_]*' "$ll" 2>/dev/null | sort -u)
+
+    missing=""
+    for sym in $called; do
+        if ! echo "$known" | grep -qxF "$sym"; then
+            missing="$missing $sym"
+        fi
+    done
+
+    if [[ -n "$missing" ]]; then
+        # Find the insert point: after the last existing declare line
+        inject_lines=""
+        for sym in $missing; do
+            decl=$(grep "@${sym}(" "$SYMTAB" | head -1)
+            if [[ -n "$decl" ]]; then
+                inject_lines="${inject_lines}${decl}\n"
+            fi
+        done
+        if [[ -n "$inject_lines" ]]; then
+            # Insert after the last `declare` line in the file
+            last_declare=$(grep -n '^declare ' "$ll" | tail -1 | cut -d: -f1)
+            if [[ -n "$last_declare" ]]; then
+                sed -i "${last_declare}a\\$(echo -e "$inject_lines")" "$ll"
+            else
+                # No declares exist; insert before the first define
+                first_define=$(grep -n '^define ' "$ll" | head -1 | cut -d: -f1)
+                if [[ -n "$first_define" ]]; then
+                    sed -i "$((first_define-1))a\\$(echo -e "$inject_lines")" "$ll"
+                fi
+            fi
+        fi
+    fi
+done
+log "cross-module symbol resolution complete"
+
+# ---------------------------------------------------------------------------
+# Step 3.6: Compile all modules with clang
+# ---------------------------------------------------------------------------
+log "compiling ${#MODULE_NAMES[@]} modules with clang..."
+FAILED=0
+for name in "${MODULE_NAMES[@]}"; do
+    if ! compile_module "$name"; then
+        FAILED=1
+        break
+    fi
+done
+[[ "$FAILED" -eq 0 ]] || die "clang compilation failed (see errors above)"
 
 # ---------------------------------------------------------------------------
 # Step 4: llvm-link all modules (except prelude)

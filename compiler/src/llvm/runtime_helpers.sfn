@@ -5,6 +5,7 @@
 
 import { RuntimeHelperDescriptor } from "./types";
 import { trim_text } from "./utils";
+import { strings_equal } from "../string_utils";
 
 // =============================================================================
 // Runtime Helper Registry

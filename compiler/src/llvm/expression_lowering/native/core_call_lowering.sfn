@@ -98,6 +98,41 @@ fn get_string_at(arr -> string[], idx -> number) -> string {
     return arr[idx];
 }
 
+// Internal struct for passing method resolution state between helpers.
+struct _CallMethodResolution {
+    trimmed_target -> string;
+    method_operand -> LLVMOperand?;
+    injected_argument_count -> number;
+    helper_descriptor -> RuntimeHelperDescriptor?;
+    is_array_concat -> boolean;
+    array_concat_element_type -> string;
+    is_array_push -> boolean;
+    array_push_element_type -> string;
+    diagnostics -> string[];
+    string_constants -> StringConstant[];
+    current_lines -> string[];
+    current_temp -> number;
+}
+
+// Internal struct for passing signature resolution state.
+struct _SignatureResolution {
+    function_entry -> NativeFunction?;
+    llvm_return -> string;
+    expected_params -> string[];
+    is_trait_dispatch -> boolean;
+    trimmed_target -> string;
+    diagnostics -> string[];
+    helper_descriptor -> RuntimeHelperDescriptor?;
+}
+
+// Internal struct for self-type coercion result.
+struct _SelfCoercionResult {
+    operands -> LLVMOperand[];
+    current_lines -> string[];
+    current_temp -> number;
+    diagnostics -> string[];
+}
+
 fn _parse_int_ccl(text -> string) -> number {
     let len = text.length;
     if len == 0 { return 0; }
@@ -253,6 +288,279 @@ fn _write_call_result_lines(current_lines -> string[], current_temp -> number) !
         _wl_i += 1;
     }
     fs.writeFile("build/sailfin/.call_result_temp", number_to_string(current_temp));
+}
+
+// Helper: resolve call signature from trait dispatch, file-based lookup, or function table
+fn _resolve_call_signature(trimmed_target -> string, functions -> NativeFunction[], context -> TypeContext, helper_descriptor_in -> RuntimeHelperDescriptor?) -> _SignatureResolution ![io] {
+    let mut diagnostics -> string[] = [];
+    let mut function_entry -> NativeFunction? = null;
+    let mut llvm_return -> string = "i8*";
+    let mut expected_params -> string[] = [];
+    let mut is_trait_dispatch -> boolean = false;
+    let mut helper_descriptor = helper_descriptor_in;
+    let mut resolved_target = trimmed_target;
+
+    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
+        is_trait_dispatch = true;
+        let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
+        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
+        if double_colon_pos > 0 {
+            if substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+                let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
+                let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
+                let interface_info2 = find_interface_info_by_name(context, interface_name);
+                if interface_info2 != null {
+                    let mut sig_idx -> number = 0;
+                    loop {
+                        if sig_idx >= interface_info2.signatures.length {
+                            break;
+                        }
+                        let sig = interface_info2.signatures[sig_idx];
+                        if sig.name == method_name {
+                            llvm_return = map_return_type(context, sig.return_type);
+                            if llvm_return.length == 0 {
+                                llvm_return = "i8*";
+                            }
+                            expected_params = ["i8*"];
+                            break;
+                        }
+                        sig_idx += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    function_entry = find_function_by_name_or_import_suffix(functions, trimmed_target);
+    if helper_descriptor == null {
+        helper_descriptor = find_runtime_helper(trimmed_target);
+    }
+
+    // File-based function resolution
+    let mut _file_fn_name -> string = "";
+    let mut _file_fn_return_type -> string = "";
+    let mut _file_fn_is_async -> boolean = false;
+    let mut _file_fn_param_types -> string[] = [];
+    let mut _file_fn_found -> boolean = false;
+    let _trace_ccl = fs.exists("build/sailfin/.trace_lowering");
+    if !is_trait_dispatch {
+        if helper_descriptor == null {
+            if fs.exists("build/sailfin/.ctx_func_count") {
+                let _fl_count_str = fs.readFile("build/sailfin/.ctx_func_count");
+                let _fl_count = _parse_int_ccl(_fl_count_str);
+                let _fl_suffix_prefix = trimmed_target + "__";
+                let mut _fl_suffix_idx -> number = -1;
+                let mut _fl_suffix_count -> number = 0;
+                let mut _fl_i -> number = 0;
+                loop {
+                    if _fl_i >= _fl_count { break; }
+                    let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_i);
+                    if !fs.exists(_fl_prefix + "_name") { break; }
+                    let _fl_name = fs.readFile(_fl_prefix + "_name");
+                    if _fl_name == trimmed_target {
+                        _file_fn_name = _fl_name;
+                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
+                        let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
+                        _file_fn_is_async = _fl_async_str == "1";
+                        let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
+                        let _fl_pc = _parse_int_ccl(_fl_pc_str);
+                        let mut _fl_j -> number = 0;
+                        loop {
+                            if _fl_j >= _fl_pc { break; }
+                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
+                            let _fl_mapped = map_parameter_type(context, _fl_ptype);
+                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
+                            _fl_j += 1;
+                        }
+                        _file_fn_found = true;
+                        break;
+                    }
+                    if starts_with(_fl_name, _fl_suffix_prefix) {
+                        _fl_suffix_idx = _fl_i;
+                        _fl_suffix_count += 1;
+                    }
+                    _fl_i += 1;
+                }
+                if !_file_fn_found {
+                    if _fl_suffix_count == 1 {
+                        let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_suffix_idx);
+                        _file_fn_name = fs.readFile(_fl_prefix + "_name");
+                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
+                        let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
+                        _file_fn_is_async = _fl_async_str == "1";
+                        let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
+                        let _fl_pc = _parse_int_ccl(_fl_pc_str);
+                        let mut _fl_j -> number = 0;
+                        loop {
+                            if _fl_j >= _fl_pc { break; }
+                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
+                            let _fl_mapped = map_parameter_type(context, _fl_ptype);
+                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
+                            _fl_j += 1;
+                        }
+                        _file_fn_found = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if !is_trait_dispatch {
+        if helper_descriptor != null {
+            let descriptor = helper_descriptor;
+            llvm_return = descriptor.return_type;
+            expected_params = descriptor.parameter_types;
+            function_entry = null;
+        } else if _file_fn_found {
+            resolved_target = _file_fn_name;
+            function_entry = null;
+            if _file_fn_is_async {
+                let future_return = future_pointer_type_for_return_type(_file_fn_return_type);
+                if future_return.length == 0 {
+                    diagnostics.push("llvm lowering: async function `" + resolved_target + "` has unsupported return type `" + _file_fn_return_type + "`");
+                    llvm_return = "i8*";
+                } else {
+                    llvm_return = future_return;
+                }
+                expected_params = _file_fn_param_types;
+            } else {
+                llvm_return = map_return_type(context, _file_fn_return_type);
+                if llvm_return.length == 0 {
+                    diagnostics.push("llvm lowering: unsupported return type in call to `" + resolved_target + "`");
+                    llvm_return = "i8*";
+                }
+                expected_params = _file_fn_param_types;
+            }
+        } else if function_entry != null {
+            resolved_target = function_entry.name;
+            if function_entry.is_async {
+                let future_return = future_pointer_type_for_return_type(function_entry.return_type);
+                if future_return.length == 0 {
+                    diagnostics.push("llvm lowering: async function `" + resolved_target + "` has unsupported return type `" + function_entry.return_type + "`");
+                    llvm_return = "i8*";
+                } else {
+                    llvm_return = future_return;
+                }
+                expected_params = collect_parameter_types(context, function_entry.parameters, resolved_target);
+            } else {
+                llvm_return = map_return_type(context, function_entry.return_type);
+                if llvm_return.length == 0 {
+                    diagnostics.push("llvm lowering: unsupported return type in call to `" + resolved_target + "`");
+                    llvm_return = "i8*";
+                }
+                expected_params = collect_parameter_types(context, function_entry.parameters, resolved_target);
+            }
+        } else {
+            diagnostics.push("llvm lowering: call to unknown function `" + resolved_target + "`");
+        }
+    }
+
+    return _SignatureResolution {
+        function_entry: function_entry,
+        llvm_return: llvm_return,
+        expected_params: expected_params,
+        is_trait_dispatch: is_trait_dispatch,
+        trimmed_target: resolved_target,
+        diagnostics: diagnostics,
+        helper_descriptor: helper_descriptor,
+    };
+}
+
+// Helper: coerce self-type operand for method calls
+fn _coerce_self_type_operand(operands -> LLVMOperand[], expected_params -> string[], function_entry -> NativeFunction?, injected_argument_count -> number, method_base_name -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], current_temp -> number, current_lines -> string[]) -> _SelfCoercionResult ![io] {
+    let mut result_operands = operands;
+    let mut result_lines = current_lines;
+    let mut result_temp = current_temp;
+    let mut diagnostics -> string[] = [];
+
+    if function_entry == null {
+        return _SelfCoercionResult { operands: result_operands, current_lines: result_lines, current_temp: result_temp, diagnostics: diagnostics };
+    }
+    if injected_argument_count != 1 {
+        return _SelfCoercionResult { operands: result_operands, current_lines: result_lines, current_temp: result_temp, diagnostics: diagnostics };
+    }
+    if operands.length == 0 {
+        return _SelfCoercionResult { operands: result_operands, current_lines: result_lines, current_temp: result_temp, diagnostics: diagnostics };
+    }
+    if expected_params.length == 0 {
+        return _SelfCoercionResult { operands: result_operands, current_lines: result_lines, current_temp: result_temp, diagnostics: diagnostics };
+    }
+
+    let expected_self_type = expected_params[0];
+    let self_operand = operands[0];
+    if self_operand.llvm_type == expected_self_type {
+        return _SelfCoercionResult { operands: result_operands, current_lines: result_lines, current_temp: result_temp, diagnostics: diagnostics };
+    }
+
+    if ends_with_pointer_suffix(self_operand.llvm_type) {
+        let stripped = strip_pointer_suffix(self_operand.llvm_type);
+        if stripped == expected_self_type {
+            let load_name = format_temp_name(result_temp);
+            result_lines.push("  " + load_name + " = load " + expected_self_type + ", " + expected_self_type + "* " + self_operand.value);
+            result_temp += 1;
+            let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: load_name };
+            result_operands = replace_llvm_operand(result_operands, 0, updated_operand);
+        } else {
+            diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+        }
+    } else if ends_with_pointer_suffix(expected_self_type) {
+        let base_name = trim_text(method_base_name);
+        if is_simple_identifier(base_name) {
+            let local_pointer = find_local_binding(locals, base_name);
+            let mut _if62 -> boolean = false;
+            if local_pointer != null {
+                if (local_pointer.llvm_type + "*") == expected_self_type {
+                    _if62 = true;
+                }
+            }
+            if _if62 {
+                let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: local_pointer.pointer };
+                result_operands = replace_llvm_operand(result_operands, 0, updated_operand);
+            } else {
+                let parameter_pointer = find_parameter_binding(bindings, base_name);
+                let mut _if64 -> boolean = false;
+                if parameter_pointer != null {
+                    if parameter_pointer.llvm_type == expected_self_type {
+                        _if64 = true;
+                    }
+                }
+                if _if64 {
+                    let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: parameter_pointer.llvm_name };
+                    result_operands = replace_llvm_operand(result_operands, 0, updated_operand);
+                } else {
+                    let mut _elif66 -> boolean = false;
+                    if parameter_pointer != null {
+                        if parameter_pointer.llvm_type == strip_pointer_suffix(expected_self_type) {
+                            _elif66 = true;
+                        }
+                    }
+                    if _elif66 {
+                        // avoid warning
+                    } else {
+                        diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                    }
+                }
+            }
+        } else {
+            let receiver_base = strip_pointer_suffix(expected_self_type);
+            let mut _if63 -> boolean = false;
+            if self_operand.llvm_type == receiver_base {
+                let mut _if65 -> boolean = false;
+                if starts_with(receiver_base, "%") { _if65 = true; }
+                if starts_with(receiver_base, "{") { _if65 = true; }
+                if _if65 {
+                    _if63 = true;
+                }
+            }
+            if !_if63 {
+                diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+            }
+        }
+    } else {
+        diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+    }
+
+    return _SelfCoercionResult { operands: result_operands, current_lines: result_lines, current_temp: result_temp, diagnostics: diagnostics };
 }
 
 fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult ![io] {
@@ -687,177 +995,15 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
     }
 
-    let mut function_entry -> NativeFunction? = null;
-    let mut llvm_return -> string = "i8*";
-    let mut expected_params -> string[] = [];
-    let mut is_trait_dispatch -> boolean = false;
-
-    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
-        is_trait_dispatch = true;
-        let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
-        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
-        if double_colon_pos > 0 {
-            if substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
-                let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
-                let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
-                let interface_info2 = find_interface_info_by_name(context, interface_name);
-                if interface_info2 != null {
-                    let mut sig_idx -> number = 0;
-                    loop {
-                        if sig_idx >= interface_info2.signatures.length {
-                            break;
-                        }
-                        let sig = interface_info2.signatures[sig_idx];
-                        if sig.name == method_name {
-                            llvm_return = map_return_type(context, sig.return_type);
-                            if llvm_return.length == 0 {
-                                llvm_return = "i8*";
-                            }
-                            expected_params = ["i8*"];
-                            break;
-                        }
-                        sig_idx += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    function_entry = find_function_by_name_or_import_suffix(functions, trimmed_target);
-    if helper_descriptor == null {
-        helper_descriptor = find_runtime_helper(trimmed_target);
-    }
-
-    // File-based function resolution: read return type and parameter types
-    // directly from files written by lowering_core.sfn. This bypasses the
-    // ABI corruption in the `functions` array (NativeFunction[] fields are
-    // misaligned when passed across function boundaries by the v0.1.1 seed).
-    let mut _file_fn_name -> string = "";
-    let mut _file_fn_return_type -> string = "";
-    let mut _file_fn_is_async -> boolean = false;
-    let mut _file_fn_param_types -> string[] = [];
-    let mut _file_fn_found -> boolean = false;
+    let _sig = _resolve_call_signature(trimmed_target, functions, context, helper_descriptor);
+    let mut function_entry = _sig.function_entry;
+    let mut llvm_return = _sig.llvm_return;
+    let mut expected_params = _sig.expected_params;
+    let is_trait_dispatch = _sig.is_trait_dispatch;
+    trimmed_target = _sig.trimmed_target;
+    helper_descriptor = _sig.helper_descriptor;
+    diagnostics = extend_string_array(diagnostics, _sig.diagnostics);
     let _trace_ccl = fs.exists("build/sailfin/.trace_lowering");
-    if _trace_ccl {
-        print("call_lowering: file-lookup-start target=" + trimmed_target + " is_trait=" + number_to_string(0) + " helper_null=" + number_to_string(0));
-    }
-    if !is_trait_dispatch {
-        if helper_descriptor == null {
-            if fs.exists("build/sailfin/.ctx_func_count") {
-                let _fl_count_str = fs.readFile("build/sailfin/.ctx_func_count");
-                let _fl_count = _parse_int_ccl(_fl_count_str);
-                if _trace_ccl {
-                    print("call_lowering: file-lookup count=" + number_to_string(_fl_count));
-                }
-                let _fl_suffix_prefix = trimmed_target + "__";
-                let mut _fl_suffix_idx -> number = -1;
-                let mut _fl_suffix_count -> number = 0;
-                let mut _fl_i -> number = 0;
-                loop {
-                    if _fl_i >= _fl_count { break; }
-                    let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_i);
-                    if !fs.exists(_fl_prefix + "_name") { break; }
-                    let _fl_name = fs.readFile(_fl_prefix + "_name");
-                    if _fl_name == trimmed_target {
-                        _file_fn_name = _fl_name;
-                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
-                        let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
-                        _file_fn_is_async = _fl_async_str == "1";
-                        let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
-                        let _fl_pc = _parse_int_ccl(_fl_pc_str);
-                        let mut _fl_j -> number = 0;
-                        loop {
-                            if _fl_j >= _fl_pc { break; }
-                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
-                            let _fl_mapped = map_parameter_type(context, _fl_ptype);
-                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
-                            _fl_j += 1;
-                        }
-                        _file_fn_found = true;
-                        if _trace_ccl {
-                            print("call_lowering: file-lookup FOUND name=" + _file_fn_name + " return_type=" + _file_fn_return_type + " params=" + number_to_string(_file_fn_param_types.length));
-                        }
-                        break;
-                    }
-                    if starts_with(_fl_name, _fl_suffix_prefix) {
-                        _fl_suffix_idx = _fl_i;
-                        _fl_suffix_count += 1;
-                    }
-                    _fl_i += 1;
-                }
-                if !_file_fn_found {
-                    if _fl_suffix_count == 1 {
-                        let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_suffix_idx);
-                        _file_fn_name = fs.readFile(_fl_prefix + "_name");
-                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
-                        let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
-                        _file_fn_is_async = _fl_async_str == "1";
-                        let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
-                        let _fl_pc = _parse_int_ccl(_fl_pc_str);
-                        let mut _fl_j -> number = 0;
-                        loop {
-                            if _fl_j >= _fl_pc { break; }
-                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
-                            let _fl_mapped = map_parameter_type(context, _fl_ptype);
-                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
-                            _fl_j += 1;
-                        }
-                        _file_fn_found = true;
-                    }
-                }
-            }
-        }
-    }
-
-    if !is_trait_dispatch {
-        if helper_descriptor != null {
-            let descriptor = helper_descriptor;
-            llvm_return = descriptor.return_type;
-            expected_params = descriptor.parameter_types;
-            function_entry = null;
-        } else if _file_fn_found {
-            trimmed_target = _file_fn_name;
-            function_entry = null;
-            if _file_fn_is_async {
-                let future_return = future_pointer_type_for_return_type(_file_fn_return_type);
-                if future_return.length == 0 {
-                    diagnostics.push("llvm lowering: async function `" + trimmed_target + "` has unsupported return type `" + _file_fn_return_type + "`");
-                    llvm_return = "i8*";
-                } else {
-                    llvm_return = future_return;
-                }
-                expected_params = _file_fn_param_types;
-            } else {
-                llvm_return = map_return_type(context, _file_fn_return_type);
-                if llvm_return.length == 0 {
-                    diagnostics.push("llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
-                    llvm_return = "i8*";
-                }
-                expected_params = _file_fn_param_types;
-            }
-        } else if function_entry != null {
-            trimmed_target = function_entry.name;
-            if function_entry.is_async {
-                let future_return = future_pointer_type_for_return_type(function_entry.return_type);
-                if future_return.length == 0 {
-                    diagnostics.push("llvm lowering: async function `" + trimmed_target + "` has unsupported return type `" + function_entry.return_type + "`");
-                    llvm_return = "i8*";
-                } else {
-                    llvm_return = future_return;
-                }
-                expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target);
-            } else {
-                llvm_return = map_return_type(context, function_entry.return_type);
-                if llvm_return.length == 0 {
-                    diagnostics.push("llvm lowering: unsupported return type in call to `" + trimmed_target + "`");
-                    llvm_return = "i8*";
-                }
-                expected_params = collect_parameter_types(context, function_entry.parameters, trimmed_target);
-            }
-        } else {
-            diagnostics.push("llvm lowering: call to unknown function `" + trimmed_target + "`");
-        }
-    }
 
     if trimmed_target == "concat" {
         if method_operand != null {
@@ -983,87 +1129,11 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         }
     }
 
-    if function_entry != null {
-        if injected_argument_count == 1 {
-            if operands.length > 0 {
-                if expected_params.length > 0 {
-                    let expected_self_type = expected_params[0];
-                    let self_operand = operands[0];
-                    if self_operand.llvm_type != expected_self_type {
-                        if ends_with_pointer_suffix(self_operand.llvm_type) {
-                            let stripped = strip_pointer_suffix(self_operand.llvm_type);
-                            if stripped == expected_self_type {
-                                let load_name = format_temp_name(current_temp);
-                                current_lines.push("  " + load_name + " = load " + expected_self_type + ", " + expected_self_type + "* " + self_operand.value);
-                                current_temp += 1;
-                                let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: load_name };
-                                operands = replace_llvm_operand(operands, 0, updated_operand);
-                            } else {
-                                diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
-                            }
-                        } else if ends_with_pointer_suffix(expected_self_type) {
-                            let base_name = trim_text(method_parse.base);
-                            if is_simple_identifier(base_name) {
-                                let local_pointer = find_local_binding(locals, base_name);
-                                let mut _if62 -> boolean = false;
-                                if local_pointer != null {
-                                    if (local_pointer.llvm_type + "*") == expected_self_type {
-                                        _if62 = true;
-                                    }
-                                }
-                                if _if62 {
-                                    let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: local_pointer.pointer };
-                                    operands = replace_llvm_operand(operands, 0, updated_operand);
-                                } else {
-                                    let parameter_pointer = find_parameter_binding(bindings, base_name);
-                                    let mut _if64 -> boolean = false;
-                                    if parameter_pointer != null {
-                                        if parameter_pointer.llvm_type == expected_self_type {
-                                            _if64 = true;
-                                        }
-                                    }
-                                    if _if64 {
-                                        let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: parameter_pointer.llvm_name };
-                                        operands = replace_llvm_operand(operands, 0, updated_operand);
-                                    } else {
-                                        let mut _elif66 -> boolean = false;
-                                        if parameter_pointer != null {
-                                            if parameter_pointer.llvm_type == strip_pointer_suffix(expected_self_type) {
-                                                _elif66 = true;
-                                            }
-                                        }
-                                        if _elif66 {
-                                            // avoid warning
-                                        } else {
-                                            diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
-                                        }
-                                    }
-                                }
-                            } else {
-                                let receiver_base = strip_pointer_suffix(expected_self_type);
-                                let mut _if63 -> boolean = false;
-                                if self_operand.llvm_type == receiver_base {
-                                    let mut _if65 -> boolean = false;
-                                    if starts_with(receiver_base, "%") { _if65 = true; }
-                                    if starts_with(receiver_base, "{") { _if65 = true; }
-                                    if _if65 {
-                                        _if63 = true;
-                                    }
-                                }
-                                if _if63 {
-                                    // ok
-                                } else {
-                                    diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
-                                }
-                            }
-                        } else {
-                            diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let _coercion = _coerce_self_type_operand(operands, expected_params, function_entry, injected_argument_count, method_parse.base, bindings, locals, current_temp, current_lines);
+    operands = _coercion.operands;
+    current_lines = _coercion.current_lines;
+    current_temp = _coercion.current_temp;
+    diagnostics = extend_string_array(diagnostics, _coercion.diagnostics);
 
     if _trace_ccl {
         print("call_lowering: pre-coerce operands=" + number_to_string(operands.length) + " expected_params=" + number_to_string(expected_params.length) + " llvm_return=" + llvm_return);

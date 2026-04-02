@@ -3,7 +3,7 @@
 // Shared string helpers surfaced via the runtime prelude. The compiler and
 // downstream projects import from here to keep a single implementation.
 
-import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, strings_equal } from "runtime/prelude";
+import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, strings_equal, string_starts_with, string_ends_with } from "runtime/prelude";
 
 fn char_at(value -> string, index -> number) -> string {
 	let value_len = value.length;

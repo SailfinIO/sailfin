@@ -4,7 +4,7 @@
 // Resolves imported module paths and applies layout metadata.
 
 import { NativeImport, NativeStruct, NativeEnum, LayoutManifest, parse_layout_manifest, parse_native_imports_for_import } from "../native_ir";
-import { substring } from "../string_utils";
+import { substring, find_char } from "../string_utils";
 import { ImportedModuleContext, LayoutManifestApplication } from "./types";
 import { trim_text, append_string, string_array_contains, number_to_string, starts_with, ends_with, join_with_separator, index_of } from "./utils";
 

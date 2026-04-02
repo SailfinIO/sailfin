@@ -7,7 +7,7 @@
 // relational operators (`emit_comparison_instruction`, `emit_boolean_and`),
 // and provides local variable loading (`load_local_operand`).
 
-import { char_code } from "../../../string_utils";
+import { char_code, strings_equal } from "../../../string_utils";
 
 import {
     number_to_string,
