@@ -2,7 +2,7 @@
 # End-to-end tests for `sfn login`.
 #
 # Usage:
-#   scripts/test_login.sh <compiler-binary>
+#   compiler/tests/e2e/test_login.sh <compiler-binary>
 #
 # Uses a temporary HOME so the real ~/.sfn/credentials is never touched.
 
@@ -101,6 +101,19 @@ test_login_interactive_stdin() {
     [ "$stored" = "stdin-token-999" ] || { echo "expected 'stdin-token-999', got '$stored'"; return 1; }
 }
 
+# ---- Test 8: login sets restrictive permissions ----
+test_login_permissions() {
+    local home="$tmpdir/t8"
+    mkdir -p "$home"
+    HOME="$home" "$BINARY" login "perm-token"
+    local dir_perms
+    dir_perms="$(stat -c '%a' "$home/.sfn" 2>/dev/null || stat -f '%Lp' "$home/.sfn" 2>/dev/null)"
+    [ "$dir_perms" = "700" ] || { echo "expected ~/.sfn perms 700, got $dir_perms"; return 1; }
+    local file_perms
+    file_perms="$(stat -c '%a' "$home/.sfn/credentials" 2>/dev/null || stat -f '%Lp' "$home/.sfn/credentials" 2>/dev/null)"
+    [ "$file_perms" = "600" ] || { echo "expected credentials perms 600, got $file_perms"; return 1; }
+}
+
 run_test "login with token argument" test_login_with_arg
 run_test "login overwrites existing credentials" test_login_overwrites
 run_test "login creates ~/.sfn directory" test_login_creates_dir
@@ -108,6 +121,7 @@ run_test "login rejects empty token" test_login_empty_token
 run_test "login too many args shows usage" test_login_too_many_args
 run_test "login output confirms save path" test_login_output_message
 run_test "login interactive reads from stdin" test_login_interactive_stdin
+run_test "login sets restrictive permissions" test_login_permissions
 
 echo ""
 echo "login tests: $PASS passed, $FAIL failed"

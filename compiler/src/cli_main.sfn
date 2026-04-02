@@ -2242,9 +2242,23 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         if args.length == 2 {
             token = _toml_trim_str(args[1]);
         } else {
-            // Interactive: read token from stdin
+            // Interactive: read token from stdin via a secure temp file
             print("enter your registry token:");
-            token = _shell_read("head -1");
+            let tmp = _shell_read("mktemp /tmp/.sfn_login_XXXXXX");
+            if tmp.length == 0 {
+                print("error: failed to create secure temp file");
+                return 1;
+            }
+            let read_rc = process.run(["sh", "-c", "head -1 > " + tmp]);
+            if read_rc != 0 {
+                process.run(["rm", "-f", tmp]);
+                print("error: failed to read token");
+                return 1;
+            }
+            if fs.exists(tmp) {
+                token = _toml_trim_str(fs.readFile(tmp));
+            }
+            process.run(["rm", "-f", tmp]);
         }
 
         if token.length == 0 {
@@ -2260,9 +2274,23 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
         let sfn_dir = home + "/.sfn";
         _ensure_dir_recursive(sfn_dir);
+        process.run(["chmod", "700", sfn_dir]);
 
         let cred_path = sfn_dir + "/credentials";
         fs.writeFile(cred_path, token);
+        process.run(["chmod", "600", cred_path]);
+
+        // Verify the write succeeded
+        if !fs.exists(cred_path) {
+            print("error: failed to write credentials to " + cred_path);
+            return 1;
+        }
+        let saved = fs.readFile(cred_path);
+        if !strings_equal(_toml_trim_str(saved), token) {
+            print("error: failed to write credentials to " + cred_path);
+            return 1;
+        }
+
         print("credentials saved to " + cred_path);
         return 0;
     }
