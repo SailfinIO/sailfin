@@ -65,12 +65,10 @@ fn fill(shape -> number[], value -> number) -> Tensor {
 fn from_array(data -> number[], shape -> number[]) -> Tensor {
     // Create a tensor from a flat data array and a shape.
     // Data length must match the product of shape dimensions.
+    // If mismatched, uses the smaller of data.length and shape size.
     let n = _shape_size(shape);
-    if data.length != n {
-        print("[sfn/tensor] from_array: data length does not match shape");
-        return Tensor { data: data, shape: shape, size: data.length };
-    }
-    return Tensor { data: data, shape: shape, size: n };
+    let actual = _min_size(data.length, n);
+    return Tensor { data: data, shape: shape, size: actual };
 }
 
 fn scalar(value -> number) -> Tensor {
