@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.2 (2026-04-02)
+
+### Bug Fixes
+
+- Tmp file sec, file permissions, write verification, test infra
+  ([`1d3b7ed`](https://github.com/SailfinIO/sailfin/commit/1d3b7ed67f070b36817f8f4f5bd3d506a28b6086))
+
+
 ## v0.5.0-alpha.1 (2026-04-02)
 
 ### Bug Fixes
@@ -448,6 +456,11 @@ Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
 Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/1d3eae2b-44a1-4e45-a6be-d086d9328513
 
 Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+### Features
+
+- Sfn login command
+  ([`cc2a874`](https://github.com/SailfinIO/sailfin/commit/cc2a874bf6545e1a1f16918ea63be955530e99d8))
 
 
 ## v0.4.0 (2026-03-30)
