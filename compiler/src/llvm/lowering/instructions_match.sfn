@@ -32,6 +32,13 @@ import {
     ConditionConversion,
     BlockLabelResult,
     MatchArmMutations,
+    MatchArmBindingResult,
+    BranchExitLoadResult,
+    MatchEnumBindingResult,
+    MatchUnionBindingResult,
+    MatchDefaultNarrowResult,
+    IfExitLoadsResult,
+    IfMergePhiResult,
 } from "../types";
 
 import {
@@ -184,6 +191,478 @@ fn _match_make_local_binding(name -> string, pointer -> string, llvm_type -> str
     };
 }
 
+// Helper: extract and bind enum payload fields in a match arm body.
+fn _match_extract_enum_field_bindings(
+    field_bindings -> MatchFieldBinding[],
+    enum_info_val -> EnumTypeInfo,
+    variant_info_val -> EnumVariantInfo,
+    subject_operand -> LLVMOperand,
+    lines -> string[],
+    temp_index -> number,
+    locals -> LocalBinding[],
+    next_local_id -> number,
+    scope_id -> string,
+    scope_depth -> number,
+    body_label -> string
+) -> MatchEnumBindingResult {
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut base_locals -> LocalBinding[] = locals;
+    let mut base_local_id -> number = next_local_id;
+
+    // Allocate subject on stack for field extraction
+    let subject_alloca_temp = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + subject_alloca_temp + " = alloca " + subject_operand.llvm_type);
+    current_lines.push("  store " + subject_operand.llvm_type + " " + subject_operand.value + ", " + subject_operand.llvm_type + "* " + subject_alloca_temp);
+
+    let mut binding_idx -> number = 0;
+    loop {
+        if binding_idx >= field_bindings.length {
+            break;
+        }
+        let field_binding = field_bindings[binding_idx];
+
+        // 1. Get pointer to payload byte array (field 1 of enum)
+        let payload_ptr_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        let mut payload_field_index -> number = 1;
+        if enum_info_val.max_payload_size > 0 {
+            if enum_info_val.align > enum_info_val.tag_size {
+                payload_field_index = 2;
+            }
+        }
+        current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 " + number_to_string(payload_field_index));
+
+        // 2. Treat payload as a raw byte pointer (opaque pointers)
+        let byte_ptr_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
+
+        // 3. Offset to field position
+        let field_offset_in_payload = field_binding.field_offset - variant_info_val.offset;
+        let mut field_ptr_temp -> string = byte_ptr_temp;
+        if field_offset_in_payload > 0 {
+            let offset_ptr_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+            field_ptr_temp = offset_ptr_temp;
+        }
+
+        // 4. Cast to field type pointer (opaque pointers)
+        let typed_ptr_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
+
+        // 5. Load the field value
+        let value_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + value_temp + " = load " + field_binding.field_type + ", ptr " + typed_ptr_temp);
+
+        // 6. Allocate a local for this binding
+        let local_alloca_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + local_alloca_temp + " = alloca " + field_binding.field_type);
+
+        // 7. Store the value into the local
+        current_lines.push("  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp);
+
+        // 8. Add to locals so the match arm body can reference it
+        base_locals.push(_match_make_local_binding(field_binding.field_name, local_alloca_temp, field_binding.field_type, make_child_scope_id(scope_id, body_label), scope_depth + 1));
+
+        base_local_id += 1;
+        binding_idx += 1;
+    }
+
+    return MatchEnumBindingResult {
+        lines: current_lines,
+        locals: base_locals,
+        temp_index: current_temp,
+        next_local_id: base_local_id,
+    };
+}
+
+// Helper: extract and bind union-variant struct fields in a match arm body.
+fn _match_extract_union_struct_bindings(
+    union_struct_bindings -> MatchStructFieldBinding[],
+    struct_info_val -> StructTypeInfo,
+    variant_index -> number,
+    union_payload_types -> string[],
+    subject_operand -> LLVMOperand,
+    lines -> string[],
+    temp_index -> number,
+    locals -> LocalBinding[],
+    next_local_id -> number,
+    scope_id -> string,
+    scope_depth -> number,
+    body_label -> string
+) -> MatchUnionBindingResult {
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut base_locals -> LocalBinding[] = locals;
+    let mut base_local_id -> number = next_local_id;
+
+    let payload_index = variant_index + 1;
+
+    // Extract the variant payload (a struct pointer) from the union.
+    let payload_temp = format_temp_name(current_temp);
+    current_temp += 1;
+    let payload_type = union_payload_types[variant_index];
+    current_lines.push("  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
+
+    let mut typed_payload_ptr -> string = payload_temp;
+    // If the payload is an opaque pointer, try to preserve the expected struct pointer type.
+    let expected_ptr_type = struct_info_val.llvm_name + "*";
+    if payload_type == "i8*" {
+        let cast_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + cast_temp + " = bitcast i8* " + payload_temp + " to " + expected_ptr_type);
+        typed_payload_ptr = cast_temp;
+    }
+
+    let mut binding_idx -> number = 0;
+    loop {
+        if binding_idx >= union_struct_bindings.length {
+            break;
+        }
+        let binding = union_struct_bindings[binding_idx];
+
+        // Compute field pointer and load.
+        let gep_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + gep_temp + " = getelementptr " + struct_info_val.llvm_name + ", " + expected_ptr_type + " " + typed_payload_ptr + ", i32 0, i32 " + number_to_string(binding.field_index));
+        let load_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + load_temp + " = load " + binding.field_type + ", " + binding.field_type + "* " + gep_temp);
+
+        // Allocate a local for this binding.
+        let local_alloca_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + local_alloca_temp + " = alloca " + binding.field_type);
+        current_lines.push("  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp);
+
+        base_locals.push(_match_make_local_binding(binding.field_name, local_alloca_temp, binding.field_type, make_child_scope_id(scope_id, body_label), scope_depth + 1));
+        base_local_id += 1;
+        binding_idx += 1;
+    }
+
+    return MatchUnionBindingResult {
+        lines: current_lines,
+        locals: base_locals,
+        temp_index: current_temp,
+        next_local_id: base_local_id,
+    };
+}
+
+// Helper: narrow union type in default match arm when exactly one variant remains.
+fn _match_narrow_default_union(
+    union_payload_types -> string[],
+    matched_union_variants -> number[],
+    subject_name -> string,
+    subject_operand -> LLVMOperand,
+    lines -> string[],
+    temp_index -> number,
+    locals -> LocalBinding[],
+    next_local_id -> number,
+    scope_id -> string,
+    scope_depth -> number,
+    body_label -> string
+) -> MatchDefaultNarrowResult {
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut base_locals -> LocalBinding[] = locals;
+    let mut base_local_id -> number = next_local_id;
+
+    let mut remaining -> number[] = [];
+    let mut v -> number = 0;
+    loop {
+        if v >= union_payload_types.length {
+            break;
+        }
+        let mut is_matched -> boolean = false;
+        let mut mi -> number = 0;
+        loop {
+            if mi >= matched_union_variants.length {
+                break;
+            }
+            if matched_union_variants[mi] == v {
+                is_matched = true;
+                break;
+            }
+            mi += 1;
+        }
+        if !is_matched {
+            remaining.push(v);
+        }
+        v += 1;
+    }
+    if remaining.length == 1 {
+        let remaining_index = remaining[0];
+        let payload_index = remaining_index + 1;
+        let payload_type = union_payload_types[remaining_index];
+        let payload_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
+
+        let local_alloca_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + local_alloca_temp + " = alloca " + payload_type);
+        current_lines.push("  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp);
+
+        base_locals.push(LocalBinding {
+            name: subject_name,
+            pointer: local_alloca_temp,
+            llvm_type: payload_type,
+            type_annotation: "",
+            ownership: null,
+            consumed: false,
+            scope_id: make_child_scope_id(scope_id, body_label),
+            scope_depth: scope_depth + 1,
+        });
+        base_local_id += 1;
+    }
+
+    return MatchDefaultNarrowResult {
+        lines: current_lines,
+        locals: base_locals,
+        temp_index: current_temp,
+        next_local_id: base_local_id,
+    };
+}
+
+// Helper: compute branch exit loads for if-else phi node emission.
+fn _if_compute_branch_exit_loads(
+    mutated_names -> string[],
+    base_locals -> LocalBinding[],
+    mutations -> LocalMutation[],
+    exit_label -> string,
+    temp_index -> number,
+    is_terminated -> boolean
+) -> BranchExitLoadResult {
+    let mut exit_loads -> string[] = [];
+    let mut added -> LocalMutation[] = [];
+    let mut current_temp -> number = temp_index;
+    let mut result_lines -> string[] = [];
+
+    if !is_terminated {
+        let mut name_idx -> number = 0;
+        loop {
+            if name_idx >= mutated_names.length {
+                break;
+            }
+            let name = mutated_names[name_idx];
+            let local = find_local_binding(base_locals, name);
+            if local != null {
+                let load_temp = format_temp_name(current_temp);
+                current_temp += 1;
+                exit_loads = append_string(
+                    exit_loads,
+                    "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
+                );
+                let original = find_mutation_for_name(mutations, name);
+                let mut original_span -> NativeSourceSpan? = null;
+                if original != null {
+                    original_span = original.span;
+                }
+                let exit_mutation = LocalMutation {
+                    name: name,
+                    llvm_type: local.llvm_type,
+                    value_name: load_temp,
+                    span: original_span,
+                    originating_label: exit_label,
+                };
+                added.push(exit_mutation);
+            }
+            name_idx += 1;
+        }
+    }
+
+    return BranchExitLoadResult {
+        lines: result_lines,
+        exit_loads: exit_loads,
+        added_mutations: added,
+        temp_index: current_temp,
+    };
+}
+
+// Helper: insert exit loads into lines and update mutations for if-else branches.
+fn _if_insert_exit_loads(
+    lines -> string[],
+    then_exit_loads -> string[],
+    else_exit_loads -> string[],
+    then_added -> LocalMutation[],
+    else_added -> LocalMutation[],
+    then_mutations -> LocalMutation[],
+    else_mutations -> LocalMutation[],
+    collected_mutations -> LocalMutation[],
+    then_merge_insert_index -> number,
+    else_merge_insert_index -> number
+) -> IfExitLoadsResult {
+    let mut current_lines -> string[] = lines;
+    let mut current_then_mutations -> LocalMutation[] = then_mutations;
+    let mut current_else_mutations -> LocalMutation[] = else_mutations;
+    let mut current_collected -> LocalMutation[] = collected_mutations;
+
+    let mut inserted_then -> boolean = false;
+    let mut inserted_else -> boolean = false;
+    if then_exit_loads.length > 0 {
+        if then_merge_insert_index >= 0 {
+            if else_exit_loads.length > 0 {
+                if else_merge_insert_index >= 0 {
+                    if then_merge_insert_index > else_merge_insert_index {
+                        current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
+                        current_then_mutations = extend_mutations(current_then_mutations, then_added);
+                        current_collected = extend_mutations(current_collected, then_added);
+                        inserted_then = true;
+
+                        current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
+                        current_else_mutations = extend_mutations(current_else_mutations, else_added);
+                        current_collected = extend_mutations(current_collected, else_added);
+                        inserted_else = true;
+                    } else {
+                        current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
+                        current_else_mutations = extend_mutations(current_else_mutations, else_added);
+                        current_collected = extend_mutations(current_collected, else_added);
+                        inserted_else = true;
+
+                        current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
+                        current_then_mutations = extend_mutations(current_then_mutations, then_added);
+                        current_collected = extend_mutations(current_collected, then_added);
+                        inserted_then = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if !inserted_then {
+        if then_exit_loads.length > 0 {
+            if then_merge_insert_index >= 0 {
+                current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
+                current_then_mutations = extend_mutations(current_then_mutations, then_added);
+                current_collected = extend_mutations(current_collected, then_added);
+            }
+        }
+    }
+
+    if !inserted_else {
+        if else_exit_loads.length > 0 {
+            if else_merge_insert_index >= 0 {
+                current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
+                current_else_mutations = extend_mutations(current_else_mutations, else_added);
+                current_collected = extend_mutations(current_collected, else_added);
+            }
+        }
+    }
+
+    return IfExitLoadsResult {
+        lines: current_lines,
+        then_mutations: current_then_mutations,
+        else_mutations: current_else_mutations,
+        collected_mutations: current_collected,
+        temp_index: 0,
+    };
+}
+
+// Helper: emit phi nodes at the merge block for if/else or straight-line if.
+fn _if_emit_merge_phis(
+    has_else -> boolean,
+    then_terminated -> boolean,
+    else_terminated -> boolean,
+    then_mutations -> LocalMutation[],
+    else_mutations -> LocalMutation[],
+    collected_mutations -> LocalMutation[],
+    base_locals -> LocalBinding[],
+    preloaded_locals -> string[],
+    then_label -> string,
+    else_label -> string,
+    then_exit_label -> string,
+    else_exit_label -> string,
+    branch_label -> string,
+    merge_label -> string,
+    lines -> string[],
+    temp_index -> number
+) -> IfMergePhiResult {
+    let mut current_lines -> string[] = lines;
+    let mut current_temp -> number = temp_index;
+    let mut current_mutations -> LocalMutation[] = collected_mutations;
+
+    if has_else {
+        // Full if/else: emit phi nodes merging values from both branches
+        let mut _if233 -> boolean = false;
+        let mut _if235 -> boolean = false;
+        if !then_terminated { _if235 = true; }
+        if !else_terminated { _if235 = true; }
+        if _if235 {
+            if current_mutations.length > 0 {
+                _if233 = true;
+            }
+        }
+        if _if233 {
+            let phi_result = emit_phi_merges_for_if_else(
+                then_mutations,
+                else_mutations,
+                base_locals,
+                preloaded_locals,
+                then_label,
+                else_label,
+                then_exit_label,
+                else_exit_label,
+                then_terminated,
+                else_terminated,
+                current_lines,
+                current_temp
+            );
+            current_lines = phi_result.lines;
+            current_temp = phi_result.temp_index;
+            let materialized = materialize_mutation_values_at_label(
+                current_mutations,
+                base_locals,
+                current_lines,
+                current_temp,
+                merge_label
+            );
+            current_lines = materialized.lines;
+            current_temp = materialized.temp_index;
+            current_mutations = materialized.mutations;
+        }
+    } else {
+        // Straight-line if: emit phi nodes merging then branch with base
+        if !then_terminated {
+            if current_mutations.length > 0 {
+                let phi_result = emit_phi_merges_for_straight_if(
+                    current_mutations,
+                    base_locals,
+                    preloaded_locals,
+                    branch_label,
+                    then_label,
+                    then_exit_label,
+                    current_lines,
+                    current_temp
+                );
+                current_lines = phi_result.lines;
+                current_temp = phi_result.temp_index;
+                let materialized = materialize_mutation_values_at_label(
+                    current_mutations,
+                    base_locals,
+                    current_lines,
+                    current_temp,
+                    merge_label
+                );
+                current_lines = materialized.lines;
+                current_temp = materialized.temp_index;
+                current_mutations = materialized.mutations;
+            }
+        }
+    }
+
+    return IfMergePhiResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        collected_mutations: current_mutations,
+    };
+}
+
 fn collect_match_structure(
     instructions -> NativeInstruction[],
     start_index -> number,
@@ -306,6 +785,7 @@ fn lower_match_instruction(
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
+    let base_lines_snapshot = copy_string_array(lines);
     let mut current_allocas -> string[] = allocas;
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_temp -> number = temp_index;
@@ -546,77 +1026,23 @@ fn lower_match_instruction(
             if lowered_condition.enum_info != null {
                 if lowered_condition.variant_info != null {
                     if subject_operand != null {
-                        let enum_info_val = lowered_condition.enum_info;
-                        let variant_info_val = lowered_condition.variant_info;
-
-                        // Allocate subject on stack for field extraction
-                        let subject_alloca_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + subject_alloca_temp + " = alloca " + subject_operand.llvm_type);
-                        current_lines.push("  store " + subject_operand.llvm_type + " " + subject_operand.value + ", " + subject_operand.llvm_type + "* " + subject_alloca_temp);
-                        // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
-
-                        let mut binding_idx -> number = 0;
-                        loop {
-                            if binding_idx >= lowered_condition.field_bindings.length {
-                                break;
-                            }
-                            let field_binding = lowered_condition.field_bindings[binding_idx];
-
-                            // Extract the field from the payload
-                            // 1. Get pointer to payload byte array (field 1 of enum)
-                            let payload_ptr_temp = format_temp_name(current_temp);
-                            current_temp += 1;
-                            let mut payload_field_index -> number = 1;
-                            if enum_info_val.max_payload_size > 0 {
-                                if enum_info_val.align > enum_info_val.tag_size {
-                                    payload_field_index = 2;
-                                }
-                            }
-                            current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 " + number_to_string(payload_field_index));
-
-                            // 2. Treat payload as a raw byte pointer (opaque pointers)
-                            let byte_ptr_temp = format_temp_name(current_temp);
-                            current_temp += 1;
-                            current_lines.push("  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
-
-                            // 3. Offset to field position
-                            // Field offset is relative to the enum start, but payload starts at variant offset
-                            // So we need to subtract the variant offset to get the offset within the payload
-                            let field_offset_in_payload = field_binding.field_offset - variant_info_val.offset;
-                            let mut field_ptr_temp -> string = byte_ptr_temp;
-                            if field_offset_in_payload > 0 {
-                                let offset_ptr_temp = format_temp_name(current_temp);
-                                current_temp += 1;
-                                current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
-                                field_ptr_temp = offset_ptr_temp;
-                            }
-
-                            // 4. Cast to field type pointer (opaque pointers)
-                            let typed_ptr_temp = format_temp_name(current_temp);
-                            current_temp += 1;
-                            current_lines.push("  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
-
-                            // 5. Load the field value
-                            let value_temp = format_temp_name(current_temp);
-                            current_temp += 1;
-                            current_lines.push("  " + value_temp + " = load " + field_binding.field_type + ", ptr " + typed_ptr_temp);
-
-                            // 6. Allocate a local for this binding
-                            let local_alloca_temp = format_temp_name(current_temp);
-                            current_temp += 1;
-                            current_lines.push("  " + local_alloca_temp + " = alloca " + field_binding.field_type);
-                            // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
-
-                            // 7. Store the value into the local
-                            current_lines.push("  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp);
-
-                            // 8. Add to locals so the match arm body can reference it
-                            base_locals.push(_match_make_local_binding(field_binding.field_name, local_alloca_temp, field_binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth + 1));
-
-                            base_local_id += 1;
-                            binding_idx += 1;
-                        }
+                        let enum_binding_result = _match_extract_enum_field_bindings(
+                            lowered_condition.field_bindings,
+                            lowered_condition.enum_info,
+                            lowered_condition.variant_info,
+                            subject_operand,
+                            current_lines,
+                            current_temp,
+                            base_locals,
+                            base_local_id,
+                            scope_id,
+                            scope_depth,
+                            body_labels[index]
+                        );
+                        current_lines = enum_binding_result.lines;
+                        base_locals = enum_binding_result.locals;
+                        current_temp = enum_binding_result.temp_index;
+                        base_local_id = enum_binding_result.next_local_id;
                     }
                 }
             }
@@ -626,51 +1052,24 @@ fn lower_match_instruction(
         if lowered_condition.union_variant_index >= 0 {
             if lowered_condition.union_struct_info != null {
                 if lowered_condition.union_struct_bindings.length > 0 {
-                    let struct_info_val = lowered_condition.union_struct_info;
-                    let variant_index = lowered_condition.union_variant_index;
-                    let payload_index = variant_index + 1;
-
-                    // Extract the variant payload (a struct pointer) from the union.
-                    let payload_temp = format_temp_name(current_temp);
-                    current_temp += 1;
-                    let payload_type = union_payload_types[variant_index];
-                    current_lines.push("  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
-
-                    let typed_payload_ptr = payload_temp;
-                    // If the payload is an opaque pointer, try to preserve the expected struct pointer type.
-                    let expected_ptr_type = struct_info_val.llvm_name + "*";
-                    if payload_type == "i8*" {
-                        let cast_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + cast_temp + " = bitcast i8* " + payload_temp + " to " + expected_ptr_type);
-                        typed_payload_ptr = cast_temp;
-                    }
-
-                    let mut binding_idx -> number = 0;
-                    loop {
-                        if binding_idx >= lowered_condition.union_struct_bindings.length {
-                            break;
-                        }
-                        let binding = lowered_condition.union_struct_bindings[binding_idx];
-
-                        // Compute field pointer and load.
-                        let gep_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + gep_temp + " = getelementptr " + struct_info_val.llvm_name + ", " + expected_ptr_type + " " + typed_payload_ptr + ", i32 0, i32 " + number_to_string(binding.field_index));
-                        let load_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + load_temp + " = load " + binding.field_type + ", " + binding.field_type + "* " + gep_temp);
-
-                        // Allocate a local for this binding.
-                        let local_alloca_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + local_alloca_temp + " = alloca " + binding.field_type);
-                        current_lines.push("  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp);
-
-                        base_locals.push(_match_make_local_binding(binding.field_name, local_alloca_temp, binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth + 1));
-                        base_local_id += 1;
-                        binding_idx += 1;
-                    }
+                    let union_binding_result = _match_extract_union_struct_bindings(
+                        lowered_condition.union_struct_bindings,
+                        lowered_condition.union_struct_info,
+                        lowered_condition.union_variant_index,
+                        union_payload_types,
+                        subject_operand,
+                        current_lines,
+                        current_temp,
+                        base_locals,
+                        base_local_id,
+                        scope_id,
+                        scope_depth,
+                        body_labels[index]
+                    );
+                    current_lines = union_binding_result.lines;
+                    base_locals = union_binding_result.locals;
+                    current_temp = union_binding_result.temp_index;
+                    base_local_id = union_binding_result.next_local_id;
                 }
             }
         }
@@ -681,54 +1080,23 @@ fn lower_match_instruction(
         if lowered_condition.is_default {
             if union_payload_types.length > 0 {
                 if subject_name.length > 0 {
-                    let mut remaining -> number[] = [];
-                    let mut v -> number = 0;
-                    loop {
-                        if v >= union_payload_types.length {
-                            break;
-                        }
-                        let mut is_matched -> boolean = false;
-                        let mut mi -> number = 0;
-                        loop {
-                            if mi >= matched_union_variants.length {
-                                break;
-                            }
-                            if matched_union_variants[mi] == v {
-                                is_matched = true;
-                                break;
-                            }
-                            mi += 1;
-                        }
-                        if !is_matched {
-                            remaining.push(v);
-                        }
-                        v += 1;
-                    }
-                    if remaining.length == 1 {
-                        let remaining_index = remaining[0];
-                        let payload_index = remaining_index + 1;
-                        let payload_type = union_payload_types[remaining_index];
-                        let payload_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
-
-                        let local_alloca_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + local_alloca_temp + " = alloca " + payload_type);
-                        current_lines.push("  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp);
-
-                        base_locals.push(LocalBinding {
-                            name: subject_name,
-                            pointer: local_alloca_temp,
-                            llvm_type: payload_type,
-                            type_annotation: "",
-                            ownership: null,
-                            consumed: false,
-                            scope_id: make_child_scope_id(scope_id, body_labels[index]),
-                            scope_depth: scope_depth + 1,
-                        });
-                        base_local_id += 1;
-                    }
+                    let narrow_result = _match_narrow_default_union(
+                        union_payload_types,
+                        matched_union_variants,
+                        subject_name,
+                        subject_operand,
+                        current_lines,
+                        current_temp,
+                        base_locals,
+                        base_local_id,
+                        scope_id,
+                        scope_depth,
+                        body_labels[index]
+                    );
+                    current_lines = narrow_result.lines;
+                    base_locals = narrow_result.locals;
+                    current_temp = narrow_result.temp_index;
+                    base_local_id = narrow_result.next_local_id;
                 }
             }
         }
@@ -1586,6 +1954,7 @@ fn lower_if_instruction(
         }
     }
 
+    // Compute exit loads and insert them for if-else branches
     let mut _if227 -> boolean = false;
     if structure.has_else {
         let mut _if232 -> boolean = false;
@@ -1623,171 +1992,47 @@ fn lower_if_instruction(
             else_idx += 1;
         }
 
-        let mut then_exit_loads -> string[] = [];
-        let mut then_added -> LocalMutation[] = [];
-        if !then_terminated {
-            let mut name_idx -> number = 0;
-            loop {
-                if name_idx >= mutated_names.length {
-                    break;
-                }
-                let name = mutated_names[name_idx];
-                let local = find_local_binding(base_locals, name);
-                if local != null {
-                    let load_temp = format_temp_name(current_temp);
-                    current_temp += 1;
-                    then_exit_loads = append_string(
-                        then_exit_loads,
-                        "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
-                    );
-                    let original = find_mutation_for_name(then_mutations, name);
-                    let mut original_span -> NativeSourceSpan? = null;
-                    if original != null {
-                        original_span = original.span;
-                    }
-                    let exit_mutation = LocalMutation {
-                        name: name,
-                        llvm_type: local.llvm_type,
-                        value_name: load_temp,
-                        span: original_span,
-                        originating_label: then_exit_label,
-                    };
-                    then_added.push(exit_mutation);
-                }
-                name_idx += 1;
-            }
-        }
+        let then_load_result = _if_compute_branch_exit_loads(
+            mutated_names, base_locals, then_mutations, then_exit_label, current_temp, then_terminated
+        );
+        current_temp = then_load_result.temp_index;
 
-        let mut else_exit_loads -> string[] = [];
-        let mut else_added -> LocalMutation[] = [];
-        if structure.has_else {
-            if !else_terminated {
-                let mut name_idx -> number = 0;
-                loop {
-                    if name_idx >= mutated_names.length {
-                        break;
-                    }
-                    let name = mutated_names[name_idx];
-                    let local = find_local_binding(base_locals, name);
-                    if local != null {
-                        let load_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        else_exit_loads = append_string(
-                            else_exit_loads,
-                            "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
-                        );
-                        let original = find_mutation_for_name(else_mutations, name);
-                        let mut original_span -> NativeSourceSpan? = null;
-                        if original != null {
-                            original_span = original.span;
-                        }
-                        let exit_mutation = LocalMutation {
-                            name: name,
-                            llvm_type: local.llvm_type,
-                            value_name: load_temp,
-                            span: original_span,
-                            originating_label: else_exit_label,
-                        };
-                        else_added.push(exit_mutation);
-                    }
-                    name_idx += 1;
-                }
-            }
-        }
+        let else_load_result = _if_compute_branch_exit_loads(
+            mutated_names, base_locals, else_mutations, else_exit_label, current_temp, else_terminated
+        );
+        current_temp = else_load_result.temp_index;
 
-        let mut inserted_then -> boolean = false;
-        let mut inserted_else -> boolean = false;
-        if then_exit_loads.length > 0 {
-            if then_merge_insert_index >= 0 {
-                if else_exit_loads.length > 0 {
-                    if else_merge_insert_index >= 0 {
-                        if then_merge_insert_index > else_merge_insert_index {
-                            current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
-                            then_mutations = extend_mutations(then_mutations, then_added);
-                            collected_mutations = extend_mutations(collected_mutations, then_added);
-                            inserted_then = true;
-
-                            current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
-                            else_mutations = extend_mutations(else_mutations, else_added);
-                            collected_mutations = extend_mutations(collected_mutations, else_added);
-                            inserted_else = true;
-                        } else {
-                            current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
-                            else_mutations = extend_mutations(else_mutations, else_added);
-                            collected_mutations = extend_mutations(collected_mutations, else_added);
-                            inserted_else = true;
-
-                            current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
-                            then_mutations = extend_mutations(then_mutations, then_added);
-                            collected_mutations = extend_mutations(collected_mutations, then_added);
-                            inserted_then = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if !inserted_then {
-            if then_exit_loads.length > 0 {
-                if then_merge_insert_index >= 0 {
-                    current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
-                    then_mutations = extend_mutations(then_mutations, then_added);
-                    collected_mutations = extend_mutations(collected_mutations, then_added);
-                }
-            }
-        }
-
-        if !inserted_else {
-            if else_exit_loads.length > 0 {
-                if else_merge_insert_index >= 0 {
-                    current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
-                    else_mutations = extend_mutations(else_mutations, else_added);
-                    collected_mutations = extend_mutations(collected_mutations, else_added);
-                }
-            }
-        }
+        let insert_result = _if_insert_exit_loads(
+            current_lines,
+            then_load_result.exit_loads,
+            else_load_result.exit_loads,
+            then_load_result.added_mutations,
+            else_load_result.added_mutations,
+            then_mutations,
+            else_mutations,
+            collected_mutations,
+            then_merge_insert_index,
+            else_merge_insert_index
+        );
+        current_lines = insert_result.lines;
+        then_mutations = insert_result.then_mutations;
+        else_mutations = insert_result.else_mutations;
+        collected_mutations = insert_result.collected_mutations;
     }
 
+    // Straight-line if (no else): compute exit loads for then branch only
     if !structure.has_else {
         if !then_terminated {
             let mutated_names = collect_mutation_names(then_mutations);
-            let mut then_exit_loads -> string[] = [];
-            let mut then_added -> LocalMutation[] = [];
-            let mut name_idx -> number = 0;
-            loop {
-                if name_idx >= mutated_names.length {
-                    break;
-                }
-                let name = mutated_names[name_idx];
-                let local = find_local_binding(base_locals, name);
-                if local != null {
-                    let load_temp = format_temp_name(current_temp);
-                    current_temp += 1;
-                    then_exit_loads = append_string(
-                        then_exit_loads,
-                        "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
-                    );
-                    let original = find_mutation_for_name(then_mutations, name);
-                    let mut original_span -> NativeSourceSpan? = null;
-                    if original != null {
-                        original_span = original.span;
-                    }
-                    let exit_mutation = LocalMutation {
-                        name: name,
-                        llvm_type: local.llvm_type,
-                        value_name: load_temp,
-                        span: original_span,
-                        originating_label: then_exit_label,
-                    };
-                    then_added.push(exit_mutation);
-                }
-                name_idx += 1;
-            }
-            if then_exit_loads.length > 0 {
+            let straight_load_result = _if_compute_branch_exit_loads(
+                mutated_names, base_locals, then_mutations, then_exit_label, current_temp, false
+            );
+            current_temp = straight_load_result.temp_index;
+            if straight_load_result.exit_loads.length > 0 {
                 if then_merge_insert_index >= 0 {
-                    current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
-                    then_mutations = extend_mutations(then_mutations, then_added);
-                    collected_mutations = extend_mutations(collected_mutations, then_added);
+                    current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, straight_load_result.exit_loads);
+                    then_mutations = extend_mutations(then_mutations, straight_load_result.added_mutations);
+                    collected_mutations = extend_mutations(collected_mutations, straight_load_result.added_mutations);
                 }
             }
         }
@@ -1811,74 +2056,27 @@ fn lower_if_instruction(
         current_lines.push(merge_label + ":");
 
         // Emit phi nodes for mutated locals
-        if structure.has_else {
-            // Full if/else: emit phi nodes merging values from both branches
-            let mut _if233 -> boolean = false;
-            let mut _if235 -> boolean = false;
-            if !then_terminated { _if235 = true; }
-            if !else_terminated { _if235 = true; }
-            if _if235 {
-                if collected_mutations.length > 0 {
-                    _if233 = true;
-                }
-            }
-            if _if233 {
-                let phi_result = emit_phi_merges_for_if_else(
-                    then_mutations,
-                    else_mutations,
-                    base_locals,
-                    preloaded_locals,
-                    then_label,
-                    else_label,
-                    then_exit_label,
-                    else_exit_label,
-                    then_terminated,
-                    else_terminated,
-                    current_lines,
-                    current_temp
-                );
-                current_lines = phi_result.lines;
-                current_temp = phi_result.temp_index;
-                let materialized = materialize_mutation_values_at_label(
-                    collected_mutations,
-                    base_locals,
-                    current_lines,
-                    current_temp,
-                    merge_label
-                );
-                current_lines = materialized.lines;
-                current_temp = materialized.temp_index;
-                collected_mutations = materialized.mutations;
-            }
-        } else {
-            // Straight-line if: emit phi nodes merging then branch with base
-            if !then_terminated {
-                if collected_mutations.length > 0 {
-                    let phi_result = emit_phi_merges_for_straight_if(
-                        collected_mutations,
-                        base_locals,
-                        preloaded_locals,
-                        branch_label,
-                        then_label,
-                        then_exit_label,
-                        current_lines,
-                        current_temp
-                    );
-                    current_lines = phi_result.lines;
-                    current_temp = phi_result.temp_index;
-                    let materialized = materialize_mutation_values_at_label(
-                        collected_mutations,
-                        base_locals,
-                        current_lines,
-                        current_temp,
-                        merge_label
-                    );
-                    current_lines = materialized.lines;
-                    current_temp = materialized.temp_index;
-                    collected_mutations = materialized.mutations;
-                }
-            }
-        }
+        let merge_phi_result = _if_emit_merge_phis(
+            structure.has_else,
+            then_terminated,
+            else_terminated,
+            then_mutations,
+            else_mutations,
+            collected_mutations,
+            base_locals,
+            preloaded_locals,
+            then_label,
+            else_label,
+            then_exit_label,
+            else_exit_label,
+            branch_label,
+            merge_label,
+            current_lines,
+            current_temp
+        );
+        current_lines = merge_phi_result.lines;
+        current_temp = merge_phi_result.temp_index;
+        collected_mutations = merge_phi_result.collected_mutations;
     }
 
     current_locals = base_locals;
