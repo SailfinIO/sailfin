@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.3 (2026-04-02)
+
+### Bug Fixes
+
+- From array print effect
+  ([`eb77968`](https://github.com/SailfinIO/sailfin/commit/eb77968347c5133003c7dacb599241f9a92efffa))
+
+- Remove some formulas we don't currently have runtime support for right now
+  ([`f10b65c`](https://github.com/SailfinIO/sailfin/commit/f10b65c295a207c09678188434fc3136e3a8fc6b))
+
+### Chores
+
+- Add regression tests for new capsules, update docs
+  ([`68033a9`](https://github.com/SailfinIO/sailfin/commit/68033a9054712e0b4dc381e32304fb2a0a0d0c84))
+
+### Features
+
+- Stand up additional std library capsules
+  ([`c5b2806`](https://github.com/SailfinIO/sailfin/commit/c5b280695441e762198bc4f64fb2ac036d522830))
+
+
 ## v0.5.0-alpha.2 (2026-04-02)
 
 ### Bug Fixes
