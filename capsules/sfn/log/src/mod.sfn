@@ -7,7 +7,7 @@
 //   - Timing helpers for performance instrumentation
 //
 // Usage:
-//   import { logger } from "sfn/log"
+//   import { logger } from "log"
 //
 //   let log = logger("http.server");
 //   log_info(log, "listening", ["port", "8080", "tls", "true"]);

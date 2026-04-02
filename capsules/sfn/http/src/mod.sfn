@@ -59,7 +59,7 @@ fn serve(handler -> any, config -> any?) -> void ![io, net] {
     // Start an HTTP server that dispatches requests to the handler function.
     //
     // Usage:
-    //   import { serve, response } from "sfn/http"
+    //   import { serve, response } from "http"
     //
     //   serve(fn(req) {
     //       return response("Hello, Sailfin!")

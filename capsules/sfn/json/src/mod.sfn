@@ -373,3 +373,120 @@ fn get_array(obj -> JsonValue, key -> string) -> JsonValue[] {
     }
     return [];
 }
+
+fn get_bool(obj -> JsonValue, key -> string) -> boolean {
+    // Get a boolean value from a JSON object by key. Returns false if not found.
+    if !strings_equal(obj.kind, "object") { return false; }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) {
+            return obj.values[i].bool_value;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn get_value(obj -> JsonValue, key -> string) -> JsonValue {
+    // Get any value from a JSON object by key. Returns null_val() if not found.
+    if !strings_equal(obj.kind, "object") { return null_val(); }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) {
+            return obj.values[i];
+        }
+        i += 1;
+    }
+    return null_val();
+}
+
+fn has_key(obj -> JsonValue, key -> string) -> boolean {
+    // Returns true if the JSON object contains the given key.
+    if !strings_equal(obj.kind, "object") { return false; }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn array_length(value -> JsonValue) -> number {
+    // Returns the number of items in a JSON array, or 0 if not an array.
+    if !strings_equal(value.kind, "array") { return 0; }
+    return value.items.length;
+}
+
+fn array_at(value -> JsonValue, index -> number) -> JsonValue {
+    // Get an item from a JSON array by index. Returns null_val() if out of bounds.
+    if !strings_equal(value.kind, "array") { return null_val(); }
+    if index < 0 || index >= value.items.length { return null_val(); }
+    return value.items[index];
+}
+
+fn stringify_pretty(value -> JsonValue, indent -> number = 2) -> string {
+    // Serialize a JsonValue to a pretty-printed JSON string.
+    return _stringify_indented(value, 0, indent);
+}
+
+fn _make_indent(level -> number, size -> number) -> string {
+    let mut out -> string = "";
+    let mut i -> number = 0;
+    let total = level * size;
+    loop {
+        if i >= total { break; }
+        out = out + " ";
+        i += 1;
+    }
+    return out;
+}
+
+fn _stringify_indented(value -> JsonValue, level -> number, size -> number) -> string {
+    if strings_equal(value.kind, "string") {
+        return "\"" + _escape_json_string(value.string_value) + "\"";
+    }
+    if strings_equal(value.kind, "number") {
+        return number_to_string(value.number_value);
+    }
+    if strings_equal(value.kind, "boolean") {
+        if value.bool_value { return "true"; }
+        return "false";
+    }
+    if strings_equal(value.kind, "null") {
+        return "null";
+    }
+    if strings_equal(value.kind, "array") {
+        if value.items.length == 0 { return "[]"; }
+        let inner = level + 1;
+        let pad = _make_indent(inner, size);
+        let close_pad = _make_indent(level, size);
+        let mut out -> string = "[\n";
+        let mut i -> number = 0;
+        loop {
+            if i >= value.items.length { break; }
+            if i > 0 { out = out + ",\n"; }
+            out = out + pad + _stringify_indented(value.items[i], inner, size);
+            i += 1;
+        }
+        return out + "\n" + close_pad + "]";
+    }
+    if strings_equal(value.kind, "object") {
+        if value.keys.length == 0 { return "{}"; }
+        let inner = level + 1;
+        let pad = _make_indent(inner, size);
+        let close_pad = _make_indent(level, size);
+        let mut out -> string = "{\n";
+        let mut i -> number = 0;
+        loop {
+            if i >= value.keys.length { break; }
+            if i > 0 { out = out + ",\n"; }
+            out = out + pad + "\"" + _escape_json_string(value.keys[i]) + "\": " + _stringify_indented(value.values[i], inner, size);
+            i += 1;
+        }
+        return out + "\n" + close_pad + "}";
+    }
+    return "null";
+}

@@ -1,0 +1,196 @@
+// Regression tests for sfn/toml capsule value types and accessors.
+// The full parser depends on char_code/number_to_string (prelude functions
+// unavailable in standalone test files). This tests the value construction,
+// accessor, and tree traversal logic.
+
+struct TomlValue {
+    kind -> string;
+    string_value -> string;
+    number_value -> number;
+    bool_value -> boolean;
+    items -> TomlValue[];
+    keys -> string[];
+    values -> TomlValue[];
+}
+
+fn _string_val(value -> string) -> TomlValue {
+    return TomlValue {
+        kind: "string", string_value: value, number_value: 0,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn _integer_val(value -> number) -> TomlValue {
+    return TomlValue {
+        kind: "integer", string_value: "", number_value: value,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn _bool_val(value -> boolean) -> TomlValue {
+    return TomlValue {
+        kind: "boolean", string_value: "", number_value: 0,
+        bool_value: value, items: [], keys: [], values: [],
+    };
+}
+
+fn _array_val(items -> TomlValue[]) -> TomlValue {
+    return TomlValue {
+        kind: "array", string_value: "", number_value: 0,
+        bool_value: false, items: items, keys: [], values: [],
+    };
+}
+
+fn _table_val(keys -> string[], values -> TomlValue[]) -> TomlValue {
+    return TomlValue {
+        kind: "table", string_value: "", number_value: 0,
+        bool_value: false, items: [], keys: keys, values: values,
+    };
+}
+
+fn _empty_val() -> TomlValue {
+    return TomlValue {
+        kind: "", string_value: "", number_value: 0,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+// -- Accessors (copied from capsule) --
+
+fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
+    if !strings_equal(root.kind, "table") {
+        return _empty_val();
+    }
+    // Split path on "."
+    let mut segments -> string[] = [];
+    let mut start -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "." {
+            segments.push(substring(path, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    segments.push(substring(path, start, path.length));
+
+    let mut current -> TomlValue = root;
+    let mut si -> number = 0;
+    loop {
+        if si >= segments.length { break; }
+        let seg = segments[si];
+        let mut found -> boolean = false;
+        let mut ki -> number = 0;
+        loop {
+            if ki >= current.keys.length { break; }
+            if strings_equal(current.keys[ki], seg) {
+                current = current.values[ki];
+                found = true;
+                break;
+            }
+            ki += 1;
+        }
+        if !found {
+            return _empty_val();
+        }
+        si += 1;
+    }
+    return current;
+}
+
+fn _get_string(root -> TomlValue, key -> string) -> string {
+    let val = _resolve_path(root, key);
+    return val.string_value;
+}
+
+fn _get_number(root -> TomlValue, key -> string) -> number {
+    let val = _resolve_path(root, key);
+    return val.number_value;
+}
+
+fn _get_bool(root -> TomlValue, key -> string) -> boolean {
+    let val = _resolve_path(root, key);
+    return val.bool_value;
+}
+
+fn _has_key(root -> TomlValue, key -> string) -> boolean {
+    let val = _resolve_path(root, key);
+    return !strings_equal(val.kind, "");
+}
+
+// -- Tests --
+
+test "toml: string value construction" {
+    let v = _string_val("hello");
+    assert strings_equal(v.kind, "string");
+    assert strings_equal(v.string_value, "hello");
+}
+
+test "toml: integer value construction" {
+    let v = _integer_val(42);
+    assert strings_equal(v.kind, "integer");
+    assert v.number_value == 42;
+}
+
+test "toml: boolean value construction" {
+    let t = _bool_val(true);
+    let f = _bool_val(false);
+    assert t.bool_value == true;
+    assert f.bool_value == false;
+}
+
+test "toml: table with simple keys" {
+    let tbl = _table_val(
+        ["name", "version"],
+        [_string_val("myapp"), _string_val("1.0.0")]
+    );
+    assert strings_equal(_get_string(tbl, "name"), "myapp");
+    assert strings_equal(_get_string(tbl, "version"), "1.0.0");
+}
+
+test "toml: nested table access via dotted path" {
+    // Simulate [package] section: { package: { name: "foo", version: "1.0" } }
+    let pkg = _table_val(["name", "version"], [_string_val("foo"), _string_val("1.0")]);
+    let root = _table_val(["package"], [pkg]);
+    assert strings_equal(_get_string(root, "package.name"), "foo");
+    assert strings_equal(_get_string(root, "package.version"), "1.0");
+}
+
+test "toml: has_key" {
+    let tbl = _table_val(["a", "b"], [_integer_val(1), _integer_val(2)]);
+    assert _has_key(tbl, "a") == true;
+    assert _has_key(tbl, "b") == true;
+    assert _has_key(tbl, "c") == false;
+}
+
+test "toml: get_number and get_bool" {
+    let tbl = _table_val(
+        ["port", "debug"],
+        [_integer_val(8080), _bool_val(true)]
+    );
+    assert _get_number(tbl, "port") == 8080;
+    assert _get_bool(tbl, "debug") == true;
+}
+
+test "toml: array value" {
+    let arr = _array_val([_string_val("a"), _string_val("b"), _string_val("c")]);
+    assert strings_equal(arr.kind, "array");
+    assert arr.items.length == 3;
+    assert strings_equal(arr.items[0].string_value, "a");
+    assert strings_equal(arr.items[2].string_value, "c");
+}
+
+test "toml: missing key returns empty kind" {
+    let tbl = _table_val(["x"], [_integer_val(1)]);
+    let missing = _resolve_path(tbl, "y");
+    assert strings_equal(missing.kind, "");
+}
+
+test "toml: deeply nested path" {
+    // { a: { b: { c: "deep" } } }
+    let c = _table_val(["c"], [_string_val("deep")]);
+    let b = _table_val(["b"], [c]);
+    let root = _table_val(["a"], [b]);
+    assert strings_equal(_get_string(root, "a.b.c"), "deep");
+}

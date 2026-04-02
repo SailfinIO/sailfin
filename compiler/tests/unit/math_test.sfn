@@ -1,0 +1,98 @@
+// Regression tests for sfn/math capsule functions.
+// Tests only pure-arithmetic functions that don't depend on prelude
+// functions (char_code, number_to_string) unavailable in standalone test files.
+
+fn _abs(x -> number) -> number {
+    if x < 0 { return 0 - x; }
+    return x;
+}
+
+fn _min(a -> number, b -> number) -> number {
+    if a <= b { return a; }
+    return b;
+}
+
+fn _max(a -> number, b -> number) -> number {
+    if a >= b { return a; }
+    return b;
+}
+
+fn _clamp(x -> number, lo -> number, hi -> number) -> number {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    return x;
+}
+
+fn _sign(x -> number) -> number {
+    if x < 0 { return -1; }
+    if x > 0 { return 1; }
+    return 0;
+}
+
+fn _sum(values -> number[]) -> number {
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= values.length { break; }
+        total = total + values[i];
+        i += 1;
+    }
+    return total;
+}
+
+fn _mean(values -> number[]) -> number {
+    if values.length == 0 { return 0; }
+    return _sum(values) / values.length;
+}
+
+// -- Tests --
+
+test "math: abs" {
+    assert _abs(5) == 5;
+    assert _abs(-5) == 5;
+    assert _abs(0) == 0;
+    assert _abs(-0.5) == 0.5;
+}
+
+test "math: min and max" {
+    assert _min(3, 7) == 3;
+    assert _min(-1, 1) == -1;
+    assert _min(5, 5) == 5;
+    assert _max(3, 7) == 7;
+    assert _max(-1, 1) == 1;
+    assert _max(5, 5) == 5;
+}
+
+test "math: clamp" {
+    assert _clamp(5, 0, 10) == 5;
+    assert _clamp(-5, 0, 10) == 0;
+    assert _clamp(15, 0, 10) == 10;
+    assert _clamp(0, 0, 10) == 0;
+    assert _clamp(10, 0, 10) == 10;
+}
+
+test "math: sign" {
+    assert _sign(42) == 1;
+    assert _sign(-42) == -1;
+    assert _sign(0) == 0;
+    assert _sign(0.001) == 1;
+    assert _sign(-0.001) == -1;
+}
+
+test "math: sum" {
+    assert _sum([1, 2, 3, 4, 5]) == 15;
+    assert _sum([]) == 0;
+    assert _sum([10]) == 10;
+    assert _sum([-1, 1]) == 0;
+}
+
+test "math: mean" {
+    assert _mean([2, 4, 6]) == 4;
+    assert _mean([10]) == 10;
+    assert _mean([]) == 0;
+}
+
+// Note: floor, ceil, round, pow, mod, is_integer depend on _truncate
+// which uses number_to_string and char_code (prelude functions not available
+// in standalone test files). Those will be tested once capsule-level
+// test support is added to the test runner.

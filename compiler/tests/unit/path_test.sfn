@@ -1,0 +1,204 @@
+// Regression tests for sfn/path capsule functions.
+
+// -- Helpers copied from sfn/path --
+
+fn _join(a -> string, b -> string) -> string {
+    if a.length == 0 { return b; }
+    if b.length == 0 { return a; }
+    let a_ends = a[a.length - 1] == "/";
+    let b_starts = b[0] == "/";
+    if a_ends && b_starts {
+        return a + substring(b, 1, b.length);
+    }
+    if a_ends || b_starts {
+        return a + b;
+    }
+    return a + "/" + b;
+}
+
+fn _dirname(path -> string) -> string {
+    if path.length == 0 { return "."; }
+    let mut last_sep -> number = -1;
+    let mut i -> number = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" { last_sep = i; }
+        i += 1;
+    }
+    if last_sep < 0 { return "."; }
+    if last_sep == 0 { return "/"; }
+    return substring(path, 0, last_sep);
+}
+
+fn _basename(path -> string) -> string {
+    if path.length == 0 { return ""; }
+    let mut end -> number = path.length;
+    loop {
+        if end <= 1 { break; }
+        if path[end - 1] == "/" {
+            end -= 1;
+        } else { break; }
+    }
+    let mut last_sep -> number = -1;
+    let mut i -> number = 0;
+    loop {
+        if i >= end { break; }
+        if path[i] == "/" { last_sep = i; }
+        i += 1;
+    }
+    if last_sep < 0 { return substring(path, 0, end); }
+    return substring(path, last_sep + 1, end);
+}
+
+fn _ext(path -> string) -> string {
+    let name = _basename(path);
+    let mut last_dot -> number = -1;
+    let mut i -> number = 0;
+    loop {
+        if i >= name.length { break; }
+        if name[i] == "." { last_dot = i; }
+        i += 1;
+    }
+    if last_dot <= 0 { return ""; }
+    return substring(name, last_dot, name.length);
+}
+
+fn _stem(path -> string) -> string {
+    let name = _basename(path);
+    let extension = _ext(path);
+    if extension.length == 0 { return name; }
+    return substring(name, 0, name.length - extension.length);
+}
+
+fn _is_absolute(path -> string) -> boolean {
+    if path.length == 0 { return false; }
+    return path[0] == "/";
+}
+
+fn _is_relative(path -> string) -> boolean {
+    return !_is_absolute(path);
+}
+
+fn _normalize(path -> string) -> string {
+    if path.length == 0 { return "."; }
+    let absolute = path[0] == "/";
+
+    let mut parts -> string[] = [];
+    let mut start -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" {
+            if i > start {
+                parts.push(substring(path, start, i));
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start < path.length {
+        parts.push(substring(path, start, path.length));
+    }
+
+    let mut resolved -> string[] = [];
+    let mut j -> number = 0;
+    loop {
+        if j >= parts.length { break; }
+        let seg = parts[j];
+        if strings_equal(seg, ".") {
+            // skip
+        } else if strings_equal(seg, "..") {
+            if resolved.length > 0 && !strings_equal(resolved[resolved.length - 1], "..") {
+                let mut new_resolved -> string[] = [];
+                let mut k -> number = 0;
+                loop {
+                    if k >= resolved.length - 1 { break; }
+                    new_resolved.push(resolved[k]);
+                    k += 1;
+                }
+                resolved = new_resolved;
+            } else if !absolute {
+                resolved.push("..");
+            }
+        } else {
+            resolved.push(seg);
+        }
+        j += 1;
+    }
+
+    if resolved.length == 0 {
+        if absolute { return "/"; }
+        return ".";
+    }
+    let mut out -> string = "";
+    if absolute { out = "/"; }
+    let mut m -> number = 0;
+    loop {
+        if m >= resolved.length { break; }
+        if m > 0 { out = out + "/"; }
+        out = out + resolved[m];
+        m += 1;
+    }
+    return out;
+}
+
+// -- Tests --
+
+test "path: join combines two path segments" {
+    assert strings_equal(_join("foo", "bar"), "foo/bar");
+    assert strings_equal(_join("foo/", "bar"), "foo/bar");
+    assert strings_equal(_join("foo", "/bar"), "foo/bar");
+    assert strings_equal(_join("foo/", "/bar"), "foo/bar");
+    assert strings_equal(_join("", "bar"), "bar");
+    assert strings_equal(_join("foo", ""), "foo");
+}
+
+test "path: dirname returns parent directory" {
+    assert strings_equal(_dirname("/foo/bar.txt"), "/foo");
+    assert strings_equal(_dirname("bar.txt"), ".");
+    assert strings_equal(_dirname("/foo"), "/");
+    assert strings_equal(_dirname(""), ".");
+}
+
+test "path: basename returns final component" {
+    assert strings_equal(_basename("/foo/bar.txt"), "bar.txt");
+    assert strings_equal(_basename("bar.txt"), "bar.txt");
+    assert strings_equal(_basename("/foo/bar/"), "bar");
+    assert strings_equal(_basename(""), "");
+}
+
+test "path: ext returns file extension" {
+    assert strings_equal(_ext("file.txt"), ".txt");
+    assert strings_equal(_ext("file.tar.gz"), ".gz");
+    assert strings_equal(_ext("Makefile"), "");
+    assert strings_equal(_ext(".gitignore"), "");
+    assert strings_equal(_ext("/path/to/file.rs"), ".rs");
+}
+
+test "path: stem returns basename without extension" {
+    assert strings_equal(_stem("file.txt"), "file");
+    assert strings_equal(_stem("file.tar.gz"), "file.tar");
+    assert strings_equal(_stem("Makefile"), "Makefile");
+}
+
+test "path: is_absolute and is_relative" {
+    assert _is_absolute("/foo") == true;
+    assert _is_absolute("foo") == false;
+    assert _is_absolute("") == false;
+    assert _is_relative("foo") == true;
+    assert _is_relative("/foo") == false;
+}
+
+test "path: normalize resolves . and .." {
+    assert strings_equal(_normalize("/foo/./bar"), "/foo/bar");
+    assert strings_equal(_normalize("/foo/bar/../baz"), "/foo/baz");
+    assert strings_equal(_normalize("/foo//bar"), "/foo/bar");
+    assert strings_equal(_normalize(""), ".");
+    assert strings_equal(_normalize("/"), "/");
+    assert strings_equal(_normalize("foo/./bar"), "foo/bar");
+}
+
+test "path: normalize handles leading .." {
+    assert strings_equal(_normalize("../foo"), "../foo");
+    assert strings_equal(_normalize("/foo/../../bar"), "/bar");
+}

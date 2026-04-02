@@ -1,0 +1,134 @@
+// sfn/layers — Neural network layer building blocks for Sailfin.
+//
+// Provides composable layer types for constructing neural networks.
+// Each layer stores its parameters and implements a forward pass.
+//
+// GPU-accelerated dispatch is planned but not yet implemented.
+// All operations currently execute on the CPU.
+//
+// Usage:
+//   import { Linear, linear, forward } from "layers"
+//   import { from_array } from "tensor"
+//
+//   let layer = linear(3, 2);  // 3 inputs, 2 outputs
+//   let input = from_array([1, 2, 3], [1, 3]);
+//   let output = forward(layer, input);
+
+// ---- Layer types ----
+
+struct Linear {
+    weights -> number[];   // flat [out_features, in_features] row-major
+    biases -> number[];    // [out_features]
+    in_features -> number;
+    out_features -> number;
+}
+
+struct ReLULayer {
+    size -> number;        // expected input size (for documentation)
+}
+
+struct SequentialLayer {
+    // A sequence of layers applied in order.
+    // For now, stores linear layers only. Generic layer types
+    // will be supported once Sailfin's type system supports
+    // trait-based dispatch (interface Layer { fn forward(...) }).
+    linears -> Linear[];
+    relu_after -> boolean[];  // whether to apply ReLU after each linear
+}
+
+// ---- Constructors ----
+
+fn linear(in_features -> number, out_features -> number) -> Linear {
+    // Create a linear (fully connected) layer with zero-initialized parameters.
+    // In practice, weights should be initialized with small random values.
+    // Random initialization will use the `rand` effect once available.
+    let weight_count = in_features * out_features;
+    let mut weights -> number[] = [];
+    let mut biases -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= weight_count { break; }
+        weights.push(0);
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= out_features { break; }
+        biases.push(0);
+        i += 1;
+    }
+    return Linear {
+        weights: weights, biases: biases,
+        in_features: in_features, out_features: out_features,
+    };
+}
+
+fn relu_layer(size -> number) -> ReLULayer {
+    return ReLULayer { size: size };
+}
+
+fn sequential(linears -> Linear[], relu_after -> boolean[]) -> SequentialLayer {
+    return SequentialLayer { linears: linears, relu_after: relu_after };
+}
+
+// ---- Forward pass ----
+
+fn forward_linear(layer -> Linear, input -> number[]) -> number[] {
+    // Forward pass for a linear layer: output = input * W^T + bias
+    // input: [in_features], output: [out_features]
+    let mut output -> number[] = [];
+    let mut o -> number = 0;
+    loop {
+        if o >= layer.out_features { break; }
+        let mut val -> number = layer.biases[o];
+        let mut j -> number = 0;
+        loop {
+            if j >= layer.in_features { break; }
+            val = val + input[j] * layer.weights[o * layer.in_features + j];
+            j += 1;
+        }
+        output.push(val);
+        o += 1;
+    }
+    return output;
+}
+
+fn forward_relu(input -> number[]) -> number[] {
+    // Apply ReLU activation: max(0, x) for each element.
+    let mut output -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= input.length { break; }
+        if input[i] > 0 {
+            output.push(input[i]);
+        } else {
+            output.push(0);
+        }
+        i += 1;
+    }
+    return output;
+}
+
+fn forward_sequential(model -> SequentialLayer, input -> number[]) -> number[] {
+    // Forward pass through a sequential model.
+    // relu_after must have the same length as linears.
+    let mut current -> number[] = input;
+    let mut i -> number = 0;
+    let n = model.linears.length;
+    loop {
+        if i >= n { break; }
+        current = forward_linear(model.linears[i], current);
+        if i < model.relu_after.length && model.relu_after[i] {
+            current = forward_relu(current);
+        }
+        i += 1;
+    }
+    return current;
+}
+
+// ---- Parameter access ----
+
+fn parameter_count(layer -> Linear) -> number {
+    // Total trainable parameters (weights + biases).
+    return layer.in_features * layer.out_features + layer.out_features;
+}

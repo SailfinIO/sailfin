@@ -1,0 +1,192 @@
+// sfn/math — Mathematical functions and numeric utilities for Sailfin.
+//
+// Provides common numeric operations. No effects required — pure functions.
+
+fn abs(x -> number) -> number {
+    // Returns the absolute value of x.
+    if x < 0 { return 0 - x; }
+    return x;
+}
+
+fn min(a -> number, b -> number) -> number {
+    // Returns the smaller of two numbers.
+    if a <= b { return a; }
+    return b;
+}
+
+fn max(a -> number, b -> number) -> number {
+    // Returns the larger of two numbers.
+    if a >= b { return a; }
+    return b;
+}
+
+fn clamp(x -> number, lo -> number, hi -> number) -> number {
+    // Clamp x to the range [lo, hi].
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    return x;
+}
+
+fn sign(x -> number) -> number {
+    // Returns -1, 0, or 1 depending on the sign of x.
+    if x < 0 { return -1; }
+    if x > 0 { return 1; }
+    return 0;
+}
+
+fn floor(x -> number) -> number {
+    // Floor for positive and negative numbers.
+    // Truncates toward negative infinity.
+    let truncated = _truncate(x);
+    if x >= 0 { return truncated; }
+    if truncated == x { return x; }
+    return truncated - 1;
+}
+
+fn ceil(x -> number) -> number {
+    // Ceiling — smallest integer >= x.
+    let truncated = _truncate(x);
+    if x <= 0 { return truncated; }
+    if truncated == x { return x; }
+    return truncated + 1;
+}
+
+fn round(x -> number) -> number {
+    // Round to nearest integer (half rounds up).
+    return floor(x + 0.5);
+}
+
+fn _truncate(x -> number) -> number {
+    // Truncate toward zero by parsing the string representation.
+    // Handles decimal ("123.45") and scientific notation ("1.5e+20")
+    // since number_to_string uses %.15g format.
+    let s = number_to_string(x);
+    if s.length == 0 { return x; }
+
+    let mut i -> number = 0;
+    let mut neg -> boolean = false;
+    if s[0] == "-" {
+        neg = true;
+        i = 1;
+    }
+
+    // Scan mantissa and locate dot and exponent.
+    let mantissa_start = i;
+    let mut dot_pos -> number = -1;
+    let mut e_pos -> number = -1;
+    let mut j -> number = i;
+    loop {
+        if j >= s.length { break; }
+        let ch = s[j];
+        if ch == "." && dot_pos < 0 { dot_pos = j; }
+        if ch == "e" || ch == "E" { e_pos = j; break; }
+        j += 1;
+    }
+    let mantissa_end = e_pos;
+    if e_pos < 0 { mantissa_end = s.length; }
+
+    // Parse exponent if present.
+    let mut exponent -> number = 0;
+    if e_pos >= 0 {
+        let mut ei -> number = e_pos + 1;
+        let mut exp_neg -> boolean = false;
+        if ei < s.length && s[ei] == "-" { exp_neg = true; ei += 1; }
+        else if ei < s.length && s[ei] == "+" { ei += 1; }
+        loop {
+            if ei >= s.length { break; }
+            exponent = exponent * 10 + (char_code(s[ei]) - 48);
+            ei += 1;
+        }
+        if exp_neg { exponent = 0 - exponent; }
+    }
+
+    // Count digits and digits before the decimal point.
+    let mut digits_before_dot -> number = 0;
+    let mut k -> number = mantissa_start;
+    loop {
+        if k >= mantissa_end { break; }
+        let ch = s[k];
+        if ch != "." {
+            if dot_pos < 0 || k < dot_pos {
+                digits_before_dot += 1;
+            }
+        }
+        k += 1;
+    }
+
+    // How many integer digits after applying the exponent.
+    let int_digits = digits_before_dot + exponent;
+    if int_digits <= 0 { return 0; }
+
+    // Build the integer value from the mantissa digits up to int_digits.
+    let mut result -> number = 0;
+    let mut digit_count -> number = 0;
+    k = mantissa_start;
+    loop {
+        if k >= mantissa_end { break; }
+        let ch = s[k];
+        k += 1;
+        if ch == "." { continue; }
+        if digit_count >= int_digits { break; }
+        result = result * 10 + (char_code(ch) - 48);
+        digit_count += 1;
+    }
+    // Pad with zeros if exponent shifts past available digits.
+    loop {
+        if digit_count >= int_digits { break; }
+        result = result * 10;
+        digit_count += 1;
+    }
+
+    if neg { return 0 - result; }
+    return result;
+}
+
+fn is_integer(x -> number) -> boolean {
+    // Returns true if x has no fractional part.
+    return floor(x) == x;
+}
+
+fn mod(a -> number, b -> number) -> number {
+    // Modulo operation. Returns a - floor(a/b) * b.
+    // Follows mathematical convention: result has the same sign as b.
+    if b == 0 { return 0; }
+    return a - floor(a / b) * b;
+}
+
+fn pow(base -> number, exp -> number) -> number {
+    // Integer exponentiation (exp must be a non-negative integer).
+    // Uses repeated squaring for efficiency.
+    if exp == 0 { return 1; }
+    if exp < 0 { return 0; } // No fractional results in integer pow.
+    let mut result -> number = 1;
+    let mut b -> number = base;
+    let mut e -> number = exp;
+    loop {
+        if e <= 0 { break; }
+        if mod(e, 2) == 1 {
+            result = result * b;
+        }
+        b = b * b;
+        e = floor(e / 2);
+    }
+    return result;
+}
+
+fn sum(values -> number[]) -> number {
+    // Sum all values in an array.
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= values.length { break; }
+        total = total + values[i];
+        i += 1;
+    }
+    return total;
+}
+
+fn mean(values -> number[]) -> number {
+    // Arithmetic mean. Returns 0 for empty arrays.
+    if values.length == 0 { return 0; }
+    return sum(values) / values.length;
+}

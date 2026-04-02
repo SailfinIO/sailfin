@@ -88,6 +88,31 @@ feature availability.
   `log.error`, `log.debug`) with named loggers and fields. `log.warn` and
   `log.error` route to stderr via `print.err()`.
 
+## Standard Library Capsules (Current)
+
+The following capsules ship as part of the Sailfin standard library under
+`capsules/sfn/`. Users import them by bare name (e.g. `from "fmt"`).
+
+| Capsule | Import | Status | Effects | Description |
+|---------|--------|--------|---------|-------------|
+| `sfn/fmt` | `"fmt"` | Shipped | None | String formatting, trim, case conversion, split/join |
+| `sfn/json` | `"json"` | Shipped | None | JSON parsing, serialization, pretty-print |
+| `sfn/crypto` | `"crypto"` | Shipped | None | SHA-256, base64 encode (via C runtime) |
+| `sfn/math` | `"math"` | Shipped | None | abs, min/max, clamp, floor/ceil/round, pow, sum/mean |
+| `sfn/path` | `"path"` | Shipped | None | Path join, dirname, basename, ext, normalize |
+| `sfn/toml` | `"toml"` | Shipped | None | TOML v1.0 parsing, serialization, dotted-path access |
+| `sfn/fs` | `"fs"` | Shipped | `io` | File read/write/append, exists, mkdir, read_dir |
+| `sfn/os` | `"os"` | Shipped | `io` | Env vars, home dir, exec, exit |
+| `sfn/log` | `"log"` | Shipped | `io`, `clock` | Structured leveled logging with named loggers |
+| `sfn/time` | `"time"` | Shipped | `clock` | Sleep, monotonic timing, elapsed |
+| `sfn/http` | `"http"` | Partial | `net`, `io` | GET/POST client (via C runtime); server stubbed |
+| `sfn/sync` | `"sync"` | Stubbed | `io` | channel/parallel/spawn API (pending concurrency runtime) |
+| `sfn/net` | `"net"` | Stubbed | `net`, `io` | TCP/UDP socket API (pending runtime intrinsics) |
+| `sfn/tensor` | `"tensor"` | Shipped (CPU) | `gpu` (planned) | Tensor ops, matmul, transpose; GPU dispatch not yet implemented |
+| `sfn/layers` | `"layers"` | Shipped (CPU) | `gpu` (planned) | Linear layers, ReLU, sequential models |
+| `sfn/nn` | `"nn"` | Shipped (CPU) | `gpu` (planned) | Activations, normalization, argmax, one_hot |
+| `sfn/losses` | `"losses"` | Shipped | None | MSE, MAE, Huber, hinge loss functions |
+
 ## Runtime (Current)
 
 - The runtime is implemented in C under `runtime/native/` and linked into the

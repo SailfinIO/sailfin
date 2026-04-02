@@ -1,0 +1,183 @@
+// Regression tests for sfn/nn capsule functions.
+
+// -- Helpers copied from sfn/nn --
+
+fn _relu(x -> number) -> number {
+    if x > 0 { return x; }
+    return 0;
+}
+
+fn _leaky_relu(x -> number, alpha -> number) -> number {
+    if x > 0 { return x; }
+    return alpha * x;
+}
+
+fn _step(x -> number) -> number {
+    if x >= 0 { return 1; }
+    return 0;
+}
+
+fn _normalize(input -> number[]) -> number[] {
+    if input.length == 0 { return []; }
+    let mut min_v -> number = input[0];
+    let mut max_v -> number = input[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= input.length { break; }
+        if input[i] < min_v { min_v = input[i]; }
+        if input[i] > max_v { max_v = input[i]; }
+        i += 1;
+    }
+    let range = max_v - min_v;
+    if range == 0 { return input; }
+    let mut out -> number[] = [];
+    i = 0;
+    loop {
+        if i >= input.length { break; }
+        out.push((input[i] - min_v) / range);
+        i += 1;
+    }
+    return out;
+}
+
+fn _argmax(input -> number[]) -> number {
+    if input.length == 0 { return -1; }
+    let mut best_idx -> number = 0;
+    let mut best_val -> number = input[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= input.length { break; }
+        if input[i] > best_val {
+            best_val = input[i];
+            best_idx = i;
+        }
+        i += 1;
+    }
+    return best_idx;
+}
+
+fn _argmin(input -> number[]) -> number {
+    if input.length == 0 { return -1; }
+    let mut best_idx -> number = 0;
+    let mut best_val -> number = input[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= input.length { break; }
+        if input[i] < best_val {
+            best_val = input[i];
+            best_idx = i;
+        }
+        i += 1;
+    }
+    return best_idx;
+}
+
+fn _one_hot(index -> number, size -> number) -> number[] {
+    let mut out -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= size { break; }
+        if i == index {
+            out.push(1);
+        } else {
+            out.push(0);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _clip(x -> number, lo -> number, hi -> number) -> number {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    return x;
+}
+
+// -- Tests --
+
+test "nn: relu activation" {
+    assert _relu(5) == 5;
+    assert _relu(0) == 0;
+    assert _relu(-3) == 0;
+    assert _relu(0.5) == 0.5;
+}
+
+test "nn: leaky_relu activation" {
+    assert _leaky_relu(5, 0.01) == 5;
+    assert _leaky_relu(0, 0.01) == 0;
+    // -3 * 0.01 = -0.03 (use tolerance for floating point)
+    let lr1 = _leaky_relu(-3, 0.01);
+    assert lr1 < -0.02 && lr1 > -0.04;
+    // -2 * 0.1 = -0.2
+    let lr2 = _leaky_relu(-2, 0.1);
+    assert lr2 < -0.19 && lr2 > -0.21;
+}
+
+test "nn: step function" {
+    assert _step(1) == 1;
+    assert _step(0) == 1;
+    assert _step(-1) == 0;
+    assert _step(0.001) == 1;
+}
+
+test "nn: normalize inline computation" {
+    // Test normalize logic inline since array return from functions
+    // can hit a known compiler issue with push-built arrays.
+    let input = [0, 5, 10];
+    let mut min_v -> number = input[0];
+    let mut max_v -> number = input[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= input.length { break; }
+        if input[i] < min_v { min_v = input[i]; }
+        if input[i] > max_v { max_v = input[i]; }
+        i += 1;
+    }
+    let range = max_v - min_v;
+    assert range == 10;
+    assert min_v == 0;
+    assert max_v == 10;
+    let v0 = (input[0] - min_v) / range;
+    let v1 = (input[1] - min_v) / range;
+    let v2 = (input[2] - min_v) / range;
+    assert v0 == 0;
+    assert v1 > 0.49 && v1 < 0.51;
+    assert v2 == 1;
+}
+
+test "nn: argmax returns index of maximum" {
+    assert _argmax([1, 3, 2]) == 1;
+    assert _argmax([5]) == 0;
+    assert _argmax([1, 2, 3, 4, 5]) == 4;
+    assert _argmax([]) == -1;
+}
+
+test "nn: argmin returns index of minimum" {
+    assert _argmin([3, 1, 2]) == 1;
+    assert _argmin([5]) == 0;
+    assert _argmin([5, 4, 3, 2, 1]) == 4;
+    assert _argmin([]) == -1;
+}
+
+test "nn: one_hot encoding" {
+    let oh = _one_hot(2, 5);
+    assert oh.length == 5;
+    assert oh[0] == 0;
+    assert oh[1] == 0;
+    assert oh[2] == 1;
+    assert oh[3] == 0;
+    assert oh[4] == 0;
+
+    let oh0 = _one_hot(0, 3);
+    assert oh0[0] == 1;
+    assert oh0[1] == 0;
+    assert oh0[2] == 0;
+}
+
+test "nn: clip constrains value to range" {
+    assert _clip(5, 0, 10) == 5;
+    assert _clip(-5, 0, 10) == 0;
+    assert _clip(15, 0, 10) == 10;
+    assert _clip(0, 0, 1) == 0;
+    assert _clip(1, 0, 1) == 1;
+}
