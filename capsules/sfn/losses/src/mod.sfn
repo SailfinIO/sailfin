@@ -12,11 +12,13 @@
 
 fn mse(predictions -> number[], targets -> number[]) -> number {
     // Mean Squared Error: (1/n) * sum((pred - target)^2).
-    if predictions.length == 0 { return 0; }
+    if predictions.length == 0 || targets.length == 0 { return 0; }
+    let n = predictions.length;
+    if targets.length < n { return 0; }
     let mut total -> number = 0;
     let mut i -> number = 0;
     loop {
-        if i >= predictions.length { break; }
+        if i >= n { break; }
         let diff = predictions[i] - targets[i];
         total = total + diff * diff;
         i += 1;
@@ -26,11 +28,13 @@ fn mse(predictions -> number[], targets -> number[]) -> number {
 
 fn mae(predictions -> number[], targets -> number[]) -> number {
     // Mean Absolute Error: (1/n) * sum(|pred - target|).
-    if predictions.length == 0 { return 0; }
+    if predictions.length == 0 || targets.length == 0 { return 0; }
+    let n = predictions.length;
+    if targets.length < n { return 0; }
     let mut total -> number = 0;
     let mut i -> number = 0;
     loop {
-        if i >= predictions.length { break; }
+        if i >= n { break; }
         let diff = predictions[i] - targets[i];
         if diff < 0 {
             total = total - diff;
@@ -45,14 +49,15 @@ fn mae(predictions -> number[], targets -> number[]) -> number {
 fn huber(predictions -> number[], targets -> number[], delta -> number = 1) -> number {
     // Huber loss: quadratic for small errors, linear for large errors.
     // Combines the best properties of MSE and MAE.
-    if predictions.length == 0 { return 0; }
+    if predictions.length == 0 || targets.length == 0 { return 0; }
+    let n = predictions.length;
+    if targets.length < n { return 0; }
     let mut total -> number = 0;
     let mut i -> number = 0;
     loop {
-        if i >= predictions.length { break; }
+        if i >= n { break; }
         let diff = predictions[i] - targets[i];
-        let abs_diff = diff;
-        let mut a -> number = abs_diff;
+        let mut a -> number = diff;
         if a < 0 { a = 0 - a; }
         if a <= delta {
             total = total + 0.5 * diff * diff;
@@ -69,11 +74,13 @@ fn huber(predictions -> number[], targets -> number[], delta -> number = 1) -> n
 fn hinge(predictions -> number[], targets -> number[]) -> number {
     // Hinge loss for binary classification (SVM-style).
     // Targets should be +1 or -1.
-    if predictions.length == 0 { return 0; }
+    if predictions.length == 0 || targets.length == 0 { return 0; }
+    let n = predictions.length;
+    if targets.length < n { return 0; }
     let mut total -> number = 0;
     let mut i -> number = 0;
     loop {
-        if i >= predictions.length { break; }
+        if i >= n { break; }
         let margin = 1 - targets[i] * predictions[i];
         if margin > 0 {
             total = total + margin;
@@ -87,11 +94,13 @@ fn binary_cross_entropy_approx(predictions -> number[], targets -> number[]) -> 
     // Approximate binary cross-entropy without log().
     // Uses a piecewise linear approximation of -log(x).
     // True implementation requires log() runtime support.
-    if predictions.length == 0 { return 0; }
+    if predictions.length == 0 || targets.length == 0 { return 0; }
+    let n = predictions.length;
+    if targets.length < n { return 0; }
     let mut total -> number = 0;
     let mut i -> number = 0;
     loop {
-        if i >= predictions.length { break; }
+        if i >= n { break; }
         // Clamp predictions to avoid division issues.
         let mut p -> number = predictions[i];
         if p < 0.001 { p = 0.001; }

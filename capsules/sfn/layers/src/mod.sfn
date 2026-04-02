@@ -3,6 +3,9 @@
 // Provides composable layer types for constructing neural networks.
 // Each layer stores its parameters and implements a forward pass.
 //
+// GPU-accelerated dispatch is planned but not yet implemented.
+// All operations currently execute on the CPU.
+//
 // Usage:
 //   import { Linear, linear, forward } from "layers"
 //   import { from_array } from "tensor"
@@ -108,12 +111,14 @@ fn forward_relu(input -> number[]) -> number[] {
 
 fn forward_sequential(model -> SequentialLayer, input -> number[]) -> number[] {
     // Forward pass through a sequential model.
+    // relu_after must have the same length as linears.
     let mut current -> number[] = input;
     let mut i -> number = 0;
+    let n = model.linears.length;
     loop {
-        if i >= model.linears.length { break; }
+        if i >= n { break; }
         current = forward_linear(model.linears[i], current);
-        if model.relu_after[i] {
+        if i < model.relu_after.length && model.relu_after[i] {
             current = forward_relu(current);
         }
         i += 1;

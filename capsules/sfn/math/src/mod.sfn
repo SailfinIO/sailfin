@@ -57,39 +57,87 @@ fn round(x -> number) -> number {
 }
 
 fn _truncate(x -> number) -> number {
-    // Truncate toward zero by converting through string.
-    // This works because number_to_string produces the full decimal
-    // and we can strip the fractional part.
+    // Truncate toward zero by parsing the string representation.
+    // Handles decimal ("123.45") and scientific notation ("1.5e+20")
+    // since number_to_string uses %.15g format.
     let s = number_to_string(x);
-    let mut dot_pos -> number = -1;
+    if s.length == 0 { return x; }
+
     let mut i -> number = 0;
-    loop {
-        if i >= s.length { break; }
-        if s[i] == "." {
-            dot_pos = i;
-            break;
-        }
-        i += 1;
-    }
-    if dot_pos < 0 { return x; }
-    // Parse the integer part back.
-    let int_str = substring(s, 0, dot_pos);
-    // Handle "-0" edge case.
-    if strings_equal(int_str, "-") || strings_equal(int_str, "-0") {
-        return 0;
-    }
-    let mut result -> number = 0;
     let mut neg -> boolean = false;
-    let mut j -> number = 0;
-    if int_str.length > 0 && int_str[0] == "-" {
+    if s[0] == "-" {
         neg = true;
-        j = 1;
+        i = 1;
     }
+
+    // Scan mantissa and locate dot and exponent.
+    let mantissa_start = i;
+    let mut dot_pos -> number = -1;
+    let mut e_pos -> number = -1;
+    let mut j -> number = i;
     loop {
-        if j >= int_str.length { break; }
-        result = result * 10 + (char_code(int_str[j]) - 48);
+        if j >= s.length { break; }
+        let ch = s[j];
+        if ch == "." && dot_pos < 0 { dot_pos = j; }
+        if ch == "e" || ch == "E" { e_pos = j; break; }
         j += 1;
     }
+    let mantissa_end = e_pos;
+    if e_pos < 0 { mantissa_end = s.length; }
+
+    // Parse exponent if present.
+    let mut exponent -> number = 0;
+    if e_pos >= 0 {
+        let mut ei -> number = e_pos + 1;
+        let mut exp_neg -> boolean = false;
+        if ei < s.length && s[ei] == "-" { exp_neg = true; ei += 1; }
+        else if ei < s.length && s[ei] == "+" { ei += 1; }
+        loop {
+            if ei >= s.length { break; }
+            exponent = exponent * 10 + (char_code(s[ei]) - 48);
+            ei += 1;
+        }
+        if exp_neg { exponent = 0 - exponent; }
+    }
+
+    // Count digits and digits before the decimal point.
+    let mut digits_before_dot -> number = 0;
+    let mut k -> number = mantissa_start;
+    loop {
+        if k >= mantissa_end { break; }
+        let ch = s[k];
+        if ch != "." {
+            if dot_pos < 0 || k < dot_pos {
+                digits_before_dot += 1;
+            }
+        }
+        k += 1;
+    }
+
+    // How many integer digits after applying the exponent.
+    let int_digits = digits_before_dot + exponent;
+    if int_digits <= 0 { return 0; }
+
+    // Build the integer value from the mantissa digits up to int_digits.
+    let mut result -> number = 0;
+    let mut digit_count -> number = 0;
+    k = mantissa_start;
+    loop {
+        if k >= mantissa_end { break; }
+        let ch = s[k];
+        k += 1;
+        if ch == "." { continue; }
+        if digit_count >= int_digits { break; }
+        result = result * 10 + (char_code(ch) - 48);
+        digit_count += 1;
+    }
+    // Pad with zeros if exponent shifts past available digits.
+    loop {
+        if digit_count >= int_digits { break; }
+        result = result * 10;
+        digit_count += 1;
+    }
+
     if neg { return 0 - result; }
     return result;
 }

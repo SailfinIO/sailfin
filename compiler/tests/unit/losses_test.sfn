@@ -1,0 +1,149 @@
+// Regression tests for sfn/losses capsule functions.
+
+// -- Helpers copied from sfn/losses --
+
+fn _mse(predictions -> number[], targets -> number[]) -> number {
+    if predictions.length == 0 || targets.length == 0 { return 0; }
+    let n = predictions.length;
+    if targets.length < n { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        let diff = predictions[i] - targets[i];
+        total = total + diff * diff;
+        i += 1;
+    }
+    return total / predictions.length;
+}
+
+fn _mae(predictions -> number[], targets -> number[]) -> number {
+    if predictions.length == 0 || targets.length == 0 { return 0; }
+    let n = predictions.length;
+    if targets.length < n { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        let diff = predictions[i] - targets[i];
+        if diff < 0 {
+            total = total - diff;
+        } else {
+            total = total + diff;
+        }
+        i += 1;
+    }
+    return total / predictions.length;
+}
+
+fn _huber(predictions -> number[], targets -> number[], delta -> number) -> number {
+    if predictions.length == 0 || targets.length == 0 { return 0; }
+    let n = predictions.length;
+    if targets.length < n { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        let diff = predictions[i] - targets[i];
+        let mut a -> number = diff;
+        if a < 0 { a = 0 - a; }
+        if a <= delta {
+            total = total + 0.5 * diff * diff;
+        } else {
+            total = total + delta * (a - 0.5 * delta);
+        }
+        i += 1;
+    }
+    return total / predictions.length;
+}
+
+fn _hinge(predictions -> number[], targets -> number[]) -> number {
+    if predictions.length == 0 || targets.length == 0 { return 0; }
+    let n = predictions.length;
+    if targets.length < n { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        let margin = 1 - targets[i] * predictions[i];
+        if margin > 0 {
+            total = total + margin;
+        }
+        i += 1;
+    }
+    return total / predictions.length;
+}
+
+fn _squared_error(prediction -> number, target -> number) -> number {
+    let diff = prediction - target;
+    return diff * diff;
+}
+
+fn _absolute_error(prediction -> number, target -> number) -> number {
+    let diff = prediction - target;
+    if diff < 0 { return 0 - diff; }
+    return diff;
+}
+
+// -- Tests --
+
+test "losses: mse computes mean squared error" {
+    // [1,2,3] vs [1,2,3] => 0
+    assert _mse([1, 2, 3], [1, 2, 3]) == 0;
+    // [1,2,3] vs [4,5,6] => (9+9+9)/3 = 9
+    assert _mse([1, 2, 3], [4, 5, 6]) == 9;
+    // [0] vs [1] => 1/1 = 1
+    assert _mse([0], [1]) == 1;
+}
+
+test "losses: mae computes mean absolute error" {
+    assert _mae([1, 2, 3], [1, 2, 3]) == 0;
+    // [1,2,3] vs [4,5,6] => (3+3+3)/3 = 3
+    assert _mae([1, 2, 3], [4, 5, 6]) == 3;
+    // [0] vs [3] => 3/1 = 3
+    assert _mae([0], [3]) == 3;
+}
+
+test "losses: huber loss with default delta" {
+    // Small errors: quadratic (same as 0.5*MSE)
+    // [1] vs [1] => 0
+    assert _huber([1], [1], 1) == 0;
+    // [0] vs [0.5] => 0.5 * 0.25 = 0.125
+    assert _huber([0], [0.5], 1) == 0.125;
+}
+
+test "losses: hinge loss for binary classification" {
+    // Perfect classification: predictions match targets (+1/-1)
+    // prediction=2, target=1 => margin = 1-2 = -1 < 0 => 0
+    assert _hinge([2], [1]) == 0;
+    // prediction=-2, target=-1 => margin = 1-2 = -1 < 0 => 0
+    assert _hinge([-2], [-1]) == 0;
+    // Misclassification: prediction=0.5, target=-1 => margin = 1-(-0.5) = 1.5
+    assert _hinge([0.5], [-1]) == 1.5;
+}
+
+test "losses: squared_error single sample" {
+    assert _squared_error(3, 1) == 4;
+    assert _squared_error(0, 0) == 0;
+    assert _squared_error(-1, 1) == 4;
+}
+
+test "losses: absolute_error single sample" {
+    assert _absolute_error(3, 1) == 2;
+    assert _absolute_error(0, 0) == 0;
+    assert _absolute_error(-1, 1) == 2;
+    assert _absolute_error(1, 3) == 2;
+}
+
+test "losses: empty arrays return zero" {
+    assert _mse([], []) == 0;
+    assert _mae([], []) == 0;
+    assert _huber([], [], 1) == 0;
+    assert _hinge([], []) == 0;
+}
+
+test "losses: mismatched lengths return zero" {
+    // targets shorter than predictions
+    assert _mse([1, 2, 3], [1]) == 0;
+    assert _mae([1, 2, 3], [1]) == 0;
+}

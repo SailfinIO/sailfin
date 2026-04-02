@@ -26,6 +26,8 @@ fn sha256_hex(data -> string) -> string {
 
 fn base64_encode(data -> string) -> string {
     // Encode a string to base64.
+    // Delegates to the C runtime via the `base64.encode` runtime helper
+    // (see compiler/src/llvm/runtime_helpers.sfn).
     //
     // Usage:
     //   let encoded = base64_encode("hello world");

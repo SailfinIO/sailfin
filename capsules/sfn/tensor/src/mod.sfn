@@ -10,8 +10,8 @@
 //   let b = ones([2, 2]);
 //   let c = add(a, b);
 //
-// GPU-accelerated operations require the `gpu` effect.
-// CPU fallbacks are provided for all operations.
+// GPU-accelerated dispatch is planned but not yet implemented.
+// All operations currently execute on the CPU.
 
 // ---- Types ----
 
@@ -64,7 +64,12 @@ fn fill(shape -> number[], value -> number) -> Tensor {
 
 fn from_array(data -> number[], shape -> number[]) -> Tensor {
     // Create a tensor from a flat data array and a shape.
+    // Data length must match the product of shape dimensions.
     let n = _shape_size(shape);
+    if data.length != n {
+        print("[sfn/tensor] from_array: data length does not match shape");
+        return Tensor { data: data, shape: shape, size: data.length };
+    }
     return Tensor { data: data, shape: shape, size: n };
 }
 
@@ -102,38 +107,41 @@ fn set(t -> Tensor, indices -> number[], value -> number) -> Tensor {
 
 fn add(a -> Tensor, b -> Tensor) -> Tensor {
     // Element-wise addition. Shapes must match.
+    let n = _min_size(a.size, b.size);
     let mut out -> number[] = [];
     let mut i -> number = 0;
     loop {
-        if i >= a.size { break; }
+        if i >= n { break; }
         out.push(a.data[i] + b.data[i]);
         i += 1;
     }
-    return Tensor { data: out, shape: a.shape, size: a.size };
+    return Tensor { data: out, shape: a.shape, size: n };
 }
 
 fn subtract(a -> Tensor, b -> Tensor) -> Tensor {
-    // Element-wise subtraction.
+    // Element-wise subtraction. Shapes must match.
+    let n = _min_size(a.size, b.size);
     let mut out -> number[] = [];
     let mut i -> number = 0;
     loop {
-        if i >= a.size { break; }
+        if i >= n { break; }
         out.push(a.data[i] - b.data[i]);
         i += 1;
     }
-    return Tensor { data: out, shape: a.shape, size: a.size };
+    return Tensor { data: out, shape: a.shape, size: n };
 }
 
 fn multiply(a -> Tensor, b -> Tensor) -> Tensor {
-    // Element-wise multiplication (Hadamard product).
+    // Element-wise multiplication (Hadamard product). Shapes must match.
+    let n = _min_size(a.size, b.size);
     let mut out -> number[] = [];
     let mut i -> number = 0;
     loop {
-        if i >= a.size { break; }
+        if i >= n { break; }
         out.push(a.data[i] * b.data[i]);
         i += 1;
     }
-    return Tensor { data: out, shape: a.shape, size: a.size };
+    return Tensor { data: out, shape: a.shape, size: n };
 }
 
 fn scale(t -> Tensor, s -> number) -> Tensor {
@@ -228,6 +236,13 @@ fn dot(a -> Tensor, b -> Tensor) -> number {
 fn matmul(a -> Tensor, b -> Tensor) -> Tensor {
     // Matrix multiplication for 2D tensors.
     // a: [M, K], b: [K, N] => result: [M, N]
+    // Both tensors must be rank-2 with matching inner dimensions.
+    if a.shape.length != 2 || b.shape.length != 2 {
+        return zeros([0]);
+    }
+    if a.shape[1] != b.shape[0] {
+        return zeros([0]);
+    }
     let m = a.shape[0];
     let k = a.shape[1];
     let n = b.shape[1];
@@ -297,4 +312,9 @@ fn _flat_index(shape -> number[], indices -> number[]) -> number {
         stride = stride * shape[i];
     }
     return flat;
+}
+
+fn _min_size(a -> number, b -> number) -> number {
+    if a <= b { return a; }
+    return b;
 }

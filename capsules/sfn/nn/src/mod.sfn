@@ -3,6 +3,9 @@
 // Provides higher-level abstractions for training loops, gradient descent,
 // and common activation functions.
 //
+// GPU-accelerated dispatch is planned but not yet implemented.
+// All operations currently execute on the CPU.
+//
 // Usage:
 //   import { sigmoid, tanh, softmax } from "nn"
 //

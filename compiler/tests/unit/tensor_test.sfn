@@ -1,0 +1,368 @@
+// Regression tests for sfn/tensor capsule functions.
+
+// -- Types and helpers copied from sfn/tensor --
+
+struct Tensor {
+    data -> number[];
+    shape -> number[];
+    size -> number;
+}
+
+fn _shape_size(shape -> number[]) -> number {
+    if shape.length == 0 { return 1; }
+    let mut n -> number = 1;
+    let mut i -> number = 0;
+    loop {
+        if i >= shape.length { break; }
+        n = n * shape[i];
+        i += 1;
+    }
+    return n;
+}
+
+fn _flat_index(shape -> number[], indices -> number[]) -> number {
+    let mut flat -> number = 0;
+    let mut stride -> number = 1;
+    let mut i -> number = shape.length;
+    loop {
+        if i <= 0 { break; }
+        i -= 1;
+        flat = flat + indices[i] * stride;
+        stride = stride * shape[i];
+    }
+    return flat;
+}
+
+fn _min_size(a -> number, b -> number) -> number {
+    if a <= b { return a; }
+    return b;
+}
+
+fn _zeros(shape -> number[]) -> Tensor {
+    let n = _shape_size(shape);
+    let mut data -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        data.push(0);
+        i += 1;
+    }
+    return Tensor { data: data, shape: shape, size: n };
+}
+
+fn _ones(shape -> number[]) -> Tensor {
+    let n = _shape_size(shape);
+    let mut data -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        data.push(1);
+        i += 1;
+    }
+    return Tensor { data: data, shape: shape, size: n };
+}
+
+fn _fill(shape -> number[], value -> number) -> Tensor {
+    let n = _shape_size(shape);
+    let mut data -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        data.push(value);
+        i += 1;
+    }
+    return Tensor { data: data, shape: shape, size: n };
+}
+
+fn _from_array(data -> number[], shape -> number[]) -> Tensor {
+    let n = _shape_size(shape);
+    return Tensor { data: data, shape: shape, size: n };
+}
+
+fn _scalar(value -> number) -> Tensor {
+    return Tensor { data: [value], shape: [], size: 1 };
+}
+
+fn _get(t -> Tensor, indices -> number[]) -> number {
+    let flat = _flat_index(t.shape, indices);
+    return t.data[flat];
+}
+
+fn _set(t -> Tensor, indices -> number[], value -> number) -> Tensor {
+    let flat = _flat_index(t.shape, indices);
+    let mut new_data -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= t.size { break; }
+        if i == flat {
+            new_data.push(value);
+        } else {
+            new_data.push(t.data[i]);
+        }
+        i += 1;
+    }
+    return Tensor { data: new_data, shape: t.shape, size: t.size };
+}
+
+fn _add(a -> Tensor, b -> Tensor) -> Tensor {
+    let n = _min_size(a.size, b.size);
+    let mut out -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        out.push(a.data[i] + b.data[i]);
+        i += 1;
+    }
+    return Tensor { data: out, shape: a.shape, size: n };
+}
+
+fn _subtract(a -> Tensor, b -> Tensor) -> Tensor {
+    let n = _min_size(a.size, b.size);
+    let mut out -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        out.push(a.data[i] - b.data[i]);
+        i += 1;
+    }
+    return Tensor { data: out, shape: a.shape, size: n };
+}
+
+fn _multiply(a -> Tensor, b -> Tensor) -> Tensor {
+    let n = _min_size(a.size, b.size);
+    let mut out -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        out.push(a.data[i] * b.data[i]);
+        i += 1;
+    }
+    return Tensor { data: out, shape: a.shape, size: n };
+}
+
+fn _scale(t -> Tensor, s -> number) -> Tensor {
+    let mut out -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= t.size { break; }
+        out.push(t.data[i] * s);
+        i += 1;
+    }
+    return Tensor { data: out, shape: t.shape, size: t.size };
+}
+
+fn _negate(t -> Tensor) -> Tensor {
+    return _scale(t, -1);
+}
+
+fn _sum(t -> Tensor) -> number {
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= t.size { break; }
+        total = total + t.data[i];
+        i += 1;
+    }
+    return total;
+}
+
+fn _mean(t -> Tensor) -> number {
+    if t.size == 0 { return 0; }
+    return _sum(t) / t.size;
+}
+
+fn _reshape(t -> Tensor, new_shape -> number[]) -> Tensor {
+    return Tensor { data: t.data, shape: new_shape, size: t.size };
+}
+
+fn _rank(t -> Tensor) -> number {
+    return t.shape.length;
+}
+
+fn _dot(a -> Tensor, b -> Tensor) -> number {
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= a.size { break; }
+        total = total + a.data[i] * b.data[i];
+        i += 1;
+    }
+    return total;
+}
+
+fn _matmul(a -> Tensor, b -> Tensor) -> Tensor {
+    if a.shape.length != 2 || b.shape.length != 2 {
+        return _zeros([0]);
+    }
+    if a.shape[1] != b.shape[0] {
+        return _zeros([0]);
+    }
+    let m = a.shape[0];
+    let k = a.shape[1];
+    let n = b.shape[1];
+    let mut out -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= m { break; }
+        let mut j -> number = 0;
+        loop {
+            if j >= n { break; }
+            let mut val -> number = 0;
+            let mut p -> number = 0;
+            loop {
+                if p >= k { break; }
+                val = val + a.data[i * k + p] * b.data[p * n + j];
+                p += 1;
+            }
+            out.push(val);
+            j += 1;
+        }
+        i += 1;
+    }
+    return Tensor { data: out, shape: [m, n], size: m * n };
+}
+
+fn _transpose(t -> Tensor) -> Tensor {
+    let rows = t.shape[0];
+    let cols = t.shape[1];
+    let mut out -> number[] = [];
+    let mut j -> number = 0;
+    loop {
+        if j >= cols { break; }
+        let mut i -> number = 0;
+        loop {
+            if i >= rows { break; }
+            out.push(t.data[i * cols + j]);
+            i += 1;
+        }
+        j += 1;
+    }
+    return Tensor { data: out, shape: [cols, rows], size: t.size };
+}
+
+// -- Tests --
+
+test "tensor: zeros and ones constructors" {
+    let z = _zeros([2, 3]);
+    assert z.size == 6;
+    assert z.data[0] == 0;
+    assert z.data[5] == 0;
+
+    let o = _ones([3]);
+    assert o.size == 3;
+    assert o.data[0] == 1;
+    assert o.data[2] == 1;
+}
+
+test "tensor: fill and from_array" {
+    let f = _fill([2, 2], 5);
+    assert f.size == 4;
+    assert f.data[0] == 5;
+    assert f.data[3] == 5;
+
+    let a = _from_array([1, 2, 3, 4], [2, 2]);
+    assert a.size == 4;
+    assert a.data[0] == 1;
+    assert a.data[3] == 4;
+}
+
+test "tensor: scalar creates 0-dimensional tensor" {
+    let s = _scalar(42);
+    assert s.size == 1;
+    assert s.data[0] == 42;
+    assert s.shape.length == 0;
+}
+
+test "tensor: get and set element access" {
+    let t = _from_array([1, 2, 3, 4, 5, 6], [2, 3]);
+    assert _get(t, [0, 0]) == 1;
+    assert _get(t, [0, 2]) == 3;
+    assert _get(t, [1, 0]) == 4;
+    assert _get(t, [1, 2]) == 6;
+
+    let t2 = _set(t, [1, 1], 99);
+    assert _get(t2, [1, 1]) == 99;
+    assert _get(t2, [0, 0]) == 1;
+}
+
+test "tensor: add and subtract element-wise" {
+    let a = _from_array([1, 2, 3], [3]);
+    let b = _from_array([4, 5, 6], [3]);
+    let c = _add(a, b);
+    assert c.data[0] == 5;
+    assert c.data[1] == 7;
+    assert c.data[2] == 9;
+
+    let d = _subtract(b, a);
+    assert d.data[0] == 3;
+    assert d.data[1] == 3;
+    assert d.data[2] == 3;
+}
+
+test "tensor: multiply, scale, negate" {
+    let a = _from_array([2, 3, 4], [3]);
+    let b = _from_array([5, 6, 7], [3]);
+    let m = _multiply(a, b);
+    assert m.data[0] == 10;
+    assert m.data[1] == 18;
+    assert m.data[2] == 28;
+
+    let s = _scale(a, 3);
+    assert s.data[0] == 6;
+    assert s.data[1] == 9;
+    assert s.data[2] == 12;
+
+    let n = _negate(a);
+    assert n.data[0] == -2;
+    assert n.data[1] == -3;
+    assert n.data[2] == -4;
+}
+
+test "tensor: sum and mean reductions" {
+    let t = _from_array([1, 2, 3, 4], [4]);
+    assert _sum(t) == 10;
+    assert _mean(t) == 2.5;
+}
+
+test "tensor: reshape and rank" {
+    let t = _from_array([1, 2, 3, 4, 5, 6], [6]);
+    assert _rank(t) == 1;
+    let r = _reshape(t, [2, 3]);
+    assert _rank(r) == 2;
+    assert r.shape[0] == 2;
+    assert r.shape[1] == 3;
+    assert r.data[0] == 1;
+}
+
+test "tensor: dot product of vectors" {
+    let a = _from_array([1, 2, 3], [3]);
+    let b = _from_array([4, 5, 6], [3]);
+    assert _dot(a, b) == 32;
+}
+
+test "tensor: matmul 2x2 matrices" {
+    // [[1,2],[3,4]] * [[5,6],[7,8]] = [[19,22],[43,50]]
+    let a = _from_array([1, 2, 3, 4], [2, 2]);
+    let b = _from_array([5, 6, 7, 8], [2, 2]);
+    let c = _matmul(a, b);
+    assert c.data[0] == 19;
+    assert c.data[1] == 22;
+    assert c.data[2] == 43;
+    assert c.data[3] == 50;
+    assert c.shape[0] == 2;
+    assert c.shape[1] == 2;
+}
+
+test "tensor: transpose 2x3 matrix" {
+    // [[1,2,3],[4,5,6]] => [[1,4],[2,5],[3,6]]
+    let t = _from_array([1, 2, 3, 4, 5, 6], [2, 3]);
+    let tr = _transpose(t);
+    assert tr.shape[0] == 3;
+    assert tr.shape[1] == 2;
+    assert tr.data[0] == 1;
+    assert tr.data[1] == 4;
+    assert tr.data[2] == 2;
+    assert tr.data[3] == 5;
+    assert tr.data[4] == 3;
+    assert tr.data[5] == 6;
+}

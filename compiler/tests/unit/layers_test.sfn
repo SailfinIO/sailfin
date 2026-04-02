@@ -1,0 +1,175 @@
+// Regression tests for sfn/layers capsule functions.
+
+// -- Types and helpers copied from sfn/layers --
+
+struct Linear {
+    weights -> number[];
+    biases -> number[];
+    in_features -> number;
+    out_features -> number;
+}
+
+fn _linear(in_features -> number, out_features -> number) -> Linear {
+    let weight_count = in_features * out_features;
+    let mut weights -> number[] = [];
+    let mut biases -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= weight_count { break; }
+        weights.push(0);
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= out_features { break; }
+        biases.push(0);
+        i += 1;
+    }
+    return Linear {
+        weights: weights, biases: biases,
+        in_features: in_features, out_features: out_features,
+    };
+}
+
+fn _forward_linear(layer -> Linear, input -> number[]) -> number[] {
+    let mut output -> number[] = [];
+    let mut o -> number = 0;
+    loop {
+        if o >= layer.out_features { break; }
+        let mut val -> number = layer.biases[o];
+        let mut j -> number = 0;
+        loop {
+            if j >= layer.in_features { break; }
+            val = val + input[j] * layer.weights[o * layer.in_features + j];
+            j += 1;
+        }
+        output.push(val);
+        o += 1;
+    }
+    return output;
+}
+
+fn _forward_relu(input -> number[]) -> number[] {
+    let mut output -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= input.length { break; }
+        if input[i] > 0 {
+            output.push(input[i]);
+        } else {
+            output.push(0);
+        }
+        i += 1;
+    }
+    return output;
+}
+
+fn _parameter_count(layer -> Linear) -> number {
+    return layer.in_features * layer.out_features + layer.out_features;
+}
+
+// -- Tests --
+
+test "layers: linear constructor creates zero-initialized layer" {
+    let layer = _linear(3, 2);
+    assert layer.in_features == 3;
+    assert layer.out_features == 2;
+    assert layer.weights.length == 6;
+    assert layer.biases.length == 2;
+    assert layer.weights[0] == 0;
+    assert layer.biases[0] == 0;
+}
+
+test "layers: parameter_count includes weights and biases" {
+    let layer = _linear(3, 2);
+    // 3*2 weights + 2 biases = 8
+    assert _parameter_count(layer) == 8;
+
+    let big = _linear(10, 5);
+    // 10*5 + 5 = 55
+    assert _parameter_count(big) == 55;
+}
+
+test "layers: forward_linear with zero weights produces bias output" {
+    let layer = _linear(3, 2);
+    let input = [1, 2, 3];
+    let output = _forward_linear(layer, input);
+    assert output.length == 2;
+    // Zero weights and zero biases => all outputs are 0
+    assert output[0] == 0;
+    assert output[1] == 0;
+}
+
+test "layers: forward_linear with custom weights" {
+    // 2 inputs, 1 output: weights=[2, 3], bias=[1]
+    let layer = Linear {
+        weights: [2, 3],
+        biases: [1],
+        in_features: 2,
+        out_features: 1,
+    };
+    let input = [4, 5];
+    let output = _forward_linear(layer, input);
+    // 4*2 + 5*3 + 1 = 8 + 15 + 1 = 24
+    assert output.length == 1;
+    assert output[0] == 24;
+}
+
+test "layers: forward_linear with multiple outputs" {
+    // 2 inputs, 2 outputs
+    // weights = [1, 0, 0, 1] (identity-like)
+    // biases = [10, 20]
+    let layer = Linear {
+        weights: [1, 0, 0, 1],
+        biases: [10, 20],
+        in_features: 2,
+        out_features: 2,
+    };
+    let input = [3, 7];
+    let output = _forward_linear(layer, input);
+    assert output.length == 2;
+    // output[0] = 3*1 + 7*0 + 10 = 13
+    assert output[0] == 13;
+    // output[1] = 3*0 + 7*1 + 20 = 27
+    assert output[1] == 27;
+}
+
+test "layers: forward_relu zeroes negative values" {
+    let result = _forward_relu([3, -1, 0, 5, -2]);
+    assert result.length == 5;
+    assert result[0] == 3;
+    assert result[1] == 0;
+    assert result[2] == 0;
+    assert result[3] == 5;
+    assert result[4] == 0;
+}
+
+test "layers: forward_relu with all positive values" {
+    let result = _forward_relu([1, 2, 3]);
+    assert result[0] == 1;
+    assert result[1] == 2;
+    assert result[2] == 3;
+}
+
+test "layers: linear then relu pipeline" {
+    // Simulate a simple linear -> relu pipeline
+    let layer = Linear {
+        weights: [1, -1],
+        biases: [0],
+        in_features: 2,
+        out_features: 1,
+    };
+    // input [3, 5] => 3*1 + 5*(-1) + 0 = -2
+    let linear_out = _forward_linear(layer, [3, 5]);
+    assert linear_out[0] == -2;
+    let relu_out = _forward_relu(linear_out);
+    // ReLU(-2) = 0
+    assert relu_out[0] == 0;
+
+    // input [5, 3] => 5*1 + 3*(-1) + 0 = 2
+    let linear_out2 = _forward_linear(layer, [5, 3]);
+    assert linear_out2[0] == 2;
+    let relu_out2 = _forward_relu(linear_out2);
+    // ReLU(2) = 2
+    assert relu_out2[0] == 2;
+}

@@ -216,14 +216,21 @@ fn _parse_value(raw -> string) -> TomlValue {
         return _parse_inline_table(value);
     }
 
-    // Datetime (contains T or : and starts with digit)
+    // Datetime detection: date-only (YYYY-MM-DD), datetime (contains T or :),
+    // or any digit-starting value with dashes in date position.
     if value.length >= 10 && _is_digit(value[0]) {
         let mut has_time_sep -> boolean = false;
+        let mut dash_count -> number = 0;
         let mut ci -> number = 0;
         loop {
             if ci >= value.length { break; }
             if value[ci] == "T" || value[ci] == ":" { has_time_sep = true; }
+            if value[ci] == "-" { dash_count += 1; }
             ci += 1;
+        }
+        // Date-only: exactly 10 chars, pattern YYYY-MM-DD (2 dashes).
+        if value.length == 10 && dash_count == 2 && _is_digit(value[5]) {
+            return datetime_val(value);
         }
         if has_time_sep { return datetime_val(value); }
     }
@@ -326,19 +333,27 @@ fn _parse_array(raw -> string) -> TomlValue {
     let inner = _trim(substring(raw, 1, raw.length - 1));
     if inner.length == 0 { return array_val(items); }
 
-    // Split on commas (respecting nesting).
+    // Split on commas (respecting nesting and strings).
     let mut depth -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut str_char -> string = "";
     let mut start -> number = 0;
     let mut i -> number = 0;
     loop {
         if i >= inner.length { break; }
         let ch = inner[i];
-        if ch == "[" || ch == "{" { depth += 1; }
-        if ch == "]" || ch == "}" { depth -= 1; }
-        if ch == "," && depth == 0 {
-            let elem = _trim(substring(inner, start, i));
-            if elem.length > 0 { items.push(_parse_value(elem)); }
-            start = i + 1;
+        if in_string {
+            if ch == "\\" { i += 1; } // skip escaped char
+            else if ch == str_char { in_string = false; }
+        } else {
+            if ch == "\"" || ch == "'" { in_string = true; str_char = ch; }
+            if ch == "[" || ch == "{" { depth += 1; }
+            if ch == "]" || ch == "}" { depth -= 1; }
+            if ch == "," && depth == 0 {
+                let elem = _trim(substring(inner, start, i));
+                if elem.length > 0 { items.push(_parse_value(elem)); }
+                start = i + 1;
+            }
         }
         i += 1;
     }
@@ -354,19 +369,27 @@ fn _parse_inline_table(raw -> string) -> TomlValue {
     let inner = _trim(substring(raw, 1, raw.length - 1));
     if inner.length == 0 { return table_val(keys, values); }
 
-    // Split on commas.
+    // Split on commas (respecting nesting and strings).
     let mut start -> number = 0;
     let mut i -> number = 0;
     let mut depth -> number = 0;
+    let mut in_string -> boolean = false;
+    let mut str_char -> string = "";
     loop {
         if i >= inner.length { break; }
         let ch = inner[i];
-        if ch == "[" || ch == "{" { depth += 1; }
-        if ch == "]" || ch == "}" { depth -= 1; }
-        if ch == "," && depth == 0 {
-            let pair = _trim(substring(inner, start, i));
-            _parse_kv_pair(pair, keys, values);
-            start = i + 1;
+        if in_string {
+            if ch == "\\" { i += 1; }
+            else if ch == str_char { in_string = false; }
+        } else {
+            if ch == "\"" || ch == "'" { in_string = true; str_char = ch; }
+            if ch == "[" || ch == "{" { depth += 1; }
+            if ch == "]" || ch == "}" { depth -= 1; }
+            if ch == "," && depth == 0 {
+                let pair = _trim(substring(inner, start, i));
+                _parse_kv_pair(pair, keys, values);
+                start = i + 1;
+            }
         }
         i += 1;
     }
@@ -388,32 +411,122 @@ fn _parse_kv_pair(pair -> string, keys -> string[], values -> TomlValue[]) -> vo
 
 fn _insert_table(root_keys -> string[], root_values -> TomlValue[], path -> string, sub -> TomlValue) -> void {
     // Insert a sub-table at a dotted path like "package" or "tool.settings".
-    // For simplicity, treats the full path as a single key (dotted keys as one segment).
-    // Full dotted-key traversal would split on "." and walk/create intermediate tables.
-    root_keys.push(path);
-    root_values.push(sub);
+    // Splits on "." and walks/creates intermediate tables.
+    let segments = _split_dotted(path);
+    if segments.length == 0 { return; }
+
+    let mut cur_keys -> string[] = root_keys;
+    let mut cur_values -> TomlValue[] = root_values;
+
+    // Walk/create intermediate tables for all but the last segment.
+    let mut depth -> number = 0;
+    loop {
+        if depth >= segments.length - 1 { break; }
+        let seg = segments[depth];
+        let mut idx -> number = -1;
+        let mut fi -> number = 0;
+        loop {
+            if fi >= cur_keys.length { break; }
+            if strings_equal(cur_keys[fi], seg) { idx = fi; break; }
+            fi += 1;
+        }
+        if idx < 0 {
+            // Create a new empty table at this segment.
+            let mut new_keys -> string[] = [];
+            let mut new_values -> TomlValue[] = [];
+            cur_keys.push(seg);
+            cur_values.push(table_val(new_keys, new_values));
+            idx = cur_values.length - 1;
+        }
+        // Descend into the nested table.
+        cur_keys = cur_values[idx].keys;
+        cur_values = cur_values[idx].values;
+        depth += 1;
+    }
+
+    // Insert the final segment.
+    let leaf = segments[segments.length - 1];
+    let mut leaf_idx -> number = -1;
+    let mut li -> number = 0;
+    loop {
+        if li >= cur_keys.length { break; }
+        if strings_equal(cur_keys[li], leaf) { leaf_idx = li; break; }
+        li += 1;
+    }
+    if leaf_idx >= 0 {
+        cur_values[leaf_idx] = sub;
+    } else {
+        cur_keys.push(leaf);
+        cur_values.push(sub);
+    }
+}
+
+fn _split_dotted(path -> string) -> string[] {
+    let mut segments -> string[] = [];
+    let mut start -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "." {
+            if i > start { segments.push(substring(path, start, i)); }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start < path.length { segments.push(substring(path, start, path.length)); }
+    return segments;
 }
 
 fn _insert_array_table(root_keys -> string[], root_values -> TomlValue[], path -> string, sub -> TomlValue) -> void {
-    // Array of tables: [[path]] appends to an array at that key.
+    // Array of tables: [[path]] appends to an array at the leaf key.
+    // Walks dotted paths like _insert_table to find the right parent.
+    let segments = _split_dotted(path);
+    if segments.length == 0 { return; }
+
+    let mut cur_keys -> string[] = root_keys;
+    let mut cur_values -> TomlValue[] = root_values;
+
+    // Walk to the parent table.
+    let mut depth -> number = 0;
+    loop {
+        if depth >= segments.length - 1 { break; }
+        let seg = segments[depth];
+        let mut idx -> number = -1;
+        let mut fi -> number = 0;
+        loop {
+            if fi >= cur_keys.length { break; }
+            if strings_equal(cur_keys[fi], seg) { idx = fi; break; }
+            fi += 1;
+        }
+        if idx < 0 {
+            let mut new_keys -> string[] = [];
+            let mut new_values -> TomlValue[] = [];
+            cur_keys.push(seg);
+            cur_values.push(table_val(new_keys, new_values));
+            idx = cur_values.length - 1;
+        }
+        cur_keys = cur_values[idx].keys;
+        cur_values = cur_values[idx].values;
+        depth += 1;
+    }
+
+    let leaf = segments[segments.length - 1];
     let mut found -> number = -1;
     let mut fi -> number = 0;
     loop {
-        if fi >= root_keys.length { break; }
-        if strings_equal(root_keys[fi], path) { found = fi; break; }
+        if fi >= cur_keys.length { break; }
+        if strings_equal(cur_keys[fi], leaf) { found = fi; break; }
         fi += 1;
     }
     if found >= 0 {
-        // Append to existing array.
-        if strings_equal(root_values[found].kind, "array") {
-            root_values[found].items.push(sub);
+        if strings_equal(cur_values[found].kind, "array") {
+            cur_values[found].items.push(sub);
         }
     } else {
-        // Create new array with this as the first element.
         let mut items -> TomlValue[] = [];
         items.push(sub);
-        root_keys.push(path);
-        root_values.push(array_val(items));
+        cur_keys.push(leaf);
+        cur_values.push(array_val(items));
     }
 }
 
@@ -553,9 +666,9 @@ fn _stringify_table(table -> TomlValue, prefix -> string) -> string {
         if i >= table.keys.length { break; }
         let val = table.values[i];
         let key = table.keys[i];
-        let full_key = key;
+        let mut full_key -> string = key;
         if prefix.length > 0 {
-            // Not used in the current simple implementation.
+            full_key = prefix + "." + key;
         }
         if strings_equal(val.kind, "table") {
             out = out + "\n[" + full_key + "]\n";
