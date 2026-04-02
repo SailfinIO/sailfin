@@ -23,3 +23,13 @@ fn sha256_hex(data -> string) -> string {
     }
     return full;
 }
+
+fn base64_encode(data -> string) -> string {
+    // Encode a string to base64.
+    //
+    // Usage:
+    //   let encoded = base64_encode("hello world");
+    //   // encoded == "aGVsbG8gd29ybGQ="
+    //
+    return base64.encode(data, data.length);
+}

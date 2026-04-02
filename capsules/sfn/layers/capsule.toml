@@ -1,0 +1,10 @@
+[package]
+name = "sfn/layers"
+version = "0.1.1"
+description = "Neural network layer building blocks for Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = ["gpu"]

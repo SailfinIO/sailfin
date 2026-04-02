@@ -128,6 +128,14 @@ fn _is_stdlib(name -> string) -> boolean {
     if strings_equal(name, "fmt") { return true; }
     if strings_equal(name, "log") { return true; }
     if strings_equal(name, "time") { return true; }
+    if strings_equal(name, "math") { return true; }
+    if strings_equal(name, "path") { return true; }
+    if strings_equal(name, "tensor") { return true; }
+    if strings_equal(name, "layers") { return true; }
+    if strings_equal(name, "nn") { return true; }
+    if strings_equal(name, "losses") { return true; }
+    if strings_equal(name, "toml") { return true; }
+    if strings_equal(name, "net") { return true; }
     return false;
 }
 

@@ -1,0 +1,144 @@
+// sfn/math — Mathematical functions and numeric utilities for Sailfin.
+//
+// Provides common numeric operations. No effects required — pure functions.
+
+fn abs(x -> number) -> number {
+    // Returns the absolute value of x.
+    if x < 0 { return 0 - x; }
+    return x;
+}
+
+fn min(a -> number, b -> number) -> number {
+    // Returns the smaller of two numbers.
+    if a <= b { return a; }
+    return b;
+}
+
+fn max(a -> number, b -> number) -> number {
+    // Returns the larger of two numbers.
+    if a >= b { return a; }
+    return b;
+}
+
+fn clamp(x -> number, lo -> number, hi -> number) -> number {
+    // Clamp x to the range [lo, hi].
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    return x;
+}
+
+fn sign(x -> number) -> number {
+    // Returns -1, 0, or 1 depending on the sign of x.
+    if x < 0 { return -1; }
+    if x > 0 { return 1; }
+    return 0;
+}
+
+fn floor(x -> number) -> number {
+    // Floor for positive and negative numbers.
+    // Truncates toward negative infinity.
+    let truncated = _truncate(x);
+    if x >= 0 { return truncated; }
+    if truncated == x { return x; }
+    return truncated - 1;
+}
+
+fn ceil(x -> number) -> number {
+    // Ceiling — smallest integer >= x.
+    let truncated = _truncate(x);
+    if x <= 0 { return truncated; }
+    if truncated == x { return x; }
+    return truncated + 1;
+}
+
+fn round(x -> number) -> number {
+    // Round to nearest integer (half rounds up).
+    return floor(x + 0.5);
+}
+
+fn _truncate(x -> number) -> number {
+    // Truncate toward zero by converting through string.
+    // This works because number_to_string produces the full decimal
+    // and we can strip the fractional part.
+    let s = number_to_string(x);
+    let mut dot_pos -> number = -1;
+    let mut i -> number = 0;
+    loop {
+        if i >= s.length { break; }
+        if s[i] == "." {
+            dot_pos = i;
+            break;
+        }
+        i += 1;
+    }
+    if dot_pos < 0 { return x; }
+    // Parse the integer part back.
+    let int_str = substring(s, 0, dot_pos);
+    // Handle "-0" edge case.
+    if strings_equal(int_str, "-") || strings_equal(int_str, "-0") {
+        return 0;
+    }
+    let mut result -> number = 0;
+    let mut neg -> boolean = false;
+    let mut j -> number = 0;
+    if int_str.length > 0 && int_str[0] == "-" {
+        neg = true;
+        j = 1;
+    }
+    loop {
+        if j >= int_str.length { break; }
+        result = result * 10 + (char_code(int_str[j]) - 48);
+        j += 1;
+    }
+    if neg { return 0 - result; }
+    return result;
+}
+
+fn is_integer(x -> number) -> boolean {
+    // Returns true if x has no fractional part.
+    return floor(x) == x;
+}
+
+fn mod(a -> number, b -> number) -> number {
+    // Modulo operation. Returns a - floor(a/b) * b.
+    // Follows mathematical convention: result has the same sign as b.
+    if b == 0 { return 0; }
+    return a - floor(a / b) * b;
+}
+
+fn pow(base -> number, exp -> number) -> number {
+    // Integer exponentiation (exp must be a non-negative integer).
+    // Uses repeated squaring for efficiency.
+    if exp == 0 { return 1; }
+    if exp < 0 { return 0; } // No fractional results in integer pow.
+    let mut result -> number = 1;
+    let mut b -> number = base;
+    let mut e -> number = exp;
+    loop {
+        if e <= 0 { break; }
+        if mod(e, 2) == 1 {
+            result = result * b;
+        }
+        b = b * b;
+        e = floor(e / 2);
+    }
+    return result;
+}
+
+fn sum(values -> number[]) -> number {
+    // Sum all values in an array.
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= values.length { break; }
+        total = total + values[i];
+        i += 1;
+    }
+    return total;
+}
+
+fn mean(values -> number[]) -> number {
+    // Arithmetic mean. Returns 0 for empty arrays.
+    if values.length == 0 { return 0; }
+    return sum(values) / values.length;
+}

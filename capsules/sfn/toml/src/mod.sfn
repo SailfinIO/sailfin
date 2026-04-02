@@ -1,0 +1,745 @@
+// sfn/toml — TOML parsing and serialization for Sailfin.
+//
+// General-purpose TOML v1.0 parser returning a generic value tree.
+// No effects required — pure functions.
+//
+// Usage:
+//   import { parse, get_string, get_table } from "toml"
+//
+//   let config = parse(text);
+//   let name = get_string(config, "package.name");
+//   let deps = get_table(config, "dependencies");
+
+// ---- Types ----
+
+struct TomlValue {
+    kind -> string;         // "string", "integer", "float", "boolean", "array", "table", "datetime"
+    string_value -> string;
+    number_value -> number;
+    bool_value -> boolean;
+    items -> TomlValue[];   // for arrays
+    keys -> string[];       // for tables
+    values -> TomlValue[];  // for tables (parallel with keys)
+}
+
+// ---- Value constructors ----
+
+fn string_val(value -> string) -> TomlValue {
+    return TomlValue {
+        kind: "string", string_value: value, number_value: 0,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn integer_val(value -> number) -> TomlValue {
+    return TomlValue {
+        kind: "integer", string_value: "", number_value: value,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn float_val(value -> number) -> TomlValue {
+    return TomlValue {
+        kind: "float", string_value: "", number_value: value,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn bool_val(value -> boolean) -> TomlValue {
+    return TomlValue {
+        kind: "boolean", string_value: "", number_value: 0,
+        bool_value: value, items: [], keys: [], values: [],
+    };
+}
+
+fn array_val(items -> TomlValue[]) -> TomlValue {
+    return TomlValue {
+        kind: "array", string_value: "", number_value: 0,
+        bool_value: false, items: items, keys: [], values: [],
+    };
+}
+
+fn table_val(keys -> string[], values -> TomlValue[]) -> TomlValue {
+    return TomlValue {
+        kind: "table", string_value: "", number_value: 0,
+        bool_value: false, items: [], keys: keys, values: values,
+    };
+}
+
+fn datetime_val(value -> string) -> TomlValue {
+    // Stores datetime as its original string representation.
+    return TomlValue {
+        kind: "datetime", string_value: value, number_value: 0,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+// ---- Parser ----
+
+fn parse(text -> string) -> TomlValue {
+    // Parse a TOML document into a TomlValue tree.
+    // The root is always a table.
+    let lines = _split_lines(text);
+    let mut root_keys -> string[] = [];
+    let mut root_values -> TomlValue[] = [];
+
+    // Current table path and accumulation.
+    let mut current_path -> string = "";
+    let mut is_array_table -> boolean = false;
+
+    // We collect all key-value pairs grouped by table path,
+    // then assemble the tree at the end.
+    let mut table_paths -> string[] = [];
+    let mut table_key_lists -> string[][] = [];
+    let mut table_value_lists -> TomlValue[][] = [];
+    let mut table_is_array -> boolean[] = [];
+
+    // Start with the root table.
+    table_paths.push("");
+    table_key_lists.push([]);
+    table_value_lists.push([]);
+    table_is_array.push(false);
+
+    let mut current_idx -> number = 0;
+
+    let mut i -> number = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _trim(lines[i]);
+        i += 1;
+
+        // Skip empty lines and comments.
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+
+        // Table header: [table] or [[array-of-tables]]
+        if line[0] == "[" {
+            let is_arr = line.length >= 2 && line[1] == "[";
+            let mut header_start -> number = 1;
+            let mut header_end -> number = line.length - 1;
+            if is_arr {
+                header_start = 2;
+                header_end = line.length - 2;
+            }
+            let path = _trim(substring(line, header_start, header_end));
+
+            // Check if this table path already exists.
+            let mut found -> number = -1;
+            if !is_arr {
+                let mut fi -> number = 0;
+                loop {
+                    if fi >= table_paths.length { break; }
+                    if strings_equal(table_paths[fi], path) && !table_is_array[fi] {
+                        found = fi;
+                        break;
+                    }
+                    fi += 1;
+                }
+            }
+
+            if found >= 0 {
+                current_idx = found;
+            } else {
+                table_paths.push(path);
+                table_key_lists.push([]);
+                table_value_lists.push([]);
+                table_is_array.push(is_arr);
+                current_idx = table_paths.length - 1;
+            }
+            continue;
+        }
+
+        // Key-value pair.
+        let eq_pos = _find_equals(line);
+        if eq_pos < 0 { continue; }
+
+        let key = _trim(substring(line, 0, eq_pos));
+        let raw_value = _trim(substring(line, eq_pos + 1, line.length));
+        let bare_key = _strip_quotes(key);
+        let parsed_value = _parse_value(raw_value);
+
+        table_key_lists[current_idx].push(bare_key);
+        table_value_lists[current_idx].push(parsed_value);
+    }
+
+    // Assemble: start with the root table (index 0).
+    root_keys = table_key_lists[0];
+    root_values = table_value_lists[0];
+
+    // Insert nested tables into the root tree.
+    let mut ti -> number = 1;
+    loop {
+        if ti >= table_paths.length { break; }
+        let path = table_paths[ti];
+        let sub = table_val(table_key_lists[ti], table_value_lists[ti]);
+
+        if table_is_array[ti] {
+            // Array of tables — append to an existing array or create one.
+            _insert_array_table(root_keys, root_values, path, sub);
+        } else {
+            _insert_table(root_keys, root_values, path, sub);
+        }
+        ti += 1;
+    }
+
+    return table_val(root_keys, root_values);
+}
+
+// ---- Value parsing ----
+
+fn _parse_value(raw -> string) -> TomlValue {
+    if raw.length == 0 { return string_val(""); }
+
+    // Strip inline comments (only outside of strings).
+    let value = _strip_inline_comment(raw);
+
+    // Boolean
+    if strings_equal(value, "true") { return bool_val(true); }
+    if strings_equal(value, "false") { return bool_val(false); }
+
+    // String (basic)
+    if value[0] == "\"" {
+        return string_val(_parse_basic_string(value));
+    }
+    // String (literal)
+    if value[0] == "'" {
+        return string_val(_parse_literal_string(value));
+    }
+
+    // Array
+    if value[0] == "[" {
+        return _parse_array(value);
+    }
+
+    // Inline table
+    if value[0] == "{" {
+        return _parse_inline_table(value);
+    }
+
+    // Datetime (contains T or : and starts with digit)
+    if value.length >= 10 && _is_digit(value[0]) {
+        let mut has_time_sep -> boolean = false;
+        let mut ci -> number = 0;
+        loop {
+            if ci >= value.length { break; }
+            if value[ci] == "T" || value[ci] == ":" { has_time_sep = true; }
+            ci += 1;
+        }
+        if has_time_sep { return datetime_val(value); }
+    }
+
+    // Number (integer or float)
+    return _parse_number(value);
+}
+
+fn _parse_basic_string(raw -> string) -> string {
+    // Parse a TOML basic string (double-quoted, with escape sequences).
+    if raw.length < 2 { return ""; }
+    let mut out -> string = "";
+    let mut i -> number = 1;
+    let end = raw.length - 1;
+    loop {
+        if i >= end { break; }
+        let ch = raw[i];
+        if ch == "\\" {
+            i += 1;
+            if i >= end { break; }
+            let esc = raw[i];
+            if esc == "\"" { out = out + "\""; }
+            else if esc == "\\" { out = out + "\\"; }
+            else if esc == "n" { out = out + "\n"; }
+            else if esc == "r" { out = out + "\r"; }
+            else if esc == "t" { out = out + "\t"; }
+            else { out = out + esc; }
+        } else {
+            out = out + ch;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _parse_literal_string(raw -> string) -> string {
+    // Parse a TOML literal string (single-quoted, no escapes).
+    if raw.length < 2 { return ""; }
+    return substring(raw, 1, raw.length - 1);
+}
+
+fn _parse_number(value -> string) -> TomlValue {
+    let mut has_dot -> boolean = false;
+    let mut i -> number = 0;
+    loop {
+        if i >= value.length { break; }
+        if value[i] == "." { has_dot = true; }
+        i += 1;
+    }
+
+    // Parse the numeric value.
+    let mut result -> number = 0;
+    let mut negative -> boolean = false;
+    let mut decimal_place -> number = 0;
+    let mut j -> number = 0;
+    if value.length > 0 && value[0] == "-" {
+        negative = true;
+        j = 1;
+    }
+    if value.length > 0 && value[0] == "+" {
+        j = 1;
+    }
+    loop {
+        if j >= value.length { break; }
+        let ch = value[j];
+        if ch == "_" {
+            // TOML allows underscores in numbers.
+            j += 1;
+            continue;
+        }
+        if ch == "." {
+            decimal_place = 1;
+        } else {
+            let digit = char_code(ch) - 48;
+            if decimal_place > 0 {
+                let mut divisor -> number = 1;
+                let mut d -> number = 0;
+                loop {
+                    if d >= decimal_place { break; }
+                    divisor = divisor * 10;
+                    d += 1;
+                }
+                result = result + digit / divisor;
+                decimal_place += 1;
+            } else {
+                result = result * 10 + digit;
+            }
+        }
+        j += 1;
+    }
+    if negative { result = 0 - result; }
+
+    if has_dot { return float_val(result); }
+    return integer_val(result);
+}
+
+fn _parse_array(raw -> string) -> TomlValue {
+    let mut items -> TomlValue[] = [];
+    if raw.length < 2 { return array_val(items); }
+    let inner = _trim(substring(raw, 1, raw.length - 1));
+    if inner.length == 0 { return array_val(items); }
+
+    // Split on commas (respecting nesting).
+    let mut depth -> number = 0;
+    let mut start -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= inner.length { break; }
+        let ch = inner[i];
+        if ch == "[" || ch == "{" { depth += 1; }
+        if ch == "]" || ch == "}" { depth -= 1; }
+        if ch == "," && depth == 0 {
+            let elem = _trim(substring(inner, start, i));
+            if elem.length > 0 { items.push(_parse_value(elem)); }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    let last = _trim(substring(inner, start, inner.length));
+    if last.length > 0 { items.push(_parse_value(last)); }
+    return array_val(items);
+}
+
+fn _parse_inline_table(raw -> string) -> TomlValue {
+    let mut keys -> string[] = [];
+    let mut values -> TomlValue[] = [];
+    if raw.length < 2 { return table_val(keys, values); }
+    let inner = _trim(substring(raw, 1, raw.length - 1));
+    if inner.length == 0 { return table_val(keys, values); }
+
+    // Split on commas.
+    let mut start -> number = 0;
+    let mut i -> number = 0;
+    let mut depth -> number = 0;
+    loop {
+        if i >= inner.length { break; }
+        let ch = inner[i];
+        if ch == "[" || ch == "{" { depth += 1; }
+        if ch == "]" || ch == "}" { depth -= 1; }
+        if ch == "," && depth == 0 {
+            let pair = _trim(substring(inner, start, i));
+            _parse_kv_pair(pair, keys, values);
+            start = i + 1;
+        }
+        i += 1;
+    }
+    let last = _trim(substring(inner, start, inner.length));
+    if last.length > 0 { _parse_kv_pair(last, keys, values); }
+    return table_val(keys, values);
+}
+
+fn _parse_kv_pair(pair -> string, keys -> string[], values -> TomlValue[]) -> void {
+    let eq = _find_equals(pair);
+    if eq < 0 { return; }
+    let key = _strip_quotes(_trim(substring(pair, 0, eq)));
+    let val = _parse_value(_trim(substring(pair, eq + 1, pair.length)));
+    keys.push(key);
+    values.push(val);
+}
+
+// ---- Tree assembly helpers ----
+
+fn _insert_table(root_keys -> string[], root_values -> TomlValue[], path -> string, sub -> TomlValue) -> void {
+    // Insert a sub-table at a dotted path like "package" or "tool.settings".
+    // For simplicity, treats the full path as a single key (dotted keys as one segment).
+    // Full dotted-key traversal would split on "." and walk/create intermediate tables.
+    root_keys.push(path);
+    root_values.push(sub);
+}
+
+fn _insert_array_table(root_keys -> string[], root_values -> TomlValue[], path -> string, sub -> TomlValue) -> void {
+    // Array of tables: [[path]] appends to an array at that key.
+    let mut found -> number = -1;
+    let mut fi -> number = 0;
+    loop {
+        if fi >= root_keys.length { break; }
+        if strings_equal(root_keys[fi], path) { found = fi; break; }
+        fi += 1;
+    }
+    if found >= 0 {
+        // Append to existing array.
+        if strings_equal(root_values[found].kind, "array") {
+            root_values[found].items.push(sub);
+        }
+    } else {
+        // Create new array with this as the first element.
+        let mut items -> TomlValue[] = [];
+        items.push(sub);
+        root_keys.push(path);
+        root_values.push(array_val(items));
+    }
+}
+
+// ---- Accessors ----
+
+fn get_string(root -> TomlValue, key -> string) -> string {
+    // Get a string value by key. Supports dotted paths like "package.name".
+    let val = _resolve_path(root, key);
+    return val.string_value;
+}
+
+fn get_number(root -> TomlValue, key -> string) -> number {
+    let val = _resolve_path(root, key);
+    return val.number_value;
+}
+
+fn get_bool(root -> TomlValue, key -> string) -> boolean {
+    let val = _resolve_path(root, key);
+    return val.bool_value;
+}
+
+fn get_table(root -> TomlValue, key -> string) -> TomlValue {
+    return _resolve_path(root, key);
+}
+
+fn get_array(root -> TomlValue, key -> string) -> TomlValue[] {
+    let val = _resolve_path(root, key);
+    return val.items;
+}
+
+fn has_key(root -> TomlValue, key -> string) -> boolean {
+    let val = _resolve_path(root, key);
+    return !strings_equal(val.kind, "");
+}
+
+fn get_value(root -> TomlValue, key -> string) -> TomlValue {
+    return _resolve_path(root, key);
+}
+
+fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
+    // Resolve a dotted path like "package.name" through nested tables.
+    // First try the full path as a single key (for table headers like [package]).
+    if !strings_equal(root.kind, "table") {
+        return TomlValue {
+            kind: "", string_value: "", number_value: 0,
+            bool_value: false, items: [], keys: [], values: [],
+        };
+    }
+
+    // Split path on ".".
+    let mut segments -> string[] = [];
+    let mut start -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "." {
+            segments.push(substring(path, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    segments.push(substring(path, start, path.length));
+
+    // Walk the tree.
+    let mut current -> TomlValue = root;
+    let mut si -> number = 0;
+    loop {
+        if si >= segments.length { break; }
+        let seg = segments[si];
+        let mut found -> boolean = false;
+        let mut ki -> number = 0;
+        loop {
+            if ki >= current.keys.length { break; }
+            if strings_equal(current.keys[ki], seg) {
+                current = current.values[ki];
+                found = true;
+                break;
+            }
+            ki += 1;
+        }
+        if !found {
+            // Try the remaining path as a single key (table headers).
+            let mut remaining -> string = seg;
+            let mut ri -> number = si + 1;
+            loop {
+                if ri >= segments.length { break; }
+                remaining = remaining + "." + segments[ri];
+                ri += 1;
+            }
+            let mut ki2 -> number = 0;
+            loop {
+                if ki2 >= current.keys.length { break; }
+                if strings_equal(current.keys[ki2], remaining) {
+                    return current.values[ki2];
+                }
+                ki2 += 1;
+            }
+            return TomlValue {
+                kind: "", string_value: "", number_value: 0,
+                bool_value: false, items: [], keys: [], values: [],
+            };
+        }
+        si += 1;
+    }
+    return current;
+}
+
+// ---- Serialization ----
+
+fn stringify(value -> TomlValue) -> string {
+    // Serialize a TomlValue tree back to a TOML string.
+    if !strings_equal(value.kind, "table") {
+        return _stringify_value(value);
+    }
+    return _stringify_table(value, "");
+}
+
+fn _stringify_table(table -> TomlValue, prefix -> string) -> string {
+    let mut out -> string = "";
+    // First pass: emit simple key-value pairs.
+    let mut i -> number = 0;
+    loop {
+        if i >= table.keys.length { break; }
+        let val = table.values[i];
+        if !strings_equal(val.kind, "table") && !strings_equal(val.kind, "array") {
+            out = out + table.keys[i] + " = " + _stringify_value(val) + "\n";
+        }
+        if strings_equal(val.kind, "array") && val.items.length > 0 && !strings_equal(val.items[0].kind, "table") {
+            out = out + table.keys[i] + " = " + _stringify_value(val) + "\n";
+        }
+        i += 1;
+    }
+
+    // Second pass: emit sub-tables.
+    i = 0;
+    loop {
+        if i >= table.keys.length { break; }
+        let val = table.values[i];
+        let key = table.keys[i];
+        let full_key = key;
+        if prefix.length > 0 {
+            // Not used in the current simple implementation.
+        }
+        if strings_equal(val.kind, "table") {
+            out = out + "\n[" + full_key + "]\n";
+            out = out + _stringify_table(val, full_key);
+        }
+        // Array of tables
+        if strings_equal(val.kind, "array") && val.items.length > 0 && strings_equal(val.items[0].kind, "table") {
+            let mut ai -> number = 0;
+            loop {
+                if ai >= val.items.length { break; }
+                out = out + "\n[[" + full_key + "]]\n";
+                out = out + _stringify_table(val.items[ai], full_key);
+                ai += 1;
+            }
+        }
+        i += 1;
+    }
+
+    return out;
+}
+
+fn _stringify_value(value -> TomlValue) -> string {
+    if strings_equal(value.kind, "string") {
+        return "\"" + _escape_string(value.string_value) + "\"";
+    }
+    if strings_equal(value.kind, "integer") {
+        return number_to_string(value.number_value);
+    }
+    if strings_equal(value.kind, "float") {
+        return number_to_string(value.number_value);
+    }
+    if strings_equal(value.kind, "boolean") {
+        if value.bool_value { return "true"; }
+        return "false";
+    }
+    if strings_equal(value.kind, "datetime") {
+        return value.string_value;
+    }
+    if strings_equal(value.kind, "array") {
+        let mut out -> string = "[";
+        let mut i -> number = 0;
+        loop {
+            if i >= value.items.length { break; }
+            if i > 0 { out = out + ", "; }
+            out = out + _stringify_value(value.items[i]);
+            i += 1;
+        }
+        return out + "]";
+    }
+    if strings_equal(value.kind, "table") {
+        // Inline table format.
+        let mut out -> string = "{";
+        let mut i -> number = 0;
+        loop {
+            if i >= value.keys.length { break; }
+            if i > 0 { out = out + ", "; }
+            out = out + value.keys[i] + " = " + _stringify_value(value.values[i]);
+            i += 1;
+        }
+        return out + "}";
+    }
+    return "\"\"";
+}
+
+// ---- String helpers ----
+
+fn _trim(text -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = text.length;
+    loop {
+        if start >= end { break; }
+        let ch = text[start];
+        if ch == " " || ch == "\t" || ch == "\r" || ch == "\n" {
+            start += 1;
+        } else { break; }
+    }
+    loop {
+        if end <= start { break; }
+        let ch = text[end - 1];
+        if ch == " " || ch == "\t" || ch == "\r" || ch == "\n" {
+            end -= 1;
+        } else { break; }
+    }
+    return substring(text, start, end);
+}
+
+fn _strip_quotes(text -> string) -> string {
+    if text.length >= 2 {
+        let first = text[0];
+        let last = text[text.length - 1];
+        if first == "\"" && last == "\"" {
+            return substring(text, 1, text.length - 1);
+        }
+        if first == "'" && last == "'" {
+            return substring(text, 1, text.length - 1);
+        }
+    }
+    return text;
+}
+
+fn _split_lines(text -> string) -> string[] {
+    let mut lines -> string[] = [];
+    let mut start -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= text.length { break; }
+        if text[i] == "\n" {
+            lines.push(substring(text, start, i));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start <= text.length {
+        lines.push(substring(text, start, text.length));
+    }
+    return lines;
+}
+
+fn _find_equals(line -> string) -> number {
+    // Find the first '=' not inside a string.
+    let mut in_string -> boolean = false;
+    let mut quote_char -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= line.length { break; }
+        let ch = line[i];
+        if in_string {
+            if ch == "\\" { i += 1; } // skip escaped char
+            else if ch == quote_char { in_string = false; }
+        } else {
+            if ch == "\"" || ch == "'" {
+                in_string = true;
+                quote_char = ch;
+            }
+            if ch == "=" { return i; }
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _strip_inline_comment(raw -> string) -> string {
+    // Remove trailing # comments (only outside strings).
+    let mut in_string -> boolean = false;
+    let mut quote_char -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= raw.length { break; }
+        let ch = raw[i];
+        if in_string {
+            if ch == "\\" { i += 1; }
+            else if ch == quote_char { in_string = false; }
+        } else {
+            if ch == "\"" || ch == "'" {
+                in_string = true;
+                quote_char = ch;
+            }
+            if ch == "#" {
+                return _trim(substring(raw, 0, i));
+            }
+        }
+        i += 1;
+    }
+    return raw;
+}
+
+fn _escape_string(s -> string) -> string {
+    let mut out -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = s[i];
+        if ch == "\"" { out = out + "\\\""; }
+        else if ch == "\\" { out = out + "\\\\"; }
+        else if ch == "\n" { out = out + "\\n"; }
+        else if ch == "\r" { out = out + "\\r"; }
+        else if ch == "\t" { out = out + "\\t"; }
+        else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _is_digit(ch -> string) -> boolean {
+    let code = char_code(ch);
+    return code >= 48 && code <= 57;
+}

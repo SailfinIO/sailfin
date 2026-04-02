@@ -1,0 +1,167 @@
+// sfn/path — File path manipulation utilities for Sailfin.
+//
+// Provides pure string-based path operations (no filesystem access).
+// Uses POSIX-style forward slash separators.
+// No effects required — pure functions.
+
+fn join(a -> string, b -> string) -> string {
+    // Join two path segments with a separator.
+    if a.length == 0 { return b; }
+    if b.length == 0 { return a; }
+    let a_ends = a[a.length - 1] == "/";
+    let b_starts = b[0] == "/";
+    if a_ends && b_starts {
+        return a + substring(b, 1, b.length);
+    }
+    if a_ends || b_starts {
+        return a + b;
+    }
+    return a + "/" + b;
+}
+
+fn dirname(path -> string) -> string {
+    // Returns the directory portion of a path.
+    // dirname("/foo/bar.txt") => "/foo"
+    // dirname("bar.txt") => "."
+    if path.length == 0 { return "."; }
+    let mut last_sep -> number = -1;
+    let mut i -> number = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" { last_sep = i; }
+        i += 1;
+    }
+    if last_sep < 0 { return "."; }
+    if last_sep == 0 { return "/"; }
+    return substring(path, 0, last_sep);
+}
+
+fn basename(path -> string) -> string {
+    // Returns the final component of a path.
+    // basename("/foo/bar.txt") => "bar.txt"
+    if path.length == 0 { return ""; }
+    // Strip trailing slashes.
+    let mut end -> number = path.length;
+    loop {
+        if end <= 1 { break; }
+        if path[end - 1] == "/" {
+            end -= 1;
+        } else { break; }
+    }
+    let mut last_sep -> number = -1;
+    let mut i -> number = 0;
+    loop {
+        if i >= end { break; }
+        if path[i] == "/" { last_sep = i; }
+        i += 1;
+    }
+    if last_sep < 0 { return substring(path, 0, end); }
+    return substring(path, last_sep + 1, end);
+}
+
+fn ext(path -> string) -> string {
+    // Returns the file extension including the dot.
+    // ext("file.tar.gz") => ".gz"
+    // ext("Makefile") => ""
+    let name = basename(path);
+    let mut last_dot -> number = -1;
+    let mut i -> number = 0;
+    loop {
+        if i >= name.length { break; }
+        if name[i] == "." { last_dot = i; }
+        i += 1;
+    }
+    // No dot, or dot is the first character (hidden file like .gitignore).
+    if last_dot <= 0 { return ""; }
+    return substring(name, last_dot, name.length);
+}
+
+fn stem(path -> string) -> string {
+    // Returns the basename without the extension.
+    // stem("file.tar.gz") => "file.tar"
+    // stem("Makefile") => "Makefile"
+    let name = basename(path);
+    let extension = ext(path);
+    if extension.length == 0 { return name; }
+    return substring(name, 0, name.length - extension.length);
+}
+
+fn is_absolute(path -> string) -> boolean {
+    // Returns true if the path starts with /.
+    if path.length == 0 { return false; }
+    return path[0] == "/";
+}
+
+fn is_relative(path -> string) -> boolean {
+    // Returns true if the path does not start with /.
+    return !is_absolute(path);
+}
+
+fn normalize(path -> string) -> string {
+    // Normalize a path by resolving "." and ".." segments and collapsing
+    // repeated slashes.
+    if path.length == 0 { return "."; }
+    let absolute = path[0] == "/";
+
+    // Split on "/"
+    let mut parts -> string[] = [];
+    let mut start -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" {
+            if i > start {
+                parts.push(substring(path, start, i));
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start < path.length {
+        parts.push(substring(path, start, path.length));
+    }
+
+    // Resolve . and ..
+    let mut resolved -> string[] = [];
+    let mut j -> number = 0;
+    loop {
+        if j >= parts.length { break; }
+        let seg = parts[j];
+        if strings_equal(seg, ".") {
+            // skip
+        } else if strings_equal(seg, "..") {
+            if resolved.length > 0 && !strings_equal(resolved[resolved.length - 1], "..") {
+                // Pop last segment.
+                let mut new_resolved -> string[] = [];
+                let mut k -> number = 0;
+                loop {
+                    if k >= resolved.length - 1 { break; }
+                    new_resolved.push(resolved[k]);
+                    k += 1;
+                }
+                resolved = new_resolved;
+            } else if !absolute {
+                resolved.push("..");
+            }
+        } else {
+            resolved.push(seg);
+        }
+        j += 1;
+    }
+
+    // Rebuild
+    if resolved.length == 0 {
+        if absolute { return "/"; }
+        return ".";
+    }
+    let mut out -> string = "";
+    if absolute { out = "/"; }
+    let mut m -> number = 0;
+    loop {
+        if m >= resolved.length { break; }
+        if m > 0 { out = out + "/"; }
+        out = out + resolved[m];
+        m += 1;
+    }
+    return out;
+}

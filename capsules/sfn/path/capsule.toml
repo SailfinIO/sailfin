@@ -1,0 +1,10 @@
+[package]
+name = "sfn/path"
+version = "0.1.1"
+description = "File path manipulation utilities for Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = []

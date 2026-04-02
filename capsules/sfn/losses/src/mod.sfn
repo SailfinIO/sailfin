@@ -1,0 +1,122 @@
+// sfn/losses — Loss functions for neural network training in Sailfin.
+//
+// Provides common loss functions used to measure model prediction error.
+// All operations are pure — no effects required.
+//
+// Usage:
+//   import { mse, mae } from "losses"
+//
+//   let loss = mse(predictions, targets);
+
+// ---- Regression losses ----
+
+fn mse(predictions -> number[], targets -> number[]) -> number {
+    // Mean Squared Error: (1/n) * sum((pred - target)^2).
+    if predictions.length == 0 { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= predictions.length { break; }
+        let diff = predictions[i] - targets[i];
+        total = total + diff * diff;
+        i += 1;
+    }
+    return total / predictions.length;
+}
+
+fn mae(predictions -> number[], targets -> number[]) -> number {
+    // Mean Absolute Error: (1/n) * sum(|pred - target|).
+    if predictions.length == 0 { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= predictions.length { break; }
+        let diff = predictions[i] - targets[i];
+        if diff < 0 {
+            total = total - diff;
+        } else {
+            total = total + diff;
+        }
+        i += 1;
+    }
+    return total / predictions.length;
+}
+
+fn huber(predictions -> number[], targets -> number[], delta -> number = 1) -> number {
+    // Huber loss: quadratic for small errors, linear for large errors.
+    // Combines the best properties of MSE and MAE.
+    if predictions.length == 0 { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= predictions.length { break; }
+        let diff = predictions[i] - targets[i];
+        let abs_diff = diff;
+        let mut a -> number = abs_diff;
+        if a < 0 { a = 0 - a; }
+        if a <= delta {
+            total = total + 0.5 * diff * diff;
+        } else {
+            total = total + delta * (a - 0.5 * delta);
+        }
+        i += 1;
+    }
+    return total / predictions.length;
+}
+
+// ---- Classification losses ----
+
+fn hinge(predictions -> number[], targets -> number[]) -> number {
+    // Hinge loss for binary classification (SVM-style).
+    // Targets should be +1 or -1.
+    if predictions.length == 0 { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= predictions.length { break; }
+        let margin = 1 - targets[i] * predictions[i];
+        if margin > 0 {
+            total = total + margin;
+        }
+        i += 1;
+    }
+    return total / predictions.length;
+}
+
+fn binary_cross_entropy_approx(predictions -> number[], targets -> number[]) -> number {
+    // Approximate binary cross-entropy without log().
+    // Uses a piecewise linear approximation of -log(x).
+    // True implementation requires log() runtime support.
+    if predictions.length == 0 { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= predictions.length { break; }
+        // Clamp predictions to avoid division issues.
+        let mut p -> number = predictions[i];
+        if p < 0.001 { p = 0.001; }
+        if p > 0.999 { p = 0.999; }
+        // Approximate -log(x) as (1 - x) / x for values near 1,
+        // and a linear ramp for small values.
+        let neg_log_p = (1 - p) / p;
+        let neg_log_1mp = p / (1 - p);
+        total = total + targets[i] * neg_log_p + (1 - targets[i]) * neg_log_1mp;
+        i += 1;
+    }
+    return total / predictions.length;
+}
+
+// ---- Utility ----
+
+fn squared_error(prediction -> number, target -> number) -> number {
+    // Single-sample squared error.
+    let diff = prediction - target;
+    return diff * diff;
+}
+
+fn absolute_error(prediction -> number, target -> number) -> number {
+    // Single-sample absolute error.
+    let diff = prediction - target;
+    if diff < 0 { return 0 - diff; }
+    return diff;
+}
