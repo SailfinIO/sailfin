@@ -1,0 +1,133 @@
+// Regression tests for Phi/SSA stabilization fixes.
+// These exercise patterns that previously caused invalid LLVM IR:
+// - Duplicate SSA temp names (temp_index resets across control flow)
+// - Phi nodes interleaved with other instructions
+
+// --- SSA temp_index stability across control flow ---
+
+fn _nested_lets_in_branches(n -> number) -> number {
+    let a = n + 1;
+    let b = a * 2;
+    if n > 10 {
+        let c = b + 3;
+        let d = c * 4;
+        return d;
+    } else {
+        let e = b - 1;
+        let f = e * 3;
+        return f;
+    }
+}
+
+fn _lets_across_loop(n -> number) -> number {
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= n {
+            break;
+        }
+        let step = i * 2;
+        let adjusted = step + 1;
+        total += adjusted;
+        i += 1;
+    }
+    let final_val = total + n;
+    return final_val;
+}
+
+// --- Phi node ordering (value-producing if/else) ---
+
+fn _conditional_value(flag -> boolean) -> number {
+    let mut result -> number = 0;
+    if flag {
+        result = 42;
+    } else {
+        result = 99;
+    }
+    return result;
+}
+
+fn _chained_conditionals(a -> number, b -> number) -> number {
+    let mut x -> number = 0;
+    if a > b {
+        x = a - b;
+    } else {
+        x = b - a;
+    }
+    let mut y -> number = 0;
+    if x > 10 {
+        y = x * 2;
+    } else {
+        y = x + 5;
+    }
+    return y;
+}
+
+fn _deeply_nested_control_flow(x -> number) -> number {
+    let a = x + 1;
+    if a > 100 {
+        let b = a - 50;
+        if b > 75 {
+            return b * 2;
+        } else {
+            let c = b + 10;
+            return c;
+        }
+    } else {
+        let d = a * 2;
+        if d < 50 {
+            return d;
+        }
+        return d + 1;
+    }
+}
+
+// --- Tests ---
+
+test "ssa: nested lets across if/else branches (then)" {
+    assert _nested_lets_in_branches(20) == 180;
+}
+
+test "ssa: nested lets across if/else branches (else)" {
+    assert _nested_lets_in_branches(5) == 33;
+}
+
+test "ssa: lets across loop iterations" {
+    assert _lets_across_loop(0) == 0;
+}
+
+test "ssa: conditional value true" {
+    assert _conditional_value(true) == 42;
+}
+
+test "ssa: conditional value false" {
+    assert _conditional_value(false) == 99;
+}
+
+test "ssa: chained conditionals large diff" {
+    assert _chained_conditionals(20, 5) == 30;
+}
+
+test "ssa: chained conditionals small diff" {
+    assert _chained_conditionals(3, 10) == 12;
+}
+
+test "ssa: deeply nested then-then branch" {
+    // a=201, b=151, b>75 -> 302
+    assert _deeply_nested_control_flow(200) == 302;
+}
+
+test "ssa: deeply nested then-else branch" {
+    // a=106, b=56, c=66 -> 66
+    assert _deeply_nested_control_flow(105) == 66;
+}
+
+test "ssa: deeply nested else-then branch" {
+    // a=11, d=22, d<50 -> 22
+    assert _deeply_nested_control_flow(10) == 22;
+}
+
+test "ssa: deeply nested else-else branch" {
+    // a=51, d=102, d>=50 -> 103
+    assert _deeply_nested_control_flow(50) == 103;
+}

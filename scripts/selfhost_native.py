@@ -12483,7 +12483,8 @@ def main(argv: list[str]) -> int:
                         )
 
                     # Fix duplicate SSA definitions within functions.
-                    # DISABLED: root cause fixed in compiler/src/llvm/lowering/instructions.sfn
+                    # DISABLED: root cause fixed by the lowering helper in
+                    # compiler/src/llvm/lowering/instructions_helpers.sfn
                     # (_read_ipc_int_min prevents temp_index from resetting to 0).
                     # candidate, dup_changes = _fix_duplicate_ssa_names(candidate)
                     # if dup_changes:
