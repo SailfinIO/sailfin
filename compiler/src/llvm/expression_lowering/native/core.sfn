@@ -8,8 +8,7 @@
 // orchestrates calls to helper modules for operands, scopes, parsing, and text.
 
 import { NativeFunction, NativeSourceSpan, NativeStruct, NativeEnum } from "../../../native_ir";
-import { find_char } from "runtime/prelude";
-import { substring, char_code, char_at, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
+import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
 
 import {
     TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
@@ -322,6 +321,8 @@ import {
     try_lower_interpolated_string_literal,
 } from "./core_literals_lowering";
 
+import { append_match_arm_mutations as append_match_arm_mutations_impl } from "./core_match_helpers";
+
 fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
     return analyze_value_ownership_impl(initializer, span, locals, bindings);
 }
@@ -338,10 +339,8 @@ fn resolve_borrow_base(target -> string, locals -> LocalBinding[]) -> string {
     return resolve_borrow_base_impl(target, locals);
 }
 
-// Inlined to avoid aliased-import cross-module declare issue in seed compiler.
 fn append_match_arm_mutations(list -> MatchArmMutations[], arm -> MatchArmMutations) -> MatchArmMutations[] {
-    list.push(arm);
-    return list;
+    return append_match_arm_mutations_impl(list, arm);
 }
 
 fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {

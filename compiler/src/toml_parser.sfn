@@ -3,9 +3,6 @@
 // Minimal TOML parser for capsule.toml manifests. Provides a string-based API
 // so callers never need to allocate the SailToml struct across modules.
 
-import { find_char, string_starts_with } from "runtime/prelude";
-import { strings_equal, substring } from "./string_utils";
-
 struct SailToml {
     name -> string;
     version -> string;

@@ -2875,20 +2875,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         // The v0.1.1 seed corrupts cross-module struct returns. Read the
         // LoweredLLVMFunction result from files written by emit_llvm_function
         // instead of accessing the (possibly garbage) struct fields.
-        // When file IPC is disabled (first-pass binary or later), use struct return directly.
-        let _lfn_use_ipc = fs.exists("build/sailfin/.use_file_ipc");
-        let mut _lfn_lines -> string[] = [];
-        let mut _lfn_diags -> string[] = [];
-        let mut _lfn_string_constants -> StringConstant[] = [];
-        if _lfn_use_ipc {
-            _lfn_lines = split_lines_local(fs.readFile("build/sailfin/.lowered_fn_lines"));
-            _lfn_diags = split_lines_local(fs.readFile("build/sailfin/.lowered_fn_diagnostics"));
-            _lfn_string_constants = _parse_lowered_fn_string_constants(fs.readFile("build/sailfin/.lowered_fn_string_constants"));
-        } else {
-            _lfn_lines = lowered.lines;
-            _lfn_diags = lowered.diagnostics;
-            _lfn_string_constants = lowered.string_constants;
-        }
+        let _lfn_lines_raw = fs.readFile("build/sailfin/.lowered_fn_lines");
+        let _lfn_lines = split_lines_local(_lfn_lines_raw);
+        let _lfn_diags_raw = fs.readFile("build/sailfin/.lowered_fn_diagnostics");
+        let _lfn_diags = split_lines_local(_lfn_diags_raw);
+        let _lfn_sc_raw = fs.readFile("build/sailfin/.lowered_fn_string_constants");
+        let _lfn_string_constants = _parse_lowered_fn_string_constants(_lfn_sc_raw);
         if debug_lowering {
             print("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
         }

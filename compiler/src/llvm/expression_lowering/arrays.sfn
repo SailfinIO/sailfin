@@ -24,7 +24,6 @@ import {
 
 import {
     array_struct_type_for_element,
-    ends_with_pointer_suffix,
 } from "../type_mapping";
 
 fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_type -> string, lines -> string[], temp_index -> number) -> ExpressionResult {
@@ -204,15 +203,7 @@ fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element
     let slot_typed = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + slot_typed + " = bitcast i8* " + slot_i8 + " to " + element_type + "*");
-    // LLVM only permits `null` for pointer-typed values.  For aggregate
-    // (struct) types the correct zero literal is `zeroinitializer`.
-    let mut store_value = value.value;
-    if store_value == "null" {
-        if !ends_with_pointer_suffix(element_type) {
-            store_value = "zeroinitializer";
-        }
-    }
-    current_lines.push("  store " + element_type + " " + store_value + ", " + element_type + "* " + slot_typed);
+    current_lines.push("  store " + element_type + " " + value.value + ", " + element_type + "* " + slot_typed);
 
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: array, diagnostics: diagnostics, string_constants: [] };
 }

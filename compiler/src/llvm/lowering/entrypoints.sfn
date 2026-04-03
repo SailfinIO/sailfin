@@ -38,7 +38,7 @@ import {
     ParseNativeResult,
     NativeBinding,
 } from "../../native_ir";
-import { substring, char_code, strings_equal } from "../../string_utils";
+import { substring, char_code } from "../../string_utils";
 
 import {
     TypeContext,
@@ -691,73 +691,6 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime_raise_value_error_fn");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
     runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent");
-    // Filesystem adapters: the seed's runtime helper detection misses these
-    // because the dot-separated call targets (fs.readFile, fs.writeFile, etc.)
-    // are not reliably extracted from instruction expressions.  Including them
-    // unconditionally is harmless (extra declares) and avoids the missing-
-    // symbol link errors that break the seedcheck pass.
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.readFile");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.writeFile");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.appendFile");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.deleteFile");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.exists");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.createDirectory");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.listDirectory");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.writeLines");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs_read_file");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs_write_file");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs_append_file");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs_delete_file");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs_list_directory");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs_create_directory");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs_write_lines");
-    // Process and environment helpers
-    runtime_helpers = append_unique_effect(runtime_helpers, "process.run");
-    runtime_helpers = append_unique_effect(runtime_helpers, "env.get");
-    runtime_helpers = append_unique_effect(runtime_helpers, "env.home");
-    runtime_helpers = append_unique_effect(runtime_helpers, "sleep");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_sleep_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "monotonic_millis");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_monotonic_millis_fn");
-    // String utility helpers
-    runtime_helpers = append_unique_effect(runtime_helpers, "char_code");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_char_code_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_grapheme_at_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_grapheme_count_fn");
-    // String and number conversion helpers
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.length");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.drop");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.to_number");
-    runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
-    // Print and console helpers
-    runtime_helpers = append_unique_effect(runtime_helpers, "print.err");
-    runtime_helpers = append_unique_effect(runtime_helpers, "print.info");
-    runtime_helpers = append_unique_effect(runtime_helpers, "print.error");
-    runtime_helpers = append_unique_effect(runtime_helpers, "print.warn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "console.info");
-    runtime_helpers = append_unique_effect(runtime_helpers, "console.log");
-    runtime_helpers = append_unique_effect(runtime_helpers, "console.error");
-    // HTTP helpers
-    runtime_helpers = append_unique_effect(runtime_helpers, "http.get");
-    runtime_helpers = append_unique_effect(runtime_helpers, "http.post");
-    runtime_helpers = append_unique_effect(runtime_helpers, "http.get_body");
-    runtime_helpers = append_unique_effect(runtime_helpers, "http.post_json");
-    runtime_helpers = append_unique_effect(runtime_helpers, "http.download");
-    // Additional filesystem helpers
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.read");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.write");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.read_bytes");
-    // Crypto helpers
-    runtime_helpers = append_unique_effect(runtime_helpers, "crypto.sha256");
-    // Exception / try-catch helpers
-    runtime_helpers = append_unique_effect(runtime_helpers, "try_enter");
-    runtime_helpers = append_unique_effect(runtime_helpers, "try_leave");
-    runtime_helpers = append_unique_effect(runtime_helpers, "set_exception");
-    runtime_helpers = append_unique_effect(runtime_helpers, "has_exception");
-    runtime_helpers = append_unique_effect(runtime_helpers, "take_exception");
-    runtime_helpers = append_unique_effect(runtime_helpers, "clear_exception");
-    runtime_helpers = append_unique_effect(runtime_helpers, "throw");
     let mut direct_effects -> FunctionEffectEntry[] = [];
     let mut aggregated_effects -> FunctionEffectEntry[] = [];
     if !skip_effects {
