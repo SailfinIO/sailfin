@@ -210,9 +210,10 @@ make rebuild BUILD_DRIVER=sh    # Shell, no fixups (needs clean seed)
 
 `make check` does:
 1. Builds the compiler from the seed using `BUILD_DRIVER` (default: Python with fixups)
-2. Builds seedcheck from the first-pass binary using `build.sh` (**always no fixups** — this is the graduation test)
-3. Validates the seedcheck can actually run `examples/basics/hello-world.sfn` (fails if it hangs)
-4. Runs the full test suite using the seedcheck binary directly (no fallbacks)
+2. Runs the full test suite on the first-pass binary (early gate — if this fails, no point continuing)
+3. Builds seedcheck from the first-pass binary using `build.sh` (**always no fixups** — this is the graduation test)
+4. Validates the seedcheck can actually run `examples/basics/hello-world.sfn` (fails if it hangs)
+5. Runs the full test suite using the seedcheck binary directly (no fallbacks)
 
 If `make check` fails, it means the compiler has a bug. Fix the compiler.
 
