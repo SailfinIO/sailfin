@@ -217,6 +217,43 @@ make rebuild BUILD_DRIVER=sh    # Shell, no fixups (needs clean seed)
 
 If `make check` fails, it means the compiler has a bug. Fix the compiler.
 
+## Pre-1.0 Syntax Reform (Active)
+
+The following breaking syntax changes are planned before 1.0. All new code
+written by agents or humans should prefer the new forms where the parser already
+accepts them. See `docs/roadmap.md` §0 for the full plan and rationale.
+
+1. **Type annotations: `:` not `->`** — Use `x: number` not `x -> number` for
+   parameters, variables, and fields. Return types keep `->`. The parser already
+   accepts both via `TypeSep = "->" | ":"`.
+2. **String interpolation: `${ }` not `{{ }}`** — Target delimiter is `${ expr }`.
+   Parser change pending; continue using `{{ }}` until the parser is updated.
+3. **Integer types** — `int` (i64) and `float` (f64) will replace the single
+   `number` type. `number` becomes an alias for `float`. Not yet in parser.
+4. **`Result<T, E>` + `?` operator** — Typed error handling to complement
+   `try`/`catch`. Not yet in parser.
+5. **Closures with capture** — Lambdas must capture enclosing variables.
+
+### Design Decision Framework
+
+When adding features or making design choices, apply these principles:
+
+- **Boring syntax wins.** Every deviation from mainstream conventions adds
+  learning curve with zero expressiveness gain. Match TypeScript/Rust/Python
+  conventions unless there's a compelling semantic reason not to.
+- **AI agents are users.** LLMs have zero `.sfn` training data. Conventional
+  syntax reduces error rates in generated code. Unusual choices cause systematic
+  LLM failures.
+- **Pick 3 differentiators.** Sailfin's top 3 are: (1) effect system,
+  (2) capability-based security, (3) structured concurrency. Don't dilute these
+  with half-finished ownership, AI constructs, or GPU features.
+- **Don't ship unfinished safety claims.** "Parsed but not enforced" is worse
+  than not having the syntax at all — it teaches users to ignore the feature.
+- **Keywords are expensive.** A keyword can never become a variable name. Only
+  add keywords for constructs that can't be expressed as library functions.
+- **Fix the foundation first.** Integer types, `Result<T, E>`, and generic
+  constraints are prerequisites for everything else.
+
 ## Important Constraints
 
 ### Bootstrap Limitations

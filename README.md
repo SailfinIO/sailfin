@@ -5,10 +5,10 @@ Its type system unifies deterministic computation, effect isolation, and capabil
 
 ## Why Sailfin
 
-- **Safety without friction** — Algebraic data types, ownership-aware linear typing, and pattern matching keep data pipelines fast and correct without manual memory management.
-- **Deterministic where it counts** — Effects such as `io`, `net`, `model`, `gpu`, `rand`, and `clock` are explicit in type signatures, enabling reproducible builds, replayable model calls, and compile-time guarantees.
-- **AI first-class (planned)** — Models, prompts, schemas, embeddings, and retrieval indices are designed as native concepts. The runtime will track latency, cost, and provenance for every generation automatically. See _What's Coming_ below.
-- **Capability-oriented security** — Secrets, PII, and data egress policies will be enforced through the type system and runtime guards.
+- **Effect system** — Effects such as `io`, `net`, `model`, `gpu`, `rand`, and `clock` are explicit in function signatures. You can look at a function and know exactly what capabilities it uses — no hidden side effects. The compiler enforces these at compile time.
+- **Capability-based security** — Capsules declare what effects they need in their manifest. Undeclared capabilities are compile-time errors. Secrets, PII, and data egress policies are designed for enforcement through the type system and runtime guards.
+- **Structured concurrency (planned)** — Routines, channels, and parallel blocks as first-class language constructs with determinism controls.
+- **AI-native vision (post-1.0)** — Models, prompts, and generation provenance are designed as language concepts. The focus is shipping a solid foundation first; AI constructs ship after the core is stable. See _What's Coming_ below.
 - **Interoperable by design** — Sailfin integrates safely with native binaries and sandboxed adapters while maintaining strong typing and effect boundaries.
 
 ## What Works Today
@@ -29,8 +29,8 @@ The self-hosted native compiler (`build/native/sailfin`) supports:
 
 ```sfn
 struct User {
-  id   -> number;
-  name -> string;
+  id:   number;
+  name: string;
 }
 
 fn greet(user: User) -> string ![io] {
@@ -46,14 +46,20 @@ test "greet produces correct output" {
 }
 ```
 
+> **Note:** The language is undergoing a [syntax reform](docs/roadmap.md) before
+> 1.0. The `:` type annotation style shown above is the preferred form (the
+> parser also accepts `->` in type positions, but this is being deprecated).
+> String interpolation (`{{ }}`) will change to `${ }` in a future release.
+
 ## What's Coming
 
 Sailfin is working toward a 1.0 release with a fully self-hosted toolchain — no Python build scripts, no C runtime. Key upcoming milestones:
 
+- **Syntax reform** — colon type annotations (`:` instead of `->`), `${}` string interpolation, `int`/`float` numeric types, `Result<T, E>` + `?` error handling
 - **Compiler stabilization** — eliminating the Python post-processing fixup script; `build.sh` becomes the sole build path
 - **Sailfin-native runtime** — replacing the current C runtime; a hard prerequisite for 1.0
 - **Concurrency primitives** — `await`, `routine { }` blocks, and `channel()` as first-class constructs
-- **Full ownership enforcement** — move semantics, borrow checking, use-after-move errors
+- **Ownership enforcement** — move semantics, borrow checking, use-after-move errors (if ready for 1.0; otherwise deferred to avoid shipping unenforced guarantees)
 
 After 1.0, the focus shifts to making AI constructs fully functional:
 

@@ -36,6 +36,10 @@ StructDeclaration  = "struct" Identifier [ TypeParameters ]
 
 StructMember       = FieldDeclaration | MethodDeclaration ;
 
+// REFORM: TypeSep currently accepts both "->" and ":". Pre-1.0, "->" will be
+// deprecated in type-annotation positions (parameters, variables, fields).
+// "->" remains the return-type separator in function signatures.
+// New code should use ":" exclusively for type annotations.
 TypeSep            = "->" | ":" ;
 FieldDeclaration   = [ "mut" ] Identifier TypeSep Type ";" ;
 
@@ -260,12 +264,23 @@ BooleanLiteral     = "true" | "false" ;
 Identifier         = Letter { Letter | Digit | '_' } ;
 ```
 
+> **REFORM (pre-1.0):** `NumberLiteral` currently compiles to a single `number`
+> type (f64). Pre-1.0 will introduce `int` (i64) and `float` (f64) as distinct
+> types. Integer literals (no decimal point) will default to `int`; decimal
+> literals default to `float`. `number` becomes an alias for `float`.
+> See `docs/roadmap.md` §0.
+
 ### String Interpolation
 
 String literals support lightweight interpolation using double braces. Any
 occurrence of `{{ expression }}` is evaluated at runtime against the current
 scope. Whitespace at the edges of the expression is ignored (`{{name}}` == `{{ name }}`).
 For example `"Hello, {{ name }}!"` becomes a formatted string.
+
+> **REFORM (pre-1.0):** The `{{ expr }}` delimiter will change to `${ expr }`.
+> `{{ }}` universally means "escape interpolation / literal braces" in template
+> languages and Rust's `format!`. Using it for the opposite meaning confuses
+> both humans and LLM code generators. See `docs/roadmap.md` §0.
 
 Named arguments appear in both function calls and pipeline stages:
 
