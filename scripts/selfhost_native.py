@@ -1802,6 +1802,131 @@ def _fix_bare_zero_lines(llvm_ir: str) -> tuple[str, int]:
     return llvm_ir, 0
 
 
+def _default_ret_value(ret_type: str) -> str:
+    """Return the correct LLVM default value for a given type."""
+    if ret_type.endswith("*") or ret_type == "ptr":
+        return "null"
+    if ret_type in ("i1", "i8", "i16", "i32", "i64"):
+        return "0"
+    if ret_type in ("double", "float"):
+        return "0.0"
+    if ret_type == "void":
+        return ""
+    return "zeroinitializer"
+
+
+def _fix_bare_ret_zeroinitializer(llvm_ir: str) -> tuple[str, int]:
+    """Fix ``ret  zeroinitializer`` (missing type) and ``ret <type> zeroinitializer``
+    where zeroinitializer is invalid for the type (e.g. i1, i8*, double).
+
+    When the first-pass binary emits ``ret <type> <value>`` but the value
+    references an undefined local (e.g. ``%l10``), later cleanup passes may
+    strip the broken load leaving a bare ``ret  zeroinitializer`` without
+    a type or ``ret <type> zeroinitializer`` with an incompatible type.
+
+    We fix both patterns:
+    1. ``ret  zeroinitializer`` → infer return type from enclosing ``define``
+    2. ``ret <type> zeroinitializer`` → use correct default for the type
+    """
+    _BARE_RET = re.compile(r"^(\s*)ret\s+zeroinitializer\s*$")
+    _TYPED_RET_ZI = re.compile(r"^(\s*)ret\s+(\S+)\s+zeroinitializer\s*$")
+    # Match return type including struct types like { i8**, i64 }*
+    _DEFINE_RE = re.compile(r"^define\s+(?:internal\s+)?(?P<ret_type>(?:\{[^}]*\}\s*\*?|\S+))\s+@")
+
+    lines = llvm_ir.splitlines()
+    out: list[str] = []
+    current_ret_type = "i8*"
+    changed = 0
+    for line in lines:
+        dm = _DEFINE_RE.match(line)
+        if dm:
+            current_ret_type = dm.group("ret_type")
+        # Pattern 1: bare ret zeroinitializer (no type)
+        m = _BARE_RET.match(line)
+        if m:
+            indent = m.group(1)
+            default = _default_ret_value(current_ret_type)
+            if current_ret_type == "void":
+                out.append(f"{indent}ret void")
+            else:
+                out.append(f"{indent}ret {current_ret_type} {default}")
+            changed += 1
+            continue
+        # Pattern 2: ret <type> zeroinitializer where zeroinitializer is wrong
+        tm = _TYPED_RET_ZI.match(line)
+        if tm:
+            indent = tm.group(1)
+            ty = tm.group(2)
+            default = _default_ret_value(ty)
+            if default != "zeroinitializer":
+                out.append(f"{indent}ret {ty} {default}")
+                changed += 1
+                continue
+        out.append(line)
+    return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+
+
+def _fix_missing_enum_variant_constants(llvm_ir: str) -> tuple[str, int]:
+    """Inject missing ``@.enum.X.Y.variant`` string constants.
+
+    The first-pass binary may not emit enum variant name string constants
+    that are referenced in match expressions. This pass finds references to
+    ``@.enum.<EnumName>.<VariantName>.variant`` and injects the missing
+    constant definitions (private unnamed_addr constants with the variant
+    name as a null-terminated C string).
+    """
+    # Find all referenced enum variant constants
+    ref_re = re.compile(r"@\.enum\.(\w+)\.(\w+)\.variant")
+    # Find all defined enum variant constants
+    def_re = re.compile(r"^@\.enum\.\w+\.\w+\.variant\s*=")
+
+    referenced: set[tuple[str, str]] = set()
+    defined: set[str] = set()
+    for line in llvm_ir.splitlines():
+        for m in ref_re.finditer(line):
+            referenced.add((m.group(1), m.group(2)))
+        dm = def_re.match(line)
+        if dm:
+            defined.add(line.split("=")[0].strip())
+
+    missing: list[tuple[str, str]] = []
+    for enum_name, variant_name in sorted(referenced):
+        const_name = f"@.enum.{enum_name}.{variant_name}.variant"
+        if const_name not in defined:
+            missing.append((enum_name, variant_name))
+
+    if not missing:
+        return llvm_ir, 0
+
+    # Inject constant definitions at the top (after type definitions, before declares)
+    inject_lines: list[str] = []
+    for enum_name, variant_name in missing:
+        const_name = f"@.enum.{enum_name}.{variant_name}.variant"
+        # The variant name is the string content
+        byte_count = len(variant_name) + 1  # null terminator
+        inject_lines.append(
+            f'{const_name} = private unnamed_addr constant [{byte_count} x i8] c"{variant_name}\\00"'
+        )
+
+    lines = llvm_ir.splitlines()
+    # Find insertion point: after last type def or before first declare/define
+    insert_idx = 0
+    for i, line in enumerate(lines):
+        if re.match(r"^%\w+ = type ", line):
+            insert_idx = i + 1
+        elif re.match(r"^(declare|define)\s", line):
+            if insert_idx == 0:
+                insert_idx = i
+            break
+        elif re.match(r"^@", line):
+            insert_idx = i + 1
+
+    for j, inj in enumerate(inject_lines):
+        lines.insert(insert_idx + j, inj)
+
+    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), len(missing)
+
+
 def _fix_mangled_push_calls(llvm_ir: str) -> tuple[str, int]:
     r"""Fix mangled ``.push()`` calls where seed concatenated variable+method names.
 
@@ -12405,6 +12530,24 @@ def main(argv: list[str]) -> int:
                     if zero_changes:
                         print(
                             f"[selfhost] removed {zero_changes} bare zero line(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Fix ``ret  zeroinitializer`` with missing return type.
+                    candidate, ret_zi_changes = _fix_bare_ret_zeroinitializer(candidate)
+                    if ret_zi_changes:
+                        print(
+                            f"[selfhost] fixed {ret_zi_changes} bare ret zeroinitializer(s) in {module_name}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                    # Inject missing @.enum.X.Y.variant string constants.
+                    candidate, enum_changes = _fix_missing_enum_variant_constants(candidate)
+                    if enum_changes:
+                        print(
+                            f"[selfhost] injected {enum_changes} missing enum variant constant(s) in {module_name}",
                             file=sys.stderr,
                             flush=True,
                         )

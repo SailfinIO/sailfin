@@ -8,7 +8,8 @@
 // orchestrates calls to helper modules for operands, scopes, parsing, and text.
 
 import { NativeFunction, NativeSourceSpan, NativeStruct, NativeEnum } from "../../../native_ir";
-import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
+import { find_char } from "runtime/prelude";
+import { substring, char_code, char_at, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
 
 import {
     TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,

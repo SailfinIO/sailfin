@@ -9,7 +9,8 @@
 
 import { NativeModule } from "../../../emit_native";
 import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest, NativeBinding } from "../../../native_ir";
-import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
+import { find_char } from "runtime/prelude";
+import { substring, char_code, char_at, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
 
 // Core lowering / analysis lives in ./core; split helpers live in submodules.
 import { lower_expression, analyze_value_ownership, detect_borrow_conflicts, format_suspension_location } from "./core";
@@ -762,35 +763,45 @@ fn lower_expression_statement(
     let lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
     // ExpressionResult struct fields may be ABI-corrupted crossing module boundaries.
     // Read lines/temp from files written by lower_call_expression instead.
-    if debug_lowering {
-        let _cr_exists_check = fs.exists("build/sailfin/.call_result_lines_count");
-        if _cr_exists_check {
-            print("stmt-lowering: call_result_lines_count EXISTS");
-        } else {
-            print("stmt-lowering: call_result_lines_count NOT FOUND");
+    if fs.exists("build/sailfin/.call_result_batch") {
+        let _cr_batch = fs.readFile("build/sailfin/.call_result_batch");
+        // Parse batch format: first line is "count\ttemp", remaining lines are IR.
+        let _cr_first_nl = find_char(_cr_batch, "\n", 0);
+        let mut _cr_header -> string = _cr_batch;
+        let mut _cr_body -> string = "";
+        if _cr_first_nl >= 0 {
+            _cr_header = substring(_cr_batch, 0, _cr_first_nl);
+            _cr_body = substring(_cr_batch, _cr_first_nl + 1, _cr_batch.length);
         }
-    }
-    if fs.exists("build/sailfin/.call_result_lines_count") {
-        let _cr_lines_count_str = fs.readFile("build/sailfin/.call_result_lines_count");
-        let _cr_lines_count = _parse_int_local(_cr_lines_count_str);
+        let _cr_tab = find_char(_cr_header, "\t", 0);
+        let _cr_count_str = substring(_cr_header, 0, _cr_tab);
+        let _cr_temp_str = substring(_cr_header, _cr_tab + 1, _cr_header.length);
+        let _cr_lines_count = _parse_int_local(_cr_count_str);
+        current_temp = _parse_int_local(_cr_temp_str);
+        // Split body by newlines into lines array
         let mut _new_lines -> string[] = [];
-        let mut _cr_li -> number = 0;
-        loop {
-            if _cr_li >= _cr_lines_count { break; }
-            let _cr_line_path = "build/sailfin/.call_result_line_" + number_to_string(_cr_li);
-            if fs.exists(_cr_line_path) {
-                _new_lines.push(fs.readFile(_cr_line_path));
+        if _cr_lines_count > 0 {
+            let mut _cr_pos -> number = 0;
+            let mut _cr_li -> number = 0;
+            loop {
+                if _cr_li >= _cr_lines_count { break; }
+                let _cr_nl = find_char(_cr_body, "\n", _cr_pos);
+                if _cr_nl < 0 {
+                    // Last line (no trailing newline)
+                    _new_lines.push(substring(_cr_body, _cr_pos, _cr_body.length));
+                    break;
+                }
+                _new_lines.push(substring(_cr_body, _cr_pos, _cr_nl));
+                _cr_pos = _cr_nl + 1;
+                _cr_li += 1;
             }
-            _cr_li += 1;
         }
         current_lines = _new_lines;
         if debug_lowering {
-            print("stmt-lowering: read " + number_to_string(_new_lines.length) + " lines from call_result files, current_lines.length=" + number_to_string(current_lines.length));
+            print("stmt-lowering: read " + number_to_string(_new_lines.length) + " lines from call_result_batch, current_lines.length=" + number_to_string(current_lines.length));
         }
-        let _cr_temp_str = fs.readFile("build/sailfin/.call_result_temp");
-        current_temp = _parse_int_local(_cr_temp_str);
         // Clean up sentinel
-        fs.deleteFile("build/sailfin/.call_result_lines_count");
+        fs.deleteFile("build/sailfin/.call_result_batch");
     } else {
         // Fallback: try struct fields
         let mut _ci15 -> number = 0;

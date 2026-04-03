@@ -333,6 +333,29 @@ fn extract_module_name_from_native_text(native_text -> string) -> string {
     return trim_text(substring(native_text, start, end));
 }
 
+// Check if a function in a provider module is re-exported from a runtime module.
+// Reads the provider's import-context .sfn-asm to detect runtime imports.
+fn is_reexported_from_runtime(provider_slug -> string, function_name -> string) -> boolean ![io] {
+    let ctx_path = "build/native/import-context/" + provider_slug + ".sfn-asm";
+    if !fs.exists(ctx_path) { return false; }
+    let text = fs.readFile(ctx_path);
+    let import_marker = ".import \"runtime/";
+    let marker_idx = index_of(text, import_marker);
+    if marker_idx < 0 { return false; }
+    let rest = substring(text, marker_idx, text.length);
+    let brace_open = index_of(rest, "{");
+    if brace_open < 0 { return false; }
+    let brace_close = index_of(rest, "}");
+    if brace_close < 0 { return false; }
+    let specifiers = substring(rest, brace_open, brace_close + 1);
+    // Check for function_name as a separate token: " name," or " name " or " name}"
+    let sp_name = " " + function_name;
+    if index_of(specifiers, sp_name + ",") >= 0 { return true; }
+    if index_of(specifiers, sp_name + " ") >= 0 { return true; }
+    if index_of(specifiers, sp_name + "}") >= 0 { return true; }
+    return false;
+}
+
 fn collect_available_import_module_names(imported_native_texts -> string[]) -> string[] {
     let mut names -> string[] = [];
     let mut index -> number = 0;
@@ -850,7 +873,12 @@ fn apply_module_symbol_mangling(
             import_olds.push(local_symbol);
             let mut target_symbol = imported_name;
             if !provider_is_runtime {
-                target_symbol = imported_name + "__" + provider_suffix;
+                // Check if the provider re-exports this function from runtime.
+                // If so, use the original runtime symbol (no module suffix).
+                let _is_rt_reexport = is_reexported_from_runtime(provider_module, imported_name);
+                if !_is_rt_reexport {
+                    target_symbol = imported_name + "__" + provider_suffix;
+                }
             }
             import_news.push(target_symbol);
 

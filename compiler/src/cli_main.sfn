@@ -18,7 +18,8 @@ import {
 } from "./main";
 import { split_lines } from "./native_ir";
 import { sailfin_version } from "./version";
-import { find_char, string_starts_with, strings_equal, substring } from "./string_utils";
+import { find_char, string_starts_with } from "runtime/prelude";
+import { strings_equal, substring } from "./string_utils";
 import {
     toml_get_name,
     toml_get_version,

@@ -403,41 +403,69 @@ fn lower_let_instruction(
     if fs.exists("build/sailfin/.trace_lowering") {
         print("let-lowering: returning LetLoweringResult for name=" + instruction.name);
     }
-    // Serialize key scalar results to files so the caller can recover
-    // when LetLoweringResult struct fields are corrupted crossing module boundaries.
-    fs.writeFile("build/sailfin/.let_result_temp_index", number_to_string(current_temp));
-    fs.writeFile("build/sailfin/.let_result_next_local_id", number_to_string(next_local_id + 1));
-    fs.writeFile("build/sailfin/.let_result_next_region_id", number_to_string(current_next_region));
-    fs.writeFile("build/sailfin/.let_result_diag_count", number_to_string(diagnostics.length));
-    let mut _diag_i -> number = 0;
-    loop {
-        if _diag_i >= diagnostics.length { break; }
-        fs.writeFile("build/sailfin/.let_result_diag_" + number_to_string(_diag_i), diagnostics[_diag_i]);
-        _diag_i += 1;
-    }
-    // Serialize lines array
-    fs.writeFile("build/sailfin/.let_result_lines_count", number_to_string(current_lines.length));
-    let mut _li_i -> number = 0;
-    loop {
-        if _li_i >= current_lines.length { break; }
-        fs.writeFile("build/sailfin/.let_result_line_" + number_to_string(_li_i), current_lines[_li_i]);
-        _li_i += 1;
-    }
-    // Serialize allocas array
-    fs.writeFile("build/sailfin/.let_result_allocas_count", number_to_string(current_allocas.length));
-    let mut _ai_i -> number = 0;
-    loop {
-        if _ai_i >= current_allocas.length { break; }
-        fs.writeFile("build/sailfin/.let_result_alloca_" + number_to_string(_ai_i), current_allocas[_ai_i]);
-        _ai_i += 1;
-    }
-    // Serialize the new local binding (last one added)
-    if current_locals.length > 0 {
-        let _last_local = current_locals[current_locals.length - 1];
-        fs.writeFile("build/sailfin/.let_result_local_name", _last_local.name);
-        fs.writeFile("build/sailfin/.let_result_local_pointer", _last_local.pointer);
-        fs.writeFile("build/sailfin/.let_result_local_llvm_type", _last_local.llvm_type);
-        fs.writeFile("build/sailfin/.let_result_local_type_ann", _last_local.type_annotation);
+    // Only serialize IPC files when the gate file is present.
+    // When the binary has correct struct-return ABI (e.g., built by Python driver
+    // with fixups), skipping IPC avoids massive file I/O overhead.
+    if fs.exists("build/sailfin/.use_file_ipc") {
+        // Serialize mutations to files for IPC recovery.
+        fs.writeFile("build/sailfin/.let_result_mut_count", number_to_string(mutations.length));
+        let mut _mut_i -> number = 0;
+        loop {
+            if _mut_i >= mutations.length { break; }
+            let _mp = "build/sailfin/.let_result_mut_" + number_to_string(_mut_i);
+            fs.writeFile(_mp + "_name", mutations[_mut_i].name);
+            fs.writeFile(_mp + "_type", mutations[_mut_i].llvm_type);
+            fs.writeFile(_mp + "_value", mutations[_mut_i].value_name);
+            fs.writeFile(_mp + "_label", mutations[_mut_i].originating_label);
+            _mut_i += 1;
+        }
+        // Serialize string constants for IPC recovery.
+        let mut _joined_sc -> string = "";
+        let mut _sc_i -> number = 0;
+        loop {
+            if _sc_i >= string_constants.length { break; }
+            if _sc_i > 0 { _joined_sc = _joined_sc + "\n"; }
+            _joined_sc = _joined_sc + string_constants[_sc_i].name + "\t" + string_constants[_sc_i].content + "\t" + number_to_string(string_constants[_sc_i].byte_count);
+            _sc_i += 1;
+        }
+        fs.writeFile("build/sailfin/.let_result_string_constants", _joined_sc);
+        // Serialize key scalar results to files
+        fs.writeFile("build/sailfin/.let_result_temp_index", number_to_string(current_temp));
+        fs.writeFile("build/sailfin/.let_result_next_local_id", number_to_string(next_local_id + 1));
+        fs.writeFile("build/sailfin/.let_result_next_region_id", number_to_string(current_next_region));
+        fs.writeFile("build/sailfin/.let_result_diag_count", number_to_string(diagnostics.length));
+        let mut _diag_i -> number = 0;
+        loop {
+            if _diag_i >= diagnostics.length { break; }
+            fs.writeFile("build/sailfin/.let_result_diag_" + number_to_string(_diag_i), diagnostics[_diag_i]);
+            _diag_i += 1;
+        }
+        // Serialize lines array (batched)
+        let mut _li_buf -> string = number_to_string(current_lines.length);
+        let mut _li_i -> number = 0;
+        loop {
+            if _li_i >= current_lines.length { break; }
+            _li_buf = _li_buf + "\n" + current_lines[_li_i];
+            _li_i += 1;
+        }
+        fs.writeFile("build/sailfin/.let_result_lines_batch", _li_buf);
+        // Serialize allocas array (batched)
+        let mut _ai_buf -> string = number_to_string(current_allocas.length);
+        let mut _ai_i -> number = 0;
+        loop {
+            if _ai_i >= current_allocas.length { break; }
+            _ai_buf = _ai_buf + "\n" + current_allocas[_ai_i];
+            _ai_i += 1;
+        }
+        fs.writeFile("build/sailfin/.let_result_allocas_batch", _ai_buf);
+        // Serialize the new local binding (last one added)
+        if current_locals.length > 0 {
+            let _last_local = current_locals[current_locals.length - 1];
+            fs.writeFile("build/sailfin/.let_result_local_name", _last_local.name);
+            fs.writeFile("build/sailfin/.let_result_local_pointer", _last_local.pointer);
+            fs.writeFile("build/sailfin/.let_result_local_llvm_type", _last_local.llvm_type);
+            fs.writeFile("build/sailfin/.let_result_local_type_ann", _last_local.type_annotation);
+        }
     }
     return LetLoweringResult {
         lines: current_lines,

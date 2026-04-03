@@ -167,7 +167,7 @@ import {
     extend_lifetime_regions,
     extend_mutations,
     insert_lines_before_index,
-    _write_block_result_files,
+    _write_block_result_files_scalar,
     _parse_int_from_string,
 } from "./instructions_helpers";
 
@@ -821,7 +821,7 @@ fn lower_match_instruction(
 
     if subject_result.operand == null {
         diagnostics.push("llvm lowering: unable to lower match subject in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
+        _write_block_result_files_scalar(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -853,7 +853,7 @@ fn lower_match_instruction(
         current_block_counter = merge_alloc.next_counter;
         current_lines.push("  br label %" + merge_label);
         current_lines.push(merge_label + ":");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
+        _write_block_result_files_scalar(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -1226,7 +1226,7 @@ fn lower_match_instruction(
         merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
     }
 
-    _write_block_result_files(merged_lines, current_allocas, terminated, diagnostics, result_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
+    _write_block_result_files_scalar(merged_lines, current_allocas, terminated, diagnostics, result_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
     return BlockLoweringResult {
         lines: merged_lines,
         allocas: current_allocas,
@@ -1770,7 +1770,7 @@ fn lower_if_instruction(
         } else {
             diagnostics.push("llvm lowering: unable to lower if condition in `" + function.name + "` for `" + rendered_condition + "`");
         }
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
+        _write_block_result_files_scalar(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -2095,7 +2095,7 @@ fn lower_if_instruction(
         merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
     }
 
-    _write_block_result_files(merged_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
+    _write_block_result_files_scalar(merged_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
     return BlockLoweringResult {
         lines: merged_lines,
         allocas: current_allocas,
