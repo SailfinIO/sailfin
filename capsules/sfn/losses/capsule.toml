@@ -1,0 +1,10 @@
+[package]
+name = "sfn/losses"
+version = "0.1.1"
+description = "Loss functions for neural network training in Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = []

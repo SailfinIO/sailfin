@@ -145,3 +145,95 @@ fn pad_right(text -> string, width -> number, pad_char -> string = " ") -> strin
     if text.length >= width { return text; }
     return text + repeat(pad_char, width - text.length);
 }
+
+fn trim_left(text -> string) -> string {
+    // Remove leading whitespace only.
+    let mut start -> number = 0;
+    loop {
+        if start >= text.length { break; }
+        let ch = text[start];
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            start += 1;
+        } else { break; }
+    }
+    return substring(text, start, text.length);
+}
+
+fn trim_right(text -> string) -> string {
+    // Remove trailing whitespace only.
+    let mut end -> number = text.length;
+    loop {
+        if end <= 0 { break; }
+        let ch = text[end - 1];
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" {
+            end -= 1;
+        } else { break; }
+    }
+    return substring(text, 0, end);
+}
+
+fn to_upper_all(text -> string) -> string {
+    // Convert all ASCII lowercase characters to uppercase.
+    let mut out -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= text.length { break; }
+        out = out + to_upper(text[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn to_lower_all(text -> string) -> string {
+    // Convert all ASCII uppercase characters to lowercase.
+    let mut out -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= text.length { break; }
+        out = out + to_lower(text[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn char_at_index(text -> string, index -> number) -> string {
+    // Return the character at the given index, or empty string if out of bounds.
+    if index < 0 || index >= text.length { return ""; }
+    return substring(text, index, index + 1);
+}
+
+fn reverse(text -> string) -> string {
+    // Reverse a string (byte-level, works for ASCII).
+    let mut out -> string = "";
+    let mut i -> number = text.length;
+    loop {
+        if i <= 0 { break; }
+        i -= 1;
+        out = out + substring(text, i, i + 1);
+    }
+    return out;
+}
+
+fn count(text -> string, needle -> string) -> number {
+    // Count non-overlapping occurrences of needle in text.
+    if needle.length == 0 { return 0; }
+    let mut total -> number = 0;
+    let mut pos -> number = 0;
+    loop {
+        let idx = find(text, needle, pos);
+        if idx < 0 { break; }
+        total += 1;
+        pos = idx + needle.length;
+    }
+    return total;
+}
+
+fn is_empty(text -> string) -> boolean {
+    // Returns true if the string has zero length.
+    return text.length == 0;
+}
+
+fn is_blank(text -> string) -> boolean {
+    // Returns true if the string is empty or contains only whitespace.
+    return trim(text).length == 0;
+}

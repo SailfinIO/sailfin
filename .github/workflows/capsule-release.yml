@@ -43,7 +43,7 @@ jobs:
 
       - name: Detect changed capsules and publish
         env:
-          SAILFIN_REGISTRY_PUBLISH_TOKEN: ${{ secrets.SAILFIN_REGISTRY_PUBLISH_TOKEN }}
+          SFN_TOKEN: ${{ secrets.SFN_TOKEN }}
         run: |
           set -euo pipefail
 

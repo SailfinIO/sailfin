@@ -1,0 +1,156 @@
+// Regression tests for sfn/json capsule additions.
+// Tests constructors, accessors, and the new helper functions.
+// Does not test stringify_pretty (requires number_to_string from prelude).
+
+struct JsonValue {
+    kind -> string;
+    string_value -> string;
+    number_value -> number;
+    bool_value -> boolean;
+    items -> JsonValue[];
+    keys -> string[];
+    values -> JsonValue[];
+}
+
+fn _string_val(value -> string) -> JsonValue {
+    return JsonValue {
+        kind: "string", string_value: value, number_value: 0,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn _number_val(value -> number) -> JsonValue {
+    return JsonValue {
+        kind: "number", string_value: "", number_value: value,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn _bool_val(value -> boolean) -> JsonValue {
+    return JsonValue {
+        kind: "boolean", string_value: "", number_value: 0,
+        bool_value: value, items: [], keys: [], values: [],
+    };
+}
+
+fn _null_val() -> JsonValue {
+    return JsonValue {
+        kind: "null", string_value: "", number_value: 0,
+        bool_value: false, items: [], keys: [], values: [],
+    };
+}
+
+fn _array_val(items -> JsonValue[]) -> JsonValue {
+    return JsonValue {
+        kind: "array", string_value: "", number_value: 0,
+        bool_value: false, items: items, keys: [], values: [],
+    };
+}
+
+fn _object_val(keys -> string[], values -> JsonValue[]) -> JsonValue {
+    return JsonValue {
+        kind: "object", string_value: "", number_value: 0,
+        bool_value: false, items: [], keys: keys, values: values,
+    };
+}
+
+// -- New accessor functions --
+
+fn _has_key(obj -> JsonValue, key -> string) -> boolean {
+    if !strings_equal(obj.kind, "object") { return false; }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _get_bool(obj -> JsonValue, key -> string) -> boolean {
+    if !strings_equal(obj.kind, "object") { return false; }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) {
+            return obj.values[i].bool_value;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn _get_value(obj -> JsonValue, key -> string) -> JsonValue {
+    if !strings_equal(obj.kind, "object") { return _null_val(); }
+    let mut i -> number = 0;
+    loop {
+        if i >= obj.keys.length { break; }
+        if strings_equal(obj.keys[i], key) {
+            return obj.values[i];
+        }
+        i += 1;
+    }
+    return _null_val();
+}
+
+fn _array_length(value -> JsonValue) -> number {
+    if !strings_equal(value.kind, "array") { return 0; }
+    return value.items.length;
+}
+
+fn _array_at(value -> JsonValue, index -> number) -> JsonValue {
+    if !strings_equal(value.kind, "array") { return _null_val(); }
+    if index < 0 || index >= value.items.length { return _null_val(); }
+    return value.items[index];
+}
+
+// -- Tests --
+
+test "json: has_key on object" {
+    let obj = _object_val(["name", "age"], [_string_val("Alice"), _number_val(30)]);
+    assert _has_key(obj, "name") == true;
+    assert _has_key(obj, "age") == true;
+    assert _has_key(obj, "missing") == false;
+}
+
+test "json: has_key on non-object" {
+    let arr = _array_val([_number_val(1)]);
+    assert _has_key(arr, "key") == false;
+}
+
+test "json: get_bool" {
+    let obj = _object_val(["active", "name"], [_bool_val(true), _string_val("test")]);
+    assert _get_bool(obj, "active") == true;
+    assert _get_bool(obj, "name") == false;
+    assert _get_bool(obj, "missing") == false;
+}
+
+test "json: get_value returns correct type" {
+    let obj = _object_val(["count"], [_number_val(42)]);
+    let val = _get_value(obj, "count");
+    assert strings_equal(val.kind, "number");
+    assert val.number_value == 42;
+}
+
+test "json: get_value returns null for missing key" {
+    let obj = _object_val(["a"], [_string_val("b")]);
+    let val = _get_value(obj, "missing");
+    assert strings_equal(val.kind, "null");
+}
+
+test "json: array_length" {
+    let arr = _array_val([_number_val(1), _number_val(2), _number_val(3)]);
+    assert _array_length(arr) == 3;
+    assert _array_length(_null_val()) == 0;
+    assert _array_length(_array_val([])) == 0;
+}
+
+test "json: array_at" {
+    let arr = _array_val([_string_val("a"), _string_val("b"), _string_val("c")]);
+    let first = _array_at(arr, 0);
+    assert strings_equal(first.string_value, "a");
+    let last = _array_at(arr, 2);
+    assert strings_equal(last.string_value, "c");
+    let oob = _array_at(arr, 5);
+    assert strings_equal(oob.kind, "null");
+}

@@ -41,6 +41,7 @@ fn _usage() -> string {
     "  sfn init\n" +
     "  sfn publish\n" +
     "  sfn add [--dev] <capsule>\n" +
+    "  sfn login [token]\n" +
     "\n" +
     "examples:\n" +
     "  sfn emit llvm examples/basics/hello-world.sfn\n" +
@@ -52,7 +53,8 @@ fn _usage() -> string {
     "  sfn publish\n" +
     "  sfn add http\n" +
     "  sfn add --dev test\n" +
-    "  sfn add acme/router\n";
+    "  sfn add acme/router\n" +
+    "  sfn login\n";
 }
 
 fn _ends_with(value -> string, suffix -> string) -> boolean {
@@ -1250,6 +1252,14 @@ fn _is_stdlib_capsule(name -> string) -> boolean {
     if strings_equal(name, "fmt") { return true; }
     if strings_equal(name, "log") { return true; }
     if strings_equal(name, "time") { return true; }
+    if strings_equal(name, "math") { return true; }
+    if strings_equal(name, "path") { return true; }
+    if strings_equal(name, "tensor") { return true; }
+    if strings_equal(name, "layers") { return true; }
+    if strings_equal(name, "nn") { return true; }
+    if strings_equal(name, "losses") { return true; }
+    if strings_equal(name, "toml") { return true; }
+    if strings_equal(name, "net") { return true; }
     return false;
 }
 
@@ -1647,6 +1657,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     let is_init = strings_equal(cmd, "init");
     let is_publish = strings_equal(cmd, "publish");
     let is_add = strings_equal(cmd, "add");
+    let is_login = strings_equal(cmd, "login");
     if trace_argv {
         if is_emit {
             print("cli: cmd_is_emit=true");
@@ -2225,6 +2236,132 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         } else {
             print("added " + display_name + "@" + latest_version);
         }
+        return 0;
+    }
+
+    if is_login {
+        // sfn login          — prompt for token interactively
+        // sfn login <token>  — accept token directly (CI/scripts)
+        if args.length > 2 {
+            print("usage: sfn login [token]");
+            return 2;
+        }
+
+        let mut token -> string = "";
+        if args.length == 2 {
+            token = _toml_trim_str(args[1]);
+        } else {
+            // Interactive: read token from stdin via a secure temp file
+            print("enter your registry token:");
+            let tmp = _shell_read("mktemp /tmp/.sfn_login_XXXXXX");
+            if tmp.length == 0 {
+                print("error: failed to create secure temp file");
+                return 1;
+            }
+            let read_rc = process.run(["sh", "-c", "head -1 > " + tmp]);
+            if read_rc != 0 {
+                process.run(["rm", "-f", tmp]);
+                print("error: failed to read token");
+                return 1;
+            }
+            if fs.exists(tmp) {
+                token = _toml_trim_str(fs.readFile(tmp));
+            }
+            process.run(["rm", "-f", tmp]);
+        }
+
+        if token.length == 0 {
+            print("error: empty token");
+            return 1;
+        }
+
+        let home = _get_home();
+        if home.length == 0 {
+            print("could not determine home directory");
+            return 1;
+        }
+
+        let sfn_dir = home + "/.sfn";
+        _ensure_dir_recursive(sfn_dir);
+        process.run(["chmod", "700", sfn_dir]);
+
+        let cred_path = sfn_dir + "/credentials";
+        fs.writeFile(cred_path, token);
+        process.run(["chmod", "600", cred_path]);
+
+        // Verify the write succeeded
+        if !fs.exists(cred_path) {
+            print("error: failed to write credentials to " + cred_path);
+            return 1;
+        }
+        let saved = fs.readFile(cred_path);
+        if !strings_equal(_toml_trim_str(saved), token) {
+            print("error: failed to write credentials to " + cred_path);
+            return 1;
+        }
+
+        print("credentials saved to " + cred_path);
+        return 0;
+    }
+
+    if strings_equal(cmd, "guillermo") {
+        print("                                                                               ++++++++++++         ");
+        print("                                                                       ++++++++++++++##*++++++++    ");
+        print("                                                                   ++++++++++++#%%%%%%%%%++++++++++ ");
+        print("                                                                 ++++++++*#%%%%%%%%%%%%%%+++++++++++");
+        print("                                                              #++++++++#%%%%%%%#*++++++++++++++++++*");
+        print("                                                            +++++++++#####*+++++++++++++++++++++++% ");
+        print("                                                         ++++++++++#####+++++++++++++++++++++++##   ");
+        print("                                                    +++++++++++++####%%#++++++*++++++++++++*##      ");
+        print("                                                +++++++++++++++*#####%%%%***+++++++++++#***         ");
+        print("                                            ++++++++++++++++++#*##**#%%%%%%#+++++*##****            ");
+        print("                                        ++++++++++++++++++++**********%%%%%%%%#*****#%              ");
+        print("                                     ++++++++++++++++++++#%%%#*******************%%                 ");
+        print("                                 +++++++++++++++++++++#%%%%%%%%%%##*******##%%%%%                   ");
+        print("                              ++++++++++++++++++++++%%%%#**#%%%%%%%%%%%%%%%%%%%                     ");
+        print("                           +++++++++++++++++++++++#%%%++++++++%%%%%%%%%%%%%%%                       ");
+        print("                        %%#*++++++++++++*********%%%++++++++++%%%%%%%%%%%%%                         ");
+        print("                      %%%%%%%%#****************%%%*+++++++++++%%%%%%%%%%%                           ");
+        print("                   *****%%%%%%%%%*************%%%+++++++++++#%%%%%%%%%%%                            ");
+        print("                 +++++****#%%%%%%%%*********#%%*++++++++++#%%%%%%%%%%%%%                            ");
+        print("               *++++++++****#%%%%%%%*******%%%*+++++++++*%%%%%%%%%%%%%%%                            ");
+        print("             %%%%%%%%%#+++****%%%%%%#*****%%%%+++++++++%%%%%%%%%%%%%%%%%                            ");
+        print("           %%%%###%%%%%%%%%#***%%%%%%***%%%%%%+++++++%%%%%%%%%  %%%%%%%#                            ");
+        print("          %%++++++++#%%%%%%%%%%%%%%%%%%%%%%%%%+++++++*%%%%%     %%%%%%####                          ");
+        print("        %%#+++++++++++#%%%%%%%%%%%%%%%%%%%%%%%*+++++++#%          %%########                        ");
+        print("       %%%+++++++++++++++#%%#%%%%%%%%%%%%%%%%%%*++++++++           ########*********                ");
+        print("      %%%%+++++++++++++++++++++++%%%%%%%%%%%%%%%+++++++++            ####*********++                ");
+        print("     %%%%%*+++++++++++++++++++++++#%%%%%%%%      +++++++++             #*********+                  ");
+        print("    %%%%%%%%*++++++++++++++++++++++%              ****+++++++++++       *******++++++               ");
+        print("   %%%%%%%%%%%%%%#*++++++++++++++++                ********++++++        *** ++++  +++              ");
+        print("   %%%%%%%%%%%%%%%%   +++++++++++                   **********           ***  ++++                  ");
+        print("  %%%%%%%%%%%%%%%    +++++++++++                     ************                                   ");
+        print(" %%%%%%%%%%%%%%    ***++++++++                        ** ****  ****                                 ");
+        print(" %%%%%%%%%%%%%   *******++++                          ***  ***                                      ");
+        print(" %%%%%%%%%%%%   ***********                            *    ***                                     ");
+        print("%%%%%%%%%%%     **********                                                                          ");
+        print("%%%%%%%%%%%      *************                                                                      ");
+        print("%%%%%%%%%%        ***************                                                                   ");
+        print("%%%%%%%%%%         **** ****                                                                        ");
+        print("%%%%%%%%%            ***  ****                                                                      ");
+        print("%%%%%%%%%             **    ***                                                                     ");
+        print("%%%%%%%%%                                                                                           ");
+        print(" %%%%%%%%%                                                            ***                           ");
+        print(" %%%%%%%%%                                                           ***                            ");
+        print("  %%%%%%%%%                                                         ****                            ");
+        print("   %%%%%%%%%                                                       ***                              ");
+        print("   %%%%%%%%%%                                                     ***                               ");
+        print("     %%%%%%%%%                                                  ****                                ");
+        print("      %%%%%%%%%%                                              ##***                                 ");
+        print("       %%%%%%%%%%%                                          #####                                   ");
+        print("         %%%%%%%%%%%                                      #####                                     ");
+        print("           %%%%%%%%%%%%                                ######                                       ");
+        print("              %%%%%%%%%%%%%                        ########                                         ");
+        print("                 %%%%%%%%%%%%%%%%%           ###########                                            ");
+        print("                     %%%%%%%%%%%%%%%%%%%%%%%%%%#####                                                ");
+        print("                           %%%%%%%%%%%%%%%%%%%                                                      ");
+        print("");
+        print("  What's good yo! I'm Guillermo, straight outta the codebase kickin' it 🦎");
         return 0;
     }
 

@@ -1,0 +1,10 @@
+[package]
+name = "sfn/tensor"
+version = "0.1.1"
+description = "Tensor primitives and operations for Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = ["gpu"]

@@ -1,0 +1,10 @@
+[package]
+name = "sfn/nn"
+version = "0.1.1"
+description = "Neural network training and inference utilities for Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = ["gpu"]
