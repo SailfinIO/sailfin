@@ -1400,6 +1400,7 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
     let mut signature -> string[] = [];
     let mut bindings -> ParameterBinding[] = [];
     let mut diagnostics -> string[] = [];
+    let mut seen_names -> string[] = [];
     let mut index -> number = 0;
     loop {
         if index >= function.parameters.length {
@@ -1426,13 +1427,28 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
                 }
             }
         }
+        // Default empty types to i8* so LLVM IR is parseable.
+        if llvm_type.length == 0 {
+            llvm_type = "i8*";
+        }
         if parameter.type_annotation.length == 0 {
             if !inferred_self_type {
                 diagnostics.push("llvm lowering: parameter `" + parameter.name + "` missing type annotation; defaulting to `" + llvm_type + "`");
             }
         }
         let sanitized = sanitize_symbol(parameter.name);
-        let llvm_name = "%" + sanitized;
+        // Deduplicate parameter names: if this name was already used,
+        // append a numeric suffix to make it unique (LLVM requires unique param names).
+        let mut llvm_name = "%" + sanitized;
+        let mut dedup_count -> number = 1;
+        loop {
+            if !string_array_contains(seen_names, llvm_name) {
+                break;
+            }
+            dedup_count += 1;
+            llvm_name = "%" + sanitized + "_" + number_to_string(dedup_count);
+        }
+        seen_names.push(llvm_name);
         signature.push(llvm_type + " " + llvm_name);
         let prep_binding = _ipc_make_parameter_binding(parameter.name, llvm_name, llvm_type, parameter.type_annotation);
         bindings = append_parameter_binding(bindings, prep_binding);
