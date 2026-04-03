@@ -221,6 +221,24 @@ fn _parse_int_from_string(text -> string) -> number {
     return result;
 }
 
+// Read an IPC integer from a file, returning at least `floor_value`.
+// This prevents temp_index resets to 0 when files are missing/empty/stale,
+// which otherwise causes duplicate SSA names (%tN) in LLVM IR.
+fn _read_ipc_int_min(path -> string, floor_value -> number) -> number ![io] {
+    if !fs.exists(path) {
+        return floor_value;
+    }
+    let text = fs.readFile(path);
+    if text.length == 0 {
+        return floor_value;
+    }
+    let parsed = _parse_int_from_string(text);
+    if parsed > floor_value {
+        return parsed;
+    }
+    return floor_value;
+}
+
 // Write parameter bindings to files for statement.sfn to read.
 // Avoids ABI corruption of struct params across module boundaries.
 fn write_bindings_to_files(bindings -> ParameterBinding[]) ![io] {

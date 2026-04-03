@@ -625,62 +625,9 @@ def _mark_unaligned_enum_payload_accesses(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
-def _reorder_phi_nodes_to_block_start(llvm_ir: str) -> tuple[str, int]:
-    """Move all phi nodes to the top of each basic block.
-
-    LLVM requires that phi nodes appear contiguously at the start of a block
-    (after the label). Some generated modules interleave phi nodes with other
-    instructions, which clang rejects.
-    """
-
-    lines = llvm_ir.splitlines()
-    if not lines:
-        return llvm_ir, 0
-
-    out: list[str] = []
-    changed = 0
-
-    def _flush_block(label: str | None, block_lines: list[str]) -> None:
-        nonlocal changed
-        if label is None:
-            out.extend(block_lines)
-            return
-
-        phi_lines: list[str] = []
-        other_lines: list[str] = []
-        for line in block_lines:
-            if _LLVM_PHI_RE.match(line):
-                phi_lines.append(line)
-            else:
-                other_lines.append(line)
-        if phi_lines:
-            if block_lines[: len(phi_lines)] != phi_lines:
-                changed += 1
-            out.append(label)
-            out.extend(phi_lines)
-            out.extend(other_lines)
-        else:
-            out.append(label)
-            out.extend(other_lines)
-
-    current_label: str | None = None
-    current_block: list[str] = []
-
-    label_re = re.compile(r"^\s*[A-Za-z_.$][A-Za-z0-9_.$]*:\s*(?:;.*)?$")
-    for line in lines:
-        if label_re.match(line):
-            _flush_block(current_label, current_block)
-            current_label = line
-            current_block = []
-            continue
-        if current_label is None:
-            out.append(line)
-        else:
-            current_block.append(line)
-
-    _flush_block(current_label, current_block)
-
-    return "\n".join(out) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+## _reorder_phi_nodes_to_block_start — REMOVED
+## Root cause fixed in compiler/src/llvm/lowering/emission.sfn
+## (_reorder_phis_to_block_start pass reorders phi nodes in the compiler itself).
 
 
 _STORE_NULL_RE = re.compile(
@@ -4192,78 +4139,10 @@ def _fix_duplicate_globals(llvm_ir: str) -> tuple[str, int]:
     return result, changed
 
 
-def _fix_duplicate_param_names(llvm_ir: str) -> tuple[str, int]:
-    """Rename duplicate LLVM parameter names in function definitions.
-
-    The seed sometimes emits ``define ... @fn(%T1 %entry, %T2 %entry)``
-    where two parameters share the same name.  LLVM rejects this.
-    Fix by appending a numeric suffix to duplicates.
-
-    Also fixes empty-type parameters (`` %_``) where the seed omits
-    the type entirely.  Replace with ``i8* %_N`` so the IR is parseable.
-    """
-
-    _define_re = re.compile(
-        r"^(define\s+(?:internal\s+)?[^(]+\()([^)]*)\)(.*)$"
-    )
-    changed = 0
-    out_lines: list[str] = []
-    for line in llvm_ir.splitlines():
-        m = _define_re.match(line)
-        if m:
-            prefix = m.group(1)
-            params_str = m.group(2)
-            suffix = m.group(3)
-            # Parse individual parameters (brace-aware to handle types like { i8**, i64 }*).
-            params: list[str] = []
-            depth = 0
-            current = ""
-            for ch in params_str:
-                if ch in "({":
-                    depth += 1
-                    current += ch
-                elif ch in ")}":
-                    depth -= 1
-                    current += ch
-                elif ch == "," and depth == 0:
-                    if current.strip():
-                        params.append(current.strip())
-                    current = ""
-                else:
-                    current += ch
-            if current.strip():
-                params.append(current.strip())
-            seen_names: dict[str, int] = {}
-            new_params: list[str] = []
-            any_changed = False
-            empty_idx = 0
-            for param in params:
-                # Detect empty-type parameter: just "%_" with no type prefix.
-                if param == "%_" or param.startswith("%_") and " " not in param:
-                    empty_idx += 1
-                    new_params.append(f"i8* %_empty_{empty_idx}")
-                    any_changed = True
-                    continue
-                # Extract the %name part (last word starting with %).
-                parts = param.rsplit(None, 1)
-                if len(parts) == 2 and parts[1].startswith("%"):
-                    ptype = parts[0]
-                    pname = parts[1]
-                    if pname in seen_names:
-                        seen_names[pname] += 1
-                        new_name = f"{pname}_{seen_names[pname]}"
-                        new_params.append(f"{ptype} {new_name}")
-                        any_changed = True
-                    else:
-                        seen_names[pname] = 0
-                        new_params.append(param)
-                else:
-                    new_params.append(param)
-            if any_changed:
-                line = prefix + ", ".join(new_params) + ")" + suffix
-                changed += 1
-        out_lines.append(line)
-    return "\n".join(out_lines), changed
+## _fix_duplicate_param_names — REMOVED
+## Root cause fixed in compiler/src/llvm/lowering/emission.sfn and
+## compiler/src/llvm/expression_lowering/native/statement.sfn
+## (parameter name deduplication + empty type defaulting to i8*).
 
 
 def _collect_declare_signatures(ll_texts: list[str]) -> dict[str, tuple[str, list[str]]]:
@@ -7632,75 +7511,9 @@ def _fix_phi_type_mismatches(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
-def _fix_duplicate_ssa_names(llvm_ir: str) -> tuple[str, int]:
-    """Rename duplicate SSA definitions within the same function.
-
-    The seed compiler sometimes reuses the same ``%tN`` register name in
-    different basic blocks of a single function, violating SSA form.
-    LLVM requires each value name to be defined exactly once per function.
-
-    This pass detects duplicate definitions and renames subsequent ones to
-    ``%tN_dup2``, ``%tN_dup3``, etc., updating all uses within the same
-    basic block to keep the IR consistent.
-    """
-    import re as _re
-
-    lines = llvm_ir.split("\n")
-    changed = 0
-
-    define_pat = _re.compile(r"^define\s+")
-    assign_pat = _re.compile(r"^\s*(%[A-Za-z0-9_.]+)\s*=")
-
-    # Collect function boundaries.
-    func_ranges: list[tuple[int, int]] = []
-    func_start_i = None
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if define_pat.match(stripped):
-            func_start_i = i
-        elif func_start_i is not None and stripped == "}":
-            func_ranges.append((func_start_i, i))
-            func_start_i = None
-
-    for fstart, fend in func_ranges:
-        # Pass 1: find all definition sites per variable name.
-        defn_sites: dict[str, list[int]] = {}  # varname -> [line_idx, ...]
-        for i in range(fstart + 1, fend):
-            m = assign_pat.match(lines[i])
-            if m:
-                vname = m.group(1)
-                defn_sites.setdefault(vname, []).append(i)
-
-        # Only care about names defined more than once.
-        dups = {k: v for k, v in defn_sites.items() if len(v) > 1}
-        if not dups:
-            continue
-
-        # Pass 2: for each duplicate, rename the 2nd, 3rd, ... definitions.
-        # We rename both the definition and all uses that follow it (up to
-        # the next definition of the same name or end of function).
-        for vname, sites in dups.items():
-            for dup_idx, site_line in enumerate(sites):
-                if dup_idx == 0:
-                    continue  # Keep the first definition unchanged.
-                new_name = f"{vname}_dup{dup_idx + 1}"
-                # Determine the range: from this definition to the next
-                # definition of the same name (or end of function).
-                range_end = sites[dup_idx + 1] if dup_idx + 1 < len(sites) else fend
-                # Rename in definition and subsequent uses.
-                escaped = _re.escape(vname)
-                # Match the variable name as a whole word (followed by
-                # non-alphanumeric or end of string).
-                rename_pat = _re.compile(escaped + r"(?=[^A-Za-z0-9_.]|$)")
-                for i in range(site_line, range_end):
-                    new_line = rename_pat.sub(new_name, lines[i])
-                    if new_line != lines[i]:
-                        lines[i] = new_line
-                changed += 1
-
-    if not changed:
-        return llvm_ir, 0
-    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+## _fix_duplicate_ssa_names — REMOVED
+## Root cause fixed in compiler/src/llvm/lowering/instructions_helpers.sfn
+## (_read_ipc_int_min prevents temp_index from resetting to 0 via stale/empty IPC files).
 
 
 def _fix_missing_parameter_stores(llvm_ir: str) -> tuple[str, int]:
@@ -12234,7 +12047,9 @@ def main(argv: list[str]) -> int:
                         candidate)
 
                     # Ensure phi nodes are grouped at the top of each block.
-                    candidate, _ = _reorder_phi_nodes_to_block_start(candidate)
+                    # DISABLED: root cause fixed in compiler/src/llvm/lowering/emission.sfn
+                    # (_reorder_phis_to_block_start pass in compiler).
+                    # candidate, _ = _reorder_phi_nodes_to_block_start(candidate)
 
                     # Optional heuristic fix for invalid phi inputs that break dominance.
                     # Disabled by default because it can change semantics.
@@ -12329,8 +12144,8 @@ def main(argv: list[str]) -> int:
                     )
 
                     # Final safeguard: ensure phi nodes are grouped at block starts
-                    # right before writing the candidate to disk.
-                    candidate, _ = _reorder_phi_nodes_to_block_start(candidate)
+                    # DISABLED: handled by compiler's _reorder_phis_to_block_start pass.
+                    # candidate, _ = _reorder_phi_nodes_to_block_start(candidate)
                     candidate, _ = _fix_invalid_null_stores(candidate)
 
                     # Eliminate unreachable branches (br i1 false/true) so
@@ -12362,13 +12177,16 @@ def main(argv: list[str]) -> int:
                         )
 
                     # Fix duplicate parameter names in function definitions.
-                    candidate, dup_param_changes = _fix_duplicate_param_names(candidate)
-                    if dup_param_changes:
-                        print(
-                            f"[selfhost] fixed {dup_param_changes} duplicate param name(s) in {module_name}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
+                    # DISABLED: root cause fixed in compiler/src/llvm/lowering/emission.sfn
+                    # and compiler/src/llvm/expression_lowering/native/statement.sfn
+                    # (parameter name deduplication + empty type defaulting).
+                    # candidate, dup_param_changes = _fix_duplicate_param_names(candidate)
+                    # if dup_param_changes:
+                    #     print(
+                    #         f"[selfhost] fixed {dup_param_changes} duplicate param name(s) in {module_name}",
+                    #         file=sys.stderr,
+                    #         flush=True,
+                    #     )
 
                     # Fix native_ir function return types (double → pointer).
                     candidate, nirt_changes = _fix_native_ir_return_types(candidate)
@@ -12665,15 +12483,16 @@ def main(argv: list[str]) -> int:
                         )
 
                     # Fix duplicate SSA definitions within functions.
-                    # The seed sometimes reuses %tN names across basic blocks
-                    # in the same function, violating SSA form.
-                    candidate, dup_changes = _fix_duplicate_ssa_names(candidate)
-                    if dup_changes:
-                        print(
-                            f"[selfhost] renamed {dup_changes} duplicate SSA name(s) in {module_name}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
+                    # DISABLED: root cause fixed by the lowering helper in
+                    # compiler/src/llvm/lowering/instructions_helpers.sfn
+                    # (_read_ipc_int_min prevents temp_index from resetting to 0).
+                    # candidate, dup_changes = _fix_duplicate_ssa_names(candidate)
+                    # if dup_changes:
+                    #     print(
+                    #         f"[selfhost] renamed {dup_changes} duplicate SSA name(s) in {module_name}",
+                    #         file=sys.stderr,
+                    #         flush=True,
+                    #     )
 
                     # Fix lower_instruction_range return type ABI mismatch.
                     # A truncated instructions.sfn-asm in the import-context
@@ -12889,8 +12708,9 @@ def main(argv: list[str]) -> int:
                         if not did_patch:
                             break
                         patched_candidate = patched_candidate2
-                        patched_candidate, _ = _reorder_phi_nodes_to_block_start(
-                            patched_candidate)
+                        # DISABLED: handled by compiler's _reorder_phis_to_block_start pass.
+                        # patched_candidate, _ = _reorder_phi_nodes_to_block_start(
+                        #     patched_candidate)
                         patched_candidate, _ = _fix_invalid_null_stores(
                             patched_candidate)
                         cleaned_attempt_path.write_text(

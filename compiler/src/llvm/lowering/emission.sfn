@@ -28,6 +28,7 @@ import {
     trim_text,
     starts_with,
     append_parameter_binding,
+    string_array_contains,
 } from "../utils";
 
 import {
@@ -180,6 +181,97 @@ fn parse_simple_integer(text -> string) -> number {
     return result;
 }
 
+// Reorder lines within each basic block so that phi nodes come first.
+// LLVM requires phi nodes to appear contiguously at the start of a block (after the label).
+fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
+    let mut out -> string[] = [];
+    let mut block_phi_lines -> string[] = [];
+    let mut block_other_lines -> string[] = [];
+    let mut in_block -> boolean = false;
+    let mut i -> number = 0;
+    loop {
+        if i >= lines.length {
+            break;
+        }
+        let line = lines[i];
+        let trimmed = trim_text(line);
+        // Detect block label: non-empty, ends with ":", not indented (not a store/instruction).
+        let mut is_label -> boolean = false;
+        if trimmed.length > 1 {
+            let last_ch = substring(trimmed, trimmed.length - 1, trimmed.length);
+            if last_ch == ":" {
+                // Labels are not indented; indented lines ending with : are not labels.
+                if line.length > 0 {
+                    let first_ch = substring(line, 0, 1);
+                    if first_ch != " " {
+                        is_label = true;
+                    }
+                }
+            }
+        }
+        if is_label {
+            // Flush previous block: phis first, then other lines.
+            if in_block {
+                let mut _pi -> number = 0;
+                loop {
+                    if _pi >= block_phi_lines.length { break; }
+                    out.push(block_phi_lines[_pi]);
+                    _pi += 1;
+                }
+                let mut _oi -> number = 0;
+                loop {
+                    if _oi >= block_other_lines.length { break; }
+                    out.push(block_other_lines[_oi]);
+                    _oi += 1;
+                }
+            }
+            block_phi_lines = [];
+            block_other_lines = [];
+            in_block = true;
+            out.push(line);
+            i += 1;
+            // skip next line if it's empty (cosmetic)
+            // no, just continue
+        } else {
+            if in_block {
+                // Check if this is a phi instruction.
+                let mut is_phi -> boolean = false;
+                if starts_with(trimmed, "%") {
+                    // Pattern: %tN = phi ...
+                    let eq_pos = index_of(trimmed, "= phi ");
+                    if eq_pos > 0 {
+                        is_phi = true;
+                    }
+                }
+                if is_phi {
+                    block_phi_lines.push(line);
+                } else {
+                    block_other_lines.push(line);
+                }
+            } else {
+                out.push(line);
+            }
+            i += 1;
+        }
+    }
+    // Flush final block.
+    if in_block {
+        let mut _pi2 -> number = 0;
+        loop {
+            if _pi2 >= block_phi_lines.length { break; }
+            out.push(block_phi_lines[_pi2]);
+            _pi2 += 1;
+        }
+        let mut _oi2 -> number = 0;
+        loop {
+            if _oi2 >= block_other_lines.length { break; }
+            out.push(block_other_lines[_oi2]);
+            _oi2 += 1;
+        }
+    }
+    return out;
+}
+
 // Helper: build a ParameterBinding for the file-IPC loop in prepare_parameters_from_files.
 // Kept as a separate function so the loop never has an inline struct literal at the top level
 // of the loop body — the v0.1.1 seed misidentifies `identifier {` as a loop-body closer.
@@ -202,6 +294,7 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
     let mut signature -> string[] = [];
     let mut bindings -> ParameterBinding[] = [];
     let mut diagnostics -> string[] = [];
+    let mut seen_names -> string[] = [];
     let mut index -> number = 0;
     loop {
         if index >= fn_param_count {
@@ -213,11 +306,26 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
         if llvm_type == "void" {
             llvm_type = "";
         }
+        // Default empty types to i8* so LLVM IR is parseable.
+        if llvm_type.length == 0 {
+            llvm_type = "i8*";
+        }
         if param_type.length == 0 {
             diagnostics.push("llvm lowering: parameter `" + param_name + "` missing type annotation; defaulting to `" + llvm_type + "`");
         }
         let sanitized = sanitize_symbol(param_name);
-        let llvm_name = "%" + sanitized;
+        // Deduplicate parameter names: if this name was already used,
+        // append a numeric suffix to make it unique (LLVM requires unique param names).
+        let mut llvm_name = "%" + sanitized;
+        let mut dedup_count -> number = 1;
+        loop {
+            if !string_array_contains(seen_names, llvm_name) {
+                break;
+            }
+            dedup_count += 1;
+            llvm_name = "%" + sanitized + "_" + number_to_string(dedup_count);
+        }
+        seen_names.push(llvm_name);
         signature.push(llvm_type + " " + llvm_name);
         bindings = append_parameter_binding(bindings, _emit_make_parameter_binding(param_name, llvm_name, llvm_type, param_type));
         index += 1;
@@ -760,6 +868,9 @@ fn emit_llvm_function(
             }
         }
     }
+
+    // Ensure phi nodes appear at the top of each basic block (LLVM requirement).
+    lines = _reorder_phis_to_block_start(lines);
 
     lines.push("}");
 
