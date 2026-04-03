@@ -2360,7 +2360,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         print("                     %%%%%%%%%%%%%%%%%%%%%%%%%%#####                                                ");
         print("                           %%%%%%%%%%%%%%%%%%%                                                      ");
         print("");
-        print("  Hi! I'm Guillermo, the Sailfin mascot. 🦎");
+        print("  What's good yo! I'm Guillermo, straight outta the codebase kickin' it 🦎");
         return 0;
     }
 
