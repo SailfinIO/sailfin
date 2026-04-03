@@ -21,7 +21,7 @@ The language features effect types (`![io, net, model, gpu, rand, clock]`), owne
 ### Environment Setup
 
 ```bash
-make env              # Create/update the 'sailfin' Conda environment (needed for BUILD_DRIVER=py, which is the current default)
+make env              # Create/update Conda environment (CI/release only — local builds just need python3)
 ```
 
 ### Development Workflow

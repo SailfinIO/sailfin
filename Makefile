@@ -66,6 +66,10 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # Once we have a clean seed, flip this to sh and remove the Python driver.
 BUILD_DRIVER ?= py
 
+# Python executable for the build driver. selfhost_native.py uses only stdlib,
+# so any Python 3 works — no Conda or virtualenv required.
+PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
+
 .PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check package clean
 
 .PHONY: ci-prepare-test-artifacts ci-package-native ci-package-installer
@@ -112,8 +116,8 @@ help:
 	@echo "  make smoke          # Rebuild + run smoke tests"
 	@echo "  make package        # Build + package native artifacts into dist/"
 	@echo "  make fetch-seed     # Download the latest released seed"
-	@echo "  make env            # Create/update Conda env (only for BUILD_DRIVER=py)"
-	@echo "  make rebuild-asan   # Rebuild with AddressSanitizer (requires Python)"
+	@echo "  make rebuild-asan   # Rebuild with AddressSanitizer (requires Python 3)"
+	@echo "  make env            # Create/update Conda env (CI/release only)"
 	@echo "  make clean          # Remove packaged artifacts (dist/)"
 	@echo ""
 	@echo "Build driver: BUILD_DRIVER=$(BUILD_DRIVER) (py=with fixups [default], sh=no fixups)"
@@ -431,8 +435,12 @@ rebuild-sh:
 	@mkdir -p build/native
 	@echo "[rebuild-sh] built $(NATIVE_OUT)"
 
-# Legacy Python-based build (requires Conda environment).
-rebuild-py: check-conda
+# Python-based build (uses selfhost_native.py with fixups; only needs Python 3 stdlib).
+rebuild-py:
+	@if [ -z "$(PYTHON)" ]; then \
+		echo "[rebuild-py][error] python3 not found on PATH" >&2; \
+		exit 1; \
+	fi
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -458,7 +466,7 @@ rebuild-py: check-conda
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi; \
 	echo "[rebuild-py] running Python build script (seed=$$seed)..."; \
-	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out $(NATIVE_OUT)
+	$(PYTHON) -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out $(NATIVE_OUT)
 	@SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
 	if [ ! -d "$$SRC" ]; then \
 		echo "[rebuild-py][error] missing import-context output at $$SRC" >&2; \
@@ -511,8 +519,12 @@ smoke-sh:
 	SEED="$$seed" OUT="$(SMOKE_OUT)" bash scripts/smoke.sh
 	@echo "[smoke-sh] OK"
 
-# Legacy Python-based smoke test (requires Conda environment).
-smoke-py: check-conda
+# Python-based smoke test (only needs Python 3 stdlib).
+smoke-py:
+	@if [ -z "$(PYTHON)" ]; then \
+		echo "[smoke-py][error] python3 not found on PATH" >&2; \
+		exit 1; \
+	fi
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -535,7 +547,7 @@ smoke-py: check-conda
 		exit 1; \
 	fi; \
 	echo "[smoke-py] running smoke harness..."; \
-	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_smoke_native.py \
+	$(PYTHON) -u scripts/selfhost_smoke_native.py \
 		--seed "$$seed" \
 		--out $(SMOKE_OUT) \
 		--jobs $(BUILD_JOBS) \
@@ -543,7 +555,11 @@ smoke-py: check-conda
 		$(SMOKE_ARGS)
 	@echo "[smoke-py] OK"
 
-rebuild-asan: check-conda
+rebuild-asan:
+	@if [ -z "$(PYTHON)" ]; then \
+		echo "[rebuild-asan][error] python3 not found on PATH" >&2; \
+		exit 1; \
+	fi
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -561,7 +577,7 @@ rebuild-asan: check-conda
 		exit 1; \
 	fi; \
 	echo "[rebuild-asan] running build script (ASAN output; seed=$$seed)..."; \
-	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u scripts/selfhost_native.py --asan --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-selfhost
+	$(PYTHON) -u scripts/selfhost_native.py --asan --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-selfhost
 	@echo "[rebuild-asan] built build/native/sailfin-selfhost"
 
 # =============================================================================
