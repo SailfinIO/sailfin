@@ -21,7 +21,7 @@ The language features effect types (`![io, net, model, gpu, rand, clock]`), owne
 ### Environment Setup
 
 ```bash
-make env              # Create/update the 'sailfin' Conda environment (only needed for BUILD_DRIVER=py; the default shell driver has no Conda requirement)
+make env              # Create/update Conda environment (CI/release only — local builds just need python3)
 ```
 
 ### Development Workflow
@@ -169,23 +169,51 @@ When uncertain about feature status or semantics:
 
 The project is marching toward a 1.0 release with a **pure Sailfin toolchain** — no Python, no C runtime, no downstream fixup scripts. All compiler improvements must target the compiler source code itself (`compiler/src/*.sfn`), not external workarounds.
 
-### Current Critical Bug
+**Full stabilization guide:** See `SEED_STABILIZATION.md` for the complete fixup catalog, root cause analysis, and attack plan.
 
-The LLVM lowering of `.loop` / `.if` / `.break` control flow produces broken loop headers where every loop unconditionally enters the body with no exit condition. The bug is in `compiler/src/llvm/lowering/instructions.sfn`. This causes the seedcheck binary to hang on any operation. See `SELFHOST_STABILIZATION_PROMPT.md` for full analysis.
+### Seed Stabilization Strategy
+
+The v0.1.1 seed requires `scripts/selfhost_native.py` (Python build driver) with **~69 IR fixup passes** to produce a working binary. The goal is to fix these bugs in the compiler source so a new seed can build itself using `scripts/build.sh` (shell driver, zero fixups).
+
+**Approach:** Iterative seed promotion — fix bugs in `compiler/src/*.sfn`, remove the corresponding fixups from `selfhost_native.py`, cut a new seed when a batch is stable. See `SEED_STABILIZATION.md` for details.
+
+**Root cause categories (by fixup count):**
+1. **Cross-module type/ABI mismatches** (~15) — seed can't resolve cross-module function signatures
+2. **Double-encoded pointers** (~12) — pointers encoded as `double` via ptrtoint→sitofp
+3. **Missing/duplicate definitions** (~12) — dropped function bodies, duplicate globals/types
+4. **Phi node / SSA violations** (~8) — wrong placement, types, predecessor labels, duplicate names
+5. **Loop / control flow bugs** (~6) — unconditional loop headers, wrong continue targets
+6. **Linker / visibility** (~6) — symbol dedup and linkage issues
+
+**Recommended attack order:** Phi/SSA → Loops → Double-encoding → Missing defs → Cross-module ABI → Linker
+
+### Build Driver Configuration
+
+```bash
+# Default: Python driver (has fixups, works with current seed)
+make compile                    # BUILD_DRIVER=py by default
+
+# Explicit driver selection
+make rebuild BUILD_DRIVER=py    # Python with fixups
+make rebuild BUILD_DRIVER=sh    # Shell, no fixups (needs clean seed)
+```
 
 ### Development Principles
 
-- **Fix the compiler, not the build script.** `scripts/selfhost_native.py` has ~30 post-processing fixup passes that patch generated LLVM IR. These are technical debt. Every fix should go into the compiler source (`compiler/src/*.sfn`) so the fixup passes can be removed.
+- **Fix the compiler, not the build script.** `scripts/selfhost_native.py` has ~69 post-processing fixup passes that patch generated LLVM IR. These are technical debt. Every fix should go into the compiler source (`compiler/src/*.sfn`) so the fixup passes can be removed.
 - **The seedcheck binary must be a fully functional standalone compiler.** `make check` validates that it can run `hello-world.sfn` and pass the test suite directly — no Python fallbacks, no fallback compilers.
 - **Build must be fast and deterministic.** Target: under 5 minutes, zero retries. If the build needs retries, the compiler has a bug to fix.
 - **Reduce complexity, don't add it.** The fixup pass count should decrease over time. Don't add new fixup passes — fix the root cause in the compiler source.
+- **Track progress by fixup count.** The number of active fixup functions in `selfhost_native.py` is the primary metric. When it reaches 0, `make check` should pass.
 
 ### `make check` Validation
 
 `make check` does:
-1. Builds seedcheck binary from the first-pass binary
-2. Validates the seedcheck can actually run `examples/basics/hello-world.sfn` (fails if it hangs)
-3. Runs the full test suite using the seedcheck binary directly (no fallbacks)
+1. Builds the compiler from the seed using `BUILD_DRIVER` (default: Python with fixups)
+2. Runs the full test suite on the first-pass binary (early gate — if this fails, no point continuing)
+3. Builds seedcheck from the first-pass binary using `build.sh` (**always no fixups** — this is the graduation test)
+4. Validates the seedcheck can actually run `examples/basics/hello-world.sfn` (fails if it hangs)
+5. Runs the full test suite using the seedcheck binary directly (no fallbacks)
 
 If `make check` fails, it means the compiler has a bug. Fix the compiler.
 
