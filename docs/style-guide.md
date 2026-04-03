@@ -117,8 +117,11 @@ import { parse_expression } from "./parser/mod";
 The following syntax changes are active. See `docs/roadmap.md` §0 for rationale.
 
 - **Type annotations**: Use `:` (colon), not `->` (arrow), for parameter types,
-  variable types, and struct field types. The parser accepts both; prefer `:` in
-  all new code. Return types continue to use `->`.
+  variable types, and struct field types. The parser currently accepts both in
+  all positions (including return types) because it shares a single `TypeSep`
+  rule. However, `:` in return-type position is unintentional, discouraged, and
+  will become a parse error once the grammar is split. New code should use `:`
+  for annotations and `->` for return types.
 
   ```sfn
   // Preferred

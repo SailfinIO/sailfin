@@ -94,8 +94,12 @@ let mut counter -> number = 0;
 
 > **Syntax reform (pre-1.0):** The `->` type annotation separator will be
 > replaced with `:` in variable declarations, parameters, and field
-> declarations. Function return types keep `->`. The parser already accepts `:`
-> as an alternative (`TypeSep = "->" | ":"`). New code should prefer `:`.
+> declarations. Function return types keep `->`. The parser currently accepts
+> `:` in all type-separator positions (including return types) because it
+> shares a single `TypeSep = "->" | ":"` rule. This is unintentional — `:` in
+> return-type position is discouraged and will become a parse error once the
+> grammar is split into separate annotation and return-type separators. New
+> code should use `:` for annotations and `->` for return types.
 > See `docs/roadmap.md` §0 and `docs/status.md` §Known Design Issues.
 >
 > ```sfn

@@ -38,8 +38,13 @@ StructMember       = FieldDeclaration | MethodDeclaration ;
 
 // REFORM: TypeSep currently accepts both "->" and ":". Pre-1.0, "->" will be
 // deprecated in type-annotation positions (parameters, variables, fields).
-// "->" remains the return-type separator in function signatures.
-// New code should use ":" exclusively for type annotations.
+// The target end state is two distinct separators:
+//   AnnotationSep = ":"         (parameters, variables, fields)
+//   ReturnSep     = "->"        (function return types)
+// Today the shared TypeSep rule means ":" also parses in return-type position.
+// This is unintentional — ":" for return types is discouraged and will become
+// a parse error once the grammar is split. New code should use ":" for
+// annotations and "->" for return types.
 TypeSep            = "->" | ":" ;
 FieldDeclaration   = [ "mut" ] Identifier TypeSep Type ";" ;
 
