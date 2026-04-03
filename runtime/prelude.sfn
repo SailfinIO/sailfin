@@ -774,4 +774,4 @@ fn guillermo() -> string {
     return "🦎";
 }
 
-export { capability_grant, fs_bridge, http_bridge, model_bridge, clamp, substring, find_char, grapheme_count, grapheme_at, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated };
+export { capability_grant, fs_bridge, http_bridge, model_bridge, clamp, substring, find_char, grapheme_count, grapheme_at, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated, guillermo };
