@@ -1,0 +1,790 @@
+// compiler/src/native_ir_utils.sfn
+//
+// Shared utility functions and layout parsers used by native_ir_parser
+// and native_ir_api.
+
+import { substring, char_code } from "./string_utils";
+
+import {
+    NumberParseResult,
+    StructLayoutHeaderParse,
+    StructLayoutFieldParse,
+    EnumLayoutHeaderParse,
+    EnumLayoutVariantParse,
+    EnumLayoutPayloadParse,
+    NativeStructLayoutField,
+} from "./native_ir";
+
+fn is_trim_char(ch -> string) -> boolean {
+    let mut _ret388 -> boolean = false;
+    if ch == " " { _ret388 = true; }
+    if ch == "\n" { _ret388 = true; }
+    if ch == "\r" { _ret388 = true; }
+    if ch == "\t" { _ret388 = true; }
+    return _ret388;
+}
+
+fn trim_text(value -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = value[start];
+        if is_trim_char(ch) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if is_trim_char(ch) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if start == 0 {
+        if end == value.length {
+            return value;
+        }
+    }
+    return substring(value, start, end);
+}
+
+fn starts_with(value -> string, prefix -> string) -> boolean {
+    if prefix.length == 0 {
+        return true;
+    }
+    if value.length < prefix.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        if value[index] != prefix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn strip_prefix(value -> string, prefix -> string) -> string {
+    if !starts_with(value, prefix) {
+        return value;
+    }
+    return substring(value, prefix.length, value.length);
+}
+
+fn index_of(value -> string, target -> string) -> number {
+    if target.length == 0 {
+        return 0;
+    }
+    let _search_limit = value.length - target.length;
+    let mut index -> number = 0;
+    loop {
+        if index > _search_limit {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            let _cmp_pos = index + match_index;
+            if value[_cmp_pos] != target[match_index] {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn strip_quotes(value -> string) -> string {
+    if value.length >= 2 {
+        let first = value[0];
+        let last = value[value.length - 1];
+        let mut _let389 -> boolean = false;
+        if first == "\"" {
+            if last == "\"" {
+                _let389 = true;
+            }
+        }
+        let is_double = _let389;
+        let mut _let390 -> boolean = false;
+        if first == "'" {
+            if last == "'" {
+                _let390 = true;
+            }
+        }
+        let is_single = _let390;
+        let mut _if391 -> boolean = false;
+        if is_double { _if391 = true; }
+        if is_single { _if391 = true; }
+        if _if391 {
+            return substring(value, 1, value.length - 1);
+        }
+    }
+    return value;
+}
+
+fn parse_decimal_number(text -> string) -> NumberParseResult {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 {
+        return NumberParseResult { success: false, value: 0 };
+    }
+    let zero = char_code("0");
+    let nine = char_code("9");
+    let mut index -> number = 0;
+    let mut value -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = trimmed[index];
+        let code = char_code(ch);
+        let mut _if386 -> boolean = false;
+        if code < zero { _if386 = true; }
+        if code > nine { _if386 = true; }
+        if _if386 {
+            return NumberParseResult { success: false, value: 0 };
+        }
+        let digit = code - zero;
+        value = value * 10 + digit;
+        index += 1;
+    }
+    return NumberParseResult { success: true, value: value };
+}
+
+fn split_lines(value -> string) -> string[] {
+    let value_len = value.length;
+    let mut lines -> string[] = [];
+    let mut start -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= value_len {
+            break;
+        }
+        let ch = value[index];
+        if ch == "\n" {
+            lines.push(substring_unchecked(value, start, index));
+            start = index + 1;
+        }
+        index += 1;
+    }
+    lines.push(substring_unchecked(value, start, value_len));
+    return lines;
+}
+
+fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
+    let tokens = split_whitespace(trim_text(text));
+    let mut diagnostics -> string[] = [];
+    if tokens.length == 0 {
+        diagnostics.push("struct layout header missing entries");
+        return StructLayoutHeaderParse { success: false, name: "", size: 0, align: 0, diagnostics: diagnostics };
+    }
+    let mut name_found -> boolean = false;
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut name_value -> string = "";
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "name=") {
+            name_value = substring(token, 5, token.length);
+            name_found = true;
+        } else if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics.push("struct layout header has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics.push("struct layout header has invalid align `" + value_text + "`");
+            }
+        } else {
+            diagnostics.push("struct layout header unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if !size_found {
+        diagnostics.push("struct layout header missing size entry");
+    }
+    if !align_found {
+        diagnostics.push("struct layout header missing align entry");
+    }
+    let mut _let374 -> boolean = false;
+    if size_found {
+        if align_found {
+            if diagnostics.length == 0 {
+                _let374 = true;
+            }
+        }
+    }
+    let success = _let374;
+    return StructLayoutHeaderParse { success: success, name: name_value, size: size_value, align: align_value, diagnostics: diagnostics };
+}
+
+fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLayoutFieldParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 };
+    if trimmed.length == 0 {
+        diagnostics.push("struct " + struct_name + " layout field missing content");
+        return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
+    }
+    let tokens = split_whitespace(trimmed);
+    if tokens.length == 0 {
+        diagnostics.push("struct " + struct_name + " layout field missing entries");
+        return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
+    }
+    let field_name = tokens[0];
+    if field_name.length == 0 {
+        diagnostics.push("struct " + struct_name + " layout field missing name");
+        return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
+    }
+    let mut type_text -> string = "";
+    let mut offset_found -> boolean = false;
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut offset_value -> number = 0;
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut index -> number = 1;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "type=") {
+            type_text = substring(token, 5, token.length);
+        } else if starts_with(token, "offset=") {
+            let value_text = substring(token, 7, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                offset_found = true;
+                offset_value = parsed.value;
+            } else {
+                diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` has invalid offset `" + value_text + "`");
+            }
+        } else if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` has invalid align `" + value_text + "`");
+            }
+        } else {
+            diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if type_text.length == 0 {
+        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing type entry");
+    }
+    if !offset_found {
+        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing offset entry");
+    }
+    if !size_found {
+        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing size entry");
+    }
+    if !align_found {
+        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing align entry");
+    }
+    let mut _let375 -> boolean = false;
+    if type_text.length > 0 {
+        if offset_found {
+            if size_found {
+                if align_found {
+                    if diagnostics.length == 0 {
+                        _let375 = true;
+                    }
+                }
+            }
+        }
+    }
+    let success = _let375;
+    let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value };
+    return StructLayoutFieldParse { success: success, field: field, diagnostics: diagnostics };
+}
+
+fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
+    let tokens = split_whitespace(trim_text(text));
+    let mut diagnostics -> string[] = [];
+    if tokens.length == 0 {
+        diagnostics.push("enum layout header missing entries");
+        return EnumLayoutHeaderParse { success: false, name: "", size: 0, align: 0, tag_type: "", tag_size: 0, tag_align: 0, diagnostics: diagnostics };
+    }
+    let mut name_found -> boolean = false;
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut name_value -> string = "";
+    let mut tag_type -> string = "";
+    let mut tag_size_found -> boolean = false;
+    let mut tag_align_found -> boolean = false;
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut tag_size_value -> number = 0;
+    let mut tag_align_value -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "name=") {
+            name_value = substring(token, 5, token.length);
+            name_found = true;
+        } else if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics.push("enum layout header has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics.push("enum layout header has invalid align `" + value_text + "`");
+            }
+        } else if starts_with(token, "tag_type=") {
+            tag_type = substring(token, 9, token.length);
+        } else if starts_with(token, "tag_size=") {
+            let value_text = substring(token, 9, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                tag_size_found = true;
+                tag_size_value = parsed.value;
+            } else {
+                diagnostics.push("enum layout header has invalid tag_size `" + value_text + "`");
+            }
+        } else if starts_with(token, "tag_align=") {
+            let value_text = substring(token, 10, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                tag_align_found = true;
+                tag_align_value = parsed.value;
+            } else {
+                diagnostics.push("enum layout header has invalid tag_align `" + value_text + "`");
+            }
+        } else {
+            diagnostics.push("enum layout header unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if !size_found {
+        diagnostics.push("enum layout header missing size entry");
+    }
+    if !align_found {
+        diagnostics.push("enum layout header missing align entry");
+    }
+    if tag_type.length == 0 {
+        diagnostics.push("enum layout header missing tag_type entry");
+    }
+    if !tag_size_found {
+        diagnostics.push("enum layout header missing tag_size entry");
+    }
+    if !tag_align_found {
+        diagnostics.push("enum layout header missing tag_align entry");
+    }
+    let mut _let376 -> boolean = false;
+    if size_found {
+        if align_found {
+            if tag_type.length > 0 {
+                if tag_size_found {
+                    if tag_align_found {
+                        if diagnostics.length == 0 {
+                            _let376 = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let success = _let376;
+    return EnumLayoutHeaderParse {
+        success: success,
+        name: name_value,
+        size: size_value,
+        align: align_value,
+        tag_type: tag_type,
+        tag_size: tag_size_value,
+        tag_align: tag_align_value,
+        diagnostics: diagnostics,
+    };
+}
+
+fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutVariantParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    let default_variant = NativeEnumVariantLayout { name: "", tag: 0, offset: 0, size: 0, align: 0, fields: [] };
+    if trimmed.length == 0 {
+        diagnostics.push("enum " + enum_name + " layout variant missing content");
+        return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
+    }
+    let tokens = split_whitespace(trimmed);
+    if tokens.length == 0 {
+        diagnostics.push("enum " + enum_name + " layout variant missing entries");
+        return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
+    }
+    let variant_name = tokens[0];
+    if variant_name.length == 0 {
+        diagnostics.push("enum " + enum_name + " layout variant missing name");
+        return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
+    }
+    let mut tag_found -> boolean = false;
+    let mut offset_found -> boolean = false;
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut tag_value -> number = 0;
+    let mut offset_value -> number = 0;
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut index -> number = 1;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "tag=") {
+            let value_text = substring(token, 4, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                tag_found = true;
+                tag_value = parsed.value;
+            } else {
+                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid tag `" + value_text + "`");
+            }
+        } else if starts_with(token, "offset=") {
+            let value_text = substring(token, 7, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                offset_found = true;
+                offset_value = parsed.value;
+            } else {
+                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid offset `" + value_text + "`");
+            }
+        } else if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid align `" + value_text + "`");
+            }
+        } else {
+            diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if !tag_found {
+        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing tag entry");
+    }
+    if !offset_found {
+        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing offset entry");
+    }
+    if !size_found {
+        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing size entry");
+    }
+    if !align_found {
+        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing align entry");
+    }
+    let mut _let377 -> boolean = false;
+    if tag_found {
+        if offset_found {
+            if size_found {
+                if align_found {
+                    if diagnostics.length == 0 {
+                        _let377 = true;
+                    }
+                }
+            }
+        }
+    }
+    let success = _let377;
+    let variant = NativeEnumVariantLayout { name: variant_name, tag: tag_value, offset: offset_value, size: size_value, align: align_value, fields: [] };
+    return EnumLayoutVariantParse { success: success, variant: variant, diagnostics: diagnostics };
+}
+
+fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutPayloadParse {
+    let trimmed = trim_text(text);
+    let mut diagnostics -> string[] = [];
+    let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 };
+    if trimmed.length == 0 {
+        diagnostics.push("enum " + enum_name + " layout payload missing content");
+        return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
+    }
+    let tokens = split_whitespace(trimmed);
+    if tokens.length == 0 {
+        diagnostics.push("enum " + enum_name + " layout payload missing entries");
+        return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
+    }
+    let identifier = tokens[0];
+    let dot_index = index_of(identifier, ".");
+    let _dot_next = dot_index + 1;
+    let mut _if378 -> boolean = false;
+    if dot_index <= 0 { _if378 = true; }
+    if _dot_next >= identifier.length { _if378 = true; }
+    if _if378 {
+        diagnostics.push("enum " + enum_name + " layout payload identifier `" + identifier + "` invalid");
+        return EnumLayoutPayloadParse { success: false, variant_name: "", field: default_field, diagnostics: diagnostics };
+    }
+    let variant_name = substring(identifier, 0, dot_index);
+    let field_name = substring(identifier, _dot_next, identifier.length);
+    let mut type_text -> string = "";
+    let mut offset_found -> boolean = false;
+    let mut size_found -> boolean = false;
+    let mut align_found -> boolean = false;
+    let mut offset_value -> number = 0;
+    let mut size_value -> number = 0;
+    let mut align_value -> number = 0;
+    let mut index -> number = 1;
+    loop {
+        if index >= tokens.length {
+            break;
+        }
+        let token = tokens[index];
+        if starts_with(token, "type=") {
+            type_text = substring(token, 5, token.length);
+        } else if starts_with(token, "offset=") {
+            let value_text = substring(token, 7, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                offset_found = true;
+                offset_value = parsed.value;
+            } else {
+                diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` has invalid offset `" + value_text + "`");
+            }
+        } else if starts_with(token, "size=") {
+            let value_text = substring(token, 5, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                size_found = true;
+                size_value = parsed.value;
+            } else {
+                diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` has invalid size `" + value_text + "`");
+            }
+        } else if starts_with(token, "align=") {
+            let value_text = substring(token, 6, token.length);
+            let parsed = parse_decimal_number(value_text);
+            if parsed.success {
+                align_found = true;
+                align_value = parsed.value;
+            } else {
+                diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` has invalid align `" + value_text + "`");
+            }
+        } else {
+            diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` unrecognized token `" + token + "`");
+        }
+        index += 1;
+    }
+    if type_text.length == 0 {
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing type entry");
+    }
+    if !offset_found {
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing offset entry");
+    }
+    if !size_found {
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing size entry");
+    }
+    if !align_found {
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing align entry");
+    }
+    let mut _let379 -> boolean = false;
+    if type_text.length > 0 {
+        if offset_found {
+            if size_found {
+                if align_found {
+                    if diagnostics.length == 0 {
+                        _let379 = true;
+                    }
+                }
+            }
+        }
+    }
+    let success = _let379;
+    let field = NativeStructLayoutField { name: field_name, type_annotation: type_text, offset: offset_value, size: size_value, align: align_value };
+    return EnumLayoutPayloadParse { success: success, variant_name: variant_name, field: field, diagnostics: diagnostics };
+}
+
+fn strip_generics(name -> string) -> string {
+    let mut result -> string = "";
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if ch == "<" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth == 0 {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    return trim_text(result);
+}
+
+fn last_index_of(value -> string, target -> string) -> number {
+    if target.length == 0 {
+        return value.length;
+    }
+    let mut index -> number = value.length - target.length;
+    loop {
+        if index < 0 {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            let _cmp_pos2 = index + match_index;
+            if value[_cmp_pos2] != target[match_index] {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index -= 1;
+    }
+    return -1;
+}
+
+fn split_text(value -> string, delimiter -> string) -> string[] {
+    if delimiter.length == 0 {
+        return [value];
+    }
+    let mut parts -> string[] = [];
+    let mut start -> number = 0;
+    let mut index -> number = 0;
+    
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let pos = index_of(substring(value, index, value.length), delimiter);
+        if pos < 0 {
+            break;
+        }
+        let actual_pos = index + pos;
+        parts.push(substring(value, start, actual_pos));
+        start = actual_pos + delimiter.length;
+        index = start;
+    }
+    
+    if start < value.length {
+        parts.push(substring(value, start, value.length));
+    } else if start == value.length {
+        parts.push("");
+    }
+    
+    return parts;
+}
+
+fn split_comma_separated(value -> string) -> string[] {
+    let value_len = value.length;
+    let mut results -> string[] = [];
+    let mut current -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value_len {
+            break;
+        }
+        let ch = value[index];
+        if ch == "," {
+            results.push(trim_text(current));
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    if current.length > 0 {
+        results.push(trim_text(current));
+    }
+    let mut filtered -> string[] = [];
+    index = 0;
+    loop {
+        if index >= results.length {
+            break;
+        }
+        let entry = results[index];
+        if entry.length > 0 {
+            filtered.push(entry);
+        }
+        index += 1;
+    }
+    return filtered;
+}

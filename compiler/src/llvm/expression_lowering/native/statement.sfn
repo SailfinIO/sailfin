@@ -8,7 +8,8 @@
 // and suspension conflict detection for async code.
 
 import { NativeModule } from "../../../emit_native";
-import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest, NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest, NativeBinding } from "../../../native_ir";
+import { NativeFunction, NativeInstruction, NativeParameter, NativeInterface, NativeInterfaceSignature, NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariant, NativeEnumVariantLayout, NativeSourceSpan, NativeImport, LayoutManifest, NativeBinding } from "../../../native_ir";
+import { select_text_artifact, select_layout_manifest_artifact, parse_native_artifact, parse_layout_manifest } from "../../../native_ir_api";
 import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
 
 // Core lowering / analysis lives in ./core; split helpers live in submodules.
