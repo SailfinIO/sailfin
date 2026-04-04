@@ -23,7 +23,9 @@ import {
     lower_to_llvm_with_manifests,
     lower_to_llvm_with_context,
 } from "./llvm/lowering/entrypoints";
-import { LayoutManifest, parse_layout_manifest, select_text_artifact, split_lines } from "./native_ir";
+import { LayoutManifest } from "./native_ir";
+import { split_lines } from "./native_ir_utils";
+import { parse_layout_manifest, select_text_artifact } from "./native_ir_api";
 import { substring } from "./string_utils";
 import { Token } from "./token";
 import { typecheck_diagnostics, typecheck_has_errors } from "./typecheck";

@@ -4,6 +4,22 @@
 
 import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
+    NativeImport,
+    NativeImportSpecifier,
+    NativeFunction,
+    NativeParameter,
+    NativeInstruction,
+    NativeInterface,
+    NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
+    NativeStructLayoutField,
+    NativeEnum,
+    LayoutManifest,
+    ParseNativeResult,
+    NativeBinding,
+} from "../../native_ir";
+import {
     select_text_artifact,
     select_layout_manifest_artifact,
     parse_native_artifact,
@@ -22,22 +38,8 @@ import {
     parse_native_functions_for_import,
     parse_native_artifact_for_import_context,
     parse_layout_manifest,
-    split_lines,
-    NativeImport,
-    NativeImportSpecifier,
-    NativeFunction,
-    NativeParameter,
-    NativeInstruction,
-    NativeInterface,
-    NativeStruct,
-    NativeStructField,
-    NativeStructLayout,
-    NativeStructLayoutField,
-    NativeEnum,
-    LayoutManifest,
-    ParseNativeResult,
-    NativeBinding,
-} from "../../native_ir";
+} from "../../native_ir_api";
+import { split_lines } from "../../native_ir_utils";
 import { substring, char_code } from "../../string_utils";
 
 import {

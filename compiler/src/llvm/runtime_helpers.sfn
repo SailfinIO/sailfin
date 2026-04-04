@@ -534,16 +534,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // String utility helpers
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
             target: "substring",
-            symbol: "sailfin_runtime_substring",
+            symbol: "substring",
             return_type: "i8*",
-            parameter_types: ["i8*", "i64", "i64"],
+            parameter_types: ["i8*", "double", "double"],
             effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
             target: "substring_unchecked",
-            symbol: "sailfin_runtime_substring_unchecked",
+            symbol: "substring_unchecked",
             return_type: "i8*",
-            parameter_types: ["i8*", "i64", "i64"],
+            parameter_types: ["i8*", "double", "double"],
             effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {

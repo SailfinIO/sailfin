@@ -85,88 +85,304 @@ _CROSS_MODULE_SHIM_C = """\
 
 /* ---- Pointer-returning functions ---- */
 
-extern void* split_lines__native_ir(void*);
+/* Functions originally in native_ir, now split across native_ir_utils, native_ir_parser,
+ * and native_ir_api.  split_lines lives in native_ir_utils; API functions in native_ir_api.
+ * Provide forwarding stubs so seed-compiled callers (__native_ir suffix) and
+ * intermediate callers (__native_ir_parser suffix) both resolve correctly.
+ */
+
+extern void* split_lines__native_ir_utils(void*);
 __attribute__((weak))
 void* split_lines(void* arg) {
-    return split_lines__native_ir(arg);
+    return split_lines__native_ir_utils(arg);
+}
+__attribute__((weak))
+void* split_lines__native_ir(void* arg) {
+    return split_lines__native_ir_utils(arg);
+}
+__attribute__((weak))
+void* split_lines__native_ir_parser(void* arg) {
+    return split_lines__native_ir_utils(arg);
+}
+__attribute__((weak))
+void* split_lines_utils(void* arg) {
+    return split_lines__native_ir_utils(arg);
 }
 
-extern void* select_text_artifact__native_ir(void*);
+extern void* select_text_artifact__native_ir_api(void*);
 __attribute__((weak))
 void* select_text_artifact(void* arg) {
-    return select_text_artifact__native_ir(arg);
+    return select_text_artifact__native_ir_api(arg);
+}
+__attribute__((weak))
+void* select_text_artifact__native_ir(void* arg) {
+    return select_text_artifact__native_ir_api(arg);
+}
+__attribute__((weak))
+void* select_text_artifact__native_ir_parser(void* arg) {
+    return select_text_artifact__native_ir_api(arg);
 }
 
-extern void* parse_native_functions_from_text__native_ir(void*);
+extern void* select_layout_manifest_artifact__native_ir_api(void*);
+__attribute__((weak))
+void* select_layout_manifest_artifact(void* arg) {
+    return select_layout_manifest_artifact__native_ir_api(arg);
+}
+__attribute__((weak))
+void* select_layout_manifest_artifact__native_ir(void* arg) {
+    return select_layout_manifest_artifact__native_ir_api(arg);
+}
+__attribute__((weak))
+void* select_layout_manifest_artifact__native_ir_parser(void* arg) {
+    return select_layout_manifest_artifact__native_ir_api(arg);
+}
+
+extern void* parse_native_functions_from_text__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_functions_from_text(void* arg) {
-    return parse_native_functions_from_text__native_ir(arg);
+    return parse_native_functions_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_functions_from_text__native_ir(void* arg) {
+    return parse_native_functions_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_functions_from_text__native_ir_parser(void* arg) {
+    return parse_native_functions_from_text__native_ir_api(arg);
 }
 
-extern void* parse_native_structs_from_text__native_ir(void*);
+extern void* parse_native_structs_from_text__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_structs_from_text(void* arg) {
-    return parse_native_structs_from_text__native_ir(arg);
+    return parse_native_structs_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_structs_from_text__native_ir(void* arg) {
+    return parse_native_structs_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_structs_from_text__native_ir_parser(void* arg) {
+    return parse_native_structs_from_text__native_ir_api(arg);
 }
 
-extern void* parse_native_imports_from_text__native_ir(void*);
+extern void* parse_native_imports_from_text__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_imports_from_text(void* arg) {
-    return parse_native_imports_from_text__native_ir(arg);
+    return parse_native_imports_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_imports_from_text__native_ir(void* arg) {
+    return parse_native_imports_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_imports_from_text__native_ir_parser(void* arg) {
+    return parse_native_imports_from_text__native_ir_api(arg);
 }
 
-extern void* parse_native_interfaces_from_text__native_ir(void*);
+extern void* parse_native_interfaces_from_text__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_interfaces_from_text(void* arg) {
-    return parse_native_interfaces_from_text__native_ir(arg);
+    return parse_native_interfaces_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_interfaces_from_text__native_ir(void* arg) {
+    return parse_native_interfaces_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_interfaces_from_text__native_ir_parser(void* arg) {
+    return parse_native_interfaces_from_text__native_ir_api(arg);
 }
 
-extern void* parse_native_enums_from_text__native_ir(void*);
+extern void* parse_native_enums_from_text__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_enums_from_text(void* arg) {
-    return parse_native_enums_from_text__native_ir(arg);
+    return parse_native_enums_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_enums_from_text__native_ir(void* arg) {
+    return parse_native_enums_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_enums_from_text__native_ir_parser(void* arg) {
+    return parse_native_enums_from_text__native_ir_api(arg);
 }
 
-extern void* parse_native_bindings_from_text__native_ir(void*);
+extern void* parse_native_bindings_from_text__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_bindings_from_text(void* arg) {
-    return parse_native_bindings_from_text__native_ir(arg);
+    return parse_native_bindings_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_bindings_from_text__native_ir(void* arg) {
+    return parse_native_bindings_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_bindings_from_text__native_ir_parser(void* arg) {
+    return parse_native_bindings_from_text__native_ir_api(arg);
 }
 
-extern void* parse_native_diagnostics_from_text__native_ir(void*);
+extern void* parse_native_diagnostics_from_text__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_diagnostics_from_text(void* arg) {
-    return parse_native_diagnostics_from_text__native_ir(arg);
+    return parse_native_diagnostics_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_diagnostics_from_text__native_ir(void* arg) {
+    return parse_native_diagnostics_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_diagnostics_from_text__native_ir_parser(void* arg) {
+    return parse_native_diagnostics_from_text__native_ir_api(arg);
 }
 
-extern void* parse_native_structs_for_import__native_ir(void*);
+extern void* parse_native_structs_for_import__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_structs_for_import(void* arg) {
-    return parse_native_structs_for_import__native_ir(arg);
+    return parse_native_structs_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_structs_for_import__native_ir(void* arg) {
+    return parse_native_structs_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_structs_for_import__native_ir_parser(void* arg) {
+    return parse_native_structs_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_structs_for_import_api(void* arg) {
+    return parse_native_structs_for_import__native_ir_api(arg);
 }
 
-extern void* parse_native_imports_for_import__native_ir(void*);
+extern void* parse_native_imports_for_import__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_imports_for_import(void* arg) {
-    return parse_native_imports_for_import__native_ir(arg);
+    return parse_native_imports_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_imports_for_import__native_ir(void* arg) {
+    return parse_native_imports_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_imports_for_import__native_ir_parser(void* arg) {
+    return parse_native_imports_for_import__native_ir_api(arg);
 }
 
-extern void* parse_native_interfaces_for_import__native_ir(void*);
+extern void* parse_native_interfaces_for_import__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_interfaces_for_import(void* arg) {
-    return parse_native_interfaces_for_import__native_ir(arg);
+    return parse_native_interfaces_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_interfaces_for_import__native_ir(void* arg) {
+    return parse_native_interfaces_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_interfaces_for_import__native_ir_parser(void* arg) {
+    return parse_native_interfaces_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_interfaces_for_import_api(void* arg) {
+    return parse_native_interfaces_for_import__native_ir_api(arg);
 }
 
-extern void* parse_native_enums_for_import__native_ir(void*);
+extern void* parse_native_enums_for_import__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_enums_for_import(void* arg) {
-    return parse_native_enums_for_import__native_ir(arg);
+    return parse_native_enums_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_enums_for_import__native_ir(void* arg) {
+    return parse_native_enums_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_enums_for_import__native_ir_parser(void* arg) {
+    return parse_native_enums_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_enums_for_import_api(void* arg) {
+    return parse_native_enums_for_import__native_ir_api(arg);
 }
 
-extern void* parse_native_functions_for_import__native_ir(void*);
+extern void* parse_native_functions_for_import__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_functions_for_import(void* arg) {
-    return parse_native_functions_for_import__native_ir(arg);
+    return parse_native_functions_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_functions_for_import__native_ir(void* arg) {
+    return parse_native_functions_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_functions_for_import__native_ir_parser(void* arg) {
+    return parse_native_functions_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_functions_for_import_api(void* arg) {
+    return parse_native_functions_for_import__native_ir_api(arg);
+}
+
+extern void* parse_layout_manifest__native_ir_api(void*);
+__attribute__((weak))
+void* parse_layout_manifest(void* arg) {
+    return parse_layout_manifest__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_layout_manifest__native_ir(void* arg) {
+    return parse_layout_manifest__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_layout_manifest__native_ir_parser(void* arg) {
+    return parse_layout_manifest__native_ir_api(arg);
+}
+
+/* Short-suffix shims: the seed generates single-underscore suffixes
+ * (e.g. split_lines_utils, select_text_artifact_api) when callers
+ * import from the new split modules.  Forward to the canonical
+ * double-underscore definitions. */
+
+__attribute__((weak))
+void* select_text_artifact_api(void* arg) {
+    return select_text_artifact__native_ir_api(arg);
+}
+__attribute__((weak))
+void* select_layout_manifest_artifact_api(void* arg) {
+    return select_layout_manifest_artifact__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_functions_from_text_api(void* arg) {
+    return parse_native_functions_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_structs_from_text_api(void* arg) {
+    return parse_native_structs_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_imports_from_text_api(void* arg) {
+    return parse_native_imports_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_interfaces_from_text_api(void* arg) {
+    return parse_native_interfaces_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_enums_from_text_api(void* arg) {
+    return parse_native_enums_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_bindings_from_text_api(void* arg) {
+    return parse_native_bindings_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_diagnostics_from_text_api(void* arg) {
+    return parse_native_diagnostics_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_imports_for_import_api(void* arg) {
+    return parse_native_imports_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_layout_manifest_api(void* arg) {
+    return parse_layout_manifest__native_ir_api(arg);
 }
 
 extern void* number_to_string__llvm__utils(double);
@@ -183,30 +399,62 @@ void* empty_string_constant_set(void) {
 
 /* ---- Double-returning function (direct forwarding) ---- */
 
-extern double parse_native_function_count_from_text__native_ir(void*);
+extern double parse_native_function_count_from_text__native_ir_api(void*);
 __attribute__((weak))
 double parse_native_function_count_from_text(void* t) {
-    return parse_native_function_count_from_text__native_ir(t);
+    return parse_native_function_count_from_text__native_ir_api(t);
+}
+__attribute__((weak))
+double parse_native_function_count_from_text__native_ir(void* t) {
+    return parse_native_function_count_from_text__native_ir_api(t);
+}
+__attribute__((weak))
+double parse_native_function_count_from_text__native_ir_parser(void* t) {
+    return parse_native_function_count_from_text__native_ir_api(t);
 }
 
 /* ---- Large-struct-returning functions (sret → heap alloc) ---- */
 
 typedef struct { void* f[7]; } ParseNativeResult;
 
-extern ParseNativeResult parse_native_artifact__native_ir(void*);
+extern ParseNativeResult parse_native_artifact__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_artifact(void* text) {
     ParseNativeResult* heap = (ParseNativeResult*)malloc(sizeof(ParseNativeResult));
-    *heap = parse_native_artifact__native_ir(text);
+    *heap = parse_native_artifact__native_ir_api(text);
     return heap;
 }
+__attribute__((weak))
+void* parse_native_artifact__native_ir(void* text) {
+    return parse_native_artifact(text);
+}
+__attribute__((weak))
+void* parse_native_artifact__native_ir_parser(void* text) {
+    return parse_native_artifact(text);
+}
+__attribute__((weak))
+void* parse_native_artifact_api(void* text) {
+    return parse_native_artifact(text);
+}
 
-extern ParseNativeResult parse_native_artifact_for_import_context__native_ir(void*);
+extern ParseNativeResult parse_native_artifact_for_import_context__native_ir_api(void*);
 __attribute__((weak))
 void* parse_native_artifact_for_import_context(void* text) {
     ParseNativeResult* heap = (ParseNativeResult*)malloc(sizeof(ParseNativeResult));
-    *heap = parse_native_artifact_for_import_context__native_ir(text);
+    *heap = parse_native_artifact_for_import_context__native_ir_api(text);
     return heap;
+}
+__attribute__((weak))
+void* parse_native_artifact_for_import_context__native_ir(void* text) {
+    return parse_native_artifact_for_import_context(text);
+}
+__attribute__((weak))
+void* parse_native_artifact_for_import_context__native_ir_parser(void* text) {
+    return parse_native_artifact_for_import_context(text);
+}
+__attribute__((weak))
+void* parse_native_artifact_for_import_context_api(void* text) {
+    return parse_native_artifact_for_import_context(text);
 }
 
 /* ---- Lowering_core recovery function shims ---- */
@@ -7511,9 +7759,11 @@ def _fix_phi_type_mismatches(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
-## _fix_duplicate_ssa_names — REMOVED
+## _fix_duplicate_ssa_names — DELETED
 ## Root cause fixed in compiler/src/llvm/lowering/instructions_helpers.sfn
 ## (_read_ipc_int_min prevents temp_index from resetting to 0 via stale/empty IPC files).
+## Verified: current build produces zero duplicate SSA renames.
+## Regression coverage: compiler/tests/unit/ssa_stability_test.sfn
 
 
 def _fix_missing_parameter_stores(llvm_ir: str) -> tuple[str, int]:
@@ -12053,7 +12303,7 @@ def main(argv: list[str]) -> int:
 
                     # Optional heuristic fix for invalid phi inputs that break dominance.
                     # Disabled by default because it can change semantics.
-                    if module_name == "native_ir" and os.environ.get("SAILFIN_REWRITE_PHI_STORE") == "1":
+                    if module_name in ("native_ir", "native_ir_utils", "native_ir_parser", "native_ir_api") and os.environ.get("SAILFIN_REWRITE_PHI_STORE") == "1":
                         candidate, _ = _rewrite_phi_store_to_load(candidate)
 
                     # Optional debugging: inject probes to dump enum payload raw bits
@@ -12482,17 +12732,10 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
-                    # Fix duplicate SSA definitions within functions.
-                    # DISABLED: root cause fixed by the lowering helper in
-                    # compiler/src/llvm/lowering/instructions_helpers.sfn
-                    # (_read_ipc_int_min prevents temp_index from resetting to 0).
-                    # candidate, dup_changes = _fix_duplicate_ssa_names(candidate)
-                    # if dup_changes:
-                    #     print(
-                    #         f"[selfhost] renamed {dup_changes} duplicate SSA name(s) in {module_name}",
-                    #         file=sys.stderr,
-                    #         flush=True,
-                    #     )
+                    ## _fix_duplicate_ssa_names — REMOVED
+                    ## Root cause fixed in compiler/src/llvm/lowering/instructions_helpers.sfn
+                    ## (_read_ipc_int_min prevents temp_index from resetting to 0 via stale/empty IPC files).
+                    ## Verified: current build produces zero duplicate SSA renames.
 
                     # Fix lower_instruction_range return type ABI mismatch.
                     # A truncated instructions.sfn-asm in the import-context

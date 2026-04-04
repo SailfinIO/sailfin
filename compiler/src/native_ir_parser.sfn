@@ -1,0 +1,479 @@
+// compiler/src/native_ir_parser.sfn
+//
+// Parser for textual `.sfn-asm` artifacts. Type definitions live in
+// native_ir.sfn; utilities and layout parsers in native_ir_utils.sfn.
+
+import { substring, char_code } from "./string_utils";
+
+import {
+    NativeInstruction,
+    NativeSourceSpan,
+    NativeFunction,
+    NativeImport,
+    NativeStruct,
+    NativeInterface,
+    NativeEnum,
+    NativeBinding,
+    ParseNativeResult,
+} from "./native_ir";
+
+import {
+    index_of,
+    line_looks_like_parameter_entry,
+    parse_decimal_number,
+    parse_decorator_name,
+    parse_function_name,
+    parse_import_entry,
+    parse_interface_definition,
+    parse_parameter_entry,
+    split_lines,
+    split_parameter_entries,
+    starts_with,
+    strip_prefix,
+    strip_quotes,
+    trim_text,
+} from "./native_ir_utils";
+
+import {
+    parse_instruction,
+    gather_instruction,
+} from "./native_ir_parser_instructions";
+
+import {
+    parse_struct_definition,
+    parse_enum_definition,
+    parse_source_span,
+    apply_meta,
+    append_parameter,
+    append_instruction,
+} from "./native_ir_parser_defs";
+
+fn parse_native_artifact_impl(text -> string, include_instructions -> boolean, include_top_level_bindings -> boolean) -> ParseNativeResult {
+    let lines = split_lines(text);
+    let mut diagnostics -> string[] = [];
+    let mut functions -> NativeFunction[] = [];
+    let mut imports -> NativeImport[] = [];
+    let mut structs -> NativeStruct[] = [];
+    let mut interfaces -> NativeInterface[] = [];
+    let mut enums -> NativeEnum[] = [];
+    let mut bindings -> NativeBinding[] = [];
+    let mut current -> NativeFunction? = null;
+    let mut pending_span -> NativeSourceSpan? = null;
+    let mut pending_value_span -> NativeSourceSpan? = null;
+    let mut pending_decorators -> string[] = [];
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let raw_line = lines[index];
+        let line = trim_text(raw_line);
+        if line.length == 0 {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ";") {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".module ") {
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".import ") {
+            let parsed_import = parse_import_entry("import", strip_prefix(line, ".import "));
+            if parsed_import == null {
+                diagnostics.push("unable to parse import: " + line);
+            } else {
+                imports.push(parsed_import);
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".export ") {
+            let parsed_export = parse_import_entry("export", strip_prefix(line, ".export "));
+            if parsed_export == null {
+                diagnostics.push("unable to parse export: " + line);
+            } else {
+                imports.push(parsed_export);
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".span ") {
+            let parsed_span = parse_source_span(strip_prefix(line, ".span "));
+            if parsed_span == null {
+                diagnostics.push("unable to parse span metadata: " + line);
+            } else {
+                pending_span = parsed_span;
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".init-span ") {
+            let parsed_init_span = parse_source_span(strip_prefix(line, ".init-span "));
+            if parsed_init_span == null {
+                diagnostics.push("unable to parse initializer span metadata: " + line);
+            } else {
+                pending_value_span = parsed_init_span;
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".struct ") {
+            if pending_decorators.length > 0 {
+                diagnostics.push("dangling decorator directives before struct definition");
+                pending_decorators = [];
+            }
+            let struct_result = parse_struct_definition(lines, index, include_instructions);
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= struct_result.diagnostics.length { break; }
+                diagnostics.push(struct_result.diagnostics[_ci]);
+                _ci += 1;
+            }
+            if struct_result.definition != null {
+                structs.push(struct_result.definition);
+            }
+            index = struct_result.next_index;
+            continue;
+        }
+        if starts_with(line, ".interface ") {
+            if pending_decorators.length > 0 {
+                diagnostics.push("dangling decorator directives before interface definition");
+                pending_decorators = [];
+            }
+            let interface_result = parse_interface_definition(lines, index);
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= interface_result.diagnostics.length { break; }
+                diagnostics.push(interface_result.diagnostics[_ci]);
+                _ci += 1;
+            }
+            if interface_result.definition != null {
+                interfaces.push(interface_result.definition);
+            }
+            index = interface_result.next_index;
+            continue;
+        }
+        if starts_with(line, ".enum ") {
+            if pending_decorators.length > 0 {
+                diagnostics.push("dangling decorator directives before enum definition");
+                pending_decorators = [];
+            }
+            let enum_result = parse_enum_definition(lines, index);
+            let mut _ci -> number = 0;
+            loop {
+                if _ci >= enum_result.diagnostics.length { break; }
+                diagnostics.push(enum_result.diagnostics[_ci]);
+                _ci += 1;
+            }
+            if enum_result.definition != null {
+                enums.push(enum_result.definition);
+            }
+            index = enum_result.next_index;
+            continue;
+        }
+        if starts_with(line, ".decorator") {
+            if current != null {
+                diagnostics.push("decorator directive encountered inside function body: " + line);
+            } else {
+                let decorator_name = parse_decorator_name(line);
+                if decorator_name == null {
+                    diagnostics.push("unable to parse decorator directive: " + line);
+                } else {
+                    pending_decorators.push(decorator_name);
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".fn ") {
+            if current != null {
+                diagnostics.push("encountered nested .fn while previous function still open");
+            }
+            let header = strip_prefix(line, ".fn ");
+            let mut is_async -> boolean = false;
+            let trimmed_header = trim_text(header);
+            if starts_with(trimmed_header, "async ") {
+                is_async = true;
+            }
+            current = NativeFunction {
+                name: parse_function_name(header),
+                is_async: is_async,
+                parameters: [],
+                return_type: "void",
+                effects: [],
+                decorators: pending_decorators,
+                is_extern: false,
+                instructions: [],
+            };
+            pending_decorators = [];
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".test ") {
+            if current != null {
+                diagnostics.push("encountered nested .test while previous function still open");
+            }
+
+            if pending_decorators.length > 0 {
+                diagnostics.push("dangling decorator directives before test declaration");
+                pending_decorators = [];
+            }
+
+            let header = strip_prefix(line, ".test ");
+            let trimmed = trim_text(header);
+            if trimmed.length == 0 {
+                diagnostics.push("unable to parse test header: " + line);
+                index += 1;
+                continue;
+            }
+
+            let mut raw_name -> string = "";
+            let mut _if358 -> boolean = false;
+            if trimmed[0] == "\"" { _if358 = true; }
+            if trimmed[0] == "'" { _if358 = true; }
+            if _if358 {
+                let quote = trimmed[0];
+                let mut scan -> number = 1;
+                let mut escaping -> boolean = false;
+                loop {
+                    if scan >= trimmed.length {
+                        break;
+                    }
+                    let ch = trimmed[scan];
+                    if escaping {
+                        escaping = false;
+                        scan += 1;
+                        continue;
+                    }
+                    if ch == "\\" {
+                        escaping = true;
+                        scan += 1;
+                        continue;
+                    }
+                    if ch == quote {
+                        raw_name = substring(trimmed, 0, scan + 1);
+                        break;
+                    }
+                    scan += 1;
+                }
+            } else {
+                let space_index = index_of(trimmed, " ");
+                if space_index < 0 {
+                    raw_name = trimmed;
+                } else {
+                    raw_name = trim_text(substring(trimmed, 0, space_index));
+                }
+            }
+
+            let name = strip_quotes(trim_text(raw_name));
+            if name.length == 0 {
+                diagnostics.push("unable to parse test header: " + line);
+                index += 1;
+                continue;
+            }
+
+            current = NativeFunction {
+                name: "test:" + name,
+                is_async: false,
+                parameters: [],
+                return_type: "void",
+                effects: [],
+                decorators: [],
+                is_extern: false,
+                instructions: [],
+            };
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".endfn") {
+            if current == null {
+                diagnostics.push("encountered .endfn without active function");
+            } else {
+                functions.push(current);
+                current = null;
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".endtest") {
+            if current == null {
+                diagnostics.push("encountered .endtest without active test");
+            } else {
+                functions.push(current);
+                current = null;
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".meta ") {
+            if current != null {
+                current = apply_meta(current, strip_prefix(line, ".meta "));
+            } else {
+                diagnostics.push("metadata outside function body: " + line);
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".param ") {
+            if current != null {
+                let mut combined -> string = strip_prefix(line, ".param ");
+                let mut lookahead -> number = index + 1;
+                loop {
+                    if lookahead >= lines.length {
+                        break;
+                    }
+                    let continuation_raw = lines[lookahead];
+                    if continuation_raw.length == 0 {
+                        break;
+                    }
+                    let continuation_trimmed = trim_text(continuation_raw);
+                    if continuation_trimmed.length == 0 {
+                        lookahead += 1;
+                        continue;
+                    }
+                    if !line_looks_like_parameter_entry(continuation_trimmed) {
+                        break;
+                    }
+                    combined = combined + " " + continuation_trimmed;
+                    lookahead += 1;
+                }
+
+                let entries = split_parameter_entries(combined);
+                if entries.length == 0 {
+                    diagnostics.push("unable to parse parameter line: " + line);
+                    pending_span = null;
+                } else {
+                    let mut entry_index -> number = 0;
+                    let mut span_consumed -> boolean = false;
+                    loop {
+                        if entry_index >= entries.length {
+                            break;
+                        }
+                        let entry = entries[entry_index];
+                        let mut parameter_span -> NativeSourceSpan? = pending_span;
+                        if span_consumed {
+                            parameter_span = null;
+                        }
+                        let parameter = parse_parameter_entry(entry, parameter_span);
+                        if parameter == null {
+                            diagnostics.push("unable to parse parameter entry: " + entry);
+                        } else {
+                            current = append_parameter(current, parameter);
+                            if parameter.span != null {
+                                span_consumed = true;
+                            }
+                        }
+                        entry_index += 1;
+                    }
+                    pending_span = null;
+                }
+                index = lookahead - 1;
+            } else {
+                diagnostics.push("parameter outside function body: " + line);
+            }
+            index += 1;
+            continue;
+        }
+
+        // Import-context fast path: once a function/test header is parsed, skip the body
+        // (instruction lines) in bulk. This preserves meta/param parsing above while
+        // avoiding a per-line walk over potentially huge instruction streams.
+        if !include_instructions {
+            if current != null {
+                // We are in a function/test body (or have reached the first instruction).
+                // Fast-forward to the next terminator directive.
+                pending_span = null;
+                pending_value_span = null;
+                let mut scan = index;
+                loop {
+                    if scan >= lines.length {
+                        break;
+                    }
+                    let candidate = trim_text(lines[scan]);
+                    let mut _if392 -> boolean = false;
+                    if starts_with(candidate, ".endfn") { _if392 = true; }
+                    if starts_with(candidate, ".endtest") { _if392 = true; }
+                    if _if392 {
+                        break;
+                    }
+                    scan += 1;
+                }
+                index = scan;
+                continue;
+            }
+        }
+        // Instruction line (or top-level binding) handling.
+
+        let gather = gather_instruction(lines, index);
+        let gathered_line = gather.text;
+        // Always advance by at least one line; `gather.lines_consumed` counts
+        // continuation lines beyond the current index.
+        index += gather.lines_consumed + 1;
+        let instruction_result = parse_instruction(gathered_line, pending_span, pending_value_span);
+        let instructions = instruction_result.instructions;
+        if instruction_result.span_consumed {
+            pending_span = null;
+        } else if pending_span != null {
+            diagnostics.push("unused span metadata before: " + gathered_line);
+            pending_span = null;
+        }
+        if instruction_result.value_span_consumed {
+            pending_value_span = null;
+        } else if pending_value_span != null {
+            diagnostics.push("unused initializer span metadata before: " + gathered_line);
+            pending_value_span = null;
+        }
+
+        if current == null {
+            if include_top_level_bindings {
+                let mut _if359 -> boolean = false;
+                if instructions.length == 1 {
+                    if instructions[0].variant == "Let" {
+                        _if359 = true;
+                    }
+                }
+                if _if359 {
+                    bindings.push(binding_from_instruction(instructions[0]));
+                } else {
+                    diagnostics.push("top-level directive not supported in lowering: " + gathered_line);
+                }
+            }
+            continue;
+        }
+        let mut instruction_index -> number = 0;
+        loop {
+            if instruction_index >= instructions.length {
+                break;
+            }
+            current = append_instruction(current, instructions[instruction_index]);
+            instruction_index += 1;
+        }
+    }
+
+    if current != null {
+        diagnostics.push("unterminated function at end of artifact");
+        functions.push(current);
+        current = null;
+    }
+
+    if pending_decorators.length > 0 {
+        diagnostics.push("dangling decorator directives at end of artifact");
+    }
+
+    return ParseNativeResult { functions: functions, imports: imports, structs: structs, interfaces: interfaces, enums: enums, bindings: bindings, diagnostics: diagnostics };
+}
+
+fn binding_from_instruction(instruction -> NativeInstruction) -> NativeBinding {
+    return NativeBinding {
+        name: instruction.name,
+        mutable: instruction.mutable,
+        type_annotation: instruction.type_annotation,
+        value: instruction.value,
+    };
+}
+
+export { parse_native_artifact_impl };
