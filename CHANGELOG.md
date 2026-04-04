@@ -1,9 +1,47 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.5 (2026-04-04)
+
+### Bug Fixes
+
+- Address QC review — remove re-enabled SSA fixup, fix UB, document cycle
+  ([`fa1c1b6`](https://github.com/SailfinIO/sailfin/commit/fa1c1b6f2f2576abcb76946acf023a75ee997ea5))
+
+- Remove _fix_duplicate_ssa_names pass (was re-enabled but produces zero renames; root cause already
+  fixed in instructions_helpers.sfn) - Add NaN/range guards to substring_unchecked double→int64_t
+  cast to eliminate undefined behavior - Document intentional emission.sfn ↔ emission_async.sfn
+  mutual import (resolved at link time via symbol mangling, not import inlining)
+
+All 34 tests pass. Build succeeds with SSA pass removed.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Remove settings.local.json from repo and delete dead SSA fixup code
+  ([`b37c3f2`](https://github.com/SailfinIO/sailfin/commit/b37c3f2263800fa2e935f0c214c5e5875c92718e))
+
+- Remove .claude/settings.local.json from tracking, add to .gitignore - Delete
+  _fix_duplicate_ssa_names function definition (dead code — root cause fixed in
+  compiler/src/llvm/lowering/instructions_helpers.sfn, regression coverage in
+  ssa_stability_test.sfn)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.4 (2026-04-04)
 
 ### Bug Fixes
+
+- Address PR review comments and fix macOS build
+  ([`de29e0d`](https://github.com/SailfinIO/sailfin/commit/de29e0d6d30da718ca9a600556efecf9f55d4985))
+
+- Replace __attribute__((alias)) with wrapper function (not supported on Darwin/Mach-O) - Fix
+  substring_unchecked descriptor to point to the C wrapper symbol instead of the i64-param runtime
+  function (ABI mismatch) - Remove duplicate imports in core_call_resolution.sfn - Clarify
+  rendering.sfn comment: fallback declares only satisfy IR validation, runtime-side wrappers still
+  needed for linking - Tighten SSA rename regex to match full LLVM identifier character set
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 - Address PR review — update comment location, add regression tests
   ([`cb809a5`](https://github.com/SailfinIO/sailfin/commit/cb809a5f23b4ffaab645c060a97d072522236b54))
@@ -39,8 +77,110 @@ Verified: make rebuild + make test pass with all three fixups disabled.
 
 https://claude.ai/code/session_01LLFsCvSbUQS2ZvArKDZgSH
 
+- Fix substring ABI mismatch and test linker improvements
+  ([`008cee1`](https://github.com/SailfinIO/sailfin/commit/008cee162e00350b4fef5bdca8ed7df421d92529))
+
+- Fix substring runtime helper to use double params matching prelude wrapper ABI (was i64, causing
+  only first char to be returned) - Add substring_unchecked C wrapper accepting double params -
+  Revert linked.o experiment (cross-module symbol names don't match)
+
+Test results: 31/34 pass (23/25 unit, 8/8 integration, 0/1 e2e). Remaining 3 failures are
+  cross-module import resolution in test linker.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Implement import inliner and fix remaining test failures
+  ([`68c517c`](https://github.com/SailfinIO/sailfin/commit/68c517cb8e7b544cba0b3819de133bab3861ee42))
+
+- Replace stub _inline_relative_imports_cmd with full implementation ported from cli_main.sfn
+  (handles relative imports, string/comment awareness, recursive inlining) - Fix substring runtime
+  helper to use double params matching prelude ABI - Add substring_unchecked C wrapper accepting
+  double params - Add helper functions for import path resolution, span collection, word matching
+
+All 34 tests pass (25 unit, 8 integration, 1 e2e).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Move 33 helper functions from native_ir_parser to native_ir_utils
+  ([`c0d32e2`](https://github.com/SailfinIO/sailfin/commit/c0d32e21970c1a75260bd7a0f5fabeb58e7dc837))
+
+Reduces native_ir_parser.sfn from 2632 to 1493 lines (19 functions) by moving leaf/helper functions
+  to native_ir_utils.sfn (now 1946 lines, 50 functions). This prevents seed OOM during LLVM lowering
+  — the seed was using 16GB to process the larger .sfn-asm.
+
+Also fixes _fix_duplicate_ssa_names to rename uses (not just definitions) and cleans up unused
+  imports in native_ir_parser.
+
+Reverts selective import context copy — it broke well-connected modules like cli_main where
+  transitive deps span most of the codebase.
+
+https://claude.ai/code/session_01VxieYFJJrucZcNA3Equmyt
+
+- Repair build and test regressions from module splits
+  ([`a7e15c8`](https://github.com/SailfinIO/sailfin/commit/a7e15c8d1fa73d78e6deeeec7943a1963a363c16))
+
+- Add missing export statements to native_ir_api, native_ir_utils, native_ir_parser, and
+  native_ir_parser_defs (resolves 8 linker errors) - Add append_struct_layout_field helper lost
+  during split - Update lowering_core.sfn imports to use new split modules (fixes SEGV on struct
+  return from cross-module ABI mismatch) - Fix cli_commands.sfn: use fs.listDirectory instead of
+  non-existent fs.readDir/fs.isDir, add .sfn early return, fix test link to include runtime
+  sources/prelude/globals and exclude native_driver.c - Add fallback runtime helper target
+  declarations in rendering.sfn - Add runtime_raise_value_error_fn C alias in sailfin_runtime.c -
+  Add short-suffix cross-module shims in selfhost_native.py
+
+Unit tests: 19/25 pass, integration: 8/8 pass.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
 - Run python directly since conda is not needed for python build script
   ([`d88e826`](https://github.com/SailfinIO/sailfin/commit/d88e8267d51a52579355f6eeb2ed7fa3e1860c6f))
+
+- Split 3 OOM-prone modules to keep functions under ~500 .sfn-asm instructions
+  ([`3d82350`](https://github.com/SailfinIO/sailfin/commit/3d82350cfee9b475347faef9199478e1d3a90102))
+
+The seed compiler's LLVM lowering uses O(N²) memory proportional to function instruction count.
+  Functions over ~500 instructions cause OOM in the 16GB container. This splits the 3 failing
+  modules:
+
+- core_call_lowering.sfn: split lower_call_expression (1612 instr) into 5 functions across 3 files
+  (core_call_lowering, core_call_resolution, core_call_emission), each under 500 instructions -
+  core_member_lowering.sfn: extract duplicate inline GEP logic into core_member_helpers.sfn,
+  reducing lower_member_access from 752 to ~261 instr - cli_main.sfn: extract 6 command handlers
+  (test, publish, add, init, login, guillermo) into cli_commands.sfn, reducing sailfin_cli_main from
+  1132 to ~476 instructions
+
+New types CallTargetResolution and CallSignatureResolution added to types.sfn to pass state between
+  split call-lowering functions.
+
+https://claude.ai/code/session_01VxieYFJJrucZcNA3Equmyt
+
+- Split emission.sfn and native_ir_parser.sfn to avoid seed OOM
+  ([`5f9f915`](https://github.com/SailfinIO/sailfin/commit/5f9f9153bfb643cebd92c81f05a7452593ac1cd9))
+
+emission.sfn: Extract async function lowering (~206 lines) into emission_async.sfn, reducing
+  emit_llvm_function from ~770 to ~497 instructions.
+
+native_ir_parser.sfn: Extract instruction parsing (~347 lines) into
+  native_ir_parser_instructions.sfn and struct/enum definition parsing (~498 lines) into
+  native_ir_parser_defs.sfn, reducing the module from 1493 to 477 lines.
+
+Both modules were OOM-killed (rc=-9) during seed compilation at 16GB.
+
+https://claude.ai/code/session_01VxieYFJJrucZcNA3Equmyt
+
+- Split statement.sfn to avoid OOM — extract assignment/self-field helpers
+  ([`a3932ba`](https://github.com/SailfinIO/sailfin/commit/a3932ba160f23a76e6b2b760c786bf2e67276f41))
+
+statement.sfn was OOM-ing during seed compilation. Split two large functions:
+
+- lower_expression_statement (540 lines → 274 lines): extracted deref, member access, and array
+  index assignment handling into lower_lvalue_assignment_stmt in new statement_assignment.sfn -
+  lower_return_instruction (363 lines → 269 lines): extracted self.field preprocessing into
+  preprocess_self_field_access in statement_assignment.sfn
+
+Both functions now well under the ~500 instruction OOM threshold.
+
+https://claude.ai/code/session_01VxieYFJJrucZcNA3Equmyt
 
 ### Chores
 
@@ -137,6 +277,25 @@ Fix: explicitly state in enbf.md, spec.md, and style-guide.md that : in return-t
   error once the grammar is split into separate AnnotationSep and ReturnSep rules.
 
 https://claude.ai/code/session_017LeZvyYGq4w8iqu4hL2FCy
+
+### Features
+
+- Split native_ir.sfn into 4 modules to stay within seed output budget
+  ([`a3165c2`](https://github.com/SailfinIO/sailfin/commit/a3165c2d8e3ba269d5fa2ab85d6786261c91ad3b))
+
+Split the monolithic native_ir.sfn (3855 lines, 100 functions) into: - native_ir.sfn (308 lines) -
+  type definitions only - native_ir_utils.sfn (790 lines) - shared utility and layout parser
+  functions - native_ir_parser.sfn (2632 lines) - core .sfn-asm parsing logic - native_ir_api.sfn
+  (447 lines) - public API entry points and wrappers
+
+Also: - Inlined 13 simple append_* functions at call sites using .push() - Updated all consumer
+  imports across the codebase - Updated C forwarding stubs in selfhost_native.py for new module
+  layout - Fixed _fix_duplicate_ssa_names to rename uses (not just definitions)
+
+The seed compiler has a ~7000-8000 line LLVM IR output budget per module. The original native_ir.sfn
+  exceeded this, causing truncation. This split keeps each module within budget.
+
+https://claude.ai/code/session_01VxieYFJJrucZcNA3Equmyt
 
 
 ## v0.5.0-alpha.3 (2026-04-02)
