@@ -1,0 +1,377 @@
+// compiler/src/native_ir_parser_instructions.sfn
+//
+// Instruction parsing helpers extracted from native_ir_parser.sfn to keep
+// the module under the seed compiler's OOM threshold.
+
+import { substring } from "./string_utils";
+
+import {
+    NativeInstruction,
+    NativeSourceSpan,
+    InstructionParseResult,
+    InstructionGatherResult,
+    InstructionDepthState,
+} from "./native_ir";
+
+import {
+    index_of,
+    maybe_trim_trailing,
+    parse_binding_components,
+    parse_case_instruction,
+    parse_inline_case_instruction,
+    parse_let_instruction,
+    starts_with,
+    strip_prefix,
+    trim_text,
+    trim_trailing_delimiters,
+} from "./native_ir_utils";
+
+fn initial_instruction_depth_state() -> InstructionDepthState {
+    return InstructionDepthState { paren_depth: 0, bracket_depth: 0, brace_depth: 0, in_string: false, escaping: false };
+}
+
+fn update_instruction_depth_state(state -> InstructionDepthState, text -> string) -> InstructionDepthState {
+    let mut paren_depth = state.paren_depth;
+    let mut bracket_depth = state.bracket_depth;
+    let mut brace_depth = state.brace_depth;
+    let mut in_string = state.in_string;
+    let mut escaping = state.escaping;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if in_string {
+            if escaping {
+                escaping = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+
+    return InstructionDepthState {
+        paren_depth: paren_depth,
+        bracket_depth: bracket_depth,
+        brace_depth: brace_depth,
+        in_string: in_string,
+        escaping: escaping,
+    };
+}
+
+fn instruction_requires_continuation(state -> InstructionDepthState) -> boolean {
+    if state.in_string {
+        return true;
+    }
+    if state.paren_depth > 0 {
+        return true;
+    }
+    if state.bracket_depth > 0 {
+        return true;
+    }
+    if state.brace_depth > 0 {
+        return true;
+    }
+    return false;
+}
+
+fn instruction_supports_multiline(line -> string) -> boolean {
+    if starts_with(line, "eval ") {
+        return true;
+    }
+    if starts_with(line, "ret ") {
+        return true;
+    }
+    return false;
+}
+
+fn instruction_line_requires_operator_continuation(line -> string) -> boolean {
+    let trimmed = trim_text(line);
+    if trimmed.length == 0 {
+        return false;
+    }
+    let mut index = trimmed.length - 1;
+    loop {
+        if index < 0 {
+            return false;
+        }
+        let ch = trimmed[index];
+        let mut _if360 -> boolean = false;
+        if ch == " " { _if360 = true; }
+        if ch == "\t" { _if360 = true; }
+        if ch == "\n" { _if360 = true; }
+        if ch == "\r" { _if360 = true; }
+        if _if360 {
+            index -= 1;
+            continue;
+        }
+        if ch == "+" {
+            return true;
+        }
+        return false;
+    }
+
+    return false;
+}
+
+fn is_native_directive_line(line -> string) -> boolean {
+    let trimmed = trim_text(line);
+    if trimmed.length == 0 {
+        return false;
+    }
+    return starts_with(trimmed, ".");
+}
+
+fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGatherResult {
+    if start_index >= lines.length {
+        return InstructionGatherResult { text: "", lines_consumed: 0 };
+    }
+    let first_line = trim_text(lines[start_index]);
+    if first_line.length == 0 {
+        return InstructionGatherResult { text: first_line, lines_consumed: 0 };
+    }
+    if !instruction_supports_multiline(first_line) {
+        return InstructionGatherResult { text: first_line, lines_consumed: 0 };
+    }
+
+    let mut state = update_instruction_depth_state(initial_instruction_depth_state(), first_line);
+    if !instruction_requires_continuation(state) {
+        if !instruction_line_requires_operator_continuation(first_line) {
+            return InstructionGatherResult { text: first_line, lines_consumed: 0 };
+        }
+    }
+
+    let mut combined -> string = first_line;
+    let mut consumed -> number = 0;
+    let mut index = start_index + 1;
+    let mut last_nonempty = first_line;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let continuation = trim_text(lines[index]);
+        if is_native_directive_line(continuation) {
+            break;
+        }
+        if continuation.length == 0 {
+            combined = combined + "\n";
+        } else {
+            combined = combined + "\n" + continuation;
+            state = update_instruction_depth_state(state, continuation);
+            last_nonempty = continuation;
+        }
+        consumed += 1;
+        index += 1;
+        if !instruction_requires_continuation(state) {
+            if !instruction_line_requires_operator_continuation(last_nonempty) {
+                break;
+            }
+        }
+    }
+    let normalized = trim_text(combined);
+    return InstructionGatherResult { text: normalized, lines_consumed: consumed };
+}
+
+fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> NativeSourceSpan?) -> InstructionParseResult {
+    if line == "noop" {
+        return InstructionParseResult { instructions: [NativeInstruction.Noop()], span_consumed: false, value_span_consumed: false };
+    }
+    if starts_with(line, ".if ") {
+        let condition = trim_text(strip_prefix(line, ".if "));
+        return InstructionParseResult { instructions: [NativeInstruction.If { condition: condition }], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".else" {
+        return InstructionParseResult { instructions: [NativeInstruction.Else()], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".endif" {
+        return InstructionParseResult { instructions: [NativeInstruction.EndIf()], span_consumed: false, value_span_consumed: false };
+    }
+    if starts_with(line, ".for ") {
+        let body = trim_text(strip_prefix(line, ".for "));
+        let separator = " in ";
+        let index = index_of(body, separator);
+        if index >= 0 {
+            let target = trim_text(substring(body, 0, index));
+            let iterable = trim_text(substring(body, index + separator.length, body.length));
+            return InstructionParseResult { instructions: [NativeInstruction.For { target: target, iterable: iterable }], span_consumed: false, value_span_consumed: false };
+        }
+    }
+    if line == ".endfor" {
+        return InstructionParseResult { instructions: [NativeInstruction.EndFor()], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".loop" {
+        return InstructionParseResult { instructions: [NativeInstruction.Loop()], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".endloop" {
+        return InstructionParseResult { instructions: [NativeInstruction.EndLoop()], span_consumed: false, value_span_consumed: false };
+    }
+    if line == "break" {
+        return InstructionParseResult { instructions: [NativeInstruction.Break()], span_consumed: false, value_span_consumed: false };
+    }
+    if line == "continue" {
+        return InstructionParseResult { instructions: [NativeInstruction.Continue()], span_consumed: false, value_span_consumed: false };
+    }
+    if starts_with(line, ".match ") {
+        let expression = trim_text(strip_prefix(line, ".match "));
+        return InstructionParseResult { instructions: [NativeInstruction.Match { expression: expression }], span_consumed: false, value_span_consumed: false };
+    }
+    if starts_with(line, ".case ") {
+        return InstructionParseResult { instructions: [parse_case_instruction(line)], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".endmatch" {
+        return InstructionParseResult { instructions: [NativeInstruction.EndMatch()], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".try" {
+        return InstructionParseResult { instructions: [NativeInstruction.Try()], span_consumed: false, value_span_consumed: false };
+    }
+    if starts_with(line, ".catch ") {
+        let name = trim_text(strip_prefix(line, ".catch "));
+        return InstructionParseResult { instructions: [NativeInstruction.Catch { name: name }], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".finally" {
+        return InstructionParseResult { instructions: [NativeInstruction.Finally()], span_consumed: false, value_span_consumed: false };
+    }
+    if line == ".endtry" {
+        return InstructionParseResult { instructions: [NativeInstruction.EndTry()], span_consumed: false, value_span_consumed: false };
+    }
+    if starts_with(line, "throw ") {
+        let expression = trim_trailing_delimiters(trim_text(strip_prefix(line, "throw ")));
+        return InstructionParseResult { instructions: [NativeInstruction.Throw { expression: expression, span: span }], span_consumed: true, value_span_consumed: false };
+    }
+    if starts_with(line, ".let ") {
+        return InstructionParseResult {
+            instructions: [parse_let_instruction(line, span, value_span)],
+            span_consumed: true,
+            value_span_consumed: true,
+        };
+    }
+    if starts_with(line, ".return") {
+        let remainder = trim_text(strip_prefix(line, ".return"));
+        let mut expression -> string = "";
+        if remainder.length > 0 {
+            expression = trim_trailing_delimiters(remainder);
+        }
+        return InstructionParseResult {
+            instructions: [NativeInstruction.Return { expression: expression, span: span }],
+            span_consumed: true,
+            value_span_consumed: false,
+        };
+    }
+    if starts_with(line, "ret") {
+        if line.length == 3 {
+            return InstructionParseResult {
+                instructions: [NativeInstruction.Return { expression: "", span: span }],
+                span_consumed: true,
+                value_span_consumed: false,
+            };
+        }
+        let separator = line[3];
+        let mut _if361 -> boolean = false;
+        if separator == " " { _if361 = true; }
+        if separator == "\t" { _if361 = true; }
+        if _if361 {
+            let remainder = trim_text(substring(line, 3, line.length));
+            if remainder.length == 0 {
+                return InstructionParseResult {
+                    instructions: [NativeInstruction.Return { expression: "", span: span }],
+                    span_consumed: true,
+                    value_span_consumed: false,
+                };
+            }
+            return InstructionParseResult {
+                instructions: [NativeInstruction.Return { expression: trim_trailing_delimiters(remainder), span: span }],
+                span_consumed: true,
+                value_span_consumed: false,
+            };
+        }
+    }
+    if starts_with(line, "eval let ") {
+        let body = trim_text(strip_prefix(line, "eval let "));
+        let mut is_mutable -> boolean = false;
+        if starts_with(body, "mut ") {
+            is_mutable = true;
+            body = trim_text(strip_prefix(body, "mut "));
+        }
+        let parsed = parse_binding_components(body);
+        return InstructionParseResult {
+            instructions: [NativeInstruction.Let {
+                name: parsed.name,
+                mutable: is_mutable,
+                type_annotation: parsed.type_annotation,
+                value: maybe_trim_trailing(parsed.value),
+                span: span,
+                value_span: value_span,
+            }],
+            span_consumed: true,
+            value_span_consumed: true,
+        };
+    }
+    if starts_with(line, "eval ") {
+        return InstructionParseResult {
+            instructions: [NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(line, "eval "))), span: span }],
+            span_consumed: true,
+            value_span_consumed: false,
+        };
+    }
+    if index_of(line, "=>") >= 0 {
+        return InstructionParseResult { instructions: parse_inline_case_instruction(line), span_consumed: false, value_span_consumed: false };
+    }
+    return InstructionParseResult { instructions: [NativeInstruction.Unknown { text: line }], span_consumed: false, value_span_consumed: false };
+}
+
+export { parse_instruction, gather_instruction };
