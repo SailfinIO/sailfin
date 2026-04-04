@@ -7759,78 +7759,11 @@ def _fix_phi_type_mismatches(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
 
 
-def _fix_duplicate_ssa_names(llvm_ir: str) -> tuple[str, int]:
-    """Rename duplicate %tN SSA temporaries within each function.
-
-    The seed compiler can produce LLVM IR with duplicate %tN names when the
-    temp_index counter resets (e.g., due to stale IPC files or certain control
-    flow patterns).  LLVM rejects duplicate SSA names within a function, so
-    this pass renames duplicates by appending _dupN suffixes.
-    """
-    import re as _re_dn
-
-    lines = llvm_ir.split("\n")
-    changed = 0
-
-    define_pat = _re_dn.compile(r"^define\s+")
-    # Match %tN as a definition (lhs of =)
-    def_pat = _re_dn.compile(r"^\s+(%t\d+)\s*=\s*")
-
-    func_ranges: list[tuple[int, int]] = []
-    func_start = None
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if define_pat.match(stripped):
-            func_start = i
-        elif func_start is not None and stripped == "}":
-            func_ranges.append((func_start, i))
-            func_start = None
-
-    # Use a boundary that matches %tN only when it is not the prefix of a
-    # longer LLVM identifier (e.g. %t1_dup0, %t1.0, or %t1$foo).
-    def _ssa_use_pat(name: str) -> "_re_dn.Pattern[str]":
-        return _re_dn.compile(_re_dn.escape(name) + r"(?![-a-zA-Z$._0-9])")
-
-    for fstart, fend in func_ranges:
-        seen: dict[str, int] = {}  # name -> count of definitions
-        # Collect all renames needed: list of (name, new_name, def_line_idx)
-        renames: list[tuple[str, str, int]] = []
-        for i in range(fstart, fend + 1):
-            m = def_pat.match(lines[i])
-            if not m:
-                continue
-            name = m.group(1)
-            if name in seen:
-                dup_count = seen[name]
-                seen[name] = dup_count + 1
-                new_name = f"{name}_dup{dup_count}"
-                renames.append((name, new_name, i))
-                changed += 1
-            else:
-                seen[name] = 1
-
-        # Apply renames in reverse order so later renames don't interfere
-        # with earlier line indices.  For each duplicate, rename the
-        # definition and all uses from that line until the next definition
-        # of the same name (or end of function).
-        for name, new_name, def_idx in reversed(renames):
-            pat = _ssa_use_pat(name)
-            # Find the extent: from def_idx to the next definition of `name`
-            # or end of function.
-            end_idx = fend + 1
-            for j in range(def_idx + 1, fend + 1):
-                m2 = def_pat.match(lines[j])
-                if m2 and m2.group(1) == name:
-                    end_idx = j
-                    break
-            for j in range(def_idx, end_idx):
-                new_line = pat.sub(new_name, lines[j])
-                if new_line != lines[j]:
-                    lines[j] = new_line
-
-    if not changed:
-        return llvm_ir, 0
-    return "\n".join(lines) + ("\n" if llvm_ir.endswith("\n") else ""), changed
+## _fix_duplicate_ssa_names — DELETED
+## Root cause fixed in compiler/src/llvm/lowering/instructions_helpers.sfn
+## (_read_ipc_int_min prevents temp_index from resetting to 0 via stale/empty IPC files).
+## Verified: current build produces zero duplicate SSA renames.
+## Regression coverage: compiler/tests/unit/ssa_stability_test.sfn
 
 
 def _fix_missing_parameter_stores(llvm_ir: str) -> tuple[str, int]:
