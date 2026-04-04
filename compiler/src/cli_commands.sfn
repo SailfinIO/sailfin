@@ -148,6 +148,9 @@ fn _looks_like_test_file_cmd(name -> string) -> boolean {
 
 fn _collect_test_files_cmd(root -> string, max_depth -> number) -> string[] ![io] {
     let mut results -> string[] = [];
+    if _ends_with_cmd(root, ".sfn") {
+        return [root];
+    }
     let mut queue -> string[] = [root];
     let mut depth -> number = 0;
     loop {
@@ -158,17 +161,18 @@ fn _collect_test_files_cmd(root -> string, max_depth -> number) -> string[] ![io
         loop {
             if qi >= queue.length { break; }
             let dir = queue[qi];
-            let entries = fs.readDir(dir);
+            let entries = fs.listDirectory(dir);
             let mut ei -> number = 0;
             loop {
                 if ei >= entries.length { break; }
                 let entry = entries[ei];
                 let full_path = dir + "/" + entry;
-                if fs.isDir(full_path) {
-                    next_queue.push(full_path);
+                if _looks_like_test_file_cmd(entry) {
+                    results.push(full_path);
                 } else {
-                    if _looks_like_test_file_cmd(entry) {
-                        results.push(full_path);
+                    let child_entries = fs.listDirectory(full_path);
+                    if child_entries.length > 0 {
+                        next_queue.push(full_path);
                     }
                 }
                 ei += 1;
@@ -183,6 +187,9 @@ fn _collect_test_files_cmd(root -> string, max_depth -> number) -> string[] ![io
 
 fn _collect_sfn_files_cmd(root -> string, max_depth -> number) -> string[] ![io] {
     let mut results -> string[] = [];
+    if _ends_with_cmd(root, ".sfn") {
+        return [root];
+    }
     let mut queue -> string[] = [root];
     let mut depth -> number = 0;
     loop {
@@ -194,17 +201,18 @@ fn _collect_sfn_files_cmd(root -> string, max_depth -> number) -> string[] ![io]
             if qi >= queue.length { break; }
             let dir = queue[qi];
             if !fs.exists(dir) { qi += 1; continue; }
-            let entries = fs.readDir(dir);
+            let entries = fs.listDirectory(dir);
             let mut ei -> number = 0;
             loop {
                 if ei >= entries.length { break; }
                 let entry = entries[ei];
                 let full_path = dir + "/" + entry;
-                if fs.isDir(full_path) {
-                    next_queue.push(full_path);
+                if _ends_with_cmd(entry, ".sfn") {
+                    results.push(full_path);
                 } else {
-                    if _ends_with_cmd(entry, ".sfn") {
-                        results.push(full_path);
+                    let child_entries = fs.listDirectory(full_path);
+                    if child_entries.length > 0 {
+                        next_queue.push(full_path);
                     }
                 }
                 ei += 1;
@@ -322,20 +330,49 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
 fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
     let mut args -> string[] = ["clang", "-O0", "-o", out_path, ll_path];
     if runtime_root.length > 0 {
-        let native_dir = runtime_root + "/native";
-        if fs.exists(native_dir) {
-            let entries = fs.readDir(native_dir);
+        let src_dir = runtime_root + "/native/src";
+        let include_dir = runtime_root + "/native/include";
+        if fs.exists(src_dir) {
+            if fs.exists(include_dir) {
+                args.push("-I" + include_dir);
+            }
+            let entries = fs.listDirectory(src_dir);
             let mut i -> number = 0;
             loop {
                 if i >= entries.length { break; }
                 if _ends_with_cmd(entries[i], ".c") {
-                    args.push(native_dir + "/" + entries[i]);
+                    if entries[i] != "native_driver.c" {
+                        args.push(src_dir + "/" + entries[i]);
+                    }
                 }
                 i += 1;
             }
         }
+        // Link runtime globals (IR)
+        let globals_ll = runtime_root + "/native/ir/runtime_globals.ll";
+        if fs.exists(globals_ll) {
+            args.push(globals_ll);
+        }
+        // Link prelude object — check known locations
+        let prelude_paths -> string[] = [
+            "build/selfhost/native/obj/runtime/prelude.o",
+            "build/native/obj/runtime/prelude.o",
+            "build/native/obj/prelude.o",
+            runtime_root + "/native/obj/runtime/prelude.o",
+            runtime_root + "/native/obj/prelude.o",
+        ];
+        let mut pi -> number = 0;
+        loop {
+            if pi >= prelude_paths.length { break; }
+            if fs.exists(prelude_paths[pi]) {
+                args.push(prelude_paths[pi]);
+                break;
+            }
+            pi += 1;
+        }
     }
     args.push("-lm");
+    args.push("-pthread");
     return process.run(args);
 }
 

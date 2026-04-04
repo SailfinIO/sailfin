@@ -104,6 +104,10 @@ __attribute__((weak))
 void* split_lines__native_ir_parser(void* arg) {
     return split_lines__native_ir_utils(arg);
 }
+__attribute__((weak))
+void* split_lines_utils(void* arg) {
+    return split_lines__native_ir_utils(arg);
+}
 
 extern void* select_text_artifact__native_ir_api(void*);
 __attribute__((weak))
@@ -244,6 +248,10 @@ __attribute__((weak))
 void* parse_native_structs_for_import__native_ir_parser(void* arg) {
     return parse_native_structs_for_import__native_ir_api(arg);
 }
+__attribute__((weak))
+void* parse_native_structs_for_import_api(void* arg) {
+    return parse_native_structs_for_import__native_ir_api(arg);
+}
 
 extern void* parse_native_imports_for_import__native_ir_api(void*);
 __attribute__((weak))
@@ -272,6 +280,10 @@ __attribute__((weak))
 void* parse_native_interfaces_for_import__native_ir_parser(void* arg) {
     return parse_native_interfaces_for_import__native_ir_api(arg);
 }
+__attribute__((weak))
+void* parse_native_interfaces_for_import_api(void* arg) {
+    return parse_native_interfaces_for_import__native_ir_api(arg);
+}
 
 extern void* parse_native_enums_for_import__native_ir_api(void*);
 __attribute__((weak))
@@ -284,6 +296,10 @@ void* parse_native_enums_for_import__native_ir(void* arg) {
 }
 __attribute__((weak))
 void* parse_native_enums_for_import__native_ir_parser(void* arg) {
+    return parse_native_enums_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_enums_for_import_api(void* arg) {
     return parse_native_enums_for_import__native_ir_api(arg);
 }
 
@@ -300,6 +316,10 @@ __attribute__((weak))
 void* parse_native_functions_for_import__native_ir_parser(void* arg) {
     return parse_native_functions_for_import__native_ir_api(arg);
 }
+__attribute__((weak))
+void* parse_native_functions_for_import_api(void* arg) {
+    return parse_native_functions_for_import__native_ir_api(arg);
+}
 
 extern void* parse_layout_manifest__native_ir_api(void*);
 __attribute__((weak))
@@ -312,6 +332,56 @@ void* parse_layout_manifest__native_ir(void* arg) {
 }
 __attribute__((weak))
 void* parse_layout_manifest__native_ir_parser(void* arg) {
+    return parse_layout_manifest__native_ir_api(arg);
+}
+
+/* Short-suffix shims: the seed generates single-underscore suffixes
+ * (e.g. split_lines_utils, select_text_artifact_api) when callers
+ * import from the new split modules.  Forward to the canonical
+ * double-underscore definitions. */
+
+__attribute__((weak))
+void* select_text_artifact_api(void* arg) {
+    return select_text_artifact__native_ir_api(arg);
+}
+__attribute__((weak))
+void* select_layout_manifest_artifact_api(void* arg) {
+    return select_layout_manifest_artifact__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_functions_from_text_api(void* arg) {
+    return parse_native_functions_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_structs_from_text_api(void* arg) {
+    return parse_native_structs_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_imports_from_text_api(void* arg) {
+    return parse_native_imports_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_interfaces_from_text_api(void* arg) {
+    return parse_native_interfaces_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_enums_from_text_api(void* arg) {
+    return parse_native_enums_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_bindings_from_text_api(void* arg) {
+    return parse_native_bindings_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_diagnostics_from_text_api(void* arg) {
+    return parse_native_diagnostics_from_text__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_native_imports_for_import_api(void* arg) {
+    return parse_native_imports_for_import__native_ir_api(arg);
+}
+__attribute__((weak))
+void* parse_layout_manifest_api(void* arg) {
     return parse_layout_manifest__native_ir_api(arg);
 }
 
@@ -362,6 +432,10 @@ __attribute__((weak))
 void* parse_native_artifact__native_ir_parser(void* text) {
     return parse_native_artifact(text);
 }
+__attribute__((weak))
+void* parse_native_artifact_api(void* text) {
+    return parse_native_artifact(text);
+}
 
 extern ParseNativeResult parse_native_artifact_for_import_context__native_ir_api(void*);
 __attribute__((weak))
@@ -376,6 +450,10 @@ void* parse_native_artifact_for_import_context__native_ir(void* text) {
 }
 __attribute__((weak))
 void* parse_native_artifact_for_import_context__native_ir_parser(void* text) {
+    return parse_native_artifact_for_import_context(text);
+}
+__attribute__((weak))
+void* parse_native_artifact_for_import_context_api(void* text) {
     return parse_native_artifact_for_import_context(text);
 }
 

@@ -209,6 +209,27 @@ fn parse_native_artifact_for_import_context(text -> string) -> ParseNativeResult
     return parse_native_artifact_impl(text, false, false);
 }
 
+export {
+    select_text_artifact,
+    select_layout_manifest_artifact,
+    parse_native_artifact,
+    parse_native_function_count_from_text,
+    parse_native_functions_from_text,
+    parse_native_structs_from_text,
+    parse_native_imports_from_text,
+    parse_native_interfaces_from_text,
+    parse_native_enums_from_text,
+    parse_native_bindings_from_text,
+    parse_native_diagnostics_from_text,
+    parse_native_structs_for_import,
+    parse_native_imports_for_import,
+    parse_native_interfaces_for_import,
+    parse_native_enums_for_import,
+    parse_native_functions_for_import,
+    parse_native_artifact_for_import_context,
+    parse_layout_manifest,
+};
+
 fn parse_layout_manifest(text -> string) -> LayoutManifest {
     let lines = split_lines(text);
     let mut diagnostics -> string[] = [];

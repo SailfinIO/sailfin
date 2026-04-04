@@ -155,6 +155,11 @@ fn update_function_meta(function -> NativeFunction, return_type -> string, effec
     };
 }
 
+fn append_struct_layout_field(fields -> NativeStructLayoutField[], field -> NativeStructLayoutField) -> NativeStructLayoutField[] {
+    fields.push(field);
+    return fields;
+}
+
 fn find_enum_variant_layout(variants -> NativeEnumVariantLayout[], name -> string) -> number {
     let mut index -> number = 0;
     loop {

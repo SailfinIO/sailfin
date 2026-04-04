@@ -475,3 +475,5 @@ fn binding_from_instruction(instruction -> NativeInstruction) -> NativeBinding {
         value: instruction.value,
     };
 }
+
+export { parse_native_artifact_impl };

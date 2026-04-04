@@ -5644,6 +5644,11 @@ void sailfin_runtime_raise_value_error(void *message)
     abort();
 }
 
+/* Alias: the compiler emits calls to runtime_raise_value_error_fn when the
+ * runtime helper symbol resolution doesn't fire (e.g. in test lowering). */
+void runtime_raise_value_error_fn(void *message)
+    __attribute__((alias("sailfin_runtime_raise_value_error")));
+
 // Debug helper: validate an "identifier name" pointer and dump context if suspicious.
 // Called with the Expression* that should contain the identifier.
 void sailfin_runtime_debug_validate_identifier(void *expr_ptr, void *name_ptr)
