@@ -75,7 +75,22 @@
       "Bash(timeout 10 /Users/mcereal/dev/github.com/sailfin/sailfin/build/native/sailfin-seedcheck emit tokens examples/basics/hello-world.sfn 2>&1 | tail -20)",
       "Bash(rm -f /tmp/llvm_types_test2.ll)",
       "Read(//tmp/**)",
-      "Bash(build/native/sailfin-selfhost --emit llvm compiler/src/decorator_semantics.sfn 2>&1 | head -60)"
+      "Bash(build/native/sailfin-selfhost --emit llvm compiler/src/decorator_semantics.sfn 2>&1 | head -60)",
+      "Bash(ulimit -c unlimited)",
+      "Bash(gdb -batch -ex run -ex bt -ex quit --args build/native/sailfin test compiler/tests/unit/comparison_ops_test.sfn)",
+      "Bash(gdb -batch -ex run -ex 'disas $rip-32,$rip+16' -ex 'info registers rsp rbp rdi rsi' --args build/native/sailfin test compiler/tests/unit/comparison_ops_test.sfn)",
+      "Bash(gdb -batch -ex run -ex 'info registers rsp' -ex 'print \\(unsigned long long\\)$rsp' --args build/native/sailfin test compiler/tests/unit/comparison_ops_test.sfn)",
+      "Read(//home/michael/github.com/sailfin/sailfin/NR==10170{found=1} found && /^}$/**)",
+      "Bash(bash /tmp/check_imports.sh)",
+      "Bash(bash /tmp/analyze_stale.sh)",
+      "Bash(gcc -c -o /tmp/test_alias.o runtime/native/src/sailfin_runtime.c -Iruntime/native/include)",
+      "Bash(strace -f -e trace=execve build/native/sailfin test compiler/tests/unit/comparison_ops_test.sfn)",
+      "Bash(strace -f build/native/sailfin test compiler/tests/unit/comparison_ops_test.sfn)",
+      "Bash(strace -f -e execve build/native/sailfin test compiler/tests/unit/comparison_ops_test.sfn)",
+      "Bash(ltrace -e execve build/native/sailfin test compiler/tests/unit/comparison_ops_test.sfn)",
+      "Bash(/tmp/test_runtime_link)",
+      "Bash(gh api:*)",
+      "Bash(gh pr:*)"
     ],
     "deny": [],
     "ask": []
