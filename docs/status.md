@@ -133,6 +133,88 @@ The following capsules ship as part of the Sailfin standard library under
   `GLOBAL_BIN_DIR`).
 - Pinned stable version for development: `v0.1.1-alpha.135`.
 
+## Known Design Issues (Pre-1.0 Syntax Reform)
+
+The following design issues have been identified through external review and must
+be resolved before 1.0 to avoid breaking a public API. Each is tracked in
+`docs/roadmap.md` §0 (Syntax Reform). This section records the *problem*; the
+roadmap records the *plan*.
+
+### Type annotation syntax (`->` vs `:`)
+
+**Problem**: `->` is used for both "has type" (parameters, variables) and
+"returns" (function return type). This conflicts with the universal meaning of
+`->` as "maps to / returns" in every typed language (Rust, TypeScript, Haskell,
+Kotlin, Swift, Python).
+
+```sfn
+// Current — three arrows, two meanings
+fn add(x -> number, y -> number) -> number { ... }
+// Target
+fn add(x: number, y: number) -> number { ... }
+```
+
+**Impact**: High. This is the first syntax new users see. It will cause
+immediate confusion and is the most likely reason someone trying the language
+will stop.
+
+**Status**: Parser already accepts `:` as `TypeSep` alongside `->` (see EBNF
+`TypeSep = "->" | ":"`). Migration: deprecate `->` in type positions, then
+remove.
+
+### String interpolation (`{{ }}` vs `${ }`)
+
+**Problem**: `{{ }}` universally means "escape interpolation" in template
+languages (Jinja2, Handlebars, Mustache, Angular) and "literal braces" in
+Rust's `format!`. Sailfin uses it for the *opposite* meaning.
+
+**Impact**: Medium-high. Every developer will be confused. LLM code generators
+trained on billions of lines of `{{ }}` = "literal braces" will systematically
+produce wrong Sailfin code.
+
+### Numeric type system (`number` = f64 only)
+
+**Problem**: The sole numeric type is `number` (64-bit float). This causes:
+- Precision loss for integers above 2^53
+- Semantically wrong array indexing (floats as indices)
+- Unreliable bit operations
+- The "double-encoded pointers" fixup category (~12 of ~69 compiler fixups) —
+  pointers are encoded as doubles because that's what `number` compiles to
+
+**Impact**: High. This is a systems language targeting LLVM. JavaScript made
+this choice and added BigInt 25 years later to compensate. Don't repeat it.
+
+### Error handling gaps
+
+**Problem**: Errors are invisible in function signatures. `try`/`catch` is the
+only structured mechanism, supplemented by ad-hoc union return types
+(`number | DivisionError`) with no propagation operator.
+
+**Impact**: Medium. No `Result<T, E>` or `?` operator means every error-handling
+call site requires manual `match`. Error types proliferate across module
+boundaries with no composition mechanism.
+
+### Unfinished safety claims
+
+**Problem**: `Affine<T>`, `Linear<T>`, `&T`, `&mut T`, `PII<T>`, `Secret<T>`
+are all parsed but not enforced. Claiming "Rust-grade safety" or
+"ownership-aware" in marketing materials while these are purely syntactic is a
+credibility risk.
+
+**Impact**: Medium. Users who come for the safety story will discover it doesn't
+work and leave. Better to remove unfinished syntax than to advertise unenforced
+guarantees.
+
+### Scope creep risk
+
+**Problem**: The spec describes Rust-grade ownership, Swift-like ergonomics,
+AI-native constructs, effect types, capability security, taint tracking, GPU
+acceleration, structured concurrency, policy DSLs, generation cards, and tensor
+types. This is a feature list for five different languages.
+
+**Recommendation**: Pick 3 differentiators (effect system, capability security,
+structured concurrency) and ship those well. Defer everything else ruthlessly.
+
 ## AI / Model Features (Design Preview)
 
 The following features are central to Sailfin's AI-native vision and are fully

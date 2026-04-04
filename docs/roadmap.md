@@ -12,6 +12,53 @@ launch. Legacy compiler stage references are no longer tracked in this plan.
 The 1.0 release requires a **fully self-hosted toolchain with no Python scripts
 or C runtime**. All items below are hard requirements, not stretch goals.
 
+0. **Syntax reform (breaking, do first)**
+
+   These changes alter surface syntax and must land before 1.0 to avoid breaking
+   a public API. They are cheaper to make now with zero external users than after
+   launch. Each item is independent and can be shipped incrementally.
+
+   - [ ] **Colon type annotations** — replace `->` in parameter and variable
+         type positions with `:`. Function return types keep `->`.
+         Before: `fn add(x -> number, y -> number) -> number`
+         After:  `fn add(x: number, y: number) -> number`
+         Rationale: `->` for "has type" conflicts with its universal meaning of
+         "returns/maps-to." Every mainstream typed language (TypeScript, Rust,
+         Python, Kotlin, Swift, Zig) uses `:` for annotations. The current
+         syntax is the single most likely reason a new user bounces.
+   - [ ] **String interpolation delimiters** — replace `{{ expr }}` with
+         `${ expr }`.
+         Before: `"Hello, {{ name }}!"`
+         After:  `"Hello, ${ name }!"`
+         Rationale: `{{ }}` universally means "escape interpolation / literal
+         braces" (Jinja2, Handlebars, Mustache, Angular, Rust `format!`). Using
+         it for the opposite meaning guarantees confusion for humans and will
+         cause systematic errors in LLM-generated code, since models are trained
+         on billions of lines where `{{ }}` means "don't interpolate."
+   - [ ] **Integer numeric types** — introduce `int` (default signed 64-bit
+         integer) alongside `float` (64-bit IEEE 754). Keep `number` as an alias
+         for `float` for backward compatibility, but make `int` the default for
+         integer literals and array indexing.
+         Rationale: a single `number` (f64) type causes precision loss above
+         2^53, makes bit operations unreliable, makes array indexing semantically
+         wrong, and is the root cause of the "double-encoded pointers" fixup
+         category (~12 of ~69 compiler fixups). This is JavaScript's worst
+         design decision; a compiled systems language must not inherit it.
+   - [ ] **Error handling reform** — add `Result<T, E>` to the type system and
+         a `?` propagation operator. Complement (don't replace) `try`/`catch`
+         for truly exceptional cases.
+         Rationale: current error handling is invisible in function signatures.
+         Union return types (`number | DivisionError`) require manual `match` at
+         every call site with no compiler enforcement. `Result<T, E>` + `?` is
+         the industry standard for typed error propagation (Rust, Swift `throws`,
+         even Go's explicit `if err`). This pairs naturally with the effect system.
+   - [ ] **Closures with capture** — ensure lambdas can capture variables from
+         enclosing scopes. This is table-stakes for idiomatic `.map()`,
+         `.filter()`, `.reduce()` usage and functional patterns.
+
+   **Migration**: update the parser, EBNF, spec, examples, and compiler source
+   for each item. Track each as a separate PR so progress is visible.
+
 1. **Compiler stabilization (build pipeline)**
    - [ ] Eliminate the Python fixup script (`scripts/selfhost_native.py`) as a
          build requirement. Every fixup it applies must become a compiler fix in
@@ -30,10 +77,15 @@ or C runtime**. All items below are hard requirements, not stretch goals.
    - [ ] Implement `spawn` expression.
    - [ ] Complete generic type inference for functions, structs, and enums.
    - [ ] Finish interface conformance validation, including variance checks.
-   - [ ] Enforce `Affine<T>` / `Linear<T>` move and consume rules.
+   - [ ] Implement generic trait/interface constraints (`fn sort<T: Comparable>`).
+   - [ ] Enforce `Affine<T>` / `Linear<T>` move and consume rules — or remove the
+         syntax if enforcement won't land by 1.0. Claiming Rust-grade safety with
+         parse-only ownership is a credibility issue.
    - [ ] Implement richer diagnostics (multi-span snippets, severity, suggested fixes).
    - [ ] Add `--fix` workflow for missing effect annotations with safe rewrite guards.
    - [ ] Enforce `gpu`, `rand`, and hierarchical effect names (`io.fs`, `net.http`).
+   - [ ] Add destructuring assignments (`let { name, age } = user;`).
+   - [ ] Add enum methods (associated functions on enum types).
 
 3. **Sailfin-native runtime (hard 1.0 prerequisite)**
    - The C runtime (`runtime/native/`) must be replaced by a Sailfin-native
@@ -72,9 +124,24 @@ or C runtime**. All items below are hard requirements, not stretch goals.
 
 ## Post-1.0 — AI / Model Execution (First Major Follow-On)
 
-The AI-native features are central to Sailfin's design and fully specified, but
-require a stable self-hosted runtime and toolchain as a foundation. They ship
-after 1.0 as the first major milestone.
+The AI-native features are central to Sailfin's long-term vision but ship after
+1.0. This is a deliberate prioritization, not a concession:
+
+- **Ship what works first.** No one adopts a language for features that don't
+  work yet. They adopt it for features that work *better* than alternatives.
+  The effect system + capability model is that feature for Sailfin.
+- **Language constructs vs. library constructs.** `model`, `prompt`, `pipeline`,
+  and `tool` keywords bake API-level details (token limits, temperature, engine
+  names) into the language grammar. These details change monthly as AI providers
+  update their APIs. Consider whether these should be **standard library
+  capsules** rather than grammar-level keywords — language constructs should be
+  reserved for things that genuinely can't be expressed as libraries. Keep the
+  `![model]` effect annotation (that's valuable); provide AI capabilities via
+  `sfn/model`, `sfn/prompt` capsules.
+- **Competitive reality.** Every major language now has excellent typed AI SDKs.
+  The bar for "what does a language keyword give me that a library can't?" is
+  high. Earn the right to add keywords by shipping a library first and finding
+  the pain points that only syntax can solve.
 
 - [ ] **Model runtime** — implement `Model<I, O>.call()` execution; wire `model`
       blocks to provider adapters (OpenAI-compatible, local, etc.).
@@ -117,6 +184,31 @@ after 1.0 as the first major milestone.
 - [ ] Currency literals (`$0.05`) and time literals (`1s`, `150ms`).
 - [ ] Notebook, LSP, and interactive tooling with live cost/latency overlays.
 - [ ] Training workflow (see `docs/proposals/model-engines-and-training.md`).
+
+## Design Principles (Pre-1.0 Decision Framework)
+
+When evaluating features, apply these filters:
+
+1. **Pick 3 differentiators, ship those well.** Sailfin's top 3 are: (1) the
+   effect system, (2) capability-based security, (3) structured concurrency.
+   Everything else is a nice-to-have that should not block or dilute these.
+2. **Boring syntax wins.** Every deviation from mainstream conventions (`:` for
+   types, `${}` for interpolation) adds learning curve with zero expressiveness
+   gain. Make the syntax boring and familiar so the *semantics* can be novel.
+3. **Don't ship unfinished safety claims.** "Parsed but not enforced" ownership
+   is worse than no ownership syntax — it teaches users to ignore the feature.
+   Either enforce it or remove the syntax until enforcement lands.
+4. **AI agents are users too.** LLMs have zero training data for `.sfn` files.
+   Conventional syntax reduces LLM error rates. Unusual choices (`{{ }}` for
+   interpolation) cause systematic failures in generated code.
+5. **Language keywords are expensive.** A keyword can never become a variable
+   name. Only add keywords for constructs that genuinely can't be expressed as
+   library functions. `model { engine = "..." }` can be a library; `![io]` on
+   function signatures cannot.
+6. **Fix the type system foundation first.** Integer vs float distinction, proper
+   `Result<T, E>`, and generic constraints are prerequisites for everything else.
+   Building AI constructs on a type system that encodes pointers as doubles is
+   building on sand.
 
 ## Completed Items
 

@@ -2,6 +2,12 @@
 
 This directory showcases the evolving Sailfin language surface implemented by the bootstrap compiler. Each subfolder groups small, focused programs illustrating syntax, type constructs, effects, concurrency primitives, and forthcoming AI-native features described in `docs/spec.md`.
 
+> **Syntax reform notice:** These examples use pre-reform syntax (`->` for type
+> annotations, `{{ }}` for string interpolation). A pre-1.0 syntax reform is
+> underway that will migrate to `:` for type annotations and `${ }` for
+> interpolation. The parser already accepts `:` — see `docs/roadmap.md` §0 for
+> the full plan. Examples will be migrated as each reform item lands.
+
 Always check `docs/status.md` before relying on an example in production code. Examples stay limited to the bootstrap feature set unless noted; future-facing snippets include inline comments.
 
 Where you see effect lists (e.g. `![io,model]`) or model/pipeline declarations, remember these are partially stubbed in the current Python runtime: semantics (capability enforcement, provenance, determinism) will harden in the self-hosted toolchain.
