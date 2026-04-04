@@ -12799,16 +12799,10 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
-                    # Fix duplicate SSA definitions within functions.
-                    # Re-enabled: the IPC fix doesn't cover all cases (e.g.
-                    # toml_parser still produces duplicate %t211).
-                    candidate, dup_changes = _fix_duplicate_ssa_names(candidate)
-                    if dup_changes:
-                        print(
-                            f"[selfhost] renamed {dup_changes} duplicate SSA name(s) in {module_name}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
+                    ## _fix_duplicate_ssa_names — REMOVED
+                    ## Root cause fixed in compiler/src/llvm/lowering/instructions_helpers.sfn
+                    ## (_read_ipc_int_min prevents temp_index from resetting to 0 via stale/empty IPC files).
+                    ## Verified: current build produces zero duplicate SSA renames.
 
                     # Fix lower_instruction_range return type ABI mismatch.
                     # A truncated instructions.sfn-asm in the import-context

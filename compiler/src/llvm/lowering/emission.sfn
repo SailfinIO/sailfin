@@ -1,6 +1,15 @@
 // compiler/src/llvm/lowering/emission.sfn
 //
 // Function emission (wrapping, async spawning, and body lowering orchestration).
+//
+// NOTE: This module has a mutual import with emission_async.sfn:
+//   emission.sfn imports emit_async_function from emission_async.sfn
+//   emission_async.sfn imports emit_llvm_function + prepare_parameters_from_files from emission.sfn
+// The Sailfin compiler's import resolver handles mutual imports correctly —
+// each module is compiled independently and cross-module calls are resolved
+// at link time via symbol mangling. This cycle is intentional: async emission
+// needs the main emit_llvm_function for the inner body, while the main
+// emitter delegates async wrapper generation to the async module.
 
 import { NativeFunction } from "../../native_ir";
 import { substring, find_char } from "../../string_utils";

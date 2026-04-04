@@ -5652,10 +5652,19 @@ void runtime_raise_value_error_fn(void *message)
 }
 
 /* Wrapper: the compiler may emit calls to substring_unchecked with double
- * params (Sailfin number type) instead of i64.  Forward to the real impl. */
+ * params (Sailfin number type) instead of i64.  Forward to the real impl.
+ * Guards against UB from NaN/out-of-range double→int64_t casts. */
+static int64_t _clamp_to_i64(double v)
+{
+    if (v != v) return 0;                       /* NaN */
+    if (v < (double)INT64_MIN) return INT64_MIN;
+    if (v > (double)INT64_MAX) return INT64_MAX;
+    return (int64_t)v;
+}
+
 char *substring_unchecked(char *text, double start, double end)
 {
-    return sailfin_runtime_substring_unchecked(text, (int64_t)start, (int64_t)end);
+    return sailfin_runtime_substring_unchecked(text, _clamp_to_i64(start), _clamp_to_i64(end));
 }
 
 // Debug helper: validate an "identifier name" pointer and dump context if suspicious.

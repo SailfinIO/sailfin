@@ -2,6 +2,8 @@
 //
 // Async function lowering extracted from emission.sfn to keep
 // emit_llvm_function under ~500 .sfn-asm instructions (avoids seed OOM).
+//
+// NOTE: Mutual import with emission.sfn — see comment there for rationale.
 
 import { NativeFunction } from "../../native_ir";
 
