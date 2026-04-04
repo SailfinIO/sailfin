@@ -112,6 +112,33 @@ import { parse_expression } from "./parser/mod";
 - Use `CamelCase` for models/capsules and `snake_case` for locals.
 - Note currency or latency literals as comments until syntax lands.
 
+### Syntax Reform (Pre-1.0)
+
+The following syntax changes are active. See `docs/roadmap.md` §0 for rationale.
+
+- **Type annotations**: Use `:` (colon), not `->` (arrow), for parameter types,
+  variable types, and struct field types. The parser currently accepts both in
+  all positions (including return types) because it shares a single `TypeSep`
+  rule. However, `:` in return-type position is unintentional, discouraged, and
+  will become a parse error once the grammar is split. New code should use `:`
+  for annotations and `->` for return types.
+
+  ```sfn
+  // Preferred
+  fn add(x: number, y: number) -> number { return x + y; }
+  let name: string = "Sailfin";
+  struct User { id: number; name: string; }
+
+  // Deprecated (still accepted)
+  fn add(x -> number, y -> number) -> number { return x + y; }
+  ```
+
+- **String interpolation**: Current syntax is `{{ expr }}`. This will change to
+  `${ expr }` before 1.0. Continue using `{{ }}` until the parser change lands.
+
+- **Numeric types**: `int` and `float` will replace the single `number` type.
+  Until this lands, use `number` and add comments where integer semantics matter.
+
 ## Comments and Docstrings
 
 - Use `///` doc comments for public items; keep the first sentence a summary.

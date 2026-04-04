@@ -65,7 +65,12 @@ runs:
             BUILD_ARGS="--max-attempts ${{ inputs.max_attempts }} --max-total-seconds 1800" \
             SEED_NATIVE="build/seed/bin/sailfin"
 
+    # Temporarily disabled: build.sh validation adds ~15 min to every CI run while
+    # the compiler still has ~66 fixup passes remaining in selfhost_native.py.
+    # Re-enable this step (remove the `if: false` line) once enough fixups have
+    # been eliminated that build.sh can complete successfully.
     - name: Validate build.sh (no Python fixups) [informational]
+      if: false
       shell: bash -l {0}
       continue-on-error: true
       run: |

@@ -92,6 +92,22 @@ let name -> string = "Sailfin";
 let mut counter -> number = 0;
 ```
 
+> **Syntax reform (pre-1.0):** The `->` type annotation separator will be
+> replaced with `:` in variable declarations, parameters, and field
+> declarations. Function return types keep `->`. The parser currently accepts
+> `:` in all type-separator positions (including return types) because it
+> shares a single `TypeSep = "->" | ":"` rule. This is unintentional — `:` in
+> return-type position is discouraged and will become a parse error once the
+> grammar is split into separate annotation and return-type separators. New
+> code should use `:` for annotations and `->` for return types.
+> See `docs/roadmap.md` §0 and `docs/status.md` §Known Design Issues.
+>
+> ```sfn
+> // Preferred (new)
+> let name: string = "Sailfin";
+> let mut counter: number = 0;
+> ```
+
 Type annotations are optional; the current compiler performs limited
 inference. Initialisers may be omitted; the compiler emits `null` when a
 binding lacks an explicit expression.
@@ -106,6 +122,15 @@ fn add(x -> number, y -> number) -> number {
     return x + y;
 }
 ```
+
+> **Syntax reform (pre-1.0):** Parameter type annotations will use `:` instead
+> of `->`. Return types keep `->`. New code should prefer the colon form:
+>
+> ```sfn
+> fn add(x: number, y: number) -> number {
+>     return x + y;
+> }
+> ```
 
 `async fn` enables `await` inside the body. Decorators (`@identifier`) are
 parsed and captured as metadata for later semantic passes.
@@ -232,6 +257,16 @@ type Result<T> = Response | T;
 > parses as a method call but no model runtime exists. Generation cards and
 > evaluators are design-stage. This entire section describes the planned
 > semantics; see `docs/status.md` for implementation state.
+>
+> **Design question (open):** Should `model`, `prompt`, `pipeline`, and `tool`
+> be language-level keywords or standard library constructs? Language keywords
+> bake API-level details (token limits, temperature, engine names) into the
+> grammar — details that change monthly as AI providers update their APIs. The
+> `![model]` effect annotation is valuable and should remain a language feature,
+> but the declaration syntax could potentially be expressed as library types
+> (e.g., `sfn/model` capsule) without losing safety or expressiveness. This
+> question should be resolved before these features ship. See `docs/roadmap.md`
+> §Post-1.0 AI section for discussion.
 
 Models are first-class program artefacts. A `model` block declares metadata,
 versions, schemas, and evaluator suites, producing a `Model<Input, Output>`
@@ -386,6 +421,13 @@ adapter boundaries.
 - **Error handling** – `try`/`catch`/`finally` blocks and `throw` statements map
   onto runtime exceptions.
 
+> **Design gap (pre-1.0):** Errors are invisible in function signatures. Union
+> return types (`number | DivisionError`) require manual `match` at every call
+> site with no compiler enforcement or propagation operator. Pre-1.0 will add
+> `Result<T, E>` to the type system and a `?` propagation operator. `try`/`catch`
+> remains for truly exceptional / unrecoverable errors.
+> See `docs/roadmap.md` §0.
+
 ## 5. Concurrency and Performance
 
 > **Current status**: Concurrency primitives are in progress. `async fn` is
@@ -451,6 +493,13 @@ is limited to ergonomic runtime type guards.
 | `boolean` | Truth values                  |
 | `void`    | No return value               |
 | `null`    | Explicit absence of a value   |
+
+> **Type reform (pre-1.0):** `number` as the sole numeric type is a known
+> design issue. Pre-1.0 will introduce `int` (signed 64-bit integer) and
+> `float` (64-bit IEEE 754). `number` will become an alias for `float`.
+> Integer literals will default to `int`; array indexing will require `int`.
+> This change also resolves the "double-encoded pointers" compiler fixup
+> category. See `docs/roadmap.md` §0 and `docs/status.md` §Known Design Issues.
 
 Composite types include structs, enums, generics (e.g. `Vec<T>`, `Seq<T>`),
 optionals (`T?`), and unions (`A | B`). The array sugar `Type[]` is deprecated
@@ -921,6 +970,23 @@ mandatory double braces. Whitespace inside braces is ignored at the edges, so
 `{{name}}` and `{{ name }}` are equivalent. The compiler lowers interpolated
 strings into segment arrays and calls `runtime.format_interpolated`, evaluating
 each embedded expression directly.
+
+> **Syntax reform (pre-1.0):** The `{{ }}` interpolation delimiter will be
+> replaced with `${ }` (single dollar-brace).
+>
+> ```sfn
+> // Current
+> let msg = "Hello, {{ name }}!";
+> // Target
+> let msg = "Hello, ${ name }!";
+> ```
+>
+> Rationale: `{{ }}` universally means "escape interpolation / literal braces"
+> in template languages (Jinja2, Handlebars, Mustache, Angular) and in Rust's
+> `format!`. Using it for the opposite meaning guarantees confusion. LLMs
+> trained on billions of lines where `{{ }}` means "don't interpolate" will
+> produce systematically wrong code.
+> See `docs/roadmap.md` §0 and `docs/status.md` §Known Design Issues.
 
 ## 10. Runtime Semantics
 

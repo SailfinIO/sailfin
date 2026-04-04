@@ -1,6 +1,144 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.4 (2026-04-04)
+
+### Bug Fixes
+
+- Address PR review — update comment location, add regression tests
+  ([`cb809a5`](https://github.com/SailfinIO/sailfin/commit/cb809a5f23b4ffaab645c060a97d072522236b54))
+
+1. Updated disabled-fixup comment for _fix_duplicate_ssa_names to reference the correct file
+  (instructions_helpers.sfn, not instructions.sfn).
+
+2. Added compiler/tests/unit/ssa_stability_test.sfn with 11 regression tests covering: - SSA
+  temp_index stability across nested if/else branches - SSA temp_index stability across loop
+  iterations - Deeply nested control flow with many let bindings - Phi node ordering via conditional
+  value assignments - Chained conditional assignments producing multiple merge points
+
+https://claude.ai/code/session_01LLFsCvSbUQS2ZvArKDZgSH
+
+- Eliminate 3 Phi/SSA fixups by fixing root causes in compiler source
+  ([`96ba1aa`](https://github.com/SailfinIO/sailfin/commit/96ba1aa00c9bdbc7749c64e9944949e42d3a91bc))
+
+Fix three categories of IR bugs in the compiler, removing 3 fixup passes from selfhost_native.py (68
+  → ~65 active fixups):
+
+1. _fix_duplicate_param_names: Added parameter name deduplication in prepare_parameters_from_files()
+  and prepare_parameters(). Empty types now default to i8* instead of producing unparseable IR.
+
+2. _fix_duplicate_ssa_names: Added _read_ipc_int_min() helper that prevents temp_index from
+  resetting to 0 when IPC files are missing/empty/stale. All temp_index reads in instructions.sfn
+  now use monotonic floor enforcement.
+
+3. _reorder_phi_nodes_to_block_start: Added _reorder_phis_to_block_start() pass in emission.sfn that
+  ensures phi nodes appear at the top of each basic block before the function closing brace is
+  emitted.
+
+Verified: make rebuild + make test pass with all three fixups disabled.
+
+https://claude.ai/code/session_01LLFsCvSbUQS2ZvArKDZgSH
+
+- Run python directly since conda is not needed for python build script
+  ([`d88e826`](https://github.com/SailfinIO/sailfin/commit/d88e8267d51a52579355f6eeb2ed7fa3e1860c6f))
+
+### Chores
+
+- **deps**: Bump astro from 6.1.2 to 6.1.3 in /site
+  ([`25b2a9b`](https://github.com/SailfinIO/sailfin/commit/25b2a9b7697795eb6f9e7e6838afc85513837897))
+
+Bumps [astro](https://github.com/withastro/astro/tree/HEAD/packages/astro) from 6.1.2 to 6.1.3. -
+  [Release notes](https://github.com/withastro/astro/releases) -
+  [Changelog](https://github.com/withastro/astro/blob/main/packages/astro/CHANGELOG.md) -
+  [Commits](https://github.com/withastro/astro/commits/astro@6.1.3/packages/astro)
+
+--- updated-dependencies: - dependency-name: astro dependency-version: 6.1.3
+
+dependency-type: direct:production
+
+update-type: version-update:semver-patch ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump defu from 6.1.4 to 6.1.6 in /site
+  ([`e7231ef`](https://github.com/SailfinIO/sailfin/commit/e7231ef71dde37eabd0fe3cc63c6d15ced6ad2c4))
+
+Bumps [defu](https://github.com/unjs/defu) from 6.1.4 to 6.1.6. - [Release
+  notes](https://github.com/unjs/defu/releases) -
+  [Changelog](https://github.com/unjs/defu/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/unjs/defu/compare/v6.1.4...v6.1.6)
+
+--- updated-dependencies: - dependency-name: defu dependency-version: 6.1.6
+
+dependency-type: indirect ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump github/gh-aw-actions from 0.65.5 to 0.65.7
+  ([`4b3380c`](https://github.com/SailfinIO/sailfin/commit/4b3380c23ff26dd69fd58f90b6c5ba5dffb3c687))
+
+Bumps [github/gh-aw-actions](https://github.com/github/gh-aw-actions) from 0.65.5 to 0.65.7. -
+  [Release notes](https://github.com/github/gh-aw-actions/releases) -
+  [Changelog](https://github.com/github/gh-aw-actions/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/github/gh-aw-actions/compare/63aa903fe409698e15e5718ad89366a72bfe6a89...742ca9c12baa13667ac53db8eb95f48414f60792)
+
+--- updated-dependencies: - dependency-name: github/gh-aw-actions dependency-version: 0.65.7
+
+dependency-type: direct:production
+
+update-type: version-update:semver-patch ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+### Continuous Integration
+
+- Disable build.sh validation step to speed up PR iteration
+  ([`756f697`](https://github.com/SailfinIO/sailfin/commit/756f697f262b46f8c1350f65f27f43e72588f0a8))
+
+Agent-Logs-Url: https://github.com/SailfinIO/sailfin/sessions/6c48545d-939c-45fe-a033-7aad1cb36607
+
+Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
+
+- Fix sfn token name
+  ([`c0d352a`](https://github.com/SailfinIO/sailfin/commit/c0d352a19011bf87cadb431ba87406c58f2587f2))
+
+### Documentation
+
+- Add pre-1.0 syntax reform plan and known design issues
+  ([`b9aa8dd`](https://github.com/SailfinIO/sailfin/commit/b9aa8dd3a5e0356ab56383530b7af9218bc5c2ae))
+
+Integrates findings from an external language design review across all working documentation to
+  ensure issues are tracked where they'll influence day-to-day decisions rather than sitting in a
+  standalone proposal.
+
+Changes across 8 files: - roadmap.md: Add §0 Syntax Reform (colon types, ${} interpolation,
+  int/float types, Result<T,E>, closures) as highest-priority 1.0 work; add design principles
+  section; add honest rationale for deferring AI constructs to post-1.0 - status.md: Add Known
+  Design Issues section documenting type annotation syntax, interpolation delimiters, number-only
+  numerics, error handling gaps, unfinished safety claims, and scope creep risk - spec.md: Add
+  migration notices at variable declarations, function signatures, type system overview, string
+  interpolation, error handling, and model declarations - enbf.md: Annotate TypeSep, string
+  interpolation, and literal rules with planned changes - CLAUDE.md: Add syntax reform guidance and
+  design decision framework so AI agents writing new code prefer the target syntax - README.md:
+  Reposition value props around effect system and capability security; update code example to use
+  colon syntax; add reform notice - style-guide.md: Add syntax reform section with preferred forms -
+  examples/README.md: Add notice that examples use pre-reform syntax
+
+https://claude.ai/code/session_017LeZvyYGq4w8iqu4hL2FCy
+
+- Clarify TypeSep ambiguity — : in return-type position is unintentional
+  ([`6ab785d`](https://github.com/SailfinIO/sailfin/commit/6ab785dfe7ace0658f8baf02643e76bd447853a4))
+
+All three review comments on PR #86 flag the same issue: the shared TypeSep rule means : parses in
+  return-type position today, but our reform notes say "return types keep ->". This is confusing.
+
+Fix: explicitly state in enbf.md, spec.md, and style-guide.md that : in return-type position is an
+  unintentional side-effect of the shared grammar rule, is discouraged, and will become a parse
+  error once the grammar is split into separate AnnotationSep and ReturnSep rules.
+
+https://claude.ai/code/session_017LeZvyYGq4w8iqu4hL2FCy
+
+
 ## v0.5.0-alpha.3 (2026-04-02)
 
 ### Bug Fixes
@@ -33,6 +171,12 @@
 ## v0.5.0-alpha.1 (2026-04-02)
 
 ### Bug Fixes
+
+- Add test step in between builds to fail fast if there are issues so we dont attempt another build
+  ([`669b9d7`](https://github.com/SailfinIO/sailfin/commit/669b9d70e5a10a456bd2bf78c954108a36e267a1))
+
+- Change default driver in make targets and upate docs for more stabilization context
+  ([`686be4e`](https://github.com/SailfinIO/sailfin/commit/686be4e53378a06ae1a03749dae40348fd91023f))
 
 - Extract inline struct literals from loop bodies to avoid v0.1.1 seed premature .endloop
   ([`2a93809`](https://github.com/SailfinIO/sailfin/commit/2a93809d93eb333c4201f8725e7aaae5483056cf))
@@ -89,6 +233,20 @@ Add --work-dir flag to build.sh and use build/selfhost/native-bs for the validat
   doesn't clobber the primary build outputs.
 
 https://claude.ai/code/session_01CeagYe2MrF9GaVFYByWGum
+
+- **compiler**: Split large functions and harden build.sh for seed stabilization
+  ([`cf0fdb1`](https://github.com/SailfinIO/sailfin/commit/cf0fdb150df653c0df1d96ee693b694657324f56))
+
+- Split lower_call_expression in core_call_lowering.sfn into helpers (_resolve_call_signature,
+  _coerce_self_type_operand) reducing native IR from 1613 to 1259 lines to prevent OOM during
+  lowering - Add explicit imports for prelude functions (find_char, string_starts_with,
+  strings_equal, substring) in 7 compiler source files to fix missing declares and wrong return
+  types - Fix null→zeroinitializer in array expression lowering - Inline append_match_arm_mutations
+  to avoid cross-module struct ABI bug - Extend runtime helper targets for fs.*, string.*, print.*
+  operations - Harden build.sh: tolerate segfault-during-cleanup exit codes when valid LLVM IR was
+  produced, use skeleton import context to prevent OOM
+
+https://claude.ai/code/session_01EK6sgPhfACvS5Yi12nTwXA
 
 - **llvm**: Fix cross-module struct return ABI corruption in control flow lowering
   ([`6788af7`](https://github.com/SailfinIO/sailfin/commit/6788af7ede6f4d2e2e69134a935ae2098d47857f))
@@ -482,6 +640,39 @@ Co-authored-by: mcereal <5081876+mcereal@users.noreply.github.com>
 
 - Sfn login command
   ([`cc2a874`](https://github.com/SailfinIO/sailfin/commit/cc2a874bf6545e1a1f16918ea63be955530e99d8))
+
+### Refactoring
+
+- **llvm**: Split large match/if lowering functions into smaller helpers
+  ([`1d47d1d`](https://github.com/SailfinIO/sailfin/commit/1d47d1dba5e69337017f619a0f0192816619dd42))
+
+Extract six helper functions from lower_match_instruction and lower_if_instruction to reduce IR size
+  per function and avoid OOM during LLVM lowering of the first-pass compiler:
+
+- _match_extract_enum_field_bindings: enum payload field extraction -
+  _match_extract_union_struct_bindings: union-variant struct binding - _match_narrow_default_union:
+  default arm union narrowing - _if_compute_branch_exit_loads: branch exit load computation -
+  _if_insert_exit_loads: exit load insertion with ordering - _if_emit_merge_phis: merge block phi
+  node emission
+
+Also adds missing base_lines_snapshot declaration in lower_match_instruction.
+
+https://claude.ai/code/session_01EK6sgPhfACvS5Yi12nTwXA
+
+- **native_ir**: Split large parsing functions into smaller helpers to avoid OOM
+  ([`d37d908`](https://github.com/SailfinIO/sailfin/commit/d37d90858c14247b36d4128fcef6fad517023455))
+
+Extract five helper functions from the three largest functions in native_ir.sfn:
+
+- parse_native_artifact_impl (589->334 lines): use existing parse_test_header and
+  parse_artifact_param_directive instead of inline code - parse_struct_definition (454->167 lines):
+  extract handle_struct_method_body_line and handle_struct_layout_directive - parse_layout_manifest
+  (313->86 lines): extract parse_manifest_struct_block and parse_manifest_enum_block
+
+All extracted helpers are under 100 lines of source. Function signatures and behavior are preserved;
+  callers are unaffected.
+
+https://claude.ai/code/session_01EK6sgPhfACvS5Yi12nTwXA
 
 
 ## v0.4.0 (2026-03-30)
