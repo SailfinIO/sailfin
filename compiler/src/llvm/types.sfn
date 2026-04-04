@@ -4,7 +4,7 @@
 // intermediate data structures used during the translation from .sfn-asm
 // to LLVM IR.
 
-import { NativeInterfaceSignature, NativeSourceSpan, NativeEnum, NativeStruct, LayoutManifest } from "../native_ir";
+import { NativeFunction, NativeInterfaceSignature, NativeSourceSpan, NativeEnum, NativeStruct, LayoutManifest } from "../native_ir";
 
 // =============================================================================
 // Enum Layout Fixup
@@ -695,5 +695,33 @@ struct LoadLocalResult {
     lines -> string[];
     temp_index -> number;
     operand -> LLVMOperand?;
+    diagnostics -> string[];
+}
+
+// =============================================================================
+// Call Resolution (split from core_call_lowering for OOM avoidance)
+// =============================================================================
+
+struct CallTargetResolution {
+    trimmed_target -> string;
+    method_operand -> LLVMOperand?;
+    helper_descriptor -> RuntimeHelperDescriptor?;
+    injected_argument_count -> number;
+    is_array_concat -> boolean;
+    array_concat_element_type -> string;
+    is_array_push -> boolean;
+    array_push_element_type -> string;
+    current_lines -> string[];
+    current_temp -> number;
+    diagnostics -> string[];
+    string_constants -> StringConstant[];
+}
+
+struct CallSignatureResolution {
+    trimmed_target -> string;
+    function_entry -> NativeFunction?;
+    llvm_return -> string;
+    expected_params -> string[];
+    is_trait_dispatch -> boolean;
     diagnostics -> string[];
 }

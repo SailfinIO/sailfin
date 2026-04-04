@@ -1,0 +1,398 @@
+// compiler/src/llvm/expression_lowering/native/core_call_emission.sfn
+//
+// Call emission extracted from core_call_lowering.sfn to keep
+// each function under ~500 .sfn-asm instructions (avoids seed OOM).
+
+import { NativeFunction } from "../../../native_ir";
+
+import {
+    TypeContext,
+    ParameterBinding,
+    LocalBinding,
+    ExpressionResult,
+    LLVMOperand,
+    StringConstant,
+    RuntimeHelperDescriptor,
+    MemberAccessParse,
+} from "../../types";
+
+import {
+    trim_text,
+    starts_with,
+    number_to_string,
+    join_with_separator,
+    extend_string_array,
+} from "../../utils";
+
+import { substring, find_last_index_of_char } from "../../../string_utils";
+
+import { merge_string_constants } from "../../strings";
+
+import { format_temp_name, format_typed_operand } from "../../expressions";
+
+import {
+    ends_with_pointer_suffix,
+    strip_pointer_suffix,
+} from "../../type_mapping";
+
+import {
+    find_interface_info_by_name,
+} from "../../type_context";
+
+import {
+    array_pointer_element_type,
+    lower_struct_array_concat,
+    lower_array_push_in_place,
+} from "../arrays";
+
+import {
+    parse_member_access,
+} from "./core_parse";
+
+import {
+    find_local_binding,
+} from "./core_scopes";
+
+import { sanitize_symbol } from "./core_text";
+
+import { coerce_operand_to_type } from "./core_operands";
+
+fn _write_emission_result_lines(result_lines -> string[], result_temp -> number) -> void ![io] {
+    let line_count = result_lines.length;
+    fs.writeFile("build/sailfin/.call_result_line_count", number_to_string(line_count));
+    fs.writeFile("build/sailfin/.call_result_temp_index", number_to_string(result_temp));
+}
+
+// Coerce operands to expected types and emit the final call instruction.
+// Handles array concat/push, trait dispatch, and normal function calls.
+fn coerce_and_emit_call(
+    trimmed_target -> string,
+    operands -> LLVMOperand[],
+    expected_params -> string[],
+    llvm_return -> string,
+    is_trait_dispatch -> boolean,
+    is_array_concat -> boolean,
+    array_concat_element_type -> string,
+    is_array_push -> boolean,
+    array_push_element_type -> string,
+    method_operand -> LLVMOperand?,
+    helper_descriptor -> RuntimeHelperDescriptor?,
+    function_entry -> NativeFunction?,
+    current_temp -> number,
+    current_lines -> string[],
+    diagnostics -> string[],
+    collected_string_constants -> StringConstant[],
+    bindings -> ParameterBinding[],
+    locals -> LocalBinding[],
+    context -> TypeContext
+) -> ExpressionResult ![io] {
+    let mut result_lines = current_lines;
+    let mut result_temp -> number = current_temp;
+    let mut result_diagnostics = diagnostics;
+    let _trace_ccl = fs.exists("build/sailfin/.trace_lowering");
+
+    // Coerce operands to expected parameter types
+    if _trace_ccl {
+        print("call_lowering: pre-coerce operands=" + number_to_string(operands.length) + " expected_params=" + number_to_string(expected_params.length) + " llvm_return=" + llvm_return);
+    }
+    let mut coerced_operands -> LLVMOperand[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= operands.length {
+            break;
+        }
+        let operand = operands[index];
+        if _trace_ccl {
+            print("call_lowering: coerce-loop idx=" + number_to_string(index) + " operand_type=" + operand.llvm_type + " operand_value=" + operand.value);
+        }
+        let mut target_type -> string = "";
+        if expected_params.length > index {
+            target_type = expected_params[index];
+        }
+        let mut _if55 -> boolean = false;
+        if is_trait_dispatch {
+            if index == 0 {
+                _if55 = true;
+            }
+        }
+        if _if55 {
+            coerced_operands.push(operand);
+        } else if target_type.length == 0 {
+            coerced_operands.push(operand);
+        } else {
+            let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines);
+            result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
+            result_lines = coerced.lines;
+            result_temp = coerced.temp_index;
+            if coerced.operand == null {
+                result_diagnostics.push("llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
+                let placeholder = LLVMOperand { llvm_type: "i8*", value: "null" };
+                coerced_operands.push(placeholder);
+            } else {
+                coerced_operands.push(coerced.operand);
+            }
+        }
+        index += 1;
+    }
+    let final_operands = coerced_operands;
+    if _trace_ccl {
+        print("call_lowering: post-coerce operands=" + number_to_string(final_operands.length));
+    }
+
+    if _trace_ccl {
+        print("call_lowering: checkpoint-A is_concat=" + number_to_string(0) + " is_push=" + number_to_string(0));
+    }
+
+    // Array concat inline lowering
+    if is_array_concat {
+        if array_concat_element_type.length > 0 {
+            if !ends_with_pointer_suffix(array_concat_element_type) {
+                if final_operands.length >= 2 {
+                    let concat_result = lower_struct_array_concat(final_operands[0], final_operands[1], array_concat_element_type, result_lines, result_temp);
+                    let mut _ci7 -> number = 0;
+                    loop {
+                        if _ci7 >= concat_result.diagnostics.length { break; }
+                        result_diagnostics.push(concat_result.diagnostics[_ci7]);
+                        _ci7 += 1;
+                    }
+                    result_lines = concat_result.lines;
+                    result_temp = concat_result.temp_index;
+                    if concat_result.operand == null {
+                        _write_emission_result_lines(result_lines, result_temp);
+                        fs.writeFile("build/sailfin/.call_result_type", "");
+                        fs.writeFile("build/sailfin/.call_result_value", "");
+                        return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                    }
+                    _write_emission_result_lines(result_lines, result_temp);
+                    fs.writeFile("build/sailfin/.call_result_type", concat_result.operand.llvm_type);
+                    fs.writeFile("build/sailfin/.call_result_value", concat_result.operand.value);
+                    return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: concat_result.operand, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                } else {
+                    result_diagnostics.push("llvm lowering: concat requires two operands");
+                    return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                }
+            }
+        }
+    }
+
+    // Array push inline lowering
+    if is_array_push {
+        if array_push_element_type.length > 0 {
+            if final_operands.length >= 2 {
+                let push_result = lower_array_push_in_place(final_operands[0], final_operands[1], array_push_element_type, result_lines, result_temp);
+                let mut _ci8 -> number = 0;
+                loop {
+                    if _ci8 >= push_result.diagnostics.length { break; }
+                    result_diagnostics.push(push_result.diagnostics[_ci8]);
+                    _ci8 += 1;
+                }
+                result_lines = push_result.lines;
+                result_temp = push_result.temp_index;
+                if push_result.operand == null {
+                    _write_emission_result_lines(result_lines, result_temp);
+                    fs.writeFile("build/sailfin/.call_result_type", "");
+                    fs.writeFile("build/sailfin/.call_result_value", "");
+                    return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                }
+                if array_push_element_type == "i8*" {
+                    let method_parse = parse_member_access(trimmed_target);
+                    if method_parse.success {
+                        let push_receiver_name = trim_text(method_parse.base);
+                        let push_receiver_local = find_local_binding(locals, push_receiver_name);
+                        if push_receiver_local != null {
+                            result_lines.push("  store " + push_result.operand.llvm_type + " " + push_result.operand.value + ", " + push_result.operand.llvm_type + "* " + push_receiver_local.pointer);
+                        }
+                    }
+                }
+                _write_emission_result_lines(result_lines, result_temp);
+                fs.writeFile("build/sailfin/.call_result_type", push_result.operand.llvm_type);
+                fs.writeFile("build/sailfin/.call_result_value", push_result.operand.value);
+                return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: push_result.operand, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+            } else {
+                result_diagnostics.push("llvm lowering: push requires two operands");
+                return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+            }
+        }
+    }
+
+    if _trace_ccl {
+        print("call_lowering: checkpoint-B fn_entry_null=" + number_to_string(0));
+    }
+    let mut _if56 -> boolean = false;
+    if function_entry != null { _if56 = true; }
+    if helper_descriptor != null { _if56 = true; }
+    if _trace_ccl {
+        print("call_lowering: checkpoint-C _if56=" + number_to_string(0));
+    }
+    if _if56 {
+        if expected_params.length != final_operands.length {
+            result_diagnostics.push("llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(final_operands.length));
+        }
+    }
+
+    if _trace_ccl {
+        print("call_lowering: checkpoint-D rendering args");
+    }
+    let mut rendered_args -> string[] = [];
+    index = 0;
+    loop {
+        if index >= final_operands.length {
+            break;
+        }
+        if _trace_ccl {
+            print("call_lowering: render-arg idx=" + number_to_string(index));
+        }
+        rendered_args.push(format_typed_operand(final_operands[index]));
+        index += 1;
+    }
+    if _trace_ccl {
+        print("call_lowering: checkpoint-E args rendered");
+    }
+    let argument_text = join_with_separator(rendered_args, ", ");
+
+    // Trait dispatch call
+    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
+        let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
+        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
+        let mut _if57 -> boolean = false;
+        if double_colon_pos > 0 {
+            if substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
+                _if57 = true;
+            }
+        }
+        if _if57 {
+            let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
+            let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
+
+            if final_operands.length > 0 {
+                let trait_object = final_operands[0];
+
+                let data_ptr_temp = "%t" + number_to_string(result_temp);
+                result_temp += 1;
+                result_lines.push("  " + data_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 0");
+
+                let vtable_ptr_temp = "%t" + number_to_string(result_temp);
+                result_temp += 1;
+                result_lines.push("  " + vtable_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 1");
+
+                let interface_info3 = find_interface_info_by_name(context, interface_name);
+                if interface_info3 != null {
+                    let mut method_index -> number = -1;
+                    let mut sig_idx -> number = 0;
+                    loop {
+                        if sig_idx >= interface_info3.signatures.length {
+                            break;
+                        }
+                        if interface_info3.signatures[sig_idx].name == method_name {
+                            method_index = sig_idx;
+                            break;
+                        }
+                        sig_idx += 1;
+                    }
+
+                    if method_index >= 0 {
+                        let mut fp_param_types -> string[] = ["i8*"];
+                        let mut arg_idx -> number = 1;
+                        loop {
+                            if arg_idx >= final_operands.length {
+                                break;
+                            }
+                            fp_param_types.push(final_operands[arg_idx].llvm_type);
+                            arg_idx += 1;
+                        }
+                        let fp_params = join_with_separator(fp_param_types, ", ");
+                        let function_type = llvm_return + " (" + fp_params + ")*";
+
+                        let vtable_slots_temp = "%t" + number_to_string(result_temp);
+                        result_temp += 1;
+                        result_lines.push("  " + vtable_slots_temp + " = bitcast i8* " + vtable_ptr_temp + " to i8**");
+
+                        let slot_ptr_temp = "%t" + number_to_string(result_temp);
+                        result_temp += 1;
+                        result_lines.push("  " + slot_ptr_temp + " = getelementptr i8*, i8** " + vtable_slots_temp + ", i64 " + number_to_string(method_index));
+
+                        let raw_ptr_temp = "%t" + number_to_string(result_temp);
+                        result_temp += 1;
+                        result_lines.push("  " + raw_ptr_temp + " = load i8*, i8** " + slot_ptr_temp);
+
+                        let method_ptr_temp = "%t" + number_to_string(result_temp);
+                        result_temp += 1;
+                        result_lines.push("  " + method_ptr_temp + " = bitcast i8* " + raw_ptr_temp + " to " + function_type);
+
+                        let mut call_args -> string[] = ["i8* " + data_ptr_temp];
+                        arg_idx = 1;
+                        loop {
+                            if arg_idx >= rendered_args.length {
+                                break;
+                            }
+                            call_args.push(rendered_args[arg_idx]);
+                            arg_idx += 1;
+                        }
+                        let call_arg_text = join_with_separator(call_args, ", ");
+
+                        if llvm_return == "void" {
+                            result_lines.push("  call void " + method_ptr_temp + "(" + call_arg_text + ")");
+                            return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                        } else {
+                            let result_temp_name = format_temp_name(result_temp);
+                            result_lines.push("  " + result_temp_name + " = call " + llvm_return + " " + method_ptr_temp + "(" + call_arg_text + ")");
+                            let result_operand = LLVMOperand { llvm_type: llvm_return, value: result_temp_name };
+                            return ExpressionResult { lines: result_lines, temp_index: result_temp + 1, operand: result_operand, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                        }
+                    } else {
+                        result_diagnostics.push("llvm lowering: method `" + method_name + "` not found in interface `" + interface_name + "`");
+                    }
+                } else {
+                    result_diagnostics.push("llvm lowering: interface `" + interface_name + "` not found for trait dispatch");
+                }
+            } else {
+                result_diagnostics.push("llvm lowering: trait dispatch requires at least one argument (the trait object)");
+            }
+        } else {
+            result_diagnostics.push("llvm lowering: malformed trait dispatch target `" + trimmed_target + "`");
+        }
+    }
+
+    // Standard function call
+    if _trace_ccl {
+        print("call_lowering: checkpoint-F call_symbol target=" + trimmed_target);
+    }
+    let mut call_symbol = sanitize_symbol(trimmed_target);
+    if helper_descriptor != null {
+        call_symbol = helper_descriptor.symbol;
+    }
+    if _trace_ccl {
+        print("call_lowering: checkpoint-G llvm_return=" + llvm_return + " call_symbol=" + call_symbol);
+    }
+    if llvm_return == "void" {
+        let call_line = "  call void @" + call_symbol + "(" + argument_text + ")";
+        result_lines.push(call_line);
+        if _trace_ccl {
+            print("call_lowering: checkpoint-H void return");
+        }
+        _write_emission_result_lines(result_lines, result_temp);
+        fs.writeFile("build/sailfin/.call_result_type", "");
+        fs.writeFile("build/sailfin/.call_result_value", "");
+        return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+    }
+
+    let temp_name = format_temp_name(result_temp);
+    if _trace_ccl {
+        print("call_lowering: checkpoint-I temp_name=" + temp_name);
+    }
+    let call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")";
+    result_lines.push(call_line);
+    let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
+    if _trace_ccl {
+        print("call_lowering: checkpoint-J writing result files");
+    }
+    _write_emission_result_lines(result_lines, result_temp + 1);
+    fs.writeFile("build/sailfin/.call_result_type", llvm_return);
+    fs.writeFile("build/sailfin/.call_result_value", temp_name);
+    if _trace_ccl {
+        print("call_lowering: checkpoint-K returning");
+    }
+    return ExpressionResult { lines: result_lines, temp_index: result_temp + 1, operand: operand, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+}
+
+export { coerce_and_emit_call };
