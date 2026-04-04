@@ -5644,10 +5644,12 @@ void sailfin_runtime_raise_value_error(void *message)
     abort();
 }
 
-/* Alias: the compiler emits calls to runtime_raise_value_error_fn when the
+/* Wrapper: the compiler emits calls to runtime_raise_value_error_fn when the
  * runtime helper symbol resolution doesn't fire (e.g. in test lowering). */
 void runtime_raise_value_error_fn(void *message)
-    __attribute__((alias("sailfin_runtime_raise_value_error")));
+{
+    sailfin_runtime_raise_value_error(message);
+}
 
 /* Wrapper: the compiler may emit calls to substring_unchecked with double
  * params (Sailfin number type) instead of i64.  Forward to the real impl. */

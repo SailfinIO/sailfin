@@ -35,6 +35,8 @@ import {
 
 import {
     find_interface_info_by_name,
+    resolve_struct_info_for_method_target,
+    resolve_interface_info_for_method_target,
 } from "../../type_context";
 
 import { find_function_by_name } from "../../rendering";
@@ -52,17 +54,6 @@ import {
 } from "./core_type_mapping";
 
 import { is_simple_identifier } from "../../expressions";
-
-import {
-    ends_with_pointer_suffix,
-} from "../../type_mapping";
-
-import {
-    resolve_struct_info_for_method_target,
-    resolve_interface_info_for_method_target,
-} from "../../type_context";
-
-import { find_runtime_helper } from "../../runtime_helpers";
 
 import {
     array_pointer_element_type,

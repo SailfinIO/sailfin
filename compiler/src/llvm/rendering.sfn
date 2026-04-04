@@ -150,8 +150,9 @@ fn render_runtime_helper_declarations(used_targets -> string[], local_functions 
             let line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")";
             lines.push(line);
             declared_symbols.push(descriptor.symbol);
-            // Also declare the target name if it differs from the symbol, so that
-            // call sites that fail to resolve the runtime helper still link.
+            // Also declare the target name if it differs from the symbol.
+            // This only satisfies IR validation (clang frontend); actual linking
+            // requires a runtime-side wrapper/alias for the target name.
             if descriptor.target != descriptor.symbol {
                 let sanitized_target = sanitize_symbol(descriptor.target);
                 if sanitized_target != descriptor.symbol {

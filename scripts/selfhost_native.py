@@ -7786,9 +7786,10 @@ def _fix_duplicate_ssa_names(llvm_ir: str) -> tuple[str, int]:
             func_ranges.append((func_start, i))
             func_start = None
 
-    # Use pattern that matches %tN as a whole word (not prefix of %tN_dupM)
+    # Use a boundary that matches %tN only when it is not the prefix of a
+    # longer LLVM identifier (e.g. %t1_dup0, %t1.0, or %t1$foo).
     def _ssa_use_pat(name: str) -> "_re_dn.Pattern[str]":
-        return _re_dn.compile(_re_dn.escape(name) + r"(?!\w)")
+        return _re_dn.compile(_re_dn.escape(name) + r"(?![-a-zA-Z$._0-9])")
 
     for fstart, fend in func_ranges:
         seen: dict[str, int] = {}  # name -> count of definitions
