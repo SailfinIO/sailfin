@@ -5649,6 +5649,13 @@ void sailfin_runtime_raise_value_error(void *message)
 void runtime_raise_value_error_fn(void *message)
     __attribute__((alias("sailfin_runtime_raise_value_error")));
 
+/* Wrapper: the compiler may emit calls to substring_unchecked with double
+ * params (Sailfin number type) instead of i64.  Forward to the real impl. */
+char *substring_unchecked(char *text, double start, double end)
+{
+    return sailfin_runtime_substring_unchecked(text, (int64_t)start, (int64_t)end);
+}
+
 // Debug helper: validate an "identifier name" pointer and dump context if suspicious.
 // Called with the Expression* that should contain the identifier.
 void sailfin_runtime_debug_validate_identifier(void *expr_ptr, void *name_ptr)
