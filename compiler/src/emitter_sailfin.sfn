@@ -1027,60 +1027,6 @@ fn format_test_name(name -> string) -> string {
     return quote_string(name);
 }
 
-fn is_identifier(value -> string) -> boolean {
-    if value.length == 0 {
-        return false;
-    }
-    let first = char_at(value, 0);
-    if !is_identifier_start(first) {
-        return false;
-    }
-    let mut index -> number = 1;
-    loop {
-        if index >= value.length {
-            break;
-        }
-        if !is_identifier_part(char_at(value, index)) {
-            return false;
-        }
-        index += 1;
-    }
-    return true;
-}
-
-fn is_identifier_start(ch -> string) -> boolean {
-    if ch == "_" {
-        return true;
-    }
-    let code = char_code(ch);
-    let mut _ret30 -> boolean = false;
-    if code >= char_code("a") {
-        if code <= char_code("z") {
-            _ret30 = true;
-        }
-    }
-    if code >= char_code("A") {
-        if code <= char_code("Z") {
-            _ret30 = true;
-        }
-    }
-    return _ret30;
-}
-
-fn is_identifier_part(ch -> string) -> boolean {
-    if is_identifier_start(ch) {
-        return true;
-    }
-    let code = char_code(ch);
-    let mut _ret31 -> boolean = false;
-    if code >= char_code("0") {
-        if code <= char_code("9") {
-            _ret31 = true;
-        }
-    }
-    return _ret31;
-}
-
 fn trim_block_body(text -> string) -> string {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
@@ -1205,11 +1151,6 @@ fn trim_right(value -> string) -> string {
         return value;
     }
     return substring(value, 0, end);
-}
-
-fn append_string(values -> string[], value -> string) -> string[] {
-    values.push(value);
-    return values;
 }
 
 fn join_with_separator(values -> string[], separator -> string) -> string {
