@@ -85,28 +85,37 @@ _CROSS_MODULE_SHIM_C = """\
 
 /* ---- Pointer-returning functions ---- */
 
-/* Functions originally in native_ir, now split across native_ir_utils, native_ir_parser,
- * and native_ir_api.  split_lines lives in native_ir_utils; API functions in native_ir_api.
+/* Functions originally in native_ir, now split across native_ir_utils_text,
+ * native_ir_utils_layout, native_ir_utils_parse, native_ir_parser, and native_ir_api.
+ * split_lines lives in native_ir_utils_text; API functions in native_ir_api.
  * Provide forwarding stubs so seed-compiled callers (__native_ir suffix) and
  * intermediate callers (__native_ir_parser suffix) both resolve correctly.
  */
 
-extern void* split_lines__native_ir_utils(void*);
+extern void* split_lines__native_ir_utils_text(void*);
 __attribute__((weak))
 void* split_lines(void* arg) {
-    return split_lines__native_ir_utils(arg);
+    return split_lines__native_ir_utils_text(arg);
 }
 __attribute__((weak))
 void* split_lines__native_ir(void* arg) {
-    return split_lines__native_ir_utils(arg);
+    return split_lines__native_ir_utils_text(arg);
+}
+__attribute__((weak))
+void* split_lines__native_ir_utils(void* arg) {
+    return split_lines__native_ir_utils_text(arg);
 }
 __attribute__((weak))
 void* split_lines__native_ir_parser(void* arg) {
-    return split_lines__native_ir_utils(arg);
+    return split_lines__native_ir_utils_text(arg);
 }
 __attribute__((weak))
 void* split_lines_utils(void* arg) {
-    return split_lines__native_ir_utils(arg);
+    return split_lines__native_ir_utils_text(arg);
+}
+__attribute__((weak))
+void* split_lines_utils_text(void* arg) {
+    return split_lines__native_ir_utils_text(arg);
 }
 
 extern void* select_text_artifact__native_ir_api(void*);
@@ -12303,7 +12312,7 @@ def main(argv: list[str]) -> int:
 
                     # Optional heuristic fix for invalid phi inputs that break dominance.
                     # Disabled by default because it can change semantics.
-                    if module_name in ("native_ir", "native_ir_utils", "native_ir_parser", "native_ir_api") and os.environ.get("SAILFIN_REWRITE_PHI_STORE") == "1":
+                    if module_name in ("native_ir", "native_ir_utils", "native_ir_utils_text", "native_ir_utils_layout", "native_ir_utils_parse", "native_ir_parser", "native_ir_api") and os.environ.get("SAILFIN_REWRITE_PHI_STORE") == "1":
                         candidate, _ = _rewrite_phi_store_to_load(candidate)
 
                     # Optional debugging: inject probes to dump enum payload raw bits

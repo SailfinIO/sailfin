@@ -40,7 +40,7 @@ import {
     parse_native_artifact_for_import_context,
     parse_layout_manifest,
 } from "../../native_ir_api";
-import { split_lines } from "../../native_ir_utils";
+import { split_lines } from "../../native_ir_utils_text";
 import { substring, char_code } from "../../string_utils";
 
 import {

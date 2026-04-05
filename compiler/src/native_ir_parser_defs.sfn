@@ -26,25 +26,31 @@ import {
 import {
     index_of,
     is_trim_char,
-    parse_decorator_name,
+    starts_with,
+    strip_generics,
+    strip_prefix,
+    trim_text,
+    split_whitespace,
+} from "./native_ir_utils_text";
+
+import {
+    parse_decimal_number,
     parse_enum_layout_header,
     parse_enum_payload_layout,
     parse_enum_variant_layout,
+    parse_struct_layout_field,
+    parse_struct_layout_header,
+} from "./native_ir_utils_layout";
+
+import {
+    parse_decorator_name,
+    parse_effect_list,
     parse_enum_variant_line,
     parse_function_name,
     parse_parameter_entry,
     parse_struct_field_line,
     parse_struct_header,
-    parse_struct_layout_field,
-    parse_struct_layout_header,
-    starts_with,
-    strip_generics,
-    strip_prefix,
-    trim_text,
-    parse_effect_list,
-    parse_decimal_number,
-    split_whitespace,
-} from "./native_ir_utils";
+} from "./native_ir_utils_parse";
 
 import {
     parse_instruction,

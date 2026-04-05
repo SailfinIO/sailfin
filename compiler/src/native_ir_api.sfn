@@ -34,12 +34,15 @@ import {
     starts_with,
     strip_prefix,
     is_trim_char,
+} from "./native_ir_utils_text";
+
+import {
     parse_struct_layout_header,
     parse_struct_layout_field,
     parse_enum_layout_header,
     parse_enum_variant_layout,
     parse_enum_payload_layout,
-} from "./native_ir_utils";
+} from "./native_ir_utils_layout";
 
 fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
     if artifacts == null {

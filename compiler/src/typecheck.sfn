@@ -6,8 +6,6 @@
 
 import { Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodDeclaration, EnumVariant, ModelProperty, TypeParameter, TypeAnnotation, SourceSpan } from "./ast";
 import { Token, TokenKind } from "./token";
-import { validate_effects, EffectRequirement, EffectViolation } from "./effect_checker";
-
 struct Diagnostic {
     code -> string;
     message -> string;
@@ -20,11 +18,6 @@ struct SymbolEntry {
     span -> SourceSpan?;
 }
 
-struct TypecheckResult {
-    diagnostics -> Diagnostic[];
-    symbols -> SymbolEntry[];
-}
-
 struct SymbolCollectionResult {
     symbols -> SymbolEntry[];
     diagnostics -> Diagnostic[];
@@ -33,39 +26,6 @@ struct SymbolCollectionResult {
 struct ScopeResult {
     bindings -> SymbolEntry[];
     diagnostics -> Diagnostic[];
-}
-
-fn typecheck_program(program -> Program) -> TypecheckResult {
-    let top_level = collect_top_level_symbols(program);
-    let interfaces = collect_interface_definitions(program);
-    let scoped_diagnostics = check_program_scopes(program, interfaces);
-    // Bootstrap guard: effect diagnostics can explode under stage2 corruption.
-    // Disable for now to keep the selfhosted compiler stable.
-    let effect_diagnostics -> Diagnostic[] = [];
-
-    let mut diagnostics_with_scopes = top_level.diagnostics;
-    let mut _ci -> number = 0;
-    loop {
-        if _ci >= scoped_diagnostics.length {
-            break;
-        }
-        diagnostics_with_scopes.push(scoped_diagnostics[_ci]);
-        _ci += 1;
-    }
-    let mut all_diagnostics = diagnostics_with_scopes;
-    let mut _ci2 -> number = 0;
-    loop {
-        if _ci2 >= effect_diagnostics.length {
-            break;
-        }
-        all_diagnostics.push(effect_diagnostics[_ci2]);
-        _ci2 += 1;
-    }
-
-    return TypecheckResult {
-        diagnostics: all_diagnostics,
-        symbols: top_level.symbols,
-    };
 }
 
 fn typecheck_diagnostics(program -> Program) -> Diagnostic[] {
@@ -941,83 +901,6 @@ fn check_type_parameters(type_parameters -> TypeParameter[]) -> Diagnostic[] {
     }
 
     return diagnostics;
-}
-
-fn build_effect_diagnostics(program -> Program) -> Diagnostic[] {
-    let violations = validate_effects(program);
-    if violations == null {
-        return [];
-    }
-    if violations.length > 10000 {
-        // Defensive cap: avoid runaway diagnostics if effect data is corrupt.
-        return [];
-    }
-    let mut diagnostics -> Diagnostic[] = [];
-    let mut violation_index -> number = 0;
-    loop {
-        if violation_index >= violations.length {
-            break;
-        }
-        let violation = violations[violation_index];
-        let mut _if439 -> boolean = false;
-        if violation == null { _if439 = true; }
-        if violation.missing_effects == null { _if439 = true; }
-        if violation.requirements == null { _if439 = true; }
-        if _if439 {
-            violation_index += 1;
-            continue;
-        }
-        if violation.missing_effects.length > 1000 {
-            violation_index += 1;
-            continue;
-        }
-        let mut effect_index -> number = 0;
-        loop {
-            if effect_index >= violation.missing_effects.length {
-                break;
-            }
-            let effect = violation.missing_effects[effect_index];
-            let requirement = select_requirement_for_effect(violation.requirements, effect);
-            diagnostics.push(Diagnostic {
-                    code: "effects.missing",
-                    message: format_effect_message(violation.routine_name, effect, requirement),
-                    primary: requirement_primary_token(requirement),
-                });
-            effect_index += 1;
-        }
-        violation_index += 1;
-    }
-    return diagnostics;
-}
-
-fn select_requirement_for_effect(requirements -> EffectRequirement[], effect -> string) -> EffectRequirement? {
-    let mut index -> number = 0;
-    loop {
-        if index >= requirements.length {
-            break;
-        }
-        let requirement = requirements[index];
-        if requirement.effect == effect {
-            return requirement;
-        }
-        index += 1;
-    }
-    return null;
-}
-
-fn requirement_primary_token(requirement -> EffectRequirement?) -> Token? {
-    // Stage2's effect checker is intentionally token-free for seed compatibility.
-    // When no origin token is available, fall back to spanless diagnostics.
-    return null;
-}
-
-fn format_effect_message(routine_name -> string, effect -> string, requirement -> EffectRequirement?) -> string {
-    let mut message = routine_name + " is missing effect '" + effect + "'";
-    if requirement != null {
-        message = message + "; required by " + requirement.description;
-    }
-    message = message + ". hint: add ![" + effect + "] to the signature or accept the CLI fix prompt when offered";
-    return message;
 }
 
 fn contains_string(items -> string[], candidate -> string) -> boolean {

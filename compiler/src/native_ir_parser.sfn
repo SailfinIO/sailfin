@@ -19,20 +19,24 @@ import {
 
 import {
     index_of,
+    split_lines,
+    starts_with,
+    strip_prefix,
+    strip_quotes,
+    trim_text,
+} from "./native_ir_utils_text";
+
+import { parse_decimal_number } from "./native_ir_utils_layout";
+
+import {
     line_looks_like_parameter_entry,
-    parse_decimal_number,
     parse_decorator_name,
     parse_function_name,
     parse_import_entry,
     parse_interface_definition,
     parse_parameter_entry,
-    split_lines,
     split_parameter_entries,
-    starts_with,
-    strip_prefix,
-    strip_quotes,
-    trim_text,
-} from "./native_ir_utils";
+} from "./native_ir_utils_parse";
 
 import {
     parse_instruction,
