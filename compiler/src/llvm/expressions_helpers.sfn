@@ -2,9 +2,9 @@
 //
 // Identifier helpers, string manipulation, type helpers, and LLVM operand formatting.
 
-import { substring, char_at, char_code } from "../string_utils";
+import { substring, char_at } from "../string_utils";
 import { LLVMOperand } from "./types";
-import { trim_text, starts_with, ends_with, sanitize_symbol, number_to_string, is_identifier_part_char } from "./utils";
+import { trim_text, starts_with, sanitize_symbol, number_to_string } from "./utils";
 
 // =============================================================================
 // Identifier and Expression Helpers
