@@ -1,0 +1,284 @@
+// compiler/src/llvm/lowering/lowering_phase_render.sfn
+//
+// Phase 4 of LLVM lowering: render LLVM IR preamble.
+// Produces type definitions (structs, enums, interfaces, async types,
+// vtables), runtime helper declarations, imported function declarations,
+// and libc declarations.
+//
+// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+
+import {
+    NativeFunction,
+    NativeStruct,
+} from "../../native_ir";
+import { substring } from "../../string_utils";
+
+import {
+    TypeContext,
+    TraitMetadata,
+} from "../types";
+
+import {
+    number_to_string,
+    index_of,
+    starts_with,
+} from "../utils";
+
+import {
+    render_struct_type_definitions,
+    render_enum_type_definitions,
+    render_interface_type_definitions,
+    render_vtable_type_definitions,
+    render_vtable_constants,
+    render_trait_metadata_comments,
+    render_runtime_helper_declarations,
+    render_imported_function_declarations,
+    find_function_by_name,
+} from "../rendering";
+
+import {
+    extend_string_lines,
+    module_source_filename,
+} from "./lowering_io";
+
+import {
+    split_lines_local,
+} from "./lowering_text_utils";
+
+// Render the LLVM IR preamble: source filename, trait metadata,
+// struct/enum/interface type definitions, async runtime types,
+// vtable types/constants, runtime helper declarations, imported
+// function declarations, and libc declarations.
+//
+// Returns the preamble as a string[] of LLVM IR lines.
+fn render_llvm_preamble(
+    module_name: string,
+    type_context: TypeContext,
+    trait_metadata: TraitMetadata,
+    context_functions: NativeFunction[],
+    local_functions: NativeFunction[],
+    imported_functions: NativeFunction[],
+    runtime_helpers: string[],
+    debug_lowering: boolean
+) -> string[] ![io] {
+    let mut lines -> string[] = [];
+    lines.push("source_filename = \"" + module_source_filename(module_name) + "\"");
+    lines.push("");
+
+    // Trait metadata comments
+    if debug_lowering {
+        print("emit-llvm: phase=render_traits");
+    }
+    let trait_lines = render_trait_metadata_comments(trait_metadata);
+    if trait_lines.length > 0 {
+        lines = extend_string_lines(lines, trait_lines);
+        lines.push("");
+    }
+
+    // Struct type definitions
+    if debug_lowering {
+        print("emit-llvm: phase=render_structs");
+        print(
+            "emit-llvm: render_structs counts structs="
+            + number_to_string(type_context.structs.length)
+            + " enums="
+            + number_to_string(type_context.enums.length)
+            + " functions="
+            + number_to_string(context_functions.length)
+        );
+    }
+    let struct_type_lines = render_struct_type_definitions(type_context, context_functions);
+    // Filter out corrupted struct type lines (empty name: "% = type ...").
+    let mut stl_valid -> boolean = struct_type_lines.length > 0;
+    if stl_valid {
+        let mut stl_check -> number = 0;
+        loop {
+            if stl_check >= struct_type_lines.length { break; }
+            if starts_with(struct_type_lines[stl_check], "% =") {
+                stl_valid = false;
+                break;
+            }
+            stl_check += 1;
+        }
+    }
+    if stl_valid {
+        lines = extend_string_lines(lines, struct_type_lines);
+        lines.push("");
+    }
+    // Supplement struct type definitions from .struct_info file when the
+    // cross-module render_struct_type_definitions produced nothing or corrupted output.
+    if !stl_valid {
+        let recovered_lines = recover_struct_types_from_file();
+        if recovered_lines.length > 0 {
+            lines = extend_string_lines(lines, recovered_lines);
+            lines.push("");
+        }
+    }
+
+    // Enum type definitions
+    if debug_lowering {
+        print("emit-llvm: phase=render_enums");
+    }
+    let enum_type_lines = render_enum_type_definitions(type_context);
+    if enum_type_lines.length > 0 {
+        lines = extend_string_lines(lines, enum_type_lines);
+        lines.push("");
+    }
+
+    // Interface type definitions
+    if debug_lowering {
+        print("emit-llvm: phase=render_interfaces");
+    }
+    let interface_type_lines = render_interface_type_definitions(type_context);
+    if interface_type_lines.length > 0 {
+        lines = extend_string_lines(lines, interface_type_lines);
+        lines.push("");
+    }
+
+    // Async/future runtime types
+    lines = extend_string_lines(lines, [
+        "%SailfinFutureNumber = type opaque",
+        "%SailfinFutureBool = type opaque",
+        "%SailfinFuturePtr = type opaque",
+        "%SailfinFutureVoid = type opaque",
+        "%SailfinFutureString = type opaque",
+        "",
+        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)",
+        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)",
+        "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)",
+        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)",
+        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)",
+        "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)",
+        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)",
+        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)",
+        "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)",
+        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)",
+        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)",
+        "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)",
+        "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)",
+        "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)",
+        "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)",
+        "",
+    ]);
+
+    // Vtable type definitions
+    let vtable_type_lines = render_vtable_type_definitions(type_context);
+    if vtable_type_lines != null {
+        if vtable_type_lines.length > 0 {
+            lines = extend_string_lines(lines, vtable_type_lines);
+            lines.push("");
+        }
+    }
+
+    // Vtable constants
+    let vtable_const_lines = render_vtable_constants(type_context);
+    if vtable_const_lines != null {
+        if vtable_const_lines.length > 0 {
+            lines = extend_string_lines(lines, vtable_const_lines);
+            lines.push("");
+        }
+    }
+
+    // Runtime helper declarations
+    if debug_lowering {
+        print("emit-llvm: phase=render_helpers");
+    }
+    let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
+    if helper_declarations != null {
+        if helper_declarations.length > 0 {
+            lines = extend_string_lines(lines, helper_declarations);
+            lines.push("");
+        }
+    }
+
+    // Imported function declarations
+    if debug_lowering {
+        print("emit-llvm: phase=render_imports");
+    }
+    let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
+    if imported_declarations != null {
+        if imported_declarations.length > 0 {
+            lines = extend_string_lines(lines, imported_declarations);
+            lines.push("");
+        }
+    }
+
+    // Libc declarations
+    if find_function_by_name(context_functions, "calloc") == null {
+        lines.push("declare noalias i8* @calloc(i64, i64)");
+    }
+    if find_function_by_name(context_functions, "malloc") == null {
+        lines.push("declare noalias i8* @malloc(i64)");
+    }
+    if find_function_by_name(context_functions, "free") == null {
+        lines.push("declare void @free(i8*)");
+    }
+    lines.push("");
+
+    // Runtime global
+    lines.push("@runtime = external global i8**");
+    lines.push("");
+
+    return lines;
+}
+
+// Recover struct type definitions from the .struct_info file.
+// Used when render_struct_type_definitions produced corrupted output.
+fn recover_struct_types_from_file() -> string[] ![io] {
+    let mut result -> string[] = [];
+    if !fs.exists("build/sailfin/.struct_info") {
+        return result;
+    }
+    let raw = fs.readFile("build/sailfin/.struct_info");
+    if raw.length == 0 {
+        return result;
+    }
+    let mut pos -> number = 0;
+    loop {
+        if pos >= raw.length { break; }
+        let nl = index_of(substring(raw, pos, raw.length), "\n");
+        let mut line -> string = "";
+        if nl < 0 {
+            line = substring(raw, pos, raw.length);
+            pos = raw.length;
+        } else {
+            line = substring(raw, pos, pos + nl);
+            pos = pos + nl + 1;
+        }
+        if line.length == 0 { continue; }
+        let t1 = index_of(line, "\t");
+        if t1 < 0 { continue; }
+        let rest = substring(line, t1 + 1, line.length);
+        let t2 = index_of(rest, "\t");
+        if t2 < 0 { continue; }
+        let llvm = substring(rest, 0, t2);
+        let fields_str = substring(rest, t2 + 1, rest.length);
+        if llvm.length == 0 { continue; }
+        // Build field type list
+        let mut ftypes -> string = "";
+        if fields_str.length > 0 {
+            let mut fpos -> number = 0;
+            let mut first -> boolean = true;
+            loop {
+                if fpos >= fields_str.length { break; }
+                let comma = index_of(substring(fields_str, fpos, fields_str.length), ",");
+                let mut fentry -> string = "";
+                if comma < 0 {
+                    fentry = substring(fields_str, fpos, fields_str.length);
+                    fpos = fields_str.length;
+                } else {
+                    fentry = substring(fields_str, fpos, fpos + comma);
+                    fpos = fpos + comma + 1;
+                }
+                let colon = index_of(fentry, ":");
+                if colon < 0 { continue; }
+                let ftype = substring(fentry, colon + 1, fentry.length);
+                if !first { ftypes = ftypes + ", "; }
+                ftypes = ftypes + ftype;
+                first = false;
+            }
+        }
+        result.push(llvm + " = type { " + ftypes + " }");
+    }
+    return result;
+}

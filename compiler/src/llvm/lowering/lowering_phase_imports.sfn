@@ -1,0 +1,85 @@
+// compiler/src/llvm/lowering/lowering_phase_imports.sfn
+//
+// Phase 2 of LLVM lowering: gather imported module context.
+// Iterates imported native texts and layout manifests to collect
+// structs, enums, interfaces, functions, and struct methods from
+// dependency modules.
+//
+// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+
+import {
+    NativeFunction,
+    NativeStruct,
+    NativeEnum,
+    NativeInterface,
+    LayoutManifest,
+} from "../../native_ir";
+import {
+    parse_native_structs_for_import,
+    parse_native_enums_for_import,
+    parse_native_interfaces_for_import,
+    parse_native_functions_for_import,
+} from "../../native_ir_api";
+
+import {
+    number_to_string,
+} from "../utils";
+
+import {
+    apply_layout_manifest_to_module,
+} from "../imports";
+
+import {
+    extend_native_structs,
+    extend_native_enums,
+    extend_native_interfaces,
+    extend_native_functions,
+    flatten_struct_methods,
+} from "./lowering_helpers";
+
+// Parse and apply layout for a single imported native text.
+// Returns the applied structs for this import module.
+// The caller is responsible for extending the accumulated arrays.
+fn parse_single_import_text(
+    native_text: string,
+    manifest_for_module: LayoutManifest?
+) -> NativeStruct[] {
+    let imported_structs_safe = parse_native_structs_for_import(native_text);
+    let imported_enums_safe = parse_native_enums_for_import(native_text);
+    let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
+    let mut applied_structs = applied_import.structs;
+    if applied_structs == null {
+        applied_structs = [];
+    }
+    return applied_structs;
+}
+
+// Parse imported enums from a single import text and apply layout manifest.
+fn parse_single_import_enums(
+    native_text: string,
+    manifest_for_module: LayoutManifest?
+) -> NativeEnum[] {
+    let imported_structs_safe = parse_native_structs_for_import(native_text);
+    let imported_enums_safe = parse_native_enums_for_import(native_text);
+    let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
+    let mut applied_enums = applied_import.enums;
+    if applied_enums == null {
+        applied_enums = [];
+    }
+    return applied_enums;
+}
+
+// Parse imported interfaces from a single import text.
+fn parse_single_import_interfaces(native_text: string) -> NativeInterface[] {
+    return parse_native_interfaces_for_import(native_text);
+}
+
+// Parse imported functions from a single import text.
+fn parse_single_import_functions(native_text: string) -> NativeFunction[] {
+    return parse_native_functions_for_import(native_text);
+}
+
+// Extract struct methods from applied structs.
+fn extract_import_struct_methods(applied_structs: NativeStruct[]) -> NativeFunction[] {
+    return flatten_struct_methods(applied_structs);
+}

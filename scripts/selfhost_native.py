@@ -12752,7 +12752,7 @@ def main(argv: list[str]) -> int:
                     # A truncated instructions.sfn-asm in the import-context
                     # causes the seed to infer `double` as return type instead
                     # of `%BlockLoweringResult`, which silently breaks lowering.
-                    if "emission" in module_name or "entrypoints" in module_name or "lowering_core" in module_name:
+                    if "emission" in module_name or "entrypoints" in module_name or "lowering_core" in module_name or "lowering_phase" in module_name:
                         candidate, lir_changes = _fix_lower_instruction_range_return_type(candidate)
                         if lir_changes:
                             print(
@@ -12771,8 +12771,8 @@ def main(argv: list[str]) -> int:
                                 flush=True,
                             )
 
-                    # Fix NativeFunction parameter in entrypoints/lowering_core module.
-                    if "entrypoints" in module_name or "lowering_core" in module_name:
+                    # Fix NativeFunction parameter in entrypoints/lowering_core/lowering_phase modules.
+                    if "entrypoints" in module_name or "lowering_core" in module_name or "lowering_phase" in module_name:
                         candidate, nfp_changes = _fix_native_function_param_for_entrypoints(candidate)
                         if nfp_changes:
                             print(
