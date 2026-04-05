@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.8 (2026-04-05)
+
+### Bug Fixes
+
+- Address PR review — deduplicate parse helpers + add regression test
+  ([`82f2695`](https://github.com/SailfinIO/sailfin/commit/82f2695c7b9f5bb4de81c0afb660c44c1ce33927))
+
+- Collapsed parse_native_artifact_with_retry into a thin wrapper around parse_native_artifact_safe
+  (attempts param was unused, bodies identical) - Added cross_module_array_test.sfn regression test
+  verifying array parameters survive cross-module function calls (the exact pattern that the i8*
+  null coercion bug corrupted)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Remove parse_native_artifact_with_retry entirely
+  ([`e3c8adf`](https://github.com/SailfinIO/sailfin/commit/e3c8adf4082d81644f1a829bf4f69127d5db3f75))
+
+The attempts parameter was unused and the function body was identical to parse_native_artifact_safe.
+  Replaced the single call site in entrypoints.sfn and deleted the function from
+  lowering_recovery.sfn.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.7 (2026-04-05)
 
 ### Bug Fixes
@@ -10,6 +34,26 @@
 
 A bare "-" with no trailing digits was incorrectly accepted as a successful parse returning 0. Add
   an early bounds check after consuming the sign character to return failure when no digits follow.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Split lowering_core.sfn into focused modules + fix coercion bug
+  ([`b8e4d84`](https://github.com/SailfinIO/sailfin/commit/b8e4d84a0464e2a0dd8605ea5a9157ea3dcc64f6))
+
+Split the 3344-line lowering_core.sfn into 5 files: - lowering_core.sfn (1919 lines) — main function
+  + wrappers - lowering_native_helpers.sfn (231 lines) — constructors, updaters, accessors -
+  lowering_text_utils.sfn (292 lines) — text processing, structured data parsers -
+  lowering_recovery.sfn (771 lines) — light recovery parsers - lowering_io.sfn (271 lines) — string
+  array ops, file I/O, intrinsics
+
+Also fixed a compiler bug in core_call_emission.sfn: when cross-module call argument coercion fails,
+  pass through the original operand instead of substituting `i8* null`. This was the root cause of
+  broken cross-module calls to functions in newly-created modules.
+
+Updated selfhost_native.py fixup patterns to match accessor functions in both the original and new
+  module suffixes.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
