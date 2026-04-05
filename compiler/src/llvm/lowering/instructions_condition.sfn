@@ -43,7 +43,7 @@ import {
 
 import {
     detect_suspension_conflicts,
-} from "../expression_lowering/native/statement";
+} from "../expression_lowering/native/statement_suspension";
 
 import {
     _parse_int_from_string,

@@ -60,8 +60,11 @@ import {
 
 import {
     detect_suspension_conflicts,
+} from "../expression_lowering/native/statement_suspension";
+
+import {
     map_local_type,
-} from "../expression_lowering/native/statement";
+} from "../expression_lowering/native/statement_type_mapping";
 
 import {
     infer_borrow_base_scope,

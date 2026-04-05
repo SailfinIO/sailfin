@@ -12,19 +12,27 @@ export {
     // Statement + entrypoint helpers
     lower_expression_statement,
     lower_return_instruction,
+    prepare_parameters,
+} from "./statement";
+
+export {
+    // Expression parsing
     parse_assignment_expression,
     parse_inline_let_expression,
-    detect_suspension_conflicts,
-    prepare_parameters,
+} from "./statement_parsing";
 
-    // Async lowering ABI helpers
+export {
+    // Suspension / async helpers
+    detect_suspension_conflicts,
     future_pointer_type_for_return_type,
     spawn_symbol_for_return_type,
     spawn_ctx_symbol_for_return_type,
+} from "./statement_suspension";
 
+export {
     // Type mapping helper consumed by instruction lowering
     map_local_type,
-} from "./statement";
+} from "./statement_type_mapping";
 
 export {
     // Expression lowering core surface

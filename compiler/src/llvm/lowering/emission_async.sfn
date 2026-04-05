@@ -38,7 +38,7 @@ import {
     future_pointer_type_for_return_type,
     spawn_symbol_for_return_type,
     spawn_ctx_symbol_for_return_type,
-} from "../expression_lowering/native/statement";
+} from "../expression_lowering/native/statement_suspension";
 
 import {
     map_return_type,
