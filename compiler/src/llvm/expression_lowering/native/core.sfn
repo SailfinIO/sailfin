@@ -210,7 +210,7 @@ import {
     default_return_literal,
     strip_mut_prefix,
     is_simple_identifier,
-} from "../../expressions";
+} from "../../expressions_helpers";
 
 import {
     find_parameter_binding,

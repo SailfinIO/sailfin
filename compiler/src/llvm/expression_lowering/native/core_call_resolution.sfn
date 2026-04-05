@@ -53,7 +53,7 @@ import {
     future_pointer_type_for_return_type,
 } from "./core_type_mapping";
 
-import { is_simple_identifier } from "../../expressions";
+import { is_simple_identifier } from "../../expressions_helpers";
 
 import {
     array_pointer_element_type,

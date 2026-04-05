@@ -34,13 +34,19 @@ import {
 import { array_struct_type_for_element } from "../type_mapping";
 
 import {
+    find_local_binding,
+} from "../expressions_bindings";
+
+import {
     is_number_literal,
     normalise_number_literal,
-    find_local_binding,
+} from "../expressions_literals";
+
+import {
     default_return_literal,
     format_local_pointer_name,
     format_temp_name,
-} from "../expressions";
+} from "../expressions_helpers";
 
 import {
     lower_expression,

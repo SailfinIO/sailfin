@@ -19,7 +19,7 @@ import {
 
 import { substring, index_of } from "../../../string_utils";
 
-import { format_temp_name } from "../../expressions";
+import { format_temp_name } from "../../expressions_helpers";
 
 // Try to resolve a struct field access via file-based struct info when the
 // base type is i8* (opaque pointer). Returns an ExpressionResult with the

@@ -12,7 +12,8 @@ import {
 } from "./types";
 import { trim_text, append_string, starts_with, ends_with, char_at, sanitize_symbol, is_identifier_start_char, is_identifier_part_char, number_to_string } from "./utils";
 import { empty_string_constant_set } from "./strings";
-import { find_local_binding, find_parameter_binding, is_simple_identifier, is_effect_delimiter, strip_enclosing_parentheses, is_copy_type } from "./expressions";
+import { find_local_binding, find_parameter_binding } from "./expressions_bindings";
+import { is_simple_identifier, is_effect_delimiter, strip_enclosing_parentheses, is_copy_type } from "./expressions_helpers";
 import { unwrap_move_wrapper } from "./type_mapping";
 
 // =============================================================================

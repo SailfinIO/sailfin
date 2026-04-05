@@ -17,8 +17,11 @@ import { append_string, join_with_separator, trim_text, extend_string_array, sta
 
 import {
     find_local_binding,
+} from "../expressions_bindings";
+
+import {
     format_temp_name,
-} from "../expressions";
+} from "../expressions_helpers";
 
 // Helper: Find preloaded value for a local by name
 fn find_preloaded_value(locals -> LocalBinding[], preloaded_values -> string[], name -> string) -> string? {

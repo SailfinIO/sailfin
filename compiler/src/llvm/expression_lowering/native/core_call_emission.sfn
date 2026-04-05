@@ -28,7 +28,7 @@ import { substring, find_last_index_of_char } from "../../../string_utils";
 
 import { merge_string_constants } from "../../strings";
 
-import { format_temp_name, format_typed_operand } from "../../expressions";
+import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 
 import {
     ends_with_pointer_suffix,

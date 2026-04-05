@@ -38,7 +38,7 @@ import {
     format_temp_name,
     default_return_literal,
     is_simple_identifier,
-} from "../../expressions";
+} from "../../expressions_helpers";
 
 import {
     ends_with_pointer_suffix, strip_pointer_suffix,

@@ -40,7 +40,7 @@ import {
     default_return_literal,
     format_local_pointer_name,
     format_temp_name,
-} from "../expressions";
+} from "../expressions_helpers";
 
 import {
     lower_expression,

@@ -1,0 +1,241 @@
+// compiler/src/llvm/expressions_helpers.sfn
+//
+// Identifier helpers, string manipulation, type helpers, and LLVM operand formatting.
+
+import { substring, char_at } from "../string_utils";
+import { LLVMOperand } from "./types";
+import { trim_text, starts_with, sanitize_symbol, number_to_string } from "./utils";
+
+// =============================================================================
+// Identifier and Expression Helpers
+// =============================================================================
+
+fn is_simple_identifier(value -> string) -> boolean {
+    let trimmed = trim_text(value);
+    if trimmed.length == 0 {
+        return false;
+    }
+    let first = substring(trimmed, 0, 1);
+    if first >= "0" {
+        if first <= "9" {
+            return false;
+        }
+    }
+    let sanitized = sanitize_symbol(trimmed);
+    if sanitized != trimmed {
+        return false;
+    }
+    return true;
+}
+
+fn is_effect_delimiter(ch -> string) -> boolean {
+    let mut _if171 -> boolean = false;
+    if ch == "!" { _if171 = true; }
+    if ch == "?" { _if171 = true; }
+    if _if171 {
+        return true;
+    }
+    return false;
+}
+
+fn strip_enclosing_parentheses(expression -> string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length < 2 {
+        return trimmed;
+    }
+    let mut _if172 -> boolean = false;
+    if substring(trimmed, 0, 1) != "(" { _if172 = true; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != ")" { _if172 = true; }
+    if _if172 {
+        return trimmed;
+    }
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= trimmed.length {
+            break;
+        }
+        let ch = char_at(trimmed, index);
+        if ch == "(" {
+            depth += 1;
+        } else if ch == ")" {
+            depth -= 1;
+            if depth == 0 {
+                if index == trimmed.length - 1 {
+                    let inner = substring(trimmed, 1, trimmed.length - 1);
+                    return strip_enclosing_parentheses(inner);
+                }
+                return trimmed;
+            }
+        }
+        index += 1;
+    }
+    return trimmed;
+}
+
+fn strip_mut_prefix(value -> string) -> string {
+    let trimmed = trim_text(value);
+    if trimmed.length < 4 {
+        return trimmed;
+    }
+    let prefix = substring(trimmed, 0, 4);
+    if prefix == "mut " {
+        return trim_text(substring(trimmed, 4, trimmed.length));
+    }
+    return trimmed;
+}
+
+fn contains_text(haystack -> string, needle -> string) -> boolean {
+    if needle.length == 0 {
+        return true;
+    }
+    if haystack.length < needle.length {
+        return false;
+    }
+    let _search_limit = haystack.length - needle.length;
+    let mut index -> number = 0;
+    loop {
+        if index > _search_limit {
+            break;
+        }
+        let candidate = substring(haystack, index, index + needle.length);
+        if candidate == needle {
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// =============================================================================
+// Type Helpers
+// =============================================================================
+
+fn ends_with_pointer_suffix(value -> string) -> boolean {
+    let trimmed = trim_text(value);
+    if trimmed.length == 0 {
+        return false;
+    }
+    // Fast-path: well-known primitives that are never pointers.
+    // Avoids character-level indexing which is miscompiled by older seeds.
+    let mut _if175 -> boolean = false;
+    if trimmed == "double" { _if175 = true; }
+    if trimmed == "i1" { _if175 = true; }
+    if trimmed == "i8" { _if175 = true; }
+    if trimmed == "i16" { _if175 = true; }
+    if trimmed == "i32" { _if175 = true; }
+    if trimmed == "i64" { _if175 = true; }
+    if trimmed == "void" { _if175 = true; }
+    if trimmed == "float" { _if175 = true; }
+    if _if175 {
+        return false;
+    }
+    // Fast-path: well-known pointer types.
+    let mut _if176 -> boolean = false;
+    if trimmed == "i8*" { _if176 = true; }
+    if trimmed == "i8**" { _if176 = true; }
+    if trimmed == "i32*" { _if176 = true; }
+    if trimmed == "i64*" { _if176 = true; }
+    if trimmed == "double*" { _if176 = true; }
+    if trimmed == "i1*" { _if176 = true; }
+    if _if176 {
+        return true;
+    }
+    // Fast-path: aggregate pointer types starting with { or % and ending with *.
+    // Use starts_with (safe) instead of character indexing.
+    let mut _if177 -> boolean = false;
+    if starts_with(trimmed, "{") { _if177 = true; }
+    if starts_with(trimmed, "%") { _if177 = true; }
+    if _if177 {
+        let without_star = substring(trimmed, 0, trimmed.length - 1);
+        if without_star + "*" == trimmed {
+            return true;
+        }
+        return false;
+    }
+    return substring(trimmed, trimmed.length - 1, trimmed.length) == "*";
+}
+
+fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
+    let trimmed = trim_text(type_annotation);
+    let mut _if173 -> boolean = false;
+    if starts_with(trimmed, "Affine<") { _if173 = true; }
+    if starts_with(trimmed, "Linear<") { _if173 = true; }
+    if _if173 {
+        return false;
+    }
+    let mut _if174 -> boolean = false;
+    if trimmed == "Affine" { _if174 = true; }
+    if trimmed == "Linear" { _if174 = true; }
+    if _if174 {
+        return false;
+    }
+    if llvm_type == "double" {
+        return true;
+    }
+    if llvm_type == "i32" {
+        return true;
+    }
+    if llvm_type == "i64" {
+        return true;
+    }
+    if llvm_type == "i1" {
+        return true;
+    }
+    if ends_with_pointer_suffix(llvm_type) {
+        return true;
+    }
+    if trimmed.length == 0 {
+        return true;
+    }
+    if substring(trimmed, 0, 1) == "&" {
+        return true;
+    }
+    if starts_with(trimmed, "mut ") {
+        let stripped = strip_mut_prefix(trimmed);
+        if stripped.length > 0 {
+            if substring(stripped, 0, 1) == "&" {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+fn default_return_literal(llvm_type -> string) -> string {
+    if llvm_type == "void" {
+        return "";
+    }
+    if llvm_type == "double" {
+        return "0.0";
+    }
+    if llvm_type == "i32" {
+        return "0";
+    }
+    if llvm_type == "i64" {
+        return "0";
+    }
+    if llvm_type == "i1" {
+        return "false";
+    }
+    if ends_with_pointer_suffix(llvm_type) {
+        return "null";
+    }
+    return "zeroinitializer";
+}
+
+// =============================================================================
+// LLVM Temp and Operand Formatting
+// =============================================================================
+
+fn format_temp_name(index -> number) -> string {
+    return "%t" + number_to_string(index);
+}
+
+fn format_local_pointer_name(index -> number) -> string {
+    return "%l" + number_to_string(index);
+}
+
+fn format_typed_operand(operand -> LLVMOperand) -> string {
+    return operand.llvm_type + " " + operand.value;
+}

@@ -68,4 +68,4 @@ export {
 } from "./core_text";
 
 // Historically consumers imported these via expression_lowering_stage2.
-export { format_temp_name } from "../../expressions";
+export { format_temp_name } from "../../expressions_helpers";

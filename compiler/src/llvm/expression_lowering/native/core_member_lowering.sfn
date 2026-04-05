@@ -53,7 +53,7 @@ import {
     find_variant_field_info,
 } from "../../type_context";
 
-import { format_temp_name, default_return_literal } from "../../expressions";
+import { format_temp_name, default_return_literal } from "../../expressions_helpers";
 
 import { sanitize_symbol } from "./core_text";
 

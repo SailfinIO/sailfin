@@ -20,7 +20,7 @@ import {
 
 import {
     format_temp_name,
-} from "../expressions";
+} from "../expressions_helpers";
 
 import {
     array_struct_type_for_element,

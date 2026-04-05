@@ -200,13 +200,16 @@ export {
     format_suspension_location,
 } from "./lifetime";
 
-// Re-export expression helper functions
+// Re-export expression helper functions (from decomposed submodules)
 export {
     find_local_binding,
     find_parameter_binding,
     mark_parameter_consumed,
     mark_local_consumed,
     reset_local_consumption,
+} from "./expressions_bindings";
+
+export {
     is_boolean_literal,
     is_null_literal,
     is_integer_literal,
@@ -215,6 +218,9 @@ export {
     is_character_literal,
     get_character_literal_value,
     normalise_number_literal,
+} from "./expressions_literals";
+
+export {
     is_simple_identifier,
     is_effect_delimiter,
     strip_enclosing_parentheses,
@@ -226,11 +232,17 @@ export {
     format_temp_name,
     format_local_pointer_name,
     format_typed_operand,
+} from "./expressions_helpers";
+
+export {
     find_top_level_operator,
     is_binary_minus,
     is_binary_star,
     find_top_level_range_separator,
     find_top_level_union_separator,
+} from "./expressions_operators";
+
+export {
     parse_member_access,
     parse_index_expression,
     parse_assignment_expression,
@@ -238,4 +250,4 @@ export {
     parse_ternary_expression,
     parse_raw_address_expression,
     parse_cast_expression,
-} from "./expressions";
+} from "./expressions_parsing";
