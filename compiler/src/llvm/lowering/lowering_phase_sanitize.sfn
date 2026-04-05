@@ -18,14 +18,8 @@ import {
     ParseNativeResult,
 } from "../../native_ir";
 import {
-    parse_native_function_count_from_text,
     parse_native_functions_from_text,
-    parse_native_structs_from_text,
-    parse_native_imports_from_text,
-    parse_native_interfaces_from_text,
-    parse_native_enums_from_text,
     parse_native_bindings_from_text,
-    parse_native_diagnostics_from_text,
 } from "../../native_ir_api";
 
 import {
@@ -66,19 +60,14 @@ import {
 // return is unreliable with the v0.1.1 seed.)
 
 // Sanitize and recover all parsed inputs for the lowering pipeline.
-// Results are written to files under build/sailfin/.phase_sanitize_*
-// because the v0.1.1 seed corrupts cross-module struct returns.
+// Recovery happens in memory because the v0.1.1 seed may corrupt
+// cross-module struct returns. This function does not write
+// .phase_sanitize_* recovery files.
 //
-// File outputs:
-//   .phase_sanitize_diagnostics   — newline-separated diagnostic messages
-//   .phase_sanitize_functions_ok  — "1" if safe_functions was recovered/valid
-//   .phase_sanitize_structs_ok    — "1" if safe_structs was recovered/valid
-//
-// The actual NativeFunction[]/NativeStruct[]/etc arrays cannot be
-// serialized through files, so this function returns them via
-// a ParseNativeResult struct.  The orchestrator should read the
-// struct fields cautiously (the seed may corrupt them) and fall
-// back to file-based recovery if needed.
+// The sanitized NativeFunction[]/NativeStruct[]/etc arrays are
+// returned through a ParseNativeResult struct. Callers should read
+// the returned struct fields cautiously and use their own recovery
+// path if later phases detect corrupted data.
 fn sanitize_lowering_inputs(
     parse_in: ParseNativeResult,
     native_text_override_path: string,
@@ -92,11 +81,10 @@ fn sanitize_lowering_inputs(
     if debug_lowering {
         print("emit-llvm: dbg-A parse_in assigned");
     }
-    let artifact_for_stable_parse -> NativeArtifact? = null;
     if debug_lowering {
         print("emit-llvm: dbg-B before override check path_len=" + number_to_string(native_text_override_path.length));
     }
-    // --- Reparse from override text or artifact ---
+    // --- Reparse from override text ---
     if native_text_override_path.length > 0 {
         let _rfns = recover_native_functions_light(native_text_override_path);
         let _rsts = recover_native_structs_light(native_text_override_path);
@@ -118,45 +106,6 @@ fn sanitize_lowering_inputs(
             print("emit-llvm: reparsed from override diagnostics=" + number_to_string(parse.diagnostics.length));
             if parse.diagnostics.length > 0 {
                 print("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
-            }
-        }
-    } else {
-        let mut _elif248 -> boolean = false;
-        if artifact_for_stable_parse != null {
-            if artifact_for_stable_parse.contents.length > 0 {
-                _elif248 = true;
-            }
-        }
-        if _elif248 {
-            if debug_lowering {
-                print("emit-llvm: artifact text bytes=" + number_to_string(artifact_for_stable_parse.contents.length));
-                print("emit-llvm: artifact direct function count=" + number_to_string(parse_native_function_count_from_text(artifact_for_stable_parse.contents)));
-            }
-            let reparsed_fns = parse_native_functions_from_text(artifact_for_stable_parse.contents);
-            if reparsed_fns.length >= parse.functions.length {
-                let reparsed_imports = parse_native_imports_from_text(artifact_for_stable_parse.contents);
-                let reparsed_structs = parse_native_structs_from_text(artifact_for_stable_parse.contents);
-                let reparsed_interfaces = parse_native_interfaces_from_text(artifact_for_stable_parse.contents);
-                let reparsed_enums = parse_native_enums_from_text(artifact_for_stable_parse.contents);
-                let reparsed_bindings = parse_native_bindings_from_text(artifact_for_stable_parse.contents);
-                let reparsed_diagnostics = parse_native_diagnostics_from_text(artifact_for_stable_parse.contents);
-                let reparsed = ParseNativeResult {
-                    functions: reparsed_fns,
-                    imports: reparsed_imports,
-                    structs: reparsed_structs,
-                    interfaces: reparsed_interfaces,
-                    enums: reparsed_enums,
-                    bindings: reparsed_bindings,
-                    diagnostics: reparsed_diagnostics,
-                };
-                parse = reparsed;
-            }
-            if debug_lowering {
-                print("emit-llvm: reparsed from artifact text functions=" + number_to_string(parse.functions.length));
-                print("emit-llvm: reparsed from artifact diagnostics=" + number_to_string(parse.diagnostics.length));
-                if parse.diagnostics.length > 0 {
-                    print("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
-                }
             }
         }
     }

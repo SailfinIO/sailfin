@@ -296,7 +296,7 @@ fn lower_all_functions(
                 print("test llvm: function ret_lines " + number_to_string(ret_lines));
             }
         }
-        if sanitize_symbol(current_function.name) == "add" {
+        if safe_function_name == "add" {
             has_add_function = true;
         }
         diagnostics = extend_string_lines_checked(diagnostics, _lfn_diags, "function lowering");

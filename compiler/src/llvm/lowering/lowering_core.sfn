@@ -32,6 +32,8 @@ import {
     parse_native_function_count_from_text,
     parse_native_functions_from_text,
     parse_native_bindings_from_text,
+    parse_native_structs_for_import,
+    parse_native_enums_for_import,
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
 
@@ -131,8 +133,6 @@ import {
 } from "./lowering_phase_sanitize";
 
 import {
-    parse_single_import_text,
-    parse_single_import_enums,
     parse_single_import_interfaces,
     parse_single_import_functions,
     extract_import_struct_methods,
@@ -404,8 +404,18 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             text_index += 1;
             continue;
         }
-        let applied_structs = parse_single_import_text(native_text, manifest_for_module);
-        let applied_enums = parse_single_import_enums(native_text, manifest_for_module);
+        // Single-pass: parse structs+enums once, apply manifest once
+        let imported_structs_safe = parse_native_structs_for_import(native_text);
+        let imported_enums_safe = parse_native_enums_for_import(native_text);
+        let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
+        let mut applied_structs = applied_import.structs;
+        if applied_structs == null {
+            applied_structs = [];
+        }
+        let mut applied_enums = applied_import.enums;
+        if applied_enums == null {
+            applied_enums = [];
+        }
         let applied_interfaces = parse_single_import_interfaces(native_text);
         let applied_functions = parse_single_import_functions(native_text);
         imported_structs = extend_native_structs(imported_structs, applied_structs);
@@ -463,6 +473,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         combined_structs, combined_enums, combined_interfaces,
         diagnostics, _trace_enums, debug_lowering
     );
+    // Merge type-context diagnostics written by build_type_context_with_recovery
+    let _tc_diags_raw = fs.readFile("build/sailfin/.phase_types_diagnostics");
+    if _tc_diags_raw.length > 0 {
+        let _tc_diags = split_lines_local(_tc_diags_raw);
+        diagnostics = extend_string_lines_checked(diagnostics, _tc_diags, "type context");
+    }
     if trace {
         print("test llvm: type context built");
     }

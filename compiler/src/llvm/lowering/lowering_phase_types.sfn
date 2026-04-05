@@ -180,7 +180,20 @@ fn build_type_context_with_recovery(
     }
 
     let type_build = build_type_context(combined_structs, fixed_enums_list, combined_interfaces);
-    diagnostics = extend_string_lines_checked(diagnostics, type_build.diagnostics, "type context");
+    // Write type-context diagnostics to file so the orchestrator can merge them.
+    // The `diagnostics` parameter is local — reassigning it here would be dropped.
+    let mut _tc_diag_content -> string = "";
+    let mut _tc_di -> number = 0;
+    let _tc_diags = type_build.diagnostics;
+    if _tc_diags != null {
+        loop {
+            if _tc_di >= _tc_diags.length { break; }
+            if _tc_di > 0 { _tc_diag_content = _tc_diag_content + "\n"; }
+            _tc_diag_content = _tc_diag_content + _tc_diags[_tc_di];
+            _tc_di += 1;
+        }
+    }
+    fs.writeFile("build/sailfin/.phase_types_diagnostics", _tc_diag_content);
     let mut type_context = type_build.context;
 
     // Recover enum info from file if cross-module ABI corruption
