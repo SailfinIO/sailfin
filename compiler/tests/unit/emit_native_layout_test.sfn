@@ -1,0 +1,278 @@
+// Unit tests for emit_native_layout.sfn — layout computation and alignment.
+// Self-contained: re-implements core layout algorithms locally to avoid
+// cross-module symbol conflicts with the v0.1.1 seed compiler.
+
+// ── align_to (mirrors emit_native_layout.sfn) ───────────────────────
+
+fn _align_to(value -> number, alignment -> number) -> number {
+    if alignment <= 1 { return value; }
+    let mut remainder -> number = value;
+    loop {
+        if remainder < alignment { break; }
+        remainder -= alignment;
+    }
+    if remainder == 0 { return value; }
+    return value + (alignment - remainder);
+}
+
+// ── Primitive type size/align lookup ─────────────────────────────────
+// Mirrors analyze_type_layout for primitive types.
+
+struct _TypeLayout {
+    size -> number;
+    align -> number;
+}
+
+fn _primitive_layout(type_name -> string) -> _TypeLayout {
+    if type_name == "number" {
+        return _TypeLayout { size: 8, align: 8 };
+    }
+    if type_name == "i64" {
+        return _TypeLayout { size: 8, align: 8 };
+    }
+    if type_name == "i32" {
+        return _TypeLayout { size: 4, align: 4 };
+    }
+    if type_name == "boolean" {
+        return _TypeLayout { size: 1, align: 1 };
+    }
+    if type_name == "bool" {
+        return _TypeLayout { size: 1, align: 1 };
+    }
+    if type_name == "string" {
+        return _TypeLayout { size: 8, align: 8 };
+    }
+    if type_name == "any" {
+        return _TypeLayout { size: 8, align: 8 };
+    }
+    // Default: pointer-sized (unknown types, arrays, optionals)
+    return _TypeLayout { size: 8, align: 8 };
+}
+
+// ── Record layout calculation ────────────────────────────────────────
+// Simplified version of calculate_record_layout.
+
+struct _FieldLayout {
+    name -> string;
+    offset -> number;
+    size -> number;
+    align -> number;
+}
+
+struct _RecordLayout {
+    size -> number;
+    align -> number;
+    fields -> _FieldLayout[];
+}
+
+struct _FieldInput {
+    name -> string;
+    type_name -> string;
+}
+
+fn _calculate_layout(inputs -> _FieldInput[]) -> _RecordLayout {
+    let mut fields -> _FieldLayout[] = [];
+    let mut offset -> number = 0;
+    let mut max_align -> number = 1;
+    let mut i -> number = 0;
+    loop {
+        if i >= inputs.length { break; }
+        let input = inputs[i];
+        let layout = _primitive_layout(input.type_name);
+        let mut field_align -> number = layout.align;
+        if field_align <= 0 { field_align = 1; }
+        offset = _align_to(offset, field_align);
+        fields.push(_FieldLayout {
+            name: input.name,
+            offset: offset,
+            size: layout.size,
+            align: field_align,
+        });
+        offset += layout.size;
+        if field_align > max_align { max_align = field_align; }
+        i += 1;
+    }
+    let mut final_align -> number = max_align;
+    if inputs.length == 0 { final_align = 1; }
+    let mut total_size -> number = offset;
+    if final_align > 1 { total_size = _align_to(offset, final_align); }
+    return _RecordLayout { size: total_size, align: final_align, fields: fields };
+}
+
+// ── align_to tests ───────────────────────────────────────────────────
+
+test "layout: align_to already aligned" {
+    assert _align_to(8, 8) == 8;
+    assert _align_to(16, 8) == 16;
+    assert _align_to(0, 4) == 0;
+}
+
+test "layout: align_to unaligned" {
+    assert _align_to(1, 4) == 4;
+    assert _align_to(5, 4) == 8;
+    assert _align_to(9, 8) == 16;
+    assert _align_to(3, 8) == 8;
+}
+
+test "layout: align_to alignment 1" {
+    assert _align_to(7, 1) == 7;
+    assert _align_to(0, 1) == 0;
+}
+
+test "layout: align_to large values" {
+    assert _align_to(100, 8) == 104;
+    assert _align_to(104, 8) == 104;
+}
+
+// ── Primitive type layout tests ──────────────────────────────────────
+
+test "layout: number is 8 bytes" {
+    let l = _primitive_layout("number");
+    assert l.size == 8;
+    assert l.align == 8;
+}
+
+test "layout: boolean is 1 byte" {
+    let l = _primitive_layout("boolean");
+    assert l.size == 1;
+    assert l.align == 1;
+}
+
+test "layout: i32 is 4 bytes" {
+    let l = _primitive_layout("i32");
+    assert l.size == 4;
+    assert l.align == 4;
+}
+
+test "layout: string is pointer-sized" {
+    let l = _primitive_layout("string");
+    assert l.size == 8;
+    assert l.align == 8;
+}
+
+test "layout: i64 is 8 bytes" {
+    let l = _primitive_layout("i64");
+    assert l.size == 8;
+    assert l.align == 8;
+}
+
+test "layout: bool is 1 byte" {
+    let l = _primitive_layout("bool");
+    assert l.size == 1;
+    assert l.align == 1;
+}
+
+test "layout: any is pointer-sized" {
+    let l = _primitive_layout("any");
+    assert l.size == 8;
+    assert l.align == 8;
+}
+
+test "layout: unknown defaults to pointer" {
+    let l = _primitive_layout("SomeUnknownType");
+    assert l.size == 8;
+    assert l.align == 8;
+}
+
+// ── Record layout tests ─────────────────────────────────────────────
+
+test "layout: empty record" {
+    let inputs -> _FieldInput[] = [];
+    let result = _calculate_layout(inputs);
+    assert result.size == 0;
+    assert result.align == 1;
+    assert result.fields.length == 0;
+}
+
+test "layout: single number field" {
+    let inputs = [_FieldInput { name: "x", type_name: "number" }];
+    let result = _calculate_layout(inputs);
+    assert result.size == 8;
+    assert result.align == 8;
+    assert result.fields.length == 1;
+    assert result.fields[0].name == "x";
+    assert result.fields[0].offset == 0;
+    assert result.fields[0].size == 8;
+}
+
+test "layout: two number fields" {
+    let inputs = [
+        _FieldInput { name: "x", type_name: "number" },
+        _FieldInput { name: "y", type_name: "number" },
+    ];
+    let result = _calculate_layout(inputs);
+    assert result.size == 16;
+    assert result.align == 8;
+    assert result.fields[0].offset == 0;
+    assert result.fields[1].offset == 8;
+}
+
+test "layout: bool then number has padding" {
+    let inputs = [
+        _FieldInput { name: "flag", type_name: "boolean" },
+        _FieldInput { name: "count", type_name: "number" },
+    ];
+    let result = _calculate_layout(inputs);
+    // bool at offset 0 (1 byte), padding to 8, number at offset 8
+    assert result.fields[0].offset == 0;
+    assert result.fields[0].size == 1;
+    assert result.fields[1].offset == 8;
+    assert result.fields[1].size == 8;
+    assert result.size == 16;
+    assert result.align == 8;
+}
+
+test "layout: number then bool has tail padding" {
+    let inputs = [
+        _FieldInput { name: "count", type_name: "number" },
+        _FieldInput { name: "flag", type_name: "boolean" },
+    ];
+    let result = _calculate_layout(inputs);
+    // number at offset 0, bool at offset 8, total needs alignment to 8 = 16
+    assert result.fields[0].offset == 0;
+    assert result.fields[1].offset == 8;
+    assert result.size == 16;
+}
+
+test "layout: i32 then i32" {
+    let inputs = [
+        _FieldInput { name: "a", type_name: "i32" },
+        _FieldInput { name: "b", type_name: "i32" },
+    ];
+    let result = _calculate_layout(inputs);
+    assert result.fields[0].offset == 0;
+    assert result.fields[0].size == 4;
+    assert result.fields[1].offset == 4;
+    assert result.fields[1].size == 4;
+    assert result.size == 8;
+    assert result.align == 4;
+}
+
+test "layout: bool bool bool packs tightly" {
+    let inputs = [
+        _FieldInput { name: "a", type_name: "boolean" },
+        _FieldInput { name: "b", type_name: "boolean" },
+        _FieldInput { name: "c", type_name: "boolean" },
+    ];
+    let result = _calculate_layout(inputs);
+    assert result.fields[0].offset == 0;
+    assert result.fields[1].offset == 1;
+    assert result.fields[2].offset == 2;
+    assert result.size == 3;
+    assert result.align == 1;
+}
+
+test "layout: mixed i32 bool number alignment" {
+    let inputs = [
+        _FieldInput { name: "tag", type_name: "i32" },
+        _FieldInput { name: "flag", type_name: "boolean" },
+        _FieldInput { name: "value", type_name: "number" },
+    ];
+    let result = _calculate_layout(inputs);
+    // i32 at 0 (4 bytes), bool at 4 (1 byte), padding to 8, number at 8
+    assert result.fields[0].offset == 0;
+    assert result.fields[1].offset == 4;
+    assert result.fields[2].offset == 8;
+    assert result.size == 16;
+    assert result.align == 8;
+}

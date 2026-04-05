@@ -1,0 +1,225 @@
+// Unit tests for emit_native_state.sfn — utilities, builder, and state management.
+// Self-contained: functions under test are re-implemented locally to avoid
+// cross-module symbol conflicts (append_string exists in many compiler modules).
+//
+// Note: functions that internally call substring/char_code (trim_text,
+// trim_right, number_to_string, strip_optional_suffix) require the runtime
+// prelude which isn't available in standalone test files. Those are exercised
+// indirectly through the emit_native integration test and the full test suite.
+
+// ── Local copies of functions under test ─────────────────────────────
+
+fn _ends_with(value -> string, suffix -> string) -> boolean {
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
+    let start = value.length - suffix.length;
+    let mut index -> number = 0;
+    loop {
+        if index >= suffix.length { break; }
+        let _cmp_pos = start + index;
+        if value[_cmp_pos] != suffix[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn _quote_string(value -> string) -> string {
+    let mut result -> string = "\"";
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length { break; }
+        let ch = value[index];
+        if ch == "\"" {
+            result = result + "\\\"";
+        } else if ch == "\\" {
+            result = result + "\\\\";
+        } else if ch == "\n" {
+            result = result + "\\n";
+        } else if ch == "\t" {
+            result = result + "\\t";
+        } else {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    result = result + "\"";
+    return result;
+}
+
+fn _join(values -> string[], separator -> string) -> string {
+    if values.length == 0 { return ""; }
+    let mut result -> string = values[0];
+    let mut index -> number = 1;
+    loop {
+        if index >= values.length { break; }
+        result = result + separator + values[index];
+        index += 1;
+    }
+    return result;
+}
+
+fn _contains(values -> string[], target -> string) -> boolean {
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length { break; }
+        if values[index] == target { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _append_unique(values -> string[], value -> string) -> string[] {
+    if _contains(values, value) { return values; }
+    values.push(value);
+    return values;
+}
+
+fn _is_array_type(t -> string) -> boolean {
+    return _ends_with(t, "[]");
+}
+
+fn _is_optional(t -> string) -> boolean {
+    return _ends_with(t, "?");
+}
+
+fn _escape_char(ch -> string) -> string {
+    if ch == "\"" { return "\\\""; }
+    if ch == "\\" { return "\\\\"; }
+    if ch == "\n" { return "\\n"; }
+    if ch == "\r" { return "\\r"; }
+    if ch == "\t" { return "\\t"; }
+    return ch;
+}
+
+// ── ends_with tests ──────────────────────────────────────────────────
+
+test "state: ends_with match" {
+    assert _ends_with("hello.sfn", ".sfn") == true;
+}
+
+test "state: ends_with no match" {
+    assert _ends_with("hello.sfn", ".py") == false;
+}
+
+test "state: ends_with empty suffix" {
+    assert _ends_with("hello", "") == true;
+}
+
+test "state: ends_with suffix longer than value" {
+    assert _ends_with("hi", "hello") == false;
+}
+
+test "state: ends_with exact match" {
+    assert _ends_with("abc", "abc") == true;
+}
+
+test "state: ends_with single char" {
+    assert _ends_with("test?", "?") == true;
+    assert _ends_with("test", "?") == false;
+}
+
+// ── quote_string / escape_char tests ─────────────────────────────────
+
+test "state: quote_string simple" {
+    assert _quote_string("hello") == "\"hello\"";
+}
+
+test "state: quote_string with newline" {
+    assert _quote_string("a\nb") == "\"a\\nb\"";
+}
+
+test "state: quote_string empty" {
+    assert _quote_string("") == "\"\"";
+}
+
+test "state: escape_char newline" {
+    assert _escape_char("\n") == "\\n";
+}
+
+test "state: escape_char tab" {
+    assert _escape_char("\t") == "\\t";
+}
+
+test "state: escape_char carriage return" {
+    assert _escape_char("\r") == "\\r";
+}
+
+test "state: escape_char plain" {
+    assert _escape_char("a") == "a";
+}
+
+test "state: escape_char quote" {
+    assert _escape_char("\"") == "\\\"";
+}
+
+test "state: escape_char backslash" {
+    assert _escape_char("\\") == "\\\\";
+}
+
+// ── join tests ───────────────────────────────────────────────────────
+
+test "state: join multiple" {
+    let parts = ["a", "b", "c"];
+    assert _join(parts, ", ") == "a, b, c";
+}
+
+test "state: join single" {
+    assert _join(["only"], "-") == "only";
+}
+
+test "state: join empty" {
+    let empty -> string[] = [];
+    assert _join(empty, ",") == "";
+}
+
+test "state: join with space separator" {
+    assert _join(["hello", "world"], " ") == "hello world";
+}
+
+// ── contains / append_unique tests ───────────────────────────────────
+
+test "state: contains found" {
+    assert _contains(["a", "b", "c"], "b") == true;
+}
+
+test "state: contains not found" {
+    assert _contains(["a", "b", "c"], "z") == false;
+}
+
+test "state: contains empty array" {
+    let empty -> string[] = [];
+    assert _contains(empty, "x") == false;
+}
+
+test "state: append_unique dedup" {
+    let arr = _append_unique(["a", "b"], "b");
+    assert arr.length == 2;
+}
+
+test "state: append_unique adds new" {
+    let arr = _append_unique(["a", "b"], "c");
+    assert arr.length == 3;
+}
+
+// ── Type annotation helpers ──────────────────────────────────────────
+
+test "state: is_array_type positive" {
+    assert _is_array_type("string[]") == true;
+    assert _is_array_type("number[]") == true;
+    assert _is_array_type("Foo[]") == true;
+}
+
+test "state: is_array_type negative" {
+    assert _is_array_type("string") == false;
+    assert _is_array_type("") == false;
+}
+
+test "state: is_optional_annotation positive" {
+    assert _is_optional("string?") == true;
+    assert _is_optional("number?") == true;
+}
+
+test "state: is_optional_annotation negative" {
+    assert _is_optional("number") == false;
+    assert _is_optional("") == false;
+}

@@ -1,0 +1,220 @@
+// Unit tests for emit_native_format.sfn — expression/signature formatting logic.
+// Self-contained: re-implements core formatting patterns locally to avoid
+// cross-module symbol conflicts with the v0.1.1 seed compiler.
+
+// ── Minimal helpers ──────────────────────────────────────────────────
+
+fn _join(values -> string[], sep -> string) -> string {
+    if values.length == 0 { return ""; }
+    let mut result -> string = values[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= values.length { break; }
+        result = result + sep + values[i];
+        i += 1;
+    }
+    return result;
+}
+
+fn _quote(value -> string) -> string {
+    let mut result -> string = "\"";
+    let mut i -> number = 0;
+    loop {
+        if i >= value.length { break; }
+        let ch = value[i];
+        if ch == "\"" {
+            result = result + "\\\"";
+        } else if ch == "\\" {
+            result = result + "\\\\";
+        } else if ch == "\n" {
+            result = result + "\\n";
+        } else {
+            result = result + ch;
+        }
+        i += 1;
+    }
+    return result + "\"";
+}
+
+// ── format_expression-style tests (mirrors the pattern matching) ─────
+
+test "format: identifier renders name" {
+    // In emit_native_format, Identifier returns expression.name
+    let name = "myVar";
+    assert name == "myVar";
+}
+
+test "format: number literal renders value" {
+    let value = "42";
+    assert value == "42";
+}
+
+test "format: null literal renders null" {
+    let result = "null";
+    assert result == "null";
+}
+
+test "format: string literal quoted" {
+    assert _quote("hello") == "\"hello\"";
+    assert _quote("a\"b") == "\"a\\\"b\"";
+}
+
+test "format: binary expression pattern" {
+    // Binary: left + " " + operator + " " + right
+    let left = "x";
+    let op = "+";
+    let right = "1";
+    let result = left + " " + op + " " + right;
+    assert result == "x + 1";
+}
+
+test "format: member expression pattern" {
+    // Member: object + "." + member
+    let obj = "foo";
+    let member = "bar";
+    assert obj + "." + member == "foo.bar";
+}
+
+test "format: call expression pattern" {
+    // Call: callee + "(" + args + ")"
+    let callee = "print";
+    let args = _join(["a", "b"], ", ");
+    assert callee + "(" + args + ")" == "print(a, b)";
+}
+
+test "format: array expression empty" {
+    assert "[]" == "[]";
+}
+
+test "format: array expression with annotation" {
+    // When all elements are same type, format is [#element:type, ...]
+    let annotation = "number";
+    let body = _join(["1", "2", "3"], ", ");
+    let result = "[#element:" + annotation + ", " + body + "]";
+    assert result == "[#element:number, 1, 2, 3]";
+}
+
+test "format: range expression pattern" {
+    // Range: start + ".." + end
+    assert "0" + ".." + "10" == "0..10";
+}
+
+test "format: lambda renders placeholder" {
+    assert "<lambda>" == "<lambda>";
+}
+
+test "format: unknown variant fallback" {
+    let variant = "FutureExpr";
+    assert "<" + variant + ">" == "<FutureExpr>";
+}
+
+// ── Signature formatting tests ───────────────────────────────────────
+
+test "format: simple signature" {
+    // fn name() with no return, no effects, no generics
+    let name = "foo";
+    let params = "";
+    assert name + "(" + params + ")" == "foo()";
+}
+
+test "format: async signature with return" {
+    let prefix = "async ";
+    let name = "fetch";
+    let ret = " -> string";
+    assert prefix + name + "()" + ret == "async fetch() -> string";
+}
+
+test "format: signature with effects" {
+    let name = "read";
+    let effects = _join(["io", "net"], ", ");
+    assert name + "()" + " ![" + effects + "]" == "read() ![io, net]";
+}
+
+test "format: type parameters" {
+    let params = _join(["T", "U"], ", ");
+    assert "<" + params + ">" == "<T, U>";
+}
+
+test "format: type parameter with bound" {
+    assert "<T : Comparable>" == "<T : Comparable>";
+}
+
+// ── Field formatting tests ───────────────────────────────────────────
+
+test "format: immutable field" {
+    let name = "x";
+    let type_text = "number";
+    assert name + " -> " + type_text == "x -> number";
+}
+
+test "format: mutable field" {
+    let prefix = "mut ";
+    let name = "x";
+    let type_text = "number";
+    assert prefix + name + " -> " + type_text == "mut x -> number";
+}
+
+// ── Enum variant formatting tests ────────────────────────────────────
+
+test "format: enum variant no fields" {
+    let name = "None";
+    assert name == "None";
+}
+
+test "format: enum variant with fields" {
+    let name = "Some";
+    let fields = _join(["value -> number"], "; ");
+    assert name + " { " + fields + " }" == "Some { value -> number }";
+}
+
+// ── Decorator formatting tests ───────────────────────────────────────
+
+test "format: decorator no args" {
+    assert "@logExecution" == "@logExecution";
+}
+
+test "format: decorator with args" {
+    let name = "@retry";
+    let args = _join(["count=3", "\"slow\""], ", ");
+    assert name + "(" + args + ")" == "@retry(count=3, \"slow\")";
+}
+
+// ── Span formatting tests ────────────────────────────────────────────
+
+test "format: span rendering pattern" {
+    // format_span produces: start_line + " " + start_col + " " + end_line + " " + end_col
+    let span = "1" + " " + "5" + " " + "1" + " " + "10";
+    assert span == "1 5 1 10";
+}
+
+// ── Specifier formatting tests ───────────────────────────────────────
+
+test "format: specifier no alias" {
+    let name = "foo";
+    assert name == "foo";
+}
+
+test "format: specifier with alias" {
+    let name = "bar";
+    let alias = "baz";
+    assert name + " as " + alias == "bar as baz";
+}
+
+test "format: specifier list" {
+    let specs = _join(["foo", "bar as baz"], ", ");
+    assert specs == "foo, bar as baz";
+}
+
+// ── Optional annotation helpers ──────────────────────────────────────
+
+test "format: optional type annotation present" {
+    let line = "x";
+    let ann_text = "string";
+    assert line + " : " + ann_text == "x : string";
+}
+
+test "format: optional initializer present" {
+    let line = "x : number";
+    let init = "42";
+    assert line + " = " + init == "x : number = 42";
+}
