@@ -16,7 +16,7 @@ import {
     number_to_string,
     module_name_from_path,
 } from "./main";
-import { split_lines } from "./native_ir_utils";
+import { split_lines } from "./native_ir_utils_text";
 import {
     handle_test_command,
     handle_publish_command,

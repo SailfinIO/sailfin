@@ -16,15 +16,18 @@ import {
 import {
     index_of,
     maybe_trim_trailing,
-    parse_binding_components,
-    parse_case_instruction,
-    parse_inline_case_instruction,
-    parse_let_instruction,
     starts_with,
     strip_prefix,
     trim_text,
     trim_trailing_delimiters,
-} from "./native_ir_utils";
+} from "./native_ir_utils_text";
+
+import {
+    parse_binding_components,
+    parse_case_instruction,
+    parse_inline_case_instruction,
+    parse_let_instruction,
+} from "./native_ir_utils_parse";
 
 fn initial_instruction_depth_state() -> InstructionDepthState {
     return InstructionDepthState { paren_depth: 0, bracket_depth: 0, brace_depth: 0, in_string: false, escaping: false };

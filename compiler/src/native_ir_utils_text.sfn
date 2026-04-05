@@ -1,0 +1,564 @@
+// compiler/src/native_ir_utils_text.sfn
+//
+// Pure string utility functions used across the native IR parser modules.
+// No dependencies on native_ir types.
+
+import { substring } from "./string_utils";
+
+export {
+    is_trim_char,
+    trim_text,
+    starts_with,
+    strip_prefix,
+    index_of,
+    strip_quotes,
+    split_lines,
+    strip_generics,
+    last_index_of,
+    split_text,
+    split_comma_separated,
+    text_char_at,
+    trim_trailing_delimiters,
+    maybe_trim_trailing,
+    split_top_level_commas,
+    find_matching_angle,
+    find_matching_paren,
+    split_whitespace,
+};
+
+fn is_trim_char(ch -> string) -> boolean {
+    let mut _ret388 -> boolean = false;
+    if ch == " " { _ret388 = true; }
+    if ch == "\n" { _ret388 = true; }
+    if ch == "\r" { _ret388 = true; }
+    if ch == "\t" { _ret388 = true; }
+    return _ret388;
+}
+
+fn trim_text(value -> string) -> string {
+    let mut start -> number = 0;
+    let mut end -> number = value.length;
+    loop {
+        if start >= end {
+            break;
+        }
+        let ch = value[start];
+        if !is_trim_char(ch) {
+            break;
+        }
+        start += 1;
+    }
+    loop {
+        if end <= start {
+            break;
+        }
+        let ch = value[end - 1];
+        if !is_trim_char(ch) {
+            break;
+        }
+        end -= 1;
+    }
+    if start == 0 {
+        if end == value.length {
+            return value;
+        }
+    }
+    return substring(value, start, end);
+}
+
+fn starts_with(value -> string, prefix -> string) -> boolean {
+    if prefix.length > value.length {
+        return false;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= prefix.length {
+            break;
+        }
+        if value[index] != prefix[index] {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn strip_prefix(value -> string, prefix -> string) -> string {
+    if starts_with(value, prefix) {
+        return substring(value, prefix.length, value.length);
+    }
+    return value;
+}
+
+fn index_of(value -> string, target -> string) -> number {
+    if target.length == 0 {
+        return 0;
+    }
+    if target.length > value.length {
+        return -1;
+    }
+    let limit = value.length - target.length;
+    let mut index -> number = 0;
+    loop {
+        if index > limit {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            let _cmp_pos = index + match_index;
+            if value[_cmp_pos] != target[match_index] {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn strip_quotes(value -> string) -> string {
+    if value.length < 2 {
+        return value;
+    }
+    let first = value[0];
+    let last = value[value.length - 1];
+    let mut _if360 -> boolean = false;
+    if first == "\"" {
+        if last == "\"" {
+            _if360 = true;
+        }
+    }
+    if _if360 {
+        return substring(value, 1, value.length - 1);
+    }
+    let mut _if361 -> boolean = false;
+    if first == "'" {
+        if last == "'" {
+            _if361 = true;
+        }
+    }
+    if _if361 {
+        return substring(value, 1, value.length - 1);
+    }
+    return value;
+}
+
+fn split_lines(value -> string) -> string[] {
+    let value_len = value.length;
+    let mut lines -> string[] = [];
+    let mut start -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= value_len {
+            break;
+        }
+        let ch = value[index];
+        if ch == "\n" {
+            lines.push(substring(value, start, index));
+            start = index + 1;
+        }
+        index += 1;
+    }
+    lines.push(substring(value, start, value_len));
+    return lines;
+}
+
+fn strip_generics(name -> string) -> string {
+    let mut result -> string = "";
+    let mut depth -> number = 0;
+    let mut index -> number = 0;
+    loop {
+        if index >= name.length {
+            break;
+        }
+        let ch = name[index];
+        if ch == "<" {
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if depth > 0 {
+                depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if depth == 0 {
+            result = result + ch;
+        }
+        index += 1;
+    }
+    return trim_text(result);
+}
+
+fn last_index_of(value -> string, target -> string) -> number {
+    if target.length == 0 {
+        return value.length;
+    }
+    let mut index -> number = value.length - target.length;
+    loop {
+        if index < 0 {
+            break;
+        }
+        let mut match_index -> number = 0;
+        let mut matches -> boolean = true;
+        loop {
+            if match_index >= target.length {
+                break;
+            }
+            let _cmp_pos2 = index + match_index;
+            if value[_cmp_pos2] != target[match_index] {
+                matches = false;
+                break;
+            }
+            match_index += 1;
+        }
+        if matches {
+            return index;
+        }
+        index -= 1;
+    }
+    return -1;
+}
+
+fn split_text(value -> string, delimiter -> string) -> string[] {
+    if delimiter.length == 0 {
+        return [value];
+    }
+    let mut parts -> string[] = [];
+    let mut start -> number = 0;
+    let mut index -> number = 0;
+
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let pos = index_of(substring(value, index, value.length), delimiter);
+        if pos < 0 {
+            break;
+        }
+        let actual_pos = index + pos;
+        parts.push(substring(value, start, actual_pos));
+        start = actual_pos + delimiter.length;
+        index = start;
+    }
+
+    if start < value.length {
+        parts.push(substring(value, start, value.length));
+    } else if start == value.length {
+        parts.push("");
+    }
+
+    return parts;
+}
+
+fn split_comma_separated(value -> string) -> string[] {
+    let value_len = value.length;
+    let mut results -> string[] = [];
+    let mut current -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= value_len {
+            break;
+        }
+        let ch = value[index];
+        if ch == "," {
+            results.push(trim_text(current));
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        index += 1;
+    }
+    if current.length > 0 {
+        results.push(trim_text(current));
+    }
+    let mut filtered -> string[] = [];
+    index = 0;
+    loop {
+        if index >= results.length {
+            break;
+        }
+        let entry = results[index];
+        if entry.length > 0 {
+            filtered.push(entry);
+        }
+        index += 1;
+    }
+    return filtered;
+}
+
+fn text_char_at(value -> string, index -> number) -> string {
+    if index < 0 {
+        return "";
+    }
+    if index >= value.length {
+        return "";
+    }
+    return value[index];
+}
+
+fn trim_trailing_delimiters(text -> string) -> string {
+    let mut end -> number = text.length;
+    loop {
+        if end <= 0 {
+            break;
+        }
+        let ch = text_char_at(text, end - 1);
+        let mut _if373 -> boolean = false;
+        if ch == "," { _if373 = true; }
+        if ch == ";" { _if373 = true; }
+        if _if373 {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if end == text.length {
+        return text;
+    }
+    return substring(text, 0, end);
+}
+
+fn maybe_trim_trailing(value -> string?) -> string? {
+    if value == null {
+        return null;
+    }
+    let trimmed = trim_trailing_delimiters(value);
+    return trimmed;
+}
+
+fn split_top_level_commas(text -> string) -> string[] {
+    let mut entries -> string[] = [];
+    let mut current -> string = "";
+    let mut index -> number = 0;
+    let mut quote -> string = "";
+    let mut angle_depth -> number = 0;
+    let mut paren_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if quote.length > 0 {
+            current = current + ch;
+            if ch == "\\" {
+                let _esc_next = index + 1;
+                if _esc_next < text.length {
+                    current = current + text[_esc_next];
+                    index += 2;
+                    continue;
+                }
+            }
+            if ch == quote {
+                quote = "";
+            }
+            index += 1;
+            continue;
+        }
+        let mut _if367 -> boolean = false;
+        if ch == "\"" { _if367 = true; }
+        if ch == "'" { _if367 = true; }
+        if _if367 {
+            quote = ch;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "<" {
+            angle_depth += 1;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            }
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            current = current + ch;
+            index += 1;
+            continue;
+        }
+        if ch == "," {
+            if angle_depth == 0 {
+                if paren_depth == 0 {
+                    if bracket_depth == 0 {
+                        if brace_depth == 0 {
+                            let segment = trim_text(current);
+                            if segment.length > 0 {
+                                entries.push(segment);
+                            }
+                            current = "";
+                            index += 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        current = current + ch;
+        index += 1;
+    }
+    let segment = trim_text(current);
+    if segment.length > 0 {
+        entries.push(segment);
+    }
+    return entries;
+}
+
+fn find_matching_angle(text -> string, start_index -> number) -> number {
+    let mut depth -> number = 0;
+    let mut index -> number = start_index;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        if ch == "<" {
+            depth += 1;
+        } else if ch == ">" {
+            if depth > 0 {
+                depth -= 1;
+                if depth == 0 {
+                    return index;
+                }
+            } else {
+                return index;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn find_matching_paren(text -> string, start_index -> number) -> number {
+    let mut depth -> number = 0;
+    let mut index -> number = start_index;
+    loop {
+        if index >= text.length {
+            break;
+        }
+        let ch = text[index];
+        let mut _if368 -> boolean = false;
+        if ch == "\"" { _if368 = true; }
+        if ch == "'" { _if368 = true; }
+        if _if368 {
+            let mut lookahead = index + 1;
+            loop {
+                if lookahead >= text.length {
+                    return -1;
+                }
+                let current = text[lookahead];
+                if current == "\\" {
+                    lookahead += 2;
+                    continue;
+                }
+                if current == ch {
+                    index = lookahead;
+                    break;
+                }
+                lookahead += 1;
+            }
+        } else if ch == "(" {
+            depth += 1;
+        } else if ch == ")" {
+            if depth > 0 {
+                depth -= 1;
+                if depth == 0 {
+                    return index;
+                }
+            } else {
+                return -1;
+            }
+        }
+        index += 1;
+    }
+    return -1;
+}
+
+fn split_whitespace(value -> string) -> string[] {
+    let mut parts -> string[] = [];
+    if value.length == 0 {
+        return parts;
+    }
+    let mut start -> number = -1;
+    let mut index -> number = 0;
+    loop {
+        if index >= value.length {
+            break;
+        }
+        let ch = text_char_at(value, index);
+        let mut _let385 -> boolean = false;
+        if ch == " " { _let385 = true; }
+        if ch == "\t" { _let385 = true; }
+        if ch == "\n" { _let385 = true; }
+        if ch == "\r" { _let385 = true; }
+        let is_space = _let385;
+        if is_space {
+            if start >= 0 {
+                parts.push(substring(value, start, index));
+                start = -1;
+            }
+        } else if start < 0 {
+            start = index;
+        }
+        index += 1;
+    }
+    if start >= 0 {
+        parts.push(substring(value, start, value.length));
+    }
+    return parts;
+}
