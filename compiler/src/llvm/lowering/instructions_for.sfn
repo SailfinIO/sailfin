@@ -27,6 +27,7 @@ import {
 } from "../utils";
 
 import {
+    empty_string_constant_set,
     merge_string_constants,
 } from "../strings";
 
@@ -530,6 +531,7 @@ fn lower_for_range(
     current_bindings = body_result.bindings;
     current_next_region = _br_fo_nextreg;
     collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
+    collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
 
     if !_br_fo_term {
         current_lines.push("  br label %" + loop_increment_label);
@@ -775,8 +777,7 @@ fn lower_for_array(
 
         current_locals = locals;
 
-    let empty_constants = empty_string_constant_set();
-    _write_block_result_files(current_lines, current_allocas, false, diagnostics, empty_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
+    _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
@@ -790,7 +791,7 @@ fn lower_for_array(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: next_index,
-        mutations: collected_mutations, string_constants: empty_constants,
+        mutations: collected_mutations, string_constants: collected_string_constants,
     };
 }
 
