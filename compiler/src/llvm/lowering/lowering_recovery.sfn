@@ -69,7 +69,9 @@ import {
 // Construct a ParseNativeResult from individual field-extraction calls.
 // This avoids the seed v0.1.1 struct-return ABI bug: each extractor returns
 // an array (works through double→pointer shim), then we assemble locally.
-fn parse_native_artifact_with_retry(text -> string, attempts -> number) -> ParseNativeResult {
+// Safe replacement for parse_native_artifact that avoids struct-return ABI bug.
+// Calls individual field extractors and assembles the result locally.
+fn parse_native_artifact_safe(text -> string) -> ParseNativeResult {
     let functions = parse_native_functions_from_text(text);
     let imports = parse_native_imports_from_text(text);
     let structs = parse_native_structs_from_text(text);
@@ -89,25 +91,11 @@ fn parse_native_artifact_with_retry(text -> string, attempts -> number) -> Parse
     return result;
 }
 
-// Safe replacement for parse_native_artifact that avoids struct-return ABI bug.
-fn parse_native_artifact_safe(text -> string) -> ParseNativeResult {
-    let functions = parse_native_functions_from_text(text);
-    let imports = parse_native_imports_from_text(text);
-    let structs = parse_native_structs_from_text(text);
-    let interfaces = parse_native_interfaces_from_text(text);
-    let enums = parse_native_enums_from_text(text);
-    let bindings = parse_native_bindings_from_text(text);
-    let diagnostics = parse_native_diagnostics_from_text(text);
-    let result = ParseNativeResult {
-        functions: functions,
-        imports: imports,
-        structs: structs,
-        interfaces: interfaces,
-        enums: enums,
-        bindings: bindings,
-        diagnostics: diagnostics,
-    };
-    return result;
+// Thin wrapper: `attempts` parameter is unused — retry logic was never
+// implemented and the body was always identical to parse_native_artifact_safe.
+// Kept for call-site compatibility (entrypoints.sfn passes an attempts arg).
+fn parse_native_artifact_with_retry(text -> string, attempts -> number) -> ParseNativeResult {
+    return parse_native_artifact_safe(text);
 }
 
 // ── Light function recovery ──────────────────────────────────────────
