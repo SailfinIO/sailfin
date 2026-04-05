@@ -1,0 +1,37 @@
+// compiler/src/llvm/lowering/lowering_phase_imports.sfn
+//
+// Phase 2 of LLVM lowering: helpers for imported module context.
+//
+// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+// The main import gathering loop lives in lowering_core.sfn (orchestrator)
+// to avoid duplicate parsing.  This module provides thin wrappers used
+// by the orchestrator for individual parse operations.
+
+import {
+    NativeFunction,
+    NativeStruct,
+    NativeInterface,
+} from "../../native_ir";
+import {
+    parse_native_interfaces_for_import,
+    parse_native_functions_for_import,
+} from "../../native_ir_api";
+
+import {
+    flatten_struct_methods,
+} from "./lowering_helpers";
+
+// Parse imported interfaces from a single import text.
+fn parse_single_import_interfaces(native_text: string) -> NativeInterface[] {
+    return parse_native_interfaces_for_import(native_text);
+}
+
+// Parse imported functions from a single import text.
+fn parse_single_import_functions(native_text: string) -> NativeFunction[] {
+    return parse_native_functions_for_import(native_text);
+}
+
+// Extract struct methods from applied structs.
+fn extract_import_struct_methods(applied_structs: NativeStruct[]) -> NativeFunction[] {
+    return flatten_struct_methods(applied_structs);
+}

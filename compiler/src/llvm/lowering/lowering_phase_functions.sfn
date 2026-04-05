@@ -1,0 +1,406 @@
+// compiler/src/llvm/lowering/lowering_phase_functions.sfn
+//
+// Phase 5 of LLVM lowering: function lowering loop.
+// Iterates over local functions, prepares file-based IPC for each,
+// calls emit_llvm_function, and merges results into the output lines.
+//
+// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+
+import { NativeModule } from "../../emit_native";
+import {
+    NativeFunction,
+    NativeParameter,
+    NativeInstruction,
+} from "../../native_ir";
+
+import {
+    TypeContext,
+    FunctionEffectEntry,
+    StringConstant,
+    LocalBinding,
+} from "../types";
+
+import {
+    number_to_string,
+    sanitize_symbol,
+    starts_with,
+    trim_text,
+} from "../utils";
+
+import {
+    empty_string_constant_set,
+    merge_string_constants,
+    render_string_constants,
+} from "../strings";
+
+import {
+    find_function_effect_entry,
+    append_function_effect_entry,
+} from "../effects";
+
+import {
+    collect_exported_symbol_names,
+} from "../rendering";
+
+import {
+    emit_llvm_function,
+} from "./emission";
+
+import {
+    extend_string_lines,
+    extend_string_lines_checked,
+    append_string_lines,
+    ensure_intrinsic_declarations,
+} from "./lowering_io";
+
+import {
+    get_function_name_at,
+    get_function_return_type_at,
+    get_function_is_async_at,
+    get_function_is_extern_at,
+    get_function_parameters_at,
+    get_function_instructions_at,
+    get_function_effects_at,
+    get_function_decorators_at,
+} from "./lowering_native_helpers";
+
+import {
+    split_lines_local,
+    _parse_lowered_fn_string_constants,
+} from "./lowering_text_utils";
+
+import {
+    apply_module_symbol_mangling,
+} from "./lowering_helpers";
+
+// Write function metadata to file-based IPC channels for emit_llvm_function.
+// The v0.1.1 seed compiles emission.sfn with NativeFunction as i8*,
+// making direct field access return garbage.
+fn write_function_ipc(
+    local_functions: NativeFunction[],
+    index: number,
+    safe_function_name: string,
+    safe_return_type: string,
+    safe_parameters: NativeParameter[],
+    safe_instructions: NativeInstruction[],
+    safe_decorators: string[],
+    fn_is_async: boolean,
+    fn_is_extern: boolean
+) -> boolean ![io] {
+    let mut is_async_flag = "0";
+    if fn_is_async {
+        is_async_flag = "1";
+    }
+    let mut is_extern_flag = "0";
+    if fn_is_extern {
+        is_extern_flag = "1";
+    }
+    fs.writeFile("build/sailfin/.fn_name", safe_function_name);
+    fs.writeFile("build/sailfin/.fn_return_type", safe_return_type);
+    fs.writeFile("build/sailfin/.fn_is_async", is_async_flag);
+    fs.writeFile("build/sailfin/.fn_is_extern", is_extern_flag);
+    fs.writeFile("build/sailfin/.fn_param_count", number_to_string(safe_parameters.length));
+    fs.writeFile("build/sailfin/.fn_instr_count", number_to_string(safe_instructions.length));
+    let fn_index_str = number_to_string(index);
+    fs.writeFile("build/sailfin/.fn_index", fn_index_str);
+    fs.writeFile("build/sailfin/.fn_index_backup", fn_index_str);
+    fs.writeFile("build/sailfin/.fn_decorator_count", number_to_string(safe_decorators.length));
+    let mut param_write_i -> number = 0;
+    loop {
+        if param_write_i >= safe_parameters.length {
+            break;
+        }
+        fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_name", safe_parameters[param_write_i].name);
+        fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_type", safe_parameters[param_write_i].type_annotation);
+        param_write_i += 1;
+    }
+    let mut dec_write_i -> number = 0;
+    loop {
+        if dec_write_i >= safe_decorators.length {
+            break;
+        }
+        fs.writeFile("build/sailfin/.fn_decorator_" + number_to_string(dec_write_i), safe_decorators[dec_write_i]);
+        dec_write_i += 1;
+    }
+    return true;
+}
+
+// Lower all local functions to LLVM IR.
+// Writes results to file-based IPC:
+//   .phase_functions_lines       — newline-separated LLVM IR lines
+//   .phase_functions_diagnostics — newline-separated diagnostics
+//   .phase_functions_has_add     — "1" if an @add function was found
+//
+// Returns the total number of LLVM IR lines produced.
+fn lower_all_functions(
+    local_functions: NativeFunction[],
+    context_functions: NativeFunction[],
+    aggregated_effects: FunctionEffectEntry[],
+    type_context: TypeContext,
+    module_name: string,
+    safe_entry_points: string[],
+    exported_symbols: string[],
+    imported_functions: NativeFunction[],
+    module_global_locals: LocalBinding[],
+    module_init_symbol: string,
+    module_globals_needs_init_call: boolean,
+    module_string_constants: StringConstant[],
+    trace: boolean,
+    debug_lowering: boolean
+) -> string[] ![io] {
+    let mut lines -> string[] = [];
+    let mut index -> number = 0;
+    let mut has_add_function -> boolean = false;
+    let mut all_string_constants -> StringConstant[] = module_string_constants;
+    let mut function_effects -> FunctionEffectEntry[] = [];
+    let mut diagnostics -> string[] = [];
+
+    if trace {
+        print("test llvm: lowering functions start (count=" + number_to_string(local_functions.length) + ")");
+    }
+    if debug_lowering {
+        print("emit-llvm: phase=functions");
+    }
+    loop {
+        if index >= local_functions.length {
+            break;
+        }
+        let current_function = local_functions[index];
+        let mut safe_function_name = get_function_name_at(local_functions, index);
+        if safe_function_name == null {
+            safe_function_name = "";
+        }
+        let mut safe_parameters = get_function_parameters_at(local_functions, index);
+        if safe_parameters == null {
+            safe_parameters = [];
+        }
+        let mut safe_effects = get_function_effects_at(local_functions, index);
+        if safe_effects == null {
+            safe_effects = [];
+        }
+        let mut safe_decorators = get_function_decorators_at(local_functions, index);
+        if safe_decorators == null {
+            safe_decorators = [];
+        }
+        let mut safe_instructions = get_function_instructions_at(local_functions, index);
+        if safe_instructions == null {
+            safe_instructions = [];
+        }
+        let mut safe_return_type = get_function_return_type_at(local_functions, index);
+        if safe_return_type == null {
+            safe_return_type = "";
+        }
+        let fn_is_async = get_function_is_async_at(local_functions, index);
+        let fn_is_extern = get_function_is_extern_at(local_functions, index);
+
+        let effective_function = NativeFunction {
+            name: safe_function_name,
+            is_async: fn_is_async,
+            parameters: safe_parameters,
+            return_type: safe_return_type,
+            effects: safe_effects,
+            decorators: safe_decorators,
+            instructions: safe_instructions,
+            is_extern: fn_is_extern,
+        };
+        if trace {
+            let mut return_count -> number = 0;
+            let mut instr_index -> number = 0;
+            loop {
+                if instr_index >= safe_instructions.length {
+                    break;
+                }
+                if safe_instructions[instr_index].variant == "Return" {
+                    return_count += 1;
+                }
+                instr_index += 1;
+            }
+            print(
+                "test llvm: function "
+                + number_to_string(index)
+                + "/"
+                + number_to_string(local_functions.length)
+                + " "
+                + safe_function_name
+                + " instrs="
+                + number_to_string(safe_instructions.length)
+                + " returns="
+                + number_to_string(return_count)
+            );
+        }
+        let aggregated_entry = find_function_effect_entry(aggregated_effects, safe_function_name);
+        let mut effective_effects -> string[] = [];
+        if aggregated_entry != null {
+            effective_effects = aggregated_entry.effects;
+        }
+        function_effects = append_function_effect_entry(
+            function_effects,
+            FunctionEffectEntry {
+                name: safe_function_name,
+                effects: effective_effects,
+            }
+        );
+        if debug_lowering {
+            print("emit-llvm: function-start " + safe_function_name + " idx=" + number_to_string(index));
+        }
+        // Write function metadata to file-based IPC
+        write_function_ipc(
+            local_functions, index,
+            safe_function_name, safe_return_type,
+            safe_parameters, safe_instructions,
+            safe_decorators, fn_is_async, fn_is_extern
+        );
+        let lowered = emit_llvm_function(
+            safe_function_name,
+            context_functions,
+            effective_effects,
+            type_context,
+            module_name,
+            safe_entry_points,
+            exported_symbols,
+            imported_functions,
+            module_global_locals,
+            module_init_symbol,
+            module_globals_needs_init_call
+        );
+        // Read results from file-based IPC
+        let _lfn_lines_raw = fs.readFile("build/sailfin/.lowered_fn_lines");
+        let _lfn_lines = split_lines_local(_lfn_lines_raw);
+        let _lfn_diags_raw = fs.readFile("build/sailfin/.lowered_fn_diagnostics");
+        let _lfn_diags = split_lines_local(_lfn_diags_raw);
+        let _lfn_sc_raw = fs.readFile("build/sailfin/.lowered_fn_string_constants");
+        let _lfn_string_constants = _parse_lowered_fn_string_constants(_lfn_sc_raw);
+        if debug_lowering {
+            print("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
+        }
+        if trace {
+            print("test llvm: function lowered " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length) + " diagnostics=" + number_to_string(_lfn_diags.length));
+            if _lfn_lines.length > 0 {
+                print("test llvm: function first line " + _lfn_lines[0]);
+                print("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
+                let mut ret_lines -> number = 0;
+                let mut scan_index -> number = 0;
+                loop {
+                    if scan_index >= _lfn_lines.length {
+                        break;
+                    }
+                    let line = _lfn_lines[scan_index];
+                    let mut _if256 -> boolean = false;
+                    if starts_with(trim_text(line), "ret ") { _if256 = true; }
+                    if trim_text(line) == "ret void" { _if256 = true; }
+                    if _if256 {
+                        ret_lines += 1;
+                    }
+                    scan_index += 1;
+                }
+                print("test llvm: function ret_lines " + number_to_string(ret_lines));
+            }
+        }
+        if safe_function_name == "add" {
+            has_add_function = true;
+        }
+        diagnostics = extend_string_lines_checked(diagnostics, _lfn_diags, "function lowering");
+        if trace {
+            print("test llvm: function diagnostics merged " + safe_function_name);
+        }
+        let normalized_lowered_lines = _lfn_lines;
+        if normalized_lowered_lines != null {
+            if normalized_lowered_lines.length > 0 {
+                lines = append_string_lines(lines, normalized_lowered_lines);
+                if trace {
+                    print("test llvm: function lines merged " + safe_function_name);
+                    print("test llvm: function post-merge check " + safe_function_name);
+                }
+                let _ep_next = index + 1;
+                if _ep_next < local_functions.length {
+                    lines.push("");
+                }
+                if trace {
+                    print("test llvm: function post-merge blank " + safe_function_name);
+                }
+            }
+        }
+        if _lfn_string_constants != null {
+            if _lfn_string_constants.length > 0 {
+                if trace {
+                    print("test llvm: merging string constants " + safe_function_name + " count=" + number_to_string(_lfn_string_constants.length));
+                }
+                let existing_constants = all_string_constants;
+                all_string_constants = merge_string_constants(existing_constants, _lfn_string_constants);
+                if trace {
+                    print("test llvm: merged string constants " + safe_function_name);
+                }
+            }
+        }
+        index += 1;
+    }
+    if trace {
+        print("test llvm: lowering functions done");
+    }
+    if debug_lowering {
+        print("emit-llvm: phase=functions_done");
+    }
+
+    // Write function_effects and has_add_function to files for orchestrator
+    let mut _has_add_flag -> string = "0";
+    if has_add_function {
+        _has_add_flag = "1";
+    }
+    fs.writeFile("build/sailfin/.phase_functions_has_add", _has_add_flag);
+
+    // Append the add helper if not defined
+    if !has_add_function {
+        lines.push("");
+        lines = extend_string_lines(lines, [
+            "define internal double @add(double %a, double %b) {",
+            "entry:",
+            "  %t0 = fadd double %a, %b",
+            "  ret double %t0",
+            "}",
+        ]);
+    }
+
+    // String constants
+    let string_constant_lines = render_string_constants(all_string_constants);
+    if string_constant_lines != null {
+        if string_constant_lines.length > 0 {
+            lines.push("");
+            lines = append_string_lines(lines, string_constant_lines);
+            lines.push("");
+        }
+    }
+    if trace {
+        print("test llvm: string constants emitted");
+    }
+    if debug_lowering {
+        print("emit-llvm: phase=string_constants");
+    }
+
+    // Intrinsics
+    lines = ensure_intrinsic_declarations(lines);
+    if trace {
+        print("test llvm: intrinsics ensured");
+    }
+    if debug_lowering {
+        print("emit-llvm: phase=intrinsics");
+    }
+
+    // Write diagnostics and function_effects count to files
+    let mut diag_content -> string = "";
+    let mut di -> number = 0;
+    loop {
+        if di >= diagnostics.length { break; }
+        if di > 0 { diag_content = diag_content + "\n"; }
+        diag_content = diag_content + diagnostics[di];
+        di += 1;
+    }
+    fs.writeFile("build/sailfin/.phase_functions_diagnostics", diag_content);
+
+    // Write function effects count
+    fs.writeFile("build/sailfin/.phase_functions_effects_count", number_to_string(function_effects.length));
+
+    // Write all_string_constants count for orchestrator
+    fs.writeFile("build/sailfin/.phase_functions_string_constants_count", number_to_string(all_string_constants.length));
+
+    return lines;
+}

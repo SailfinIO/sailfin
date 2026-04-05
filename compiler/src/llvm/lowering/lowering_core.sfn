@@ -1,9 +1,13 @@
 // compiler/src/llvm/lowering/lowering_core.sfn
 //
-// Core LLVM lowering implementation: the main
-// lower_to_llvm_lines_with_parsed_context function and its direct wrappers.
+// Core LLVM lowering orchestrator.  Delegates to phase modules:
+//   lowering_phase_sanitize.sfn  — input sanitization & recovery
+//   lowering_phase_imports.sfn   — per-text import context helpers
+//   lowering_phase_types.sfn     — struct/enum serialization, type context
+//   lowering_phase_render.sfn    — LLVM IR preamble rendering
+//   lowering_phase_functions.sfn — function lowering loop
 //
-// Supporting modules (extracted to reduce per-file memory footprint):
+// Supporting modules (extracted earlier):
 //   lowering_native_helpers.sfn — constructors, updaters, field accessors
 //   lowering_text_utils.sfn     — text processing and structured data parsers
 //   lowering_recovery.sfn       — light recovery parsers for functions/structs/imports
@@ -25,96 +29,50 @@ import {
     NativeBinding,
 } from "../../native_ir";
 import {
-    select_text_artifact,
     parse_native_function_count_from_text,
     parse_native_functions_from_text,
-    parse_native_structs_from_text,
-    parse_native_imports_from_text,
-    parse_native_interfaces_from_text,
-    parse_native_enums_from_text,
     parse_native_bindings_from_text,
-    parse_native_diagnostics_from_text,
     parse_native_structs_for_import,
-    parse_native_imports_for_import,
-    parse_native_interfaces_for_import,
     parse_native_enums_for_import,
-    parse_native_functions_for_import,
-    parse_native_artifact_for_import_context,
-    parse_layout_manifest,
 } from "../../native_ir_api";
-import { split_lines } from "../../native_ir_utils_text";
 import { substring } from "../../string_utils";
 
 import {
     TypeContext,
     TraitMetadata,
-    TraitDescriptor,
-    TraitImplementationDescriptor,
-    ImportedModuleContext,
-    LoweredLLVMResult,
     LoweredLLVMLinesResult,
     FunctionEffectEntry,
     LifetimeRegionMetadata,
     StringConstant,
-    CapabilityManifest,
-    EnumTypeInfo,
-    EnumVariantInfo,
     LocalBinding,
 } from "../types";
 
 import {
-    append_string,
-    join_with_separator,
     number_to_string,
     sanitize_symbol,
     string_array_contains,
-    starts_with,
-    trim_text,
     index_of,
 } from "../utils";
 
 import {
     empty_string_constant_set,
-    merge_string_constants,
-    render_string_constants,
 } from "../strings";
 
 import {
     collect_direct_function_effects,
     collect_function_call_graph,
     propagate_function_effects,
-    build_capability_manifest,
     collect_runtime_helper_targets,
     append_unique_effect,
-    find_function_effect_entry,
-    append_function_effect_entry,
 } from "../effects";
 
 import {
-    render_test_harness_main,
     collect_exported_symbol_names,
-    render_struct_type_definitions,
-    render_enum_type_definitions,
-    render_interface_type_definitions,
-    render_vtable_type_definitions,
-    render_vtable_constants,
-    render_trait_metadata_comments,
-    render_runtime_helper_declarations,
-    render_imported_function_declarations,
-    should_internalize_function,
-    find_function_by_name,
 } from "../rendering";
-
-import {
-    fixup_enum_layouts,
-    build_type_context,
-} from "../type_context";
 
 import {
     collect_imported_module_context_for_module,
     apply_layout_manifest_to_module,
-    resolve_import_module_slug_for_module,
-    resolve_import_artifact_slug,
 } from "../imports";
 
 import {
@@ -122,11 +80,6 @@ import {
 } from "./module_globals";
 
 import {
-    emit_llvm_function,
-} from "./emission";
-
-import {
-    sanitize_collection_length,
     extend_native_structs,
     extend_native_enums,
     extend_native_interfaces,
@@ -135,65 +88,68 @@ import {
     render_test_harness_main_for_module,
     apply_module_symbol_mangling,
     build_trait_metadata,
-    append_native_function,
     concat_native_functions,
     flatten_struct_methods,
     empty_capability_manifest,
-    empty_trait_metadata,
-    collect_available_import_module_names,
-    resolve_import_provider_module_name,
     collect_defined_function_symbols,
-    find_substitution_index,
-    replace_symbol_refs_in_line,
-    apply_symbol_substitutions,
-    find_declare_signature,
-    render_function_shim,
-    insert_before_llvm_footer,
-    DeclareSignature,
-    MangledModuleResult,
 } from "./lowering_helpers";
 
 import {
     split_lines_local,
     _parse_lowered_fn_string_constants,
     _parse_module_globals_locals,
-    parse_number_local,
 } from "./lowering_text_utils";
-
-import {
-    get_function_name_at,
-    get_function_return_type_at,
-    get_function_is_async_at,
-    get_function_is_extern_at,
-    get_function_parameters_at,
-    get_function_instructions_at,
-    get_function_effects_at,
-    get_function_decorators_at,
-    get_struct_name_at,
-    get_struct_fields_at,
-    get_struct_field_name_at,
-    get_struct_field_type_at,
-    get_enum_name_at,
-} from "./lowering_native_helpers";
 
 import {
     recover_native_functions_light,
     recover_native_imports_light,
     recover_native_structs_light,
     recover_functions_for_lowering,
-    parse_native_artifact_safe,
 } from "./lowering_recovery";
 
 import {
     extend_string_lines,
     extend_string_lines_checked,
-    extend_lifetime_regions_checked,
     append_string_lines,
     write_llvm_lines_chunked,
     module_source_filename,
-    ensure_intrinsic_declarations,
-    insert_string_at,
 } from "./lowering_io";
+
+// Phase modules
+import {
+    sanitize_lowering_inputs,
+    sanitize_imported_manifests,
+    sanitize_imported_native_texts,
+    sanitize_diagnostics,
+    sanitize_entry_points,
+    sanitize_imports,
+    sanitize_structs,
+    sanitize_enums,
+    sanitize_interfaces,
+    sanitize_functions,
+    recover_safe_functions,
+    recover_structs_if_corrupt,
+    sanitize_bindings,
+} from "./lowering_phase_sanitize";
+
+import {
+    parse_single_import_interfaces,
+    parse_single_import_functions,
+    extract_import_struct_methods,
+} from "./lowering_phase_imports";
+
+import {
+    build_type_context_with_recovery,
+    serialize_context_functions,
+} from "./lowering_phase_types";
+
+import {
+    render_llvm_preamble,
+} from "./lowering_phase_render";
+
+import {
+    lower_all_functions,
+} from "./lowering_phase_functions";
 
 // Consolidated: parse all structure from native text using light recovery.
 // Kept in lowering_core to preserve cross-module symbol mangling compatibility
@@ -279,8 +235,6 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
     }
     print("emit-llvm: compile_native_text_to_llvm_file module=" + module_name + " bytes=" + number_to_string(native_text.length));
     let parse = build_parse_result_from_text(native_text);
-    // Recover imports separately — field access on parse uses sailfin_runtime_get_field
-    // which does not work on plain C structs built by the fixup pass.
     let raw_imports = recover_native_imports_light(native_text);
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
     let import_context = collect_imported_module_context_for_module(raw_imports, module_name);
@@ -321,6 +275,7 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
     }
     return write_llvm_lines_chunked(out_path, lines);
 }
+
 fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_in -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], diagnostics_in -> string[], mangle_symbols -> boolean, native_text_override_path -> string) -> LoweredLLVMLinesResult ![io] {
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
@@ -333,400 +288,54 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
         print("emit-llvm: native artifacts=" + number_to_string(artifact_count));
     }
-    let mut parse = parse_in;
-    if debug_lowering {
-        print("emit-llvm: dbg-A parse_in assigned");
-    }
-    // Keep this lowering path dependent on explicit parsed context and optional
-    // override text only. Accessing `native_module.artifacts` here has caused
-    // stage2 instability on some selfhost paths.
-    let artifact_for_stable_parse -> NativeArtifact? = null;
-    if debug_lowering {
-        print("emit-llvm: dbg-B before override check path_len=" + number_to_string(native_text_override_path.length));
-    }
-    if native_text_override_path.length > 0 {
-        // Use light recovery to avoid hanging on parse_native_artifact_impl
-        // which has deeply nested if/else chains the seed cannot compile correctly.
-        // The emit-llvm-file path only needs functions, imports, and structs —
-        // interfaces, enums, bindings are not used during module compilation.
-        let reparsed = build_parse_result_from_text(native_text_override_path);
-        if reparsed.functions.length >= parse.functions.length {
-            parse = reparsed;
-        }
-        if debug_lowering {
-            print("emit-llvm: reparsed from override text functions=" + number_to_string(parse.functions.length));
-            print("emit-llvm: reparsed from override diagnostics=" + number_to_string(parse.diagnostics.length));
-            if parse.diagnostics.length > 0 {
-                print("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
-            }
-        }
-    } else {
-        let mut _elif248 -> boolean = false;
-        if artifact_for_stable_parse != null {
-            if artifact_for_stable_parse.contents.length > 0 {
-                _elif248 = true;
-            }
-        }
-        if _elif248 {
-            if debug_lowering {
-                print("emit-llvm: artifact text bytes=" + number_to_string(artifact_for_stable_parse.contents.length));
-                print("emit-llvm: artifact direct function count=" + number_to_string(parse_native_function_count_from_text(artifact_for_stable_parse.contents)));
-            }
-            // Use individual field extractors to avoid struct-return ABI bug
-            let reparsed_fns = parse_native_functions_from_text(artifact_for_stable_parse.contents);
-            if reparsed_fns.length >= parse.functions.length {
-                let reparsed_imports = parse_native_imports_from_text(artifact_for_stable_parse.contents);
-                let reparsed_structs = parse_native_structs_from_text(artifact_for_stable_parse.contents);
-                let reparsed_interfaces = parse_native_interfaces_from_text(artifact_for_stable_parse.contents);
-                let reparsed_enums = parse_native_enums_from_text(artifact_for_stable_parse.contents);
-                let reparsed_bindings = parse_native_bindings_from_text(artifact_for_stable_parse.contents);
-                let reparsed_diagnostics = parse_native_diagnostics_from_text(artifact_for_stable_parse.contents);
-                let reparsed = ParseNativeResult {
-                    functions: reparsed_fns,
-                    imports: reparsed_imports,
-                    structs: reparsed_structs,
-                    interfaces: reparsed_interfaces,
-                    enums: reparsed_enums,
-                    bindings: reparsed_bindings,
-                    diagnostics: reparsed_diagnostics,
-                };
-                parse = reparsed;
-            }
-            if debug_lowering {
-                print("emit-llvm: reparsed from artifact text functions=" + number_to_string(parse.functions.length));
-                print("emit-llvm: reparsed from artifact diagnostics=" + number_to_string(parse.diagnostics.length));
-                if parse.diagnostics.length > 0 {
-                    print("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
-                }
-            }
-        }
-    }
-    if debug_lowering {
-        print("emit-llvm: dbg-C after reparse block");
-    }
-    let mut safe_imported_manifests = imported_manifests;
-    if safe_imported_manifests == null {
-        safe_imported_manifests = [];
-    }
-    if safe_imported_manifests.length != sanitize_collection_length(safe_imported_manifests.length, 100000) {
-        safe_imported_manifests = [];
-    }
-    if debug_lowering {
-        print("emit-llvm: dbg-D after manifests sanitize");
-    }
-    let mut safe_imported_native_texts = imported_native_texts;
-    if safe_imported_native_texts == null {
-        safe_imported_native_texts = [];
-    }
-    if safe_imported_native_texts.length != sanitize_collection_length(safe_imported_native_texts.length, 100000) {
-        safe_imported_native_texts = [];
-    }
-    if debug_lowering {
-        print("emit-llvm: dbg-E after native_texts sanitize");
-    }
-    let mut safe_imported_diagnostics = diagnostics_in;
-    if safe_imported_diagnostics == null {
-        safe_imported_diagnostics = [];
-    }
-    if safe_imported_diagnostics.length != sanitize_collection_length(safe_imported_diagnostics.length, 1000000) {
-        safe_imported_diagnostics = [];
-    }
-    let mut diagnostics = safe_imported_diagnostics;
+
+    // ── Phase 1: Sanitize & recover inputs ──────────────────────────
+    let parse = sanitize_lowering_inputs(parse_in, native_text_override_path, native_module, imported_manifests, imported_native_texts, diagnostics_in, debug_lowering);
+
+    let safe_imported_manifests = sanitize_imported_manifests(imported_manifests, debug_lowering);
+    let safe_imported_native_texts = sanitize_imported_native_texts(imported_native_texts, debug_lowering);
+    let mut diagnostics = sanitize_diagnostics(diagnostics_in);
     if debug_lowering {
         print("emit-llvm: dbg-F after diagnostics sanitize");
     }
-    let mut safe_entry_points = native_module.entry_points;
-    if safe_entry_points == null {
-        safe_entry_points = [];
-    }
-    if safe_entry_points.length != sanitize_collection_length(safe_entry_points.length, 100000) {
-        safe_entry_points = [];
-    }
-    if debug_lowering {
-        print("emit-llvm: dbg-G after entry_points sanitize");
-    }
-    let mut safe_imports = parse.imports;
-    if safe_imports == null {
-        safe_imports = [];
-    }
-    if safe_imports.length != sanitize_collection_length(safe_imports.length, 100000) {
-        safe_imports = [];
-    }
-    if safe_imports.length > 100000 {
-        if debug_lowering {
-            print("emit-llvm: import list too large; dropping");
-        }
-        safe_imports = [];
-    }
-    let mut safe_structs = parse.structs;
-    if safe_structs == null {
-        safe_structs = [];
-    }
-    if safe_structs.length != sanitize_collection_length(safe_structs.length, 100000) {
-        safe_structs = [];
-    }
-    if safe_structs.length > 100000 {
-        diagnostics.push("llvm lowering: struct list too large (" + number_to_string(safe_structs.length) + "); dropping");
-        safe_structs = [];
-    }
-    let mut safe_enums = parse.enums;
+    let safe_entry_points = sanitize_entry_points(native_module.entry_points, debug_lowering);
     let _trace_enums = fs.exists("build/sailfin/.trace_call_lowering");
-    if _trace_enums {
-        let mut _enum_len_text -> string = "null";
-        if safe_enums != null {
-            _enum_len_text = number_to_string(safe_enums.length);
-        }
-        print("enum_trace: parse.enums=" + _enum_len_text);
-    }
-    if safe_enums == null {
-        safe_enums = [];
-    }
-    if safe_enums.length != sanitize_collection_length(safe_enums.length, 100000) {
-        if _trace_enums {
-            print("enum_trace: sanitize dropped enums (len=" + number_to_string(safe_enums.length) + " sanitized=" + number_to_string(sanitize_collection_length(safe_enums.length, 100000)) + ")");
-        }
-        safe_enums = [];
-    }
-    if safe_enums.length > 100000 {
-        diagnostics.push("llvm lowering: enum list too large (" + number_to_string(safe_enums.length) + "); dropping");
-        safe_enums = [];
-    }
-    if _trace_enums {
-        print("enum_trace: safe_enums.length=" + number_to_string(safe_enums.length));
-    }
-    let mut safe_interfaces = parse.interfaces;
-    if safe_interfaces == null {
-        safe_interfaces = [];
-    }
-    if safe_interfaces.length != sanitize_collection_length(safe_interfaces.length, 100000) {
-        safe_interfaces = [];
-    }
-    if safe_interfaces.length > 100000 {
-        diagnostics.push("llvm lowering: interface list too large (" + number_to_string(safe_interfaces.length) + "); dropping");
-        safe_interfaces = [];
-    }
-    if debug_lowering {
-        print("emit-llvm: dbg-H after structs/enums/interfaces sanitize");
-    }
-    if debug_lowering {
-        print("emit-llvm: dbg-H1 before parse.functions access");
-    }
-    let mut safe_functions = parse.functions;
-    if debug_lowering {
-        print("emit-llvm: dbg-H2 after parse.functions access");
-    }
-    if debug_lowering {
-        if safe_functions == null {
-            print("emit-llvm: parse.functions is null");
-        }
-    }
-    if safe_functions == null {
-        safe_functions = [];
-    }
-    if debug_lowering {
-        print("emit-llvm: dbg-H3 safe_functions.length=" + number_to_string(safe_functions.length));
-    }
-    if safe_functions.length != sanitize_collection_length(safe_functions.length, 200000) {
-        if debug_lowering {
-            print("emit-llvm: parse.functions has invalid length; dropping");
-        }
-        safe_functions = [];
-    }
-    if debug_lowering {
-        print("emit-llvm: dbg-H4 after sanitize safe_functions.length=" + number_to_string(safe_functions.length));
-    }
-    if safe_functions.length == 0 {
-        if debug_lowering {
-            print("emit-llvm: dbg-R1 safe_functions empty, recovery path");
-        }
-        let mut recovery_text = "";
-        if native_text_override_path.length > 0 {
-            recovery_text = native_text_override_path;
-        } else if artifact_for_stable_parse != null {
-            recovery_text = artifact_for_stable_parse.contents;
-        }
-        if debug_lowering {
-            print("emit-llvm: dbg-R2 recovery_text.length=" + number_to_string(recovery_text.length));
-        }
-        if recovery_text.length == 0 {
-            if fs.exists("build/sailfin/emit-native.tmp") {
-                if debug_lowering {
-                    print("emit-llvm: dbg-R3 reading emit-native.tmp");
-                }
-                recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
-                if debug_lowering {
-                    print("emit-llvm: dbg-R4 read emit-native.tmp bytes=" + number_to_string(recovery_text.length));
-                }
-            }
-        }
-        if debug_lowering {
-            print("emit-llvm: dbg-R5 before parse recovery_text.length=" + number_to_string(recovery_text.length));
-        }
-        if recovery_text.length > 0 {
-            if debug_lowering {
-                print("emit-llvm: dbg-R6 calling parse_native_functions_from_text");
-            }
-            let mut recovered_functions = parse_native_functions_from_text(recovery_text);
-            let mut recovered_has_body = false;
-            let mut recovered_index -> number = 0;
-            loop {
-                if recovered_index >= recovered_functions.length {
-                    break;
-                }
-                let recovered_function = recovered_functions[recovered_index];
-                if !recovered_function.is_extern {
-                    if recovered_function.instructions != null {
-                        if recovered_function.instructions.length > 0 {
-                            recovered_has_body = true;
-                            break;
-                        }
-                    }
-                }
-                recovered_index += 1;
-            }
-            let mut _if249 -> boolean = false;
-            if recovered_functions.length == 0 { _if249 = true; }
-            if !recovered_has_body { _if249 = true; }
-            if _if249 {
-                let light_recovered = recover_native_functions_light(recovery_text);
-                let mut light_has_body = false;
-                recovered_index = 0;
-                loop {
-                    if recovered_index >= light_recovered.length {
-                        break;
-                    }
-                    let recovered_function = light_recovered[recovered_index];
-                    if !recovered_function.is_extern {
-                        if recovered_function.instructions != null {
-                            if recovered_function.instructions.length > 0 {
-                                light_has_body = true;
-                                break;
-                            }
-                        }
-                    }
-                    recovered_index += 1;
-                }
-                let mut _if261 -> boolean = false;
-                if light_has_body { _if261 = true; }
-                if recovered_functions.length == 0 { _if261 = true; }
-                if _if261 {
-                    recovered_functions = light_recovered;
-                }
-            }
-            if recovered_functions.length > 0 {
-                safe_functions = recovered_functions;
-                if debug_lowering {
-                    print("emit-llvm: recovered empty parse.functions from artifact text count=" + number_to_string(safe_functions.length));
-                }
-            }
-        }
-    }
-    if safe_functions.length > 200000 {
-        diagnostics.push("llvm lowering: function list too large (" + number_to_string(safe_functions.length) + "); dropping");
-        safe_functions = [];
-    }
-    if debug_lowering {
-        print("emit-llvm: phase=recover_functions_start current=" + number_to_string(safe_functions.length));
-    }
-    let mut artifact_text = "";
-    if artifact_for_stable_parse != null {
-        artifact_text = artifact_for_stable_parse.contents;
-    }
-    let recovered_safe = recover_functions_for_lowering(safe_functions, native_text_override_path, artifact_text, debug_lowering);
-    safe_functions = recovered_safe;
-    if debug_lowering {
-        print("emit-llvm: phase=recover_functions_done current=" + number_to_string(safe_functions.length));
-    }
-    if debug_lowering {
-        let mut has_artifact_text = "false";
-        if artifact_for_stable_parse != null {
-            has_artifact_text = "true";
-        }
-        print("emit-llvm: fallback precheck has_artifact=" + has_artifact_text + " safe_len=" + number_to_string(safe_functions.length));
-        print("emit-llvm: functions parsed=" + number_to_string(parse.functions.length) + " safe=" + number_to_string(safe_functions.length));
-        if parse.functions.length == 0 {
-            if parse.diagnostics.length > 0 {
-                print("emit-llvm: parse diagnostic " + parse.diagnostics[0]);
-            }
-        }
-    }
-    // Recover struct definitions when the main parser returned empty/corrupt results.
-    // The ABI may corrupt struct data so it passes the null/length checks above
-    // but the actual field data is garbage.  Validate that each struct has a
-    // non-empty name; if any struct looks corrupt, replace with light recovery.
-    let mut structs_look_corrupt -> boolean = safe_structs.length == 0;
-    if !structs_look_corrupt {
-        if safe_structs.length > 0 {
-            let mut check_i -> number = 0;
-            loop {
-                if check_i >= safe_structs.length {
-                    break;
-                }
-                let check_struct = safe_structs[check_i];
-                let mut _if262 -> boolean = false;
-                if check_struct.name == null { _if262 = true; }
-                if check_struct.name.length == 0 { _if262 = true; }
-                if _if262 {
-                    structs_look_corrupt = true;
-                    break;
-                }
-                if check_struct.fields == null {
-                    structs_look_corrupt = true;
-                    break;
-                }
-                check_i += 1;
-            }
-        }
-    }
-    if structs_look_corrupt {
-        let mut struct_recovery_text = "";
-        if native_text_override_path.length > 0 {
-            struct_recovery_text = native_text_override_path;
-        } else if fs.exists("build/sailfin/emit-native.tmp") {
-            struct_recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
-        }
-        if struct_recovery_text.length > 0 {
-            let recovered_structs = recover_native_structs_light(struct_recovery_text);
-            if recovered_structs.length > 0 {
-                safe_structs = recovered_structs;
-            }
+
+    let mut is_test_module = is_test_module_slug(native_module.module_name);
+    if !is_test_module {
+        if fs.exists("build/sailfin/.test_runner_active") {
+            is_test_module = true;
         }
     }
 
-    let mut safe_bindings = parse.bindings;
-    if safe_bindings == null {
-        safe_bindings = [];
+    let mut safe_imports = sanitize_imports(parse.imports, debug_lowering);
+    if is_test_module {
+        safe_imports = [];
     }
-    if safe_bindings.length != sanitize_collection_length(safe_bindings.length, 200000) {
-        safe_bindings = [];
+    let mut safe_structs = sanitize_structs(parse.structs, diagnostics);
+    let safe_enums = sanitize_enums(parse.enums, diagnostics, _trace_enums);
+    let safe_interfaces = sanitize_interfaces(parse.interfaces, diagnostics);
+    if debug_lowering {
+        print("emit-llvm: dbg-H after structs/enums/interfaces sanitize");
     }
-    if safe_bindings.length > 200000 {
-        diagnostics.push("llvm lowering: binding list too large (" + number_to_string(safe_bindings.length) + "); dropping");
-        safe_bindings = [];
+    let mut safe_functions = sanitize_functions(parse.functions, native_text_override_path, debug_lowering);
+    safe_functions = recover_safe_functions(safe_functions, native_text_override_path, debug_lowering);
+
+    if debug_lowering {
+        print("emit-llvm: functions parsed=" + number_to_string(parse.functions.length) + " safe=" + number_to_string(safe_functions.length));
     }
-    // Recovery: if bindings empty (seed struct-return ABI may drop this field),
-    // re-parse directly from the native text written to emit-native.tmp.
-    if safe_bindings.length == 0 {
-        if fs.exists("build/sailfin/emit-native.tmp") {
-            let _reparse_native = fs.readFile("build/sailfin/emit-native.tmp");
-            if _reparse_native.length > 0 {
-                let _reparsed_bindings = parse_native_bindings_from_text(_reparse_native);
-                if _reparsed_bindings != null {
-                    if _reparsed_bindings.length > 0 {
-                        safe_bindings = _reparsed_bindings;
-                    }
-                }
-            }
-        }
-    }
+
+    safe_structs = recover_structs_if_corrupt(safe_structs, native_text_override_path, debug_lowering);
+
+    let safe_bindings = sanitize_bindings(parse.bindings, diagnostics);
+
     let mut safe_parse_diagnostics = parse.diagnostics;
     if safe_parse_diagnostics == null {
         safe_parse_diagnostics = [];
     }
-    if safe_parse_diagnostics.length != sanitize_collection_length(safe_parse_diagnostics.length, 1000000) {
-        safe_parse_diagnostics = [];
-    }
     diagnostics = extend_string_lines_checked(diagnostics, safe_parse_diagnostics, "parse");
+
+    // ── Trace/timing setup ──────────────────────────────────────────
     let mut _let250 -> boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
         if fs.exists("build/sailfin/.test_runner_active") {
@@ -736,15 +345,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let trace = _let250;
     let timing = fs.exists("build/sailfin/.test_runner_active");
     let start_ms = monotonic_millis();
-    let mut is_test_module = is_test_module_slug(native_module.module_name);
-    if !is_test_module {
-        if fs.exists("build/sailfin/.test_runner_active") {
-            is_test_module = true;
-        }
-    }
-    if is_test_module {
-        safe_imports = [];
-    }
+
     if trace {
         print("test llvm: lower_to_llvm_lines_with_parsed_context start");
     }
@@ -752,13 +353,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("test llvm: phase=parse ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
+    // ── Phase 2: Gather imported module context ─────────────────────
     let exported_symbols = collect_exported_symbol_names(safe_imports);
 
     let mut module_structs = safe_structs;
     let mut module_enums = safe_enums;
     if !is_test_module {
         let mut module_manifest -> LayoutManifest? = null;
-
         let manifest_application = apply_layout_manifest_to_module(safe_structs, safe_enums, module_manifest);
         diagnostics = extend_string_lines_checked(diagnostics, manifest_application.diagnostics, "layout application");
         module_structs = manifest_application.structs;
@@ -777,15 +378,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
-    // Gather imported module context (layout + signatures) to improve lowering fidelity
     let mut imported_structs -> NativeStruct[] = [];
     let mut imported_enums -> NativeEnum[] = [];
     let mut imported_interfaces -> NativeInterface[] = [];
     let mut imported_functions -> NativeFunction[] = [];
     let mut imported_struct_methods -> NativeFunction[] = [];
-    if debug_lowering {
-        print("emit-llvm: dbg-M1 manifests=" + number_to_string(safe_imported_manifests.length) + " texts=" + number_to_string(safe_imported_native_texts.length));
-    }
 
     let manifest_count = safe_imported_manifests.length;
     let mut text_index -> number = 0;
@@ -796,8 +393,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         let native_text = safe_imported_native_texts[text_index];
         let mut manifest_for_module -> LayoutManifest? = null;
         if text_index < manifest_count {
-            let candidate_manifest = safe_imported_manifests[text_index];
-            manifest_for_module = candidate_manifest;
+            manifest_for_module = safe_imported_manifests[text_index];
         }
         if native_text.length == 0 {
             if manifest_for_module != null {
@@ -808,14 +404,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             text_index += 1;
             continue;
         }
-
-        // Use individual import-context extractors to avoid struct-return ABI bug
+        // Single-pass: parse structs+enums once, apply manifest once
         let imported_structs_safe = parse_native_structs_for_import(native_text);
         let imported_enums_safe = parse_native_enums_for_import(native_text);
-        let imported_interfaces_safe = parse_native_interfaces_for_import(native_text);
-        let imported_functions_safe = parse_native_functions_for_import(native_text);
         let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
-
         let mut applied_structs = applied_import.structs;
         if applied_structs == null {
             applied_structs = [];
@@ -824,12 +416,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         if applied_enums == null {
             applied_enums = [];
         }
-
+        let applied_interfaces = parse_single_import_interfaces(native_text);
+        let applied_functions = parse_single_import_functions(native_text);
         imported_structs = extend_native_structs(imported_structs, applied_structs);
         imported_enums = extend_native_enums(imported_enums, applied_enums);
-        imported_interfaces = extend_native_interfaces(imported_interfaces, imported_interfaces_safe);
-        imported_functions = extend_native_functions(imported_functions, imported_functions_safe);
-        let imported_methods = flatten_struct_methods(applied_structs);
+        imported_interfaces = extend_native_interfaces(imported_interfaces, applied_interfaces);
+        imported_functions = extend_native_functions(imported_functions, applied_functions);
+        let imported_methods = extract_import_struct_methods(applied_structs);
         imported_struct_methods = extend_native_functions(imported_struct_methods, imported_methods);
         text_index += 1;
     }
@@ -851,6 +444,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("emit-llvm: phase=imports");
     }
 
+    // ── Phase 3: Combine types, build type context ──────────────────
     let combined_structs = extend_native_structs(module_structs, imported_structs);
     let combined_enums = extend_native_enums(module_enums, imported_enums);
     let mut combined_interfaces = extend_native_interfaces(safe_interfaces, imported_interfaces);
@@ -868,257 +462,31 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if debug_lowering {
         print("emit-llvm: phase=trait_metadata");
     }
-    if debug_lowering {
-        print("emit-llvm: about to fixup_enum_layouts enums=" + number_to_string(combined_enums.length));
-    }
     if trace {
         print("test llvm: enum layout fixup start");
     }
-    // Skip cross-module fixup_enum_layouts call: the seed's struct-returning
-    // cross-module ABI segfaults.  Pass enums through; downstream lowering
-    // already handles missing layout metadata with fallbacks.
-    let fixed_enums = EnumLayoutFixupResult { enums: combined_enums, diagnostics: [] };
-    diagnostics = extend_string_lines_checked(diagnostics, fixed_enums.diagnostics, "enum layout");
-    if debug_lowering {
-        print("emit-llvm: phase=enum_fixup");
-    }
+
     if trace {
         print("test llvm: type context build start");
     }
-    // Write struct info BEFORE the cross-module build_type_context call.
-    // combined_structs is local to this module and intact; after crossing the
-    // module boundary to type_context.sfn the data gets corrupted by the seed ABI.
-    let mut _si2_content -> string = "";
-    let mut _si2_idx -> number = 0;
-    loop {
-        if _si2_idx >= combined_structs.length { break; }
-        let _si2_name = get_struct_name_at(combined_structs, _si2_idx);
-        let mut _if251 -> boolean = false;
-        if _si2_name == null { _if251 = true; }
-        if _si2_name.length == 0 { _if251 = true; }
-        if _if251 {
-            _si2_idx += 1;
-            continue;
-        }
-        if _si2_idx > 0 {
-            if _si2_content.length > 0 {
-                _si2_content = _si2_content + "\n";
-            }
-        }
-        let _si2_llvm = "%" + sanitize_symbol(_si2_name);
-        _si2_content = _si2_content + _si2_name + "\t" + _si2_llvm + "\t";
-        let mut _fi2 -> number = 0;
-        let _si2_fields = get_struct_fields_at(combined_structs, _si2_idx);
-        if _si2_fields != null {
-            loop {
-                if _fi2 >= _si2_fields.length { break; }
-                if _fi2 > 0 { _si2_content = _si2_content + ","; }
-                let mut _fn2 = get_struct_field_name_at(_si2_fields, _fi2);
-                if _fn2 == null { _fn2 = ""; }
-                let mut _ft2 = "i8*";
-                let _ann2 = get_struct_field_type_at(_si2_fields, _fi2);
-                if _ann2 == "number" { _ft2 = "double"; }
-                else if _ann2 == "boolean" { _ft2 = "i1"; }
-                else if _ann2 == "bool" { _ft2 = "i1"; }
-                else if _ann2 == "i64" { _ft2 = "i64"; }
-                else if _ann2 == "int" { _ft2 = "i64"; }
-                else if _ann2 == "usize" { _ft2 = "i64"; }
-                else if _ann2 == "i32" { _ft2 = "i32"; }
-                else if _ann2 == "u8" { _ft2 = "i8"; }
-                _si2_content = _si2_content + _fn2 + ":" + _ft2;
-                _fi2 += 1;
-            }
-        }
-        _si2_idx += 1;
-    }
-    fs.writeFile("build/sailfin/.struct_info", _si2_content);
-    // Write enum info to a file-based channel so build_type_context can read it
-    // even if the enums array gets corrupted crossing the module boundary.
-    let mut _ei_content -> string = "";
-    let mut _ei_idx -> number = 0;
-    loop {
-        if _ei_idx >= fixed_enums.enums.length { break; }
-        let _ei_name = get_enum_name_at(fixed_enums.enums, _ei_idx);
-        let mut _if252 -> boolean = false;
-        if _ei_name == null { _if252 = true; }
-        if _ei_name.length == 0 { _if252 = true; }
-        if _if252 {
-            _ei_idx += 1;
-            continue;
-        }
-        if _ei_idx > 0 {
-            if _ei_content.length > 0 {
-                _ei_content = _ei_content + "\n";
-            }
-        }
-        // For now assume unit-enum defaults (the fixup_enum_layouts was skipped).
-        let _ei_tag_type = "i32";
-        let _ei_tag_size = "4";
-        let _ei_tag_align = "4";
-        let _ei_size = "4";
-        let _ei_align = "4";
-        _ei_content = _ei_content + _ei_name + "\t" + _ei_tag_type + "\t" + _ei_tag_size + "\t" + _ei_tag_align + "\t" + _ei_size + "\t" + _ei_align + "\t";
-        // Variant names also go through get_field stub; use numeric fallback.
-        let _ei_e = fixed_enums.enums[_ei_idx];
-        let _variants = _ei_e.variants;
-        let mut _vi -> number = 0;
-        if _variants != null {
-            loop {
-                if _vi >= _variants.length { break; }
-                if _vi > 0 { _ei_content = _ei_content + ","; }
-                _ei_content = _ei_content + "v" + number_to_string(_vi) + "=" + number_to_string(_vi);
-                _vi += 1;
-            }
-        }
-        _ei_idx += 1;
-    }
-    fs.writeFile("build/sailfin/.enum_info", _ei_content);
-    if _trace_enums {
-        print("enum_trace: combined_enums=" + number_to_string(combined_enums.length) + " fixed_enums=" + number_to_string(fixed_enums.enums.length));
-        print("enum_trace: wrote .enum_info bytes=" + number_to_string(_ei_content.length));
-    }
-    let type_build = build_type_context(combined_structs, fixed_enums.enums, combined_interfaces);
-    diagnostics = extend_string_lines_checked(diagnostics, type_build.diagnostics, "type context");
-    let mut type_context = type_build.context;
-
-    // Recover enum info from file-based channel if cross-module ABI corruption
-    // caused the enums parameter to arrive empty in build_type_context.
-    // Also recover when enums have empty names (get_field stub returns "").
-    let mut _enum_names_empty -> boolean = false;
-    if type_context.enums.length > 0 {
-        let mut _asgn253 -> boolean = false;
-        if type_context.enums[0].name == null { _asgn253 = true; }
-        if type_context.enums[0].name.length == 0 { _asgn253 = true; }
-        _enum_names_empty = _asgn253;
-    }
-    let mut _if254 -> boolean = false;
-    let mut _if263 -> boolean = false;
-    if type_context.enums.length == 0 { _if263 = true; }
-    if _enum_names_empty { _if263 = true; }
-    if _if263 {
-        if fs.exists("build/sailfin/.enum_info") {
-            _if254 = true;
-        }
-    }
-    if _if254 {
-        let _ei_raw = fs.readFile("build/sailfin/.enum_info");
-        if _ei_raw.length > 0 {
-            let _ei_lines = split_lines_local(_ei_raw);
-            let mut _recovered_enums -> EnumTypeInfo[] = [];
-            let mut _eli -> number = 0;
-            loop {
-                if _eli >= _ei_lines.length { break; }
-                let _el = _ei_lines[_eli];
-                // Format: name\ttag_type\ttag_size\ttag_align\tsize\talign\tv0=t0,v1=t1,...
-                let _tab1 = index_of(_el, "\t");
-                if _tab1 < 0 { _eli += 1; continue; }
-                let _ename = substring(_el, 0, _tab1);
-                let _rest1 = substring(_el, _tab1 + 1, _el.length);
-                let _tab2 = index_of(_rest1, "\t");
-                if _tab2 < 0 { _eli += 1; continue; }
-                let _etag_type = substring(_rest1, 0, _tab2);
-                let _rest2 = substring(_rest1, _tab2 + 1, _rest1.length);
-                let _tab3 = index_of(_rest2, "\t");
-                if _tab3 < 0 { _eli += 1; continue; }
-                let _etag_size = parse_number_local(substring(_rest2, 0, _tab3));
-                let _rest3 = substring(_rest2, _tab3 + 1, _rest2.length);
-                let _tab4 = index_of(_rest3, "\t");
-                if _tab4 < 0 { _eli += 1; continue; }
-                let _etag_align = parse_number_local(substring(_rest3, 0, _tab4));
-                let _rest4 = substring(_rest3, _tab4 + 1, _rest3.length);
-                let _tab5 = index_of(_rest4, "\t");
-                if _tab5 < 0 { _eli += 1; continue; }
-                let _esize = parse_number_local(substring(_rest4, 0, _tab5));
-                let _rest5 = substring(_rest4, _tab5 + 1, _rest4.length);
-                let _tab6 = index_of(_rest5, "\t");
-                let mut _ealign -> number = 4;
-                let mut _variants_str -> string = "";
-                if _tab6 >= 0 {
-                    _ealign = parse_number_local(substring(_rest5, 0, _tab6));
-                    _variants_str = substring(_rest5, _tab6 + 1, _rest5.length);
-                } else {
-                    _ealign = parse_number_local(_rest5);
-                }
-
-                // Parse variants: v0=t0,v1=t1,...
-                let mut _evariants -> EnumVariantInfo[] = [];
-                if _variants_str.length > 0 {
-                    let mut _vpos -> number = 0;
-                    let mut _vtag -> number = 0;
-                    loop {
-                        let _comma = index_of(substring(_variants_str, _vpos, _variants_str.length), ",");
-                        let mut _vend -> number = _variants_str.length;
-                        if _comma >= 0 {
-                            _vend = _vpos + _comma;
-                        }
-                        let _vpair = substring(_variants_str, _vpos, _vend);
-                        let _eq = index_of(_vpair, "=");
-                        let mut _vname -> string = _vpair;
-                        if _eq >= 0 {
-                            _vname = substring(_vpair, 0, _eq);
-                            _vtag = parse_number_local(substring(_vpair, _eq + 1, _vpair.length));
-                        }
-                        if _vname.length > 0 {
-                            _evariants.push(EnumVariantInfo {
-                                name: _vname,
-                                tag: _vtag,
-                                offset: 0,
-                                size: 0,
-                                align: 1,
-                                fields: []
-                            });
-                        }
-                        _vtag += 1;
-                        if _comma < 0 { break; }
-                        _vpos = _vend + 1;
-                    }
-                }
-
-                let _ellvm = "%" + sanitize_symbol(_ename);
-                // Compute max_payload_size from total size minus tag size.
-                // This avoids complex variant field parsing while ensuring
-                // enum types get a payload field in the generated LLVM type.
-                let mut _max_ps -> number = _esize - _etag_size;
-                if _max_ps < 0 { _max_ps = 0; }
-                _recovered_enums.push(EnumTypeInfo {
-                    name: _ename,
-                    llvm_name: _ellvm,
-                    tag_type: _etag_type,
-                    tag_size: _etag_size,
-                    tag_align: _etag_align,
-                    max_payload_size: _max_ps,
-                    size: _esize,
-                    align: _ealign,
-                    variants: _evariants
-                });
-                _eli += 1;
-            }
-            if _recovered_enums.length > 0 {
-                type_context = TypeContext {
-                    structs: type_context.structs,
-                    enums: _recovered_enums,
-                    interfaces: type_context.interfaces,
-                    vtables: type_context.vtables
-                };
-                if _trace_enums {
-                    print("enum_trace: recovered " + number_to_string(_recovered_enums.length) + " enum(s) from .enum_info");
-                }
-            }
-        }
-    }
-    if _trace_enums {
-        print("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
+    let type_context = build_type_context_with_recovery(
+        combined_structs, combined_enums, combined_interfaces,
+        diagnostics, _trace_enums, debug_lowering
+    );
+    // Merge type-context diagnostics written by build_type_context_with_recovery
+    let _tc_diags_raw = fs.readFile("build/sailfin/.phase_types_diagnostics");
+    if _tc_diags_raw.length > 0 {
+        let _tc_diags = split_lines_local(_tc_diags_raw);
+        diagnostics = extend_string_lines_checked(diagnostics, _tc_diags, "type context");
     }
     if trace {
         print("test llvm: type context built");
-    }
-    if debug_lowering {
-        print("emit-llvm: phase=type_context");
     }
     if timing {
         print("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
+    // ── Build context functions ─────────────────────────────────────
     if debug_lowering {
         print("emit-llvm: phase=struct_methods_start");
     }
@@ -1136,64 +504,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("emit-llvm: phase=context_functions");
     }
 
-    // Serialize context_functions to individual files so downstream call
-    // resolution can read clean data instead of ABI-corrupted NativeFunction[]
-    // params passed across function boundaries.
-    // Clean up stale files first.
-    let mut _cfc_i -> number = 0;
-    loop {
-        let _cfc_prefix = "build/sailfin/.ctx_func_" + number_to_string(_cfc_i);
-        if !fs.exists(_cfc_prefix + "_name") { break; }
-        fs.deleteFile(_cfc_prefix + "_name");
-        fs.deleteFile(_cfc_prefix + "_return_type");
-        fs.deleteFile(_cfc_prefix + "_is_async");
-        fs.deleteFile(_cfc_prefix + "_param_count");
-        // Clean up param files
-        let mut _cfc_j -> number = 0;
-        loop {
-            let _cfc_pp = _cfc_prefix + "_param_" + number_to_string(_cfc_j);
-            if !fs.exists(_cfc_pp + "_name") { break; }
-            fs.deleteFile(_cfc_pp + "_name");
-            fs.deleteFile(_cfc_pp + "_type");
-            _cfc_j += 1;
-        }
-        _cfc_i += 1;
-    }
-    // Write fresh function metadata
-    fs.writeFile("build/sailfin/.ctx_func_count", number_to_string(context_functions.length));
-    let mut _cfw_i -> number = 0;
-    loop {
-        if _cfw_i >= context_functions.length { break; }
-        let _cfw_fn = context_functions[_cfw_i];
-        let _cfw_prefix = "build/sailfin/.ctx_func_" + number_to_string(_cfw_i);
-        fs.writeFile(_cfw_prefix + "_name", _cfw_fn.name);
-        fs.writeFile(_cfw_prefix + "_return_type", _cfw_fn.return_type);
-        let mut _cfw_async_flag -> string = "0";
-        if _cfw_fn.is_async {
-            _cfw_async_flag = "1";
-        }
-        fs.writeFile(_cfw_prefix + "_is_async", _cfw_async_flag);
-        let mut _cfw_params = _cfw_fn.parameters;
-        if _cfw_params == null {
-            _cfw_params = [];
-        }
-        fs.writeFile(_cfw_prefix + "_param_count", number_to_string(_cfw_params.length));
-        let mut _cfw_j -> number = 0;
-        loop {
-            if _cfw_j >= _cfw_params.length { break; }
-            let _cfw_pp = _cfw_prefix + "_param_" + number_to_string(_cfw_j);
-            fs.writeFile(_cfw_pp + "_name", _cfw_params[_cfw_j].name);
-            fs.writeFile(_cfw_pp + "_type", _cfw_params[_cfw_j].type_annotation);
-            _cfw_j += 1;
-        }
-        _cfw_i += 1;
-    }
-    if debug_lowering {
-        print("emit-llvm: serialized context_functions count=" + number_to_string(context_functions.length));
-    }
+    serialize_context_functions(context_functions, debug_lowering);
 
-    // Bootstrap guard: effect analysis currently introduces instability in
-    // selfhost/native lowering for some modules. Keep disabled by default.
+    // ── Effect analysis ─────────────────────────────────────────────
     let skip_effects = true;
     let mut runtime_helpers -> string[] = [];
     let mut _if255 -> boolean = false;
@@ -1213,19 +526,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     } else if trace {
         print("test llvm: skipping runtime helper collection for inlined tests");
     }
-    // Some lowering paths (e.g. array lowering) emit direct calls to
-    // `@sailfin_runtime_copy_bytes` that do not appear in Native IR call targets.
-    // Ensure the declaration is always present to keep per-module clang compiles valid.
     if !string_array_contains(runtime_helpers, "copy_bytes") {
         runtime_helpers.push("copy_bytes");
     }
-    // `lower_array_push_in_place` emits a direct call to `@sailfin_runtime_array_push_slot`.
-    // This helper target must be present so we emit the corresponding declaration.
     if !string_array_contains(runtime_helpers, "array_push_slot") {
         runtime_helpers.push("array_push_slot");
     }
-    // `lower_array_push_in_place` uses `@sailfin_runtime_append_string` for `i8*` arrays.
-    // This helper target must be present so we emit the corresponding declaration.
     if !string_array_contains(runtime_helpers, "append_string") {
         runtime_helpers.push("append_string");
     }
@@ -1270,228 +576,29 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("emit-llvm: phase=effects");
     }
 
-    let mut function_effects -> FunctionEffectEntry[] = [];
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut lines -> string[] = [];
-    lines.push("source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
-    lines.push("");
+    // ── Phase 4: Render LLVM IR preamble ────────────────────────────
+    let mut lines = render_llvm_preamble(
+        native_module.module_name,
+        type_context,
+        trait_metadata,
+        context_functions,
+        local_functions,
+        imported_functions,
+        runtime_helpers,
+        debug_lowering
+    );
 
-    if debug_lowering {
-        print("emit-llvm: phase=render_traits");
-    }
-    let trait_lines = render_trait_metadata_comments(trait_metadata);
-    if trait_lines.length > 0 {
-        lines = extend_string_lines(lines, trait_lines);
-        lines.push("");
-    }
-
-    if debug_lowering {
-        print("emit-llvm: phase=render_structs");
-        print(
-            "emit-llvm: render_structs counts structs="
-            + number_to_string(type_context.structs.length)
-            + " enums="
-            + number_to_string(type_context.enums.length)
-            + " functions="
-            + number_to_string(context_functions.length)
-        );
-    }
-    let struct_type_lines = render_struct_type_definitions(type_context, context_functions);
-    // Filter out corrupted struct type lines (empty name: "% = type ...").
-    let mut _stl_valid -> boolean = struct_type_lines.length > 0;
-    if _stl_valid {
-        let mut _stl_check -> number = 0;
-        loop {
-            if _stl_check >= struct_type_lines.length { break; }
-            if starts_with(struct_type_lines[_stl_check], "% =") {
-                _stl_valid = false;
-                break;
-            }
-            _stl_check += 1;
-        }
-    }
-    if _stl_valid {
-        lines = extend_string_lines(lines, struct_type_lines);
-        lines.push("");
-    }
-    // Supplement struct type definitions from .struct_info file when the cross-module
-    // render_struct_type_definitions produced nothing or corrupted output.
-    if !_stl_valid {
-        if fs.exists("build/sailfin/.struct_info") {
-            let _std_raw = fs.readFile("build/sailfin/.struct_info");
-            if _std_raw.length > 0 {
-                let mut _std_pos -> number = 0;
-                loop {
-                    if _std_pos >= _std_raw.length { break; }
-                    let _std_nl = index_of(substring(_std_raw, _std_pos, _std_raw.length), "\n");
-                    let mut _std_line -> string = "";
-                    if _std_nl < 0 {
-                        _std_line = substring(_std_raw, _std_pos, _std_raw.length);
-                        _std_pos = _std_raw.length;
-                    } else {
-                        _std_line = substring(_std_raw, _std_pos, _std_pos + _std_nl);
-                        _std_pos = _std_pos + _std_nl + 1;
-                    }
-                    if _std_line.length == 0 { continue; }
-                    let _std_t1 = index_of(_std_line, "\t");
-                    if _std_t1 < 0 { continue; }
-                    let _std_rest = substring(_std_line, _std_t1 + 1, _std_line.length);
-                    let _std_t2 = index_of(_std_rest, "\t");
-                    if _std_t2 < 0 { continue; }
-                    let _std_llvm = substring(_std_rest, 0, _std_t2);
-                    let _std_fields_str = substring(_std_rest, _std_t2 + 1, _std_rest.length);
-                    if _std_llvm.length == 0 { continue; }
-                    // Skip if this type is already defined in existing lines
-                    if index_of(_existing_types, _std_llvm + " = type") >= 0 { continue; }
-                    // Build field type list
-                    let mut _std_ftypes -> string = "";
-                    if _std_fields_str.length > 0 {
-                        let mut _std_fpos -> number = 0;
-                        let mut _std_first -> boolean = true;
-                        loop {
-                            if _std_fpos >= _std_fields_str.length { break; }
-                            let _std_comma = index_of(substring(_std_fields_str, _std_fpos, _std_fields_str.length), ",");
-                            let mut _std_fentry -> string = "";
-                            if _std_comma < 0 {
-                                _std_fentry = substring(_std_fields_str, _std_fpos, _std_fields_str.length);
-                                _std_fpos = _std_fields_str.length;
-                            } else {
-                                _std_fentry = substring(_std_fields_str, _std_fpos, _std_fpos + _std_comma);
-                                _std_fpos = _std_fpos + _std_comma + 1;
-                            }
-                            let _std_colon = index_of(_std_fentry, ":");
-                            if _std_colon < 0 { continue; }
-                            let _std_ftype = substring(_std_fentry, _std_colon + 1, _std_fentry.length);
-                            if !_std_first { _std_ftypes = _std_ftypes + ", "; }
-                            _std_ftypes = _std_ftypes + _std_ftype;
-                            _std_first = false;
-                        }
-                    }
-                    lines.push(_std_llvm + " = type { " + _std_ftypes + " }");
-                }
-                lines.push("");
-            }
-        }
-    }
-
-    if debug_lowering {
-        print("emit-llvm: phase=render_enums");
-    }
-    let enum_type_lines = render_enum_type_definitions(type_context);
-    if enum_type_lines.length > 0 {
-        lines = extend_string_lines(lines, enum_type_lines);
-        lines.push("");
-    }
-
-    if debug_lowering {
-        print("emit-llvm: phase=render_interfaces");
-    }
-    let interface_type_lines = render_interface_type_definitions(type_context);
-    if interface_type_lines.length > 0 {
-        lines = extend_string_lines(lines, interface_type_lines);
-        lines.push("");
-    }
-
-    // Async/future runtime types (opaque in LLVM; implemented by the native runtime).
-    lines = extend_string_lines(lines, [
-        "%SailfinFutureNumber = type opaque",
-        "%SailfinFutureBool = type opaque",
-        "%SailfinFuturePtr = type opaque",
-        "%SailfinFutureVoid = type opaque",
-        "%SailfinFutureString = type opaque",
-        "",
-        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)",
-        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)",
-        "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)",
-        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)",
-        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)",
-        "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)",
-        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)",
-        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)",
-        "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)",
-        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)",
-        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)",
-        "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)",
-        "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)",
-        "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)",
-        "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)",
-        "",
-    ]);
-
-    let vtable_type_lines = render_vtable_type_definitions(type_context);
-    if vtable_type_lines != null {
-        if vtable_type_lines.length > 0 {
-        lines = extend_string_lines(lines, vtable_type_lines);
-        lines.push("");
-        }
-    }
-
-    let vtable_const_lines = render_vtable_constants(type_context);
-    if vtable_const_lines != null {
-        if vtable_const_lines.length > 0 {
-        lines = extend_string_lines(lines, vtable_const_lines);
-        lines.push("");
-        }
-    }
-
-    if debug_lowering {
-        print("emit-llvm: phase=render_helpers");
-    }
-    let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
-    if helper_declarations != null {
-        if helper_declarations.length > 0 {
-        lines = extend_string_lines(lines, helper_declarations);
-        lines.push("");
-        }
-    }
-
-    // Declare imported functions from other modules (excluding local functions)
-    if debug_lowering {
-        print("emit-llvm: phase=render_imports");
-    }
-    let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
-    if imported_declarations != null {
-        if imported_declarations.length > 0 {
-        lines = extend_string_lines(lines, imported_declarations);
-        lines.push("");
-        }
-    }
-
-    // Provide libc declarations for common helpers when not declared in the module.
-    if find_function_by_name(context_functions, "calloc") == null {
-        lines.push("declare noalias i8* @calloc(i64, i64)");
-    }
-    if find_function_by_name(context_functions, "malloc") == null {
-        lines.push("declare noalias i8* @malloc(i64)");
-    }
-    if find_function_by_name(context_functions, "free") == null {
-        lines.push("declare void @free(i8*)");
-    }
-    lines.push("");
-
-    // Declare the runtime global (provided by the Python bootstrap runtime)
-    lines.push("@runtime = external global i8**");
-    lines.push("");
-
-    // Lower module-level `let` bindings into LLVM globals (and an optional init function).
+    // ── Module globals ──────────────────────────────────────────────
     if debug_lowering {
         print("emit-llvm: phase=module_globals");
-    }
-    if debug_lowering {
         print("emit-llvm: module bindings count=" + number_to_string(safe_bindings.length));
     }
-    let mut module_globals = ModuleGlobalLoweringResult {
-        preamble_lines: [],
-        init_function_lines: [],
-        init_function_symbol: "",
-        needs_init_call: false,
-        locals: [],
-        string_constants: empty_string_constant_set(),
-        diagnostics: [],
-    };
-    // File IPC: default false; updated in else branch after lower_module_bindings_to_globals
-    // (the v0.1.1 seed corrupts boolean scalar fields in cross-module struct returns)
     let mut module_globals_needs_init_call -> boolean = false;
+    let mut module_global_locals -> LocalBinding[] = [];
+    let mut module_preamble_lines -> string[] = [];
+    let mut module_init_lines -> string[] = [];
+    let mut module_init_symbol -> string = "";
+    let mut module_string_constants -> StringConstant[] = empty_string_constant_set();
     if safe_bindings.length == 0 {
         if debug_lowering {
             print("emit-llvm: module bindings empty; skipping module globals");
@@ -1501,18 +608,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             print("emit-llvm: skipping module globals");
         }
     } else {
-        module_globals = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
-        // File IPC: the v0.1.1 seed corrupts cross-module struct returns (zeroinitializer).
-        // Read ALL results from files written by _write_module_globals_files.
+        let _mg = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
         let _mg_needs_init_raw = fs.readFile("build/sailfin/.module_globals_needs_init");
         module_globals_needs_init_call = _mg_needs_init_raw == "1";
     }
-    // File IPC: read module globals results from files (ignoring struct return which is zeroinitializer)
-    let mut module_global_locals -> LocalBinding[] = [];
-    let mut module_preamble_lines -> string[] = [];
-    let mut module_init_lines -> string[] = [];
-    let mut module_init_symbol -> string = "";
-    let mut module_string_constants -> StringConstant[] = empty_string_constant_set();
     if safe_bindings.length > 0 {
         let _mg_preamble_raw = fs.readFile("build/sailfin/.module_globals_preamble");
         if _mg_preamble_raw.length > 0 {
@@ -1537,7 +636,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         lines = extend_string_lines(lines, module_preamble_lines);
         lines.push("");
     }
-
     if module_init_lines.length > 0 {
         lines = extend_string_lines(lines, module_init_lines);
         lines.push("");
@@ -1549,288 +647,37 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print("test llvm: phase=globals ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
-    let mut index -> number = 0;
-    let mut has_add_function -> boolean = false;
-    let mut all_string_constants -> StringConstant[] = module_string_constants;
-    if trace {
-        print("test llvm: lowering functions start (count=" + number_to_string(local_functions.length) + ")");
+    // ── Phase 5: Lower all functions ────────────────────────────────
+    let function_lines = lower_all_functions(
+        local_functions,
+        context_functions,
+        aggregated_effects,
+        type_context,
+        native_module.module_name,
+        safe_entry_points,
+        exported_symbols,
+        imported_functions,
+        module_global_locals,
+        module_init_symbol,
+        module_globals_needs_init_call,
+        module_string_constants,
+        trace,
+        debug_lowering
+    );
+    lines = append_string_lines(lines, function_lines);
+
+    // Read function phase diagnostics
+    let _fn_diags_raw = fs.readFile("build/sailfin/.phase_functions_diagnostics");
+    if _fn_diags_raw.length > 0 {
+        let _fn_diags = split_lines_local(_fn_diags_raw);
+        diagnostics = extend_string_lines_checked(diagnostics, _fn_diags, "function lowering");
     }
-    if debug_lowering {
-        print("emit-llvm: phase=functions");
-    }
-    loop {
-        if index >= local_functions.length {
-            break;
-        }
-        let current_function = local_functions[index];
-        // Use accessor helpers instead of direct field access: the seed v0.1.1
-        // compiles by-value struct field access as 0.0.  The fixup pass replaces
-        // these helpers with correct GEP + extractvalue LLVM IR.
-        let mut safe_function_name = get_function_name_at(local_functions, index);
-        if safe_function_name == null {
-            safe_function_name = "";
-        }
-        let mut safe_parameters = get_function_parameters_at(local_functions, index);
-        if safe_parameters == null {
-            safe_parameters = [];
-        }
-        let mut safe_effects = get_function_effects_at(local_functions, index);
-        if safe_effects == null {
-            safe_effects = [];
-        }
-        let mut safe_decorators = get_function_decorators_at(local_functions, index);
-        if safe_decorators == null {
-            safe_decorators = [];
-        }
-        let mut safe_instructions = get_function_instructions_at(local_functions, index);
-        if safe_instructions == null {
-            safe_instructions = [];
-        }
-        let mut safe_return_type = get_function_return_type_at(local_functions, index);
-        if safe_return_type == null {
-            safe_return_type = "";
-        }
-        let fn_is_async = get_function_is_async_at(local_functions, index);
-        let fn_is_extern = get_function_is_extern_at(local_functions, index);
-        // Always construct a fresh NativeFunction from safe_* values.
-        let effective_function = NativeFunction {
-            name: safe_function_name,
-            is_async: fn_is_async,
-            parameters: safe_parameters,
-            return_type: safe_return_type,
-            effects: safe_effects,
-            decorators: safe_decorators,
-            instructions: safe_instructions,
-            is_extern: fn_is_extern,
-        };
-        if trace {
-            let mut return_count -> number = 0;
-            let mut instr_index -> number = 0;
-            loop {
-                if instr_index >= safe_instructions.length {
-                    break;
-                }
-                if safe_instructions[instr_index].variant == "Return" {
-                    return_count += 1;
-                }
-                instr_index += 1;
-            }
-            print(
-                "test llvm: function "
-                + number_to_string(index)
-                + "/"
-                + number_to_string(local_functions.length)
-                + " "
-                + safe_function_name
-                + " instrs="
-                + number_to_string(safe_instructions.length)
-                + " returns="
-                + number_to_string(return_count)
-            );
-        }
-        let aggregated_entry = find_function_effect_entry(aggregated_effects, safe_function_name);
-        let mut effective_effects -> string[] = [];
-        if aggregated_entry != null {
-            effective_effects = aggregated_entry.effects;
-        }
-        function_effects = append_function_effect_entry(
-            function_effects,
-            FunctionEffectEntry {
-                name: safe_function_name,
-                effects: effective_effects,
-            }
-        );
-        if debug_lowering {
-            print("emit-llvm: function-start " + safe_function_name + " idx=" + number_to_string(index));
-        }
-        // Write NativeFunction field values to disk for emission.sfn to read.
-        // The v0.1.1 seed compiles emission.sfn with NativeFunction as i8*,
-        // making direct field access return garbage. This file-based channel
-        // bypasses the cross-module struct layout mismatch.
-        let mut is_async_flag = "0";
-        if fn_is_async {
-            is_async_flag = "1";
-        }
-        let mut is_extern_flag = "0";
-        if fn_is_extern {
-            is_extern_flag = "1";
-        }
-        fs.writeFile("build/sailfin/.fn_name", safe_function_name);
-        fs.writeFile("build/sailfin/.fn_return_type", safe_return_type);
-        fs.writeFile("build/sailfin/.fn_is_async", is_async_flag);
-        fs.writeFile("build/sailfin/.fn_is_extern", is_extern_flag);
-        fs.writeFile("build/sailfin/.fn_param_count", number_to_string(safe_parameters.length));
-        fs.writeFile("build/sailfin/.fn_instr_count", number_to_string(safe_instructions.length));
-        // Write .fn_index via a pre-computed string to avoid seed compilation
-        // issues where number_to_string(index) on a loop-mutated variable is
-        // silently dropped by broken control flow in the compiled binary.
-        let _fn_index_str = number_to_string(index);
-        fs.writeFile("build/sailfin/.fn_index", _fn_index_str);
-        // Redundant write: some seed builds silently skip the above write.
-        // Write the index to a second file as a fallback.
-        fs.writeFile("build/sailfin/.fn_index_backup", _fn_index_str);
-        fs.writeFile("build/sailfin/.fn_decorator_count", number_to_string(safe_decorators.length));
-        // Write individual parameter names and types so emission.sfn can build
-        // ParameterPreparation from files instead of calling prepare_parameters
-        // (which the v0.1.1 seed compiles with i8* NativeFunction, breaking
-        // field access in the statement module).
-        let mut param_write_i -> number = 0;
-        loop {
-            if param_write_i >= safe_parameters.length {
-                break;
-            }
-            fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_name", safe_parameters[param_write_i].name);
-            fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_type", safe_parameters[param_write_i].type_annotation);
-            param_write_i += 1;
-        }
-        let mut dec_write_i -> number = 0;
-        loop {
-            if dec_write_i >= safe_decorators.length {
-                break;
-            }
-            fs.writeFile("build/sailfin/.fn_decorator_" + number_to_string(dec_write_i), safe_decorators[dec_write_i]);
-            dec_write_i += 1;
-        }
-        let lowered = emit_llvm_function(
-            safe_function_name,
-            context_functions,
-            effective_effects,
-            type_context,
-            native_module.module_name,
-            safe_entry_points,
-            exported_symbols,
-            imported_functions,
-            module_global_locals,
-            module_init_symbol,
-            module_globals_needs_init_call
-        );
-        // The v0.1.1 seed corrupts cross-module struct returns. Read the
-        // LoweredLLVMFunction result from files written by emit_llvm_function
-        // instead of accessing the (possibly garbage) struct fields.
-        let _lfn_lines_raw = fs.readFile("build/sailfin/.lowered_fn_lines");
-        let _lfn_lines = split_lines_local(_lfn_lines_raw);
-        let _lfn_diags_raw = fs.readFile("build/sailfin/.lowered_fn_diagnostics");
-        let _lfn_diags = split_lines_local(_lfn_diags_raw);
-        let _lfn_sc_raw = fs.readFile("build/sailfin/.lowered_fn_string_constants");
-        let _lfn_string_constants = _parse_lowered_fn_string_constants(_lfn_sc_raw);
-        if debug_lowering {
-            print("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
-        }
-        if trace {
-            print("test llvm: function lowered " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length) + " diagnostics=" + number_to_string(_lfn_diags.length));
-            if _lfn_lines.length > 0 {
-                print("test llvm: function first line " + _lfn_lines[0]);
-                print("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
-                let mut ret_lines -> number = 0;
-                let mut scan_index -> number = 0;
-                loop {
-                    if scan_index >= _lfn_lines.length {
-                        break;
-                    }
-                    let line = _lfn_lines[scan_index];
-                    let mut _if256 -> boolean = false;
-                    if starts_with(trim_text(line), "ret ") { _if256 = true; }
-                    if trim_text(line) == "ret void" { _if256 = true; }
-                    if _if256 {
-                        ret_lines += 1;
-                    }
-                    scan_index += 1;
-                }
-                print("test llvm: function ret_lines " + number_to_string(ret_lines));
-            }
-        }
-        if sanitize_symbol(current_function.name) == "add" {
-            has_add_function = true;
-        }
-        diagnostics = extend_string_lines_checked(diagnostics, _lfn_diags, "function lowering");
-        if trace {
-            print("test llvm: function diagnostics merged " + safe_function_name);
-        }
-        let normalized_lowered_lines = _lfn_lines;
-        // TODO: Re-enable lifetime region aggregation once native array ABI is fully stable.
-        if normalized_lowered_lines != null {
-            if normalized_lowered_lines.length > 0 {
-            // NOTE: Stage2-native has exhibited corruption when concatenating
-            // large `string[]` buffers (dropping the module preamble/header).
-            // Append line-by-line to avoid large array copies.
-            lines = append_string_lines(lines, normalized_lowered_lines);
-            if trace {
-                print("test llvm: function lines merged " + safe_function_name);
-            }
-            if trace {
-                print("test llvm: function post-merge check " + safe_function_name);
-            }
-            let _ep_next = index + 1;
-            if _ep_next < local_functions.length {
-                lines.push("");
-            }
-            if trace {
-                print("test llvm: function post-merge blank " + safe_function_name);
-            }
-            }
-        }
-        if _lfn_string_constants != null {
-            if _lfn_string_constants.length > 0 {
-                if trace {
-                    print("test llvm: merging string constants " + safe_function_name + " count=" + number_to_string(_lfn_string_constants.length));
-                }
-                let existing_constants = all_string_constants;
-                all_string_constants = merge_string_constants(existing_constants, _lfn_string_constants);
-                if trace {
-                    print("test llvm: merged string constants " + safe_function_name);
-                }
-            }
-        }
-        index += 1;
-    }
-    if trace {
-        print("test llvm: lowering functions done");
-    }
-    if debug_lowering {
-        print("emit-llvm: phase=functions_done");
-    }
-    if timing {
-        print("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
-    }
+
     if timing {
         print("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
-    if !has_add_function {
-        // Keep the generated helper separated from prior output.
-        lines.push("");
-        lines = extend_string_lines(lines, [
-            "define internal double @add(double %a, double %b) {",
-            "entry:",
-            "  %t0 = fadd double %a, %b",
-            "  ret double %t0",
-            "}"
-        ]);
-    }
-
-    let string_constant_lines = render_string_constants(all_string_constants);
-    if string_constant_lines != null {
-        if string_constant_lines.length > 0 {
-        lines.push("");
-        lines = append_string_lines(lines, string_constant_lines);
-        lines.push("");
-        }
-    }
-    if trace {
-        print("test llvm: string constants emitted");
-    }
-    if debug_lowering {
-        print("emit-llvm: phase=string_constants");
-    }
-
-    lines = ensure_intrinsic_declarations(lines);
-    if trace {
-        print("test llvm: intrinsics ensured");
-    }
-    if debug_lowering {
-        print("emit-llvm: phase=intrinsics");
-    }
-
+    // ── Mangling ────────────────────────────────────────────────────
     let mut effective_mangle_symbols = false;
     if debug_lowering {
         print("emit-llvm: skipping mangling (stability fallback)");
@@ -1854,11 +701,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if timing {
         print("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
     }
-    if timing {
-        print("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
-    }
 
+    // ── Final result ────────────────────────────────────────────────
     let manifest = empty_capability_manifest();
+    let mut function_effects -> FunctionEffectEntry[] = [];
+    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let all_string_constants = empty_string_constant_set();
+
     if trace {
         let mut nonempty -> number = 0;
         let mut first_len -> number = 0;
